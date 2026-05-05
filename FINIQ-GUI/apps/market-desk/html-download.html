@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FINIQ MarketDesk HTML Download</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/html-download.js"></script>
+  </head>
+  <body data-page="html-download">
+    <div class="page-shell">
+      <header class="topbar panel">
+        <div class="topbar-copy">
+          <p class="brand-label">FINIQ MarketDesk</p>
+          <h1>HTML Download</h1>
+        </div>
+        <nav class="topbar-nav" aria-label="주요 메뉴">
+          <a class="nav-link" href="/">공시 조회</a>
+          <a class="nav-link" href="/download">공시 다운로드</a>
+          <a class="nav-link" href="/filter">공시 필터</a>
+          <a class="nav-link active" href="/html-download">HTML 저장</a>
+        </nav>
+      </header>
+
+      <main class="download-view">
+        <section class="panel download-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-kicker">Destination</div>
+              <div class="panel-title">HTML 저장 조건</div>
+            </div>
+          </div>
+          <div class="download-grid download-grid-3">
+            <label class="field">
+              <span>저장 경로</span>
+              <input id="outputDirectory" type="text" />
+            </label>
+            <label class="field">
+              <span>타임아웃(초)</span>
+              <input id="timeout" type="number" min="1" max="120" step="1" value="20" />
+            </label>
+            <label class="field">
+              <span>최대 요청/분</span>
+              <input id="maxRequestsPerMinute" type="number" min="1" max="100" step="1" value="90" />
+            </label>
+          </div>
+          <div class="download-grid download-grid-3">
+            <label class="field">
+              <span>요청 간격(초)</span>
+              <input id="waitSeconds" type="number" min="0" max="60" step="0.5" value="0" />
+            </label>
+            <label class="field">
+              <span>최대 처리 건수</span>
+              <input id="limit" type="number" min="1" max="10000" step="1" placeholder="비우면 전체" />
+            </label>
+            <label class="field">
+              <span>기존 파일</span>
+              <span class="checkbox-card">
+                <input id="skipExisting" type="checkbox" checked />
+                이미 저장된 HTML 건너뛰기
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-kicker">Input</div>
+              <div class="panel-title">필터링 JSON</div>
+            </div>
+          </div>
+          <label class="field">
+            <span>JSON 붙여넣기</span>
+            <textarea id="jsonInput" class="json-input json-input-tall" spellcheck="false"></textarea>
+          </label>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="download-actions">
+            <button id="downloadHtmlBtn" class="action-button action-button-primary action-button-compact" type="button">
+              HTML 다운로드 실행
+            </button>
+          </div>
+          <div id="status" class="download-status"></div>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-kicker">Result</div>
+              <div class="panel-title">저장 결과</div>
+            </div>
+          </div>
+          <pre id="result" class="download-result">결과 없음</pre>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

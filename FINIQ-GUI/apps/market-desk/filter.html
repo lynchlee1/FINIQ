@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FINIQ MarketDesk Disclosure Filter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/filter.js"></script>
+  </head>
+  <body data-page="filter">
+    <div class="page-shell">
+      <header class="topbar panel">
+        <div class="topbar-copy">
+          <p class="brand-label">FINIQ MarketDesk</p>
+          <h1>Disclosure Filter</h1>
+        </div>
+        <nav class="topbar-nav" aria-label="주요 메뉴">
+          <a class="nav-link" href="/">공시 조회</a>
+          <a class="nav-link" href="/download">공시 다운로드</a>
+          <a class="nav-link active" href="/filter">공시 필터</a>
+          <a class="nav-link" href="/html-download">HTML 저장</a>
+        </nav>
+      </header>
+
+      <main class="download-view">
+        <section class="panel download-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-kicker">Source</div>
+              <div class="panel-title">분류 JSON</div>
+            </div>
+          </div>
+          <div class="download-grid download-grid-single">
+            <label class="field">
+              <span>공시 소스 폴더</span>
+              <input id="rootDirectory" type="text" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-kicker">Filters</div>
+              <div class="panel-title">공시 조건</div>
+            </div>
+          </div>
+          <div class="download-grid download-grid-single">
+            <div class="field">
+              <span>조건 블록</span>
+              <div id="conditionPreview" class="condition-preview"></div>
+              <div id="conditionBlocks" class="condition-blocks"></div>
+              <div class="download-actions">
+                <button id="addConditionBtn" class="action-button action-button-muted action-button-compact" type="button">
+                  조건 추가
+                </button>
+                <button id="addGroupBtn" class="action-button action-button-muted action-button-compact" type="button">
+                  그룹 조건 추가
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="download-grid download-grid-single">
+            <div class="field">
+              <span>최대 반환</span>
+              <div class="limit-control">
+                <input id="limit" type="number" min="1" max="10000" step="1" value="1000" />
+                <label class="limit-unlimited">
+                  <input id="limitUnlimited" type="checkbox" />
+                  <span>제한 없음</span>
+                </label>
+              </div>
+            </div>
+            <label class="field">
+              <span>진행 표시 간격</span>
+              <input id="progressInterval" type="number" min="1" max="10000" step="1" value="100" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="download-actions">
+            <button id="filterBtn" class="action-button action-button-primary action-button-compact" type="button">
+              필터 실행
+            </button>
+            <button id="selectAllBtn" class="action-button action-button-muted action-button-compact" type="button">
+              전체 선택
+            </button>
+            <button id="clearSelectionBtn" class="action-button action-button-muted action-button-compact" type="button">
+              선택 해제
+            </button>
+            <button id="sendToHtmlBtn" class="action-button action-button-primary action-button-compact" type="button">
+              선택 항목 HTML 저장
+            </button>
+            <button id="copyBtn" class="action-button action-button-muted action-button-compact" type="button">
+              선택 JSON 복사
+            </button>
+            <button id="downloadBtn" class="action-button action-button-muted action-button-compact" type="button">
+              선택 JSON 저장
+            </button>
+          </div>
+          <div id="status" class="download-status"></div>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-kicker">Result</div>
+              <div class="panel-title">필터 결과</div>
+            </div>
+            <div id="selectionCountBadge" class="count-chip">0</div>
+          </div>
+          <div id="summaryCards" class="summary-cards"></div>
+          <div class="result-pager" aria-label="필터 결과 페이지 이동">
+            <button id="prevPageBtn" class="action-button action-button-muted action-button-compact" type="button">이전</button>
+            <span id="pageInfo" class="page-info">0 / 0</span>
+            <button id="nextPageBtn" class="action-button action-button-muted action-button-compact" type="button">다음</button>
+          </div>
+          <div class="table-wrap disclosure-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>선택</th>
+                  <th>공시일</th>
+                  <th>회사</th>
+                  <th>시장</th>
+                  <th>제목</th>
+                  <th>제출인</th>
+                  <th>접수번호</th>
+                </tr>
+              </thead>
+              <tbody id="disclosureTableBody"></tbody>
+            </table>
+          </div>
+          <pre id="result" class="download-result">결과 없음</pre>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

@@ -134,6 +134,34 @@ def test_download_run_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None
     assert json.loads(payload) == {"status": "done", "mode": "resume"}
 
 
+def test_disclosure_filter_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "web.app.filter_disclosures_payload",
+        lambda body: {"echo_title": body.get("title_keyword")},
+    )
+
+    status, payload = _post("/api/disclosures/filter", tmp_path, {"title_keyword": "전환사채"})
+
+    assert status == 200
+    assert json.loads(payload) == {"echo_title": "전환사채"}
+
+
+def test_disclosure_html_download_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "web.app.download_disclosure_html_payload",
+        lambda body: {"saved_count": len(body.get("json", {}).get("disclosures", []))},
+    )
+
+    status, payload = _post(
+        "/api/disclosures/html/download",
+        tmp_path,
+        {"json": {"disclosures": [{"acpt_no": "1"}]}},
+    )
+
+    assert status == 200
+    assert json.loads(payload) == {"saved_count": 1}
+
+
 def test_settings_can_be_saved_via_api(tmp_path: Path) -> None:
     settings_path = tmp_path / "appdata" / "kind-web-settings.json"
     server = KindWebServer(

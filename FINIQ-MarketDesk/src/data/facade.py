@@ -138,7 +138,7 @@ def load_company_classification(
         raise NotADirectoryError(msg)
     if force_refresh:
         msg = (
-            "force_refresh is not supported in ConsigliereAI. "
+            "force_refresh is not supported in FINIQ-MarketDesk. "
             "Generate artifacts in FINIQ-DataScraper."
         )
         raise RuntimeError(msg)
@@ -164,7 +164,7 @@ def load_company_classification_index(
         raise NotADirectoryError(msg)
     if force_refresh:
         msg = (
-            "force_refresh is not supported in ConsigliereAI. "
+            "force_refresh is not supported in FINIQ-MarketDesk. "
             "Generate artifacts in FINIQ-DataScraper."
         )
         raise RuntimeError(msg)
@@ -192,7 +192,7 @@ def load_company_classification_company(
         raise NotADirectoryError(msg)
     if force_refresh:
         msg = (
-            "force_refresh is not supported in ConsigliereAI. "
+            "force_refresh is not supported in FINIQ-MarketDesk. "
             "Generate artifacts in FINIQ-DataScraper."
         )
         raise RuntimeError(msg)

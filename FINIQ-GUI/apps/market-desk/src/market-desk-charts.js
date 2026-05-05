@@ -751,7 +751,7 @@
     return new MarkerHandle(series, markers);
   }
 
-  window.ConsigliereCharts = {
+  window.MarketDeskCharts = {
     createChart,
     createSeriesMarkers,
     BarSeries,

@@ -3,11 +3,12 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "consigliereai"
+name = "finiq-marketdesk"
 version = "0.4.0"
-description = "ConsigliereAI visualization workspace (uses FINIQ-DataScraper outputs)"
+description = "FINIQ MarketDesk visualization workspace (uses FINIQ-DataScraper outputs)"
 requires-python = ">=3.11"
 dependencies = [
+    "lxml>=4.9",
     "pandas>=2",
 ]
 

@@ -469,7 +469,7 @@ function ensureChart() {
   if (state.chart || !elements.chartContainer) {
     return;
   }
-  const { createChart, CandlestickSeries, HistogramSeries } = window.ConsigliereCharts;
+  const { createChart, CandlestickSeries, HistogramSeries } = window.MarketDeskCharts;
   state.chart = createChart(elements.chartContainer, {
     layout: {
       background: { type: "solid", color: cssVar("--surface", "#ffffff") },
@@ -569,9 +569,9 @@ function renderChart() {
   if (!candles.length) {
     state.candleSeries.setData([]);
     state.volumeSeries.setData([]);
-    if (window.ConsigliereCharts.createSeriesMarkers) {
+    if (window.MarketDeskCharts.createSeriesMarkers) {
       if (!state.markerHandle) {
-        state.markerHandle = window.ConsigliereCharts.createSeriesMarkers(state.candleSeries, []);
+        state.markerHandle = window.MarketDeskCharts.createSeriesMarkers(state.candleSeries, []);
       } else {
         state.markerHandle.setMarkers([]);
       }
@@ -606,9 +606,9 @@ function renderChart() {
 
   state.candleSeries.setData(candleData);
   state.volumeSeries.setData(volumeData);
-  if (window.ConsigliereCharts.createSeriesMarkers) {
+  if (window.MarketDeskCharts.createSeriesMarkers) {
     if (!state.markerHandle) {
-      state.markerHandle = window.ConsigliereCharts.createSeriesMarkers(state.candleSeries, markerData);
+      state.markerHandle = window.MarketDeskCharts.createSeriesMarkers(state.candleSeries, markerData);
     } else {
       state.markerHandle.setMarkers(markerData);
     }

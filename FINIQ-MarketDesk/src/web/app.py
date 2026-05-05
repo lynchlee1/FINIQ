@@ -23,6 +23,7 @@ from web.service import (
     PRICE_SOURCE_LABELS,
     PRICE_SOURCE_QUANTI,
     build_company_list_export,
+    filter_disclosures_payload,
     build_insight_payload,
     list_classification_files,
     list_price_source_files,
@@ -39,6 +40,7 @@ from web.download import (
     run_download_action,
     start_download_job,
 )
+from web.disclosure_html import download_disclosure_html_payload
 
 
 @dataclass(slots=True)
@@ -191,6 +193,12 @@ class KindWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/download/run":
             self._handle_download_run()
+            return
+        if parsed.path == "/api/disclosures/filter":
+            self._handle_disclosure_filter()
+            return
+        if parsed.path == "/api/disclosures/html/download":
+            self._handle_disclosure_html_download()
             return
         self._respond_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
@@ -433,6 +441,53 @@ class KindWebHandler(BaseHTTPRequestHandler):
             body = self._read_json_body()
             payload = run_download_action(body)
         except ValueError as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_filter(self) -> None:
+        try:
+            body = self._read_json_body()
+        except (FileNotFoundError, IsADirectoryError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        if "application/x-ndjson" in self.headers.get("Accept", ""):
+            self._stream_disclosure_filter(body)
+            return
+        try:
+            payload = filter_disclosures_payload(body)
+        except (FileNotFoundError, IsADirectoryError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _stream_disclosure_filter(self, body: dict[str, Any]) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+        def write_event(payload: dict[str, Any]) -> None:
+            content = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
+            self.wfile.write(content)
+            self.wfile.flush()
+
+        try:
+            payload = filter_disclosures_payload(
+                body,
+                progress_callback=lambda progress: write_event({"type": "progress", "progress": progress}),
+            )
+            write_event({"type": "result", "payload": payload})
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except (FileNotFoundError, IsADirectoryError, ValueError) as exc:
+            write_event({"type": "error", "error": str(exc)})
+
+    def _handle_disclosure_html_download(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = download_disclosure_html_payload(body)
+        except (OSError, ValueError) as exc:
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
         self._respond_json(HTTPStatus.OK, payload)

@@ -7,6 +7,10 @@ const downloadAliasPlugin = () => ({
     server.middlewares.use((request, _response, next) => {
       if (request.url === '/download') {
         request.url = '/download.html'
+      } else if (request.url === '/filter') {
+        request.url = '/filter.html'
+      } else if (request.url === '/html-download') {
+        request.url = '/html-download.html'
       }
       next()
     })
@@ -15,6 +19,10 @@ const downloadAliasPlugin = () => ({
     server.middlewares.use((request, _response, next) => {
       if (request.url === '/download') {
         request.url = '/download.html'
+      } else if (request.url === '/filter') {
+        request.url = '/filter.html'
+      } else if (request.url === '/html-download') {
+        request.url = '/html-download.html'
       }
       next()
     })
@@ -29,12 +37,14 @@ export default defineConfig({
         index: resolve(__dirname, 'index.html'),
         company: resolve(__dirname, 'company.html'),
         download: resolve(__dirname, 'download.html'),
+        filter: resolve(__dirname, 'filter.html'),
+        htmlDownload: resolve(__dirname, 'html-download.html'),
       },
     },
   },
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:8765',
+      '/api': process.env.VITE_API_TARGET || 'http://127.0.0.1:8765',
     },
   },
 })

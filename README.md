@@ -1,0 +1,47 @@
+# FINIQ
+
+FINIQ는 KRX KIND 공시 데이터를 수집하고, 기업별로 정리해, 가격 데이터와 함께 분석/시각화하는 프로젝트입니다.
+
+## 컴포넌트
+
+### FINIQ-DataScraper
+
+KRX KIND 공시 데이터를 다운로드하고 파싱합니다. 검색 결과, 공시 원문, 기업별 공시 분류 산출물을 만드는 데이터 수집 컴포넌트입니다.
+
+### FINIQ-StructureNL
+
+공시 원문에서 핵심 구조화 정보를 추출합니다. 전환사채 등 증권 발행 공시에서 발행일, 만기일, 전환가액 같은 필드를 파싱합니다.
+
+### FINIQ-MarketDesk
+
+수집된 공시 데이터와 가격 데이터를 결합해 분석 API를 제공합니다. 기업 목록, 공시 타임라인, 차트용 데이터, 다운로드 작업을 처리합니다.
+
+### FINIQ-GUI
+
+FINIQ의 웹 화면을 담은 프론트엔드 워크스페이스입니다. MarketDesk 화면과 Graph Viewer 앱, 공통 UI/theme 패키지를 포함합니다.
+
+### FINIQ-GraphViewer
+
+그래프 데이터를 검증, 필터링, 탐색, export하는 Graph Viewer core입니다. 시각화 UI는 `FINIQ-GUI`에서 사용합니다.
+
+## UI
+
+### MarketDesk
+
+MarketDesk는 수집된 KIND 공시를 기업 단위로 탐색하는 분석 화면입니다. 기업 목록에서 종목을 고르고, 상세 화면에서 공시 타임라인과 주가 차트를 함께 봅니다. 공시 그룹 필터, 기간/빈도 선택, 가격 데이터 소스 선택, 기업 목록 export 같은 기능도 제공합니다.
+
+### MarketDesk Download
+
+Download 화면은 KIND 데이터 수집 작업을 웹에서 실행하는 UI입니다. 날짜 범위, 기업명, 제출인, 시장, 공시 유형, page size, worker 수 등을 설정해 다운로드를 preview하거나 실행할 수 있고, 진행 로그와 작업 상태를 확인합니다. 연도별 분할 다운로드와 resume 흐름도 이 화면에서 다룹니다.
+
+### Graph Viewer
+
+Graph Viewer는 graph JSON을 시각적으로 탐색하는 UI입니다. 노드와 엣지를 force graph로 표시하고, 검색/필터링, 선택, 숨김, 삭제, pin, 이웃 노드 보기, undo/redo, 스타일 설정, JSON/SVG/PNG export를 지원합니다.
+
+## 기본 흐름
+
+1. `FINIQ-DataScraper`가 KIND 데이터를 수집합니다.
+2. `FINIQ-StructureNL`이 필요한 공시 원문 필드를 구조화합니다.
+3. `FINIQ-MarketDesk`가 공시와 가격 데이터를 분석용 API로 제공합니다.
+4. `FINIQ-GUI`가 분석 결과를 화면에 표시합니다.
+5. `FINIQ-GraphViewer`는 그래프 기반 탐색 기능을 제공합니다.
