@@ -8,18 +8,13 @@ const elements = {
   addGroupBtn: document.getElementById("addGroupBtn"),
   limit: document.getElementById("limit"),
   limitUnlimited: document.getElementById("limitUnlimited"),
+  filterWorkers: document.getElementById("filterWorkers"),
   progressInterval: document.getElementById("progressInterval"),
   filterBtn: document.getElementById("filterBtn"),
-  selectAllBtn: document.getElementById("selectAllBtn"),
-  clearSelectionBtn: document.getElementById("clearSelectionBtn"),
-  sendToHtmlBtn: document.getElementById("sendToHtmlBtn"),
-  copyBtn: document.getElementById("copyBtn"),
-  downloadBtn: document.getElementById("downloadBtn"),
   status: document.getElementById("status"),
   result: document.getElementById("result"),
   summaryCards: document.getElementById("summaryCards"),
   disclosureTableBody: document.getElementById("disclosureTableBody"),
-  selectionCountBadge: document.getElementById("selectionCountBadge"),
   prevPageBtn: document.getElementById("prevPageBtn"),
   nextPageBtn: document.getElementById("nextPageBtn"),
   pageInfo: document.getElementById("pageInfo"),
@@ -28,7 +23,6 @@ const elements = {
 const RESULT_PAGE_SIZE = 20;
 
 let latestPayload = null;
-let selectedAcptNumbers = new Set();
 let resultPage = 0;
 let progressLines = [];
 let conditionBlocks = [
@@ -216,33 +210,6 @@ function addCondition(block = {}) {
   renderConditionBlocks();
 }
 
-function disclosureKey(disclosure, index) {
-  return String(disclosure.acpt_no || disclosure.acptno || `row-${index}`);
-}
-
-function selectedPayload() {
-  if (!latestPayload) {
-    return null;
-  }
-  const disclosures = (latestPayload.disclosures || []).filter((disclosure, index) =>
-    selectedAcptNumbers.has(disclosureKey(disclosure, index)),
-  );
-  return {
-    ...latestPayload,
-    summary: {
-      ...(latestPayload.summary || {}),
-      selected_disclosures: disclosures.length,
-      selected_acpt_numbers: new Set(disclosures.map((item) => item.acpt_no).filter(Boolean)).size,
-    },
-    disclosures,
-  };
-}
-
-function updateSelectionCount() {
-  const count = selectedPayload()?.disclosures?.length || 0;
-  elements.selectionCountBadge.textContent = String(count);
-}
-
 function totalResultPages(disclosures = latestPayload?.disclosures || []) {
   return Math.max(1, Math.ceil(disclosures.length / RESULT_PAGE_SIZE));
 }
@@ -263,12 +230,11 @@ function updatePager(disclosures = latestPayload?.disclosures || []) {
 
 function setResult(payload) {
   latestPayload = payload;
-  selectedAcptNumbers = new Set((payload.disclosures || []).map((disclosure, index) => disclosureKey(disclosure, index)));
   resultPage = 0;
+  sessionStorage.setItem(HTML_DOWNLOAD_STORAGE_KEY, JSON.stringify(payload));
   renderSummary(payload);
   renderTable(payload.disclosures || []);
   renderJsonPreview();
-  updateSelectionCount();
 }
 
 function currentPageDisclosures() {
@@ -290,7 +256,6 @@ function renderJsonPreview() {
       preview_page: resultPage + 1,
       preview_page_size: RESULT_PAGE_SIZE,
       preview_disclosures: disclosures.length,
-      selected_disclosures: selectedPayload()?.disclosures?.length || 0,
     },
     disclosures,
   };
@@ -325,25 +290,21 @@ function viewerUrl(acptNo) {
 
 function renderTable(disclosures) {
   if (!disclosures.length) {
-    elements.disclosureTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">필터 결과가 없습니다.</td></tr>';
+    elements.disclosureTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">필터 결과가 없습니다.</td></tr>';
     updatePager(disclosures);
     return;
   }
   updatePager(disclosures);
   const pageRows = disclosures.slice(resultPage * RESULT_PAGE_SIZE, (resultPage + 1) * RESULT_PAGE_SIZE);
   elements.disclosureTableBody.innerHTML = pageRows
-    .map((disclosure, index) => {
-      const absoluteIndex = resultPage * RESULT_PAGE_SIZE + index;
-      const key = disclosureKey(disclosure, absoluteIndex);
+    .map((disclosure) => {
       const acptNo = String(disclosure.acpt_no || disclosure.acptno || "");
       const title = disclosure.title || "";
-      const checked = selectedAcptNumbers.has(key) ? "checked" : "";
       const titleCell = acptNo
         ? `<a class="table-link" href="${viewerUrl(acptNo)}" target="_blank" rel="noreferrer">${escapeHtml(title)}</a>`
         : escapeHtml(title);
       return `
         <tr>
-          <td><input class="row-selector" type="checkbox" data-key="${escapeHtml(key)}" ${checked} /></td>
           <td>${escapeHtml(String(disclosure.disclosed_at || "").split(" ", 1)[0])}</td>
           <td>${escapeHtml(disclosure.company_name || "")}</td>
           <td>${escapeHtml(disclosure.market || "")}</td>
@@ -373,6 +334,7 @@ function buildPayload() {
     title_expression: "",
     limit: limitUnlimited ? null : Number(elements.limit.value || 1000),
     limit_unlimited: limitUnlimited,
+    filter_workers: Number(elements.filterWorkers?.value || 8),
     progress_interval: Number(elements.progressInterval?.value || 100),
   };
 }
@@ -454,53 +416,8 @@ async function runFilter() {
   }, (progress) => appendStatus(formatProgress(progress)));
   setResult(payload);
   appendStatus(
-    `매칭 ${payload.summary?.matched_disclosures || 0}건 중 ${payload.summary?.returned_disclosures || 0}건을 표시했습니다. 필요한 행만 선택해서 HTML 저장으로 넘길 수 있습니다.`,
+    `매칭 ${payload.summary?.matched_disclosures || 0}건 중 ${payload.summary?.returned_disclosures || 0}건을 표시했고, 결과 JSON을 HTML 저장 페이지에서 불러올 수 있게 저장했습니다.`,
   );
-}
-
-async function copyResult() {
-  const payload = selectedPayload();
-  if (!payload) {
-    setStatus("복사할 결과가 없습니다.", true);
-    return;
-  }
-  await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-  setStatus(`선택 ${payload.disclosures.length}건의 JSON을 클립보드에 복사했습니다.`);
-}
-
-function downloadResult() {
-  const payload = selectedPayload();
-  if (!payload) {
-    setStatus("저장할 결과가 없습니다.", true);
-    return;
-  }
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "kind.filtered_disclosures.json";
-  anchor.click();
-  URL.revokeObjectURL(url);
-  setStatus(`선택 ${payload.disclosures.length}건의 JSON 파일 다운로드를 시작했습니다.`);
-}
-
-function selectAll() {
-  if (!latestPayload) {
-    return;
-  }
-  selectedAcptNumbers = new Set((latestPayload.disclosures || []).map((disclosure, index) => disclosureKey(disclosure, index)));
-  renderTable(latestPayload.disclosures || []);
-  renderJsonPreview();
-  updateSelectionCount();
-}
-
-function clearSelection() {
-  selectedAcptNumbers = new Set();
-  if (latestPayload) {
-    renderTable(latestPayload.disclosures || []);
-    renderJsonPreview();
-  }
-  updateSelectionCount();
 }
 
 function moveResultPage(offset) {
@@ -511,30 +428,6 @@ function moveResultPage(offset) {
   renderTable(latestPayload.disclosures || []);
   renderJsonPreview();
 }
-
-function sendToHtmlDownload() {
-  const payload = selectedPayload();
-  if (!payload || !payload.disclosures.length) {
-    setStatus("HTML 저장으로 넘길 공시를 선택하세요.", true);
-    return;
-  }
-  sessionStorage.setItem(HTML_DOWNLOAD_STORAGE_KEY, JSON.stringify(payload));
-  window.location.href = "/html-download";
-}
-
-elements.disclosureTableBody?.addEventListener("change", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement) || !target.classList.contains("row-selector")) {
-    return;
-  }
-  if (target.checked) {
-    selectedAcptNumbers.add(target.dataset.key);
-  } else {
-    selectedAcptNumbers.delete(target.dataset.key);
-  }
-  renderJsonPreview();
-  updateSelectionCount();
-});
 
 elements.conditionBlocks?.addEventListener("input", (event) => {
   const row = event.target.closest?.(".condition-block");
@@ -611,18 +504,11 @@ elements.addGroupBtn?.addEventListener("click", () =>
     close_count: 1,
   }),
 );
-elements.selectAllBtn?.addEventListener("click", selectAll);
-elements.clearSelectionBtn?.addEventListener("click", clearSelection);
 elements.prevPageBtn?.addEventListener("click", () => moveResultPage(-1));
 elements.nextPageBtn?.addEventListener("click", () => moveResultPage(1));
-elements.sendToHtmlBtn?.addEventListener("click", sendToHtmlDownload);
 elements.limitUnlimited?.addEventListener("change", () => {
   elements.limit.disabled = Boolean(elements.limitUnlimited.checked);
 });
-elements.copyBtn?.addEventListener("click", () => {
-  copyResult().catch((error) => setStatus(error.message, true));
-});
-elements.downloadBtn?.addEventListener("click", downloadResult);
 
 loadConfig().catch((error) => setStatus(error.message, true));
 renderConditionBlocks();

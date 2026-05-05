@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 
 from web.service import (
     DISCLOSURE_GROUP_OTHER,
@@ -11,6 +12,7 @@ from web.service import (
     load_company_index_payload,
 )
 from web.disclosure_html import collect_acpt_numbers_from_json, download_disclosure_html_payload
+from web.table_export import build_disclosure_table_payload
 from analytics.quanti import list_quanti_stock_codes
 
 
@@ -315,6 +317,101 @@ def test_filter_disclosures_payload_supports_exact_match_operator(tmp_path: Path
 
     assert partial_payload["disclosures"] == []
     assert [disclosure["acpt_no"] for disclosure in exact_payload["disclosures"]] == ["1"]
+
+
+def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: Path) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+    output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
+
+    payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(fixture_path),
+            "output_path": str(output_path),
+            "table_name": "disclosures",
+        }
+    )
+
+    assert payload["format"] == "finiq_disclosure_table_build_v1"
+    assert payload["summary"]["companies"] == 1
+    assert payload["summary"]["disclosures"] == 3
+    assert payload["summary"]["shards"] == 1
+    assert output_path.exists()
+    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    assert manifest["format"] == "finiq_disclosure_table_manifest_v1"
+    assert manifest["shards"][0]["year"] == "2025"
+
+    shard_path = Path(manifest["shards"][0]["path"])
+    connection = sqlite3.connect(shard_path)
+    try:
+        rows = connection.execute(
+            "SELECT company_name, disclosed_date, title, acpt_no FROM disclosures ORDER BY acpt_no"
+        ).fetchall()
+        metadata = dict(connection.execute("SELECT key, value FROM table_metadata").fetchall())
+    finally:
+        connection.close()
+
+    assert rows[0] == ("테스트전자", "2025-01-02", "전환사채발행결정", "1")
+    assert metadata["format"] == "finiq_disclosure_table_sqlite"
+    assert metadata["shard_format"] == "finiq_disclosure_table_sqlite_shard"
+    assert metadata["shard_year"] == "2025"
+    assert metadata["table_name"] == "disclosures"
+
+
+def test_build_disclosure_table_payload_accepts_nested_folder_path(tmp_path: Path) -> None:
+    nested = tmp_path / "nested" / "current_shape"
+    nested.mkdir(parents=True)
+    fixture_path = _write_classification_fixture(nested)
+
+    payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(nested),
+        }
+    )
+
+    assert payload["source_classification_path"] == str(fixture_path.resolve())
+    assert Path(payload["output_path"]).name == "kind.company_classification.sample.sqlite_manifest.json"
+    assert Path(payload["shards"][0]["path"]).name == "2025.sqlite"
+    assert payload["summary"]["disclosures"] == 3
+
+
+def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Path) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_path = tmp_path / "kind.sqlite_manifest.json"
+
+    payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(output_path),
+        }
+    )
+
+    assert payload["source_type"] == "source_folder"
+    assert payload["summary"]["disclosures"] == 2
+    assert payload["summary"]["shards"] == 1
+    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    assert manifest["source_type"] == "source_folder"
+    assert manifest["shards"][0]["year"] == "2025"
+
+
+def test_build_disclosure_table_payload_falls_back_to_root_when_raw_path_is_output_dir(
+    tmp_path: Path,
+) -> None:
+    source_base = tmp_path / "source"
+    source_base.mkdir()
+    source_root = _write_source_body_fixture(source_base)
+    output_dir = tmp_path / "kind_sqlite"
+
+    payload = build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "classification_path": str(output_dir),
+            "output_path": str(output_dir / "kind.sqlite_manifest.json"),
+        }
+    )
+
+    assert payload["source_type"] == "source_folder"
+    assert payload["source_path"] == str(source_root.resolve())
+    assert payload["summary"]["disclosures"] == 2
 
 
 def test_collect_acpt_numbers_from_json_is_recursive_and_unique() -> None:

@@ -41,6 +41,7 @@ from web.download import (
     start_download_job,
 )
 from web.disclosure_html import download_disclosure_html_payload
+from web.table_export import build_disclosure_table_payload
 
 
 @dataclass(slots=True)
@@ -196,6 +197,9 @@ class KindWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/disclosures/filter":
             self._handle_disclosure_filter()
+            return
+        if parsed.path == "/api/disclosures/table/build":
+            self._handle_disclosure_table_build()
             return
         if parsed.path == "/api/disclosures/html/download":
             self._handle_disclosure_html_download()
@@ -487,6 +491,15 @@ class KindWebHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
             payload = download_disclosure_html_payload(body)
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_table_build(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = build_disclosure_table_payload(body)
         except (OSError, ValueError) as exc:
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return

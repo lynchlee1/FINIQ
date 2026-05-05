@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
+from functools import lru_cache
+import heapq
+import os
 from pathlib import Path
 import re
 from typing import Any, Callable
@@ -363,9 +367,9 @@ def _parse_boolean_tokens(tokens: list[object]) -> bool:
 def _record_field_value(record: dict[str, Any], field: str) -> object:
     normalized_field = str(field or "").strip()
     if normalized_field in {"disclosed_date", "date"}:
-        return _date_part(record.get("disclosed_at"))
+        return record.get("__filter_disclosed_date") or _date_part(record.get("disclosed_at"))
     if normalized_field in {"acpt_no", "acptno"}:
-        return record.get("acpt_no") or record.get("acptno")
+        return record.get("__filter_acpt_no") or record.get("acpt_no") or record.get("acptno")
     return record.get(normalized_field)
 
 
@@ -493,6 +497,18 @@ def _normalize_acpt_numbers(value: object) -> set[str]:
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
+def _resolve_filter_workers(value: object, item_count: int) -> int:
+    if item_count <= 1:
+        return max(1, item_count)
+    try:
+        requested = int(value or 0)
+    except (TypeError, ValueError):
+        requested = 0
+    if requested < 1:
+        requested = min(8, os.cpu_count() or 1)
+    return max(1, min(requested, item_count, 32))
+
+
 def _progress_interval(value: object) -> int:
     try:
         return min(max(int(value or 100), 1), 10000)
@@ -559,6 +575,73 @@ def _iter_disclosure_records(
             records=len(records),
             progress_interval=progress_interval,
         )
+    return records
+
+
+def _record_sort_key(record: dict[str, Any]) -> tuple[str, str, str]:
+    cached_key = record.get("__filter_sort_key")
+    if isinstance(cached_key, tuple) and len(cached_key) == 3:
+        return cached_key
+    return (
+        str(record.get("disclosed_at") or ""),
+        str(record.get("company_name") or ""),
+        str(record.get("title") or ""),
+    )
+
+
+def _prepare_filter_record(record: dict[str, Any]) -> dict[str, Any]:
+    prepared = dict(record)
+    disclosed_at = str(prepared.get("disclosed_at") or "")
+    title = str(prepared.get("title") or "")
+    company_name = str(prepared.get("company_name") or "")
+    submitter = str(prepared.get("submitter") or "")
+    prepared["__filter_disclosed_date"] = disclosed_at.strip().split(" ", 1)[0]
+    prepared["__filter_acpt_no"] = str(prepared.get("acpt_no") or prepared.get("acptno") or "").strip()
+    prepared["__filter_title_cf"] = title.casefold()
+    prepared["__filter_company_cf"] = company_name.casefold()
+    prepared["__filter_submitter_cf"] = submitter.casefold()
+    prepared["__filter_sort_key"] = (disclosed_at, company_name, title)
+    return prepared
+
+
+def _public_disclosure_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in record.items() if not str(key).startswith("__filter_")}
+
+
+def _classification_cache_key(classification_path: str | Path) -> tuple[str, int, int]:
+    target = Path(classification_path).expanduser().resolve()
+    stat_result = target.stat()
+    return (str(target), stat_result.st_mtime_ns, stat_result.st_size)
+
+
+@lru_cache(maxsize=8)
+def _load_classification_records_cached(
+    classification_path: str,
+    modified_ns: int,
+    file_size: int,
+) -> tuple[tuple[dict[str, Any], ...], int]:
+    payload = load_company_classification_file(classification_path)
+    records = [_prepare_filter_record(record) for record in _iter_disclosure_records(payload)]
+    return (tuple(records), len(list(payload.get("companies") or [])))
+
+
+def _load_classification_disclosure_records(
+    classification_path: str | Path,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> list[dict[str, Any]]:
+    cache_key = _classification_cache_key(classification_path)
+    cached_records, company_count = _load_classification_records_cached(*cache_key)
+    records = list(cached_records)
+    _emit_progress(
+        progress_callback,
+        source_type="classification",
+        unit_label="JSON 항목",
+        completed=company_count,
+        total=company_count,
+        records=len(records),
+        force=True,
+    )
     return records
 
 
@@ -669,11 +752,66 @@ def _find_source_body_files(root: Path) -> list[Path]:
     )
 
 
+def _source_cache_key(root: Path, body_paths: list[Path]) -> tuple[str, int, int, int]:
+    latest_modified_ns = 0
+    total_size = 0
+    for body_path in body_paths:
+        stat_result = body_path.stat()
+        latest_modified_ns = max(latest_modified_ns, stat_result.st_mtime_ns)
+        total_size += stat_result.st_size
+    return (str(root), len(body_paths), latest_modified_ns, total_size)
+
+
+@lru_cache(maxsize=4)
+def _parse_source_body_files_cached(
+    root_path: str,
+    body_count: int,
+    latest_modified_ns: int,
+    total_size: int,
+    workers: int,
+) -> tuple[tuple[dict[str, Any], ...], int]:
+    root = Path(root_path)
+    body_paths = _find_source_body_files(root)
+    if not body_paths:
+        return ((), 0)
+
+    worker_count = _resolve_filter_workers(workers, len(body_paths))
+    parsed_by_path: dict[Path, list[dict[str, Any]]] = {}
+    if worker_count == 1:
+        for body_path in body_paths:
+            parsed_by_path[body_path] = _parse_source_body_file(body_path)
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="kind-filter") as executor:
+            future_to_path = {
+                executor.submit(_parse_source_body_file, body_path): body_path
+                for body_path in body_paths
+            }
+            for future in as_completed(future_to_path):
+                parsed_by_path[future_to_path[future]] = future.result()
+
+    records: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str, str]] = set()
+    for body_path in body_paths:
+        for record in parsed_by_path.get(body_path, []):
+            key = (
+                str(record.get("acpt_no") or ""),
+                str(record.get("company_id") or ""),
+                str(record.get("disclosed_at") or ""),
+                str(record.get("title") or ""),
+            )
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            records.append(_prepare_filter_record(record))
+    return (tuple(records), len(body_paths))
+
+
 def _iter_source_disclosure_records(
     root_directory: str | Path,
     *,
     progress_callback: ProgressCallback | None = None,
     progress_interval: int = 100,
+    workers: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
     root = Path(root_directory).expanduser().resolve()
     if not root.is_dir():
@@ -683,21 +821,12 @@ def _iter_source_disclosure_records(
     folders: dict[Path, list[Path]] = {}
     for body_path in body_paths:
         folders.setdefault(body_path.parent, []).append(body_path)
-    records: list[dict[str, Any]] = []
-    seen_keys: set[tuple[str, str, str, str]] = set()
+    records_tuple, body_file_count = _parse_source_body_files_cached(
+        *_source_cache_key(root, body_paths),
+        _resolve_filter_workers(workers, len(body_paths)),
+    )
+    records = list(records_tuple)
     for index, folder_path in enumerate(sorted(folders), start=1):
-        for body_path in folders[folder_path]:
-            for record in _parse_source_body_file(body_path):
-                key = (
-                    str(record.get("acpt_no") or ""),
-                    str(record.get("company_id") or ""),
-                    str(record.get("disclosed_at") or ""),
-                    str(record.get("title") or ""),
-                )
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                records.append(record)
         _emit_progress(
             progress_callback,
             source_type="source_folder",
@@ -707,7 +836,7 @@ def _iter_source_disclosure_records(
             records=len(records),
             progress_interval=progress_interval,
         )
-    return (records, len(body_paths))
+    return (records, body_file_count)
 
 
 def filter_disclosures_payload(
@@ -743,25 +872,27 @@ def filter_disclosures_payload(
     if limit is not None:
         limit = min(max(limit, 1), DISCLOSURE_FILTER_LIMIT_MAX)
     progress_interval = _progress_interval(body.get("progress_interval"))
+    filter_workers = _resolve_filter_workers(body.get("filter_workers"), 32)
 
     body_files = 0
     if classification_path:
-        payload = load_company_classification_file(classification_path)
-        records = _iter_disclosure_records(
-            payload,
+        records = _load_classification_disclosure_records(
+            classification_path,
             progress_callback=progress_callback,
-            progress_interval=progress_interval,
         )
     else:
         records, body_files = _iter_source_disclosure_records(
             root_directory,
             progress_callback=progress_callback,
             progress_interval=progress_interval,
+            workers=filter_workers,
         )
     filtered: list[dict[str, Any]] = []
+    limited_heap: list[tuple[tuple[str, str, str], int, dict[str, Any]]] = []
+    matched_count = 0
     for index, record in enumerate(records, start=1):
-        disclosed_date = _date_part(record.get("disclosed_at"))
-        acpt_no = str(record.get("acpt_no") or record.get("acptno") or "").strip()
+        disclosed_date = str(record.get("__filter_disclosed_date") or "")
+        acpt_no = str(record.get("__filter_acpt_no") or "")
         matched = True
         if acpt_numbers and acpt_no not in acpt_numbers:
             matched = False
@@ -776,34 +907,47 @@ def filter_disclosures_payload(
         elif matched and title_expression:
             matched = _title_expression_matches(record.get("title"), title_expression)
         elif matched:
-            matched = _text_matches_keywords(record.get("title"), title_keywords, title_match_mode)
+            title_folded = str(record.get("__filter_title_cf") or "")
+            if title_keywords and title_match_mode == "and":
+                matched = all(keyword in title_folded for keyword in title_keywords)
+            elif title_keywords:
+                matched = any(keyword in title_folded for keyword in title_keywords)
         if matched and not title_expression:
-            matched = _text_excludes_keywords(record.get("title"), exclude_title_keywords)
+            title_folded = str(record.get("__filter_title_cf") or "")
+            matched = not any(keyword in title_folded for keyword in exclude_title_keywords)
         if matched:
-            matched = _text_contains(record.get("company_name"), company_keyword)
+            matched = not company_keyword or company_keyword in str(record.get("__filter_company_cf") or "")
         if matched:
-            matched = _text_contains(record.get("submitter"), submitter_keyword)
+            matched = not submitter_keyword or submitter_keyword in str(record.get("__filter_submitter_cf") or "")
         if matched:
-            filtered.append(record)
+            matched_count += 1
+            if limit is None:
+                filtered.append(record)
+            else:
+                heap_item = (_record_sort_key(record), index, record)
+                if len(limited_heap) < limit:
+                    heapq.heappush(limited_heap, heap_item)
+                elif heap_item > limited_heap[0]:
+                    heapq.heapreplace(limited_heap, heap_item)
         _emit_progress(
             progress_callback,
             source_type=source_kind,
             unit_label="공시",
             completed=index,
             total=len(records),
-            records=len(filtered),
+            records=matched_count,
             progress_interval=progress_interval,
         )
 
-    filtered.sort(
-        key=lambda record: (
-            str(record.get("disclosed_at") or ""),
-            str(record.get("company_name") or ""),
-            str(record.get("title") or ""),
-        ),
-        reverse=True,
-    )
-    limited = filtered if limit is None else filtered[:limit]
+    if limit is None:
+        filtered.sort(key=_record_sort_key, reverse=True)
+        limited = filtered
+    else:
+        limited = [
+            item[2]
+            for item in sorted(limited_heap, reverse=True)
+        ]
+    public_limited = [_public_disclosure_record(record) for record in limited]
     return {
         "format": "kind_disclosure_filter_v1",
         "source_type": source_kind,
@@ -824,15 +968,16 @@ def filter_disclosures_payload(
             "acpt_numbers": sorted(acpt_numbers),
             "limit": limit,
             "limit_unlimited": limit_unlimited,
+            "filter_workers": filter_workers,
         },
         "summary": {
             "source_disclosures": len(records),
             "source_body_files": body_files,
-            "matched_disclosures": len(filtered),
-            "returned_disclosures": len(limited),
-            "unique_acpt_numbers": len({str(record.get("acpt_no") or "") for record in limited if record.get("acpt_no")}),
+            "matched_disclosures": matched_count,
+            "returned_disclosures": len(public_limited),
+            "unique_acpt_numbers": len({str(record.get("acpt_no") or "") for record in public_limited if record.get("acpt_no")}),
         },
-        "disclosures": limited,
+        "disclosures": public_limited,
     }
 
 
