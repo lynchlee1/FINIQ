@@ -170,6 +170,38 @@ def test_filter_disclosures_payload_reads_source_folder_without_classification_j
     assert any(event["unit_label"] == "공시" and event["total"] == 2 for event in progress_events)
 
 
+def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Path) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    sqlite_root = tmp_path / "kind_sqlite"
+    build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(sqlite_root / "kind.sqlite_manifest.json"),
+        }
+    )
+
+    payload = filter_disclosures_payload(
+        {
+            "root_directory": str(sqlite_root),
+            "filter_blocks": [
+                {
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "전환사채",
+                }
+            ],
+            "include_html_download_acpt_numbers": True,
+        }
+    )
+
+    assert payload["source_type"] == "sqlite_manifest"
+    assert payload["source_sqlite_manifest_path"] == str((sqlite_root / "kind.sqlite_manifest.json").resolve())
+    assert payload["summary"]["source_disclosures"] == 2
+    assert payload["summary"]["matched_disclosures"] == 1
+    assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
+    assert payload["html_download_acpt_numbers"] == ["20250102000001"]
+
+
 def test_filter_disclosures_payload_reports_json_progress(tmp_path: Path) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
     progress_events = []
@@ -219,6 +251,27 @@ def test_filter_disclosures_payload_can_return_without_limit(tmp_path: Path) -> 
     assert payload["summary"]["matched_disclosures"] == 3
     assert payload["summary"]["returned_disclosures"] == 3
     assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["3", "2", "1"]
+
+
+def test_filter_disclosures_payload_can_return_preview_with_full_html_transfer_numbers(tmp_path: Path) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+
+    payload = filter_disclosures_payload(
+        {
+            "classification_path": str(fixture_path),
+            "limit_unlimited": True,
+            "return_limit": 1,
+            "include_html_download_acpt_numbers": True,
+        }
+    )
+
+    assert payload["filters"]["limit"] is None
+    assert payload["filters"]["limit_unlimited"] is True
+    assert payload["filters"]["return_limit"] == 1
+    assert payload["summary"]["matched_disclosures"] == 3
+    assert payload["summary"]["returned_disclosures"] == 1
+    assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["3"]
+    assert payload["html_download_acpt_numbers"] == ["3", "2", "1"]
 
 
 def test_filter_disclosures_payload_supports_title_boolean_expression(tmp_path: Path) -> None:
@@ -441,6 +494,31 @@ def test_download_disclosure_html_payload_uses_collected_acpt_numbers(tmp_path: 
 
     assert payload["requested_count"] == 1
     assert payload["saved_files"] == [str(tmp_path / "viewer_html" / "20250101000001.html")]
+
+
+def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Path, monkeypatch) -> None:
+    def fake_download(**kwargs):
+        return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
+
+    monkeypatch.setattr("web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    source_json_path = tmp_path / "filtered-disclosures.json"
+    source_json_path.write_text(
+        json.dumps({"acptNumbers": ["20250101000001", "20250101000002"]}),
+        encoding="utf-8",
+    )
+
+    payload = download_disclosure_html_payload(
+        {
+            "output_directory": str(tmp_path / "viewer_html"),
+            "source_json_path": str(source_json_path),
+        }
+    )
+
+    assert payload["requested_count"] == 2
+    assert payload["saved_files"] == [
+        str(tmp_path / "viewer_html" / "20250101000001.html"),
+        str(tmp_path / "viewer_html" / "20250101000002.html"),
+    ]
 
 
 def test_build_insight_payload_groups_disclosures(tmp_path: Path, monkeypatch) -> None:

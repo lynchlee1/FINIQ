@@ -2,6 +2,7 @@ const HTML_DOWNLOAD_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 
 const elements = {
   rootDirectory: document.getElementById("rootDirectory"),
+  htmlTransferPath: document.getElementById("htmlTransferPath"),
   conditionBlocks: document.getElementById("conditionBlocks"),
   conditionPreview: document.getElementById("conditionPreview"),
   addConditionBtn: document.getElementById("addConditionBtn"),
@@ -11,6 +12,7 @@ const elements = {
   filterWorkers: document.getElementById("filterWorkers"),
   progressInterval: document.getElementById("progressInterval"),
   filterBtn: document.getElementById("filterBtn"),
+  cancelFilterBtn: document.getElementById("cancelFilterBtn"),
   status: document.getElementById("status"),
   result: document.getElementById("result"),
   summaryCards: document.getElementById("summaryCards"),
@@ -25,6 +27,7 @@ const RESULT_PAGE_SIZE = 20;
 let latestPayload = null;
 let resultPage = 0;
 let progressLines = [];
+let filterAbortController = null;
 let conditionBlocks = [
   { connector: "", open_count: 0, not: false, ignore_spaces: false, field: "title", operator: "contains", value: "", close_count: 0 },
 ];
@@ -74,6 +77,21 @@ function appendStatus(message, isError = false) {
   progressLines.push(message);
   progressLines = progressLines.slice(-80);
   setStatus(progressLines.join("\n"), isError);
+}
+
+function storeHtmlDownloadTransferPath(payload) {
+  const transfer = payload?.html_download_transfer || {};
+  const transferPath = String(transfer.path || "").trim();
+  if (!transferPath) {
+    sessionStorage.removeItem(HTML_DOWNLOAD_STORAGE_KEY);
+    return null;
+  }
+  const reference = {
+    source_json_path: transferPath,
+    acpt_numbers: Number(transfer.acpt_numbers || 0),
+  };
+  sessionStorage.setItem(HTML_DOWNLOAD_STORAGE_KEY, JSON.stringify(reference));
+  return reference;
 }
 
 function quoteExpressionTerm(value) {
@@ -231,10 +249,11 @@ function updatePager(disclosures = latestPayload?.disclosures || []) {
 function setResult(payload) {
   latestPayload = payload;
   resultPage = 0;
-  sessionStorage.setItem(HTML_DOWNLOAD_STORAGE_KEY, JSON.stringify(payload));
+  const transferReference = storeHtmlDownloadTransferPath(payload);
   renderSummary(payload);
   renderTable(payload.disclosures || []);
   renderJsonPreview();
+  return transferReference;
 }
 
 function currentPageDisclosures() {
@@ -328,18 +347,25 @@ async function fetchJson(url, init) {
 
 function buildPayload() {
   const limitUnlimited = Boolean(elements.limitUnlimited?.checked);
+  const displayLimit = Number(elements.limit.value || 1000);
   return {
     root_directory: elements.rootDirectory.value,
+    html_transfer_path: elements.htmlTransferPath?.value || "",
     filter_blocks: conditionBlocks,
     title_expression: "",
-    limit: limitUnlimited ? null : Number(elements.limit.value || 1000),
+    limit: limitUnlimited ? null : displayLimit,
     limit_unlimited: limitUnlimited,
+    return_limit: displayLimit,
+    include_html_download_acpt_numbers: true,
     filter_workers: Number(elements.filterWorkers?.value || 8),
     progress_interval: Number(elements.progressInterval?.value || 100),
   };
 }
 
 function formatProgress(progress) {
+  if (progress.message) {
+    return progress.message;
+  }
   const unitLabel = progress.unit_label || "항목";
   const records = Number(progress.records || 0).toLocaleString("ko-KR");
   const completed = Number(progress.completed || 0).toLocaleString("ko-KR");
@@ -403,21 +429,51 @@ async function fetchJsonStream(url, init, onProgress) {
 async function loadConfig() {
   const config = await fetchJson("/api/config");
   elements.rootDirectory.value = config.output_root || "";
+  if (elements.htmlTransferPath) {
+    elements.htmlTransferPath.value = `${config.output_root || ""}/.finiq/transfers`;
+  }
   setStatus("공시 소스 폴더를 불러왔습니다.");
 }
 
+function setFilterRunning(isRunning) {
+  if (elements.filterBtn) {
+    elements.filterBtn.disabled = isRunning;
+  }
+  if (elements.cancelFilterBtn) {
+    elements.cancelFilterBtn.disabled = !isRunning;
+  }
+}
+
 async function runFilter() {
+  if (filterAbortController) {
+    return;
+  }
+  filterAbortController = new AbortController();
+  setFilterRunning(true);
   progressLines = [];
   appendStatus("필터링 중...");
-  const payload = await fetchJsonStream("/api/disclosures/filter", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
-  }, (progress) => appendStatus(formatProgress(progress)));
-  setResult(payload);
-  appendStatus(
-    `매칭 ${payload.summary?.matched_disclosures || 0}건 중 ${payload.summary?.returned_disclosures || 0}건을 표시했고, 결과 JSON을 HTML 저장 페이지에서 불러올 수 있게 저장했습니다.`,
-  );
+  try {
+    const payload = await fetchJsonStream("/api/disclosures/filter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload()),
+      signal: filterAbortController.signal,
+    }, (progress) => appendStatus(formatProgress(progress)));
+    const transferReference = setResult(payload);
+    const transferMessage = transferReference
+      ? `HTML 저장용 접수번호 ${transferReference.acpt_numbers}개를 서버 파일로 저장했습니다.`
+      : "HTML 저장용 전송 파일을 만들지 못했습니다.";
+    appendStatus(`매칭 ${payload.summary?.matched_disclosures || 0}건 중 ${payload.summary?.returned_disclosures || 0}건을 표시했고, ${transferMessage}`, !transferReference);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      appendStatus("필터링을 중단했습니다.", true);
+      return;
+    }
+    throw error;
+  } finally {
+    filterAbortController = null;
+    setFilterRunning(false);
+  }
 }
 
 function moveResultPage(offset) {
@@ -493,6 +549,9 @@ elements.conditionBlocks?.addEventListener("click", (event) => {
 elements.filterBtn?.addEventListener("click", () => {
   runFilter().catch((error) => setStatus(error.message, true));
 });
+elements.cancelFilterBtn?.addEventListener("click", () => {
+  filterAbortController?.abort();
+});
 elements.addConditionBtn?.addEventListener("click", () => addCondition());
 elements.addGroupBtn?.addEventListener("click", () =>
   addCondition({
@@ -509,6 +568,9 @@ elements.nextPageBtn?.addEventListener("click", () => moveResultPage(1));
 elements.limitUnlimited?.addEventListener("change", () => {
   elements.limit.disabled = Boolean(elements.limitUnlimited.checked);
 });
+if (elements.limit && elements.limitUnlimited) {
+  elements.limit.disabled = Boolean(elements.limitUnlimited.checked);
+}
 
 loadConfig().catch((error) => setStatus(error.message, true));
 renderConditionBlocks();

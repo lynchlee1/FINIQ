@@ -6,9 +6,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from functools import lru_cache
 import heapq
+import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 from typing import Any, Callable
 
 import pandas as pd
@@ -645,6 +647,85 @@ def _load_classification_disclosure_records(
     return records
 
 
+def _looks_like_sqlite_manifest(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return payload.get("format") == "finiq_disclosure_table_manifest_v1"
+
+
+def _resolve_sqlite_manifest_path(path: str | Path) -> Path | None:
+    candidate = Path(path).expanduser().resolve()
+    if candidate.is_file() and _looks_like_sqlite_manifest(candidate):
+        return candidate
+    if not candidate.is_dir():
+        return None
+    preferred = candidate / "kind.sqlite_manifest.json"
+    if _looks_like_sqlite_manifest(preferred):
+        return preferred
+    manifests = sorted(candidate.glob("*.sqlite_manifest.json"))
+    for manifest_path in manifests:
+        if _looks_like_sqlite_manifest(manifest_path):
+            return manifest_path
+    return None
+
+
+def _load_sqlite_manifest(manifest_path: Path) -> dict[str, Any]:
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if payload.get("format") != "finiq_disclosure_table_manifest_v1":
+        msg = f"Not a FINIQ disclosure SQLite manifest: {manifest_path}"
+        raise ValueError(msg)
+    return payload
+
+
+def _sqlite_manifest_total_disclosures(manifest: dict[str, Any]) -> int:
+    summary_count = manifest.get("summary", {}).get("disclosures")
+    if summary_count is not None:
+        return int(summary_count)
+    return sum(int(shard.get("disclosures") or 0) for shard in list(manifest.get("shards") or []))
+
+
+def _iter_sqlite_manifest_disclosure_records(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+) -> Any:
+    table_name = str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
+    quoted_table = f'"{table_name.replace(chr(34), chr(34) + chr(34))}"'
+    manifest_parent = manifest_path.parent
+    for shard in sorted(list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")):
+        shard_path = Path(str(shard.get("path") or "")).expanduser()
+        if not shard_path.is_absolute():
+            shard_path = (manifest_parent / shard_path).resolve()
+        if not shard_path.is_file():
+            continue
+        connection = sqlite3.connect(shard_path)
+        connection.row_factory = sqlite3.Row
+        try:
+            cursor = connection.execute(
+                f"""
+                SELECT
+                    company_key,
+                    company_name,
+                    company_id,
+                    market,
+                    disclosed_at,
+                    disclosed_date,
+                    title,
+                    acpt_no,
+                    doc_no,
+                    submitter
+                FROM {quoted_table}
+                """
+            )
+            for row in cursor:
+                yield _prepare_filter_record(dict(row))
+        finally:
+            connection.close()
+
+
 def _element_text(node: html.HtmlElement | None) -> str:
     if node is None:
         return ""
@@ -852,7 +933,10 @@ def filter_disclosures_payload(
             msg = "classification_path or root_directory is required"
             raise ValueError(msg)
         classification_path = resolve_default_classification(root_directory) or ""
-    source_kind = "classification" if classification_path else "source_folder"
+    sqlite_manifest_path = _resolve_sqlite_manifest_path(classification_path) if classification_path else None
+    if sqlite_manifest_path is None and root_directory:
+        sqlite_manifest_path = _resolve_sqlite_manifest_path(root_directory)
+    source_kind = "sqlite_manifest" if sqlite_manifest_path else ("classification" if classification_path else "source_folder")
 
     title_expression = str(body.get("title_expression") or "").strip()
     filter_blocks = body.get("filter_blocks")
@@ -871,15 +955,28 @@ def filter_disclosures_payload(
     limit = None if limit_unlimited else int(body.get("limit") or 1000)
     if limit is not None:
         limit = min(max(limit, 1), DISCLOSURE_FILTER_LIMIT_MAX)
+    return_limit = body.get("return_limit")
+    if return_limit in (None, ""):
+        public_limit = limit
+    else:
+        public_limit = min(max(int(return_limit), 1), DISCLOSURE_FILTER_LIMIT_MAX)
+    include_html_download_acpt_numbers = bool(body.get("include_html_download_acpt_numbers"))
     progress_interval = _progress_interval(body.get("progress_interval"))
     filter_workers = _resolve_filter_workers(body.get("filter_workers"), 32)
 
     body_files = 0
-    if classification_path:
+    total_records = 0
+    sqlite_manifest: dict[str, Any] | None = None
+    if source_kind == "sqlite_manifest" and sqlite_manifest_path is not None:
+        sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
+        records = _iter_sqlite_manifest_disclosure_records(sqlite_manifest_path, sqlite_manifest)
+        total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
+    elif classification_path:
         records = _load_classification_disclosure_records(
             classification_path,
             progress_callback=progress_callback,
         )
+        total_records = len(records)
     else:
         records, body_files = _iter_source_disclosure_records(
             root_directory,
@@ -887,8 +984,10 @@ def filter_disclosures_payload(
             progress_interval=progress_interval,
             workers=filter_workers,
         )
+        total_records = len(records)
     filtered: list[dict[str, Any]] = []
     limited_heap: list[tuple[tuple[str, str, str], int, dict[str, Any]]] = []
+    html_download_acpt_heap: list[tuple[tuple[str, str, str], int, str]] = []
     matched_count = 0
     for index, record in enumerate(records, start=1):
         disclosed_date = str(record.get("__filter_disclosed_date") or "")
@@ -921,11 +1020,13 @@ def filter_disclosures_payload(
             matched = not submitter_keyword or submitter_keyword in str(record.get("__filter_submitter_cf") or "")
         if matched:
             matched_count += 1
-            if limit is None:
+            if include_html_download_acpt_numbers and acpt_no:
+                html_download_acpt_heap.append((_record_sort_key(record), index, acpt_no))
+            if public_limit is None:
                 filtered.append(record)
             else:
                 heap_item = (_record_sort_key(record), index, record)
-                if len(limited_heap) < limit:
+                if len(limited_heap) < public_limit:
                     heapq.heappush(limited_heap, heap_item)
                 elif heap_item > limited_heap[0]:
                     heapq.heapreplace(limited_heap, heap_item)
@@ -934,12 +1035,12 @@ def filter_disclosures_payload(
             source_type=source_kind,
             unit_label="공시",
             completed=index,
-            total=len(records),
+            total=total_records,
             records=matched_count,
             progress_interval=progress_interval,
         )
 
-    if limit is None:
+    if public_limit is None:
         filtered.sort(key=_record_sort_key, reverse=True)
         limited = filtered
     else:
@@ -948,10 +1049,11 @@ def filter_disclosures_payload(
             for item in sorted(limited_heap, reverse=True)
         ]
     public_limited = [_public_disclosure_record(record) for record in limited]
-    return {
+    payload = {
         "format": "kind_disclosure_filter_v1",
         "source_type": source_kind,
-        "source_classification_path": str(Path(classification_path).resolve()) if classification_path else "",
+        "source_classification_path": str(Path(classification_path).resolve()) if classification_path and source_kind == "classification" else "",
+        "source_sqlite_manifest_path": str(sqlite_manifest_path) if sqlite_manifest_path else "",
         "source_root_directory": str(Path(root_directory).expanduser().resolve()) if root_directory else "",
         "filters": {
             "filter_blocks": filter_blocks if isinstance(filter_blocks, list) else [],
@@ -968,10 +1070,11 @@ def filter_disclosures_payload(
             "acpt_numbers": sorted(acpt_numbers),
             "limit": limit,
             "limit_unlimited": limit_unlimited,
+            "return_limit": public_limit,
             "filter_workers": filter_workers,
         },
         "summary": {
-            "source_disclosures": len(records),
+            "source_disclosures": total_records,
             "source_body_files": body_files,
             "matched_disclosures": matched_count,
             "returned_disclosures": len(public_limited),
@@ -979,6 +1082,12 @@ def filter_disclosures_payload(
         },
         "disclosures": public_limited,
     }
+    if include_html_download_acpt_numbers:
+        payload["html_download_acpt_numbers"] = [
+            item[2]
+            for item in sorted(html_download_acpt_heap, reverse=True)
+        ]
+    return payload
 
 
 def list_classification_files(root_directory: str | Path) -> list[dict[str, str]]:
