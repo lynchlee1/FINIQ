@@ -402,11 +402,23 @@ textarea:focus {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  min-height: 54px;
+  min-height: 52px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
   background: var(--summary-bg);
+}
+
+.condition-preview .empty-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--panel-strong-bg);
+  font-weight: 800;
+  text-align: left;
 }
 
 .condition-block {
@@ -770,9 +782,14 @@ button {
 
 .limit-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(120px, 1fr);
   gap: 8px;
   align-items: center;
+}
+
+.limit-control input[type="number"] {
+  font-size: var(--font-size-small);
+  font-weight: 700;
 }
 
 .limit-unlimited {

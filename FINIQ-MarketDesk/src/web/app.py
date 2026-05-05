@@ -7,11 +7,13 @@ import errno
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from urllib.parse import parse_qs, urlparse
 
 from web.service import (
@@ -142,6 +144,62 @@ def _first_query_value(query: dict[str, list[str]], key: str, default: str = "")
     if not values:
         return default
     return values[0]
+
+
+def _build_disclosure_html_transfer_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    acpt_numbers: list[str] = []
+    seen: set[str] = set()
+    source_acpt_numbers = payload.get("html_download_acpt_numbers")
+    if isinstance(source_acpt_numbers, list):
+        candidates = source_acpt_numbers
+    else:
+        candidates = [
+            disclosure.get("acpt_no") or disclosure.get("acptno")
+            for disclosure in list(payload.get("disclosures") or [])
+            if isinstance(disclosure, dict)
+        ]
+    for candidate in candidates:
+        acpt_no = str(candidate or "").strip()
+        if not acpt_no or acpt_no in seen:
+            continue
+        seen.add(acpt_no)
+        acpt_numbers.append(acpt_no)
+    return {
+        "format": "kind_disclosure_filter_transfer_v1",
+        "source_format": payload.get("format") or "",
+        "source_classification_path": payload.get("source_classification_path") or "",
+        "source_root_directory": payload.get("source_root_directory") or "",
+        "filters": payload.get("filters") or {},
+        "summary": {
+            **(payload.get("summary") or {}),
+            "transferred_acpt_numbers": len(acpt_numbers),
+        },
+        "acptNumbers": acpt_numbers,
+    }
+
+
+def _write_disclosure_html_transfer_file(
+    output_root: str | Path,
+    payload: dict[str, Any],
+    *,
+    requested_path: str = "",
+) -> dict[str, Any]:
+    transfer_payload = _build_disclosure_html_transfer_payload(payload)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if requested_path:
+        transfer_path = Path(requested_path).expanduser().resolve()
+        if transfer_path.suffix.lower() != ".json":
+            transfer_path = transfer_path / f"filtered-disclosures-{timestamp}-{uuid4().hex[:8]}.json"
+    else:
+        transfer_dir = Path(output_root).expanduser().resolve() / ".finiq" / "transfers"
+        transfer_path = transfer_dir / f"filtered-disclosures-{timestamp}-{uuid4().hex[:8]}.json"
+    transfer_path.parent.mkdir(parents=True, exist_ok=True)
+    transfer_path.write_text(json.dumps(transfer_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "format": transfer_payload["format"],
+        "path": str(transfer_path),
+        "acpt_numbers": len(transfer_payload["acptNumbers"]),
+    }
 
 
 class KindWebHandler(BaseHTTPRequestHandler):
@@ -460,6 +518,13 @@ class KindWebHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = filter_disclosures_payload(body)
+            if payload.get("format") == "kind_disclosure_filter_v1":
+                payload["html_download_transfer"] = _write_disclosure_html_transfer_file(
+                    self.server.config.output_root,
+                    payload,
+                    requested_path=str(body.get("html_transfer_path") or "").strip(),
+                )
+                payload.pop("html_download_acpt_numbers", None)
         except (FileNotFoundError, IsADirectoryError, ValueError) as exc:
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
@@ -477,10 +542,19 @@ class KindWebHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
+            write_event({"type": "progress", "progress": {"message": "필터 데이터를 읽는 중입니다."}})
             payload = filter_disclosures_payload(
                 body,
                 progress_callback=lambda progress: write_event({"type": "progress", "progress": progress}),
             )
+            if payload.get("format") == "kind_disclosure_filter_v1":
+                write_event({"type": "progress", "progress": {"message": "HTML 저장용 접수번호 파일을 저장하는 중입니다."}})
+                payload["html_download_transfer"] = _write_disclosure_html_transfer_file(
+                    self.server.config.output_root,
+                    payload,
+                    requested_path=str(body.get("html_transfer_path") or "").strip(),
+                )
+                payload.pop("html_download_acpt_numbers", None)
             write_event({"type": "result", "payload": payload})
         except (BrokenPipeError, ConnectionResetError):
             return

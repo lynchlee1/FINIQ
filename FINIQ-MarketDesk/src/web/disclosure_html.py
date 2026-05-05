@@ -59,6 +59,17 @@ def download_disclosure_html_payload(body: dict[str, Any]) -> dict[str, Any]:
     source_json = body.get("json")
     if source_json is None:
         source_json = body.get("payload")
+    source_json_path = body.get("source_json_path")
+    if not source_json_path and isinstance(source_json, dict):
+        source_json_path = source_json.get("source_json_path")
+    if source_json_path:
+        source_json = Path(str(source_json_path)).expanduser().resolve()
+        if not source_json.is_file():
+            msg = f"source_json_path does not exist: {source_json}"
+            raise ValueError(msg)
+        import json
+
+        source_json = json.loads(source_json.read_text(encoding="utf-8"))
     if source_json is None:
         msg = "json is required"
         raise ValueError(msg)

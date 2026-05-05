@@ -54,6 +54,7 @@ function buildPayload() {
   return {
     output_directory: elements.outputDirectory.value,
     json: parsedJson,
+    source_json_path: parsedJson.source_json_path || "",
     timeout: Number(elements.timeout.value || 20),
     max_requests_per_minute: Number(elements.maxRequestsPerMinute.value || 90),
     wait_seconds: Number(elements.waitSeconds.value || 0),
