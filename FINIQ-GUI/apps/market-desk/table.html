@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FINIQ MarketDesk Disclosure Table</title>
+    <title>FINIQ MarketDesk SQLITE 변환</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,12 +18,12 @@
       <header class="topbar panel">
         <div class="topbar-copy">
           <p class="brand-label">FINIQ MarketDesk</p>
-          <h1>Disclosure Table</h1>
+          <h1>SQLITE 변환</h1>
         </div>
         <nav class="topbar-nav" aria-label="주요 메뉴">
           <a class="nav-link" href="/">공시 조회</a>
           <a class="nav-link" href="/download">공시 다운로드</a>
-          <a class="nav-link active" href="/table">공시 테이블</a>
+          <a class="nav-link active" href="/table">SQLITE 변환</a>
           <a class="nav-link" href="/filter">공시 필터</a>
           <a class="nav-link" href="/html-download">HTML 저장</a>
         </nav>
@@ -31,42 +31,37 @@
 
       <main class="download-view">
         <section class="panel download-panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-kicker">Source</div>
-              <div class="panel-title">Raw JSON 또는 원본 폴더 선택</div>
-            </div>
-          </div>
-          <div class="download-grid download-grid-single">
-            <label class="field">
-              <span>공시 소스 폴더</span>
-              <input id="rootDirectory" type="text" />
-            </label>
-          </div>
-          <div class="download-grid download-grid-single">
-            <label class="field">
-              <span>Raw JSON 또는 원본 폴더 경로</span>
-              <input id="classificationPath" type="text" list="classificationPathOptions" />
-              <datalist id="classificationPathOptions"></datalist>
-            </label>
-          </div>
-        </section>
-
-        <section class="panel download-panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-kicker">Destination</div>
-              <div class="panel-title">연도별 SQLite shard 생성</div>
-            </div>
-          </div>
           <div class="download-grid download-grid-2">
             <label class="field">
-              <span>Manifest 저장 경로</span>
-              <input id="outputPath" type="text" />
+              <span>입력 경로</span>
+              <div class="path-input-row path-input-row-3">
+                <input id="classificationPath" type="text" list="classificationPathOptions" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="classificationPath"
+                  data-dialog-mode="folder"
+                  data-dialog-title="원본 폴더 선택"
+                >
+                  📁
+                </button>
+              </div>
+              <datalist id="classificationPathOptions"></datalist>
             </label>
             <label class="field">
-              <span>테이블명</span>
-              <input id="tableName" type="text" value="disclosures" />
+              <span>저장 경로</span>
+              <div class="path-input-row">
+                <input id="outputPath" type="text" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="outputPath"
+                  data-dialog-mode="folder"
+                  data-dialog-title="저장 경로 선택"
+                >
+                  📁
+                </button>
+              </div>
             </label>
           </div>
         </section>
@@ -81,17 +76,6 @@
             </button>
           </div>
           <div id="status" class="download-status"></div>
-        </section>
-
-        <section class="panel download-panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-kicker">Result</div>
-              <div class="panel-title">변환 결과</div>
-            </div>
-          </div>
-          <div id="summaryCards" class="summary-cards"></div>
-          <pre id="result" class="download-result">결과 없음</pre>
         </section>
       </main>
     </div>

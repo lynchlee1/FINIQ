@@ -316,6 +316,17 @@ body::before {
   gap: 6px;
 }
 
+.path-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.path-input-row.path-input-row-3 {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .field span {
   font-size: var(--font-size-small);
   font-weight: 700;
@@ -395,6 +406,24 @@ textarea:focus {
   border-radius: 8px;
   padding: 8px;
   background: rgba(248, 250, 252, 0.54);
+}
+
+.preset-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.preset-controls button {
+  white-space: nowrap;
+}
+
+.preset-controls select,
+.preset-controls input {
+  min-height: 38px;
+  font-size: var(--font-size-small);
+  font-weight: 700;
 }
 
 .condition-preview {
@@ -485,6 +514,10 @@ textarea:focus {
   padding: 0;
   font-size: var(--font-size-small);
   box-shadow: none;
+}
+
+.condition-paren-input {
+  text-align: center;
 }
 
 .group-toggle.active {
@@ -739,7 +772,6 @@ button {
 
 .download-view {
   width: 100%;
-  max-width: 1320px;
 }
 
 .download-grid {
@@ -1091,9 +1123,15 @@ tbody tr:hover {
   .download-grid-4,
   .download-grid-single,
   .summary-cards,
+  .preset-controls,
   .condition-block,
   .disc-items {
     grid-template-columns: 1fr;
+  }
+
+  .path-input-row,
+  .path-input-row.path-input-row-3 {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .company-link {

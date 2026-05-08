@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sqlite3
 
+import pytest
+
 from web.service import (
     DISCLOSURE_GROUP_OTHER,
     build_insight_payload,
@@ -43,9 +45,16 @@ def _write_classification_fixture(tmp_path: Path) -> Path:
                 "disclosures": [
                     {
                         "disclosed_at": "2025-01-02 09:00:00",
-                        "title": "전환사채발행결정",
+                        "title": "[정정]전환사채발행결정",
+                        "title_attr": "전환사채발행결정",
+                        "title_base": "전환사채발행결정",
+                        "title_display": "[정정]전환사채발행결정",
+                        "title_flags": ["정정"],
+                        "is_correction_report": True,
+                        "has_later_correction": False,
                         "submitter": "테스트전자",
                         "acpt_no": "1",
+                        "doc_no": "10",
                     },
                     {
                         "disclosed_at": "2025-01-10 09:00:00",
@@ -84,7 +93,7 @@ def _write_source_body_fixture(tmp_path: Path) -> Path:
                   <a id="companysum" onclick="companysummary_open('005930'); return false;" title="테스트전자">테스트전자</a>
                 </td>
                 <td>
-                  <a onclick="openDisclsViewer('20250102000001','')" title="전환사채발행결정">전환사채발행결정</a>
+                  <a onclick="openDisclsViewer('20250102000001','20250102009999')" title="전환사채발행결정"><font color="#FF8040">[정정]</font>전환사채발행결정<img alt="해당보고서 이후에 정정된 보고서 있음"></a>
                 </td>
                 <td>테스트전자</td>
               </tr>
@@ -140,6 +149,7 @@ def test_filter_disclosures_payload_filters_by_title_and_date(tmp_path: Path) ->
     assert payload["summary"]["matched_disclosures"] == 1
     assert payload["disclosures"][0]["acpt_no"] == "1"
     assert payload["disclosures"][0]["company_name"] == "테스트전자"
+    assert payload["unique_titles"] == ["[정정]전환사채발행결정"]
 
 
 def test_filter_disclosures_payload_resolves_classification_from_root_directory(tmp_path: Path) -> None:
@@ -180,7 +190,14 @@ def test_filter_disclosures_payload_reads_source_folder_without_classification_j
     assert payload["summary"]["source_body_files"] == 1
     assert payload["summary"]["matched_disclosures"] == 1
     assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
+    assert payload["disclosures"][0]["doc_no"] == "20250102009999"
     assert payload["disclosures"][0]["company_name"] == "테스트전자"
+    assert payload["disclosures"][0]["title"] == "[정정]전환사채발행결정"
+    assert payload["disclosures"][0]["title_attr"] == "전환사채발행결정"
+    assert payload["disclosures"][0]["title_flags"] == ["정정"]
+    assert payload["disclosures"][0]["is_correction_report"] is True
+    assert payload["disclosures"][0]["has_later_correction"] is True
+    assert payload["disclosures"][0]["source_page"] == 1
     assert any(event["unit_label"] == "폴더" and event["completed"] == 1 for event in progress_events)
     assert any(event["unit_label"] == "공시" and event["total"] == 2 for event in progress_events)
 
@@ -214,7 +231,121 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
     assert payload["summary"]["source_disclosures"] == 2
     assert payload["summary"]["matched_disclosures"] == 1
     assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
+    assert payload["disclosures"][0]["doc_no"] == "20250102009999"
+    assert payload["disclosures"][0]["title"] == "[정정]전환사채발행결정"
+    assert payload["disclosures"][0]["title_flags"] == ["정정"]
+    assert payload["disclosures"][0]["is_correction_report"] == 1
+    assert payload["disclosures"][0]["has_later_correction"] == 1
     assert payload["html_download_acpt_numbers"] == ["20250102000001"]
+
+
+def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(tmp_path: Path) -> None:
+    sqlite_root = tmp_path / "kind_sqlite"
+    shard_root = sqlite_root / "kind.sqlite_manifest_shards"
+    shard_root.mkdir(parents=True)
+    shard_path = shard_root / "2025.sqlite"
+    connection = sqlite3.connect(shard_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE disclosures (
+                id INTEGER PRIMARY KEY,
+                company_key TEXT,
+                company_name TEXT,
+                company_id TEXT,
+                market TEXT,
+                disclosed_at TEXT,
+                disclosed_date TEXT,
+                title TEXT,
+                title_attr TEXT,
+                title_base TEXT,
+                title_display TEXT,
+                title_flags_json TEXT NOT NULL DEFAULT '[]',
+                is_correction_report INTEGER NOT NULL DEFAULT 0,
+                has_later_correction INTEGER NOT NULL DEFAULT 0,
+                acpt_no TEXT,
+                doc_no TEXT,
+                submitter TEXT,
+                source_file TEXT,
+                source_page INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO disclosures (
+                company_key, company_name, company_id, market, disclosed_at, disclosed_date,
+                title, title_attr, title_base, title_display, title_flags_json,
+                is_correction_report, has_later_correction, acpt_no, doc_no, submitter,
+                source_file, source_page
+            )
+            VALUES (
+                '005930', '테스트전자', '005930', '코스피', '2025-01-02 09:00:00', '2025-01-02',
+                '전환사채발행결정', '전환사채발행결정', '전환사채발행결정', '전환사채발행결정', '[]',
+                0, 0, '1', '10', '테스트전자', '', 1
+            )
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    manifest_path = sqlite_root / "kind.sqlite_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_table_manifest_v1",
+                "table_name": "disclosures",
+                "summary": {"companies": 1, "disclosures": 1, "shards": 1},
+                "shards": [
+                    {
+                        "year": "2025",
+                        "path": str(shard_path),
+                        "companies": 1,
+                        "disclosures": 1,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = filter_disclosures_payload(
+        {
+            "root_directory": str(sqlite_root),
+            "filter_blocks": [
+                {
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "전환사채",
+                }
+            ],
+        }
+    )
+
+    assert payload["summary"]["matched_disclosures"] == 1
+    assert payload["disclosures"][0]["row_no"] is None
+    assert payload["disclosures"][0]["acpt_no"] == "1"
+
+
+def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    sqlite_root = tmp_path / "kind_sqlite"
+    manifest_path = sqlite_root / "kind.sqlite_manifest.json"
+    build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(manifest_path),
+        }
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["shards"][0]["disclosures"] = 3
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="SQLite shard disclosure count mismatch"):
+        filter_disclosures_payload({"root_directory": str(sqlite_root)})
 
 
 def test_filter_disclosures_payload_reports_json_progress(tmp_path: Path) -> None:
@@ -268,7 +399,7 @@ def test_filter_disclosures_payload_can_return_without_limit(tmp_path: Path) -> 
     assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["3", "2", "1"]
 
 
-def test_filter_disclosures_payload_can_return_preview_with_full_html_transfer_numbers(tmp_path: Path) -> None:
+def test_filter_disclosures_payload_ignores_return_limit(tmp_path: Path) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
@@ -282,11 +413,34 @@ def test_filter_disclosures_payload_can_return_preview_with_full_html_transfer_n
 
     assert payload["filters"]["limit"] is None
     assert payload["filters"]["limit_unlimited"] is True
-    assert payload["filters"]["return_limit"] == 1
+    assert payload["filters"]["return_limit"] is None
     assert payload["summary"]["matched_disclosures"] == 3
-    assert payload["summary"]["returned_disclosures"] == 1
-    assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["3"]
+    assert payload["summary"]["returned_disclosures"] == 3
+    assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["3", "2", "1"]
     assert payload["html_download_acpt_numbers"] == ["3", "2", "1"]
+
+
+def test_filter_disclosures_payload_deduplicates_by_disclosure_identity(tmp_path: Path) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload["companies"][0]["disclosures"].append(dict(payload["companies"][0]["disclosures"][0]))
+    payload["summary"]["disclosures"] = 4
+    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    filtered_payload = filter_disclosures_payload(
+        {
+            "classification_path": str(fixture_path),
+            "include_html_download_acpt_numbers": True,
+        }
+    )
+
+    assert filtered_payload["summary"]["source_disclosures"] == 4
+    assert filtered_payload["summary"]["matched_disclosures"] == 3
+    assert filtered_payload["summary"]["returned_disclosures"] == 3
+    assert filtered_payload["summary"]["duplicate_disclosures"] == 1
+    assert [disclosure["acpt_no"] for disclosure in filtered_payload["disclosures"]] == ["3", "2", "1"]
+    assert filtered_payload["unique_titles"] == ["주주총회소집결의", "기타 주요경영사항", "[정정]전환사채발행결정"]
+    assert filtered_payload["html_download_acpt_numbers"] == ["3", "2", "1"]
 
 
 def test_filter_disclosures_payload_supports_title_boolean_expression(tmp_path: Path) -> None:
@@ -355,6 +509,50 @@ def test_filter_disclosures_payload_can_ignore_spaces_in_block_values(tmp_path: 
     assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["1"]
 
 
+def test_filter_disclosures_payload_supports_nested_bond_issuance_filter_blocks(tmp_path: Path) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+
+    payload = filter_disclosures_payload(
+        {
+            "classification_path": str(fixture_path),
+            "filter_blocks": [
+                {
+                    "open_count": 2,
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "전환사채",
+                    "ignore_spaces": True,
+                },
+                {
+                    "connector": "OR",
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "교환사채",
+                    "ignore_spaces": True,
+                    "close_count": 1,
+                },
+                {
+                    "connector": "OR",
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "신주인수권부사채",
+                    "ignore_spaces": True,
+                    "close_count": 1,
+                },
+                {
+                    "connector": "AND",
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "발행",
+                    "ignore_spaces": True,
+                },
+            ],
+        }
+    )
+
+    assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["1"]
+
+
 def test_filter_disclosures_payload_supports_exact_match_operator(tmp_path: Path) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
 
@@ -374,13 +572,13 @@ def test_filter_disclosures_payload_supports_exact_match_operator(tmp_path: Path
         {
             "classification_path": str(fixture_path),
             "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "exact_match",
-                    "value": "전환사채발행결정",
-                },
-            ],
-        }
+                    {
+                        "field": "title",
+                        "operator": "exact_match",
+                        "value": "[정정]전환사채발행결정",
+                    },
+                ],
+            }
     )
 
     assert partial_payload["disclosures"] == []
@@ -412,13 +610,27 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     connection = sqlite3.connect(shard_path)
     try:
         rows = connection.execute(
-            "SELECT company_name, disclosed_date, title, acpt_no FROM disclosures ORDER BY acpt_no"
+            """
+            SELECT company_name, disclosed_date, title, title_attr, title_flags_json,
+                   is_correction_report, has_later_correction, acpt_no, doc_no
+            FROM disclosures ORDER BY acpt_no
+            """
         ).fetchall()
         metadata = dict(connection.execute("SELECT key, value FROM table_metadata").fetchall())
     finally:
         connection.close()
 
-    assert rows[0] == ("테스트전자", "2025-01-02", "전환사채발행결정", "1")
+    assert rows[0] == (
+        "테스트전자",
+        "2025-01-02",
+        "[정정]전환사채발행결정",
+        "전환사채발행결정",
+        '["정정"]',
+        1,
+        0,
+        "1",
+        "10",
+    )
     assert metadata["format"] == "finiq_disclosure_table_sqlite"
     assert metadata["shard_format"] == "finiq_disclosure_table_sqlite_shard"
     assert metadata["shard_year"] == "2025"
@@ -442,6 +654,31 @@ def test_build_disclosure_table_payload_accepts_nested_folder_path(tmp_path: Pat
     assert payload["summary"]["disclosures"] == 3
 
 
+def test_build_disclosure_table_payload_rejects_unloaded_classification_disclosures(
+    tmp_path: Path,
+) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload["summary"]["disclosures"] = 4
+    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="summary does not match loaded disclosures"):
+        build_disclosure_table_payload({"classification_path": str(fixture_path)})
+
+
+def test_build_disclosure_table_payload_rejects_malformed_disclosure_item(
+    tmp_path: Path,
+) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload["companies"][0]["disclosures"].append("not-a-disclosure")
+    payload["summary"]["disclosures"] = 4
+    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"disclosures\[3\] must be an object"):
+        build_disclosure_table_payload({"classification_path": str(fixture_path)})
+
+
 def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     output_path = tmp_path / "kind.sqlite_manifest.json"
@@ -459,6 +696,33 @@ def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Pat
     manifest = json.loads(output_path.read_text(encoding="utf-8"))
     assert manifest["source_type"] == "source_folder"
     assert manifest["shards"][0]["year"] == "2025"
+
+
+def test_build_disclosure_table_payload_recovers_misnested_resource_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "FINIQ"
+    source_parent = workspace / "resources" / "kind_kosdaq"
+    source_parent.mkdir(parents=True)
+    source_root = _write_source_body_fixture(source_parent)
+    package_dir = workspace / "FINIQ-MarketDesk"
+    package_dir.mkdir(parents=True)
+    monkeypatch.chdir(package_dir)
+
+    misnested_root = package_dir / "resources" / "kind_kosdaq"
+    payload = build_disclosure_table_payload(
+        {
+            "root_directory": str(misnested_root),
+            "classification_path": str(misnested_root),
+            "output_path": str(misnested_root / "kind.sqlite_manifest.json"),
+        }
+    )
+
+    assert payload["source_type"] == "source_folder"
+    assert payload["source_path"] == str(source_root.resolve())
+    assert payload["output_path"] == str((source_root / "kind.sqlite_manifest.json").resolve())
+    assert payload["summary"]["disclosures"] == 2
 
 
 def test_build_disclosure_table_payload_falls_back_to_root_when_raw_path_is_output_dir(

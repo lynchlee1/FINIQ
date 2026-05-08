@@ -23,7 +23,7 @@
         <nav class="topbar-nav" aria-label="주요 메뉴">
           <a class="nav-link" href="/">공시 조회</a>
           <a class="nav-link" href="/download">공시 다운로드</a>
-          <a class="nav-link" href="/table">공시 테이블</a>
+          <a class="nav-link" href="/table">SQLITE 변환</a>
           <a class="nav-link" href="/filter">공시 필터</a>
           <a class="nav-link active" href="/html-download">HTML 저장</a>
         </nav>
@@ -40,7 +40,18 @@
           <div class="download-grid download-grid-3">
             <label class="field">
               <span>저장 경로</span>
-              <input id="outputDirectory" type="text" />
+              <div class="path-input-row">
+                <input id="outputDirectory" type="text" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="outputDirectory"
+                  data-dialog-mode="folder"
+                  data-dialog-title="HTML 저장 폴더 선택"
+                >
+                  📁
+                </button>
+              </div>
             </label>
             <label class="field">
               <span>타임아웃(초)</span>

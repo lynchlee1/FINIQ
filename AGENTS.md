@@ -60,6 +60,17 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Git Hygiene
+
+**Do not leave the user guessing what changed.**
+
+Before ending a coding task:
+- Run `git status --short` from the repository root.
+- State exactly which files changed and whether they are staged.
+- If the user asked for a commit, stage only the files directly related to the request, commit them, and report the commit hash.
+- If the user did not ask for a commit, do not stage or commit silently. Tell the user the exact `git add`/`git commit` commands to run, or ask whether to commit when that is the obvious next step.
+- Never discard or restore changes unless the user explicitly asks for that.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

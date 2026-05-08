@@ -23,7 +23,7 @@
         <nav class="topbar-nav" aria-label="주요 메뉴">
           <a class="nav-link active" href="/">공시 조회</a>
           <a class="nav-link" href="/download">공시 다운로드</a>
-          <a class="nav-link" href="/table">공시 테이블</a>
+          <a class="nav-link" href="/table">SQLITE 변환</a>
           <a class="nav-link" href="/filter">공시 필터</a>
           <a class="nav-link" href="/html-download">HTML 저장</a>
         </nav>
@@ -35,10 +35,6 @@
             <span class="sr-only">회사 검색</span>
             <input id="companySearchInput" type="search" placeholder="회사명을 입력하세요." />
           </label>
-          <button id="searchCompaniesBtn" class="action-button action-button-primary" type="button">
-            <span class="button-icon" aria-hidden="true">⌕</span>
-            <span>검색</span>
-          </button>
           <button id="toggleSettingsBtn" class="action-button action-button-muted" type="button">
             <span class="button-icon" aria-hidden="true">⚙</span>
             <span>설정</span>
@@ -51,7 +47,18 @@
               <div class="panel-title">주가 소스</div>
               <label class="field">
                 <span>폴더 경로</span>
-                <input id="priceDirInput" type="text" placeholder="/path/to/price/folder" />
+                <div class="path-input-row">
+                  <input id="priceDirInput" type="text" placeholder="/path/to/price/folder" />
+                  <button
+                    class="action-button action-button-muted action-button-compact"
+                    type="button"
+                    data-path-target="priceDirInput"
+                    data-dialog-mode="folder"
+                    data-dialog-title="주가 소스 폴더 선택"
+                  >
+                    📁
+                  </button>
+                </div>
               </label>
               <label class="field">
                 <span>파일 선택</span>
@@ -63,7 +70,18 @@
               <div class="panel-title">공시 소스</div>
               <label class="field">
                 <span>폴더 경로</span>
-                <input id="rootDirInput" type="text" />
+                <div class="path-input-row">
+                  <input id="rootDirInput" type="text" />
+                  <button
+                    class="action-button action-button-muted action-button-compact"
+                    type="button"
+                    data-path-target="rootDirInput"
+                    data-dialog-mode="folder"
+                    data-dialog-title="공시 소스 폴더 선택"
+                  >
+                    📁
+                  </button>
+                </div>
               </label>
               <label class="field">
                 <span>파일 선택</span>

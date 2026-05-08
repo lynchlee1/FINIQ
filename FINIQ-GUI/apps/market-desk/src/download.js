@@ -1,5 +1,7 @@
+import { bindPathPicker } from "./path-picker.js";
+import { bindPathSetting } from "./settings.js";
+
 const elements = {
-  mode: document.getElementById("mode"),
   outputDirectory: document.getElementById("outputDirectory"),
   startDate: document.getElementById("startDate"),
   endDate: document.getElementById("endDate"),
@@ -25,7 +27,6 @@ const elements = {
 
 let activeJobId = "";
 let jobPollTimer = 0;
-let statusPollTimer = 0;
 
 function setStatus(message, isError = false) {
   elements.status.textContent = message || "";
@@ -149,13 +150,6 @@ function stopJobPolling() {
   }
 }
 
-function stopStatusPolling() {
-  if (statusPollTimer) {
-    window.clearTimeout(statusPollTimer);
-    statusPollTimer = 0;
-  }
-}
-
 async function pollJob(jobId) {
   try {
     const payload = await fetchJson(`/api/download/jobs/${encodeURIComponent(jobId)}`);
@@ -176,38 +170,6 @@ async function pollJob(jobId) {
     stopJobPolling();
     setStatus(error.message, true);
   }
-}
-
-async function refreshDownloadStatus({ updateResult = false } = {}) {
-  const payload = await fetchJson("/api/download/status", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
-  });
-  if (updateResult) {
-    setResult(payload);
-  }
-  setStatus(formatProgressLog(payload) || "다운로드 현황을 불러왔습니다.");
-}
-
-function startStatusPolling() {
-  stopStatusPolling();
-  if (activeJobId) {
-    return;
-  }
-  const tick = async () => {
-    if (activeJobId) {
-      return;
-    }
-    try {
-      await refreshDownloadStatus({ updateResult: elements.result.textContent === "결과 없음" });
-      statusPollTimer = window.setTimeout(tick, 3000);
-    } catch (error) {
-      setStatus(error.message, true);
-      statusPollTimer = window.setTimeout(tick, 5000);
-    }
-  };
-  tick();
 }
 
 function fillSelect(selectElement, items) {
@@ -298,7 +260,7 @@ function collectDisclosureGroups() {
 function buildPayload() {
   const endPageRaw = String(elements.endPage.value || "").trim();
   return {
-    mode: elements.mode.value,
+    mode: "yearly",
     output_directory: String(elements.outputDirectory.value || "").trim(),
     start_date: String(elements.startDate.value || "").trim(),
     end_date: String(elements.endDate.value || "").trim(),
@@ -319,12 +281,6 @@ function buildPayload() {
   };
 }
 
-function syncModeState() {
-  const resumeMode = elements.mode.value === "resume";
-  elements.startDate.disabled = resumeMode;
-  elements.endDate.disabled = resumeMode;
-}
-
 async function initialize() {
   setStatus("옵션을 불러오는 중...");
   const optionsPayload = await fetchJson("/api/download/options");
@@ -339,11 +295,13 @@ async function initialize() {
   start.setDate(today.getDate() - 30);
   elements.startDate.value = start.toISOString().slice(0, 10);
   elements.endDate.value = today.toISOString().slice(0, 10);
-  syncModeState();
-  startStatusPolling();
 }
 
-elements.mode.addEventListener("change", syncModeState);
+bindPathSetting(
+  elements.outputDirectory,
+  () => ({ download_output_directory: elements.outputDirectory.value }),
+  (error) => setStatus(error.message, true),
+);
 
 elements.previewBtn.addEventListener("click", async () => {
   try {
@@ -362,7 +320,6 @@ elements.previewBtn.addEventListener("click", async () => {
 
 elements.runBtn.addEventListener("click", async () => {
   try {
-    stopStatusPolling();
     stopJobPolling();
     setStatus("다운로드 작업을 시작하는 중...");
     const result = await fetchJson("/api/download/run/start", {
@@ -381,4 +338,8 @@ elements.runBtn.addEventListener("click", async () => {
 
 initialize().catch((error) => {
   setStatus(error.message, true);
+});
+
+bindPathPicker(document, {
+  onError: (error) => setStatus(error.message, true),
 });

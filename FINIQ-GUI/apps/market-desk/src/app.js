@@ -1,3 +1,6 @@
+import { bindPathPicker } from "./path-picker.js";
+import { savePathSetting } from "./settings.js";
+
 const HOME_PATH = "/";
 const DETAIL_PATH = "/company.html";
 const FALLBACK_OUTPUT_ROOT = "/Users/wonwoolee/Documents/GitHub/FINIQ/resources/kind";
@@ -49,7 +52,6 @@ let companySearchTimer = null;
 
 const elements = {
   companySearchInput: document.getElementById("companySearchInput"),
-  searchCompaniesBtn: document.getElementById("searchCompaniesBtn"),
   toggleSettingsBtn: document.getElementById("toggleSettingsBtn"),
   settingsPanel: document.getElementById("settingsPanel"),
   priceDirInput: document.getElementById("priceDirInput"),
@@ -235,15 +237,17 @@ function renderClassificationOptions(files, selectedPath) {
   if (!elements.classificationSelect) {
     return;
   }
+  const nextSelectedPath = selectedPath || files[0]?.path || "";
   elements.classificationSelect.innerHTML = files
     .map(
       (file) => `
-        <option value="${escapeHtml(file.path)}" ${selectedPath === file.path ? "selected" : ""}>
+        <option value="${escapeHtml(file.path)}" ${nextSelectedPath === file.path ? "selected" : ""}>
           ${escapeHtml(file.label)}
         </option>
       `,
     )
     .join("");
+  elements.classificationSelect.value = nextSelectedPath;
 }
 
 function renderPriceOptions(files, selectedPath) {
@@ -740,8 +744,9 @@ async function reloadClassifications() {
     root_directory: state.outputRoot,
   });
   state.outputRoot = payload.root_directory || state.outputRoot;
-  state.selectedClassificationPath = payload.selected_classification_path || "";
-  renderClassificationOptions(payload.classification_files, state.selectedClassificationPath);
+  const files = payload.classification_files || [];
+  state.selectedClassificationPath = payload.selected_classification_path || files[0]?.path || "";
+  renderClassificationOptions(files, state.selectedClassificationPath);
   syncDirectoryInputs();
 }
 
@@ -794,6 +799,18 @@ async function saveSettings() {
   syncDirectoryInputs();
   updateUrl(HOME_PATH, { replace: true });
   await loadCompanies();
+}
+
+async function saveCurrentPathSettings() {
+  if (!state.apiAvailable) {
+    return;
+  }
+  await savePathSetting({
+    output_root: state.outputRoot,
+    selected_classification_path: state.selectedClassificationPath,
+    price_root_directory: state.priceRootDir,
+    quanti_dir: state.priceDir,
+  });
 }
 
 async function loadCompanies() {
@@ -865,16 +882,6 @@ function bindHomeEvents() {
     renderSettingsVisibility();
   });
 
-  elements.searchCompaniesBtn.addEventListener("click", async () => {
-    try {
-      state.keyword = elements.companySearchInput.value.trim();
-      updateUrl(HOME_PATH);
-      await loadCompanies();
-    } catch (error) {
-      console.error(error);
-    }
-  });
-
   elements.companySearchInput.addEventListener("input", (event) => {
     state.keyword = event.target.value.trim();
     window.clearTimeout(companySearchTimer);
@@ -917,36 +924,56 @@ function bindHomeEvents() {
     try {
       await reloadPriceSources();
       updateUrl(HOME_PATH, { replace: true });
+      await saveCurrentPathSettings();
     } catch (error) {
       console.error(error);
+      setSettingsStatus(error.message, true);
     }
   };
 
   elements.priceDirInput.addEventListener("change", refreshPriceSources);
   elements.priceDirInput.addEventListener("blur", refreshPriceSources);
+  elements.priceDirInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    refreshPriceSources();
+  });
 
   elements.priceFileSelect.addEventListener("change", (event) => {
     state.priceDir = event.target.value;
     syncDirectoryInputs();
     updateUrl(HOME_PATH, { replace: true });
+    saveCurrentPathSettings().catch((error) => setSettingsStatus(error.message, true));
   });
 
   const refreshClassifications = async () => {
     try {
       await reloadClassifications();
       updateUrl(HOME_PATH);
+      await saveCurrentPathSettings();
       await loadCompanies();
     } catch (error) {
       console.error(error);
+      setSettingsStatus(error.message, true);
     }
   };
 
   elements.rootDirInput.addEventListener("change", refreshClassifications);
   elements.rootDirInput.addEventListener("blur", refreshClassifications);
+  elements.rootDirInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    refreshClassifications();
+  });
 
   elements.classificationSelect.addEventListener("change", async (event) => {
     state.selectedClassificationPath = event.target.value;
     updateUrl(HOME_PATH);
+    await saveCurrentPathSettings();
     await loadCompanies();
   });
 
@@ -1020,6 +1047,19 @@ function bindDetailEvents() {
   elements.detailPriceDirInput.addEventListener("input", (event) => {
     syncPriceDir(event.target.value);
   });
+  elements.detailPriceDirInput.addEventListener("change", () => {
+    saveCurrentPathSettings().catch((error) => setStatus(error.message, true));
+  });
+  elements.detailPriceDirInput.addEventListener("blur", () => {
+    saveCurrentPathSettings().catch((error) => setStatus(error.message, true));
+  });
+  elements.detailPriceDirInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    saveCurrentPathSettings().catch((error) => setStatus(error.message, true));
+  });
 
   elements.applyFiltersBtn.addEventListener("click", async () => {
     updateUrl(DETAIL_PATH);
@@ -1054,6 +1094,12 @@ async function bootstrapDetail() {
 
 async function bootstrap() {
   applyRouteParams();
+  bindPathPicker(document, {
+    onError: (error) => {
+      setStatus(error.message, true);
+      setSettingsStatus(error.message, true);
+    },
+  });
   if (state.page === "detail") {
     await bootstrapDetail();
     return;

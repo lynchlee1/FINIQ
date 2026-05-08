@@ -1,4 +1,8 @@
+import { bindPathPicker } from "./path-picker.js";
+import { bindPathSetting } from "./settings.js";
+
 const HTML_DOWNLOAD_STORAGE_KEY = "finiq.kind.filteredDisclosures";
+const CONDITION_PRESET_STORAGE_KEY = "finiq.kind.conditionPresets";
 
 const elements = {
   rootDirectory: document.getElementById("rootDirectory"),
@@ -6,15 +10,16 @@ const elements = {
   conditionBlocks: document.getElementById("conditionBlocks"),
   conditionPreview: document.getElementById("conditionPreview"),
   addConditionBtn: document.getElementById("addConditionBtn"),
-  addGroupBtn: document.getElementById("addGroupBtn"),
-  limit: document.getElementById("limit"),
-  limitUnlimited: document.getElementById("limitUnlimited"),
+  presetSelect: document.getElementById("presetSelect"),
+  presetName: document.getElementById("presetName"),
+  loadPresetBtn: document.getElementById("loadPresetBtn"),
+  savePresetBtn: document.getElementById("savePresetBtn"),
+  deletePresetBtn: document.getElementById("deletePresetBtn"),
   filterWorkers: document.getElementById("filterWorkers"),
   progressInterval: document.getElementById("progressInterval"),
   filterBtn: document.getElementById("filterBtn"),
   cancelFilterBtn: document.getElementById("cancelFilterBtn"),
   status: document.getElementById("status"),
-  result: document.getElementById("result"),
   summaryCards: document.getElementById("summaryCards"),
   disclosureTableBody: document.getElementById("disclosureTableBody"),
   prevPageBtn: document.getElementById("prevPageBtn"),
@@ -28,9 +33,7 @@ let latestPayload = null;
 let resultPage = 0;
 let progressLines = [];
 let filterAbortController = null;
-let conditionBlocks = [
-  { connector: "", open_count: 0, not: false, ignore_spaces: false, field: "title", operator: "contains", value: "", close_count: 0 },
-];
+let conditionBlocks = [defaultConditionBlock()];
 
 const fieldOptions = [
   ["title", "제목"],
@@ -59,6 +62,19 @@ const operatorOptions = [
   ["exists", "exists"],
   ["empty", "is empty"],
 ];
+
+function defaultConditionBlock() {
+  return {
+    connector: "",
+    open_count: 0,
+    not: false,
+    ignore_spaces: false,
+    field: "title",
+    operator: "contains",
+    value: "",
+    close_count: 0,
+  };
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -191,7 +207,7 @@ function renderConditionBlocks() {
             </select>
           </div>
           <div class="condition-clause">
-            <button class="group-toggle ${block.open_count ? "active" : ""}" type="button" data-group-toggle="open" aria-label="그룹 시작">(</button>
+            <input class="group-toggle condition-paren-input ${block.open_count ? "active" : ""}" data-group-toggle="open" type="text" value="${block.open_count ? "(".repeat(Number(block.open_count)) : ""}" aria-label="그룹 시작" />
             <label class="condition-not">
               <input class="condition-not-input" type="checkbox" ${block.not ? "checked" : ""} />
               NOT
@@ -203,7 +219,7 @@ function renderConditionBlocks() {
             <select class="condition-field" aria-label="필드">${optionMarkup(fieldOptions, block.field)}</select>
             <select class="condition-operator" aria-label="연산자">${optionMarkup(operatorOptions, block.operator)}</select>
             <input class="condition-value" type="text" value="${escapeHtml(block.value)}" placeholder="값" />
-            <button class="group-toggle ${block.close_count ? "active" : ""}" type="button" data-group-toggle="close" aria-label="그룹 끝">)</button>
+            <input class="group-toggle condition-paren-input ${block.close_count ? "active" : ""}" data-group-toggle="close" type="text" value="${block.close_count ? ")".repeat(Number(block.close_count)) : ""}" aria-label="그룹 끝" />
           </div>
           <button class="condition-remove" type="button" aria-label="조건 삭제">삭제</button>
         </div>
@@ -213,16 +229,153 @@ function renderConditionBlocks() {
   syncExpressionFromBlocks();
 }
 
+function normalizeParenCount(value, paren) {
+  if (typeof value === "string" && /^[()]+$/.test(value.trim())) {
+    return [...value.trim()].filter((char) => char === paren).length;
+  }
+  const count = Number(value || 0);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+function normalizeConditionBlocks(blocks) {
+  const normalized = Array.isArray(blocks)
+    ? blocks
+        .map((block, index) => {
+          const connector = String(block?.connector || "AND").toUpperCase();
+          return {
+            ...defaultConditionBlock(),
+            connector: index === 0 || !["AND", "OR"].includes(connector) ? "" : connector,
+            open_count: normalizeParenCount(block?.open_count, "("),
+            not: Boolean(block?.not),
+            ignore_spaces: Boolean(block?.ignore_spaces),
+            field: fieldOptions.some(([value]) => value === block?.field) ? block.field : "title",
+            operator: operatorOptions.some(([value]) => value === block?.operator) ? block.operator : "contains",
+            value: String(block?.value || ""),
+            close_count: normalizeParenCount(block?.close_count, ")"),
+          };
+        })
+        .filter((block) => block.value.trim() || ["exists", "empty"].includes(block.operator))
+    : [];
+  return normalized.length ? normalized : [defaultConditionBlock()];
+}
+
+function readConditionBlocksFromDom() {
+  const rows = [...(elements.conditionBlocks?.querySelectorAll(".condition-block") || [])];
+  if (!rows.length) {
+    return conditionBlocks;
+  }
+  conditionBlocks = rows.map((row, index) => {
+    const connector = String(row.querySelector(".condition-connector")?.value || "AND").toUpperCase();
+    const field = row.querySelector(".condition-field")?.value || "title";
+    const operator = row.querySelector(".condition-operator")?.value || "contains";
+    return {
+      ...defaultConditionBlock(),
+      connector: index === 0 || !["AND", "OR"].includes(connector) ? "" : connector,
+      open_count: normalizeParenCount(row.querySelector('[data-group-toggle="open"]')?.value, "("),
+      not: Boolean(row.querySelector(".condition-not-input")?.checked),
+      ignore_spaces: Boolean(row.querySelector(".condition-ignore-spaces-input")?.checked),
+      field: fieldOptions.some(([value]) => value === field) ? field : "title",
+      operator: operatorOptions.some(([value]) => value === operator) ? operator : "contains",
+      value: row.querySelector(".condition-value")?.value || "",
+      close_count: normalizeParenCount(row.querySelector('[data-group-toggle="close"]')?.value, ")"),
+    };
+  });
+  return conditionBlocks;
+}
+
+function readConditionPresets() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CONDITION_PRESET_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((preset) => ({
+        name: String(preset?.name || "").trim(),
+        condition_blocks: normalizeConditionBlocks(preset?.condition_blocks),
+      }))
+      .filter((preset) => preset.name)
+      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  } catch {
+    return [];
+  }
+}
+
+function writeConditionPresets(presets) {
+  localStorage.setItem(CONDITION_PRESET_STORAGE_KEY, JSON.stringify(presets));
+}
+
+function renderPresetOptions(selectedName = elements.presetSelect?.value || "") {
+  if (!elements.presetSelect) {
+    return;
+  }
+  const presets = readConditionPresets();
+  elements.presetSelect.innerHTML = [
+    '<option value="">프리셋 선택</option>',
+    ...presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`),
+  ].join("");
+  elements.presetSelect.value = presets.some((preset) => preset.name === selectedName) ? selectedName : "";
+  if (elements.loadPresetBtn) {
+    elements.loadPresetBtn.disabled = !elements.presetSelect.value;
+  }
+  if (elements.deletePresetBtn) {
+    elements.deletePresetBtn.disabled = !elements.presetSelect.value;
+  }
+}
+
+function selectedPresetName() {
+  return String(elements.presetSelect?.value || "").trim();
+}
+
+function applyConditionPreset(name) {
+  const preset = readConditionPresets().find((item) => item.name === name);
+  if (!preset) {
+    setStatus("선택한 프리셋을 찾을 수 없습니다.", true);
+    renderPresetOptions();
+    return;
+  }
+  conditionBlocks = normalizeConditionBlocks(preset.condition_blocks);
+  renderConditionBlocks();
+  if (elements.presetName) {
+    elements.presetName.value = preset.name;
+  }
+  setStatus(`조건검색 프리셋을 불러왔습니다: ${preset.name}`);
+}
+
+function saveConditionPreset() {
+  const name = String(elements.presetName?.value || "").trim();
+  if (!name) {
+    setStatus("저장할 프리셋 이름을 입력하세요.", true);
+    elements.presetName?.focus();
+    return;
+  }
+  const presets = readConditionPresets().filter((preset) => preset.name !== name);
+  presets.push({
+    name,
+    condition_blocks: normalizeConditionBlocks(readConditionBlocksFromDom()),
+  });
+  writeConditionPresets(presets.sort((a, b) => a.name.localeCompare(b.name, "ko")));
+  renderPresetOptions(name);
+  setStatus(`조건검색 프리셋을 저장했습니다: ${name}`);
+}
+
+function deleteConditionPreset() {
+  const name = selectedPresetName();
+  if (!name) {
+    return;
+  }
+  writeConditionPresets(readConditionPresets().filter((preset) => preset.name !== name));
+  if (elements.presetName?.value === name) {
+    elements.presetName.value = "";
+  }
+  renderPresetOptions();
+  setStatus(`조건검색 프리셋을 삭제했습니다: ${name}`);
+}
+
 function addCondition(block = {}) {
   conditionBlocks.push({
+    ...defaultConditionBlock(),
     connector: conditionBlocks.length ? "AND" : "",
-    open_count: 0,
-    not: false,
-    ignore_spaces: false,
-    field: "title",
-    operator: "contains",
-    value: "",
-    close_count: 0,
     ...block,
   });
   renderConditionBlocks();
@@ -252,33 +405,7 @@ function setResult(payload) {
   const transferReference = storeHtmlDownloadTransferPath(payload);
   renderSummary(payload);
   renderTable(payload.disclosures || []);
-  renderJsonPreview();
   return transferReference;
-}
-
-function currentPageDisclosures() {
-  const disclosures = latestPayload?.disclosures || [];
-  return disclosures.slice(resultPage * RESULT_PAGE_SIZE, (resultPage + 1) * RESULT_PAGE_SIZE);
-}
-
-function renderJsonPreview() {
-  if (!latestPayload) {
-    elements.result.textContent = "결과 없음";
-    return;
-  }
-  const disclosures = currentPageDisclosures();
-  const payload = {
-    ...latestPayload,
-    summary: {
-      ...(latestPayload.summary || {}),
-      json_preview: true,
-      preview_page: resultPage + 1,
-      preview_page_size: RESULT_PAGE_SIZE,
-      preview_disclosures: disclosures.length,
-    },
-    disclosures,
-  };
-  elements.result.textContent = JSON.stringify(payload, null, 2);
 }
 
 function renderSummary(payload) {
@@ -346,16 +473,13 @@ async function fetchJson(url, init) {
 }
 
 function buildPayload() {
-  const limitUnlimited = Boolean(elements.limitUnlimited?.checked);
-  const displayLimit = Number(elements.limit.value || 1000);
+  readConditionBlocksFromDom();
   return {
     root_directory: elements.rootDirectory.value,
     html_transfer_path: elements.htmlTransferPath?.value || "",
     filter_blocks: conditionBlocks,
     title_expression: "",
-    limit: limitUnlimited ? null : displayLimit,
-    limit_unlimited: limitUnlimited,
-    return_limit: displayLimit,
+    limit_unlimited: true,
     include_html_download_acpt_numbers: true,
     filter_workers: Number(elements.filterWorkers?.value || 8),
     progress_interval: Number(elements.progressInterval?.value || 100),
@@ -430,7 +554,7 @@ async function loadConfig() {
   const config = await fetchJson("/api/config");
   elements.rootDirectory.value = config.output_root || "";
   if (elements.htmlTransferPath) {
-    elements.htmlTransferPath.value = `${config.output_root || ""}/.finiq/transfers`;
+    elements.htmlTransferPath.value = config.html_transfer_directory || `${config.output_root || ""}/.finiq/transfers`;
   }
   setStatus("공시 소스 폴더를 불러왔습니다.");
 }
@@ -461,8 +585,8 @@ async function runFilter() {
     }, (progress) => appendStatus(formatProgress(progress)));
     const transferReference = setResult(payload);
     const transferMessage = transferReference
-      ? `HTML 저장용 접수번호 ${transferReference.acpt_numbers}개를 서버 파일로 저장했습니다.`
-      : "HTML 저장용 전송 파일을 만들지 못했습니다.";
+      ? `접수번호 ${transferReference.acpt_numbers}개를 저장했습니다: ${transferReference.source_json_path}`
+      : "저장 파일을 만들지 못했습니다.";
     appendStatus(`매칭 ${payload.summary?.matched_disclosures || 0}건 중 ${payload.summary?.returned_disclosures || 0}건을 표시했고, ${transferMessage}`, !transferReference);
   } catch (error) {
     if (error.name === "AbortError") {
@@ -482,7 +606,6 @@ function moveResultPage(offset) {
   }
   resultPage += offset;
   renderTable(latestPayload.disclosures || []);
-  renderJsonPreview();
 }
 
 elements.conditionBlocks?.addEventListener("input", (event) => {
@@ -493,6 +616,14 @@ elements.conditionBlocks?.addEventListener("input", (event) => {
   const index = Number(row.dataset.index);
   if (!Number.isInteger(index) || !conditionBlocks[index]) {
     return;
+  }
+  if (event.target.matches?.(".condition-paren-input")) {
+    const paren = event.target.dataset.groupToggle === "open" ? "(" : ")";
+    const value = [...event.target.value].filter((char) => char === paren).join("");
+    const key = paren === "(" ? "open_count" : "close_count";
+    conditionBlocks[index][key] = value.length;
+    event.target.value = value;
+    event.target.classList.toggle("active", value.length > 0);
   }
   conditionBlocks[index].field = row.querySelector(".condition-field")?.value || "title";
   conditionBlocks[index].operator = row.querySelector(".condition-operator")?.value || "contains";
@@ -521,18 +652,6 @@ elements.conditionBlocks?.addEventListener("change", (event) => {
 });
 
 elements.conditionBlocks?.addEventListener("click", (event) => {
-  const groupButton = event.target.closest?.(".group-toggle");
-  if (groupButton) {
-    const row = groupButton.closest(".condition-block");
-    const index = Number(row?.dataset.index);
-    if (Number.isInteger(index) && conditionBlocks[index]) {
-      const key = groupButton.dataset.groupToggle === "open" ? "open_count" : "close_count";
-      conditionBlocks[index][key] = conditionBlocks[index][key] ? 0 : 1;
-      renderConditionBlocks();
-    }
-    return;
-  }
-
   const removeButton = event.target.closest?.(".condition-remove");
   if (!removeButton) {
     return;
@@ -553,24 +672,40 @@ elements.cancelFilterBtn?.addEventListener("click", () => {
   filterAbortController?.abort();
 });
 elements.addConditionBtn?.addEventListener("click", () => addCondition());
-elements.addGroupBtn?.addEventListener("click", () =>
-  addCondition({
-    connector: conditionBlocks.length ? "OR" : "",
-    open_count: 1,
-    field: "title",
-    operator: "contains",
-    value: "",
-    close_count: 1,
-  }),
-);
+elements.presetSelect?.addEventListener("change", () => {
+  const name = selectedPresetName();
+  if (elements.presetName) {
+    elements.presetName.value = name;
+  }
+  renderPresetOptions(name);
+});
+elements.loadPresetBtn?.addEventListener("click", () => applyConditionPreset(selectedPresetName()));
+elements.savePresetBtn?.addEventListener("click", () => saveConditionPreset());
+elements.deletePresetBtn?.addEventListener("click", () => deleteConditionPreset());
+elements.presetName?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveConditionPreset();
+  }
+});
 elements.prevPageBtn?.addEventListener("click", () => moveResultPage(-1));
 elements.nextPageBtn?.addEventListener("click", () => moveResultPage(1));
-elements.limitUnlimited?.addEventListener("change", () => {
-  elements.limit.disabled = Boolean(elements.limitUnlimited.checked);
-});
-if (elements.limit && elements.limitUnlimited) {
-  elements.limit.disabled = Boolean(elements.limitUnlimited.checked);
-}
+
+bindPathSetting(
+  elements.rootDirectory,
+  () => ({ output_root: elements.rootDirectory.value }),
+  (error) => setStatus(error.message, true),
+);
+bindPathSetting(
+  elements.htmlTransferPath,
+  () => ({ html_transfer_directory: elements.htmlTransferPath.value }),
+  (error) => setStatus(error.message, true),
+);
 
 loadConfig().catch((error) => setStatus(error.message, true));
 renderConditionBlocks();
+renderPresetOptions();
+
+bindPathPicker(document, {
+  onError: (error) => setStatus(error.message, true),
+});

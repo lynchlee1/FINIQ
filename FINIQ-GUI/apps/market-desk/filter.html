@@ -23,7 +23,7 @@
         <nav class="topbar-nav" aria-label="주요 메뉴">
           <a class="nav-link" href="/">공시 조회</a>
           <a class="nav-link" href="/download">공시 다운로드</a>
-          <a class="nav-link" href="/table">공시 테이블</a>
+          <a class="nav-link" href="/table">SQLITE 변환</a>
           <a class="nav-link active" href="/filter">공시 필터</a>
           <a class="nav-link" href="/html-download">HTML 저장</a>
         </nav>
@@ -39,12 +39,34 @@
           </div>
           <div class="download-grid download-grid-single">
             <label class="field">
-              <span>공시 소스 폴더</span>
-              <input id="rootDirectory" type="text" />
+              <span>입력 경로</span>
+              <div class="path-input-row">
+                <input id="rootDirectory" type="text" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="rootDirectory"
+                  data-dialog-mode="folder"
+                  data-dialog-title="공시 소스 폴더 선택"
+                >
+                  📁
+                </button>
+              </div>
             </label>
             <label class="field">
-              <span>HTML 저장용 JSON 경로</span>
-              <input id="htmlTransferPath" type="text" />
+              <span>저장 경로</span>
+              <div class="path-input-row">
+                <input id="htmlTransferPath" type="text" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="htmlTransferPath"
+                  data-dialog-mode="folder"
+                  data-dialog-title="저장 경로 선택"
+                >
+                  📁
+                </button>
+              </div>
             </label>
           </div>
         </section>
@@ -58,6 +80,22 @@
           </div>
           <div class="download-grid download-grid-single">
             <div class="field">
+              <span>조건검색 프리셋</span>
+              <div class="preset-controls">
+                <select id="presetSelect" aria-label="조건검색 프리셋 선택"></select>
+                <input id="presetName" type="text" placeholder="프리셋 이름" />
+                <button id="loadPresetBtn" class="action-button action-button-muted action-button-compact" type="button">
+                  불러오기
+                </button>
+                <button id="savePresetBtn" class="action-button action-button-primary action-button-compact" type="button">
+                  저장
+                </button>
+                <button id="deletePresetBtn" class="action-button action-button-muted action-button-compact" type="button">
+                  삭제
+                </button>
+              </div>
+            </div>
+            <div class="field">
               <span>조건 블록</span>
               <div id="conditionPreview" class="condition-preview"></div>
               <div id="conditionBlocks" class="condition-blocks"></div>
@@ -65,23 +103,10 @@
                 <button id="addConditionBtn" class="action-button action-button-muted action-button-compact" type="button">
                   조건 추가
                 </button>
-                <button id="addGroupBtn" class="action-button action-button-muted action-button-compact" type="button">
-                  그룹 조건 추가
-                </button>
               </div>
             </div>
           </div>
           <div class="download-grid download-grid-single">
-            <div class="field">
-              <span>최대 반환</span>
-              <div class="limit-control">
-                <label class="limit-unlimited">
-                  <input id="limitUnlimited" type="checkbox" checked />
-                  <span>제한 없음</span>
-                </label>
-                <input id="limit" type="number" min="1" max="10000" step="1" value="1000" disabled />
-              </div>
-            </div>
             <label class="field">
               <span>파싱 worker 수</span>
               <input id="filterWorkers" type="number" min="1" max="32" step="1" value="8" />
@@ -133,7 +158,6 @@
               <tbody id="disclosureTableBody"></tbody>
             </table>
           </div>
-          <pre id="result" class="download-result">결과 없음</pre>
         </section>
       </main>
     </div>

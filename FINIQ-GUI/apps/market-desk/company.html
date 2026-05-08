@@ -26,7 +26,7 @@
           <nav class="topbar-nav" aria-label="주요 메뉴">
             <a class="nav-link active" href="/">공시 조회</a>
             <a class="nav-link" href="/download">공시 다운로드</a>
-          <a class="nav-link" href="/table">공시 테이블</a>
+            <a class="nav-link" href="/table">SQLITE 변환</a>
             <a class="nav-link" href="/filter">공시 필터</a>
             <a class="nav-link" href="/html-download">HTML 저장</a>
           </nav>
@@ -68,7 +68,18 @@
             </label>
             <label class="field detail-filter-span">
               <span>Parquet 폴더 경로</span>
-              <input id="detailPriceDirInput" type="text" placeholder="/path/to/parquet/folder" />
+              <div class="path-input-row">
+                <input id="detailPriceDirInput" type="text" placeholder="/path/to/parquet/folder" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="detailPriceDirInput"
+                  data-dialog-mode="folder"
+                  data-dialog-title="Parquet 폴더 선택"
+                >
+                  📁
+                </button>
+              </div>
             </label>
           </div>
           <div id="statusBanner" class="status-banner" hidden></div>

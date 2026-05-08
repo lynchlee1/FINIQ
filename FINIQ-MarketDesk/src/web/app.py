@@ -6,6 +6,7 @@ import argparse
 import errno
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -56,6 +57,24 @@ class AppConfig:
     settings_path: str = ""
     price_root_directory: str = ""
     selected_classification_path: str = ""
+    sqlite_source_path: str = ""
+    download_output_directory: str = ""
+    sqlite_manifest_path: str = ""
+    html_output_directory: str = ""
+    html_transfer_directory: str = ""
+
+
+SAVED_SETTINGS_KEYS = (
+    "output_root",
+    "quanti_dir",
+    "price_root_directory",
+    "selected_classification_path",
+    "sqlite_source_path",
+    "download_output_directory",
+    "sqlite_manifest_path",
+    "html_output_directory",
+    "html_transfer_directory",
+)
 
 
 def _default_settings_path() -> Path:
@@ -65,7 +84,11 @@ def _default_settings_path() -> Path:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return base / "FINIQ-DataScraper" / "kind-web-settings.json"
+    return base / "FINIQ-DataScraper" / "appdata.json"
+
+
+def _legacy_settings_path(settings_path: str | Path) -> Path:
+    return Path(settings_path).with_name("kind-web-settings.json")
 
 
 def _normalize_saved_path(value: str) -> str:
@@ -74,6 +97,10 @@ def _normalize_saved_path(value: str) -> str:
 
 def _load_saved_settings(settings_path: str | Path) -> dict[str, str]:
     path = Path(settings_path)
+    if not path.exists() and path.name == "appdata.json":
+        legacy_path = _legacy_settings_path(path)
+        if legacy_path.exists():
+            path = legacy_path
     if not path.exists():
         return {}
     try:
@@ -83,7 +110,7 @@ def _load_saved_settings(settings_path: str | Path) -> dict[str, str]:
     if not isinstance(payload, dict):
         return {}
     settings: dict[str, str] = {}
-    for key in ("output_root", "quanti_dir", "price_root_directory", "selected_classification_path"):
+    for key in SAVED_SETTINGS_KEYS:
         value = payload.get(key)
         if not value or not isinstance(value, str):
             continue
@@ -101,33 +128,15 @@ def _apply_saved_settings(config: AppConfig) -> AppConfig:
     settings_path = config.settings_path or str(_default_settings_path())
     saved = _load_saved_settings(settings_path)
     output_root = saved.get("output_root", config.output_root)
-    if not Path(output_root).exists() or not list_classification_files(output_root):
-        output_root = config.output_root
-
     quanti_dir = saved.get("quanti_dir", config.quanti_dir)
-    resolved_quanti_dir = Path(quanti_dir)
-    quanti_by_item = resolved_quanti_dir / "by_item" if (resolved_quanti_dir / "by_item").is_dir() else resolved_quanti_dir
-    if not quanti_by_item.exists() or not any(quanti_by_item.glob("*.parquet")):
-        quanti_dir = config.quanti_dir
-
     price_root_directory = saved.get(
         "price_root_directory",
         config.price_root_directory or str(Path(quanti_dir).resolve().parent),
     )
-    if not Path(price_root_directory).exists() or not list_price_source_files(price_root_directory):
-        price_root_directory = str(Path(quanti_dir).resolve().parent)
-
     selected_classification_path = saved.get(
         "selected_classification_path",
-        config.selected_classification_path,
+        config.selected_classification_path or resolve_default_classification(output_root) or "",
     )
-    if selected_classification_path:
-        selected_path = Path(selected_classification_path).resolve()
-        output_root_path = Path(output_root).resolve()
-        if not selected_path.is_file() or output_root_path not in selected_path.parents:
-            selected_classification_path = resolve_default_classification(output_root) or ""
-    else:
-        selected_classification_path = resolve_default_classification(output_root) or ""
 
     return AppConfig(
         output_root=output_root,
@@ -137,6 +146,11 @@ def _apply_saved_settings(config: AppConfig) -> AppConfig:
         settings_path=settings_path,
         price_root_directory=price_root_directory,
         selected_classification_path=selected_classification_path,
+        sqlite_source_path=saved.get("sqlite_source_path", config.sqlite_source_path),
+        download_output_directory=saved.get("download_output_directory", config.download_output_directory),
+        sqlite_manifest_path=saved.get("sqlite_manifest_path", config.sqlite_manifest_path),
+        html_output_directory=saved.get("html_output_directory", config.html_output_directory),
+        html_transfer_directory=saved.get("html_transfer_directory", config.html_transfer_directory),
     )
 
 
@@ -150,14 +164,17 @@ def _first_query_value(query: dict[str, list[str]], key: str, default: str = "")
 def _build_disclosure_html_transfer_payload(payload: dict[str, Any]) -> dict[str, Any]:
     acpt_numbers: list[str] = []
     seen: set[str] = set()
+    disclosures = [
+        dict(disclosure)
+        for disclosure in list(payload.get("disclosures") or [])
+        if isinstance(disclosure, dict)
+    ]
     source_acpt_numbers = payload.get("html_download_acpt_numbers")
     if isinstance(source_acpt_numbers, list):
         candidates = source_acpt_numbers
     else:
         candidates = [
-            disclosure.get("acpt_no") or disclosure.get("acptno")
-            for disclosure in list(payload.get("disclosures") or [])
-            if isinstance(disclosure, dict)
+            disclosure.get("acpt_no") or disclosure.get("acptno") for disclosure in disclosures
         ]
     for candidate in candidates:
         acpt_no = str(candidate or "").strip()
@@ -174,7 +191,34 @@ def _build_disclosure_html_transfer_payload(payload: dict[str, Any]) -> dict[str
         "summary": {
             **(payload.get("summary") or {}),
             "transferred_acpt_numbers": len(acpt_numbers),
+            "transferred_rows": len(disclosures),
         },
+        "table": {
+            "columns": [
+                "disclosed_at",
+                "disclosed_date",
+                "company_name",
+                "company_id",
+                "market",
+                "title",
+                "title_attr",
+                "title_base",
+                "title_display",
+                "title_flags",
+                "title_flags_json",
+                "is_correction_report",
+                "has_later_correction",
+                "acpt_no",
+                "doc_no",
+                "submitter",
+                "row_no",
+                "source_file",
+                "source_page",
+            ],
+            "rows": disclosures,
+        },
+        "disclosures": disclosures,
+        "unique_titles": payload.get("unique_titles") or [],
         "acptNumbers": acpt_numbers,
     }
 
@@ -201,6 +245,65 @@ def _write_disclosure_html_transfer_file(
         "path": str(transfer_path),
         "acpt_numbers": len(transfer_payload["acptNumbers"]),
     }
+
+
+def _file_dialog_default_parts(raw_path: str) -> tuple[str, str]:
+    if not raw_path:
+        return (str(Path.home()), "")
+    path = Path(raw_path).expanduser()
+    default_name = path.name if path.suffix else ""
+    directory = path.parent if path.suffix else path
+    while not directory.exists() and directory != directory.parent:
+        directory = directory.parent
+    if not directory.exists():
+        directory = Path.home()
+    return (str(directory.resolve()), default_name)
+
+
+def _choose_finder_path(*, mode: str, title: str, default_path: str = "") -> str:
+    if sys.platform != "darwin":
+        msg = "Finder path selection is only available on macOS."
+        raise RuntimeError(msg)
+    if mode not in {"file", "folder", "save"}:
+        msg = "mode must be one of: file, folder, save"
+        raise ValueError(msg)
+
+    default_directory, default_name = _file_dialog_default_parts(default_path)
+    script = r'''
+on run argv
+  set dialogTitle to item 1 of argv
+  set modeName to item 2 of argv
+  set defaultDirectory to item 3 of argv
+  set defaultName to item 4 of argv
+  set defaultLocation to POSIX file defaultDirectory
+
+  if modeName is "folder" then
+    set chosenPath to choose folder with prompt dialogTitle default location defaultLocation
+  else if modeName is "save" then
+    if defaultName is "" then
+      set defaultName to "untitled"
+    end if
+    set chosenPath to choose file name with prompt dialogTitle default name defaultName default location defaultLocation
+  else
+    set chosenPath to choose file with prompt dialogTitle default location defaultLocation
+  end if
+
+  return POSIX path of chosenPath
+end run
+'''
+    result = subprocess.run(
+        ["osascript", "-e", script, title, mode, default_directory, default_name],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "User canceled" in stderr or "사용자가 취소" in stderr:
+            return ""
+        raise RuntimeError(stderr or "Finder path selection failed")
+    return result.stdout.strip()
 
 
 class KindWebHandler(BaseHTTPRequestHandler):
@@ -242,6 +345,9 @@ class KindWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/settings":
             self._handle_save_settings()
             return
+        if parsed.path == "/api/file-dialog":
+            self._handle_file_dialog()
+            return
         if parsed.path == "/api/download/preview":
             self._handle_download_preview()
             return
@@ -275,6 +381,7 @@ class KindWebHandler(BaseHTTPRequestHandler):
         price_root_directory = self.server.config.price_root_directory or str(
             Path(self.server.config.quanti_dir).resolve().parent
         )
+        output_root = self.server.config.output_root
         classification_files = list_classification_files(self.server.config.output_root)
         selected_classification_path = self.server.config.selected_classification_path or resolve_default_classification(
             self.server.config.output_root
@@ -284,13 +391,18 @@ class KindWebHandler(BaseHTTPRequestHandler):
             self.server.config.quanti_dir,
         )
         return {
-            "output_root": self.server.config.output_root,
+            "output_root": output_root,
             "quanti_dir": self.server.config.quanti_dir,
             "price_root_directory": price_root_directory,
+            "download_output_directory": self.server.config.download_output_directory or output_root,
+            "sqlite_manifest_path": self.server.config.sqlite_manifest_path,
+            "html_output_directory": self.server.config.html_output_directory or f"{output_root}/viewer_html",
+            "html_transfer_directory": self.server.config.html_transfer_directory or f"{output_root}/.finiq/transfers",
             "price_files": list_price_source_files(price_root_directory),
             "selected_price_path": selected_price_path,
             "classification_files": classification_files,
             "selected_classification_path": selected_classification_path,
+            "sqlite_source_path": self.server.config.sqlite_source_path,
             "range_options": list(INSIGHT_RANGE_OPTIONS),
             "display_frequency_options": list(DISPLAY_FREQUENCY_OPTIONS),
             "price_sources": [
@@ -352,19 +464,15 @@ class KindWebHandler(BaseHTTPRequestHandler):
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
-        output_root = str(
-            Path(payload.get("output_root") or self.server.config.output_root).expanduser().resolve()
-        )
-        quanti_dir = str(
-            Path(payload.get("quanti_dir") or self.server.config.quanti_dir).expanduser().resolve()
-        )
-        price_root_directory = str(
-            Path(
-                payload.get("price_root_directory")
-                or self.server.config.price_root_directory
-                or Path(quanti_dir).resolve().parent
-            ).expanduser().resolve()
-        )
+        settings_path = self.server.config.settings_path or str(_default_settings_path())
+        saved = _load_saved_settings(settings_path)
+        output_root = str(Path(payload.get("output_root") or self.server.config.output_root).expanduser().resolve())
+        quanti_dir = str(Path(payload.get("quanti_dir") or self.server.config.quanti_dir).expanduser().resolve())
+        price_root_directory = str(Path(
+            payload.get("price_root_directory")
+            or self.server.config.price_root_directory
+            or Path(quanti_dir).resolve().parent
+        ).expanduser().resolve())
         selected_classification_raw = (
             payload.get("selected_classification_path")
             or self.server.config.selected_classification_path
@@ -381,16 +489,50 @@ class KindWebHandler(BaseHTTPRequestHandler):
         self.server.config.quanti_dir = quanti_dir
         self.server.config.price_root_directory = price_root_directory
         self.server.config.selected_classification_path = selected_classification_path
-        _write_saved_settings(
-            self.server.config.settings_path or _default_settings_path(),
-            {
-                "output_root": output_root,
-                "quanti_dir": quanti_dir,
-                "price_root_directory": price_root_directory,
-                "selected_classification_path": selected_classification_path,
-            },
-        )
+        for attr in (
+            "download_output_directory",
+            "sqlite_source_path",
+            "sqlite_manifest_path",
+            "html_output_directory",
+            "html_transfer_directory",
+        ):
+            if attr in payload:
+                setattr(self.server.config, attr, str(Path(str(payload.get(attr) or "")).expanduser().resolve()) if payload.get(attr) else "")
+
+        next_settings = {
+            **saved,
+            "output_root": output_root,
+            "quanti_dir": quanti_dir,
+            "price_root_directory": price_root_directory,
+            "selected_classification_path": selected_classification_path,
+        }
+        for attr in (
+            "download_output_directory",
+            "sqlite_source_path",
+            "sqlite_manifest_path",
+            "html_output_directory",
+            "html_transfer_directory",
+        ):
+            value = getattr(self.server.config, attr) or saved.get(attr, "")
+            if value:
+                next_settings[attr] = value
+            else:
+                next_settings.pop(attr, None)
+        _write_saved_settings(settings_path, next_settings)
         self._respond_json(HTTPStatus.OK, self._build_config_payload())
+
+    def _handle_file_dialog(self) -> None:
+        try:
+            payload = self._read_json_body()
+            path = _choose_finder_path(
+                mode=str(payload.get("mode") or "file").strip(),
+                title=str(payload.get("title") or "경로 선택").strip(),
+                default_path=str(payload.get("default_path") or "").strip(),
+            )
+        except (RuntimeError, subprocess.TimeoutExpired, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, {"path": path, "cancelled": not bool(path)})
 
     def _handle_companies(self, raw_query: str) -> None:
         query = parse_qs(raw_query)
@@ -462,7 +604,7 @@ class KindWebHandler(BaseHTTPRequestHandler):
 
     def _handle_download_options(self) -> None:
         payload = build_download_options_payload(
-            default_output_directory=self.server.config.output_root,
+            default_output_directory=self.server.config.download_output_directory or self.server.config.output_root,
         )
         self._respond_json(HTTPStatus.OK, payload)
 
@@ -541,9 +683,15 @@ class KindWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         def write_event(payload: dict[str, Any]) -> None:
-            content = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
+            content = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8") + b"\n"
             self.wfile.write(content)
             self.wfile.flush()
+
+        def write_error_event(message: str) -> None:
+            try:
+                write_event({"type": "error", "error": message})
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         try:
             write_event({"type": "progress", "progress": {"message": "필터 데이터를 읽는 중입니다."}})
@@ -562,8 +710,10 @@ class KindWebHandler(BaseHTTPRequestHandler):
             write_event({"type": "result", "payload": payload})
         except (BrokenPipeError, ConnectionResetError):
             return
-        except (FileNotFoundError, IsADirectoryError, ValueError) as exc:
-            write_event({"type": "error", "error": str(exc)})
+        except (OSError, ValueError) as exc:
+            write_error_event(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            write_error_event(f"필터 실행 중 오류가 발생했습니다: {exc}")
 
     def _handle_disclosure_html_download(self) -> None:
         try:
@@ -636,6 +786,11 @@ def _create_server(config: AppConfig, *, max_port_tries: int = 20) -> tuple[Kind
                     settings_path=config.settings_path,
                     price_root_directory=config.price_root_directory,
                     selected_classification_path=config.selected_classification_path,
+                    sqlite_source_path=config.sqlite_source_path,
+                    download_output_directory=config.download_output_directory,
+                    sqlite_manifest_path=config.sqlite_manifest_path,
+                    html_output_directory=config.html_output_directory,
+                    html_transfer_directory=config.html_transfer_directory,
                 ),
             )
             return server, candidate_port, candidate_port != requested_port

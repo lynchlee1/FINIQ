@@ -1,3 +1,6 @@
+import { bindPathPicker } from "./path-picker.js";
+import { bindPathSetting } from "./settings.js";
+
 const HTML_DOWNLOAD_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 
 const elements = {
@@ -49,7 +52,7 @@ async function fetchJson(url, init) {
 
 async function loadConfig() {
   const config = await fetchJson("/api/config");
-  elements.outputDirectory.value = `${config.output_root || ""}/viewer_html`;
+  elements.outputDirectory.value = config.html_output_directory || `${config.output_root || ""}/viewer_html`;
   refreshParseOutputPath();
   const transferredPayload = sessionStorage.getItem(HTML_DOWNLOAD_STORAGE_KEY);
   if (transferredPayload) {
@@ -149,4 +152,14 @@ elements.parseHtmlBtn?.addEventListener("click", () => {
   runParse().catch((error) => setStatus(error.message, true));
 });
 
+bindPathSetting(
+  elements.outputDirectory,
+  () => ({ html_output_directory: elements.outputDirectory.value }),
+  (error) => setStatus(error.message, true),
+);
+
 loadConfig().catch((error) => setStatus(error.message, true));
+
+bindPathPicker(document, {
+  onError: (error) => setStatus(error.message, true),
+});

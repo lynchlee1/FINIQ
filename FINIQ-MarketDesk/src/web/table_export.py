@@ -17,7 +17,7 @@ from web.service import (
 )
 
 
-TABLE_SCHEMA_VERSION = 1
+TABLE_SCHEMA_VERSION = 2
 DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
 SQLITE_FORMAT = "finiq_disclosure_table_sqlite_shard"
@@ -31,6 +31,27 @@ def _company_key(company: dict[str, Any]) -> str:
     return str(
         company.get("company_key") or company.get("company_id") or company.get("company_name") or ""
     ).strip()
+
+
+def _summary_disclosure_count(payload: dict[str, Any]) -> int | None:
+    summary = payload.get("summary")
+    if not isinstance(summary, dict) or summary.get("disclosures") is None:
+        return None
+    return int(summary.get("disclosures") or 0)
+
+
+def _company_disclosures(company: dict[str, Any], company_index: int) -> list[dict[str, Any]]:
+    disclosures = company.get("disclosures")
+    if disclosures is None:
+        return []
+    if not isinstance(disclosures, list):
+        msg = f"companies[{company_index}].disclosures must be a list"
+        raise ValueError(msg)
+    for disclosure_index, disclosure in enumerate(disclosures):
+        if not isinstance(disclosure, dict):
+            msg = f"companies[{company_index}].disclosures[{disclosure_index}] must be an object"
+            raise ValueError(msg)
+    return disclosures
 
 
 def _normalize_table_name(value: object) -> str:
@@ -54,7 +75,7 @@ def _shard_directory(manifest_path: Path) -> Path:
 def _manifest_output_path(raw_path: str, classification_path: Path) -> Path:
     if not raw_path:
         return _default_output_path(classification_path).resolve()
-    output_path = Path(raw_path).expanduser().resolve()
+    output_path = _normalize_workspace_resource_path(Path(raw_path).expanduser(), allow_missing_leaf=True).resolve()
     if output_path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}:
         return output_path.with_suffix(".sqlite_manifest.json")
     if output_path.suffix:
@@ -66,11 +87,49 @@ def _source_has_body_files(path: Path) -> bool:
     return path.is_dir() and bool(_find_source_body_files(path))
 
 
+def _workspace_resource_bases() -> list[Path]:
+    bases = [
+        Path.cwd(),
+        Path.cwd().parent,
+        Path(__file__).resolve().parents[3],
+        Path(__file__).resolve().parents[2],
+    ]
+    unique_bases: list[Path] = []
+    seen: set[Path] = set()
+    for base in bases:
+        resolved = base.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_bases.append(resolved)
+    return unique_bases
+
+
+def _normalize_workspace_resource_path(path: Path, *, allow_missing_leaf: bool = False) -> Path:
+    candidate = path.resolve()
+    if candidate.exists() or "resources" not in candidate.parts:
+        return candidate
+
+    resource_index = candidate.parts.index("resources")
+    relative_parts = candidate.parts[resource_index + 1 :]
+    for base in _workspace_resource_bases():
+        resource_path = (base / "resources" / Path(*relative_parts)).resolve()
+        if resource_path.exists():
+            return resource_path
+        if allow_missing_leaf and resource_path.parent.exists():
+            return resource_path
+    return candidate
+
+
 def _resolve_source(raw_path: str, root_directory: str) -> tuple[str, Path]:
-    root_path = Path(root_directory).expanduser().resolve() if root_directory else None
+    root_path = (
+        _normalize_workspace_resource_path(Path(root_directory).expanduser())
+        if root_directory
+        else None
+    )
 
     if raw_path:
-        candidate = Path(raw_path).expanduser().resolve()
+        candidate = _normalize_workspace_resource_path(Path(raw_path).expanduser())
         if candidate.is_file():
             return ("classification", candidate)
         if candidate.is_dir():
@@ -113,16 +172,17 @@ def _resolve_source(raw_path: str, root_directory: str) -> tuple[str, Path]:
 
 def _iter_disclosure_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for company in list(payload.get("companies") or []):
+    for company_index, company in enumerate(list(payload.get("companies") or [])):
         company_key = _company_key(company)
         company_name = company.get("company_name")
         company_id = company.get("company_id")
         market = company.get("market")
         badges = list(company.get("badges") or [])
-        for disclosure in list(company.get("disclosures") or []):
+        for disclosure in _company_disclosures(company, company_index):
             disclosed_at = disclosure.get("disclosed_at")
             rows.append(
                 {
+                    "row_no": disclosure.get("row_no"),
                     "company_key": company_key,
                     "company_name": company_name,
                     "company_id": company_id,
@@ -131,12 +191,46 @@ def _iter_disclosure_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                     "disclosed_at": disclosed_at,
                     "disclosed_date": _date_part(disclosed_at),
                     "title": disclosure.get("title"),
+                    "title_attr": disclosure.get("title_attr"),
+                    "title_base": disclosure.get("title_base") or disclosure.get("title_attr"),
+                    "title_display": disclosure.get("title_display") or disclosure.get("title"),
+                    "title_flags_json": json.dumps(list(disclosure.get("title_flags") or []), ensure_ascii=False),
+                    "is_correction_report": 1 if disclosure.get("is_correction_report") else 0,
+                    "has_later_correction": 1 if disclosure.get("has_later_correction") else 0,
                     "acpt_no": disclosure.get("acpt_no") or disclosure.get("acptno"),
                     "doc_no": disclosure.get("doc_no"),
                     "submitter": disclosure.get("submitter"),
+                    "source_file": disclosure.get("source_file"),
+                    "source_page": disclosure.get("source_page"),
                 }
             )
     return rows
+
+
+def _validate_classification_disclosure_counts(
+    payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+    source_path: Path,
+) -> None:
+    companies = list(payload.get("companies") or [])
+    actual_disclosures = sum(
+        len(_company_disclosures(company, company_index))
+        for company_index, company in enumerate(companies)
+    )
+    if len(rows) != actual_disclosures:
+        msg = (
+            "SQLite export did not inspect every classification disclosure: "
+            f"source={source_path}, inspected={len(rows)}, expected={actual_disclosures}"
+        )
+        raise ValueError(msg)
+
+    summary_disclosures = _summary_disclosure_count(payload)
+    if summary_disclosures is not None and summary_disclosures != actual_disclosures:
+        msg = (
+            "Classification disclosure summary does not match loaded disclosures: "
+            f"source={source_path}, summary={summary_disclosures}, loaded={actual_disclosures}"
+        )
+        raise ValueError(msg)
 
 
 def _iter_source_folder_rows(source_folder: Path) -> list[dict[str, Any]]:
@@ -156,6 +250,7 @@ def _iter_source_folder_rows(source_folder: Path) -> list[dict[str, Any]]:
             disclosed_at = record.get("disclosed_at")
             rows.append(
                 {
+                    "row_no": record.get("row_no"),
                     "company_key": record.get("company_key") or _company_key(record),
                     "company_name": record.get("company_name"),
                     "company_id": record.get("company_id"),
@@ -164,9 +259,17 @@ def _iter_source_folder_rows(source_folder: Path) -> list[dict[str, Any]]:
                     "disclosed_at": disclosed_at,
                     "disclosed_date": _date_part(disclosed_at),
                     "title": record.get("title"),
+                    "title_attr": record.get("title_attr"),
+                    "title_base": record.get("title_base") or record.get("title_attr"),
+                    "title_display": record.get("title_display") or record.get("title"),
+                    "title_flags_json": json.dumps(list(record.get("title_flags") or []), ensure_ascii=False),
+                    "is_correction_report": 1 if record.get("is_correction_report") else 0,
+                    "has_later_correction": 1 if record.get("has_later_correction") else 0,
                     "acpt_no": record.get("acpt_no") or record.get("acptno"),
                     "doc_no": record.get("doc_no"),
                     "submitter": record.get("submitter"),
+                    "source_file": record.get("source_file"),
+                    "source_page": record.get("source_page"),
                 }
             )
     return rows
@@ -194,6 +297,7 @@ def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) ->
         f"""
         CREATE TABLE {quoted_table} (
             id INTEGER PRIMARY KEY,
+            row_no TEXT,
             company_key TEXT,
             company_name TEXT,
             company_id TEXT,
@@ -202,9 +306,17 @@ def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) ->
             disclosed_at TEXT,
             disclosed_date TEXT,
             title TEXT,
+            title_attr TEXT,
+            title_base TEXT,
+            title_display TEXT,
+            title_flags_json TEXT NOT NULL DEFAULT '[]',
+            is_correction_report INTEGER NOT NULL DEFAULT 0,
+            has_later_correction INTEGER NOT NULL DEFAULT 0,
             acpt_no TEXT,
             doc_no TEXT,
-            submitter TEXT
+            submitter TEXT,
+            source_file TEXT,
+            source_page INTEGER
         )
         """
     )
@@ -318,6 +430,7 @@ def _write_sqlite_shard(
             connection.executemany(
                 f"""
                 INSERT INTO "{table_name}" (
+                    row_no,
                     company_key,
                     company_name,
                     company_id,
@@ -326,11 +439,20 @@ def _write_sqlite_shard(
                     disclosed_at,
                     disclosed_date,
                     title,
+                    title_attr,
+                    title_base,
+                    title_display,
+                    title_flags_json,
+                    is_correction_report,
+                    has_later_correction,
                     acpt_no,
                     doc_no,
-                    submitter
+                    submitter,
+                    source_file,
+                    source_page
                 )
                 VALUES (
+                    :row_no,
                     :company_key,
                     :company_name,
                     :company_id,
@@ -339,15 +461,32 @@ def _write_sqlite_shard(
                     :disclosed_at,
                     :disclosed_date,
                     :title,
+                    :title_attr,
+                    :title_base,
+                    :title_display,
+                    :title_flags_json,
+                    :is_correction_report,
+                    :has_later_correction,
                     :acpt_no,
                     :doc_no,
-                    :submitter
+                    :submitter,
+                    :source_file,
+                    :source_page
                 )
                 """,
                 rows,
             )
             indexes = _create_indexes(connection, table_name)
             fts_enabled = _create_fts_table(connection, table_name)
+            inserted_count = int(
+                connection.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+            )
+            if inserted_count != len(rows):
+                msg = (
+                    "SQLite shard row count mismatch: "
+                    f"shard={shard_path}, inserted={inserted_count}, expected={len(rows)}"
+                )
+                raise ValueError(msg)
             _write_metadata(
                 connection,
                 classification_path=classification_path,
@@ -395,6 +534,7 @@ def build_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
     if source_type == "classification":
         payload = load_company_classification_file(source_path)
         rows = _iter_disclosure_rows(payload)
+        _validate_classification_disclosure_counts(payload, rows, source_path)
         companies = len(list(payload.get("companies") or []))
     else:
         rows = _iter_source_folder_rows(source_path)

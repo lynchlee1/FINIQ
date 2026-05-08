@@ -5,7 +5,6 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from functools import lru_cache
-import heapq
 import json
 import os
 from pathlib import Path
@@ -75,7 +74,6 @@ INSIGHT_RANGE_OPTIONS = ("검색기간", "1개월", "3개월", "6개월", "1년"
 DISPLAY_FREQUENCY_OPTIONS = ("자동", "일봉", "주봉", "월봉")
 KIND_UI_DATE_MIN = date(1990, 1, 1)
 MARKER_PLACEMENT = "candle_below"
-DISCLOSURE_FILTER_LIMIT_MAX = 10000
 _RESULT_PAGE_NUMBER_RE = re.compile(r"_post_page_(?P<page>\d+)\.body$")
 _COMPANYSUMMARY_OPEN_RE = re.compile(
     r"companysummary_open\(\s*['\"](?P<company_id>[^'\"]*)['\"]\s*\)"
@@ -83,6 +81,8 @@ _COMPANYSUMMARY_OPEN_RE = re.compile(
 _OPEN_DISCLS_VIEWER_RE = re.compile(
     r"openDisclsViewer\(\s*['\"](?P<acpt_no>[^'\"]*)['\"]\s*,\s*['\"](?P<doc_no>[^'\"]*)['\"]\s*\)"
 )
+_TITLE_FLAG_RE = re.compile(r"\[([^\[\]]+)\]")
+_LATER_CORRECTION_LABEL = "해당보고서 이후에 정정된 보고서 있음"
 
 
 def _company_key(company: dict[str, Any]) -> str:
@@ -591,6 +591,15 @@ def _record_sort_key(record: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def _disclosure_dedup_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(record.get("acpt_no") or record.get("acptno") or "").strip(),
+        str(record.get("company_id") or "").strip(),
+        str(record.get("disclosed_at") or "").strip(),
+        str(record.get("title") or "").strip(),
+    )
+
+
 def _prepare_filter_record(record: dict[str, Any]) -> dict[str, Any]:
     prepared = dict(record)
     disclosed_at = str(prepared.get("disclosed_at") or "")
@@ -608,6 +617,18 @@ def _prepare_filter_record(record: dict[str, Any]) -> dict[str, Any]:
 
 def _public_disclosure_record(record: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in record.items() if not str(key).startswith("__filter_")}
+
+
+def _unique_disclosure_titles(records: list[dict[str, Any]]) -> list[str]:
+    titles: list[str] = []
+    seen_titles: set[str] = set()
+    for record in records:
+        title = str(record.get("title") or "").strip()
+        if not title or title in seen_titles:
+            continue
+        seen_titles.add(title)
+        titles.append(title)
+    return titles
 
 
 def _classification_cache_key(classification_path: str | Path) -> tuple[str, int, int]:
@@ -688,40 +709,112 @@ def _sqlite_manifest_total_disclosures(manifest: dict[str, Any]) -> int:
     return sum(int(shard.get("disclosures") or 0) for shard in list(manifest.get("shards") or []))
 
 
+def _quoted_sqlite_identifier(value: str) -> str:
+    return f'"{value.replace(chr(34), chr(34) + chr(34))}"'
+
+
+def _validate_sqlite_manifest_counts(manifest_path: Path, manifest: dict[str, Any]) -> None:
+    table_name = str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
+    quoted_table = _quoted_sqlite_identifier(table_name)
+    manifest_parent = manifest_path.parent
+    shard_total = 0
+    for shard in list(manifest.get("shards") or []):
+        shard_path = Path(str(shard.get("path") or "")).expanduser()
+        if not shard_path.is_absolute():
+            shard_path = (manifest_parent / shard_path).resolve()
+        if not shard_path.is_file():
+            msg = f"SQLite shard not found: {shard_path}"
+            raise ValueError(msg)
+        expected = int(shard.get("disclosures") or 0)
+        connection = sqlite3.connect(shard_path)
+        try:
+            actual = int(connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0])
+        finally:
+            connection.close()
+        if actual != expected:
+            msg = (
+                "SQLite shard disclosure count mismatch: "
+                f"shard={shard_path}, manifest={expected}, rows={actual}"
+            )
+            raise ValueError(msg)
+        shard_total += expected
+
+    summary_total = manifest.get("summary", {}).get("disclosures")
+    if summary_total is not None and int(summary_total) != shard_total:
+        msg = (
+            "SQLite manifest disclosure summary does not match shard totals: "
+            f"manifest={manifest_path}, summary={int(summary_total)}, shards={shard_total}"
+        )
+        raise ValueError(msg)
+
+
+def _sqlite_table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    return {
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info({_quoted_sqlite_identifier(table_name)})").fetchall()
+    }
+
+
+def _sqlite_select_column(columns: set[str], column_name: str) -> str:
+    quoted_column = _quoted_sqlite_identifier(column_name)
+    if column_name in columns:
+        return quoted_column
+    return f"NULL AS {quoted_column}"
+
+
 def _iter_sqlite_manifest_disclosure_records(
     manifest_path: Path,
     manifest: dict[str, Any],
 ) -> Any:
     table_name = str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
-    quoted_table = f'"{table_name.replace(chr(34), chr(34) + chr(34))}"'
+    quoted_table = _quoted_sqlite_identifier(table_name)
     manifest_parent = manifest_path.parent
     for shard in sorted(list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")):
         shard_path = Path(str(shard.get("path") or "")).expanduser()
         if not shard_path.is_absolute():
             shard_path = (manifest_parent / shard_path).resolve()
         if not shard_path.is_file():
-            continue
+            msg = f"SQLite shard not found: {shard_path}"
+            raise ValueError(msg)
         connection = sqlite3.connect(shard_path)
         connection.row_factory = sqlite3.Row
         try:
+            columns = _sqlite_table_columns(connection, table_name)
+            selected_columns = ",\n                    ".join(
+                _sqlite_select_column(columns, column_name)
+                for column_name in [
+                    "row_no",
+                    "company_key",
+                    "company_name",
+                    "company_id",
+                    "market",
+                    "disclosed_at",
+                    "disclosed_date",
+                    "title",
+                    "title_attr",
+                    "title_base",
+                    "title_display",
+                    "title_flags_json",
+                    "is_correction_report",
+                    "has_later_correction",
+                    "acpt_no",
+                    "doc_no",
+                    "submitter",
+                    "source_file",
+                    "source_page",
+                ]
+            )
             cursor = connection.execute(
                 f"""
                 SELECT
-                    company_key,
-                    company_name,
-                    company_id,
-                    market,
-                    disclosed_at,
-                    disclosed_date,
-                    title,
-                    acpt_no,
-                    doc_no,
-                    submitter
+                    {selected_columns}
                 FROM {quoted_table}
                 """
             )
             for row in cursor:
-                yield _prepare_filter_record(dict(row))
+                record = dict(row)
+                record["title_flags"] = list(json.loads(str(record.get("title_flags_json") or "[]")))
+                yield _prepare_filter_record(record)
         finally:
             connection.close()
 
@@ -730,6 +823,28 @@ def _element_text(node: html.HtmlElement | None) -> str:
     if node is None:
         return ""
     return _clean_text(" ".join(text for text in node.itertext()))
+
+
+def _display_text(node: html.HtmlElement | None) -> str:
+    if node is None:
+        return ""
+    return _clean_text(node.text_content())
+
+
+def _title_flags(title: str) -> list[str]:
+    flags: list[str] = []
+    for match in _TITLE_FLAG_RE.finditer(title):
+        flag = _clean_text(match.group(1))
+        if flag and flag not in flags:
+            flags.append(flag)
+    return flags
+
+
+def _has_later_correction(disclosure_cell: html.HtmlElement) -> bool:
+    return any(
+        _clean_text(image_tag.get("alt")) == _LATER_CORRECTION_LABEL
+        for image_tag in disclosure_cell.xpath(".//img")
+    )
 
 
 def _companysummary_onclick(onclick_value: object) -> str | None:
@@ -785,20 +900,32 @@ def _build_source_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any] | 
     badges = labels[1:] if len(labels) > 1 else []
 
     acpt_no, doc_no = _disclosure_onclick(disclosure_link.get("onclick") if disclosure_link is not None else None)
-    title = ""
+    title_attr = ""
+    title_display = ""
     if disclosure_link is not None:
-        title = _clean_text(disclosure_link.get("title") or _element_text(disclosure_link))
+        title_attr = _clean_text(disclosure_link.get("title"))
+        title_display = _display_text(disclosure_link)
+    title = title_display or title_attr
     if not title:
-        title = _element_text(disclosure_cell)
+        title = _display_text(disclosure_cell)
+        title_display = title
+    title_flags = _title_flags(title_display or title)
 
     return {
         "company_key": _clean_text(company_id or company_name),
+        "row_no": _element_text(cells[0]),
         "company_name": company_name,
         "company_id": company_id,
         "market": market,
         "badges": badges,
         "disclosed_at": _element_text(cells[1]),
         "title": title,
+        "title_attr": title_attr,
+        "title_base": title_attr,
+        "title_display": title_display or title,
+        "title_flags": title_flags,
+        "is_correction_report": "정정" in title_flags,
+        "has_later_correction": _has_later_correction(disclosure_cell),
         "acpt_no": acpt_no,
         "doc_no": doc_no,
         "submitter": _element_text(submitter_cell),
@@ -822,6 +949,8 @@ def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
         for row_tag in parent_tag.xpath("./tr"):
             row = _build_source_disclosure_row(row_tag)
             if row is not None:
+                row["source_file"] = str(file_path)
+                row["source_page"] = _result_page_number(file_path)
                 rows.append(row)
     return rows
 
@@ -951,15 +1080,8 @@ def filter_disclosures_payload(
     start_date = str(body.get("start_date") or "").strip()
     end_date = str(body.get("end_date") or "").strip()
     acpt_numbers = _normalize_acpt_numbers(body.get("acpt_numbers"))
-    limit_unlimited = bool(body.get("limit_unlimited"))
-    limit = None if limit_unlimited else int(body.get("limit") or 1000)
-    if limit is not None:
-        limit = min(max(limit, 1), DISCLOSURE_FILTER_LIMIT_MAX)
-    return_limit = body.get("return_limit")
-    if return_limit in (None, ""):
-        public_limit = limit
-    else:
-        public_limit = min(max(int(return_limit), 1), DISCLOSURE_FILTER_LIMIT_MAX)
+    limit = None
+    limit_unlimited = True
     include_html_download_acpt_numbers = bool(body.get("include_html_download_acpt_numbers"))
     progress_interval = _progress_interval(body.get("progress_interval"))
     filter_workers = _resolve_filter_workers(body.get("filter_workers"), 32)
@@ -969,6 +1091,7 @@ def filter_disclosures_payload(
     sqlite_manifest: dict[str, Any] | None = None
     if source_kind == "sqlite_manifest" and sqlite_manifest_path is not None:
         sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
+        _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
         records = _iter_sqlite_manifest_disclosure_records(sqlite_manifest_path, sqlite_manifest)
         total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
     elif classification_path:
@@ -986,10 +1109,13 @@ def filter_disclosures_payload(
         )
         total_records = len(records)
     filtered: list[dict[str, Any]] = []
-    limited_heap: list[tuple[tuple[str, str, str], int, dict[str, Any]]] = []
     html_download_acpt_heap: list[tuple[tuple[str, str, str], int, str]] = []
+    seen_disclosure_keys: set[tuple[str, str, str, str]] = set()
     matched_count = 0
+    duplicate_count = 0
+    inspected_count = 0
     for index, record in enumerate(records, start=1):
+        inspected_count = index
         disclosed_date = str(record.get("__filter_disclosed_date") or "")
         acpt_no = str(record.get("__filter_acpt_no") or "")
         matched = True
@@ -1019,17 +1145,24 @@ def filter_disclosures_payload(
         if matched:
             matched = not submitter_keyword or submitter_keyword in str(record.get("__filter_submitter_cf") or "")
         if matched:
+            dedup_key = _disclosure_dedup_key(record)
+            if dedup_key in seen_disclosure_keys:
+                duplicate_count += 1
+                _emit_progress(
+                    progress_callback,
+                    source_type=source_kind,
+                    unit_label="공시",
+                    completed=index,
+                    total=total_records,
+                    records=matched_count,
+                    progress_interval=progress_interval,
+                )
+                continue
+            seen_disclosure_keys.add(dedup_key)
             matched_count += 1
             if include_html_download_acpt_numbers and acpt_no:
                 html_download_acpt_heap.append((_record_sort_key(record), index, acpt_no))
-            if public_limit is None:
-                filtered.append(record)
-            else:
-                heap_item = (_record_sort_key(record), index, record)
-                if len(limited_heap) < public_limit:
-                    heapq.heappush(limited_heap, heap_item)
-                elif heap_item > limited_heap[0]:
-                    heapq.heapreplace(limited_heap, heap_item)
+            filtered.append(record)
         _emit_progress(
             progress_callback,
             source_type=source_kind,
@@ -1040,15 +1173,15 @@ def filter_disclosures_payload(
             progress_interval=progress_interval,
         )
 
-    if public_limit is None:
-        filtered.sort(key=_record_sort_key, reverse=True)
-        limited = filtered
-    else:
-        limited = [
-            item[2]
-            for item in sorted(limited_heap, reverse=True)
-        ]
-    public_limited = [_public_disclosure_record(record) for record in limited]
+    if source_kind == "sqlite_manifest" and inspected_count != total_records:
+        msg = (
+            "SQLite filter did not inspect every manifest disclosure: "
+            f"manifest={sqlite_manifest_path}, inspected={inspected_count}, expected={total_records}"
+        )
+        raise ValueError(msg)
+
+    filtered.sort(key=_record_sort_key, reverse=True)
+    public_limited = [_public_disclosure_record(record) for record in filtered]
     payload = {
         "format": "kind_disclosure_filter_v1",
         "source_type": source_kind,
@@ -1070,7 +1203,7 @@ def filter_disclosures_payload(
             "acpt_numbers": sorted(acpt_numbers),
             "limit": limit,
             "limit_unlimited": limit_unlimited,
-            "return_limit": public_limit,
+            "return_limit": None,
             "filter_workers": filter_workers,
         },
         "summary": {
@@ -1078,9 +1211,11 @@ def filter_disclosures_payload(
             "source_body_files": body_files,
             "matched_disclosures": matched_count,
             "returned_disclosures": len(public_limited),
+            "duplicate_disclosures": duplicate_count,
             "unique_acpt_numbers": len({str(record.get("acpt_no") or "") for record in public_limited if record.get("acpt_no")}),
         },
         "disclosures": public_limited,
+        "unique_titles": _unique_disclosure_titles(public_limited),
     }
     if include_html_download_acpt_numbers:
         payload["html_download_acpt_numbers"] = [

@@ -290,6 +290,12 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         flex-wrap: wrap;
         gap: 10px;
       }
+      .path-input-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+      }
       #status {
         margin-top: 10px;
         color: var(--muted);
@@ -330,6 +336,7 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         }
         .row.cols-2,
         .row.cols-3,
+        .path-input-row,
         .disc-items {
           grid-template-columns: 1fr;
         }
@@ -356,18 +363,13 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         <div class="row">
           <label>
             저장 경로
-            <input id="outputDirectory" type="text" />
+            <div class="path-input-row">
+              <input id="outputDirectory" type="text" />
+              <button id="chooseOutputDirectoryBtn" class="muted" type="button" aria-label="경로 선택">📁</button>
+            </div>
           </label>
         </div>
-        <div class="row cols-3">
-          <label>
-            모드
-            <select id="mode">
-              <option value="single">단건 검색</option>
-              <option value="yearly">연도별 일괄</option>
-              <option value="resume">이어받기</option>
-            </select>
-          </label>
+        <div class="row cols-2">
           <label>
             시작일
             <input id="startDate" type="date" />
@@ -467,7 +469,6 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
 
     <script>
       const el = {
-        mode: document.getElementById("mode"),
         outputDirectory: document.getElementById("outputDirectory"),
         startDate: document.getElementById("startDate"),
         endDate: document.getElementById("endDate"),
@@ -511,6 +512,21 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
           throw new Error(payload.error || `Request failed: ${response.status}`);
         }
         return payload;
+      }
+
+      async function chooseOutputDirectory() {
+        const payload = await fetchJson("/api/file-dialog", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "folder",
+            title: "저장 폴더 선택",
+            default_path: el.outputDirectory.value || "",
+          }),
+        });
+        if (payload.path) {
+          el.outputDirectory.value = payload.path;
+        }
       }
 
       function fillSelect(selectElement, items) {
@@ -598,7 +614,7 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
       function buildPayload() {
         const endPageRaw = String(el.endPage.value || "").trim();
         return {
-          mode: el.mode.value,
+          mode: "yearly",
           output_directory: String(el.outputDirectory.value || "").trim(),
           start_date: String(el.startDate.value || "").trim(),
           end_date: String(el.endDate.value || "").trim(),
@@ -616,12 +632,6 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         };
       }
 
-      function syncModeState() {
-        const resumeMode = el.mode.value === "resume";
-        el.startDate.disabled = resumeMode;
-        el.endDate.disabled = resumeMode;
-      }
-
       async function initialize() {
         setStatus("옵션을 불러오는 중...");
         optionsPayload = await fetchJson("/api/download/options");
@@ -636,11 +646,12 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         start.setDate(today.getDate() - 30);
         el.startDate.value = start.toISOString().slice(0, 10);
         el.endDate.value = today.toISOString().slice(0, 10);
-        syncModeState();
         setStatus("준비 완료");
       }
 
-      el.mode.addEventListener("change", syncModeState);
+      document.getElementById("chooseOutputDirectoryBtn").addEventListener("click", () => {
+        chooseOutputDirectory().catch((error) => setStatus(error.message, true));
+      });
 
       el.previewBtn.addEventListener("click", async () => {
         try {
