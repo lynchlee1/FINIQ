@@ -43,6 +43,7 @@ from web.download import (
     start_download_job,
 )
 from web.disclosure_html import download_disclosure_html_payload
+from web.disclosure_html_parse import parse_disclosure_html_payload
 from web.table_export import build_disclosure_table_payload
 
 
@@ -261,6 +262,9 @@ class KindWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/disclosures/html/download":
             self._handle_disclosure_html_download()
+            return
+        if parsed.path == "/api/disclosures/html/parse":
+            self._handle_disclosure_html_parse()
             return
         self._respond_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
@@ -565,6 +569,15 @@ class KindWebHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
             payload = download_disclosure_html_payload(body)
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_html_parse(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = parse_disclosure_html_payload(body)
         except (OSError, ValueError) as exc:
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return

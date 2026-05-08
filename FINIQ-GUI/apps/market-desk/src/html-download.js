@@ -7,8 +7,11 @@ const elements = {
   waitSeconds: document.getElementById("waitSeconds"),
   limit: document.getElementById("limit"),
   skipExisting: document.getElementById("skipExisting"),
+  parseMode: document.getElementById("parseMode"),
+  parseOutputPath: document.getElementById("parseOutputPath"),
   jsonInput: document.getElementById("jsonInput"),
   downloadHtmlBtn: document.getElementById("downloadHtmlBtn"),
+  parseHtmlBtn: document.getElementById("parseHtmlBtn"),
   status: document.getElementById("status"),
   result: document.getElementById("result"),
 };
@@ -20,6 +23,19 @@ function setStatus(message, isError = false) {
 
 function setResult(payload) {
   elements.result.textContent = JSON.stringify(payload, null, 2);
+}
+
+function defaultParseOutputPath() {
+  const outputDirectory = elements.outputDirectory.value || "";
+  const mode = elements.parseMode?.value || "bond_issuance";
+  return outputDirectory ? `${outputDirectory}/parsed-${mode}.json` : "";
+}
+
+function refreshParseOutputPath() {
+  if (!elements.parseOutputPath || elements.parseOutputPath.dataset.touched === "true") {
+    return;
+  }
+  elements.parseOutputPath.value = defaultParseOutputPath();
 }
 
 async function fetchJson(url, init) {
@@ -34,6 +50,7 @@ async function fetchJson(url, init) {
 async function loadConfig() {
   const config = await fetchJson("/api/config");
   elements.outputDirectory.value = `${config.output_root || ""}/viewer_html`;
+  refreshParseOutputPath();
   const transferredPayload = sessionStorage.getItem(HTML_DOWNLOAD_STORAGE_KEY);
   if (transferredPayload) {
     elements.jsonInput.value = JSON.stringify(JSON.parse(transferredPayload), null, 2);
@@ -63,6 +80,16 @@ function buildPayload() {
   };
 }
 
+function buildParsePayload() {
+  return {
+    input_directory: elements.outputDirectory.value,
+    output_path: elements.parseOutputPath.value || defaultParseOutputPath(),
+    mode: elements.parseMode.value,
+    limit: elements.limit.value ? Number(elements.limit.value) : "",
+    skip_errors: true,
+  };
+}
+
 async function runDownload() {
   setStatus("HTML 다운로드 중입니다. 처리 건수가 많으면 잠시 걸립니다.");
   const payload = await fetchJson("/api/disclosures/html/download", {
@@ -81,8 +108,45 @@ async function runDownload() {
   setStatus(lines.join("\n"));
 }
 
+async function runParse() {
+  refreshParseOutputPath();
+  setStatus("HTML 파싱 중입니다.");
+  const payload = await fetchJson("/api/disclosures/html/parse", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(buildParsePayload()),
+  });
+  setResult(payload);
+  const summary = payload.summary || {};
+  const lines = [
+    `파싱 모드: ${payload.mode || ""}`,
+    `대상 HTML: ${summary.found_files || 0}`,
+    `파싱 성공: ${summary.parsed_files || 0}`,
+    `파싱 실패: ${summary.failed_files || 0}`,
+    `결과 경로: ${payload.output_path || ""}`,
+  ];
+  setStatus(lines.join("\n"), Number(summary.failed_files || 0) > 0);
+}
+
+elements.outputDirectory?.addEventListener("input", refreshParseOutputPath);
+
+elements.parseMode?.addEventListener("change", () => {
+  if (elements.parseOutputPath) {
+    elements.parseOutputPath.dataset.touched = "false";
+  }
+  refreshParseOutputPath();
+});
+
+elements.parseOutputPath?.addEventListener("input", () => {
+  elements.parseOutputPath.dataset.touched = "true";
+});
+
 elements.downloadHtmlBtn?.addEventListener("click", () => {
   runDownload().catch((error) => setStatus(error.message, true));
+});
+
+elements.parseHtmlBtn?.addEventListener("click", () => {
+  runParse().catch((error) => setStatus(error.message, true));
 });
 
 loadConfig().catch((error) => setStatus(error.message, true));

@@ -162,6 +162,22 @@ def test_disclosure_html_download_api_routes_to_handler(tmp_path: Path, monkeypa
     assert json.loads(payload) == {"saved_count": 1}
 
 
+def test_disclosure_html_parse_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "web.app.parse_disclosure_html_payload",
+        lambda body: {"mode": body.get("mode"), "parsed": True},
+    )
+
+    status, payload = _post(
+        "/api/disclosures/html/parse",
+        tmp_path,
+        {"input_directory": str(tmp_path), "mode": "bond_issuance"},
+    )
+
+    assert status == 200
+    assert json.loads(payload) == {"mode": "bond_issuance", "parsed": True}
+
+
 def test_settings_can_be_saved_via_api(tmp_path: Path) -> None:
     settings_path = tmp_path / "appdata" / "kind-web-settings.json"
     server = KindWebServer(
