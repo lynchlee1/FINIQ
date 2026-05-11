@@ -3,15 +3,6 @@ import { bindPathSetting } from "./settings.js";
 
 const HTML_DOWNLOAD_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const CONDITION_PRESET_STORAGE_KEY = "finiq.kind.conditionPresets";
-const LEGACY_CONDITION_PRESET_STORAGE_KEYS = [
-  "finiq.kind.filterPresets",
-  "finiq.marketDesk.conditionPresets",
-  "finiq.marketDesk.filterPresets",
-  "kind.conditionPresets",
-  "kind.filterPresets",
-  "conditionPresets",
-  "filterPresets",
-];
 
 const elements = {
   rootDirectory: document.getElementById("rootDirectory"),
@@ -293,76 +284,21 @@ function readConditionBlocksFromDom() {
 }
 
 function readConditionPresets() {
-  const currentPresets = readConditionPresetsFromValue(localStorage.getItem(CONDITION_PRESET_STORAGE_KEY));
-  if (currentPresets.length) {
-    return currentPresets;
-  }
-  const migratedPresets = readLegacyConditionPresets();
-  if (migratedPresets.length) {
-    writeConditionPresets(migratedPresets);
-    return migratedPresets;
-  }
-  return [];
-}
-
-function readConditionPresetsFromValue(value) {
   try {
-    return normalizePresetEntries(JSON.parse(value || "[]"));
+    const parsed = JSON.parse(localStorage.getItem(CONDITION_PRESET_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((preset) => ({
+        name: String(preset?.name || "").trim(),
+        condition_blocks: normalizeConditionBlocks(preset?.condition_blocks),
+      }))
+      .filter((preset) => preset.name)
+      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
   } catch {
     return [];
   }
-}
-
-function normalizePresetEntries(parsed) {
-  let entries = [];
-  if (Array.isArray(parsed)) {
-    entries = parsed;
-  } else if (Array.isArray(parsed?.presets)) {
-    entries = parsed.presets;
-  } else if (parsed && typeof parsed === "object") {
-    entries = Object.entries(parsed.presets || parsed).map(([name, preset]) => {
-      if (Array.isArray(preset)) {
-        return { name, condition_blocks: preset };
-      }
-      if (preset && typeof preset === "object") {
-        return { name, ...preset };
-      }
-      return { name };
-    });
-  }
-  if (!Array.isArray(entries)) {
-    return [];
-  }
-  return entries
-    .map((preset) => ({
-      name: String(preset?.name || preset?.presetName || "").trim(),
-      condition_blocks: normalizeConditionBlocks(preset?.condition_blocks || preset?.filter_blocks),
-    }))
-    .filter((preset) => preset.name && hasSavedCondition(preset.condition_blocks))
-    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
-}
-
-function hasSavedCondition(blocks) {
-  return blocks.some((block) => block.value.trim() || ["exists", "empty"].includes(block.operator));
-}
-
-function readLegacyConditionPresets() {
-  const seen = new Set();
-  const keys = [
-    ...LEGACY_CONDITION_PRESET_STORAGE_KEYS,
-    ...Object.keys(localStorage).filter((key) => /condition|filter|preset/i.test(key)),
-  ].filter((key) => key !== CONDITION_PRESET_STORAGE_KEY);
-  const presets = keys.flatMap((key) => readConditionPresetsFromValue(localStorage.getItem(key)));
-  return presets
-    .filter((preset) => {
-      if (seen.has(preset.name)) {
-        return false;
-      }
-      seen.add(preset.name);
-      return true;
-    })
-      .filter((preset) => preset.name)
-      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
 }
 
 function writeConditionPresets(presets) {

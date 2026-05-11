@@ -176,6 +176,19 @@ def _apply_main_table_row(result: dict[str, Any], row_parts: list[str]) -> None:
         result["회차"] = row_parts[2]
     if "사채의 권면" in label and value:
         result["발행금액(억)"] = _parse_number(value) / 10**8
+    conversion_price = _conversion_price_from_row(row_parts)
+    if conversion_price is not None:
+        result["전환가액(원)"] = conversion_price
+    surface_rate = _value_after_sub_label(row_parts, "표면이자율", fallback_last=False)
+    if surface_rate:
+        result["표면이율"] = _normalize_percent(surface_rate)
+    if "표면이자율" in label and value:
+        result["표면이율"] = _normalize_percent(value)
+    maturity_rate = _value_after_sub_label(row_parts, "만기이자율", fallback_last=False)
+    if maturity_rate:
+        result["만기이율"] = _normalize_percent(maturity_rate)
+    if "만기이자율" in label and value:
+        result["만기이율"] = _normalize_percent(value)
     if _is_price_adjustment_label(label) and value:
         result["리픽싱내용"] = " ".join(row_parts[1:])
     if "사채만기일" in label and value:
@@ -191,6 +204,8 @@ def _apply_main_table_row(result: dict[str, Any], row_parts: list[str]) -> None:
         result["전환시작일"] = _parse_date(row_parts[2])
     if label.strip() == "종료일" and value:
         result["전환종료일"] = _parse_date(value)
+    if "옵션" in label and value:
+        result["옵션사항"] = " ".join(row_parts[1:])
 
 
 def _is_conversion_price_label(label: str) -> bool:
