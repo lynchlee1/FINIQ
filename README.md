@@ -2,27 +2,29 @@
 
 FINIQ(피닉)는 공시 데이터를 수집하고, 기업별로 정리해, 가격 데이터와 함께 분석/시각화하는 프로젝트입니다.
 
+FINIQ가 유일한 프로젝트 루트입니다. `finiq_*` 폴더들은 독립 프로젝트가 아니라 소스와 테스트를 나누는 내부 모듈 경계입니다.
+
 ## 컴포넌트
 
-### FINIQ-DataScraper
+### finiq_dataScraper
 
 KRX KIND 공시 데이터를 다운로드하고 파싱합니다. 검색 결과, 공시 원문, 기업별 공시 분류 산출물을 만드는 데이터 수집 컴포넌트입니다.
 
-### FINIQ-StructureNL
+### finiq_structureNL
 
 공시 원문에서 핵심 구조화 정보를 추출합니다. 전환사채 등 증권 발행 공시에서 발행일, 만기일, 전환가액 같은 필드를 파싱합니다.
 
-### FINIQ-MarketDesk
+### finiq_marketDesk
 
 수집된 공시 데이터와 가격 데이터를 결합해 분석 API를 제공합니다. 기업 목록, 공시 타임라인, 차트용 데이터, 다운로드 작업을 처리합니다.
 
-### FINIQ-GUI
+### finiq_GUI
 
 FINIQ의 웹 화면을 담은 프론트엔드 워크스페이스입니다. MarketDesk 화면과 Graph Viewer 앱, 공통 UI/theme 패키지를 포함합니다.
 
-### FINIQ-GraphViewer
+### finiq_graphViewer
 
-그래프 데이터를 검증, 필터링, 탐색, export하는 Graph Viewer core입니다. 시각화 UI는 `FINIQ-GUI`에서 사용합니다.
+그래프 데이터를 검증, 필터링, 탐색, export하는 Graph Viewer core입니다. 시각화 UI는 `finiq_GUI`에서 사용합니다.
 
 ## UI
 
@@ -40,8 +42,27 @@ Graph Viewer는 graph JSON을 시각적으로 탐색하는 UI입니다. 노드�
 
 ## 기본 흐름
 
-1. `FINIQ-DataScraper`가 KIND 데이터를 수집합니다.
-2. `FINIQ-StructureNL`이 필요한 공시 원문 필드를 구조화합니다.
-3. `FINIQ-MarketDesk`가 공시와 가격 데이터를 분석용 API로 제공합니다.
-4. `FINIQ-GUI`가 분석 결과를 화면에 표시합니다.
-5. `FINIQ-GraphViewer`는 그래프 기반 탐색 기능을 제공합니다.
+1. `finiq_dataScraper`가 KIND 데이터를 수집합니다.
+2. `finiq_structureNL`이 필요한 공시 원문 필드를 구조화합니다.
+3. `finiq_marketDesk`가 공시와 가격 데이터를 분석용 API로 제공합니다.
+4. `finiq_GUI`가 분석 결과를 화면에 표시합니다.
+5. `finiq_graphViewer`는 그래프 기반 탐색 기능을 제공합니다.
+
+## 개발 명령
+
+모든 npm 명령은 저장소 루트에서 실행합니다.
+
+```bash
+npm install
+npm run build
+npm run dev:graph-viewer
+npm run dev:market-desk
+```
+
+Python 테스트도 저장소 루트에서 실행합니다.
+
+```bash
+python -m pytest
+```
+
+`resources/`는 로컬 생성 데이터 위치이며 Git에 올리지 않습니다. Codex worktree는 별도 작업 브랜치용으로 사용하고, GitHub Desktop에서는 루트 저장소의 작업 상태와 커밋 범위를 확인합니다.
