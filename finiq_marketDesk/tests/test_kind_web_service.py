@@ -8,13 +8,22 @@ import pytest
 
 from finiq_marketDesk.web.service import (
     DISCLOSURE_GROUP_OTHER,
+    _clean_search_text,
     build_insight_payload,
     filter_disclosures_payload,
     list_classification_files,
     load_company_index_payload,
 )
-from finiq_marketDesk.web.disclosure_html import collect_acpt_numbers_from_json, download_disclosure_html_payload
-from finiq_marketDesk.web.disclosure_html_parse import PARSER_REGISTRY, parse_disclosure_html_payload
+from finiq_marketDesk.web.disclosure_html import (
+    cancel_disclosure_html_download,
+    collect_acpt_numbers_from_json,
+    download_disclosure_html_payload,
+)
+from finiq_marketDesk.web.disclosure_html_parse import (
+    PARSER_REGISTRY,
+    cancel_disclosure_html_parse,
+    parse_disclosure_html_payload,
+)
 from finiq_marketDesk.web.html_parsers.bond_issuance import parse_bond_issuance
 from finiq_marketDesk.web.html_parsers.common import expand_table, parse_html_document
 from finiq_marketDesk.web.table_export import build_disclosure_table_payload
@@ -24,6 +33,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parents[1]
 HTML_PARSERS_DIR = REPO_ROOT / "finiq_marketDesk" / "src" / "finiq_marketDesk" / "web" / "html_parsers"
 GUI_HTML_DOWNLOAD_PAGE = REPO_ROOT / "finiq_GUI" / "apps" / "market-desk" / "html-download.html"
+GUI_HTML_PARSE_PAGE = REPO_ROOT / "finiq_GUI" / "apps" / "market-desk" / "html-parse.html"
 EXPECTED_PARSE_MODES = {
     "bond_issuance",
     "rights_issuance",
@@ -379,6 +389,70 @@ def test_filter_disclosures_payload_supports_title_include_and_exclude_keywords(
     )
 
     assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["1"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("공정공시(무슨사항에대한공시)공시내용", "공정공시공시내용"),
+        ("공정공시((주)삼성전자)공시내용", "공정공시공시내용"),
+        ("공정공시((주)삼성전자))공시내용", "공정공시공시내용"),
+        ("공정공시(((주)삼성전자)공시내용", "공정공시공시내용"),
+    ],
+)
+def test_clean_search_text_removes_parenthesized_title_fragments(value: str, expected: str) -> None:
+    assert _clean_search_text(value) == expected
+
+
+def test_filter_disclosures_payload_supports_clean_search_title_blocks(tmp_path: Path) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload["companies"][0]["disclosures"].append(
+        {
+            "disclosed_at": "2025-01-20 09:00:00",
+            "title": "공정공시(((주)삼성전자)공시내용",
+            "submitter": "테스트전자",
+            "acpt_no": "4",
+        }
+    )
+    payload["summary"]["disclosures"] = 4
+    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    filtered_payload = filter_disclosures_payload(
+        {
+            "classification_path": str(fixture_path),
+            "filter_blocks": [
+                {
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "공정공시공시내용",
+                    "clean_search": True,
+                }
+            ],
+        }
+    )
+
+    assert [disclosure["acpt_no"] for disclosure in filtered_payload["disclosures"]] == ["4"]
+
+
+def test_filter_disclosures_payload_cleans_unique_titles_and_places_them_before_rows(tmp_path: Path) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload["companies"][0]["disclosures"].append(
+        {
+            "disclosed_at": "2025-01-20 09:00:00",
+            "title": "공정공시((주)삼성전자)공시내용",
+            "submitter": "테스트전자",
+            "acpt_no": "4",
+        }
+    )
+    payload["summary"]["disclosures"] = 4
+    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    filtered_payload = filter_disclosures_payload({"classification_path": str(fixture_path)})
+
+    assert filtered_payload["unique_titles"][0] == "공정공시공시내용"
+    assert list(filtered_payload).index("unique_titles") < list(filtered_payload).index("disclosures")
 
 
 def test_filter_disclosures_payload_can_return_without_limit(tmp_path: Path) -> None:
@@ -800,6 +874,30 @@ def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Pat
     ]
 
 
+def test_download_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
+    def fake_download(**kwargs):
+        saved_paths = []
+        for acpt_no in kwargs["acpt_numbers"]:
+            if kwargs["cancel_check"]():
+                break
+            saved_paths.append(Path(kwargs["output_directory"]) / f"{acpt_no}.html")
+            cancel_disclosure_html_download("cancel-test")
+        return saved_paths
+
+    monkeypatch.setattr("finiq_marketDesk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+
+    payload = download_disclosure_html_payload(
+        {
+            "output_directory": str(tmp_path / "viewer_html"),
+            "json": {"acptNumbers": ["20250101000001", "20250101000002"]},
+            "cancel_token": "cancel-test",
+        }
+    )
+
+    assert payload["cancelled"] is True
+    assert payload["saved_count"] == 1
+
+
 def test_parse_disclosure_html_payload_requires_mode(tmp_path: Path) -> None:
     try:
         parse_disclosure_html_payload({"input_directory": str(tmp_path)})
@@ -845,12 +943,242 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
 
     assert payload["format"] == "finiq_disclosure_html_parse_v1"
     assert payload["mode"] == "bond_issuance"
-    assert payload["summary"] == {"found_files": 1, "parsed_files": 1, "failed_files": 0}
+    assert payload["summary"] == {"found_files": 1, "parsed_files": 1, "failed_files": 0, "resumed_files": 0}
+    assert payload["cancelled"] is False
+    assert "파싱 대상 HTML 1건" in payload["progress_log"][0]
+    assert payload["progress_log"][-1].startswith("파싱 결과 JSON 저장 완료:")
     assert payload["records"][0]["acpt_no"] == "20250101000001"
     assert payload["records"][0]["title"] == "Sample Disclosure"
-    assert payload["records"][0]["raw_rows"] == [["Field", "Value"]]
+    assert "raw_rows" not in payload["records"][0]
+    assert "raw_tables" not in payload["records"][0]
     assert stored["format"] == payload["format"]
     assert stored["records"][0]["source_file"] == payload["records"][0]["source_file"]
+    assert stored["progress_log"] == payload["progress_log"]
+
+
+def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for index in range(2):
+        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        cancel_disclosure_html_parse("parse-cancel-test")
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(file_path),
+            "mode": "security_transaction",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "cancel_token": "parse-cancel-test",
+        }
+    )
+
+    assert payload["cancelled"] is True
+    assert payload["summary"]["found_files"] == 2
+    assert payload["summary"]["parsed_files"] == 1
+    assert any("중지 요청" in line for line in payload["progress_log"])
+
+
+def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    html_path = viewer_dir / "20250101000001.html"
+    html_path.write_text("<html></html>", encoding="utf-8")
+    output_path = tmp_path / "parsed.json"
+
+    def fake_parser(html_text, *, file_path):
+        raise RuntimeError("broken parser")
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "output_path": str(output_path),
+            "mode": "security_transaction",
+            "skip_errors": True,
+        }
+    )
+    stored = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert payload["summary"]["failed_files"] == 1
+    assert payload["errors"] == [
+        {
+            "index": 1,
+            "total": 1,
+            "mode": "security_transaction",
+            "source_file": str(html_path.resolve()),
+            "source_name": "20250101000001.html",
+            "error_type": "RuntimeError",
+            "error": "broken parser",
+        }
+    ]
+    assert any("20250101000001.html (RuntimeError) broken parser" in line for line in payload["progress_log"])
+    assert stored["errors"] == payload["errors"]
+
+
+def test_parse_disclosure_html_payload_checkpoints_and_resumes(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    first = viewer_dir / "20250101000001.html"
+    second = viewer_dir / "20250101000002.html"
+    first.write_text("<html></html>", encoding="utf-8")
+    second.write_text("<html></html>", encoding="utf-8")
+    output_path = tmp_path / "parsed.json"
+    calls: list[str] = []
+
+    def fake_parser(html_text, *, file_path):
+        calls.append(Path(file_path).name)
+        if Path(file_path).name == second.name and len(calls) == 2:
+            raise RuntimeError("stop after checkpoint")
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    try:
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(viewer_dir),
+                "output_path": str(output_path),
+                "mode": "security_transaction",
+                "skip_errors": False,
+                "progress_interval": 1,
+            }
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError")
+
+    checkpoint = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [record["source_file"] for record in checkpoint["records"]] == [str(first.resolve())]
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "output_path": str(output_path),
+            "mode": "security_transaction",
+            "progress_interval": 1,
+            "resume": True,
+        }
+    )
+
+    assert payload["summary"]["resumed_files"] == 1
+    assert payload["summary"]["parsed_files"] == 2
+    assert calls == [first.name, second.name, second.name]
+    assert any("이어하기 건너뜀 중간 확인: 1/1건" in line for line in payload["progress_log"])
+
+
+def test_parse_disclosure_html_payload_logs_resume_skips_by_interval(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for index in range(3):
+        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+    output_path = tmp_path / "parsed.json"
+    output_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "security_transaction",
+                "records": [
+                    {"source_file": str((viewer_dir / "20250101000000.html").resolve())},
+                    {"source_file": str((viewer_dir / "20250101000001.html").resolve())},
+                    {"source_file": str((viewer_dir / "20250101000002.html").resolve())},
+                ],
+                "errors": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_parser(html_text, *, file_path):
+        raise AssertionError("resume should skip every file")
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "output_path": str(output_path),
+            "mode": "security_transaction",
+            "progress_interval": 2,
+            "resume": True,
+        }
+    )
+
+    assert not any("이어하기 건너뜀 1/3:" in line for line in payload["progress_log"])
+    assert not any("이어하기 건너뜀 2/3:" in line for line in payload["progress_log"])
+    assert any("이어하기 건너뜀 중간 확인: 2/3건" in line for line in payload["progress_log"])
+    assert any("이어하기 건너뜀 완료: 3/3건" in line for line in payload["progress_log"])
+
+
+def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for index in range(3):
+        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "progress_interval": 2,
+        }
+    )
+
+    assert not any("파싱 중 1/3:" in line for line in payload["progress_log"])
+    assert not any("파싱 완료 1/3:" in line for line in payload["progress_log"])
+    assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
+
+
+def test_parse_disclosure_html_payload_reports_failed_file_when_not_skipping(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        raise RuntimeError("broken parser")
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    with pytest.raises(ValueError) as exc_info:
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(viewer_dir),
+                "mode": "security_transaction",
+                "skip_errors": False,
+            }
+        )
+
+    message = str(exc_info.value)
+    assert "파싱 실패 1/1: 20250101000001.html" in message
+    assert "(RuntimeError) broken parser" in message
 
 
 def test_parse_disclosure_html_payload_applies_limit(tmp_path: Path) -> None:
@@ -901,12 +1229,20 @@ def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkey
 
 def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     readme = (HTML_PARSERS_DIR / "README.md").read_text(encoding="utf-8")
-    ui_html = GUI_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
+    download_ui_html = GUI_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
+    parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
+    parse_ui_js = (GUI_HTML_PARSE_PAGE.parent / "src" / "html-parse.js").read_text(encoding="utf-8")
 
     assert set(PARSER_REGISTRY) == EXPECTED_PARSE_MODES
     for mode in EXPECTED_PARSE_MODES:
         assert mode in readme
-        assert f'value="{mode}"' in ui_html
+        assert mode in parse_ui_js
+    assert 'href="/html-parse"' in parse_ui_html
+    assert "parseMode" not in download_ui_html
+    assert "sourceJsonPath" in download_ui_html
+    assert "cancelHtmlBtn" in download_ui_html
+    assert "cancelParseBtn" in parse_ui_html
+    assert "JSON 붙여넣기" not in download_ui_html
 
 
 def test_expand_table_expands_rowspan_and_colspan() -> None:
@@ -960,6 +1296,80 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     assert parsed["발행대상자세부엔티티"] == [
         ["아이티씨홀딩스(유)", "임현철", "케이씨지아이혁신성장이에스지제1호사모투자 합자회사"]
     ]
+
+
+def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path: Path) -> None:
+    wrapper_path = tmp_path / "20080826000187.html"
+    wrapper_html = """
+    <html>
+      <head><title>[에스브이에이치] [정정]전환사채발행결정</title></head>
+      <body>
+        <select id="mainDoc">
+          <option value="00000000867311|N">전환사채발행결정 (2008.08.18)</option>
+          <option value="20080826000555|N" selected="selected">[정정]전환사채발행결정 (2008.08.26)</option>
+        </select>
+      </body>
+    </html>
+    """
+    body_html = """
+    <html><body>
+      <p class="CORRECTION">정 정 신 고 (보고)</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>9</td><td>종류</td><td>무기명 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>15,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>0</td></tr>
+      </table>
+      <h2 class="SECTION-1"><p class="SECTION-1">전환사채발행결정</p></h2>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>9</td><td>종류</td><td>무기명 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>15,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>시설자금 (원)</td><td>-</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>4,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>기타자금 (원)</td><td>11,000,000,000</td></tr>
+        <tr><td>5. 사채만기일</td><td>2011년 10월 01일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.html_parsers.bond_issuance._fetch_selected_viewer_body",
+        lambda html_text: body_html.encode("utf-8"),
+    )
+
+    parsed = parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
+
+    assert parsed["title"] == "[에스브이에이치] [정정]전환사채발행결정"
+    assert parsed["회차"] == "9"
+    assert parsed["발행금액"] == 15_000_000_000
+    assert parsed["발행목적"] == [
+        ["시설자금", 0],
+        ["영업양수자금", 0],
+        ["운영자금", 4_000_000_000],
+        ["채무상환자금", 0],
+        ["타법인 증권 취득자금", 0],
+        ["기타자금", 11_000_000_000],
+    ]
+
+
+def test_parse_bond_issuance_maps_bond_with_warrant_exercise_period(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20080826000146.html"
+    html = """
+    <html><body>
+      <h2 class="SECTION-1"><p class="SECTION-1">신주인수권부사채발행결정</p></h2>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>2</td><td>종류</td><td>무기명식 무보증 신주인수권부사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>10,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>10,000,000,000</td></tr>
+        <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>시작일</td><td>2009년 08월 26일</td></tr>
+        <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>종료일</td><td>2011년 08월 26일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["전환시작일"] == "2009년 08월 26일"
+    assert parsed["전환종료일"] == "2011년 08월 26일"
 
 
 def test_parse_bond_issuance_collects_multiple_target_entity_tables() -> None:

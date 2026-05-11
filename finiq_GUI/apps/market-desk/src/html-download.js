@@ -10,35 +10,60 @@ const elements = {
   waitSeconds: document.getElementById("waitSeconds"),
   limit: document.getElementById("limit"),
   skipExisting: document.getElementById("skipExisting"),
-  parseMode: document.getElementById("parseMode"),
-  parseOutputPath: document.getElementById("parseOutputPath"),
-  jsonInput: document.getElementById("jsonInput"),
+  progressInterval: document.getElementById("progressInterval"),
+  sourceJsonPath: document.getElementById("sourceJsonPath"),
   downloadHtmlBtn: document.getElementById("downloadHtmlBtn"),
-  parseHtmlBtn: document.getElementById("parseHtmlBtn"),
+  cancelHtmlBtn: document.getElementById("cancelHtmlBtn"),
   status: document.getElementById("status"),
   result: document.getElementById("result"),
 };
+
+let activeCancelToken = "";
+let stopRequested = false;
+let activeJobId = "";
+let jobPollTimer = 0;
 
 function setStatus(message, isError = false) {
   elements.status.textContent = message || "";
   elements.status.dataset.tone = isError ? "error" : "default";
 }
 
+function logLines(lines, isError = false) {
+  setStatus(lines.filter(Boolean).join("\n"), isError);
+  if (elements.status) {
+    elements.status.scrollTop = elements.status.scrollHeight;
+  }
+}
+
+function timestamp() {
+  return new Date().toLocaleTimeString("ko-KR", { hour12: false });
+}
+
 function setResult(payload) {
   elements.result.textContent = JSON.stringify(payload, null, 2);
 }
 
-function defaultParseOutputPath() {
-  const outputDirectory = elements.outputDirectory.value || "";
-  const mode = elements.parseMode?.value || "bond_issuance";
-  return outputDirectory ? `${outputDirectory}/parsed-${mode}.json` : "";
+function statusLabel(status) {
+  if (status === "queued") {
+    return "대기 중";
+  }
+  if (status === "running") {
+    return "실행 중";
+  }
+  if (status === "completed") {
+    return "완료";
+  }
+  if (status === "failed") {
+    return "실패";
+  }
+  return status || "-";
 }
 
-function refreshParseOutputPath() {
-  if (!elements.parseOutputPath || elements.parseOutputPath.dataset.touched === "true") {
-    return;
+function stopJobPolling() {
+  if (jobPollTimer) {
+    window.clearTimeout(jobPollTimer);
+    jobPollTimer = 0;
   }
-  elements.parseOutputPath.value = defaultParseOutputPath();
 }
 
 async function fetchJson(url, init) {
@@ -50,106 +75,153 @@ async function fetchJson(url, init) {
   return payload;
 }
 
+function makeCancelToken() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function setDownloadRunning(isRunning) {
+  if (elements.downloadHtmlBtn) {
+    elements.downloadHtmlBtn.disabled = isRunning;
+  }
+  if (elements.cancelHtmlBtn) {
+    elements.cancelHtmlBtn.disabled = !isRunning || stopRequested;
+  }
+}
+
 async function loadConfig() {
   const config = await fetchJson("/api/config");
   elements.outputDirectory.value = config.html_output_directory || `${config.output_root || ""}/viewer_html`;
-  refreshParseOutputPath();
   const transferredPayload = sessionStorage.getItem(HTML_DOWNLOAD_STORAGE_KEY);
   if (transferredPayload) {
-    elements.jsonInput.value = JSON.stringify(JSON.parse(transferredPayload), null, 2);
+    const transferReference = JSON.parse(transferredPayload);
+    elements.sourceJsonPath.value = transferReference.source_json_path || "";
     sessionStorage.removeItem(HTML_DOWNLOAD_STORAGE_KEY);
-    setStatus("필터 페이지에서 선택한 JSON을 불러왔습니다.");
+    setStatus("공시 필터에서 생성한 결과 파일을 불러왔습니다.");
     return;
   }
   setStatus("저장 경로 기본값을 불러왔습니다.");
 }
 
 function buildPayload() {
-  let parsedJson;
-  try {
-    parsedJson = JSON.parse(elements.jsonInput.value);
-  } catch (error) {
-    throw new Error(`JSON 파싱 실패: ${error.message}`);
+  const sourceJsonPath = String(elements.sourceJsonPath.value || "").trim();
+  if (!sourceJsonPath) {
+    throw new Error("필터 결과 파일을 선택하세요.");
   }
   return {
     output_directory: elements.outputDirectory.value,
-    json: parsedJson,
-    source_json_path: parsedJson.source_json_path || "",
+    source_json_path: sourceJsonPath,
     timeout: Number(elements.timeout.value || 20),
     max_requests_per_minute: Number(elements.maxRequestsPerMinute.value || 90),
     wait_seconds: Number(elements.waitSeconds.value || 0),
     limit: elements.limit.value ? Number(elements.limit.value) : "",
     skip_existing: elements.skipExisting.checked,
+    progress_interval: Number(elements.progressInterval.value || 10),
+    log_limit: 200,
   };
 }
 
-function buildParsePayload() {
-  return {
-    input_directory: elements.outputDirectory.value,
-    output_path: elements.parseOutputPath.value || defaultParseOutputPath(),
-    mode: elements.parseMode.value,
-    limit: elements.limit.value ? Number(elements.limit.value) : "",
-    skip_errors: true,
-  };
+function formatDownloadJobStatus(payload) {
+  const result = payload.result || {};
+  const lines = [`작업 상태: ${statusLabel(payload.status)}`];
+  if (payload.error) {
+    lines.push(`오류: ${payload.error}`);
+  }
+  if (result.requested_count !== undefined) {
+    lines.push(`요청 접수번호: ${result.requested_count || 0}`);
+    lines.push(`저장 파일: ${result.saved_count || 0}`);
+    lines.push(`저장 경로: ${result.output_directory || ""}`);
+  }
+  if (Array.isArray(payload.progress_log) && payload.progress_log.length) {
+    lines.push("", "최근 로그", ...payload.progress_log);
+  }
+  return lines.join("\n");
+}
+
+async function pollDownloadJob(jobId) {
+  try {
+    const payload = await fetchJson(`/api/disclosures/html/jobs/${encodeURIComponent(jobId)}`);
+    setResult(payload.result || payload);
+    setStatus(formatDownloadJobStatus(payload), payload.status === "failed");
+    if (payload.status === "completed" || payload.status === "failed") {
+      activeJobId = "";
+      activeCancelToken = "";
+      stopRequested = false;
+      stopJobPolling();
+      setDownloadRunning(false);
+      return;
+    }
+    jobPollTimer = window.setTimeout(() => pollDownloadJob(jobId), 1000);
+  } catch (error) {
+    activeJobId = "";
+    activeCancelToken = "";
+    stopRequested = false;
+    stopJobPolling();
+    setDownloadRunning(false);
+    setStatus(error.message, true);
+  }
 }
 
 async function runDownload() {
-  setStatus("HTML 다운로드 중입니다. 처리 건수가 많으면 잠시 걸립니다.");
-  const payload = await fetchJson("/api/disclosures/html/download", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
-  });
-  setResult(payload);
-  const lines = [
-    `요청 접수번호: ${payload.requested_count || 0}`,
-    `저장 파일: ${payload.saved_count || 0}`,
-    `저장 경로: ${payload.output_directory || ""}`,
-    "",
-    ...(payload.progress_log || []),
-  ];
-  setStatus(lines.join("\n"));
-}
-
-async function runParse() {
-  refreshParseOutputPath();
-  setStatus("HTML 파싱 중입니다.");
-  const payload = await fetchJson("/api/disclosures/html/parse", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildParsePayload()),
-  });
-  setResult(payload);
-  const summary = payload.summary || {};
-  const lines = [
-    `파싱 모드: ${payload.mode || ""}`,
-    `대상 HTML: ${summary.found_files || 0}`,
-    `파싱 성공: ${summary.parsed_files || 0}`,
-    `파싱 실패: ${summary.failed_files || 0}`,
-    `결과 경로: ${payload.output_path || ""}`,
-  ];
-  setStatus(lines.join("\n"), Number(summary.failed_files || 0) > 0);
-}
-
-elements.outputDirectory?.addEventListener("input", refreshParseOutputPath);
-
-elements.parseMode?.addEventListener("change", () => {
-  if (elements.parseOutputPath) {
-    elements.parseOutputPath.dataset.touched = "false";
+  if (activeCancelToken || activeJobId) {
+    return;
   }
-  refreshParseOutputPath();
-});
+  stopJobPolling();
+  const requestPayload = buildPayload();
+  activeCancelToken = makeCancelToken();
+  stopRequested = false;
+  setDownloadRunning(true);
+  logLines([
+    `[${timestamp()}] HTML 저장을 시작했습니다.`,
+    `필터 결과 파일: ${requestPayload.source_json_path || ""}`,
+    `저장 경로: ${requestPayload.output_directory || ""}`,
+    `타임아웃: ${requestPayload.timeout}초`,
+    `최대 요청/분: ${requestPayload.max_requests_per_minute}`,
+    `요청 간격: ${requestPayload.wait_seconds}초`,
+    `최대 처리 건수: ${requestPayload.limit || "전체"}`,
+    `기존 파일 건너뛰기: ${requestPayload.skip_existing ? "예" : "아니오"}`,
+    `진행 확인 간격: ${requestPayload.progress_interval}건`,
+  ]);
+  try {
+    const payload = await fetchJson("/api/disclosures/html/download/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...requestPayload, cancel_token: activeCancelToken }),
+    });
+    activeJobId = payload.job_id;
+    setResult(payload);
+    setStatus(formatDownloadJobStatus(payload));
+    pollDownloadJob(activeJobId);
+  } catch (error) {
+    activeCancelToken = "";
+    stopRequested = false;
+    activeJobId = "";
+    setDownloadRunning(false);
+    throw error;
+  }
+}
 
-elements.parseOutputPath?.addEventListener("input", () => {
-  elements.parseOutputPath.dataset.touched = "true";
-});
+async function cancelDownload() {
+  if (!activeCancelToken || stopRequested) {
+    return;
+  }
+  stopRequested = true;
+  setDownloadRunning(true);
+  setStatus(`[${timestamp()}] HTML 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.`);
+  await fetchJson("/api/disclosures/html/download/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cancel_token: activeCancelToken }),
+  });
+}
 
 elements.downloadHtmlBtn?.addEventListener("click", () => {
   runDownload().catch((error) => setStatus(error.message, true));
 });
-
-elements.parseHtmlBtn?.addEventListener("click", () => {
-  runParse().catch((error) => setStatus(error.message, true));
+elements.cancelHtmlBtn?.addEventListener("click", () => {
+  cancelDownload().catch((error) => setStatus(error.message, true));
 });
 
 bindPathSetting(

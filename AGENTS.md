@@ -71,6 +71,16 @@ Before ending a coding task:
 - If the user did not ask for a commit, do not stage or commit silently. Tell the user the exact `git add`/`git commit` commands to run, or ask whether to commit when that is the obvious next step.
 - Never discard or restore changes unless the user explicitly asks for that.
 
+## 6. KIND Bond Issuance Parsing
+
+**Preserve legacy output fields while accepting issuer-specific table labels.**
+
+- `finiq_marketDesk`의 사채 발행 파서는 전환사채와 신주인수권부사채를 같은 `bond_issuance` 레코드로 내보낸다.
+- 출력 필드는 기존 호환성을 위해 `전환시작일`/`전환종료일`을 유지한다.
+- 전환사채는 `전환청구기간` + `시작일`/`종료일` 행에서 값을 가져온다.
+- 신주인수권부사채는 같은 출력 필드에 `권리행사기간` + `시작일`/`종료일` 행을 매핑해야 한다. `resources/kind_kosdaq/kind_html/20080825000412.html`, `20080826000146.html`, `20080826000267.html`이 이 케이스다.
+- `rowspan`/`colspan` 확장 후 같은 행에 보이는 라벨 조합을 기준으로 찾고, 임의의 본문 정규식으로 날짜를 뽑지 않는다.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

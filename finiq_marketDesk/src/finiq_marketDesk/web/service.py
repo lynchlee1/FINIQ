@@ -388,12 +388,50 @@ def _remove_whitespace(value: str) -> str:
     return "".join(str(value).split())
 
 
+def _clean_search_text(value: str) -> str:
+    text = str(value or "")
+    cleaned: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "(":
+            depth = 0
+            last_close_index = -1
+            scan_index = index
+            while scan_index < len(text):
+                current = text[scan_index]
+                if current == "(":
+                    depth += 1
+                elif current == ")":
+                    depth -= 1
+                    last_close_index = scan_index
+                    if depth <= 0:
+                        scan_index += 1
+                        while scan_index < len(text) and text[scan_index] == ")":
+                            scan_index += 1
+                        break
+                scan_index += 1
+            else:
+                scan_index = last_close_index + 1 if last_close_index >= 0 else len(text)
+            index = scan_index
+            continue
+        if char == ")":
+            index += 1
+            continue
+        cleaned.append(char)
+        index += 1
+    return "".join(cleaned)
+
+
 def _condition_block_matches(record: dict[str, Any], block: dict[str, Any]) -> bool:
     field = str(block.get("field") or "title").strip()
     operator = str(block.get("operator") or "contains").strip()
     expected = str(block.get("value") or "").strip()
     raw_value = _record_field_value(record, field)
     actual = str(raw_value or "").strip()
+    if bool(block.get("clean_search")):
+        actual = _clean_search_text(actual)
+        expected = _clean_search_text(expected)
     if bool(block.get("ignore_spaces")):
         actual = _remove_whitespace(actual)
         expected = _remove_whitespace(expected)
@@ -623,7 +661,7 @@ def _unique_disclosure_titles(records: list[dict[str, Any]]) -> list[str]:
     titles: list[str] = []
     seen_titles: set[str] = set()
     for record in records:
-        title = str(record.get("title") or "").strip()
+        title = _clean_search_text(str(record.get("title") or "")).strip()
         if not title or title in seen_titles:
             continue
         seen_titles.add(title)
@@ -1214,8 +1252,8 @@ def filter_disclosures_payload(
             "duplicate_disclosures": duplicate_count,
             "unique_acpt_numbers": len({str(record.get("acpt_no") or "") for record in public_limited if record.get("acpt_no")}),
         },
-        "disclosures": public_limited,
         "unique_titles": _unique_disclosure_titles(public_limited),
+        "disclosures": public_limited,
     }
     if include_html_download_acpt_numbers:
         payload["html_download_acpt_numbers"] = [

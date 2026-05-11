@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+import requests
+
 from .common import build_base_record, clean_text, parse_html_document, parse_int
 
 MODE = "bond_issuance"
@@ -21,9 +23,19 @@ FUNDING_PURPOSE_LABELS = [
 
 def parse_bond_issuance(html_text: str | bytes, *, file_path: str | Path) -> dict[str, Any]:
     """Parse debt issuance HTML into the shared v1 architecture record."""
+    document_markup = html_text
     record = build_base_record(html_text, file_path=file_path, mode=MODE)
     rows = _main_bond_rows(record["raw_tables"])
-    document_text = clean_text(" ".join(parse_html_document(html_text).itertext()))
+    if not rows:
+        body_html = _fetch_selected_viewer_body(html_text)
+        if body_html is not None:
+            document_markup = body_html
+            original_title = record.get("title") or ""
+            record = build_base_record(body_html, file_path=file_path, mode=MODE)
+            if not record.get("title"):
+                record["title"] = original_title
+            rows = _main_bond_rows(record["raw_tables"])
+    document_text = clean_text(" ".join(parse_html_document(document_markup).itertext()))
 
     record.update(
         {
@@ -34,8 +46,8 @@ def parse_bond_issuance(html_text: str | bytes, *, file_path: str | Path) -> dic
             "할증률(%)": _premium_rate(document_text),
             "행사가액": _last_int(_row_containing(rows, "전환가액 (원/주)")),
             "행사대상": _last_value(_row_containing(rows, "전환에 따라", "종류")),
-            "전환시작일": _last_value(_row_containing(rows, "전환청구기간", "시작일")),
-            "전환종료일": _last_value(_row_containing(rows, "전환청구기간", "종료일")),
+            "전환시작일": _exercise_period_value(rows, "시작일"),
+            "전환종료일": _exercise_period_value(rows, "종료일"),
             "리픽싱(%)": _refixing_rate(rows),
             "청약일": _last_value(_row_with_label(rows, "청약일")),
             "납입일": _last_value(_row_with_label(rows, "납입일")),
@@ -49,10 +61,48 @@ def parse_bond_issuance(html_text: str | bytes, *, file_path: str | Path) -> dic
 
 def _main_bond_rows(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
     for table in raw_tables:
+        if _is_correction_chapter(table):
+            continue
         rows = table.get("logical_rows") or []
-        if any(_row_contains(row, "사채의 종류") for row in rows):
+        if (
+            any(_row_contains(row, "사채의 종류") for row in rows)
+            and any(_row_contains(row, "사채의 권면") for row in rows)
+            and any(_row_contains(row, "자금조달의 목적") for row in rows)
+        ):
             return rows
     return []
+
+
+def _non_correction_tables(raw_tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [table for table in raw_tables if not _is_correction_chapter(table)]
+
+
+def _is_correction_chapter(table: dict[str, Any]) -> bool:
+    chapter_title = clean_text(str(table.get("chapter_title") or "")).replace(" ", "")
+    return "정정신고" in chapter_title
+
+
+def _fetch_selected_viewer_body(html_text: str | bytes) -> bytes | None:
+    document = parse_html_document(html_text)
+    selected_values = document.xpath("//select[@id='mainDoc']/option[@selected or @selected='selected']/@value")
+    if not selected_values:
+        selected_values = document.xpath("//select[@name='mainDoc']/option[@selected or @selected='selected']/@value")
+    if not selected_values:
+        return None
+    doc_no = str(selected_values[0]).split("|", 1)[0].strip()
+    if not doc_no:
+        return None
+    contents_url = f"https://kind.krx.co.kr/common/disclsviewer.do?method=searchContents&docNo={doc_no}"
+    contents_response = requests.get(contents_url, timeout=20)
+    contents_response.raise_for_status()
+    contents_html = contents_response.content
+    contents_text = contents_html.decode("utf-8", errors="replace")
+    match = re.search(r"parent\.setPath\('[^']*','([^']+)'", contents_text)
+    if match is None:
+        return None
+    response = requests.get(match.group(1), timeout=20)
+    response.raise_for_status()
+    return response.content
 
 
 def _row_contains(row: list[str], *needles: str) -> bool:
@@ -98,6 +148,14 @@ def _last_int(row: list[str]) -> int | None:
     return None
 
 
+def _exercise_period_value(rows: list[list[str]], boundary_label: str) -> str | None:
+    for period_label in ("전환청구기간", "권리행사기간"):
+        value = _last_value(_row_containing(rows, period_label, boundary_label))
+        if value is not None:
+            return value
+    return None
+
+
 def _funding_purposes(rows: list[list[str]]) -> list[list[Any]]:
     purposes: list[list[Any]] = []
     for label in FUNDING_PURPOSE_LABELS:
@@ -128,7 +186,7 @@ def _refixing_rate(rows: list[list[str]]) -> int | None:
 
 
 def _issue_targets(raw_tables: list[dict[str, Any]]) -> list[list[Any]]:
-    for table in raw_tables:
+    for table in _non_correction_tables(raw_tables):
         rows = table.get("logical_rows") or []
         if not rows or not _row_contains(rows[0], "발행 대상자명", "발행권면"):
             continue
@@ -145,7 +203,7 @@ def _issue_targets(raw_tables: list[dict[str, Any]]) -> list[list[Any]]:
 
 def _issue_target_entities(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
     entities: list[list[str]] = []
-    for table in raw_tables:
+    for table in _non_correction_tables(raw_tables):
         rows = table.get("logical_rows") or []
         if len(rows) < 3 or not _row_contains(rows[0], "명칭", "대표이사", "최대주주"):
             continue

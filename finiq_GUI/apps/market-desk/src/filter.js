@@ -69,6 +69,7 @@ function defaultConditionBlock() {
     open_count: 0,
     not: false,
     ignore_spaces: false,
+    clean_search: false,
     field: "title",
     operator: "contains",
     value: "",
@@ -172,6 +173,7 @@ function renderConditionPreview() {
         : "";
       const not = block.not ? '<span class="logic-chip">NOT</span>' : "";
       const space = block.ignore_spaces ? '<span class="space-chip">공백무시</span>' : "";
+      const cleanSearch = block.clean_search ? '<span class="space-chip">Clean</span>' : "";
       const close = Number(block.close_count || 0)
         ? `<span class="paren-chip">${")".repeat(Number(block.close_count))}</span>`
         : "";
@@ -185,6 +187,7 @@ function renderConditionPreview() {
           <em>${escapeHtml(operatorLabel(block.operator))}</em>
           ${value}
           ${space}
+          ${cleanSearch}
         </span>
         ${close}
       `;
@@ -215,6 +218,10 @@ function renderConditionBlocks() {
             <label class="condition-space">
               <input class="condition-ignore-spaces-input" type="checkbox" ${block.ignore_spaces ? "checked" : ""} />
               공백무시
+            </label>
+            <label class="condition-space">
+              <input class="condition-clean-search-input" type="checkbox" ${block.clean_search ? "checked" : ""} />
+              Clean
             </label>
             <select class="condition-field" aria-label="필드">${optionMarkup(fieldOptions, block.field)}</select>
             <select class="condition-operator" aria-label="연산자">${optionMarkup(operatorOptions, block.operator)}</select>
@@ -248,6 +255,7 @@ function normalizeConditionBlocks(blocks) {
             open_count: normalizeParenCount(block?.open_count, "("),
             not: Boolean(block?.not),
             ignore_spaces: Boolean(block?.ignore_spaces),
+            clean_search: Boolean(block?.clean_search),
             field: fieldOptions.some(([value]) => value === block?.field) ? block.field : "title",
             operator: operatorOptions.some(([value]) => value === block?.operator) ? block.operator : "contains",
             value: String(block?.value || ""),
@@ -274,6 +282,7 @@ function readConditionBlocksFromDom() {
       open_count: normalizeParenCount(row.querySelector('[data-group-toggle="open"]')?.value, "("),
       not: Boolean(row.querySelector(".condition-not-input")?.checked),
       ignore_spaces: Boolean(row.querySelector(".condition-ignore-spaces-input")?.checked),
+      clean_search: Boolean(row.querySelector(".condition-clean-search-input")?.checked),
       field: fieldOptions.some(([value]) => value === field) ? field : "title",
       operator: operatorOptions.some(([value]) => value === operator) ? operator : "contains",
       value: row.querySelector(".condition-value")?.value || "",
@@ -630,6 +639,7 @@ elements.conditionBlocks?.addEventListener("input", (event) => {
   conditionBlocks[index].value = row.querySelector(".condition-value")?.value || "";
   conditionBlocks[index].not = Boolean(row.querySelector(".condition-not-input")?.checked);
   conditionBlocks[index].ignore_spaces = Boolean(row.querySelector(".condition-ignore-spaces-input")?.checked);
+  conditionBlocks[index].clean_search = Boolean(row.querySelector(".condition-clean-search-input")?.checked);
   syncExpressionFromBlocks();
 });
 
@@ -645,6 +655,7 @@ elements.conditionBlocks?.addEventListener("change", (event) => {
   conditionBlocks[index].connector = row.querySelector(".condition-connector")?.value || "";
   conditionBlocks[index].not = Boolean(row.querySelector(".condition-not-input")?.checked);
   conditionBlocks[index].ignore_spaces = Boolean(row.querySelector(".condition-ignore-spaces-input")?.checked);
+  conditionBlocks[index].clean_search = Boolean(row.querySelector(".condition-clean-search-input")?.checked);
   conditionBlocks[index].field = row.querySelector(".condition-field")?.value || "title";
   conditionBlocks[index].operator = row.querySelector(".condition-operator")?.value || "contains";
   conditionBlocks[index].value = row.querySelector(".condition-value")?.value || "";

@@ -501,10 +501,17 @@ textarea:focus {
 
 .condition-clause {
   display: grid;
-  grid-template-columns: 36px 68px 92px minmax(118px, 0.8fr) minmax(126px, 0.8fr) minmax(180px, 2fr) 36px;
+  grid-template-columns: 36px 68px 86px 72px minmax(84px, 0.45fr) minmax(112px, 0.55fr) minmax(320px, 3fr) 36px;
   gap: 6px;
   align-items: center;
   min-width: 0;
+}
+
+.condition-field,
+.condition-operator,
+.condition-value {
+  min-width: 0;
+  width: 100%;
 }
 
 .group-toggle {
@@ -853,6 +860,66 @@ input[type="checkbox"] {
   gap: 8px;
 }
 
+.mode-cards {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mode-card {
+  display: grid;
+  gap: 8px;
+  min-height: 164px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel-soft-bg);
+}
+
+.mode-card[data-active="true"] {
+  border-color: rgba(52, 211, 153, 0.56);
+  background: var(--primary-bg);
+}
+
+.mode-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mode-card strong {
+  color: var(--text);
+  font-size: var(--font-size-small);
+  line-height: 1.35;
+}
+
+.mode-card span,
+.mode-card p {
+  color: var(--muted);
+  font-size: var(--font-size-very-small);
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.mode-card span {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--control-bg);
+}
+
+.mode-card code {
+  color: var(--green);
+  font-size: var(--font-size-very-small);
+  font-weight: 800;
+}
+
+.mode-card p {
+  margin: 0;
+}
+
 .disclosure-groups details {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1122,6 +1189,7 @@ tbody tr:hover {
   .download-grid-3,
   .download-grid-4,
   .download-grid-single,
+  .mode-cards,
   .summary-cards,
   .preset-controls,
   .condition-block,

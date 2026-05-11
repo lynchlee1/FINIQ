@@ -257,6 +257,8 @@ def test_disclosure_filter_api_transfer_file_stores_table_rows(
     assert transfer_payload["table"]["rows"][0]["title"] == "전환사채발행결정"
     assert transfer_payload["disclosures"][0]["acpt_no"] == "20250102000001"
     assert transfer_payload["unique_titles"] == ["전환사채발행결정"]
+    assert list(transfer_payload).index("unique_titles") < list(transfer_payload).index("table")
+    assert list(transfer_payload).index("unique_titles") < list(transfer_payload).index("disclosures")
     assert transfer_payload["acptNumbers"] == ["20250102000001"]
 
 
@@ -276,6 +278,43 @@ def test_disclosure_html_download_api_routes_to_handler(tmp_path: Path, monkeypa
     assert json.loads(payload) == {"saved_count": 1}
 
 
+def test_disclosure_html_download_start_api_routes_to_job(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.app._start_html_job",
+        lambda kind, body: {"job_id": "job-1", "kind": kind, "status": "queued", "body": body},
+    )
+
+    status, payload = _post(
+        "/api/disclosures/html/download/start",
+        tmp_path,
+        {"source_json_path": "filtered.json"},
+    )
+
+    assert status == 200
+    assert json.loads(payload) == {
+        "job_id": "job-1",
+        "kind": "download",
+        "status": "queued",
+        "body": {"source_json_path": "filtered.json"},
+    }
+
+
+def test_disclosure_html_download_cancel_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.app.cancel_disclosure_html_download",
+        lambda token: {"cancelled": True, "cancel_token": token},
+    )
+
+    status, payload = _post(
+        "/api/disclosures/html/download/cancel",
+        tmp_path,
+        {"cancel_token": "cancel-test"},
+    )
+
+    assert status == 200
+    assert json.loads(payload) == {"cancelled": True, "cancel_token": "cancel-test"}
+
+
 def test_disclosure_html_parse_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         "finiq_marketDesk.web.app.parse_disclosure_html_payload",
@@ -290,6 +329,55 @@ def test_disclosure_html_parse_api_routes_to_handler(tmp_path: Path, monkeypatch
 
     assert status == 200
     assert json.loads(payload) == {"mode": "bond_issuance", "parsed": True}
+
+
+def test_disclosure_html_parse_start_api_routes_to_job(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.app._start_html_job",
+        lambda kind, body: {"job_id": "job-1", "kind": kind, "status": "queued", "body": body},
+    )
+
+    status, payload = _post(
+        "/api/disclosures/html/parse/start",
+        tmp_path,
+        {"input_directory": str(tmp_path), "mode": "bond_issuance"},
+    )
+
+    assert status == 200
+    assert json.loads(payload) == {
+        "job_id": "job-1",
+        "kind": "parse",
+        "status": "queued",
+        "body": {"input_directory": str(tmp_path), "mode": "bond_issuance"},
+    }
+
+
+def test_disclosure_html_job_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.app.get_html_job",
+        lambda job_id: {"job_id": job_id, "status": "running"},
+    )
+
+    status, payload = _fetch("/api/disclosures/html/jobs/job-1", tmp_path)
+
+    assert status == 200
+    assert json.loads(payload) == {"job_id": "job-1", "status": "running"}
+
+
+def test_disclosure_html_parse_cancel_api_routes_to_handler(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.app.cancel_disclosure_html_parse",
+        lambda token: {"cancelled": True, "cancel_token": token},
+    )
+
+    status, payload = _post(
+        "/api/disclosures/html/parse/cancel",
+        tmp_path,
+        {"cancel_token": "cancel-test"},
+    )
+
+    assert status == 200
+    assert json.loads(payload) == {"cancelled": True, "cancel_token": "cancel-test"}
 
 
 def test_settings_can_be_saved_via_api(tmp_path: Path) -> None:

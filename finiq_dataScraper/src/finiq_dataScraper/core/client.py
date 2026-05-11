@@ -24,6 +24,7 @@ VIEWER_HTML_FILENAME_TEMPLATE = "{acpt_no}.html"
 VIEWER_HTML_WITH_DOC_FILENAME_TEMPLATE = "{acpt_no}_{doc_no}.html"
 
 KindProgressCallback = Callable[[str], None]
+KindCancelCheck = Callable[[], bool]
 KindSavedFileCallback = Callable[[Path, int | None, KindSearchFormData | None], None]
 KindSavedFileValidator = Callable[[Path, int | None, KindSearchFormData | None], None]
 KindViewerSavedFileCallback = Callable[[Path, str, str | None], None]
@@ -41,10 +42,16 @@ def _report_progress(progress_callback: KindProgressCallback | None, message: st
         progress_callback(message)
 
 
-def _sleep_between_requests(wait_seconds: float) -> None:
+def _sleep_between_requests(wait_seconds: float, cancel_check: KindCancelCheck | None = None) -> bool:
     """요청 사이에 필요한 만큼 대기한다."""
-    if wait_seconds > 0:
-        time.sleep(wait_seconds)
+    remaining_seconds = wait_seconds
+    while remaining_seconds > 0:
+        if cancel_check is not None and cancel_check():
+            return True
+        sleep_seconds = min(remaining_seconds, 0.2)
+        time.sleep(sleep_seconds)
+        remaining_seconds -= sleep_seconds
+    return bool(cancel_check is not None and cancel_check())
 
 
 def _report_saved_file(
@@ -466,6 +473,7 @@ def download_disclosure_viewer_htmls(
     skip_existing: bool = True,
     progress_callback: KindProgressCallback | None = None,
     saved_file_callback: KindViewerSavedFileCallback | None = None,
+    cancel_check: KindCancelCheck | None = None,
 ) -> list[Path]:
     """여러 KIND 접수번호의 뷰어 HTML을 rate limit을 지키며 저장한다."""
     if timeout <= 0:
@@ -491,6 +499,10 @@ def download_disclosure_viewer_htmls(
     try:
         total_count = len(normalized_acpt_numbers)
         for index, normalized_acpt_no in enumerate(normalized_acpt_numbers, start=1):
+            if cancel_check is not None and cancel_check():
+                _report_progress(progress_callback, "Cancelled KIND viewer HTML download.")
+                break
+
             output_path = output_directory / _build_viewer_html_filename(normalized_acpt_no)
             if skip_existing and output_path.exists():
                 _report_progress(
@@ -500,8 +512,9 @@ def download_disclosure_viewer_htmls(
                 saved_paths.append(output_path)
                 continue
 
-            if request_count:
-                _sleep_between_requests(effective_wait_seconds)
+            if request_count and _sleep_between_requests(effective_wait_seconds, cancel_check):
+                _report_progress(progress_callback, "Cancelled KIND viewer HTML download.")
+                break
 
             _report_progress(
                 progress_callback,
@@ -540,6 +553,7 @@ __all__ = [
     "download_disclosure_viewer_htmls",
     "fetch_disclosure_viewer_html",
     "fetch_search_page",
+    "KindCancelCheck",
     "KindProgressCallback",
     "KindSavedFileCallback",
     "KindSavedFileValidator",

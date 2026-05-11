@@ -13,6 +13,8 @@ const downloadAliasPlugin = () => ({
         request.url = '/filter.html'
       } else if (request.url === '/html-download') {
         request.url = '/html-download.html'
+      } else if (request.url === '/html-parse') {
+        request.url = '/html-parse.html'
       }
       next()
     })
@@ -27,6 +29,8 @@ const downloadAliasPlugin = () => ({
         request.url = '/filter.html'
       } else if (request.url === '/html-download') {
         request.url = '/html-download.html'
+      } else if (request.url === '/html-parse') {
+        request.url = '/html-parse.html'
       }
       next()
     })
@@ -44,6 +48,7 @@ export default defineConfig({
         table: resolve(__dirname, 'table.html'),
         filter: resolve(__dirname, 'filter.html'),
         htmlDownload: resolve(__dirname, 'html-download.html'),
+        htmlParse: resolve(__dirname, 'html-parse.html'),
       },
     },
   },

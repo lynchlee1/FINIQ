@@ -16,8 +16,8 @@ This package contains parser entrypoints for downloaded KIND disclosure viewer H
 
 - All modes should use the common HTML helpers in `common.py`.
 - Tables must be parsed through the span-aware grid utilities so `rowspan` and `colspan` values are expanded before field extraction.
-- Mode-specific parsers should extract fields from logical rows and keep the common metadata fields:
-  `acpt_no`, `source_file`, `mode`, `title`, `raw_tables`, and `raw_rows`.
+- Mode-specific parsers may use `raw_tables` and `raw_rows` internally, but saved web parse results should keep only common metadata
+  (`acpt_no`, `source_file`, `mode`, `title`) plus extracted target fields.
 
 ## Core Logic Notes
 

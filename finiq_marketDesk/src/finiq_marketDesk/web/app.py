@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import errno
 import json
 import os
 import subprocess
 import sys
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import threading
+import time
 from typing import Any
 from uuid import uuid4
 from urllib.parse import parse_qs, urlparse
@@ -43,8 +46,8 @@ from finiq_marketDesk.web.download import (
     run_download_action,
     start_download_job,
 )
-from finiq_marketDesk.web.disclosure_html import download_disclosure_html_payload
-from finiq_marketDesk.web.disclosure_html_parse import parse_disclosure_html_payload
+from finiq_marketDesk.web.disclosure_html import cancel_disclosure_html_download, download_disclosure_html_payload
+from finiq_marketDesk.web.disclosure_html_parse import cancel_disclosure_html_parse, parse_disclosure_html_payload
 from finiq_marketDesk.web.table_export import build_disclosure_table_payload
 
 
@@ -62,6 +65,22 @@ class AppConfig:
     sqlite_manifest_path: str = ""
     html_output_directory: str = ""
     html_transfer_directory: str = ""
+
+
+@dataclass(slots=True)
+class HtmlJob:
+    id: str
+    kind: str
+    status: str = "queued"
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    progress_log: deque[str] = field(default_factory=lambda: deque(maxlen=100))
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+_HTML_JOBS: dict[str, HtmlJob] = {}
+_HTML_JOBS_LOCK = threading.Lock()
 
 
 SAVED_SETTINGS_KEYS = (
@@ -93,6 +112,87 @@ def _legacy_settings_path(settings_path: str | Path) -> Path:
 
 def _normalize_saved_path(value: str) -> str:
     return str(Path(value).expanduser().resolve())
+
+
+def _html_job_log_limit(payload: dict[str, Any]) -> int:
+    value = payload.get("log_limit")
+    if value in ("", None):
+        return 120
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 120
+    return max(20, min(parsed, 500))
+
+
+def _html_job_snapshot(job: HtmlJob) -> dict[str, Any]:
+    return {
+        "job_id": job.id,
+        "kind": job.kind,
+        "status": job.status,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "progress_log": list(job.progress_log),
+        "result": job.result,
+        "error": job.error,
+    }
+
+
+def _update_html_job(job_id: str, **updates: Any) -> None:
+    with _HTML_JOBS_LOCK:
+        job = _HTML_JOBS[job_id]
+        for key, value in updates.items():
+            setattr(job, key, value)
+        job.updated_at = time.time()
+
+
+def _append_html_job_progress(job_id: str, message: str) -> None:
+    with _HTML_JOBS_LOCK:
+        job = _HTML_JOBS[job_id]
+        timestamp = time.strftime("%H:%M:%S")
+        job.progress_log.append(f"[{timestamp}] {message}")
+        job.updated_at = time.time()
+
+
+def _start_html_job(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if kind not in {"download", "parse"}:
+        raise ValueError("html job kind must be download or parse")
+    job_id = uuid4().hex
+    job = HtmlJob(id=job_id, kind=kind, progress_log=deque(maxlen=_html_job_log_limit(payload)))
+    with _HTML_JOBS_LOCK:
+        _HTML_JOBS[job_id] = job
+
+    def _worker() -> None:
+        try:
+            _update_html_job(job_id, status="running")
+            _append_html_job_progress(job_id, f"JOB start kind={kind} id={job_id}")
+            if kind == "download":
+                result = download_disclosure_html_payload(
+                    payload,
+                    progress_callback=lambda message: _append_html_job_progress(job_id, message),
+                )
+            else:
+                result = parse_disclosure_html_payload(
+                    payload,
+                    progress_callback=lambda message: _append_html_job_progress(job_id, message),
+                )
+            _update_html_job(job_id, status="completed", result=result)
+            _append_html_job_progress(job_id, f"JOB completed kind={kind} id={job_id}")
+        except Exception as exc:  # pragma: no cover - runtime path
+            _update_html_job(job_id, status="failed", error=str(exc))
+            _append_html_job_progress(job_id, f"JOB failed error={exc}")
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    return get_html_job(job_id)
+
+
+def get_html_job(job_id: str) -> dict[str, Any]:
+    with _HTML_JOBS_LOCK:
+        job = _HTML_JOBS.get(job_id)
+        if job is None:
+            raise ValueError(f"html job not found: {job_id}")
+        return _html_job_snapshot(job)
 
 
 def _load_saved_settings(settings_path: str | Path) -> dict[str, str]:
@@ -193,6 +293,7 @@ def _build_disclosure_html_transfer_payload(payload: dict[str, Any]) -> dict[str
             "transferred_acpt_numbers": len(acpt_numbers),
             "transferred_rows": len(disclosures),
         },
+        "unique_titles": payload.get("unique_titles") or [],
         "table": {
             "columns": [
                 "disclosed_at",
@@ -218,7 +319,6 @@ def _build_disclosure_html_transfer_payload(payload: dict[str, Any]) -> dict[str
             "rows": disclosures,
         },
         "disclosures": disclosures,
-        "unique_titles": payload.get("unique_titles") or [],
         "acptNumbers": acpt_numbers,
     }
 
@@ -323,6 +423,9 @@ class KindWebHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/download/jobs/"):
             self._handle_download_job(parsed.path)
             return
+        if parsed.path.startswith("/api/disclosures/html/jobs/"):
+            self._handle_disclosure_html_job(parsed.path)
+            return
         if parsed.path == "/api/classifications":
             self._handle_classifications(parsed.query)
             return
@@ -369,8 +472,20 @@ class KindWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/disclosures/html/download":
             self._handle_disclosure_html_download()
             return
+        if parsed.path == "/api/disclosures/html/download/start":
+            self._handle_disclosure_html_download_start()
+            return
+        if parsed.path == "/api/disclosures/html/download/cancel":
+            self._handle_disclosure_html_download_cancel()
+            return
         if parsed.path == "/api/disclosures/html/parse":
             self._handle_disclosure_html_parse()
+            return
+        if parsed.path == "/api/disclosures/html/parse/start":
+            self._handle_disclosure_html_parse_start()
+            return
+        if parsed.path == "/api/disclosures/html/parse/cancel":
+            self._handle_disclosure_html_parse_cancel()
             return
         self._respond_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
@@ -724,10 +839,55 @@ class KindWebHandler(BaseHTTPRequestHandler):
             return
         self._respond_json(HTTPStatus.OK, payload)
 
+    def _handle_disclosure_html_download_start(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = _start_html_job("download", body)
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_html_download_cancel(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = cancel_disclosure_html_download(str(body.get("cancel_token") or ""))
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_html_job(self, path: str) -> None:
+        job_id = path.rsplit("/", 1)[-1]
+        try:
+            payload = get_html_job(job_id)
+        except ValueError as exc:
+            self._respond_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
     def _handle_disclosure_html_parse(self) -> None:
         try:
             body = self._read_json_body()
             payload = parse_disclosure_html_payload(body)
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_html_parse_start(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = _start_html_job("parse", body)
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_html_parse_cancel(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = cancel_disclosure_html_parse(str(body.get("cancel_token") or ""))
         except (OSError, ValueError) as exc:
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
