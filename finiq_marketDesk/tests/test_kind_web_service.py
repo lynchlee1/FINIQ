@@ -250,6 +250,38 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
     assert payload["html_download_acpt_numbers"] == ["20250102000001"]
 
 
+def test_filter_disclosures_payload_reads_nested_kind_sqlite_manifest(tmp_path: Path) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    root = tmp_path / "kind_kosdaq"
+    sqlite_root = root / "kind_sqlite"
+    manifest_path = sqlite_root / "kind_kosdaq.sqlite_manifest.json"
+    build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(manifest_path),
+        }
+    )
+
+    payload = filter_disclosures_payload(
+        {
+            "root_directory": str(root),
+            "filter_blocks": [
+                {
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "전환사채",
+                }
+            ],
+        }
+    )
+
+    assert payload["source_type"] == "sqlite_manifest"
+    assert payload["source_sqlite_manifest_path"] == str(manifest_path.resolve())
+    assert payload["summary"]["source_body_files"] == 0
+    assert payload["summary"]["matched_disclosures"] == 1
+    assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
+
+
 def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(tmp_path: Path) -> None:
     sqlite_root = tmp_path / "kind_sqlite"
     shard_root = sqlite_root / "kind.sqlite_manifest_shards"

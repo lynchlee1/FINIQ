@@ -722,13 +722,15 @@ def _resolve_sqlite_manifest_path(path: str | Path) -> Path | None:
         return candidate
     if not candidate.is_dir():
         return None
-    preferred = candidate / "kind.sqlite_manifest.json"
-    if _looks_like_sqlite_manifest(preferred):
-        return preferred
-    manifests = sorted(candidate.glob("*.sqlite_manifest.json"))
-    for manifest_path in manifests:
-        if _looks_like_sqlite_manifest(manifest_path):
-            return manifest_path
+    search_dirs = [candidate, candidate / "kind_sqlite"]
+    for search_dir in search_dirs:
+        preferred = search_dir / "kind.sqlite_manifest.json"
+        if _looks_like_sqlite_manifest(preferred):
+            return preferred
+        manifests = sorted(search_dir.glob("*.sqlite_manifest.json"))
+        for manifest_path in manifests:
+            if _looks_like_sqlite_manifest(manifest_path):
+                return manifest_path
     return None
 
 

@@ -1251,36 +1251,6 @@ button:disabled {
   font-size: var(--font-size-small);
 }
 
-.summary-cards {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.summary-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--summary-bg);
-}
-
-.summary-card span {
-  color: var(--muted);
-  font-size: var(--font-size-very-small);
-  font-weight: 800;
-}
-
-.summary-card strong {
-  color: var(--text);
-  font-size: var(--font-size-medium);
-}
-
 .disclosure-table-wrap {
   height: 460px;
 }
@@ -1422,7 +1392,6 @@ tbody tr:hover {
   .download-grid-4,
   .download-grid-single,
   .mode-cards,
-  .summary-cards,
   .html-bond-layout,
   .preset-controls,
   .condition-block,

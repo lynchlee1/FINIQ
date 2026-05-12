@@ -20,7 +20,6 @@ const elements = {
   filterBtn: document.getElementById("filterBtn"),
   cancelFilterBtn: document.getElementById("cancelFilterBtn"),
   status: document.getElementById("status"),
-  summaryCards: document.getElementById("summaryCards"),
   disclosureTableBody: document.getElementById("disclosureTableBody"),
   prevPageBtn: document.getElementById("prevPageBtn"),
   nextPageBtn: document.getElementById("nextPageBtn"),
@@ -412,31 +411,8 @@ function setResult(payload) {
   latestPayload = payload;
   resultPage = 0;
   const transferReference = storeHtmlDownloadTransferPath(payload);
-  renderSummary(payload);
   renderTable(payload.disclosures || []);
   return transferReference;
-}
-
-function renderSummary(payload) {
-  const summary = payload.summary || {};
-  const disclosures = payload.disclosures || [];
-  const companyCount = new Set(disclosures.map((item) => item.company_key || item.company_name).filter(Boolean)).size;
-  const cards = [
-    ["매칭", summary.matched_disclosures || 0],
-    ["반환", summary.returned_disclosures || 0],
-    ["회사", companyCount],
-    ["접수번호", summary.unique_acpt_numbers || 0],
-  ];
-  elements.summaryCards.innerHTML = cards
-    .map(
-      ([label, value]) => `
-        <div class="summary-card">
-          <span>${escapeHtml(label)}</span>
-          <strong>${escapeHtml(value)}</strong>
-        </div>
-      `,
-    )
-    .join("");
 }
 
 function viewerUrl(acptNo) {
