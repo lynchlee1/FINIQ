@@ -1074,16 +1074,17 @@ button:disabled {
 
 .html-bond-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(360px, 0.7fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
 .html-bond-table-wrap {
-  height: 620px;
+  height: 520px;
 }
 
 .html-bond-table-wrap th,
 .html-bond-table-wrap td {
+  padding: 7px 8px;
   white-space: nowrap;
 }
 
@@ -1097,23 +1098,31 @@ button:disabled {
 
 .html-bond-title {
   min-width: 260px;
-  max-width: 420px;
+  max-width: none;
   font-weight: 800;
+  line-height: 1.25;
   white-space: normal;
 }
 
+.html-bond-open-link {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: var(--font-size-very-small);
+  text-decoration: none;
+}
+
 .html-bond-detail {
-  min-height: 620px;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 12px;
+  padding: 9px;
   background: var(--panel-strong-bg);
 }
 
 .html-bond-detail-head {
   display: grid;
-  gap: 7px;
-  padding-bottom: 12px;
+  gap: 5px;
+  padding-bottom: 9px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1130,7 +1139,7 @@ button:disabled {
 
 .html-bond-detail-head strong {
   color: var(--text);
-  font-size: var(--font-size-medium);
+  font-size: var(--font-size-small);
   line-height: 1.35;
 }
 
@@ -1140,14 +1149,13 @@ button:disabled {
   font-size: var(--font-size-very-small);
 }
 
-.html-bond-field-grid {
+.html-bond-field-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
+  gap: 5px;
+  margin-top: 9px;
 }
 
-.html-bond-field-grid div,
+.html-bond-field-list div,
 .html-bond-target,
 .html-correction-step {
   border: 1px solid var(--line);
@@ -1155,14 +1163,16 @@ button:disabled {
   background: var(--summary-bg);
 }
 
-.html-bond-field-grid div {
+.html-bond-field-list div {
   display: grid;
-  gap: 4px;
-  min-height: 68px;
-  padding: 9px;
+  grid-template-columns: minmax(110px, 0.16fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-height: 30px;
+  padding: 6px 8px;
 }
 
-.html-bond-field-grid span,
+.html-bond-field-list span,
 .html-bond-section-title,
 .html-bond-target span,
 .html-correction-step em {
@@ -1171,29 +1181,30 @@ button:disabled {
   font-weight: 800;
 }
 
-.html-bond-field-grid strong {
+.html-bond-field-list strong {
   color: var(--text);
   font-size: var(--font-size-small);
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .html-bond-section-title {
-  margin: 16px 0 8px;
+  margin: 12px 0 6px;
   text-transform: uppercase;
 }
 
 .html-correction-timeline,
 .html-bond-targets {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .html-correction-step {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 7px;
   align-items: center;
-  padding: 8px;
+  padding: 6px 8px;
 }
 
 .html-correction-step[data-current="true"] {
@@ -1205,8 +1216,8 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   color: var(--text);
   background: var(--control-bg);
@@ -1231,8 +1242,8 @@ button:disabled {
 .html-bond-target {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
-  padding: 9px;
+  gap: 8px;
+  padding: 6px 8px;
 }
 
 .html-bond-target strong {
@@ -1413,7 +1424,6 @@ tbody tr:hover {
   .mode-cards,
   .summary-cards,
   .html-bond-layout,
-  .html-bond-field-grid,
   .preset-controls,
   .condition-block,
   .disc-items {

@@ -29,9 +29,12 @@ PARSER_REGISTRY = {
 }
 
 BOND_SUMMARY_FIELDS = (
+    "상장시장",
     "회차",
     "발행금액",
     "발행목적",
+    "표면이자율",
+    "만기이자율",
     "만기일",
     "할증률(%)",
     "행사가액",
@@ -391,7 +394,12 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
         msg = "parse result mode must be bond_issuance"
         raise ValueError(msg)
 
+    limit = _parse_limit(body.get("limit"))
     records = _resolve_correction_family_acpt_numbers(list(payload.get("records") or []))
+    total_count = len(records)
+    if limit is not None:
+        records = records[:limit]
+
     summary_records: list[dict[str, Any]] = []
     families: dict[str, Any] = {}
     for index, record in enumerate(records, start=1):
@@ -419,7 +427,8 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
         "format": "finiq_bond_parse_summary_v1",
         "source_path": str(output_path),
         "summary": {
-            "records": len(summary_records),
+            "records": total_count,
+            "visible_records": len(summary_records),
             "families": len(families),
             "correction_records": sum(
                 1 for record in summary_records if (record.get("current_sequence") or 0) > 0

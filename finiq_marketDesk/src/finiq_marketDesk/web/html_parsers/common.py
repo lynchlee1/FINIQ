@@ -339,6 +339,7 @@ def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: 
     raw_tables = extract_tables(document)
     acpt_no = _viewer_acpt_no(document, file_path)
     rcept_no, correction_families = _correction_families(document, acpt_no=acpt_no)
+    document_text = clean_text(" ".join(document.itertext()))
     return {
         "correction_families": correction_families,
         "rcept_no": rcept_no,
@@ -346,6 +347,17 @@ def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: 
         "source_file": str(Path(file_path).resolve()),
         "mode": mode,
         "title": extract_title(document),
+        "상장시장": _listing_market(document_text),
         "raw_tables": raw_tables,
         "raw_rows": [row for table in raw_tables for row in table["logical_rows"]],
     }
+
+
+def _listing_market(document_text: str) -> str:
+    if "코스닥시장" in document_text:
+        return "코스닥"
+    if "유가증권시장" in document_text:
+        return "코스피"
+    if "코넥스시장" in document_text:
+        return "코넥스"
+    return "기타"

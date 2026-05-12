@@ -87,6 +87,7 @@
             <label class="field">
               <span>표시 건수</span>
               <select id="bondLimit">
+                <option value="20" selected>20건</option>
                 <option value="100">100건</option>
                 <option value="300">300건</option>
                 <option value="1000">1000건</option>
@@ -94,32 +95,26 @@
               </select>
             </label>
           </div>
-          <div id="bondSummaryCards" class="summary-cards html-bond-summary-cards"></div>
           <div class="html-bond-layout">
             <div class="table-wrap html-bond-table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>순번</th>
                     <th>제목</th>
                     <th>회차</th>
-                    <th>발행금액</th>
-                    <th>행사가액</th>
-                    <th>리픽싱</th>
-                    <th>납입일</th>
-                    <th>정정</th>
+                    <th>발행금액(억원)</th>
                     <th>rcept_no</th>
-                    <th>acpt_no</th>
+                    <th>공시 원문</th>
                   </tr>
                 </thead>
                 <tbody id="bondRows">
-                  <tr><td colspan="10" class="empty-state">파싱 결과를 불러오면 채권 정보가 표시됩니다.</td></tr>
+                  <tr><td colspan="5" class="empty-state">파싱 결과를 불러오면 채권 정보가 표시됩니다.</td></tr>
                 </tbody>
               </table>
             </div>
-            <aside class="html-bond-detail" id="bondDetail">
-              <div class="empty-state">행을 선택하면 정정공시 기록과 발행 대상자가 표시됩니다.</div>
-            </aside>
+            <section class="html-bond-detail" id="bondDetail">
+              <div class="empty-state">행을 선택하면 채권 상세 정보가 표시됩니다.</div>
+            </section>
           </div>
           <div id="status" class="download-status"></div>
         </section>

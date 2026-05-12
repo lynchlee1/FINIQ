@@ -51,7 +51,6 @@ const elements = {
   bondSearch: document.getElementById("bondSearch"),
   bondCorrectionFilter: document.getElementById("bondCorrectionFilter"),
   bondLimit: document.getElementById("bondLimit"),
-  bondSummaryCards: document.getElementById("bondSummaryCards"),
   bondRows: document.getElementById("bondRows"),
   bondDetail: document.getElementById("bondDetail"),
 };
@@ -80,8 +79,30 @@ function formatNumber(value) {
   return Number.isFinite(number) ? number.toLocaleString("ko-KR") : String(value);
 }
 
+function formatHundredMillion(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return String(value);
+  }
+  return (number / 100000000).toLocaleString("ko-KR", {
+    maximumFractionDigits: 2,
+  });
+}
+
 function field(record, key) {
   return record?.fields?.[key] ?? "";
+}
+
+function kindDisclosureUrl(record) {
+  const acptNo = String(record?.acpt_no || "").trim();
+  const docNo = String(record?.rcept_no || "").trim();
+  if (!acptNo) {
+    return "";
+  }
+  return `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=${encodeURIComponent(acptNo)}&docno=${encodeURIComponent(docNo)}&viewerhost=&viewerport=`;
 }
 
 function recordKey(record) {
@@ -270,22 +291,6 @@ function formatParseResult(result) {
   return lines.filter((line) => line !== "").join("\n");
 }
 
-function renderBondSummaryCards(payload, visibleCount) {
-  const summary = payload?.summary || {};
-  const cards = [
-    ["표시", visibleCount],
-    ["전체", summary.records || 0],
-    ["정정 Family", summary.families || 0],
-    ["최신 공시", summary.latest_records || 0],
-  ];
-  elements.bondSummaryCards.innerHTML = cards.map(([label, value]) => `
-    <div class="summary-card">
-      <span>${escapeHtml(label)}</span>
-      <strong>${formatNumber(value)}</strong>
-    </div>
-  `).join("");
-}
-
 function bondRecordMatches(record, keyword) {
   if (!keyword) {
     return true;
@@ -320,21 +325,20 @@ function bondRecordPassesCorrectionFilter(record, filterValue) {
 function visibleBondRecords() {
   const keyword = String(elements.bondSearch?.value || "").trim().toLowerCase();
   const correctionFilter = elements.bondCorrectionFilter?.value || "all";
-  const limitValue = elements.bondLimit?.value || "100";
+  const limitValue = elements.bondLimit?.value || "20";
   const records = (bondSummary?.records || [])
     .filter((record) => bondRecordMatches(record, keyword))
     .filter((record) => bondRecordPassesCorrectionFilter(record, correctionFilter));
   if (limitValue === "all") {
     return records;
   }
-  return records.slice(0, Number(limitValue || 100));
+  return records.slice(0, Number(limitValue || 20));
 }
 
 function renderBondRows() {
   const records = visibleBondRecords();
-  renderBondSummaryCards(bondSummary, records.length);
   if (!records.length) {
-    elements.bondRows.innerHTML = `<tr><td colspan="10" class="empty-state">표시할 채권 정보가 없습니다.</td></tr>`;
+    elements.bondRows.innerHTML = `<tr><td colspan="5" class="empty-state">표시할 채권 정보가 없습니다.</td></tr>`;
     renderBondDetail(null);
     return;
   }
@@ -343,18 +347,18 @@ function renderBondRows() {
   }
   elements.bondRows.innerHTML = records.map((record) => {
     const key = recordKey(record);
+    const disclosureUrl = kindDisclosureUrl(record);
     return `
       <tr class="html-bond-row" data-key="${escapeHtml(key)}" data-selected="${key === selectedBondKey ? "true" : "false"}">
-        <td>${formatNumber(record.index)}</td>
         <td class="html-bond-title">${escapeHtml(record.title || "-")}</td>
         <td>${escapeHtml(field(record, "회차") || "-")}</td>
-        <td>${formatNumber(field(record, "발행금액"))}</td>
-        <td>${formatNumber(field(record, "행사가액"))}</td>
-        <td>${formatNumber(field(record, "리픽싱(%)"))}</td>
-        <td>${escapeHtml(field(record, "납입일") || "-")}</td>
-        <td>${escapeHtml(correctionLabel(record))}</td>
+        <td>${formatHundredMillion(field(record, "발행금액"))}</td>
         <td><code>${escapeHtml(record.rcept_no || "-")}</code></td>
-        <td><code>${escapeHtml(record.acpt_no || "-")}</code></td>
+        <td>${
+          disclosureUrl
+            ? `<a class="line-button html-bond-open-link" href="${escapeHtml(disclosureUrl)}" target="_blank" rel="noopener noreferrer">열기</a>`
+            : "-"
+        }</td>
       </tr>
     `;
   }).join("");
@@ -405,20 +409,45 @@ function renderCorrectionTimeline(record) {
 
 function renderBondDetail(record) {
   if (!record) {
-    elements.bondDetail.innerHTML = `<div class="empty-state">행을 선택하면 정정공시 기록과 발행 대상자가 표시됩니다.</div>`;
+    elements.bondDetail.innerHTML = `<div class="empty-state">행을 선택하면 채권 상세 정보가 표시됩니다.</div>`;
     return;
   }
+  const detailFields = [
+    ["제목", record.title || "-"],
+    ["정정", correctionLabel(record)],
+    ["rcept_no", record.rcept_no || "-"],
+    ["acpt_no", record.acpt_no || "-"],
+    ["source_file", record.source_file || "-"],
+    ["상장시장", field(record, "상장시장") || "-"],
+    ["회차", field(record, "회차") || "-"],
+    ["발행금액(억원)", formatHundredMillion(field(record, "발행금액"))],
+    ["발행목적", field(record, "발행목적") || "-"],
+    ["표면이자율", field(record, "표면이자율") || "-"],
+    ["만기이자율", field(record, "만기이자율") || "-"],
+    ["만기일", field(record, "만기일") || "-"],
+    ["할증률(%)", field(record, "할증률(%)") || "-"],
+    ["행사가액", formatNumber(field(record, "행사가액"))],
+    ["행사대상", field(record, "행사대상") || "-"],
+    ["전환시작일", field(record, "전환시작일") || "-"],
+    ["전환종료일", field(record, "전환종료일") || "-"],
+    ["리픽싱(%)", field(record, "리픽싱(%)") || "-"],
+    ["청약일", field(record, "청약일") || "-"],
+    ["납입일", field(record, "납입일") || "-"],
+    ["납입방법", field(record, "납입방법") || "-"],
+  ];
   elements.bondDetail.innerHTML = `
     <div class="html-bond-detail-head">
       <span>${escapeHtml(correctionLabel(record))}</span>
       <strong>${escapeHtml(record.title || "-")}</strong>
       <code>${escapeHtml(record.family_id || record.rcept_no || "-")}</code>
     </div>
-    <div class="html-bond-field-grid">
-      <div><span>만기일</span><strong>${escapeHtml(field(record, "만기일") || "-")}</strong></div>
-      <div><span>전환기간</span><strong>${escapeHtml(field(record, "전환시작일") || "-")} ~ ${escapeHtml(field(record, "전환종료일") || "-")}</strong></div>
-      <div><span>납입방법</span><strong>${escapeHtml(field(record, "납입방법") || "-")}</strong></div>
-      <div><span>행사대상</span><strong>${escapeHtml(field(record, "행사대상") || "-")}</strong></div>
+    <div class="html-bond-field-list">
+      ${detailFields.map(([label, value]) => `
+        <div>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+      `).join("")}
     </div>
     <div class="html-bond-section-title">정정공시 기록</div>
     ${renderCorrectionTimeline(record)}
@@ -436,15 +465,36 @@ async function loadBondSummary() {
     setStatus("파싱 결과 경로가 필요합니다.", true);
     return;
   }
-  const payload = await fetchJson("/api/disclosures/html/parse/bond-summary", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ output_path: outputPath }),
-  });
-  bondSummary = payload;
-  selectedBondKey = "";
-  renderBondRows();
-  setStatus(`채권 요약 ${payload.summary?.records || 0}건을 불러왔습니다.`);
+
+  const limitValue = elements.bondLimit?.value || "20";
+  const limit = limitValue === "all" ? "" : Number(limitValue);
+
+  const btn = elements.loadBondSummaryBtn;
+  const originalText = btn ? btn.textContent : "결과 불러오기";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "불러오는 중";
+  }
+
+  try {
+    const payload = await fetchJson("/api/disclosures/html/parse/bond-summary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        output_path: outputPath,
+        limit: limit,
+      }),
+    });
+    bondSummary = payload;
+    selectedBondKey = "";
+    renderBondRows();
+    setStatus("채권 요약을 불러왔습니다.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
 }
 
 function formatParseJobStatus(payload) {
@@ -567,8 +617,13 @@ elements.loadBondSummaryBtn?.addEventListener("click", () => {
 });
 elements.bondSearch?.addEventListener("input", renderBondRows);
 elements.bondCorrectionFilter?.addEventListener("change", renderBondRows);
-elements.bondLimit?.addEventListener("change", renderBondRows);
+elements.bondLimit?.addEventListener("change", () => {
+  loadBondSummary().catch((error) => setStatus(error.message, true));
+});
 elements.bondRows?.addEventListener("click", (event) => {
+  if (event.target.closest("a")) {
+    return;
+  }
   const row = event.target.closest(".html-bond-row");
   if (!row) {
     return;

@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from .common import build_base_record, clean_text, parse_html_document, parse_int
+from .common import build_base_record, clean_text, parse_float, parse_html_document, parse_int
 
 MODE = "bond_issuance"
 FUNDING_PURPOSE_LABELS = [
@@ -52,6 +52,8 @@ def parse_bond_issuance(html_text: str | bytes, *, file_path: str | Path) -> dic
             "회차": _value_after(_row_containing(rows, "사채의 종류"), "회차"),
             "발행금액": _last_int(_row_containing(rows, "사채의 권면")),
             "발행목적": _funding_purposes(rows),
+            "표면이자율": _interest_rate(rows, "표면이자율"),
+            "만기이자율": _interest_rate(rows, "만기이자율", "만기보장수익"),
             "만기일": _last_value(_row_containing(rows, "사채만기일")),
             "할증률(%)": None if is_bond_with_warrant else _premium_rate(document_text),
             "행사가액": _exercise_price(rows),
@@ -284,3 +286,14 @@ def _issue_target_entities(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
         for name, values in grouped.items():
             entities.append([name, *values["representatives"], *values["major_holders"]])
     return entities
+
+
+def _interest_rate(rows: list[list[str]], *labels: str) -> float | None:
+    for label in labels:
+        row = _row_containing(rows, label)
+        if row:
+            val = _last_value(row)
+            res = parse_float(val)
+            if res is not None:
+                return res
+    return None
