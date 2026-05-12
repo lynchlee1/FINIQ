@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FINIQ MarketDesk HTML Download</title>
+    <title>FINIQ MarketDesk HTML 저장</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,19 +18,31 @@
       <header class="topbar panel">
         <div class="topbar-copy">
           <p class="brand-label">FINIQ MarketDesk</p>
-          <h1>HTML Download</h1>
+          <h1>HTML 저장</h1>
         </div>
         <nav class="topbar-nav" aria-label="주요 메뉴">
           <a class="nav-link" href="/">공시 조회</a>
-          <a class="nav-link" href="/download">공시 다운로드</a>
-          <a class="nav-link" href="/table">SQLITE 변환</a>
-          <a class="nav-link" href="/filter">공시 필터</a>
-          <a class="nav-link active" href="/html-download">HTML 저장</a>
-          <a class="nav-link" href="/html-parse">HTML 파싱</a>
+          <a class="nav-link" href="/download">데이터 구축</a>
+          <a class="nav-link active" href="/html-download">원문 처리</a>
         </nav>
       </header>
 
       <main class="download-view">
+        <nav class="workflow-tabs panel" aria-label="원문 처리 세부 페이지">
+          <a class="workflow-tab active" href="/html-download">
+            <span class="workflow-step">4</span>
+            <span>HTML 저장</span>
+          </a>
+          <a class="workflow-tab" href="/html-parse">
+            <span class="workflow-step">5</span>
+            <span>HTML 파싱</span>
+          </a>
+          <a class="workflow-tab" href="/html-bond-summary">
+            <span class="workflow-step">6</span>
+            <span>사채 발행 요약</span>
+          </a>
+        </nav>
+
         <section class="panel download-panel">
           <div class="panel-header">
             <div>

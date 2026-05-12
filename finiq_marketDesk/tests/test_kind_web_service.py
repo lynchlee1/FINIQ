@@ -21,6 +21,7 @@ from finiq_marketDesk.web.disclosure_html import (
 )
 from finiq_marketDesk.web.disclosure_html_parse import (
     PARSER_REGISTRY,
+    build_bond_parse_summary_payload,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
@@ -1017,6 +1018,55 @@ def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
         ]
 
 
+def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
+    parse_path = tmp_path / "parsed-bond_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "bond_issuance",
+                "records": [
+                    {
+                        "title": "[정정]전환사채권발행결정",
+                        "acpt_no": "20250102000002",
+                        "rcept_no": "20250102009999",
+                        "source_file": "/tmp/20250102000002.html",
+                        "correction_families": {
+                            "20250102009999": {
+                                "current_sequence": 1,
+                                "members": [
+                                    {"sequence": 0, "acpt_no": None, "rcept_no": "20250101009999"},
+                                    {"sequence": 1, "acpt_no": "20250102000002", "rcept_no": "20250102009999"},
+                                ],
+                            }
+                        },
+                        "회차": "1",
+                        "발행금액": 1_000_000_000,
+                        "행사가액": 1000,
+                        "리픽싱(%)": 70,
+                        "납입일": "2025년 01월 02일",
+                        "발행대상자": [["테스트조합", 1_000_000_000]],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bond_parse_summary_payload({"output_path": str(parse_path)})
+
+    assert payload["format"] == "finiq_bond_parse_summary_v1"
+    assert payload["summary"] == {
+        "records": 1,
+        "families": 1,
+        "correction_records": 1,
+        "latest_records": 1,
+    }
+    assert payload["records"][0]["family_id"] == "20250102009999"
+    assert payload["records"][0]["fields"]["발행금액"] == 1_000_000_000
+
+
 def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
@@ -1420,6 +1470,15 @@ def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path
         ["타법인 증권 취득자금", 0],
         ["기타자금", 11_000_000_000],
     ]
+
+
+def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing() -> None:
+    fixture_path = REPO_ROOT / "resources" / "kind_kosdaq" / "kind_html" / "20090506000331.html"
+
+    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["행사대상"] == "(주)아이에스이커머스 기명식 보통주"
+    assert parsed["리픽싱(%)"] == 80
 
 
 @pytest.mark.parametrize(

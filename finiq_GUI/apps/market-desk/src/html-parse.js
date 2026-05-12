@@ -47,12 +47,63 @@ const elements = {
   cancelParseBtn: document.getElementById("cancelParseBtn"),
   status: document.getElementById("status"),
   result: document.getElementById("result"),
+  loadBondSummaryBtn: document.getElementById("loadBondSummaryBtn"),
+  bondSearch: document.getElementById("bondSearch"),
+  bondCorrectionFilter: document.getElementById("bondCorrectionFilter"),
+  bondLimit: document.getElementById("bondLimit"),
+  bondSummaryCards: document.getElementById("bondSummaryCards"),
+  bondRows: document.getElementById("bondRows"),
+  bondDetail: document.getElementById("bondDetail"),
 };
 
 let activeCancelToken = "";
 let stopRequested = false;
 let activeJobId = "";
 let jobPollTimer = 0;
+let bondSummary = null;
+let selectedBondKey = "";
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString("ko-KR") : String(value);
+}
+
+function field(record, key) {
+  return record?.fields?.[key] ?? "";
+}
+
+function recordKey(record) {
+  return `${record.rcept_no || ""}:${record.acpt_no || ""}:${record.index || ""}`;
+}
+
+function correctionLabel(record) {
+  const current = Number(record.current_sequence ?? 0);
+  const total = Number(record.family_member_count || 0);
+  if (!total || total <= 1) {
+    return "-";
+  }
+  return `${current + 1}/${total}`;
+}
+
+function targetText(record) {
+  const targets = field(record, "발행대상자");
+  if (!Array.isArray(targets)) {
+    return "";
+  }
+  return targets.map((target) => Array.isArray(target) ? target.join(" ") : String(target || "")).join(" ");
+}
 
 function setStatus(message, isError = false) {
   elements.status.textContent = message || "";
@@ -129,8 +180,8 @@ function formatFailureLines(errors) {
 }
 
 function defaultOutputPath() {
-  const inputDirectory = elements.inputDirectory.value || "";
-  const mode = elements.parseMode.value || PARSE_MODES[0].key;
+  const inputDirectory = elements.inputDirectory?.value || "";
+  const mode = elements.parseMode?.value || PARSE_MODES[0].key;
   return inputDirectory ? `${inputDirectory}/parsed-${mode}.json` : "";
 }
 
@@ -142,6 +193,9 @@ function refreshOutputPath() {
 }
 
 function renderModes() {
+  if (!elements.parseMode || !elements.modeCards) {
+    return;
+  }
   elements.parseMode.innerHTML = PARSE_MODES.map(
     (mode) => `<option value="${mode.key}">${mode.label}</option>`,
   ).join("");
@@ -160,6 +214,9 @@ function renderModes() {
 }
 
 function syncModeCards() {
+  if (!elements.parseMode || !elements.modeCards) {
+    return;
+  }
   for (const card of elements.modeCards.querySelectorAll(".mode-card")) {
     card.dataset.active = card.querySelector("code")?.textContent === elements.parseMode.value ? "true" : "false";
   }
@@ -176,8 +233,13 @@ async function fetchJson(url, init) {
 
 async function loadConfig() {
   const config = await fetchJson("/api/config");
-  elements.inputDirectory.value = config.html_output_directory || `${config.output_root || ""}/viewer_html`;
-  refreshOutputPath();
+  if (elements.inputDirectory) {
+    elements.inputDirectory.value = config.html_output_directory || `${config.output_root || ""}/viewer_html`;
+    refreshOutputPath();
+  } else if (elements.outputPath && elements.outputPath.dataset.touched !== "true") {
+    const htmlDirectory = config.html_output_directory || `${config.output_root || ""}/viewer_html`;
+    elements.outputPath.value = htmlDirectory ? `${htmlDirectory}/parsed-bond_issuance.json` : "";
+  }
   setStatus("저장된 HTML 폴더 기본값을 불러왔습니다.");
 }
 
@@ -206,6 +268,183 @@ function formatParseResult(result) {
     ...formatFailureLines(result.errors),
   ];
   return lines.filter((line) => line !== "").join("\n");
+}
+
+function renderBondSummaryCards(payload, visibleCount) {
+  const summary = payload?.summary || {};
+  const cards = [
+    ["표시", visibleCount],
+    ["전체", summary.records || 0],
+    ["정정 Family", summary.families || 0],
+    ["최신 공시", summary.latest_records || 0],
+  ];
+  elements.bondSummaryCards.innerHTML = cards.map(([label, value]) => `
+    <div class="summary-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${formatNumber(value)}</strong>
+    </div>
+  `).join("");
+}
+
+function bondRecordMatches(record, keyword) {
+  if (!keyword) {
+    return true;
+  }
+  const haystack = [
+    record.title,
+    record.acpt_no,
+    record.rcept_no,
+    record.family_id,
+    field(record, "회차"),
+    field(record, "납입일"),
+    targetText(record),
+  ].join(" ").toLowerCase();
+  return haystack.includes(keyword);
+}
+
+function bondRecordPassesCorrectionFilter(record, filterValue) {
+  const current = Number(record.current_sequence ?? 0);
+  const total = Number(record.family_member_count || 0);
+  if (filterValue === "corrected") {
+    return total > 1;
+  }
+  if (filterValue === "current") {
+    return current > 0;
+  }
+  if (filterValue === "latest") {
+    return total > 0 && current === total - 1;
+  }
+  return true;
+}
+
+function visibleBondRecords() {
+  const keyword = String(elements.bondSearch?.value || "").trim().toLowerCase();
+  const correctionFilter = elements.bondCorrectionFilter?.value || "all";
+  const limitValue = elements.bondLimit?.value || "100";
+  const records = (bondSummary?.records || [])
+    .filter((record) => bondRecordMatches(record, keyword))
+    .filter((record) => bondRecordPassesCorrectionFilter(record, correctionFilter));
+  if (limitValue === "all") {
+    return records;
+  }
+  return records.slice(0, Number(limitValue || 100));
+}
+
+function renderBondRows() {
+  const records = visibleBondRecords();
+  renderBondSummaryCards(bondSummary, records.length);
+  if (!records.length) {
+    elements.bondRows.innerHTML = `<tr><td colspan="10" class="empty-state">표시할 채권 정보가 없습니다.</td></tr>`;
+    renderBondDetail(null);
+    return;
+  }
+  if (!selectedBondKey || !records.some((record) => recordKey(record) === selectedBondKey)) {
+    selectedBondKey = recordKey(records[0]);
+  }
+  elements.bondRows.innerHTML = records.map((record) => {
+    const key = recordKey(record);
+    return `
+      <tr class="html-bond-row" data-key="${escapeHtml(key)}" data-selected="${key === selectedBondKey ? "true" : "false"}">
+        <td>${formatNumber(record.index)}</td>
+        <td class="html-bond-title">${escapeHtml(record.title || "-")}</td>
+        <td>${escapeHtml(field(record, "회차") || "-")}</td>
+        <td>${formatNumber(field(record, "발행금액"))}</td>
+        <td>${formatNumber(field(record, "행사가액"))}</td>
+        <td>${formatNumber(field(record, "리픽싱(%)"))}</td>
+        <td>${escapeHtml(field(record, "납입일") || "-")}</td>
+        <td>${escapeHtml(correctionLabel(record))}</td>
+        <td><code>${escapeHtml(record.rcept_no || "-")}</code></td>
+        <td><code>${escapeHtml(record.acpt_no || "-")}</code></td>
+      </tr>
+    `;
+  }).join("");
+  renderBondDetail(records.find((record) => recordKey(record) === selectedBondKey) || records[0]);
+}
+
+function renderTargetList(record) {
+  const targets = field(record, "발행대상자");
+  if (!Array.isArray(targets) || targets.length === 0) {
+    return `<div class="empty-state">발행 대상자 정보가 없습니다.</div>`;
+  }
+  return `
+    <div class="html-bond-targets">
+      ${targets.map((target) => {
+        const name = Array.isArray(target) ? target[0] : target;
+        const amount = Array.isArray(target) ? target[target.length - 1] : "";
+        return `
+          <div class="html-bond-target">
+            <span>${escapeHtml(name || "-")}</span>
+            <strong>${formatNumber(amount)}</strong>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderCorrectionTimeline(record) {
+  const family = bondSummary?.families?.[record.family_id];
+  const members = Array.isArray(family?.members) ? family.members : [];
+  if (!members.length) {
+    return `<div class="empty-state">정정공시 기록이 없습니다.</div>`;
+  }
+  return `
+    <div class="html-correction-timeline">
+      ${members.map((member) => `
+        <div class="html-correction-step" data-current="${member.sequence === record.current_sequence ? "true" : "false"}">
+          <span>${formatNumber(Number(member.sequence || 0) + 1)}</span>
+          <div>
+            <strong><code>${escapeHtml(member.rcept_no || "-")}</code></strong>
+            <em>acpt_no ${escapeHtml(member.acpt_no || "-")}</em>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderBondDetail(record) {
+  if (!record) {
+    elements.bondDetail.innerHTML = `<div class="empty-state">행을 선택하면 정정공시 기록과 발행 대상자가 표시됩니다.</div>`;
+    return;
+  }
+  elements.bondDetail.innerHTML = `
+    <div class="html-bond-detail-head">
+      <span>${escapeHtml(correctionLabel(record))}</span>
+      <strong>${escapeHtml(record.title || "-")}</strong>
+      <code>${escapeHtml(record.family_id || record.rcept_no || "-")}</code>
+    </div>
+    <div class="html-bond-field-grid">
+      <div><span>만기일</span><strong>${escapeHtml(field(record, "만기일") || "-")}</strong></div>
+      <div><span>전환기간</span><strong>${escapeHtml(field(record, "전환시작일") || "-")} ~ ${escapeHtml(field(record, "전환종료일") || "-")}</strong></div>
+      <div><span>납입방법</span><strong>${escapeHtml(field(record, "납입방법") || "-")}</strong></div>
+      <div><span>행사대상</span><strong>${escapeHtml(field(record, "행사대상") || "-")}</strong></div>
+    </div>
+    <div class="html-bond-section-title">정정공시 기록</div>
+    ${renderCorrectionTimeline(record)}
+    <div class="html-bond-section-title">발행 대상자</div>
+    ${renderTargetList(record)}
+  `;
+}
+
+async function loadBondSummary() {
+  if (elements.inputDirectory) {
+    refreshOutputPath();
+  }
+  const outputPath = elements.outputPath.value || defaultOutputPath();
+  if (!outputPath) {
+    setStatus("파싱 결과 경로가 필요합니다.", true);
+    return;
+  }
+  const payload = await fetchJson("/api/disclosures/html/parse/bond-summary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ output_path: outputPath }),
+  });
+  bondSummary = payload;
+  selectedBondKey = "";
+  renderBondRows();
+  setStatus(`채권 요약 ${payload.summary?.records || 0}건을 불러왔습니다.`);
 }
 
 function formatParseJobStatus(payload) {
@@ -299,7 +538,9 @@ async function cancelParse() {
   });
 }
 
-renderModes();
+if (elements.parseMode) {
+  renderModes();
+}
 
 elements.inputDirectory?.addEventListener("input", refreshOutputPath);
 
@@ -321,12 +562,28 @@ elements.parseBtn?.addEventListener("click", () => {
 elements.cancelParseBtn?.addEventListener("click", () => {
   cancelParse().catch((error) => setStatus(error.message, true));
 });
+elements.loadBondSummaryBtn?.addEventListener("click", () => {
+  loadBondSummary().catch((error) => setStatus(error.message, true));
+});
+elements.bondSearch?.addEventListener("input", renderBondRows);
+elements.bondCorrectionFilter?.addEventListener("change", renderBondRows);
+elements.bondLimit?.addEventListener("change", renderBondRows);
+elements.bondRows?.addEventListener("click", (event) => {
+  const row = event.target.closest(".html-bond-row");
+  if (!row) {
+    return;
+  }
+  selectedBondKey = row.dataset.key || "";
+  renderBondRows();
+});
 
-bindPathSetting(
-  elements.inputDirectory,
-  () => ({ html_output_directory: elements.inputDirectory.value }),
-  (error) => setStatus(error.message, true),
-);
+if (elements.inputDirectory) {
+  bindPathSetting(
+    elements.inputDirectory,
+    () => ({ html_output_directory: elements.inputDirectory.value }),
+    (error) => setStatus(error.message, true),
+  );
+}
 
 loadConfig().catch((error) => setStatus(error.message, true));
 

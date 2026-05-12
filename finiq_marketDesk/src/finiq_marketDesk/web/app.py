@@ -47,7 +47,11 @@ from finiq_marketDesk.web.download import (
     start_download_job,
 )
 from finiq_marketDesk.web.disclosure_html import cancel_disclosure_html_download, download_disclosure_html_payload
-from finiq_marketDesk.web.disclosure_html_parse import cancel_disclosure_html_parse, parse_disclosure_html_payload
+from finiq_marketDesk.web.disclosure_html_parse import (
+    build_bond_parse_summary_payload,
+    cancel_disclosure_html_parse,
+    parse_disclosure_html_payload,
+)
 from finiq_marketDesk.web.table_export import build_disclosure_table_payload
 
 
@@ -484,6 +488,9 @@ class KindWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/disclosures/html/parse/start":
             self._handle_disclosure_html_parse_start()
             return
+        if parsed.path == "/api/disclosures/html/parse/bond-summary":
+            self._handle_disclosure_html_parse_bond_summary()
+            return
         if parsed.path == "/api/disclosures/html/parse/cancel":
             self._handle_disclosure_html_parse_cancel()
             return
@@ -888,6 +895,15 @@ class KindWebHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
             payload = cancel_disclosure_html_parse(str(body.get("cancel_token") or ""))
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_html_parse_bond_summary(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = build_bond_parse_summary_payload(body)
         except (OSError, ValueError) as exc:
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return

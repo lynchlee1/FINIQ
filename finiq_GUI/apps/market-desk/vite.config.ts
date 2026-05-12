@@ -15,6 +15,8 @@ const downloadAliasPlugin = () => ({
         request.url = '/html-download.html'
       } else if (request.url === '/html-parse') {
         request.url = '/html-parse.html'
+      } else if (request.url === '/html-bond-summary') {
+        request.url = '/html-bond-summary.html'
       }
       next()
     })
@@ -31,6 +33,8 @@ const downloadAliasPlugin = () => ({
         request.url = '/html-download.html'
       } else if (request.url === '/html-parse') {
         request.url = '/html-parse.html'
+      } else if (request.url === '/html-bond-summary') {
+        request.url = '/html-bond-summary.html'
       }
       next()
     })
@@ -49,6 +53,7 @@ export default defineConfig({
         filter: resolve(__dirname, 'filter.html'),
         htmlDownload: resolve(__dirname, 'html-download.html'),
         htmlParse: resolve(__dirname, 'html-parse.html'),
+        htmlBondSummary: resolve(__dirname, 'html-bond-summary.html'),
       },
     },
   },

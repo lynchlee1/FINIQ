@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FINIQ MarketDesk Dart Navigator</title>
+    <title>FINIQ MarketDesk 공시 조회</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,15 +18,12 @@
       <header class="topbar panel">
         <div class="topbar-copy">
           <p class="brand-label">FINIQ MarketDesk</p>
-          <h1>Dart Navigator</h1>
+          <h1>공시 조회</h1>
         </div>
         <nav class="topbar-nav" aria-label="주요 메뉴">
           <a class="nav-link active" href="/">공시 조회</a>
-          <a class="nav-link" href="/download">공시 다운로드</a>
-          <a class="nav-link" href="/table">SQLITE 변환</a>
-          <a class="nav-link" href="/filter">공시 필터</a>
-          <a class="nav-link" href="/html-download">HTML 저장</a>
-          <a class="nav-link" href="/html-parse">HTML 파싱</a>
+          <a class="nav-link" href="/download">데이터 구축</a>
+          <a class="nav-link" href="/html-download">원문 처리</a>
         </nav>
       </header>
 
@@ -36,7 +33,7 @@
             <span class="sr-only">회사 검색</span>
             <input id="companySearchInput" type="search" placeholder="회사명을 입력하세요." />
           </label>
-          <button id="toggleSettingsBtn" class="action-button action-button-muted" type="button">
+          <button id="toggleSettingsBtn" class="action-button action-button-muted action-button-compact" type="button">
             <span class="button-icon" aria-hidden="true">⚙</span>
             <span>설정</span>
           </button>

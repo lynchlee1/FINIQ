@@ -28,6 +28,23 @@ PARSER_REGISTRY = {
     "security_transaction": parse_security_transaction,
 }
 
+BOND_SUMMARY_FIELDS = (
+    "회차",
+    "발행금액",
+    "발행목적",
+    "만기일",
+    "할증률(%)",
+    "행사가액",
+    "행사대상",
+    "전환시작일",
+    "전환종료일",
+    "리픽싱(%)",
+    "청약일",
+    "납입일",
+    "납입방법",
+    "발행대상자",
+)
+
 
 def cancel_disclosure_html_parse(token: str) -> dict[str, Any]:
     normalized_token = str(token or "").strip()
@@ -181,6 +198,21 @@ def _write_parse_payload(payload: dict[str, Any], output_path: Path) -> None:
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _load_parse_payload(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        msg = f"parse result JSON does not exist: {path}"
+        raise ValueError(msg)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        msg = f"parse result JSON cannot be read: {path}"
+        raise ValueError(msg) from exc
+    if not isinstance(payload, dict):
+        msg = "parse result JSON must contain an object"
+        raise ValueError(msg)
+    return payload
+
+
 def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -330,3 +362,75 @@ def parse_disclosure_html_payload(
     )
     _write_parse_payload(payload, output_path)
     return payload
+
+
+def _record_family_info(record: dict[str, Any]) -> tuple[str, int | None, int | None]:
+    families = record.get("correction_families")
+    if not isinstance(families, dict) or not families:
+        return ("", None, None)
+    family_id = str(next(iter(families)))
+    family = families.get(family_id)
+    if not isinstance(family, dict):
+        return (family_id, None, None)
+    current_sequence_raw = family.get("current_sequence")
+    current_sequence = current_sequence_raw if isinstance(current_sequence_raw, int) else None
+    members = family.get("members")
+    member_count = len(members) if isinstance(members, list) else None
+    return (family_id, current_sequence, member_count)
+
+
+def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Load a bond_issuance parse result JSON and return UI-ready summary rows."""
+    output_path_raw = str(body.get("output_path") or body.get("parse_result_path") or "").strip()
+    if not output_path_raw:
+        msg = "output_path is required"
+        raise ValueError(msg)
+    output_path = Path(output_path_raw).expanduser().resolve()
+    payload = _load_parse_payload(output_path)
+    if payload.get("mode") != "bond_issuance":
+        msg = "parse result mode must be bond_issuance"
+        raise ValueError(msg)
+
+    records = _resolve_correction_family_acpt_numbers(list(payload.get("records") or []))
+    summary_records: list[dict[str, Any]] = []
+    families: dict[str, Any] = {}
+    for index, record in enumerate(records, start=1):
+        if not isinstance(record, dict):
+            continue
+        family_id, current_sequence, member_count = _record_family_info(record)
+        for family_key, family in (record.get("correction_families") or {}).items():
+            if str(family_key) and str(family_key) not in families:
+                families[str(family_key)] = family
+        summary_records.append(
+            {
+                "index": index,
+                "title": record.get("title") or "",
+                "source_file": record.get("source_file") or "",
+                "acpt_no": record.get("acpt_no") or "",
+                "rcept_no": record.get("rcept_no") or "",
+                "family_id": family_id,
+                "current_sequence": current_sequence,
+                "family_member_count": member_count,
+                "fields": {field: record.get(field) for field in BOND_SUMMARY_FIELDS},
+            }
+        )
+
+    return {
+        "format": "finiq_bond_parse_summary_v1",
+        "source_path": str(output_path),
+        "summary": {
+            "records": len(summary_records),
+            "families": len(families),
+            "correction_records": sum(
+                1 for record in summary_records if (record.get("current_sequence") or 0) > 0
+            ),
+            "latest_records": sum(
+                1
+                for record in summary_records
+                if record.get("family_member_count") is not None
+                and record.get("current_sequence") == record.get("family_member_count") - 1
+            ),
+        },
+        "families": families,
+        "records": summary_records,
+    }

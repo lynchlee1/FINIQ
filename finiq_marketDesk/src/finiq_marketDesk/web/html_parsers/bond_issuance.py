@@ -179,7 +179,7 @@ def _exercise_price(rows: list[list[str]]) -> int | None:
 
 
 def _exercise_target(rows: list[list[str]]) -> str | None:
-    for target_label in ("전환에 따라", "인수권행사에 따라"):
+    for target_label in ("전환에 따라", "전환으로 발행할", "인수권행사에 따라"):
         value = _last_value(_row_containing(rows, target_label, "종류"))
         if value is not None:
             return value
@@ -226,14 +226,17 @@ def _refixing_rate(rows: list[list[str]], document_text: str) -> int | None:
 
 
 def _refixing_rate_from_adjustment_text(document_text: str) -> int | None:
-    adjustment_index = document_text.find("행사가액 조정")
-    if adjustment_index == -1:
-        adjustment_index = document_text.find("행사가액의 조정")
+    adjustment_index = -1
+    for adjustment_label in ("행사가액 조정", "행사가액의 조정", "전환가액 조정", "전환가액의 조정", "전환가격 조정"):
+        adjustment_index = document_text.find(adjustment_label)
+        if adjustment_index != -1:
+            break
     if adjustment_index == -1:
         return None
     adjustment_text = document_text[adjustment_index : adjustment_index + 2500]
     patterns = (
         r"최저조정가액비율\s*:\s*(\d+(?:\.\d+)?)\s*%",
+        r"최저\s*조정한도.{0,160}?(\d+(?:\.\d+)?)\s*%",
         r"조정한도.{0,160}?(\d+(?:\.\d+)?)\s*%\s*이상",
         r"행사가액에\s*(\d+(?:\.\d+)?)\s*%\s*를\s*한도",
     )
