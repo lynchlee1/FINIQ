@@ -101,6 +101,51 @@ def _processed_source_files(records: list[dict[str, Any]], errors: list[dict[str
     return processed
 
 
+def _rcept_no_to_acpt_no(records: list[dict[str, Any]]) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for record in records:
+        rcept_no = str(record.get("rcept_no") or "").strip()
+        acpt_no = str(record.get("acpt_no") or "").strip()
+        if rcept_no and acpt_no:
+            index.setdefault(rcept_no, acpt_no)
+    return index
+
+
+def _resolve_correction_family_acpt_numbers(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rcept_to_acpt = _rcept_no_to_acpt_no(records)
+    resolved_records: list[dict[str, Any]] = []
+    for record in records:
+        resolved_record = dict(record)
+        families = record.get("correction_families")
+        if not isinstance(families, dict):
+            resolved_records.append(resolved_record)
+            continue
+
+        resolved_families: dict[str, Any] = {}
+        for family_id, family in families.items():
+            if not isinstance(family, dict):
+                resolved_families[str(family_id)] = family
+                continue
+            resolved_family = dict(family)
+            members = family.get("members")
+            if isinstance(members, list):
+                resolved_members = []
+                for member in members:
+                    if not isinstance(member, dict):
+                        resolved_members.append(member)
+                        continue
+                    resolved_member = dict(member)
+                    rcept_no = str(resolved_member.get("rcept_no") or "").strip()
+                    if rcept_no and not resolved_member.get("acpt_no"):
+                        resolved_member["acpt_no"] = rcept_to_acpt.get(rcept_no)
+                    resolved_members.append(resolved_member)
+                resolved_family["members"] = resolved_members
+            resolved_families[str(family_id)] = resolved_family
+        resolved_record["correction_families"] = resolved_families
+        resolved_records.append(resolved_record)
+    return resolved_records
+
+
 def _build_payload(
     *,
     mode: str,
@@ -125,7 +170,7 @@ def _build_payload(
             "failed_files": len(errors),
             "resumed_files": resumed_files,
         },
-        "records": records,
+        "records": _resolve_correction_family_acpt_numbers(records),
         "errors": errors,
         "progress_log": progress_log[-200:],
     }

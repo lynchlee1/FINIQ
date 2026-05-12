@@ -31,11 +31,21 @@ def parse_bond_issuance(html_text: str | bytes, *, file_path: str | Path) -> dic
         if body_html is not None:
             document_markup = body_html
             original_title = record.get("title") or ""
+            original_correction_families = record.get("correction_families")
+            original_rcept_no = record.get("rcept_no")
+            original_acpt_no = record.get("acpt_no")
             record = build_base_record(body_html, file_path=file_path, mode=MODE)
             if not record.get("title"):
                 record["title"] = original_title
+            if not record.get("correction_families") and original_correction_families:
+                record["correction_families"] = original_correction_families
+            if not record.get("rcept_no") and original_rcept_no:
+                record["rcept_no"] = original_rcept_no
+            if original_acpt_no:
+                record["acpt_no"] = original_acpt_no
             rows = _main_bond_rows(record["raw_tables"])
     document_text = clean_text(" ".join(parse_html_document(document_markup).itertext()))
+    is_bond_with_warrant = _is_bond_with_warrant(rows)
 
     record.update(
         {
@@ -43,15 +53,15 @@ def parse_bond_issuance(html_text: str | bytes, *, file_path: str | Path) -> dic
             "발행금액": _last_int(_row_containing(rows, "사채의 권면")),
             "발행목적": _funding_purposes(rows),
             "만기일": _last_value(_row_containing(rows, "사채만기일")),
-            "할증률(%)": _premium_rate(document_text),
-            "행사가액": _last_int(_row_containing(rows, "전환가액 (원/주)")),
-            "행사대상": _last_value(_row_containing(rows, "전환에 따라", "종류")),
+            "할증률(%)": None if is_bond_with_warrant else _premium_rate(document_text),
+            "행사가액": _exercise_price(rows),
+            "행사대상": _exercise_target(rows),
             "전환시작일": _exercise_period_value(rows, "시작일"),
             "전환종료일": _exercise_period_value(rows, "종료일"),
-            "리픽싱(%)": _refixing_rate(rows),
+            "리픽싱(%)": _refixing_rate(rows, document_text),
             "청약일": _last_value(_row_with_label(rows, "청약일")),
             "납입일": _last_value(_row_with_label(rows, "납입일")),
-            "납입방법": _last_value(_row_with_label(rows, "납입방법")),
+            "납입방법": _payment_method(rows),
             "발행대상자": _issue_targets(record["raw_tables"]),
             "발행대상자세부엔티티": _issue_target_entities(record["raw_tables"]),
         }
@@ -118,6 +128,10 @@ def _row_containing(rows: list[list[str]], *needles: str) -> list[str]:
     return []
 
 
+def _is_bond_with_warrant(rows: list[list[str]]) -> bool:
+    return _row_contains(_row_containing(rows, "사채의 종류"), "신주인수권")
+
+
 def _normalize_label(value: str) -> str:
     return re.sub(r"^\d+(?:-\d+)?\.\s*", "", clean_text(value))
 
@@ -156,6 +170,30 @@ def _exercise_period_value(rows: list[list[str]], boundary_label: str) -> str | 
     return None
 
 
+def _exercise_price(rows: list[list[str]]) -> int | None:
+    for price_label in ("전환가액 (원/주)", "행사가액 (원/주)"):
+        value = _last_int(_row_containing(rows, price_label))
+        if value is not None:
+            return value
+    return None
+
+
+def _exercise_target(rows: list[list[str]]) -> str | None:
+    for target_label in ("전환에 따라", "인수권행사에 따라"):
+        value = _last_value(_row_containing(rows, target_label, "종류"))
+        if value is not None:
+            return value
+    return None
+
+
+def _payment_method(rows: list[list[str]]) -> str | None:
+    for label in ("납입방법", "신주대금 납입방법"):
+        value = _last_value(_row_with_label(rows, label))
+        if value is not None:
+            return value
+    return None
+
+
 def _funding_purposes(rows: list[list[str]]) -> list[list[Any]]:
     purposes: list[list[Any]] = []
     for label in FUNDING_PURPOSE_LABELS:
@@ -173,7 +211,7 @@ def _premium_rate(document_text: str) -> float | None:
     return None
 
 
-def _refixing_rate(rows: list[list[str]]) -> int | None:
+def _refixing_rate(rows: list[list[str]], document_text: str) -> int | None:
     row = _row_containing(rows, "최저 조정가액 근거")
     text = " ".join(row)
     match = re.search(r"100분의\s*(\d+)", text)
@@ -182,7 +220,28 @@ def _refixing_rate(rows: list[list[str]]) -> int | None:
     row = _row_containing(rows, "발행당시 전환가액의", "미만")
     text = " ".join(row)
     match = re.search(r"(\d+(?:\.\d+)?)\s*%", text)
-    return int(float(match.group(1))) if match else None
+    if match:
+        return int(float(match.group(1)))
+    return _refixing_rate_from_adjustment_text(document_text)
+
+
+def _refixing_rate_from_adjustment_text(document_text: str) -> int | None:
+    adjustment_index = document_text.find("행사가액 조정")
+    if adjustment_index == -1:
+        adjustment_index = document_text.find("행사가액의 조정")
+    if adjustment_index == -1:
+        return None
+    adjustment_text = document_text[adjustment_index : adjustment_index + 2500]
+    patterns = (
+        r"최저조정가액비율\s*:\s*(\d+(?:\.\d+)?)\s*%",
+        r"조정한도.{0,160}?(\d+(?:\.\d+)?)\s*%\s*이상",
+        r"행사가액에\s*(\d+(?:\.\d+)?)\s*%\s*를\s*한도",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, adjustment_text)
+        if match:
+            return int(float(match.group(1)))
+    return None
 
 
 def _issue_targets(raw_tables: list[dict[str, Any]]) -> list[list[Any]]:

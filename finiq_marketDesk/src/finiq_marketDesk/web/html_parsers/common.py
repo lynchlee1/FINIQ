@@ -82,6 +82,71 @@ def extract_acpt_no(file_path: str | Path) -> str:
     return candidate if candidate.isdigit() else ""
 
 
+def _viewer_acpt_no(document: html.HtmlElement, file_path: str | Path) -> str:
+    values = document.xpath("//input[@name='acptNo']/@value")
+    for value in values:
+        acpt_no = clean_text(str(value))
+        if acpt_no:
+            return acpt_no
+    return extract_acpt_no(file_path)
+
+
+def _main_doc_options(document: html.HtmlElement) -> list[dict[str, Any]]:
+    options: list[dict[str, Any]] = []
+    for option in document.xpath("//select[@id='mainDoc' or @name='mainDoc']/option"):
+        raw_value = clean_text(str(option.get("value") or ""))
+        if not raw_value:
+            continue
+        doc_no, _, latest_flag = raw_value.partition("|")
+        rcept_no = clean_text(doc_no)
+        if not rcept_no:
+            continue
+        options.append(
+            {
+                "rcept_no": rcept_no,
+                "latest_flag": clean_text(latest_flag).upper(),
+                "selected": option.get("selected") is not None,
+            }
+        )
+    return options
+
+
+def _correction_families(document: html.HtmlElement, *, acpt_no: str) -> tuple[str | None, dict[str, Any]]:
+    main_docs = _main_doc_options(document)
+    if not main_docs:
+        return None, {}
+
+    current_sequence = next(
+        (index for index, item in enumerate(main_docs) if item["selected"]),
+        None,
+    )
+    latest_item = next(
+        (item for item in main_docs if item["latest_flag"] == "Y"),
+        main_docs[-1],
+    )
+    family_id = latest_item["rcept_no"]
+    current_rcept_no = (
+        main_docs[current_sequence]["rcept_no"]
+        if current_sequence is not None
+        else None
+    )
+    members = []
+    for sequence, item in enumerate(main_docs):
+        members.append(
+            {
+                "sequence": sequence,
+                "acpt_no": acpt_no if sequence == current_sequence else None,
+                "rcept_no": item["rcept_no"],
+            }
+        )
+    return current_rcept_no, {
+        family_id: {
+            "current_sequence": current_sequence,
+            "members": members,
+        }
+    }
+
+
 def extract_table_rows(document: html.HtmlElement) -> list[list[str]]:
     """Return all table rows as normalized cell text."""
     rows: list[list[str]] = []
@@ -272,8 +337,12 @@ def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: 
     """Build the shared architecture-level parse record for a disclosure HTML file."""
     document = parse_html_document(html_markup)
     raw_tables = extract_tables(document)
+    acpt_no = _viewer_acpt_no(document, file_path)
+    rcept_no, correction_families = _correction_families(document, acpt_no=acpt_no)
     return {
-        "acpt_no": extract_acpt_no(file_path),
+        "correction_families": correction_families,
+        "rcept_no": rcept_no,
+        "acpt_no": acpt_no,
         "source_file": str(Path(file_path).resolve()),
         "mode": mode,
         "title": extract_title(document),

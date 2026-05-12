@@ -956,6 +956,67 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
     assert stored["progress_log"] == payload["progress_log"]
 
 
+def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    first = viewer_dir / "20250101000001.html"
+    second = viewer_dir / "20250102000002.html"
+    first.write_text("<html></html>", encoding="utf-8")
+    second.write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        acpt_no = Path(file_path).stem
+        rcept_no = {
+            "20250101000001": "20250101009999",
+            "20250102000002": "20250102009999",
+        }[acpt_no]
+        current_sequence = 0 if acpt_no == "20250101000001" else 1
+        return {
+            "correction_families": {
+                "20250102009999": {
+                    "current_sequence": current_sequence,
+                    "members": [
+                        {
+                            "sequence": 0,
+                            "acpt_no": acpt_no if current_sequence == 0 else None,
+                            "rcept_no": "20250101009999",
+                        },
+                        {
+                            "sequence": 1,
+                            "acpt_no": acpt_no if current_sequence == 1 else None,
+                            "rcept_no": "20250102009999",
+                        },
+                    ],
+                }
+            },
+            "rcept_no": rcept_no,
+            "acpt_no": acpt_no,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "resume": False,
+        }
+    )
+
+    for record in payload["records"]:
+        family = record["correction_families"]["20250102009999"]
+        assert family["members"] == [
+            {"sequence": 0, "acpt_no": "20250101000001", "rcept_no": "20250101009999"},
+            {"sequence": 1, "acpt_no": "20250102000002", "rcept_no": "20250102009999"},
+        ]
+
+
 def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
@@ -1339,6 +1400,16 @@ def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path
     parsed = parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
 
     assert parsed["title"] == "[에스브이에이치] [정정]전환사채발행결정"
+    assert parsed["rcept_no"] == "20080826000555"
+    assert parsed["correction_families"] == {
+        "20080826000555": {
+            "current_sequence": 1,
+            "members": [
+                {"sequence": 0, "acpt_no": None, "rcept_no": "00000000867311"},
+                {"sequence": 1, "acpt_no": "20080826000187", "rcept_no": "20080826000555"},
+            ],
+        }
+    }
     assert parsed["회차"] == "9"
     assert parsed["발행금액"] == 15_000_000_000
     assert parsed["발행목적"] == [
@@ -1351,25 +1422,111 @@ def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path
     ]
 
 
-def test_parse_bond_issuance_maps_bond_with_warrant_exercise_period(tmp_path: Path) -> None:
-    fixture_path = tmp_path / "20080826000146.html"
-    html = """
-    <html><body>
-      <h2 class="SECTION-1"><p class="SECTION-1">신주인수권부사채발행결정</p></h2>
-      <table>
-        <tr><td>1. 사채의 종류</td><td>회차</td><td>2</td><td>종류</td><td>무기명식 무보증 신주인수권부사채</td></tr>
-        <tr><td>2. 사채의 권면총액 (원)</td><td>10,000,000,000</td></tr>
-        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>10,000,000,000</td></tr>
-        <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>시작일</td><td>2009년 08월 26일</td></tr>
-        <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>종료일</td><td>2011년 08월 26일</td></tr>
-      </table>
-    </body></html>
-    """
+@pytest.mark.parametrize(
+    ("acpt_no", "body_html", "expected"),
+    [
+        (
+            "20080825000412",
+            """
+            <html><body>
+              <h2 class="SECTION-1"><p class="SECTION-1">신주인수권부사채발행결정</p></h2>
+              <table>
+                <tr><td>1. 사채의 종류</td><td>회차</td><td>5</td><td>종류</td><td>무기명식 무보증 해외 신주인수권부사채</td></tr>
+                <tr><td>2. 사채의 권면총액 (원)</td><td>10,515,000,000</td></tr>
+                <tr><td>3. 자금조달의 목적</td><td>기타자금 (원)</td><td>10,515,000,000</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>행사가액 (원/주)</td><td>730</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>신주대금 납입방법</td><td>현금납입 또는 사채대용납입</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>인수권행사에 따라 발행할 주식의 종류</td><td>기명식 보통주</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>시작일</td><td>2009년 08월 29일</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>종료일</td><td>2011년 07월 29일</td></tr>
+              </table>
+              <p>신주인수권행사가액의 조정에 관한 사항. 행사가액은 최초행사가액의 70%를 하회할 수 없음. 최저조정가액비율 : 70%</p>
+            </body></html>
+            """,
+            {
+                "할증률(%)": None,
+                "행사가액": 730,
+                "행사대상": "기명식 보통주",
+                "전환시작일": "2009년 08월 29일",
+                "전환종료일": "2011년 07월 29일",
+                "리픽싱(%)": 70,
+                "납입방법": "현금납입 또는 사채대용납입",
+            },
+        ),
+        (
+            "20080826000146",
+            """
+            <html><body>
+              <h2 class="SECTION-1"><p class="SECTION-1">신주인수권부사채발행결정</p></h2>
+              <table>
+                <tr><td>1. 사채의 종류</td><td>회차</td><td>2</td><td>종류</td><td>무기명식 무보증 신주인수권부사채</td></tr>
+                <tr><td>2. 사채의 권면총액 (원)</td><td>3,000,000,000</td></tr>
+                <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>3,000,000,000</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>행사가액 (원/주)</td><td>848</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>신주대금 납입방법</td><td>현금 및 대용</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>인수권행사에 따라 발행할 주식의 종류</td><td>기명식 보통주</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>시작일</td><td>2009년 08월 26일</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>종료일</td><td>2011년 08월 26일</td></tr>
+              </table>
+              <p>신주인수권 행사가액 조정 등. 행사가액 조정한도는 발행 당시의 행사가액의 70%이상에 해당하는 가액으로 한다.</p>
+            </body></html>
+            """,
+            {
+                "할증률(%)": None,
+                "행사가액": 848,
+                "행사대상": "기명식 보통주",
+                "전환시작일": "2009년 08월 26일",
+                "전환종료일": "2011년 08월 26일",
+                "리픽싱(%)": 70,
+                "납입방법": "현금 및 대용",
+            },
+        ),
+        (
+            "20080826000267",
+            """
+            <html><body>
+              <h2 class="SECTION-1"><p class="SECTION-1">신주인수권부사채발행결정</p></h2>
+              <table>
+                <tr><td>1. 사채의 종류</td><td>회차</td><td>7-1</td><td>종류</td><td>무기명식 이권부 무보증 신주인수권부사채</td></tr>
+                <tr><td>2. 사채의 권면총액 (원)</td><td>6,000,000,000</td></tr>
+                <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>2,000,000,000</td></tr>
+                <tr><td>3. 자금조달의 목적</td><td>기타자금 (원)</td><td>4,000,000,000</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>행사가액 (원/주)</td><td>1,035</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>신주대금 납입방법</td><td>현금납입 또는 사채대용납입</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>인수권행사에 따라 발행할 주식의 종류</td><td>기명식 보통주</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>시작일</td><td>2008년 10월 08일</td></tr>
+                <tr><td>9. 신주인수권에 관한 사항</td><td>권리행사기간</td><td>종료일</td><td>2010년 08월 08일</td></tr>
+              </table>
+              <p>행사가액 조정에 관한 사항. 매 3개월마다 산정한 가액이 행사가액에 미달하는 경우 최초 발행당시 산정한 행사가액에 70%를 한도까지로 하여 행사가액을 조정한다.</p>
+            </body></html>
+            """,
+            {
+                "할증률(%)": None,
+                "행사가액": 1035,
+                "행사대상": "기명식 보통주",
+                "전환시작일": "2008년 10월 08일",
+                "전환종료일": "2010년 08월 08일",
+                "리픽싱(%)": 70,
+                "납입방법": "현금납입 또는 사채대용납입",
+            },
+        ),
+    ],
+)
+def test_parse_bond_issuance_maps_kind_warrant_resource_examples(
+    monkeypatch, acpt_no: str, body_html: str, expected: dict[str, object]
+) -> None:
+    fixture_path = REPO_ROOT / "resources" / "kind_kosdaq" / "kind_html" / f"{acpt_no}.html"
 
-    parsed = parse_bond_issuance(html.encode("utf-8"), file_path=fixture_path)
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.html_parsers.bond_issuance._fetch_selected_viewer_body",
+        lambda html_text: body_html.encode("utf-8"),
+    )
 
-    assert parsed["전환시작일"] == "2009년 08월 26일"
-    assert parsed["전환종료일"] == "2011년 08월 26일"
+    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["acpt_no"] == acpt_no
+    for key, value in expected.items():
+        assert parsed[key] == value
 
 
 def test_parse_bond_issuance_collects_multiple_target_entity_tables() -> None:
