@@ -47,6 +47,82 @@ BOND_SUMMARY_FIELDS = (
     "납입방법",
     "발행대상자",
 )
+CHANGE_LOG_FIELDS = {
+    "bond_issuance": (
+        "상장시장",
+        "회차",
+        "발행금액",
+        "발행목적",
+        "표면이자율",
+        "만기이자율",
+        "만기일",
+        "할증률(%)",
+        "행사가액",
+        "행사대상",
+        "전환시작일",
+        "전환종료일",
+        "리픽싱(%)",
+        "청약일",
+        "납입일",
+        "납입방법",
+        "발행대상자",
+        "발행대상자세부엔티티",
+    ),
+    "rights_issuance": (
+        "상장시장",
+        "신주의 종류와 수",
+        "발행목적",
+        "발행가액",
+        "기준주가",
+        "증자방식",
+        "납입일",
+        "신주권교부예정일",
+        "상장예정일",
+        "발행대상자",
+        "발행대상자세부엔티티",
+    ),
+}
+MAJOR_CHANGE_FIELDS = {
+    "bond_issuance": {
+        "발행금액",
+        "발행목적",
+        "만기일",
+        "행사가액",
+        "행사대상",
+        "전환시작일",
+        "전환종료일",
+        "리픽싱(%)",
+        "청약일",
+        "납입일",
+        "납입방법",
+        "발행대상자",
+        "발행대상자세부엔티티",
+    },
+    "rights_issuance": {
+        "신주의 종류와 수",
+        "발행목적",
+        "발행가액",
+        "기준주가",
+        "증자방식",
+        "납입일",
+        "신주권교부예정일",
+        "상장예정일",
+        "발행대상자",
+        "발행대상자세부엔티티",
+    },
+}
+
+# Fields that should always be excluded from change detection as they are metadata
+METADATA_FIELDS = {
+    "title",
+    "acpt_no",
+    "rcept_no",
+    "source_file",
+    "correction_families",
+    "raw_tables",
+    "raw_rows",
+    "index",
+}
 
 
 def cancel_disclosure_html_parse(token: str) -> dict[str, Any]:
@@ -216,6 +292,20 @@ def _load_parse_payload(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _resolve_parse_result_path(path: Path, mode: str) -> Path:
+    if path.is_dir():
+        # Try all supported modes if one is not active or if we want to be smart
+        modes_to_try = [mode] if mode in PARSER_REGISTRY else list(PARSER_REGISTRY.keys())
+        for m in modes_to_try:
+            candidate = path / f"parsed-{m}.json"
+            if candidate.is_file():
+                return candidate
+        
+        # Fallback to the requested mode's default name even if not exists (for error reporting)
+        return path / f"parsed-{mode if mode else 'bond_issuance'}.json"
+    return path
+
+
 def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -382,6 +472,226 @@ def _record_family_info(record: dict[str, Any]) -> tuple[str, int | None, int | 
     return (family_id, current_sequence, member_count)
 
 
+def _json_stable(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _field_changed(before: Any, after: Any) -> bool:
+    return _json_stable(before) != _json_stable(after)
+
+
+def _record_reference(record: dict[str, Any], *, index: int) -> dict[str, Any]:
+    family_id, current_sequence, member_count = _record_family_info(record)
+    return {
+        "index": index,
+        "title": record.get("title") or "",
+        "source_file": record.get("source_file") or "",
+        "acpt_no": record.get("acpt_no") or "",
+        "rcept_no": record.get("rcept_no") or "",
+        "family_id": family_id,
+        "current_sequence": current_sequence,
+        "family_member_count": member_count,
+    }
+
+
+def _sequence_sort_key(record: dict[str, Any]) -> tuple[int, str]:
+    _, current_sequence, _ = _record_family_info(record)
+    sequence = current_sequence if current_sequence is not None else 0
+    return (sequence, str(record.get("rcept_no") or record.get("acpt_no") or ""))
+
+
+def _get_all_value_fields(records: list[dict[str, Any]]) -> list[str]:
+    """Dynamically discover all fields present in the records, excluding metadata."""
+    all_fields = set()
+    for record in records:
+        all_fields.update(record.keys())
+    
+    # Filter out metadata and sort for consistency
+    value_fields = sorted([f for f in all_fields if f not in METADATA_FIELDS])
+    return value_fields
+
+
+def _build_record_change(
+    *,
+    mode: str,
+    before_record: dict[str, Any],
+    after_record: dict[str, Any],
+    before_index: int,
+    after_index: int,
+    fields: list[str] | None = None,
+) -> dict[str, Any] | None:
+    # Use provided fields or fallback to mode-specific or discover dynamic
+    if not fields:
+        fields = list(CHANGE_LOG_FIELDS.get(mode, _get_all_value_fields([before_record, after_record])))
+    
+    changes: list[dict[str, Any]] = []
+    major_fields = MAJOR_CHANGE_FIELDS.get(mode, set())
+    
+    for field in fields:
+        before_value = before_record.get(field)
+        after_value = after_record.get(field)
+        
+        if not _field_changed(before_value, after_value):
+            continue
+            
+        changes.append(
+            {
+                "field": field,
+                "impact": "major" if field in major_fields else "minor",
+                "before": before_value,
+                "after": after_value,
+            }
+        )
+        
+    if not changes:
+        return None
+        
+    severity = "major" if any(c["impact"] == "major" for c in changes) else "minor"
+    return {
+        "severity": severity,
+        "changed_fields": len(changes),
+        "major_fields": sum(1 for change in changes if change["impact"] == "major"),
+        "minor_fields": sum(1 for change in changes if change["impact"] == "minor"),
+        "before": _record_reference(before_record, index=before_index),
+        "after": _record_reference(after_record, index=after_index),
+        "changes": changes,
+    }
+
+
+def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Load parse results and return correction-family field changes with generic support."""
+    output_path_raw = str(body.get("output_path") or body.get("parse_result_path") or "").strip()
+    if not output_path_raw:
+        msg = "output_path is required"
+        raise ValueError(msg)
+    
+    requested_mode = str(body.get("mode") or "").strip()
+    output_path = _resolve_parse_result_path(Path(output_path_raw).expanduser().resolve(), requested_mode)
+    
+    try:
+        payload = _load_parse_payload(output_path)
+    except Exception as exc:
+        # Provide a more user-friendly error if it's a file-not-found issue
+        if not output_path.exists():
+            msg = f"파싱 결과 파일을 찾을 수 없습니다. 먼저 [HTML 파싱]을 진행해 주세요.\n(예상 경로: {output_path.name})"
+            raise ValueError(msg) from exc
+        raise
+
+    mode = str(payload.get("mode") or "")
+    summary_only = bool(body.get("summary_only"))
+    requested_family_id = body.get("family_id")
+
+    # Get records
+    all_records = list(payload.get("records") or [])
+    
+    # Identify which records belong to which families
+    family_records: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, record in enumerate(all_records, start=1):
+        if not isinstance(record, dict):
+            continue
+        family_id, current_sequence, member_count = _record_family_info(record)
+        if not family_id or member_count is None or member_count < 2 or current_sequence is None:
+            continue
+        if requested_family_id and family_id != requested_family_id:
+            continue
+        family_records.setdefault(family_id, []).append((index, record))
+
+    # Determine fields to compare: use defined ones or discover from data
+    if mode in CHANGE_LOG_FIELDS:
+        comparison_fields = list(CHANGE_LOG_FIELDS[mode])
+    else:
+        # Dynamic discovery for generic modes (like shareholder_meeting)
+        comparison_fields = _get_all_value_fields(all_records)
+
+    # If we need details, resolve acpt_numbers ONLY for the relevant records
+    if not summary_only or requested_family_id:
+        rcept_to_acpt = _rcept_no_to_acpt_no(all_records)
+        for family_id in family_records:
+            resolved_list = []
+            for index, record in family_records[family_id]:
+                resolved_record = dict(record)
+                families_data = record.get("correction_families")
+                if isinstance(families_data, dict):
+                    resolved_families = {}
+                    for fid, fdoc in families_data.items():
+                        resolved_fdoc = dict(fdoc)
+                        members = fdoc.get("members")
+                        if isinstance(members, list):
+                            resolved_members = []
+                            for m in members:
+                                if isinstance(m, dict):
+                                    rm = dict(m)
+                                    r_no = str(rm.get("rcept_no") or "").strip()
+                                    if r_no and not rm.get("acpt_no"):
+                                        rm["acpt_no"] = rcept_to_acpt.get(r_no)
+                                    resolved_members.append(rm)
+                                else:
+                                    resolved_members.append(m)
+                            resolved_fdoc["members"] = resolved_members
+                        resolved_families[str(fid)] = resolved_fdoc
+                    resolved_record["correction_families"] = resolved_families
+                resolved_list.append((index, resolved_record))
+            family_records[family_id] = resolved_list
+
+    families: list[dict[str, Any]] = []
+    for family_id, records in sorted(family_records.items()):
+        sorted_records = sorted(records, key=lambda item: _sequence_sort_key(item[1]))
+
+        family_changes: list[dict[str, Any]] = []
+        for (before_index, before_record), (after_index, after_record) in zip(sorted_records, sorted_records[1:]):
+            change = _build_record_change(
+                mode=mode,
+                before_record=before_record,
+                after_record=after_record,
+                before_index=before_index,
+                after_index=after_index,
+                fields=comparison_fields,
+            )
+            if change is not None:
+                family_changes.append(change)
+
+        total_changed_fields = sum(change["changed_fields"] for change in family_changes)
+
+        if summary_only and not (requested_family_id == family_id):
+            families.append(
+                {
+                    "family_id": family_id,
+                    "record_count": len(sorted_records),
+                    "title": sorted_records[-1][1].get("title") or "",
+                    "changed_fields": total_changed_fields,
+                    "has_details": False,
+                }
+            )
+            continue
+
+        families.append(
+            {
+                "family_id": family_id,
+                "severity": "major" if any(c["severity"] == "major" for c in family_changes) else "minor" if family_changes else "none",
+                "record_count": len(sorted_records),
+                "change_count": len(family_changes),
+                "changed_fields": total_changed_fields,
+                "records": [_record_reference(record, index=index) for index, record in sorted_records],
+                "changes": family_changes,
+                "has_details": True,
+            }
+        )
+
+    limit = _parse_limit(body.get("limit"))
+    visible_families = families[:limit] if limit is not None else families
+    return {
+        "format": "finiq_parse_change_log_v1",
+        "mode": mode,
+        "source_path": str(output_path),
+        "summary": {
+            "records": len(all_records),
+            "families": len(family_records) if not requested_family_id else "filtered",
+            "visible_families": len(visible_families),
+        },
+        "families": visible_families,
+    }
+
+
 def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Load a bond_issuance parse result JSON and return UI-ready summary rows."""
     output_path_raw = str(body.get("output_path") or body.get("parse_result_path") or "").strip()
@@ -443,3 +753,133 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
         "families": families,
         "records": summary_records,
     }
+
+
+def _xlsx_column_name(index: int) -> str:
+    result = ""
+    current = index
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def build_parse_export_xlsx(output_path_raw: str, requested_mode: str, latest_only: bool = False) -> bytes:
+    from xml.sax.saxutils import escape
+
+    output_path = _resolve_parse_result_path(Path(output_path_raw).expanduser().resolve(), requested_mode)
+    try:
+        payload = _load_parse_payload(output_path)
+    except Exception as exc:
+        raise ValueError(f"파싱 결과 파일을 찾을 수 없습니다: {output_path.name}") from exc
+
+    records = list(payload.get("records") or [])
+    if latest_only:
+        filtered_records = []
+        for record in records:
+            family_id, current_sequence, member_count = _record_family_info(record)
+            if family_id and member_count is not None and current_sequence is not None:
+                if current_sequence == member_count - 1:
+                    filtered_records.append(record)
+            else:
+                filtered_records.append(record)
+        records = filtered_records
+
+    # Dynamic extraction of all keys
+    all_keys = set()
+    for record in records:
+        all_keys.update(record.keys())
+    
+    # Priority headers
+    priority = ["title", "rcept_no", "acpt_no", "source_file"]
+    headers = [p for p in priority if p in all_keys] + sorted(k for k in all_keys if k not in priority and k != "correction_families" and k != "source_lines")
+
+    workbook_rows = [headers]
+    for record in records:
+        row = []
+        for header in headers:
+            val = record.get(header)
+            if isinstance(val, (list, dict)):
+                row.append(json.dumps(val, ensure_ascii=False))
+            elif val is None:
+                row.append("")
+            else:
+                row.append(str(val))
+        workbook_rows.append(row)
+
+    sheet_rows_xml: list[str] = []
+    for row_number, row_values in enumerate(workbook_rows, start=1):
+        cell_xml: list[str] = []
+        for column_number, value in enumerate(row_values, start=1):
+            cell_ref = f"{_xlsx_column_name(column_number)}{row_number}"
+            cell_xml.append(
+                f'<c r="{cell_ref}" t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
+            )
+        sheet_rows_xml.append(f'<row r="{row_number}">{"".join(cell_xml)}</row>')
+
+    dimension_ref = f"A1:{_xlsx_column_name(len(headers))}{max(1, len(workbook_rows))}"
+    
+    col_widths = "".join(f'<col min="{i}" max="{i}" width="20" customWidth="1"/>' for i in range(1, len(headers) + 1))
+    
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<dimension ref="{dimension_ref}"/>'
+        '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+        '<sheetFormatPr defaultRowHeight="15"/>'
+        f'<cols>{col_widths}</cols>'
+        f'<sheetData>{"".join(sheet_rows_xml)}</sheetData>'
+        f'<autoFilter ref="{dimension_ref}"/>'
+        "</worksheet>"
+    )
+    
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        "</Types>"
+    )
+    
+    root_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+    
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        "</Relationships>"
+    )
+    
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>'
+        "</workbook>"
+    )
+
+    import io
+    import zipfile
+    
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types_xml)
+        zf.writestr("_rels/.rels", root_rels_xml)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        
+    return output.getvalue()

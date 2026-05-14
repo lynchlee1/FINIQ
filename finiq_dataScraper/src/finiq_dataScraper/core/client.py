@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -34,6 +36,43 @@ def _save_response_content(output_path: Path, response: requests.Response) -> No
     """response body를 지정한 경로에 저장한다."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(response.content)
+
+
+def _is_valid_html(path: Path) -> bool:
+    """Check if the saved file is a valid HTML (basic check)."""
+    if not path.exists():
+        return False
+    if path.stat().st_size < 100:  # Too small to be a valid KIND viewer HTML
+        return False
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore")
+        # Basic check for HTML or KIND specific content
+        return "<html" in content.lower() or "openDisclsViewer" in content
+    except Exception:
+        return False
+
+
+class _RateLimiter:
+    def __init__(self, max_requests_per_minute: int):
+        self.lock = threading.Lock()
+        self.max_requests_per_minute = max_requests_per_minute
+        self.request_timestamps: list[float] = []
+
+    def wait(self, cancel_check: KindCancelCheck | None = None) -> bool:
+        while True:
+            if cancel_check is not None and cancel_check():
+                return True
+
+            now = time.time()
+            with self.lock:
+                # Remove timestamps older than 60 seconds
+                self.request_timestamps = [t for t in self.request_timestamps if now - t < 60]
+
+                if len(self.request_timestamps) < self.max_requests_per_minute:
+                    self.request_timestamps.append(now)
+                    return False
+
+            time.sleep(0.1)
 
 
 def _report_progress(progress_callback: KindProgressCallback | None, message: str) -> None:
@@ -474,8 +513,10 @@ def download_disclosure_viewer_htmls(
     progress_callback: KindProgressCallback | None = None,
     saved_file_callback: KindViewerSavedFileCallback | None = None,
     cancel_check: KindCancelCheck | None = None,
+    max_workers: int = 5,
+    max_retries: int = 2,
 ) -> list[Path]:
-    """여러 KIND 접수번호의 뷰어 HTML을 rate limit을 지키며 저장한다."""
+    """여러 KIND 접수번호의 뷰어 HTML을 병렬로 처리하며 무결성을 보장한다."""
     if timeout <= 0:
         raise ValueError("timeout must be > 0")
     if wait_seconds_between_requests < 0:
@@ -491,56 +532,121 @@ def download_disclosure_viewer_htmls(
     normalized_request_headers = _normalize_request_headers(request_headers)
     owns_session = session is None
     active_session = session or requests.Session()
-    rate_limit_wait_seconds = 60.0 / max_requests_per_minute
-    effective_wait_seconds = max(wait_seconds_between_requests, rate_limit_wait_seconds)
-    saved_paths: list[Path] = []
-    request_count = 0
+    
+    # Increase connection pool size for parallel requests
+    if not owns_session and hasattr(active_session, "mount"):
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=max_workers,
+            pool_maxsize=max_workers
+        )
+        active_session.mount("https://", adapter)
+        active_session.mount("http://", adapter)
 
-    try:
-        total_count = len(normalized_acpt_numbers)
-        for index, normalized_acpt_no in enumerate(normalized_acpt_numbers, start=1):
-            if cancel_check is not None and cancel_check():
-                _report_progress(progress_callback, "Cancelled KIND viewer HTML download.")
-                break
+    rate_limiter = _RateLimiter(max_requests_per_minute)
+    saved_paths: dict[str, Path] = {}
+    errors: dict[str, str] = {}
+    
+    total_count = len(normalized_acpt_numbers)
+    lock = threading.Lock()
 
-            output_path = output_directory / _build_viewer_html_filename(normalized_acpt_no)
-            if skip_existing and output_path.exists():
-                _report_progress(
-                    progress_callback,
-                    f"Skipping existing KIND viewer HTML {index}/{total_count}: {output_path}",
-                )
-                saved_paths.append(output_path)
-                continue
+    def download_task(acpt_no: str, current_retry: int = 0) -> Path | None:
+        if cancel_check is not None and cancel_check():
+            return None
 
-            if request_count and _sleep_between_requests(effective_wait_seconds, cancel_check):
-                _report_progress(progress_callback, "Cancelled KIND viewer HTML download.")
-                break
+        output_path = output_directory / _build_viewer_html_filename(acpt_no)
+        
+        # Check if already exists and valid
+        if skip_existing and _is_valid_html(output_path):
+            with lock:
+                saved_paths[acpt_no] = output_path
+            return output_path
 
+        # Wait for rate limit
+        if rate_limiter.wait(cancel_check):
+            return None
+
+        try:
             _report_progress(
                 progress_callback,
-                f"Fetching KIND viewer HTML {index}/{total_count} acpt_no={normalized_acpt_no}...",
+                f"Fetching KIND viewer HTML acpt_no={acpt_no} (retry={current_retry})...",
             )
             response = _request_disclosure_viewer_page(
                 active_session,
                 request_headers=normalized_request_headers,
-                acpt_no=normalized_acpt_no,
+                acpt_no=acpt_no,
                 doc_no=None,
                 timeout=timeout,
             )
             _save_response_content(output_path, response)
-            request_count += 1
-            saved_paths.append(output_path)
+            
+            if not _is_valid_html(output_path):
+                raise ValueError(f"Downloaded content for {acpt_no} is invalid")
+
+            with lock:
+                saved_paths[acpt_no] = output_path
+            
             if saved_file_callback is not None:
-                saved_file_callback(output_path, normalized_acpt_no, None)
+                saved_file_callback(output_path, acpt_no, None)
+            
+            return output_path
+        except Exception as e:
+            _report_progress(progress_callback, f"Failed to download {acpt_no}: {str(e)}")
+            return None
+
+    try:
+        # First Pass: Parallel Download
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(download_task, acpt_no): acpt_no 
+                for acpt_no in normalized_acpt_numbers
+            }
+            for future in as_completed(futures):
+                if cancel_check is not None and cancel_check():
+                    break
+        
+        # Integrity Check & Retries
+        for retry in range(1, max_retries + 1):
+            missing_or_invalid = [
+                acpt_no for acpt_no in normalized_acpt_numbers 
+                if acpt_no not in saved_paths or not _is_valid_html(saved_paths[acpt_no])
+            ]
+            
+            if not missing_or_invalid:
+                break
+                
             _report_progress(
-                progress_callback,
-                f"Saved KIND viewer HTML {index}/{total_count} to: {output_path}",
+                progress_callback, 
+                f"Integrity check failed for {len(missing_or_invalid)} files. Retrying (attempt {retry}/{max_retries})..."
             )
+            
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(missing_or_invalid))) as executor:
+                futures = {
+                    executor.submit(download_task, acpt_no, retry): acpt_no 
+                    for acpt_no in missing_or_invalid
+                }
+                for future in as_completed(futures):
+                    if cancel_check is not None and cancel_check():
+                        break
+
+        # Final check and error logging
+        final_missing = [
+            acpt_no for acpt_no in normalized_acpt_numbers 
+            if acpt_no not in saved_paths or not _is_valid_html(saved_paths[acpt_no])
+        ]
+        
+        if final_missing:
+            error_msg = f"Permanently failed to download {len(final_missing)} files: {', '.join(final_missing)}"
+            _report_progress(progress_callback, error_msg)
+            error_log_path = output_directory / "download_errors.log"
+            with open(error_log_path, "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}\n")
+
     finally:
         if owns_session:
             active_session.close()
 
-    return saved_paths
+    # Return paths in original order
+    return [saved_paths[acpt_no] for acpt_no in normalized_acpt_numbers if acpt_no in saved_paths]
 
 
 __all__ = [

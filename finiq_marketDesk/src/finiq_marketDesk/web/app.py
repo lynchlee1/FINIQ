@@ -49,6 +49,7 @@ from finiq_marketDesk.web.download import (
 from finiq_marketDesk.web.disclosure_html import cancel_disclosure_html_download, download_disclosure_html_payload
 from finiq_marketDesk.web.disclosure_html_parse import (
     build_bond_parse_summary_payload,
+    build_parse_change_log_payload,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
@@ -69,6 +70,8 @@ class AppConfig:
     sqlite_manifest_path: str = ""
     html_output_directory: str = ""
     html_transfer_directory: str = ""
+    html_parse_result_path: str = ""
+    html_parse_mode: str = ""
 
 
 @dataclass(slots=True)
@@ -97,6 +100,8 @@ SAVED_SETTINGS_KEYS = (
     "sqlite_manifest_path",
     "html_output_directory",
     "html_transfer_directory",
+    "html_parse_result_path",
+    "html_parse_mode",
 )
 
 
@@ -218,7 +223,10 @@ def _load_saved_settings(settings_path: str | Path) -> dict[str, str]:
         value = payload.get(key)
         if not value or not isinstance(value, str):
             continue
-        settings[key] = _normalize_saved_path(value)
+        if key == "html_parse_mode":
+            settings[key] = value
+        else:
+            settings[key] = _normalize_saved_path(value)
     return settings
 
 
@@ -255,6 +263,8 @@ def _apply_saved_settings(config: AppConfig) -> AppConfig:
         sqlite_manifest_path=saved.get("sqlite_manifest_path", config.sqlite_manifest_path),
         html_output_directory=saved.get("html_output_directory", config.html_output_directory),
         html_transfer_directory=saved.get("html_transfer_directory", config.html_transfer_directory),
+        html_parse_result_path=saved.get("html_parse_result_path", config.html_parse_result_path),
+        html_parse_mode=saved.get("html_parse_mode", config.html_parse_mode),
     )
 
 
@@ -445,6 +455,9 @@ class KindWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/company-list.xlsx":
             self._handle_company_export(parsed.query)
             return
+        if parsed.path == "/api/disclosures/html/parse/export.xlsx":
+            self._handle_disclosure_html_parse_export_xlsx(parsed.query)
+            return
         self._respond_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -491,6 +504,9 @@ class KindWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/disclosures/html/parse/bond-summary":
             self._handle_disclosure_html_parse_bond_summary()
             return
+        if parsed.path == "/api/disclosures/html/parse/change-log":
+            self._handle_disclosure_html_parse_change_log()
+            return
         if parsed.path == "/api/disclosures/html/parse/cancel":
             self._handle_disclosure_html_parse_cancel()
             return
@@ -520,6 +536,8 @@ class KindWebHandler(BaseHTTPRequestHandler):
             "sqlite_manifest_path": self.server.config.sqlite_manifest_path,
             "html_output_directory": self.server.config.html_output_directory or f"{output_root}/viewer_html",
             "html_transfer_directory": self.server.config.html_transfer_directory or f"{output_root}/.finiq/transfers",
+            "html_parse_result_path": self.server.config.html_parse_result_path,
+            "html_parse_mode": self.server.config.html_parse_mode,
             "price_files": list_price_source_files(price_root_directory),
             "selected_price_path": selected_price_path,
             "classification_files": classification_files,
@@ -611,15 +629,21 @@ class KindWebHandler(BaseHTTPRequestHandler):
         self.server.config.quanti_dir = quanti_dir
         self.server.config.price_root_directory = price_root_directory
         self.server.config.selected_classification_path = selected_classification_path
-        for attr in (
-            "download_output_directory",
-            "sqlite_source_path",
-            "sqlite_manifest_path",
-            "html_output_directory",
-            "html_transfer_directory",
-        ):
-            if attr in payload:
-                setattr(self.server.config, attr, str(Path(str(payload.get(attr) or "")).expanduser().resolve()) if payload.get(attr) else "")
+
+        # Update remaining attributes from payload
+        for attr in SAVED_SETTINGS_KEYS:
+            if attr in payload and attr not in (
+                "output_root",
+                "quanti_dir",
+                "price_root_directory",
+                "selected_classification_path",
+            ):
+                value = payload.get(attr)
+                # html_parse_mode is a string, others are paths
+                if attr == "html_parse_mode":
+                    setattr(self.server.config, attr, str(value or ""))
+                else:
+                    setattr(self.server.config, attr, str(Path(str(value or "")).expanduser().resolve()) if value else "")
 
         next_settings = {
             **saved,
@@ -628,18 +652,13 @@ class KindWebHandler(BaseHTTPRequestHandler):
             "price_root_directory": price_root_directory,
             "selected_classification_path": selected_classification_path,
         }
-        for attr in (
-            "download_output_directory",
-            "sqlite_source_path",
-            "sqlite_manifest_path",
-            "html_output_directory",
-            "html_transfer_directory",
-        ):
-            value = getattr(self.server.config, attr) or saved.get(attr, "")
+        for attr in SAVED_SETTINGS_KEYS:
+            value = getattr(self.server.config, attr)
             if value:
                 next_settings[attr] = value
             else:
                 next_settings.pop(attr, None)
+
         _write_saved_settings(settings_path, next_settings)
         self._respond_json(HTTPStatus.OK, self._build_config_payload())
 
@@ -710,6 +729,28 @@ class KindWebHandler(BaseHTTPRequestHandler):
             market=_first_query_value(query, "market", "전체"),
         )
         filename = f"{Path(classification_path).stem}.company_list.xlsx"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _handle_disclosure_html_parse_export_xlsx(self, raw_query: str) -> None:
+        from finiq_marketDesk.web.disclosure_html_parse import build_parse_export_xlsx
+        query = parse_qs(raw_query)
+        output_path = _first_query_value(query, "output_path")
+        mode = _first_query_value(query, "mode")
+        latest_only = _first_query_value(query, "latest_only", "false").lower() == "true"
+        if not output_path:
+            self.send_error(HTTPStatus.BAD_REQUEST, "output_path is required")
+            return
+        try:
+            payload = build_parse_export_xlsx(output_path, mode, latest_only=latest_only)
+        except Exception as exc:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        filename = f"{Path(output_path).stem}_export.xlsx"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         self.send_header("Content-Length", str(len(payload)))
@@ -904,6 +945,15 @@ class KindWebHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
             payload = build_bond_parse_summary_payload(body)
+        except (OSError, ValueError) as exc:
+            self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        self._respond_json(HTTPStatus.OK, payload)
+
+    def _handle_disclosure_html_parse_change_log(self) -> None:
+        try:
+            body = self._read_json_body()
+            payload = build_parse_change_log_payload(body)
         except (OSError, ValueError) as exc:
             self._respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
