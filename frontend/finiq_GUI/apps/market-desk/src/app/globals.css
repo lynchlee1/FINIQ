@@ -1,0 +1,38 @@
+@import "tailwindcss";
+@import "@finiq/theme/base.css";
+
+@source "../../../../packages/ui/src/**/*.tsx";
+
+@theme {
+  --font-sans: "IBM Plex Sans KR", sans-serif;
+  --font-mono: "Space Grotesk", monospace;
+
+  --color-primary: var(--color-slate-900);
+  --color-primary-foreground: var(--color-slate-50);
+  
+  --color-secondary: var(--color-slate-100);
+  --color-secondary-foreground: var(--color-slate-900);
+
+  --color-accent: var(--color-slate-100);
+  --color-accent-foreground: var(--color-slate-900);
+
+  --color-destructive: var(--color-red-600);
+  --color-destructive-foreground: var(--color-slate-50);
+
+  --color-muted: var(--color-slate-100);
+  --color-muted-foreground: var(--color-slate-500);
+
+  --color-card: var(--color-white);
+  --color-card-foreground: var(--color-slate-900);
+
+  --color-popover: var(--color-white);
+  --color-popover-foreground: var(--color-slate-900);
+
+  --color-border: var(--color-slate-200);
+  --color-input: var(--color-slate-200);
+  --color-ring: var(--color-slate-900);
+}
+
+body {
+  @apply bg-slate-50 text-slate-900;
+}

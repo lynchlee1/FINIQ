@@ -7,6 +7,7 @@ __pycache__/
 resources/
 .vite/
 node_modules/
+.next/
 dist/
 dist-ssr/
 apps/*/dist/
