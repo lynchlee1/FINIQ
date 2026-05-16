@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
@@ -20,6 +21,8 @@ ParseFunction = Callable[[str | bytes], dict[str, Any]]
 ProgressCallback = Callable[[str], None]
 _CANCELLED_PARSES: set[str] = set()
 _CANCEL_LOCK = Lock()
+_PARSE_CACHE: dict[str, dict[str, Any]] = {}
+_CACHE_LOCK = Lock()
 
 PARSER_REGISTRY = {
     "bond_issuance": parse_bond_issuance,
@@ -603,6 +606,94 @@ def _build_record_change(
     }
 
 
+def _parse_korean_date(date_str: Any) -> float:
+    if not date_str or not isinstance(date_str, str):
+        return float("nan")
+    match = re.search(r"(\d{4})\s*[년.-]\s*(\d{1,2})\s*[월.-]\s*(\d{1,2})", date_str)
+    if match:
+        from datetime import datetime
+        try:
+            return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3))).timestamp() * 1000
+        except ValueError:
+            return float("nan")
+    clean = re.sub(r"[^\d]", "", date_str)
+    if len(clean) == 8:
+        from datetime import datetime
+        try:
+            return datetime(int(clean[:4]), int(clean[4:6]), int(clean[6:8])).timestamp() * 1000
+        except ValueError:
+            return float("nan")
+    return float("nan")
+
+
+def _parse_numeric_value(val: Any) -> float:
+    if isinstance(val, (int, float)):
+        return float(val)
+    if not isinstance(val, str):
+        return float("nan")
+    match = re.search(r"-?\d+\.?\d*", val.replace(",", ""))
+    return float(match.group(0)) if match else float("nan")
+
+
+def _is_major_change(
+    field: str, 
+    before: Any, 
+    after: Any, 
+    *,
+    date_thresholds: dict[str, float],
+    numeric_thresholds: dict[str, float]
+) -> bool:
+    if _json_stable(before) == _json_stable(after):
+        return False
+    
+    if field == "회차":
+        return False
+
+    date_threshold = date_thresholds.get(field)
+    if date_threshold is not None:
+        d1 = _parse_korean_date(before)
+        d2 = _parse_korean_date(after)
+        import math
+        if not math.isnan(d1) and not math.isnan(d2):
+            if abs(d1 - d2) <= date_threshold * 24 * 3600 * 1000:
+                return False
+    
+    num_threshold = numeric_thresholds.get(field)
+    if num_threshold is not None:
+        n1 = _parse_numeric_value(before)
+        n2 = _parse_numeric_value(after)
+        import math
+        if not math.isnan(n1) and not math.isnan(n2) and n2 != 0:
+            diff_percent = abs((n2 - n1) / n2) * 100
+            if diff_percent <= num_threshold:
+                return False
+                
+    return True
+
+
+def _get_cached_payload(path: Path) -> dict[str, Any]:
+    path = path.resolve()
+    path_str = str(path)
+    try:
+        mtime = path.stat().st_mtime
+    except FileNotFoundError:
+        return {}
+    
+    with _CACHE_LOCK:
+        cached = _PARSE_CACHE.get(path_str)
+        if cached and cached["mtime"] == mtime:
+            return cached["payload"]
+    
+    payload = _load_parse_payload(path)
+    
+    with _CACHE_LOCK:
+        if len(_PARSE_CACHE) > 10:
+            _PARSE_CACHE.clear()
+        _PARSE_CACHE[path_str] = {"mtime": mtime, "payload": payload}
+        
+    return payload
+
+
 def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Load parse results and return correction-family field changes with generic support."""
     output_path_raw = str(body.get("output_path") or body.get("parse_result_path") or "").strip()
@@ -614,7 +705,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     output_path = _resolve_parse_result_path(Path(output_path_raw).expanduser().resolve(), requested_mode)
     
     try:
-        payload = _load_parse_payload(output_path)
+        payload = _get_cached_payload(output_path)
     except Exception as exc:
         # Provide a more user-friendly error if it's a file-not-found issue
         if not output_path.exists():
@@ -627,6 +718,11 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     requested_family_id = body.get("family_id")
     limit = _parse_limit(body.get("limit"))
     changes_only = bool(body.get("changes_only"))
+
+    # Load thresholds from global config
+    from finiq.market_desk.web.app import config as app_config
+    date_thresholds = app_config.change_log_date_thresholds or {}
+    numeric_thresholds = app_config.change_log_numeric_thresholds or {}
 
     # Get records
     all_records = list(payload.get("records") or [])
@@ -698,11 +794,22 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             if change is not None:
                 family_changes.append(change)
 
-        # Calculate changed fields count, excluding "회차" to match UI logic
-        total_changed_fields = sum(
-            sum(1 for c in change["changes"] if c["field"] != "회차")
-            for change in family_changes
-        )
+        # Calculate MAJOR changed fields count and names (exclude minor changes based on thresholds)
+        changed_field_names = set()
+        for change in family_changes:
+            for c in change["changes"]:
+                f = str(c["field"]).strip()
+                # Check if it's a major change based on dynamic thresholds
+                if _is_major_change(
+                    f, 
+                    c["before"], 
+                    c["after"], 
+                    date_thresholds=date_thresholds, 
+                    numeric_thresholds=numeric_thresholds
+                ):
+                    changed_field_names.add(f)
+        
+        total_changed_fields = len(changed_field_names)
 
         if changes_only and total_changed_fields == 0:
             continue
@@ -714,6 +821,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
                     "record_count": len(sorted_records),
                     "title": sorted_records[-1][1].get("title") or "",
                     "changed_fields": total_changed_fields,
+                    "changed_field_names": sorted(list(changed_field_names)),
                     "has_details": False,
                 }
             )
@@ -725,6 +833,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
                     "record_count": len(sorted_records),
                     "change_count": len(family_changes),
                     "changed_fields": total_changed_fields,
+                    "changed_field_names": sorted(list(changed_field_names)),
                     "records": [_record_reference(record, index=index) for index, record in sorted_records],
                     "changes": family_changes,
                     "has_details": True,

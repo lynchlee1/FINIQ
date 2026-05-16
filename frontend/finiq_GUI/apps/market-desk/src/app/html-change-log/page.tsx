@@ -67,12 +67,21 @@ export default function HtmlChangeLogPage() {
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [dateThresholds, setDateThresholds] = useState<Record<string, number>>(
-    Object.fromEntries(DATE_FIELDS_CONFIG.map(c => [c.field, c.default]))
+    Object.fromEntries(DATE_FIELDS_CONFIG.map((c: any) => [c.field, c.default]))
   );
   const [numericThresholds, setNumericThresholds] = useState<Record<string, number>>(
-    Object.fromEntries(NUMERIC_FIELDS_CONFIG.map(c => [c.field, c.default]))
+    Object.fromEntries(NUMERIC_FIELDS_CONFIG.map((c: any) => [c.field, c.default]))
   );
+
+  const handleBulkDateChange = (val: number) => {
+    setDateThresholds(Object.fromEntries(DATE_FIELDS_CONFIG.map((c: any) => [c.field, val])));
+  };
+
+  const handleBulkNumericChange = (val: number) => {
+    setNumericThresholds(Object.fromEntries(NUMERIC_FIELDS_CONFIG.map((c: any) => [c.field, val])));
+  };
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -109,18 +118,6 @@ export default function HtmlChangeLogPage() {
     fetchConfig();
   }, [fetchConfig]);
 
-  const saveSetting = async (key: string, value: string) => {
-    try {
-      await fetch("/api/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [key]: value })
-      });
-    } catch (err) {
-      console.error("Failed to save setting:", err);
-    }
-  };
-
   // Automatic saving to backend
   useEffect(() => {
     if (loading) return;
@@ -142,6 +139,18 @@ export default function HtmlChangeLogPage() {
 
     return () => clearTimeout(timer);
   }, [dateThresholds, numericThresholds, loading]);
+
+  const saveSetting = async (key: string, value: string) => {
+    try {
+      await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value })
+      });
+    } catch (err) {
+      console.error("Failed to save setting:", err);
+    }
+  };
 
   const loadChangeLog = async () => {
     if (!outputPath) {
@@ -166,7 +175,6 @@ export default function HtmlChangeLogPage() {
           mode: changeMode,
           summary_only: true,
           limit: changeLimit === "" ? null : Number(changeLimit),
-          changes_only: showOnlyChanges,
         }),
       });
       
@@ -188,7 +196,7 @@ export default function HtmlChangeLogPage() {
 
   const handleSelectFamily = async (familyId: string) => {
     setSelectedFamilyId(familyId);
-    if (familyDetails[familyId] && familyDetails[familyId].has_details) return;
+    if (familyDetails[familyId]) return;
 
     try {
       const response = await fetch("/api/disclosures/html/parse/change-log", {
@@ -219,7 +227,10 @@ export default function HtmlChangeLogPage() {
         body: JSON.stringify({ mode: type, title: "선택", default_path: defaultPath }),
       });
       const data = await response.json();
-      if (data.path) setter(data.path);
+      if (data.path) {
+        setter(data.path);
+        saveSetting("html_parse_result_path", data.path);
+      }
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
@@ -244,18 +255,19 @@ export default function HtmlChangeLogPage() {
     const fields: string[] = [];
     const seen = new Set<string>();
     
-    // Use changes if available (detailed data)
-    if (family.changes && family.changes.length > 0) {
-      for (const change of family.changes) {
-        for (const fieldChange of change.changes || []) {
-          const field = String(fieldChange.field || "").trim();
-          if (!field || seen.has(field) || field === "회차") continue;
-          seen.add(field);
-          fields.push(field);
-        }
+    // Use backend-provided field names if available (optimized)
+    if (family.changed_field_names) {
+      return family.changed_field_names;
+    }
+
+    for (const change of family.changes || []) {
+      for (const fieldChange of change.changes || []) {
+        const field = String(fieldChange.field || "").trim();
+        if (!field || seen.has(field) || field === "회차") continue;
+        seen.add(field);
+        fields.push(field);
       }
     }
-    
     return fields;
   };
 
@@ -267,12 +279,7 @@ export default function HtmlChangeLogPage() {
       .filter((family: any) => {
         // Calculate display changed fields count (excluding 회차)
         const displayFields = getChangedFields(family);
-        let displayChangedCount = displayFields.length;
-        
-        // If it's summary data, use the backend-provided changed_fields count
-        if (!family.has_details && family.changed_fields !== undefined) {
-          displayChangedCount = family.changed_fields;
-        }
+        const displayChangedCount = displayFields.length;
 
         if (showOnlyChanges && displayChangedCount === 0) return false;
         
@@ -288,12 +295,10 @@ export default function HtmlChangeLogPage() {
         return true;
       })
       .sort((a: any, b: any) => {
-        // We already have some sorting from backend, but let's keep it consistent
-        const aCount = a.has_details ? getChangedFields(a).length : (a.changed_fields || 0);
-        const bCount = b.has_details ? getChangedFields(b).length : (b.changed_fields || 0);
-        
-        if (Boolean(bCount) !== Boolean(aCount)) return Number(Boolean(bCount)) - Number(Boolean(aCount));
-        if (bCount !== aCount) return bCount - aCount;
+        const aFields = getChangedFields(a).length;
+        const bFields = getChangedFields(b).length;
+        if (Boolean(bFields) !== Boolean(aFields)) return Number(Boolean(bFields)) - Number(Boolean(aFields));
+        if (bFields !== aFields) return bFields - aFields;
         return String(b.family_id || "").localeCompare(String(a.family_id || ""), "ko-KR");
       });
   }, [changeLog, changeSearch, showOnlyChanges]);
@@ -316,7 +321,7 @@ export default function HtmlChangeLogPage() {
       return Number.isFinite(num) ? (num / 100000000).toLocaleString("ko-KR", { maximumFractionDigits: 2 }) : String(value);
     }
     if (fieldName === "발행대상자" && Array.isArray(value)) {
-      return value.map((target) => {
+      return value.map((target: any) => {
         if (Array.isArray(target)) {
           const name = target[0];
           const amount = target[target.length - 1];
@@ -394,113 +399,176 @@ export default function HtmlChangeLogPage() {
     <main className="flex flex-col gap-6 w-full">
       <WorkflowTabs tabs={HTML_PROCESS_TABS} />
       
-      <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+      <Card className="dark:bg-[#131722] dark:border-[#2a2e39]">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <div>
-            <CardTitle className="dark:text-white">변동기록조회</CardTitle>
-            <CardDescription className="dark:text-slate-400">정정공시 전후의 필드 값 변화를 매트릭스 형태로 비교합니다.</CardDescription>
+            <CardTitle className="dark:text-[#d1d4dc]">변동기록조회</CardTitle>
+            <CardDescription className="dark:text-[#787b86]">정정공시 전후의 필드 값 변화를 매트릭스 형태로 비교합니다.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => setShowSettings(!showSettings)} className={cn(showSettings ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#484f58]" : "dark:border-[#30363d] dark:hover:bg-[#21262d]")}>
-              <Settings className={cn("h-4 w-4", showSettings ? "text-blue-600 dark:text-blue-400" : "text-slate-400")} />
+            <Button variant="outline" size="icon" onClick={() => setShowSettings(!showSettings)} className={cn(showSettings ? "bg-slate-100 border-slate-300 dark:bg-[#1e222d] dark:border-[#484f58]" : "dark:border-[#2a2e39] dark:hover:bg-[#1e222d]")}>
+              <Settings className={cn("h-4 w-4", showSettings ? "text-[#2962ff] dark:text-[#2962ff]" : "text-slate-400 dark:text-[#787b86]")} />
             </Button>
-            <Button onClick={loadChangeLog} disabled={isFetching} className="dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200">
+            <Button onClick={loadChangeLog} disabled={isFetching} className="dark:bg-[#d1d4dc] dark:text-[#131722] dark:hover:bg-white transition-colors">
               변동 불러오기
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
           {showSettings && (
-            <div className="p-5 bg-slate-50/80 dark:bg-[#0d1117]/50 border border-slate-200 dark:border-[#30363d] rounded-xl space-y-5 animate-in fade-in slide-in-from-top-2 shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#30363d] pb-3">
+            <div className="p-5 bg-slate-50/80 dark:bg-[#161a25]/60 border border-slate-200 dark:border-[#2d3446] rounded-xl space-y-5 animate-in fade-in slide-in-from-top-2 shadow-sm backdrop-blur-sm">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#2d3446] pb-3">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-white dark:bg-[#161b22] shadow-sm border border-slate-100 dark:border-[#30363d]">
-                    <Settings className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />
+                  <div className="p-1.5 rounded-lg bg-white dark:bg-[#131722] shadow-sm border border-slate-100 dark:border-[#2d3446]">
+                    <Settings className="h-3.5 w-3.5 text-slate-600 dark:text-[#787b86]" />
                   </div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">필드별 임계값 상세 설정</h4>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-[#d1d4dc]">필드별 임계값 상세 설정</h4>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => setShowDetails(!showDetails)}
+                    className="h-8 text-[10px] font-bold text-slate-500 hover:text-slate-700 dark:text-[#787b86] dark:hover:text-[#d1d4dc] flex items-center gap-1"
+                  >
+                    {showDetails ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    세부 설정 {showDetails ? "접기" : "펼치기"}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => {
-                    setDateThresholds(Object.fromEntries(DATE_FIELDS_CONFIG.map(c => [c.field, c.default])));
-                    setNumericThresholds(Object.fromEntries(NUMERIC_FIELDS_CONFIG.map(c => [c.field, c.default])));
-                  }} className="h-8 text-[10px] font-bold dark:border-[#30363d] dark:hover:bg-[#21262d]">초기화</Button>
-                  <Button variant="ghost" size="icon" onClick={() => setShowSettings(false)} className="h-8 w-8 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                    setDateThresholds(Object.fromEntries(DATE_FIELDS_CONFIG.map((c: any) => [c.field, c.default])));
+                    setNumericThresholds(Object.fromEntries(NUMERIC_FIELDS_CONFIG.map((c: any) => [c.field, c.default])));
+                  }} className="h-8 text-[10px] font-bold dark:border-[#2d3446] dark:hover:bg-[#1e222d] dark:text-[#d1d4dc]">초기화</Button>
+                  <Button variant="ghost" size="icon" onClick={() => setShowSettings(false)} className="h-8 w-8 text-slate-400 hover:text-slate-600 dark:hover:text-[#d1d4dc]">
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
               
-              <div className="grid lg:grid-cols-2 gap-x-12 gap-y-8 py-2">
+              <div className="grid lg:grid-cols-2 gap-x-12 gap-y-4 py-2">
                 {/* Date Fields Column */}
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
-                    <h5 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">날짜 필드 (일수 차이)</h5>
-                  </div>
-                  <div className="grid gap-x-8 gap-y-4">
-                    {DATE_FIELDS_CONFIG.map(({ field }) => (
-                      <div key={field} className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">{field}</Label>
-                          <div className="flex items-center gap-0.5 text-[10px] font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-[#21262d] px-1.5 py-0.5 rounded">
-                            <span>{dateThresholds[field]}</span>
-                            <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium ml-0.5">일</span>
-                          </div>
-                        </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
+                      <h5 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">날짜 필드 (일수 차이)</h5>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-[11px] text-slate-400 dark:text-slate-500 font-bold">일괄 조절</Label>
+                      <div className="flex items-center gap-1 bg-white dark:bg-[#131722] border border-slate-200 dark:border-[#2a2e39] rounded px-1.5 py-0.5">
                         <Input 
-                          type="range" 
+                          type="number" 
                           min="0" 
                           max="30" 
-                          step="1" 
-                          value={dateThresholds[field]} 
-                          onChange={(e) => setDateThresholds(prev => ({ ...prev, [field]: Number(e.target.value) }))}
-                          className="h-4 accent-slate-600 dark:accent-slate-400 cursor-pointer"
+                          className="w-10 h-5 border-none bg-transparent text-[11px] focus-visible:ring-0 p-0 text-center font-bold dark:text-slate-300"
+                          onChange={(e) => handleBulkDateChange(Number(e.target.value))}
+                          placeholder="0"
                         />
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500 font-bold">일</span>
                       </div>
-                    ))}
+                    </div>
                   </div>
+                  
+                  {showDetails && (
+                    <div className="grid grid-cols-1 gap-1.5 animate-in fade-in slide-in-from-top-1">
+                      {DATE_FIELDS_CONFIG.map(({ field }) => (
+                        <div key={field} className="space-y-1.5 p-2 rounded-lg bg-slate-50/50 dark:bg-[#1e222d]/30 border border-slate-100 dark:border-[#2a2e39]">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">{field}</Label>
+                            <div className="flex items-center gap-1 bg-slate-100 dark:bg-[#1e222d] px-1.5 py-0.5 rounded border border-transparent focus-within:border-slate-300 dark:focus-within:border-[#484f58] transition-colors">
+                              <Input 
+                                type="number"
+                                min="0"
+                                max="30"
+                                value={dateThresholds[field]}
+                                onChange={(e) => setDateThresholds(prev => ({ ...prev, [field]: Number(e.target.value) }))}
+                                className="w-8 h-4 border-none bg-transparent text-[11px] font-bold focus-visible:ring-0 p-0 text-center dark:text-slate-200"
+                              />
+                              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-bold">일</span>
+                            </div>
+                          </div>
+                          <Input 
+                            type="range" 
+                            min="0" 
+                            max="30" 
+                            step="1" 
+                            value={dateThresholds[field]} 
+                            onChange={(e) => setDateThresholds(prev => ({ ...prev, [field]: Number(e.target.value) }))}
+                            className="h-4 accent-slate-600 dark:accent-slate-400 cursor-pointer"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Numeric Fields Column */}
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
-                    <h5 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">수치 필드 (변동폭 %)</h5>
-                  </div>
-                  <div className="grid gap-x-8 gap-y-4">
-                    {NUMERIC_FIELDS_CONFIG.map(({ field }) => (
-                      <div key={field} className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">{field}</Label>
-                          <div className="flex items-center gap-0.5 text-[10px] font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-[#21262d] px-1.5 py-0.5 rounded">
-                            <span>{numericThresholds[field]}</span>
-                            <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium ml-0.5">%</span>
-                          </div>
-                        </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
+                      <h5 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">수치 필드 (변동폭 %)</h5>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-[11px] text-slate-400 dark:text-slate-500 font-bold">일괄 조절</Label>
+                      <div className="flex items-center gap-1 bg-white dark:bg-[#131722] border border-slate-200 dark:border-[#2a2e39] rounded px-1.5 py-0.5">
                         <Input 
-                          type="range" 
+                          type="number" 
                           min="0" 
                           max="100" 
-                          step="0.5" 
-                          value={numericThresholds[field]} 
-                          onChange={(e) => setNumericThresholds(prev => ({ ...prev, [field]: Number(e.target.value) }))}
-                          className="h-4 accent-slate-600 dark:accent-slate-400 cursor-pointer"
+                          step="0.5"
+                          className="w-10 h-5 border-none bg-transparent text-[11px] focus-visible:ring-0 p-0 text-center font-bold dark:text-slate-300"
+                          onChange={(e) => handleBulkNumericChange(Number(e.target.value))}
+                          placeholder="0.0"
                         />
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500 font-bold">%</span>
                       </div>
-                    ))}
+                    </div>
                   </div>
+
+                  {showDetails && (
+                    <div className="grid grid-cols-1 gap-1.5 animate-in fade-in slide-in-from-top-1">
+                      {NUMERIC_FIELDS_CONFIG.map(({ field }) => (
+                        <div key={field} className="space-y-1.5 p-2 rounded-lg bg-slate-50/50 dark:bg-[#1e222d]/30 border border-slate-100 dark:border-[#2a2e39]">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">{field}</Label>
+                            <div className="flex items-center gap-1 bg-slate-100 dark:bg-[#1e222d] px-1.5 py-0.5 rounded border border-transparent focus-within:border-slate-300 dark:focus-within:border-[#484f58] transition-colors">
+                              <Input 
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.5"
+                                value={numericThresholds[field]}
+                                onChange={(e) => setNumericThresholds(prev => ({ ...prev, [field]: Number(e.target.value) }))}
+                                className="w-8 h-4 border-none bg-transparent text-[11px] font-bold focus-visible:ring-0 p-0 text-center dark:text-slate-200"
+                              />
+                              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-bold">%</span>
+                            </div>
+                          </div>
+                          <Input 
+                            type="range" 
+                            min="0" 
+                            max="100" 
+                            step="0.5" 
+                            value={numericThresholds[field]} 
+                            onChange={(e) => setNumericThresholds(prev => ({ ...prev, [field]: Number(e.target.value) }))}
+                            className="h-4 accent-slate-600 dark:accent-slate-400 cursor-pointer"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="pt-3 border-t border-slate-100 dark:border-[#30363d] flex items-center justify-between">
+              <div className="pt-3 border-t border-slate-100 dark:border-[#2a2e39] flex items-center justify-between">
                 <p className="text-[10px] text-slate-400 italic">※ 임계값 이하의 변동은 '단순변동'으로 처리되어 강조되지 않습니다.</p>
-                <code className="text-[9px] text-slate-300 dark:text-slate-600 font-mono">회차 변동: 항상 무시됨</code>
+                <code className="text-[9px] text-slate-300 dark:text-[#787b86] font-mono">회차 변동: 항상 무시됨</code>
               </div>
             </div>
           )}
 
           <div className="grid md:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label className="dark:text-slate-300">파싱 모드</Label>
+              <Label className="dark:text-[#d1d4dc]">파싱 모드</Label>
               <Select 
                 value={changeMode} 
                 onValueChange={(val) => {
@@ -508,44 +576,44 @@ export default function HtmlChangeLogPage() {
                   saveSetting("html_parse_mode", val);
                 }}
               >
-                <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
+                <SelectTrigger className="dark:bg-[#131722] dark:border-[#2a2e39] dark:text-[#d1d4dc]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                  {PARSE_MODES.map(m => (
+                <SelectContent className="dark:bg-[#131722] dark:border-[#2a2e39] dark:text-[#d1d4dc]">
+                  {PARSE_MODES.map((m: any) => (
                     <SelectItem key={m.key} value={m.key}>{m.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="md:col-span-2 space-y-2">
-              <Label className="dark:text-slate-300">파싱 결과 파일</Label>
+              <Label className="dark:text-[#d1d4dc]">파싱 결과 파일</Label>
               <div className="flex gap-2">
                 <Input 
                   value={outputPath} 
                   onChange={(e) => setOutputPath(e.target.value)} 
                   onBlur={() => saveSetting("html_parse_result_path", outputPath)}
-                  className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" 
+                  className="dark:bg-[#131722] dark:border-[#2a2e39] dark:text-[#d1d4dc]" 
                 />
-                <Button variant="outline" size="icon" onClick={() => handlePickPath('file', setOutputPath, outputPath)} className="dark:border-[#30363d] dark:hover:bg-[#21262d]">
-                  <FileJson className="h-4 w-4 dark:text-slate-400" />
+                <Button variant="outline" size="icon" onClick={() => handlePickPath('file', setOutputPath, outputPath)} className="dark:border-[#2a2e39] dark:hover:bg-[#1e222d]">
+                  <FileJson className="h-4 w-4 dark:text-[#787b86]" />
                 </Button>
               </div>
             </div>
             <div className="space-y-2">
-              <Label className="dark:text-slate-300">로딩 건수</Label>
+              <Label className="dark:text-[#d1d4dc]">로딩 건수</Label>
               <div className="flex gap-2">
-                <Input type="number" value={changeLimit} onChange={(e) => setChangeLimit(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                <Button variant="outline" onClick={() => setChangeLimit("")} className="dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">전체</Button>
+                <Input type="number" value={changeLimit} onChange={(e) => setChangeLimit(e.target.value)} className="dark:bg-[#131722] dark:border-[#2a2e39] dark:text-[#d1d4dc]" />
+                <Button variant="outline" onClick={() => setChangeLimit("")} className="dark:border-[#2a2e39] dark:hover:bg-[#1e222d] dark:text-[#d1d4dc]">전체</Button>
               </div>
             </div>
           </div>
 
           <div className="grid md:grid-cols-2 gap-4 items-end">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-[#787b86]" />
               <Input 
-                className="pl-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" 
+                className="pl-9 dark:bg-[#131722] dark:border-[#2a2e39] dark:text-[#d1d4dc] dark:placeholder:text-[#9da1ab]/60" 
                 placeholder="제목, 접수번호, 필드명 검색..." 
                 value={changeSearch} 
                 onChange={(e) => setChangeSearch(e.target.value)} 
@@ -553,15 +621,15 @@ export default function HtmlChangeLogPage() {
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Checkbox id="showOnlyChanges" checked={showOnlyChanges} onCheckedChange={(v) => setShowOnlyChanges(!!v)} className="dark:border-[#30363d]" />
-                <Label htmlFor="showOnlyChanges" className="cursor-pointer dark:text-slate-300">변경사항만 보기</Label>
+                <Checkbox id="showOnlyChanges" checked={showOnlyChanges} onCheckedChange={(v) => setShowOnlyChanges(!!v)} className="dark:border-[#2a2e39]" />
+                <Label htmlFor="showOnlyChanges" className="cursor-pointer dark:text-[#d1d4dc]">변경사항만 보기</Label>
               </div>
               <div className="flex items-center gap-4">
                 <div className="flex items-center space-x-2">
-                  <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#30363d]" />
-                  <Label htmlFor="exportLatestOnly" className="cursor-pointer text-xs text-slate-500 dark:text-slate-400">최신버전만</Label>
+                  <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#2a2e39]" />
+                  <Label htmlFor="exportLatestOnly" className="cursor-pointer text-xs text-slate-500 dark:text-[#787b86]">최신버전만</Label>
                 </div>
-                <Button size="sm" variant="outline" onClick={handleExport} disabled={!outputPath} className="dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
+                <Button size="sm" variant="outline" onClick={handleExport} disabled={!outputPath} className="dark:border-[#2a2e39] dark:hover:bg-[#1e222d] dark:text-[#d1d4dc]">
                   <FileSpreadsheet className="mr-2 h-3.5 w-3.5" />
                   Export
                 </Button>
@@ -569,50 +637,60 @@ export default function HtmlChangeLogPage() {
             </div>
           </div>
 
-          <div className="grid lg:grid-cols-4 gap-6 min-h-[500px]">
+          <div className="grid lg:grid-cols-10 gap-6 min-h-[500px]">
             {/* Sidebar Rail */}
-            <div className="lg:col-span-1 border rounded-xl overflow-hidden bg-white dark:bg-[#161b22] dark:border-[#30363d] flex flex-col">
-              <div className="p-3 bg-slate-50 dark:bg-[#0d1117] border-b dark:border-[#30363d] text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <div className="lg:col-span-4 border rounded-xl overflow-hidden bg-white dark:bg-[#131722] dark:border-[#2a2e39] flex flex-col">
+              <div className="p-3 bg-slate-50 dark:bg-[#1e222d] border-b dark:border-[#2a2e39] text-[11px] font-bold text-slate-500 dark:text-[#787b86] uppercase tracking-wider">
                 정정 패밀리 목록
               </div>
-              <div className="overflow-auto flex-1 divide-y divide-slate-100 dark:divide-[#30363d] max-h-[600px]">
+              <div className="overflow-auto flex-1 divide-y divide-slate-100 dark:divide-[#2a2e39] max-h-[600px]">
                 {filteredFamilies.length > 0 ? (
                   filteredFamilies.map((family: any) => {
                     const isSelected = selectedFamilyId === family.family_id;
                     const displayChangedFields = getChangedFields(family);
-                    const displayCount = displayChangedFields.length;
+                    const displayCount = family.has_details ? displayChangedFields.length : (family.changed_fields ?? 0);
                     
                     return (
                       <button 
                         key={family.family_id}
                         onClick={() => handleSelectFamily(family.family_id)}
                         className={cn(
-                          "w-full text-left p-4 hover:bg-slate-50 dark:hover:bg-[#21262d] transition-colors group relative",
-                          isSelected ? "bg-blue-50/50 dark:bg-[#1f2937]/50" : ""
+                          "w-full text-left p-4 hover:bg-slate-50 dark:hover:bg-[#1e222d] transition-colors group relative",
+                          isSelected ? "bg-blue-50/50 dark:bg-[#1e222d]" : ""
                         )}
                       >
-                        {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-blue-500" />}
-                        <div className="flex flex-col gap-1">
-                          <strong className={cn(
-                            "text-sm line-clamp-2",
-                            isSelected ? "text-blue-900 dark:text-blue-100" : "text-slate-700 dark:text-slate-300"
-                          )}>
-                            {family.title || family.family_id}
-                          </strong>
-                          <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-                            <span>문서 {family.record_count}</span>
-                            <span>•</span>
-                            <span className={cn(displayCount > 0 ? "text-amber-600 dark:text-amber-500" : "")}>
-                              필드 {family.has_details ? displayCount : "-"}
-                            </span>
+                        {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-[#2962ff]" />}
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <strong className={cn(
+                              "text-[13px] leading-snug flex-1 transition-colors",
+                              isSelected ? "text-blue-900 dark:text-[#d1d4dc]" : "text-slate-700 dark:text-[#d1d4dc]"
+                            )}>
+                              {family.title || family.family_id}
+                            </strong>
+                            <div className={cn(
+                              "shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
+                              displayCount > 0 
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" 
+                                : "bg-slate-100 text-slate-400 dark:bg-[#2a2e39] dark:text-[#4b4e5a]"
+                            )}>
+                              {displayCount > 0 ? `Changed ${displayCount}` : "No Change"}
+                            </div>
                           </div>
-                          {family.has_details && displayCount > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {displayChangedFields.slice(0, 3).map(f => (
-                                <span key={f} className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#21262d] text-slate-500 dark:text-slate-400 text-[9px]">{f}</span>
+                          
+                          <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-[#787b86] font-medium">
+                            <code className="bg-slate-50 dark:bg-[#0d1117] px-1 rounded border dark:border-[#2a2e39]">{family.family_id}</code>
+                            <span>•</span>
+                            <span>문서 {family.record_count}</span>
+                          </div>
+
+                          {displayCount > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {displayChangedFields.slice(0, 5).map((f: string) => (
+                                <span key={f} className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-[#1e222d] text-blue-600 dark:text-[#2962ff] text-[9px] font-medium border border-blue-100 dark:border-[#2a2e39]">{f}</span>
                               ))}
-                              {displayChangedFields.length > 3 && (
-                                <span className="text-[9px] text-slate-300 dark:text-slate-600">+{displayChangedFields.length - 3}</span>
+                              {displayChangedFields.length > 5 && (
+                                <span className="text-[9px] text-slate-400 dark:text-[#4b4e5a] font-medium self-center ml-0.5">+{displayChangedFields.length - 5}</span>
                               )}
                             </div>
                           )}
@@ -621,7 +699,7 @@ export default function HtmlChangeLogPage() {
                     );
                   })
                 ) : (
-                  <div className="p-8 text-center text-slate-400 dark:text-slate-600 text-sm">
+                  <div className="p-8 text-center text-slate-400 dark:text-[#4b4e5a] text-sm">
                     {changeLog ? "검색 결과가 없습니다." : "파싱 결과를 불러오세요."}
                   </div>
                 )}
@@ -629,14 +707,14 @@ export default function HtmlChangeLogPage() {
             </div>
 
             {/* Matrix Content Area */}
-            <div className="lg:col-span-3 border rounded-xl bg-slate-50/50 dark:bg-[#0d1117]/50 dark:border-[#30363d] overflow-hidden flex flex-col min-h-[600px]">
+            <div className="lg:col-span-6 border rounded-xl bg-slate-50/50 dark:bg-[#131722] dark:border-[#2a2e39] overflow-hidden flex flex-col min-h-[600px]">
               {selectedFamily ? (
                 <>
-                  <div className="p-6 bg-white dark:bg-[#161b22] border-b dark:border-[#30363d] space-y-1">
+                  <div className="p-6 bg-white dark:bg-[#131722] border-b dark:border-[#2a2e39] space-y-1">
                     <div className="flex items-center gap-2">
-                      <code className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">{selectedFamily.family_id}</code>
+                      <code className="text-[11px] text-slate-400 dark:text-[#787b86] font-mono">{selectedFamily.family_id}</code>
                     </div>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white line-clamp-1">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-[#d1d4dc] line-clamp-1">
                       {selectedFamily.records?.at(-1)?.title || selectedFamily.title}
                     </h3>
                   </div>
@@ -644,49 +722,49 @@ export default function HtmlChangeLogPage() {
                   <div className="flex-1 overflow-auto p-6">
                     {!selectedFamily.has_details ? (
                       <div className="h-full flex flex-col items-center justify-center space-y-4 py-12">
-                        <Loader2 className="h-8 w-8 animate-spin text-blue-500 dark:text-blue-400" />
+                        <Loader2 className="h-8 w-8 animate-spin text-blue-500 dark:text-[#2962ff]" />
                         <div className="text-center">
-                          <p className="text-sm font-bold text-slate-900 dark:text-slate-200">상세 변동 내역 분석 중</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">문서 간 데이터 차이를 대조하고 있습니다...</p>
+                          <p className="text-sm font-bold text-slate-900 dark:text-[#d1d4dc]">상세 변동 내역 분석 중</p>
+                          <p className="text-xs text-slate-500 dark:text-[#787b86]">문서 간 데이터 차이를 대조하고 있습니다...</p>
                         </div>
                       </div>
                     ) : (() => {
                       const data = getMatrixData(selectedFamily);
                       if (!data || data.fields.length === 0) {
                         return (
-                          <div className="h-full flex flex-col items-center justify-center text-center space-y-3 opacity-40 py-24">
-                            <CheckCircle2 className="h-12 w-12 text-emerald-500 dark:text-emerald-400" />
+                          <div className="h-full flex flex-col items-center justify-center text-center space-y-3 py-24">
+                            <CheckCircle2 className="h-12 w-12 text-emerald-500 dark:text-emerald-500" />
                             <div>
-                              <p className="text-sm font-bold text-slate-900 dark:text-slate-200">변동 사항 없음</p>
-                              <p className="text-xs text-slate-500 dark:text-slate-400">모든 비교 필드가 이전 버전과 동일합니다.</p>
+                              <p className="text-sm font-bold text-slate-900 dark:text-[#d1d4dc]">변동 사항 없음</p>
+                              <p className="text-xs text-slate-500 dark:text-[#787b86]">모든 비교 필드가 이전 버전과 동일합니다.</p>
                             </div>
                           </div>
                         );
                       }
 
                       return (
-                        <div className="border rounded-lg bg-white dark:bg-[#161b22] dark:border-[#30363d] shadow-sm overflow-hidden">
+                        <div className="border rounded-lg bg-white dark:bg-[#131722] dark:border-[#2a2e39] shadow-sm overflow-hidden">
                           <table className="w-full text-xs border-collapse">
-                            <thead className="bg-slate-50 dark:bg-[#0d1117] border-b dark:border-[#30363d]">
+                            <thead className="bg-slate-50 dark:bg-[#1e222d] border-b dark:border-[#2a2e39]">
                               <tr>
-                                <th className="px-4 py-3 text-left font-bold text-slate-500 dark:text-slate-400 w-32 border-r dark:border-[#30363d] bg-slate-50/80 dark:bg-[#0d1117]/80 sticky left-0 z-20">변동 필드</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-500 dark:text-[#787b86] w-32 border-r dark:border-[#2a2e39] bg-slate-50/80 dark:bg-[#1e222d]/80 sticky left-0 z-20">변동 필드</th>
                                 {data.records.map((r: any, i: number) => (
-                                  <th key={r.rcept_no} className="px-4 py-3 text-left min-w-[180px] border-r dark:border-[#30363d] last:border-r-0">
+                                  <th key={r.rcept_no} className="px-4 py-3 text-left min-w-[180px] border-r dark:border-[#2a2e39] last:border-r-0">
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-blue-600 dark:text-blue-400 font-bold">#{i + 1} {i === 0 ? "(Original)" : i === data.records.length - 1 ? "(Latest)" : ""}</span>
-                                      <code className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">{r.rcept_no}</code>
+                                      <span className="text-blue-600 dark:text-[#2962ff] font-bold">#{i + 1} {i === 0 ? "(Original)" : i === data.records.length - 1 ? "(Latest)" : ""}</span>
+                                      <code className="text-[10px] text-slate-400 dark:text-[#787b86] font-mono">{r.rcept_no}</code>
                                     </div>
                                   </th>
                                 ))}
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-[#30363d]">
-                              {data.fields.map(field => (
+                            <tbody className="divide-y divide-slate-100 dark:divide-[#2a2e39]">
+                              {data.fields.map((field: string) => (
                                 <tr key={field} className="group">
-                                  <td className="px-4 py-4 font-bold text-slate-700 dark:text-slate-300 border-r dark:border-[#30363d] bg-slate-50/30 dark:bg-[#0d1117]/30 sticky left-0 group-hover:bg-slate-100 dark:group-hover:bg-[#21262d] transition-colors z-10">
+                                  <td className="px-4 py-4 font-bold text-slate-700 dark:text-[#d1d4dc] border-r dark:border-[#2a2e39] bg-slate-50/30 dark:bg-[#1e222d]/30 sticky left-0 group-hover:bg-slate-100 dark:group-hover:bg-[#1e222d] transition-colors z-10">
                                     {field}
                                   </td>
-                                  {data.matrix[field].map((val, i) => {
+                                  {data.matrix[field].map((val: any, i: number) => {
                                     const prevVal = i > 0 ? data.matrix[field][i-1] : null;
                                     const isChanged = i > 0 && stableJson(val) !== stableJson(prevVal);
                                     
@@ -716,8 +794,8 @@ export default function HtmlChangeLogPage() {
                                       <td 
                                         key={i} 
                                         className={cn(
-                                          "px-4 py-4 border-r dark:border-[#30363d] last:border-r-0 align-top transition-colors",
-                                          changeType === 'major' ? "bg-amber-50/50 dark:bg-amber-900/20" : changeType === 'minor' ? "bg-slate-50/50 dark:bg-slate-800/20" : ""
+                                          "px-4 py-4 border-r dark:border-[#2a2e39] last:border-r-0 align-top transition-colors",
+                                          changeType === 'major' ? "bg-amber-50/50 dark:bg-amber-900/10" : changeType === 'minor' ? "bg-slate-50/50 dark:bg-slate-800/10" : ""
                                         )}
                                       >
                                         <div className="space-y-1">
@@ -729,7 +807,7 @@ export default function HtmlChangeLogPage() {
                                           )}
                                           <div className={cn(
                                             "whitespace-pre-wrap leading-relaxed",
-                                            isChanged ? "font-bold text-slate-900 dark:text-slate-50" : "text-slate-500 dark:text-slate-400"
+                                            isChanged ? "font-bold text-slate-900 dark:text-[#d1d4dc]" : "text-slate-500 dark:text-[#4b4e5a]"
                                           )}>
                                             {formatValueWithField(val, field)}
                                           </div>
@@ -747,11 +825,11 @@ export default function HtmlChangeLogPage() {
                   </div>
                 </>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center space-y-3 opacity-40 py-24">
-                  <div className="p-4 rounded-full bg-slate-200 dark:bg-[#21262d]">
-                    <AlertCircle className="h-8 w-8 text-slate-400 dark:text-slate-500" />
+                <div className="h-full flex flex-col items-center justify-center text-center space-y-3 py-24">
+                  <div className="p-4 rounded-full bg-slate-200 dark:bg-[#1e222d]">
+                    <AlertCircle className="h-8 w-8 text-slate-400 dark:text-[#4b4e5a]" />
                   </div>
-                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">패밀리를 선택하면 상세 변동 내역이 표시됩니다.</p>
+                  <p className="text-sm font-medium text-slate-500 dark:text-[#787b86]">패밀리를 선택하면 상세 변동 내역이 표시됩니다.</p>
                 </div>
               )}
             </div>
@@ -760,7 +838,7 @@ export default function HtmlChangeLogPage() {
         {status && (
           <div className={cn(
             "mx-6 mb-6 p-3 rounded-lg border text-xs font-medium",
-            isErrorStatus ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300" : "bg-slate-50 dark:bg-[#21262d] border-slate-200 dark:border-[#30363d] text-slate-700 dark:text-slate-300"
+            isErrorStatus ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300" : "bg-slate-50 dark:bg-[#1e222d] border-slate-200 dark:border-[#2a2e39] text-slate-700 dark:text-[#d1d4dc]"
           )}>
             {status}
           </div>

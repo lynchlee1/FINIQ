@@ -42,18 +42,18 @@
 }
 
 :root.dark {
-  --background: #0d1117;
-  --foreground: #e6edf3;
-  --color-card: #161b22;
-  --color-card-foreground: #e6edf3;
-  --color-border: #30363d;
-  --color-muted: #21262d;
-  --color-muted-foreground: #8b949e;
-  --color-primary: #f0f6fc;
-  --color-primary-foreground: #0d1117;
-  --color-secondary: #21262d;
-  --color-secondary-foreground: #e6edf3;
-  --color-accent: #238636;
+  --background: #131722;
+  --foreground: #d1d4dc;
+  --color-card: #131722;
+  --color-card-foreground: #d1d4dc;
+  --color-border: #2a2e39;
+  --color-muted: #1e222d;
+  --color-muted-foreground: #787b86;
+  --color-primary: #2962ff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #2a2e39;
+  --color-secondary-foreground: #d1d4dc;
+  --color-accent: #2962ff;
   --color-accent-foreground: #ffffff;
   color-scheme: dark;
 }

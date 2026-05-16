@@ -43,11 +43,11 @@ export function Topbar() {
   };
 
   return (
-    <header className="bg-white dark:bg-[#161b22] rounded-xl shadow-sm border border-slate-200 dark:border-[#30363d] p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 transition-colors">
+    <header className="bg-white dark:bg-[#131722] rounded-xl shadow-sm border border-slate-200 dark:border-[#2a2e39] p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 transition-colors">
       <div className="flex items-center justify-between w-full md:w-auto">
         <div>
-          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">FINIQ MarketDesk</p>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+          <p className="text-sm font-medium text-slate-500 dark:text-[#787b86] uppercase tracking-wider">FINIQ MarketDesk</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#d1d4dc]">
             {NAV_ITEMS.find((item) => item.href === pathname)?.label || "공시 조회"}
           </h1>
         </div>
@@ -55,7 +55,7 @@ export function Topbar() {
           variant="outline" 
           size="icon" 
           onClick={toggleDarkMode} 
-          className="md:hidden border-slate-200 dark:border-[#30363d] dark:hover:bg-[#21262d]"
+          className="md:hidden border-slate-200 dark:border-[#2a2e39] dark:hover:bg-[#1e222d]"
         >
           {isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-600" />}
         </Button>
@@ -70,8 +70,8 @@ export function Topbar() {
               className={cn(
                 "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
                 pathname === item.href
-                  ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#21262d]"
+                  ? "bg-slate-900 dark:bg-[#d1d4dc] text-white dark:text-[#131722]"
+                  : "text-slate-600 dark:text-[#787b86] hover:bg-slate-100 dark:hover:bg-[#1e222d] dark:hover:text-[#d1d4dc]"
               )}
             >
               {item.label}
@@ -79,13 +79,13 @@ export function Topbar() {
           ))}
         </nav>
         
-        <div className="hidden md:block h-6 w-px bg-slate-200 dark:bg-[#30363d] mx-1" />
+        <div className="hidden md:block h-6 w-px bg-slate-200 dark:bg-[#2a2e39] mx-1" />
         
         <Button 
           variant="outline" 
           size="icon" 
           onClick={toggleDarkMode} 
-          className="hidden md:flex border-slate-200 dark:border-[#30363d] dark:hover:bg-[#21262d] transition-colors"
+          className="hidden md:flex border-slate-200 dark:border-[#2a2e39] dark:hover:bg-[#1e222d] transition-colors"
           title={isDark ? "라이트 모드로 전환" : "다크 모드로 전환"}
         >
           {isDark ? <Sun className="h-[1.1rem] w-[1.1rem] text-amber-400" /> : <Moon className="h-[1.1rem] w-[1.1rem] text-slate-600" />}
