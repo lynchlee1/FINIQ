@@ -119,6 +119,8 @@ export default function Home() {
         // If we picked a directory for price or output, we might want to reload files
         if (mode === 'dir') {
           await handleSaveSettings(data.path, setter === setOutputRoot ? 'output' : 'price');
+        } else if (setter === setSelectedClassificationPath) {
+          await handleSaveSettings(data.path, 'classification');
         }
       }
     } catch (err: any) {
@@ -126,11 +128,11 @@ export default function Home() {
     }
   };
 
-  const handleSaveSettings = async (pathOverride?: string, type?: 'output' | 'price') => {
+  const handleSaveSettings = async (pathOverride?: string, type?: 'output' | 'price' | 'classification') => {
     try {
       const payload = {
         output_root: type === 'output' ? pathOverride : outputRoot,
-        selected_classification_path: selectedClassificationPath,
+        selected_classification_path: type === 'classification' ? pathOverride : selectedClassificationPath,
         price_root_directory: type === 'price' ? pathOverride : priceRootDir,
         quanti_dir: selectedPricePath,
       };
@@ -164,7 +166,7 @@ export default function Home() {
           <Input 
             type="search" 
             placeholder="회사명을 입력하세요." 
-            className="pl-10 h-12 bg-white"
+            className="pl-10 h-12 bg-white dark:bg-[#161b22] dark:border-[#30363d] dark:text-white"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
@@ -173,7 +175,7 @@ export default function Home() {
           variant="outline" 
           size="lg"
           onClick={() => setSettingsOpen(!settingsOpen)}
-          className={settingsOpen ? "bg-slate-100" : ""}
+          className={cn(settingsOpen ? "bg-slate-100 dark:bg-[#21262d]" : "", "dark:border-[#30363d] dark:text-slate-300 dark:hover:bg-[#21262d]")}
         >
           <Settings className="mr-2 h-4 w-4" />
           설정
@@ -181,36 +183,45 @@ export default function Home() {
       </section>
 
       {settingsOpen && (
-        <Card>
+        <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
           <CardContent className="p-6">
             <div className="grid md:grid-cols-2 gap-8">
               <div className="space-y-4">
-                <h3 className="font-semibold text-slate-900 border-b pb-2">주가 소스</h3>
+                <h3 className="font-semibold text-slate-900 dark:text-white border-b dark:border-[#30363d] pb-2">주가 소스</h3>
                 <div className="space-y-2">
-                  <Label>폴더 경로</Label>
+                  <Label className="dark:text-slate-300">폴더 경로</Label>
                   <div className="flex gap-2">
                     <Input 
                       placeholder="/path/to/price/folder" 
                       value={priceRootDir} 
                       onChange={(e) => setPriceRootDir(e.target.value)}
+                      onBlur={() => handleSaveSettings(priceRootDir, 'price')}
+                      className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
                     />
                     <Button 
                       variant="outline" 
                       size="icon" 
                       title="폴더 선택"
                       onClick={() => handlePickPath('dir', setPriceRootDir, priceRootDir)}
+                      className="dark:border-[#30363d] dark:hover:bg-[#21262d]"
                     >
-                      <FolderOpen className="h-4 w-4" />
+                      <FolderOpen className="h-4 w-4 dark:text-slate-400" />
                     </Button>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>파일 선택</Label>
-                  <Select value={selectedPricePath} onValueChange={setSelectedPricePath}>
-                    <SelectTrigger>
+                  <Label className="dark:text-slate-300">파일 선택</Label>
+                  <Select 
+                    value={selectedPricePath} 
+                    onValueChange={(val) => {
+                      setSelectedPricePath(val);
+                      handleSaveSettings(val, 'price');
+                    }}
+                  >
+                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
                       <SelectValue placeholder="파일을 선택하세요" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
                       {config?.price_files.map((file) => (
                         <SelectItem key={file.path} value={file.path}>
                           {file.label}
@@ -222,32 +233,41 @@ export default function Home() {
               </div>
 
               <div className="space-y-4">
-                <h3 className="font-semibold text-slate-900 border-b pb-2">공시 소스</h3>
+                <h3 className="font-semibold text-slate-900 dark:text-white border-b dark:border-[#30363d] pb-2">공시 소스</h3>
                 <div className="space-y-2">
-                  <Label>폴더 경로</Label>
+                  <Label className="dark:text-slate-300">폴더 경로</Label>
                   <div className="flex gap-2">
                     <Input 
                       placeholder="/path/to/disclosure/folder" 
                       value={outputRoot}
                       onChange={(e) => setOutputRoot(e.target.value)}
+                      onBlur={() => handleSaveSettings(outputRoot, 'output')}
+                      className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
                     />
                     <Button 
                       variant="outline" 
                       size="icon" 
                       title="폴더 선택"
                       onClick={() => handlePickPath('dir', setOutputRoot, outputRoot)}
+                      className="dark:border-[#30363d] dark:hover:bg-[#21262d]"
                     >
-                      <FolderOpen className="h-4 w-4" />
+                      <FolderOpen className="h-4 w-4 dark:text-slate-400" />
                     </Button>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>파일 선택</Label>
-                  <Select value={selectedClassificationPath} onValueChange={setSelectedClassificationPath}>
-                    <SelectTrigger>
+                  <Label className="dark:text-slate-300">파일 선택</Label>
+                  <Select 
+                    value={selectedClassificationPath} 
+                    onValueChange={(val) => {
+                      setSelectedClassificationPath(val);
+                      handleSaveSettings(val, 'classification');
+                    }}
+                  >
+                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
                       <SelectValue placeholder="파일을 선택하세요" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
                       {config?.classification_files.map((file) => (
                         <SelectItem key={file.path} value={file.path}>
                           {file.label}
@@ -259,25 +279,25 @@ export default function Home() {
               </div>
             </div>
             <div className="mt-8 flex justify-end">
-              <Button onClick={() => handleSaveSettings()}>설정 저장</Button>
+              <Button onClick={() => handleSaveSettings()} className="dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200">설정 저장</Button>
             </div>
           </CardContent>
         </Card>
       )}
 
-      <Card>
+      <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <div>
-            <CardDescription>회사 목록</CardDescription>
-            <CardTitle>회사 코드</CardTitle>
+            <CardDescription className="dark:text-slate-400">회사 목록</CardDescription>
+            <CardTitle className="dark:text-white">회사 코드</CardTitle>
           </div>
-          <div className="bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-sm font-semibold">
+          <div className="bg-slate-100 dark:bg-[#21262d] text-slate-700 dark:text-slate-200 px-3 py-1 rounded-full text-sm font-semibold">
             {formatNumber(companies.length)}
           </div>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-center py-12 text-slate-500">
+            <div className="text-center py-12 text-slate-500 dark:text-slate-400">
               데이터를 불러오는 중입니다...
             </div>
           ) : companies.length > 0 ? (
@@ -296,36 +316,36 @@ export default function Home() {
                     <Link
                       key={company.company_key}
                       href={href}
-                      className="flex flex-col p-4 rounded-xl border border-slate-200 hover:border-slate-900 hover:shadow-md transition-all text-left bg-white group"
+                      className="flex flex-col p-4 rounded-xl border border-slate-200 dark:border-[#30363d] hover:border-slate-900 dark:hover:border-slate-100 hover:shadow-md transition-all text-left bg-white dark:bg-[#0d1117]/50 group"
                     >
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex flex-col">
-                          <span className="text-xs font-bold text-slate-400 mb-1">{company.company_key}</span>
-                          <h4 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                          <span className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-1">{company.company_key}</span>
+                          <h4 className="font-bold text-slate-900 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                             {company.company_name}
                           </h4>
                         </div>
-                        <span className="px-2 py-1 rounded bg-slate-100 text-[10px] font-bold text-slate-600">
+                        <span className="px-2 py-1 rounded bg-slate-100 dark:bg-[#21262d] text-[10px] font-bold text-slate-600 dark:text-slate-400">
                           {company.market}
                         </span>
                       </div>
                       
                       <div className="flex flex-wrap gap-1 mb-4">
                         {company.badges?.slice(0, 3).map((tag, i) => (
-                          <span key={i} className="px-1.5 py-0.5 rounded-md bg-blue-50 text-[10px] font-medium text-blue-600 border border-blue-100">
+                          <span key={i} className="px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/20 text-[10px] font-medium text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/50">
                             {tag}
                           </span>
                         ))}
                       </div>
 
-                      <div className="mt-auto grid grid-cols-2 gap-2 pt-3 border-t border-slate-50">
+                      <div className="mt-auto grid grid-cols-2 gap-2 pt-3 border-t border-slate-50 dark:border-[#30363d]">
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-slate-400">최근 공시</span>
-                          <span className="text-xs font-semibold text-slate-700">{company.last_disclosed_at || "-"}</span>
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500">최근 공시</span>
+                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{company.last_disclosed_at || "-"}</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-slate-400">공시 건수</span>
-                          <span className="text-xs font-semibold text-slate-700">{formatNumber(company.disclosure_count)}건</span>
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500">공시 건수</span>
+                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{formatNumber(company.disclosure_count)}건</span>
                         </div>
                       </div>
                     </Link>
@@ -334,14 +354,14 @@ export default function Home() {
               </div>
               {companies.length > displayCount && (
                 <div className="mt-8 flex justify-center">
-                  <Button variant="outline" onClick={() => setDisplayCount(prev => prev + 100)}>
+                  <Button variant="outline" onClick={() => setDisplayCount(prev => prev + 100)} className="dark:border-[#30363d] dark:text-slate-300 dark:hover:bg-[#21262d]">
                     더 보기 ({formatNumber(companies.length - displayCount)}개 남음)
                   </Button>
                 </div>
               )}
             </>
           ) : (
-            <div className="text-center py-12 text-slate-500">
+            <div className="text-center py-12 text-slate-500 dark:text-slate-400">
               {error ? `오류: ${error}` : "조건에 맞는 회사가 없습니다."}
             </div>
           )}

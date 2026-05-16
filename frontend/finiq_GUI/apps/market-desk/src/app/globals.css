@@ -33,6 +33,37 @@
   --color-ring: var(--color-slate-900);
 }
 
-body {
-  @apply bg-slate-50 text-slate-900;
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  color-scheme: light;
+  background-color: var(--background) !important;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
+
+:root.dark {
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --color-card: #161b22;
+  --color-card-foreground: #e6edf3;
+  --color-border: #30363d;
+  --color-muted: #21262d;
+  --color-muted-foreground: #8b949e;
+  --color-primary: #f0f6fc;
+  --color-primary-foreground: #0d1117;
+  --color-secondary: #21262d;
+  --color-secondary-foreground: #e6edf3;
+  --color-accent: #238636;
+  --color-accent-foreground: #ffffff;
+  color-scheme: dark;
+}
+
+html, body {
+  height: auto !important;
+  min-height: 100% !important;
+  background-color: var(--background) !important;
+  color: var(--foreground) !important;
+}
+
+/* Ensure Tailwind dark utilities work with .dark class on html */
+@variant dark (&:where(.dark, .dark *));

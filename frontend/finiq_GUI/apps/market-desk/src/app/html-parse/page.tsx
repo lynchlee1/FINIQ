@@ -112,6 +112,7 @@ export default function HtmlParsePage() {
   const handleParseModeChange = (val: string) => {
     setParseMode(val);
     updateOutputPath(inputDirectory, val);
+    saveSetting("html_parse_mode", val);
   };
 
   const pollJob = useCallback(async (jobId: string) => {
@@ -164,6 +165,18 @@ export default function HtmlParsePage() {
     }
   }, []);
 
+  const saveSetting = async (key: string, value: string) => {
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+      });
+    } catch (err) {
+      console.error(`Failed to save setting ${key}:`, err);
+    }
+  };
+
   const handlePickPath = async (type: 'dir' | 'file' | 'save', setter: (v: string) => void, defaultPath: string) => {
     try {
       const response = await fetch("/api/file-dialog", {
@@ -172,7 +185,14 @@ export default function HtmlParsePage() {
         body: JSON.stringify({ mode: type, title: "선택", default_path: defaultPath }),
       });
       const data = await response.json();
-      if (data.path) setter(data.path);
+      if (data.path) {
+        setter(data.path);
+        if (setter === setOutputPath) {
+          saveSetting("html_parse_result_path", data.path);
+        } else if (setter === handleInputDirectoryChange) {
+          saveSetting("html_output_directory", data.path);
+        }
+      }
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
@@ -262,28 +282,28 @@ export default function HtmlParsePage() {
       <WorkflowTabs tabs={HTML_PROCESS_TABS} />
       <div className="grid lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2 space-y-6">
-          <Card>
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle>HTML 파싱 설정</CardTitle>
-              <CardDescription>저장된 HTML 원문에서 핵심 데이터를 구조화된 JSON으로 추출합니다.</CardDescription>
+              <CardTitle className="dark:text-white">HTML 파싱 설정</CardTitle>
+              <CardDescription className="dark:text-slate-400">저장된 HTML 원문에서 핵심 데이터를 구조화된 JSON으로 추출합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>입력 경로 (HTML 폴더)</Label>
+                  <Label className="dark:text-slate-300">입력 경로 (HTML 폴더)</Label>
                   <div className="flex gap-2">
-                    <Input value={inputDirectory} onChange={(e) => handleInputDirectoryChange(e.target.value)} />
-                    <Button variant="outline" size="icon" onClick={() => handlePickPath('dir', handleInputDirectoryChange, inputDirectory)}>
-                      <FolderOpen className="h-4 w-4" />
+                    <Input value={inputDirectory} onChange={(e) => handleInputDirectoryChange(e.target.value)} onBlur={() => saveSetting("html_output_directory", inputDirectory)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                    <Button variant="outline" size="icon" onClick={() => handlePickPath('dir', handleInputDirectoryChange, inputDirectory)} className="dark:border-[#30363d] dark:hover:bg-[#21262d]">
+                      <FolderOpen className="h-4 w-4 dark:text-slate-400" />
                     </Button>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>결과 경로 (JSON)</Label>
+                  <Label className="dark:text-slate-300">결과 경로 (JSON)</Label>
                   <div className="flex gap-2">
-                    <Input value={outputPath} onChange={(e) => setOutputPath(e.target.value)} />
-                    <Button variant="outline" size="icon" onClick={() => handlePickPath('save', setOutputPath, outputPath)}>
-                      <FileJson className="h-4 w-4" />
+                    <Input value={outputPath} onChange={(e) => setOutputPath(e.target.value)} onBlur={() => saveSetting("html_parse_result_path", outputPath)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                    <Button variant="outline" size="icon" onClick={() => handlePickPath('save', setOutputPath, outputPath)} className="dark:border-[#30363d] dark:hover:bg-[#21262d]">
+                      <FileJson className="h-4 w-4 dark:text-slate-400" />
                     </Button>
                   </div>
                 </div>
@@ -291,12 +311,12 @@ export default function HtmlParsePage() {
 
               <div className="grid md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label>파싱 모드</Label>
+                  <Label className="dark:text-slate-300">파싱 모드</Label>
                   <Select value={parseMode} onValueChange={handleParseModeChange}>
-                    <SelectTrigger>
+                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
                       <SelectValue placeholder="모드 선택" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
                       {PARSE_MODES.map(mode => (
                         <SelectItem key={mode.key} value={mode.key}>{mode.label}</SelectItem>
                       ))}
@@ -304,31 +324,31 @@ export default function HtmlParsePage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>최대 처리 건수</Label>
-                  <Input type="number" placeholder="전체" value={limit} onChange={(e) => setLimit(e.target.value)} />
+                  <Label className="dark:text-slate-300">최대 처리 건수</Label>
+                  <Input type="number" placeholder="전체" value={limit} onChange={(e) => setLimit(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
                 </div>
                 <div className="space-y-2">
-                  <Label>진행 확인 간격 (건)</Label>
-                  <Input type="number" value={progressInterval} onChange={(e) => setProgressInterval(e.target.value)} />
+                  <Label className="dark:text-slate-300">진행 확인 간격 (건)</Label>
+                  <Input type="number" value={progressInterval} onChange={(e) => setProgressInterval(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
                 </div>
               </div>
 
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="flex items-center space-x-2">
-                  <Checkbox id="resumeParse" checked={resumeParse} onCheckedChange={(v) => setResumeParse(!!v)} />
-                  <Label htmlFor="resumeParse" className="cursor-pointer">기존 결과 JSON 이후부터 진행 (이어하기)</Label>
+                  <Checkbox id="resumeParse" checked={resumeParse} onCheckedChange={(v) => setResumeParse(!!v)} className="dark:border-[#30363d]" />
+                  <Label htmlFor="resumeParse" className="cursor-pointer dark:text-slate-300">기존 결과 JSON 이후부터 진행 (이어하기)</Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Checkbox id="skipErrors" checked={skipErrors} onCheckedChange={(v) => setSkipErrors(!!v)} />
-                  <Label htmlFor="skipErrors" className="cursor-pointer">실패 파일 건너뛰기</Label>
+                  <Checkbox id="skipErrors" checked={skipErrors} onCheckedChange={(v) => setSkipErrors(!!v)} className="dark:border-[#30363d]" />
+                  <Label htmlFor="skipErrors" className="cursor-pointer dark:text-slate-300">실패 파일 건너뛰기</Label>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle>모드별 기능</CardTitle>
+              <CardTitle className="dark:text-white">모드별 기능</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
@@ -338,20 +358,20 @@ export default function HtmlParsePage() {
                     className={cn(
                       "p-4 rounded-xl border transition-all",
                       parseMode === mode.key 
-                        ? "bg-slate-900 text-white border-slate-900 shadow-md" 
-                        : "bg-white text-slate-600 border-slate-200"
+                        ? "bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100 shadow-md" 
+                        : "bg-white text-slate-600 border-slate-200 dark:bg-[#0d1117] dark:text-slate-300 dark:border-[#30363d]"
                     )}
                   >
                     <div className="flex justify-between items-start mb-2">
                       <strong className="text-sm font-bold">{mode.label}</strong>
                       <span className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded font-medium",
-                        parseMode === mode.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                        parseMode === mode.key ? "bg-white/20 text-white dark:bg-black/10 dark:text-black" : "bg-slate-100 text-slate-500 dark:bg-[#21262d] dark:text-slate-400"
                       )}>{mode.status}</span>
                     </div>
                     <code className={cn(
                       "text-[10px] block mb-2 font-mono opacity-70",
-                      parseMode === mode.key ? "text-white/80" : "text-slate-400"
+                      parseMode === mode.key ? "text-white/80 dark:text-black/70" : "text-slate-400"
                     )}>{mode.key}</code>
                     <p className="text-xs leading-relaxed opacity-90">{mode.description}</p>
                   </div>
@@ -360,16 +380,16 @@ export default function HtmlParsePage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle>결과 내보내기</CardTitle>
+              <CardTitle className="dark:text-white">결과 내보내기</CardTitle>
             </CardHeader>
             <CardContent className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} />
-                <Label htmlFor="exportLatestOnly" className="cursor-pointer">최신버전만 보기</Label>
+                <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#30363d]" />
+                <Label htmlFor="exportLatestOnly" className="cursor-pointer dark:text-slate-300">최신버전만 보기</Label>
               </div>
-              <Button onClick={handleExport} disabled={!outputPath}>
+              <Button onClick={handleExport} disabled={!outputPath} variant="outline" className="dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
                 <FileSpreadsheet className="mr-2 h-4 w-4" />
                 Excel로 내보내기
               </Button>
@@ -378,35 +398,35 @@ export default function HtmlParsePage() {
         </section>
 
         <section className="space-y-6">
-          <Card className="sticky top-6">
+          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle>작업 실행</CardTitle>
+              <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col gap-2">
-                <Button className="w-full" onClick={handleRun} disabled={!!activeJobId}>
+                <Button className="w-full dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200" onClick={handleRun} disabled={!!activeJobId}>
                   <Play className="mr-2 h-4 w-4" />
                   파싱 시작
                 </Button>
-                <Button variant="outline" className="w-full" onClick={handleCancel} disabled={!activeJobId || stopRequested}>
+                <Button variant="outline" className="w-full dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300" onClick={handleCancel} disabled={!activeJobId || stopRequested}>
                   <Square className="mr-2 h-4 w-4" />
                   파싱 중지
                 </Button>
               </div>
 
               <div className="space-y-2">
-                <Label>작업 상태</Label>
+                <Label className="dark:text-slate-300">작업 상태</Label>
                 <div className={cn(
                   "p-3 rounded-lg border text-sm font-medium min-h-[120px] whitespace-pre-wrap font-mono text-xs overflow-auto max-h-[300px]",
-                  isErrorStatus ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-700"
+                  isErrorStatus ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/30 text-red-700 dark:text-red-400" : "bg-slate-50 dark:bg-[#21262d] border-slate-200 dark:border-[#30363d] text-slate-700 dark:text-slate-300"
                 )}>
                   {status || "대기 중..."}
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label>실행 결과 (JSON)</Label>
-                <div className="p-3 rounded-lg border bg-slate-900 text-slate-50 font-mono text-[10px] overflow-auto max-h-[300px]">
+                <Label className="dark:text-slate-300">실행 결과 (JSON)</Label>
+                <div className="p-3 rounded-lg border bg-slate-900 dark:bg-[#0d1117] border-slate-800 dark:border-[#30363d] text-slate-50 dark:text-slate-300 font-mono text-[10px] overflow-auto max-h-[300px]">
                   <pre>{result ? JSON.stringify(result, null, 2) : "결과 없음"}</pre>
                 </div>
               </div>

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, List, Dict, Union
 
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -163,7 +163,10 @@ def _write_transfer_file(payload: dict[str, Any], requested_path: str = "") -> d
 # --- API Routes ---
 
 @app.get("/api/config")
-async def get_config():
+async def get_config(response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     price_root = config.price_root_directory or str(Path(config.quanti_dir).resolve().parent)
     return {
         "output_root": config.output_root,
@@ -180,6 +183,14 @@ async def get_config():
         "classification_files": list_classification_files(config.output_root),
         "selected_classification_path": config.selected_classification_path or resolve_default_classification(config.output_root),
         "sqlite_source_path": config.sqlite_source_path,
+        "integrated_merge_input_path": config.integrated_merge_input_path,
+        "integrated_merge_output_path": config.integrated_merge_output_path,
+        "integrated_history_item_registry_path": config.integrated_history_item_registry_path,
+        "integrated_history_output_path": config.integrated_history_output_path,
+        "html_download_source_path": config.html_download_source_path,
+        "integrated_data_values": config.integrated_data_values,
+        "change_log_date_thresholds": config.change_log_date_thresholds,
+        "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
         "range_options": list(INSIGHT_RANGE_OPTIONS),
         "display_frequency_options": list(DISPLAY_FREQUENCY_OPTIONS),
         "price_sources": [
@@ -200,6 +211,14 @@ class SettingsUpdate(BaseModel):
     html_transfer_directory: Optional[str] = None
     html_parse_result_path: Optional[str] = None
     html_parse_mode: Optional[str] = None
+    integrated_merge_input_path: Optional[str] = None
+    integrated_merge_output_path: Optional[str] = None
+    integrated_history_item_registry_path: Optional[str] = None
+    integrated_history_output_path: Optional[str] = None
+    html_download_source_path: Optional[str] = None
+    integrated_data_values: Optional[dict[str, str]] = None
+    change_log_date_thresholds: Optional[dict[str, float]] = None
+    change_log_numeric_thresholds: Optional[dict[str, float]] = None
 
 @app.post("/api/settings")
 async def save_app_settings(update: SettingsUpdate):
@@ -208,13 +227,15 @@ async def save_app_settings(update: SettingsUpdate):
     current_settings = {}
     for key in config.__slots__:
         val = getattr(config, key)
-        if isinstance(val, (str, int, float, bool)):
+        if isinstance(val, (str, int, float, bool, dict)):
             current_settings[key] = val
 
     for key, value in payload.items():
         if value is None: continue
         if key == "html_parse_mode":
             normalized = str(value)
+        elif key in ("integrated_data_values", "change_log_date_thresholds", "change_log_numeric_thresholds") and isinstance(value, dict):
+            normalized = value
         else:
             normalized = normalize_path(str(value))
         setattr(config, key, normalized)
@@ -307,7 +328,8 @@ async def export_companies(
     return FileResponse(temp_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 @app.get("/api/download/options")
-async def get_download_options_route():
+async def get_download_options_route(response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return build_download_options_payload(
         default_output_directory=config.download_output_directory or config.output_root
     )

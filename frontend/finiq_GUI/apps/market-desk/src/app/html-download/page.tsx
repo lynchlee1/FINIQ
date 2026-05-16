@@ -50,6 +50,8 @@ export default function HtmlDownloadPage() {
         setSourceJsonPath(transferReference.source_json_path || "");
         sessionStorage.removeItem("finiq.kind.filteredDisclosures");
         setStatus("공시 필터에서 생성한 결과 파일을 불러왔습니다.");
+      } else if (config.html_download_source_path) {
+        setSourceJsonPath(config.html_download_source_path);
       }
     } catch (err: any) {
       setStatus(err.message);
@@ -58,6 +60,18 @@ export default function HtmlDownloadPage() {
       setLoading(false);
     }
   }, []);
+
+  const saveSetting = async (key: string, value: string) => {
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+      });
+    } catch (err) {
+      console.error(`Failed to save setting ${key}:`, err);
+    }
+  };
 
   useEffect(() => {
     fetchConfig();
@@ -116,7 +130,14 @@ export default function HtmlDownloadPage() {
         body: JSON.stringify({ mode: type, title: "선택", default_path: defaultPath }),
       });
       const data = await response.json();
-      if (data.path) setter(data.path);
+      if (data.path) {
+        setter(data.path);
+        if (setter === setSourceJsonPath) {
+          saveSetting("html_download_source_path", data.path);
+        } else if (setter === setOutputDirectory) {
+          saveSetting("html_output_directory", data.path);
+        }
+      }
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
@@ -193,65 +214,65 @@ export default function HtmlDownloadPage() {
       <WorkflowTabs tabs={HTML_PROCESS_TABS} />
       <div className="grid lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2 space-y-6">
-          <Card>
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle>HTML 저장 설정</CardTitle>
-              <CardDescription>다운로드된 공시 결과 JSON을 바탕으로 HTML 원문을 대량 저장합니다.</CardDescription>
+              <CardTitle className="dark:text-white">HTML 저장 설정</CardTitle>
+              <CardDescription className="dark:text-slate-400">다운로드된 공시 결과 JSON을 바탕으로 HTML 원문을 대량 저장합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>필터 결과 JSON 파일</Label>
+                <Label className="dark:text-slate-300">필터 결과 JSON 파일</Label>
                 <div className="flex gap-2">
-                  <Input value={sourceJsonPath} onChange={(e) => setSourceJsonPath(e.target.value)} />
-                  <Button variant="outline" size="icon" onClick={() => handlePickPath('file', setSourceJsonPath, sourceJsonPath)}>
-                    <FileJson className="h-4 w-4" />
+                  <Input value={sourceJsonPath} onChange={(e) => setSourceJsonPath(e.target.value)} onBlur={() => saveSetting("html_download_source_path", sourceJsonPath)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                  <Button variant="outline" size="icon" onClick={() => handlePickPath('file', setSourceJsonPath, sourceJsonPath)} className="dark:border-[#30363d] dark:hover:bg-[#21262d]">
+                    <FileJson className="h-4 w-4 dark:text-slate-400" />
                   </Button>
                 </div>
-                <p className="text-[11px] text-slate-400 flex items-center gap-1">
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
                   <Info className="h-3 w-3" /> 공시 필터링 결과 파일(JSON)을 선택하세요.
                 </p>
               </div>
 
               <div className="space-y-2">
-                <Label>저장 경로</Label>
+                <Label className="dark:text-slate-300">저장 경로</Label>
                 <div className="flex gap-2">
-                  <Input value={outputDirectory} onChange={(e) => setOutputDirectory(e.target.value)} />
-                  <Button variant="outline" size="icon" onClick={() => handlePickPath('dir', setOutputDirectory, outputDirectory)}>
-                    <FolderOpen className="h-4 w-4" />
+                  <Input value={outputDirectory} onChange={(e) => setOutputDirectory(e.target.value)} onBlur={() => saveSetting("html_output_directory", outputDirectory)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                  <Button variant="outline" size="icon" onClick={() => handlePickPath('dir', setOutputDirectory, outputDirectory)} className="dark:border-[#30363d] dark:hover:bg-[#21262d]">
+                    <FolderOpen className="h-4 w-4 dark:text-slate-400" />
                   </Button>
                 </div>
               </div>
 
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>타임아웃 (초)</Label>
-                  <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} />
+                  <Label className="dark:text-slate-300">타임아웃 (초)</Label>
+                  <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
                 </div>
                 <div className="space-y-2">
-                  <Label>최대 요청/분</Label>
-                  <Input type="number" value={maxRequestsPerMinute} onChange={(e) => setMaxRequestsPerMinute(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>요청 간격 (초)</Label>
-                  <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>최대 처리 건수</Label>
-                  <Input type="number" placeholder="전체" value={limit} onChange={(e) => setLimit(e.target.value)} />
+                  <Label className="dark:text-slate-300">최대 요청/분</Label>
+                  <Input type="number" value={maxRequestsPerMinute} onChange={(e) => setMaxRequestsPerMinute(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
                 </div>
               </div>
 
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>진행 확인 간격 (건)</Label>
-                  <Input type="number" value={progressInterval} onChange={(e) => setProgressInterval(e.target.value)} />
+                  <Label className="dark:text-slate-300">요청 간격 (초)</Label>
+                  <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">최대 처리 건수</Label>
+                  <Input type="number" placeholder="전체" value={limit} onChange={(e) => setLimit(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">진행 확인 간격 (건)</Label>
+                  <Input type="number" value={progressInterval} onChange={(e) => setProgressInterval(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
                 </div>
                 <div className="flex items-center space-x-2 pt-8">
-                  <Checkbox id="skipExisting" checked={skipExisting} onCheckedChange={(v) => setSkipExisting(!!v)} />
-                  <Label htmlFor="skipExisting" className="cursor-pointer">기존 파일 건너뛰기</Label>
+                  <Checkbox id="skipExisting" checked={skipExisting} onCheckedChange={(v) => setSkipExisting(!!v)} className="dark:border-[#30363d]" />
+                  <Label htmlFor="skipExisting" className="cursor-pointer dark:text-slate-300">기존 파일 건너뛰기</Label>
                 </div>
               </div>
             </CardContent>
@@ -259,35 +280,35 @@ export default function HtmlDownloadPage() {
         </section>
 
         <section className="space-y-6">
-          <Card className="sticky top-6">
+          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle>작업 실행</CardTitle>
+              <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col gap-2">
-                <Button className="w-full" onClick={handleRun} disabled={!!activeJobId}>
+                <Button className="w-full dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200" onClick={handleRun} disabled={!!activeJobId}>
                   <Play className="mr-2 h-4 w-4" />
                   저장 시작
                 </Button>
-                <Button variant="outline" className="w-full" onClick={handleCancel} disabled={!activeJobId || stopRequested}>
+                <Button variant="outline" className="w-full dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300" onClick={handleCancel} disabled={!activeJobId || stopRequested}>
                   <Square className="mr-2 h-4 w-4" />
                   저장 중지
                 </Button>
               </div>
 
               <div className="space-y-2">
-                <Label>작업 상태</Label>
+                <Label className="dark:text-slate-300">작업 상태</Label>
                 <div className={cn(
                   "p-3 rounded-lg border text-sm font-medium min-h-[120px] whitespace-pre-wrap font-mono text-xs overflow-auto max-h-[300px]",
-                  isErrorStatus ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-700"
+                  isErrorStatus ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/30 text-red-700 dark:text-red-400" : "bg-slate-50 dark:bg-[#21262d] border-slate-200 dark:border-[#30363d] text-slate-700 dark:text-slate-300"
                 )}>
                   {status || "대기 중..."}
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label>실행 결과 (JSON)</Label>
-                <div className="p-3 rounded-lg border bg-slate-900 text-slate-50 font-mono text-[10px] overflow-auto max-h-[300px]">
+                <Label className="dark:text-slate-300">실행 결과 (JSON)</Label>
+                <div className="p-3 rounded-lg border bg-slate-900 dark:bg-[#0d1117] border-slate-800 dark:border-[#30363d] text-slate-50 dark:text-slate-300 font-mono text-[10px] overflow-auto max-h-[300px]">
                   <pre>{result ? JSON.stringify(result, null, 2) : "결과 없음"}</pre>
                 </div>
               </div>

@@ -91,6 +91,18 @@ export default function TablePage() {
     setOutputPath(outputDirectoryFromRawPath(val));
   };
 
+  const saveSetting = async (key: string, value: string) => {
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+      });
+    } catch (err) {
+      console.error(`Failed to save setting ${key}:`, err);
+    }
+  };
+
   const handlePickPath = async (type: 'dir' | 'file', setter: (v: string) => void, defaultPath: string) => {
     try {
       const response = await fetch("/api/file-dialog", {
@@ -102,8 +114,12 @@ export default function TablePage() {
       if (data.path) {
         if (setter === setClassificationPath) {
           handleClassificationPathChange(data.path);
+          saveSetting("sqlite_source_path", data.path);
         } else {
           setter(data.path);
+          if (setter === setOutputPath) {
+            saveSetting("output_root", data.path);
+          }
         }
       }
     } catch (err: any) {
@@ -186,11 +202,13 @@ export default function TablePage() {
             <div className="space-y-2">
               <Label>입력 경로 (Raw JSON 폴더)</Label>
               <div className="flex gap-2">
-                <Input 
-                  value={classificationPath} 
-                  onChange={(e) => handleClassificationPathChange(e.target.value)} 
+                <Input
+                  value={classificationPath}
+                  onChange={(e) => handleClassificationPathChange(e.target.value)}
+                  onBlur={() => saveSetting("sqlite_source_path", classificationPath)}
                   list="classificationPathOptions"
                 />
+
                 <datalist id="classificationPathOptions">
                   {classificationOptions.map(opt => (
                     <option key={opt.path} value={opt.path}>{opt.label || opt.name}</option>
@@ -204,7 +222,11 @@ export default function TablePage() {
             <div className="space-y-2">
               <Label>저장 경로 (SQLite)</Label>
               <div className="flex gap-2">
-                <Input value={outputPath} onChange={(e) => setOutputPath(e.target.value)} />
+                <Input 
+                  value={outputPath} 
+                  onChange={(e) => setOutputPath(e.target.value)} 
+                  onBlur={() => saveSetting("output_root", outputPath)}
+                />
                 <Button variant="outline" size="icon" onClick={() => handlePickPath('dir', setOutputPath, outputPath)}>
                   <FolderOpen className="h-4 w-4" />
                 </Button>

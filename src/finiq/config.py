@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 def _resolve_workspace_root() -> Path:
     """Resolve the project root directory."""
@@ -38,6 +38,14 @@ SAVED_SETTINGS_KEYS = (
     "html_transfer_directory",
     "html_parse_result_path",
     "html_parse_mode",
+    "integrated_merge_input_path",
+    "integrated_merge_output_path",
+    "integrated_history_item_registry_path",
+    "integrated_history_output_path",
+    "html_download_source_path",
+    "integrated_data_values",
+    "change_log_date_thresholds",
+    "change_log_numeric_thresholds",
 )
 
 @dataclass(slots=True)
@@ -56,6 +64,14 @@ class AppConfig:
     html_transfer_directory: str = ""
     html_parse_result_path: str = ""
     html_parse_mode: str = ""
+    integrated_merge_input_path: str = ""
+    integrated_merge_output_path: str = ""
+    integrated_history_item_registry_path: str = ""
+    integrated_history_output_path: str = ""
+    html_download_source_path: str = ""
+    integrated_data_values: dict[str, str] = field(default_factory=dict)
+    change_log_date_thresholds: dict[str, float] = field(default_factory=dict)
+    change_log_numeric_thresholds: dict[str, float] = field(default_factory=dict)
 
 def get_default_settings_path() -> Path:
     if os.name == "nt":
@@ -67,9 +83,14 @@ def get_default_settings_path() -> Path:
     return base / "finiq.data_scraper" / "appdata.json"
 
 def normalize_path(value: str) -> str:
-    return str(Path(value).expanduser().resolve())
+    if not value or not str(value).strip():
+        return ""
+    try:
+        return str(Path(value).expanduser().resolve())
+    except Exception:
+        return str(value)
 
-def load_settings(settings_path: str | Path) -> dict[str, str]:
+def load_settings(settings_path: str | Path) -> dict[str, Any]:
     path = Path(settings_path)
     if not path.exists():
         return {}
@@ -79,22 +100,34 @@ def load_settings(settings_path: str | Path) -> dict[str, str]:
         return {}
     if not isinstance(payload, dict):
         return {}
-    settings: dict[str, str] = {}
+    
+    settings: dict[str, Any] = {}
     for key in SAVED_SETTINGS_KEYS:
-        value = payload.get(key)
-        if not value or not isinstance(value, str):
+        if key not in payload:
             continue
+        
+        value = payload[key]
         if key == "html_parse_mode":
+            settings[key] = str(value)
+        elif isinstance(value, dict):
             settings[key] = value
-        else:
+        elif isinstance(value, str):
             settings[key] = normalize_path(value)
+        else:
+            settings[key] = value
     return settings
 
 def save_settings(settings_path: str | Path, settings: dict[str, Any]):
     path = Path(settings_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    clean_settings = {k: v for k, v in settings.items() if k in SAVED_SETTINGS_KEYS}
-    path.write_text(json.dumps(clean_settings, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        clean_settings = {}
+        for key in SAVED_SETTINGS_KEYS:
+            if key in settings:
+                clean_settings[key] = settings[key]
+        path.write_text(json.dumps(clean_settings, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        print(f"Error saving settings to {path}: {e}")
 
 def init_config() -> AppConfig:
     settings_path = get_default_settings_path()
@@ -116,4 +149,12 @@ def init_config() -> AppConfig:
         html_transfer_directory=settings.get("html_transfer_directory", str(KIND_DATA_DIR / "transfer")),
         html_parse_result_path=settings.get("html_parse_result_path", str(KIND_DATA_DIR / "parsed")),
         html_parse_mode=settings.get("html_parse_mode", "bond_issuance"),
+        integrated_merge_input_path=settings.get("integrated_merge_input_path", ""),
+        integrated_merge_output_path=settings.get("integrated_merge_output_path", ""),
+        integrated_history_item_registry_path=settings.get("integrated_history_item_registry_path", ""),
+        integrated_history_output_path=settings.get("integrated_history_output_path", ""),
+        html_download_source_path=settings.get("html_download_source_path", ""),
+        integrated_data_values=settings.get("integrated_data_values", {}),
+        change_log_date_thresholds=settings.get("change_log_date_thresholds", {}),
+        change_log_numeric_thresholds=settings.get("change_log_numeric_thresholds", {}),
     )

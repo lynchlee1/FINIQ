@@ -155,17 +155,17 @@ function CompanyDetailContent() {
     <main className="flex flex-col gap-6 w-full">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => router.back()}>
+          <Button variant="outline" size="icon" onClick={() => router.back()} className="dark:border-[#30363d] dark:text-slate-400 dark:hover:bg-[#21262d] dark:hover:text-slate-200">
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-2xl font-bold text-slate-900">{insight?.company.company_name}</h2>
-              <span className="px-2 py-0.5 rounded bg-slate-100 text-xs font-bold text-slate-600">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{insight?.company.company_name}</h2>
+              <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-[#21262d] text-xs font-bold text-slate-600 dark:text-slate-400">
                 {insight?.company.market}
               </span>
             </div>
-            <div className="flex flex-wrap gap-2 text-sm text-slate-500 font-medium">
+            <div className="flex flex-wrap gap-2 text-sm text-slate-500 dark:text-slate-400 font-medium">
               <span>공시 {formatNumber(insight?.company.disclosure_count || 0)}건</span>
               {insight?.company.badges.map((badge, i) => (
                 <span key={i}>· {badge}</span>
@@ -182,8 +182,8 @@ function CompanyDetailContent() {
               size="sm"
               onClick={() => {
                 setRangeLabel(label);
-                // We should probably trigger fetch here or let user click apply
               }}
+              className={rangeLabel === label ? "dark:bg-slate-100 dark:text-slate-900" : "dark:border-[#30363d] dark:text-slate-400 dark:hover:bg-[#21262d]"}
             >
               {label}
             </Button>
@@ -191,30 +191,30 @@ function CompanyDetailContent() {
         </div>
       </header>
 
-      <Card>
+      <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
         <CardContent className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
             <div className="space-y-2">
-              <Label>시작일</Label>
-              <Input type="date" value={startDate} onChange={(e) => {
+              <Label className="dark:text-slate-300">시작일</Label>
+              <Input type="date" value={startDate} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:[color-scheme:dark]" onChange={(e) => {
                 setStartDate(e.target.value);
                 setRangeLabel("검색기간");
               }} />
             </div>
             <div className="space-y-2">
-              <Label>종료일</Label>
-              <Input type="date" value={endDate} onChange={(e) => {
+              <Label className="dark:text-slate-300">종료일</Label>
+              <Input type="date" value={endDate} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:[color-scheme:dark]" onChange={(e) => {
                 setEndDate(e.target.value);
                 setRangeLabel("검색기간");
               }} />
             </div>
             <div className="space-y-2">
-              <Label>주기</Label>
+              <Label className="dark:text-slate-300">주기</Label>
               <Select value={displayFrequency} onValueChange={setDisplayFrequency}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
                   <SelectItem value="자동">자동</SelectItem>
                   <SelectItem value="일봉">일봉</SelectItem>
                   <SelectItem value="주봉">주봉</SelectItem>
@@ -223,31 +223,31 @@ function CompanyDetailContent() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>종목코드 (수동)</Label>
-              <Input placeholder="000000" value={stockCode} onChange={(e) => setStockCode(e.target.value)} />
+              <Label className="dark:text-slate-300">종목코드 (수동)</Label>
+              <Input placeholder="000000" value={stockCode} onChange={(e) => setStockCode(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
             </div>
-            <Button className="w-full" onClick={handleApplyFilters}>적용</Button>
+            <Button className="w-full dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200" onClick={handleApplyFilters}>적용</Button>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
-        <CardHeader className="bg-slate-50 border-b py-3 px-6">
+      <Card className="overflow-hidden dark:bg-[#161b22] dark:border-[#30363d]">
+        <CardHeader className="bg-slate-50 dark:bg-[#0d1117] border-b dark:border-[#30363d] py-3 px-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-6">
               {crosshairData ? (
                 <div className="flex items-center gap-4 text-xs font-mono">
-                  <span className="font-bold">{crosshairData.time}</span>
+                  <span className="font-bold dark:text-white">{crosshairData.time}</span>
                   <div className={cn("flex gap-2", getToneClass(crosshairData.open, crosshairData.close))}>
                     <span>O {formatNumber(crosshairData.open)}</span>
                     <span>H {formatNumber(crosshairData.high)}</span>
                     <span>L {formatNumber(crosshairData.low)}</span>
                     <span>C {formatNumber(crosshairData.close)}</span>
-                    <span className="text-slate-500">V {formatNumber(crosshairData.volume)}</span>
+                    <span className="text-slate-500 dark:text-slate-500">V {formatNumber(crosshairData.volume)}</span>
                   </div>
                 </div>
               ) : (
-                <span className="text-xs text-slate-400">데이터 대기 중</span>
+                <span className="text-xs text-slate-400 dark:text-slate-600">데이터 대기 중</span>
               )}
             </div>
             <div className="flex gap-2">
@@ -258,8 +258,8 @@ function CompanyDetailContent() {
                   className={cn(
                     "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold border transition-all",
                     groupVisibility[group.name] 
-                      ? "bg-white border-slate-300 shadow-sm" 
-                      : "bg-slate-100 border-transparent text-slate-400 opacity-60"
+                      ? "bg-white dark:bg-[#21262d] border-slate-300 dark:border-[#484f58] shadow-sm dark:text-white" 
+                      : "bg-slate-100 dark:bg-[#0d1117] border-transparent dark:border-transparent text-slate-400 dark:text-slate-600 opacity-60 dark:opacity-40"
                   )}
                 >
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: group.color }} />
@@ -283,17 +283,17 @@ function CompanyDetailContent() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-lg">공시 타임라인</CardTitle>
-          <div className="px-2 py-1 rounded bg-blue-50 text-blue-600 text-xs font-bold">
+          <CardTitle className="text-lg dark:text-white">공시 타임라인</CardTitle>
+          <div className="px-2 py-1 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold">
             {formatNumber(filteredTimeline.length)}건
           </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
-              <thead className="bg-slate-50 border-y text-slate-500 font-medium">
+              <thead className="bg-slate-50 dark:bg-[#0d1117] border-y dark:border-[#30363d] text-slate-500 dark:text-slate-400 font-medium">
                 <tr>
                   <th className="px-6 py-3">공시일시</th>
                   <th className="px-6 py-3">그룹</th>
@@ -303,12 +303,12 @@ function CompanyDetailContent() {
                   <th className="px-6 py-3">거래일</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y dark:divide-[#30363d]">
                 {filteredTimeline.map((item, i) => (
-                  <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-slate-500 font-mono text-xs">{item.disclosed_at}</td>
+                  <tr key={i} className="hover:bg-slate-50 dark:hover:bg-[#21262d] transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-slate-500 dark:text-slate-400 font-mono text-xs">{item.disclosed_at}</td>
                     <td className="px-6 py-4">
-                      <span className="flex items-center gap-1.5 font-bold text-xs">
+                      <span className="flex items-center gap-1.5 font-bold text-xs dark:text-slate-200">
                         <span 
                           className="w-2 h-2 rounded-full" 
                           style={{ backgroundColor: insight?.chart.groups.find(g => g.name === item.group)?.color }} 
@@ -316,15 +316,15 @@ function CompanyDetailContent() {
                         {item.group}
                       </span>
                     </td>
-                    <td className="px-6 py-4 font-medium text-slate-900">{item.title}</td>
-                    <td className="px-6 py-4 text-slate-600">{item.submitter}</td>
-                    <td className="px-6 py-4 text-slate-400 font-mono text-xs">{item.acpt_no}</td>
-                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{item.trade_day || "-"}</td>
+                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-slate-100">{item.title}</td>
+                    <td className="px-6 py-4 text-slate-600 dark:text-slate-400">{item.submitter}</td>
+                    <td className="px-6 py-4 text-slate-400 dark:text-slate-500 font-mono text-xs">{item.acpt_no}</td>
+                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-mono text-xs">{item.trade_day || "-"}</td>
                   </tr>
                 ))}
                 {filteredTimeline.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">
+                    <td colSpan={6} className="px-6 py-12 text-center text-slate-400 dark:text-slate-600 italic">
                       표시할 공시가 없습니다.
                     </td>
                   </tr>

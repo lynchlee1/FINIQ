@@ -57,6 +57,19 @@ export default function IntegratedDataPage() {
 
   useEffect(() => {
     fetchProviders();
+    const fetchConfig = async () => {
+      try {
+        const response = await fetch("/api/config");
+        if (!response.ok) throw new Error("Failed to fetch config");
+        const config = await response.json();
+        if (config.integrated_data_values) {
+          setFieldValues(config.integrated_data_values);
+        }
+      } catch (err) {
+        console.error("Failed to fetch config:", err);
+      }
+    };
+    fetchConfig();
   }, [fetchProviders]);
 
   const pollJob = useCallback(async (jobId: string) => {
@@ -126,6 +139,18 @@ export default function IntegratedDataPage() {
     }
   };
 
+  const saveSetting = async (key: string, value: any) => {
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+      });
+    } catch (err) {
+      console.error(`Failed to save setting ${key}:`, err);
+    }
+  };
+
   const handlePickPath = async (fieldId: string, mode: "folder" | "file", label: string) => {
     try {
       const response = await fetch("/api/file-dialog", {
@@ -139,7 +164,11 @@ export default function IntegratedDataPage() {
       });
       const data = await response.json();
       if (data.path) {
-        setFieldValues(prev => ({ ...prev, [fieldId]: data.path }));
+        setFieldValues(prev => {
+          const next = { ...prev, [fieldId]: data.path };
+          saveSetting("integrated_data_values", next);
+          return next;
+        });
       }
     } catch (err: any) {
       setStatus(err.message);
@@ -163,16 +192,16 @@ export default function IntegratedDataPage() {
       <WorkflowTabs tabs={INTEGRATED_TABS} />
 
       <div className="space-y-6">
-        <Card>
+        <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Source Pipeline</p>
-              <CardTitle className="text-xl">원천 데이터 변환</CardTitle>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source Pipeline</p>
+              <CardTitle className="text-xl dark:text-white">원천 데이터 변환</CardTitle>
             </div>
             <Button 
               onClick={handleStartConvert} 
               disabled={!!activeJobId}
-              className="bg-slate-900 text-white hover:bg-slate-800"
+              className="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
             >
               {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
               변환 시작
@@ -180,12 +209,12 @@ export default function IntegratedDataPage() {
           </CardHeader>
           <CardContent className="pt-6 space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="providerSelect">데이터 소스 (Source of Truth)</Label>
+              <Label htmlFor="providerSelect" className="dark:text-slate-300">데이터 소스 (Source of Truth)</Label>
               <Select value={selectedProviderId} onValueChange={setSelectedProviderId}>
-                <SelectTrigger id="providerSelect">
+                <SelectTrigger id="providerSelect" className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
                   <SelectValue placeholder="Select a provider" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
                   {providers.map(p => (
                     <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
@@ -197,21 +226,24 @@ export default function IntegratedDataPage() {
               <div className="grid md:grid-cols-2 gap-4">
                 {selectedProvider.fields.map((field) => (
                   <div key={field.id} className="space-y-2">
-                    <Label htmlFor={`field_${field.id}`}>{field.label}</Label>
+                    <Label htmlFor={`field_${field.id}`} className="dark:text-slate-300">{field.label}</Label>
                     <div className="flex gap-2">
                       <Input 
                         id={`field_${field.id}`}
                         placeholder={field.placeholder}
                         value={fieldValues[field.id] || ""}
                         onChange={(e) => setFieldValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                        onBlur={() => saveSetting("integrated_data_values", fieldValues)}
+                        className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
                       />
                       {(field.type === "folder" || field.type === "file") && (
                         <Button 
                           variant="outline" 
                           size="icon" 
                           onClick={() => handlePickPath(field.id, field.type as "folder" | "file", field.label)}
+                          className="dark:border-[#30363d] dark:hover:bg-[#21262d]"
                         >
-                          {field.type === "folder" ? <FolderOpen className="h-4 w-4" /> : <File className="h-4 w-4" />}
+                          {field.type === "folder" ? <FolderOpen className="h-4 w-4 dark:text-slate-400" /> : <File className="h-4 w-4 dark:text-slate-400" />}
                         </Button>
                       )}
                     </div>
@@ -222,15 +254,15 @@ export default function IntegratedDataPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
           <CardHeader>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Validation</p>
-            <CardTitle className="text-xl">검증 결과</CardTitle>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Validation</p>
+            <CardTitle className="text-xl dark:text-white">검증 결과</CardTitle>
           </CardHeader>
           <CardContent>
             <div className={cn(
               "p-4 rounded-lg border font-mono text-xs whitespace-pre-wrap min-h-[120px]",
-              isErrorStatus ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-700"
+              isErrorStatus ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300" : "bg-slate-50 dark:bg-[#21262d] border-slate-200 dark:border-[#30363d] text-slate-700 dark:text-slate-300"
             )}>
               {status}
             </div>

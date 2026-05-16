@@ -625,6 +625,8 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     mode = str(payload.get("mode") or "")
     summary_only = bool(body.get("summary_only"))
     requested_family_id = body.get("family_id")
+    limit = _parse_limit(body.get("limit"))
+    changes_only = bool(body.get("changes_only"))
 
     # Get records
     all_records = list(payload.get("records") or [])
@@ -679,7 +681,8 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             family_records[family_id] = resolved_list
 
     families: list[dict[str, Any]] = []
-    for family_id, records in sorted(family_records.items()):
+    # Sort families by family_id descending (latest first) for better responsiveness and early exit
+    for family_id, records in sorted(family_records.items(), reverse=True):
         sorted_records = sorted(records, key=lambda item: _sequence_sort_key(item[1]))
 
         family_changes: list[dict[str, Any]] = []
@@ -695,7 +698,14 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             if change is not None:
                 family_changes.append(change)
 
-        total_changed_fields = sum(change["changed_fields"] for change in family_changes)
+        # Calculate changed fields count, excluding "회차" to match UI logic
+        total_changed_fields = sum(
+            sum(1 for c in change["changes"] if c["field"] != "회차")
+            for change in family_changes
+        )
+
+        if changes_only and total_changed_fields == 0:
+            continue
 
         if summary_only and not (requested_family_id == family_id):
             families.append(
@@ -707,23 +717,25 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
                     "has_details": False,
                 }
             )
-            continue
+        else:
+            families.append(
+                {
+                    "family_id": family_id,
+                    "severity": "major" if any(c["severity"] == "major" for c in family_changes) else "minor" if family_changes else "none",
+                    "record_count": len(sorted_records),
+                    "change_count": len(family_changes),
+                    "changed_fields": total_changed_fields,
+                    "records": [_record_reference(record, index=index) for index, record in sorted_records],
+                    "changes": family_changes,
+                    "has_details": True,
+                }
+            )
 
-        families.append(
-            {
-                "family_id": family_id,
-                "severity": "major" if any(c["severity"] == "major" for c in family_changes) else "minor" if family_changes else "none",
-                "record_count": len(sorted_records),
-                "change_count": len(family_changes),
-                "changed_fields": total_changed_fields,
-                "records": [_record_reference(record, index=index) for index, record in sorted_records],
-                "changes": family_changes,
-                "has_details": True,
-            }
-        )
+        # Early exit if we reached the limit
+        if limit is not None and len(families) >= limit:
+            break
 
-    limit = _parse_limit(body.get("limit"))
-    visible_families = families[:limit] if limit is not None else families
+    visible_families = families
     return {
         "format": "finiq_parse_change_log_v1",
         "mode": mode,
