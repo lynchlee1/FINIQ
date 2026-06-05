@@ -1,11 +1,13 @@
 import { useState, useCallback } from "react";
+import { apiGet } from "@/api/client";
+import type { JobSnapshot } from "@/types/api";
 
 interface UseJobPollingOptions {
   pollingEndpoint: string;
   onSuccess?: (data: any) => void;
   onError?: (error: Error) => void;
   pollInterval?: number;
-  formatStatus?: (data: any) => string[];
+  formatStatus?: (data: JobSnapshot<any>) => string[];
 }
 
 export function useJobPolling(options: UseJobPollingOptions) {
@@ -18,9 +20,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
     async (jobId: string) => {
       try {
         const url = pollingEndpoint.replace("{jobId}", encodeURIComponent(jobId));
-        const response = await fetch(url);
-        if (!response.ok) throw new Error("Job polling failed");
-        const data = await response.json();
+        const data = await apiGet<JobSnapshot<any>>(url);
 
         if (formatStatus) {
           const lines = formatStatus(data);

@@ -1,23 +1,20 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { FolderOpen, FileJson, Play, Square, FileSpreadsheet, Loader2 } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Label, Checkbox } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { AlertTriangle, Database, FileSearch, FileSpreadsheet, Info, ListChecks, Loader2, Play, Square } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, CardTitle, Label, Checkbox } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { useJobPolling } from "@/hooks/useJobPolling";
-
-const HTML_PROCESS_TABS = [
-  { href: "/html-download", step: 1, label: "HTML 외부 저장" },
-  { href: "/html-content-download", step: 2, label: "HTML 내부 저장" },
-  { href: "/html-parse", step: 3, label: "HTML 파싱" },
-  { href: "/html-change-log", step: 4, label: "변동기록조회" },
-  { href: "/html-bond-summary", step: 5, label: "사채 발행 요약" },
-];
+import {
+  HtmlStepGuide,
+  HtmlWorkflowForm,
+  HtmlWorkflowCard,
+  HtmlWorkflowPage,
+  type HtmlWorkflowField,
+} from "@/components/html-workflow/HtmlWorkflowTemplate";
 
 const PARSE_MODES = [
   {
@@ -51,6 +48,33 @@ const PARSE_MODES = [
     description: "발행증권 거래 HTML을 공통 구조로 파싱합니다. 상세 필드 규칙은 아직 추가되지 않았습니다.",
   },
 ];
+
+const WORKFLOW_GUIDE = [
+  {
+    icon: FileSearch,
+    title: "1. HTML 폴더 선택",
+    description: "KIND 뷰어 HTML이 저장된 폴더를 입력합니다. .html 파일만 처리하고 파일명 순서대로 읽습니다.",
+  },
+  {
+    icon: Database,
+    title: "2. 파싱 모드 선택",
+    description: "공시 양식에 맞는 파서를 고릅니다. 모드가 맞지 않으면 결과는 생성되지만 일부 필드가 비거나 경고가 남을 수 있습니다.",
+  },
+  {
+    icon: ListChecks,
+    title: "3. JSON 저장 후 검토",
+    description: "결과 JSON에는 records, errors, warnings, progress_log가 저장됩니다. 이후 공시 정정내역 한눈에와 Excel 내보내기에 사용됩니다.",
+  },
+];
+
+const PARSING_RULES = [
+  "HTML 문서에서 KIND 뷰어 본문을 우선 찾고, 표의 rowspan/colspan을 펼쳐 논리 행으로 변환합니다.",
+  "정정 신고 표는 별도 보존하되 핵심 필드 추출은 정정이 아닌 본문 표를 우선 사용합니다.",
+  "다운로드 manifest가 있으면 접수번호 기준으로 상장시장과 발행사명을 보강합니다.",
+  "이어하기를 켜면 기존 JSON의 source_file을 기준으로 이미 처리된 파일과 실패 파일을 건너뜁니다.",
+];
+
+const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
 
 export default function HtmlParsePage() {
   const {
@@ -211,7 +235,7 @@ export default function HtmlParsePage() {
 
   const handleCancel = async () => {
     if (!activeCancelToken) return;
-    setStatus("HTML 파싱 중지를 요청했습니다. 현재 파일 처리가 끝나면 멈춥니다.");
+    setStatus("공시원문 변환 중지를 요청했습니다. 현재 파일 처리가 끝나면 멈춥니다.");
     try {
       await fetch("/api/disclosures/html/parse/cancel", {
         method: "POST",
@@ -238,6 +262,64 @@ export default function HtmlParsePage() {
     window.location.href = `/api/disclosures/html/parse/export.xlsx?${params.toString()}`;
   };
 
+  const parseSettingFields: HtmlWorkflowField[] = [
+    {
+      id: "inputDirectory",
+      kind: "path",
+      label: "입력 경로 (HTML 폴더)",
+      mode: "folder",
+      value: inputDirectory,
+      onChange: handleInputDirectoryChange,
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 2,
+    },
+    {
+      id: "outputPath",
+      kind: "path",
+      label: "결과 경로 (JSON)",
+      mode: "save",
+      value: outputPath,
+      onChange: handleOutputPathChange,
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 2,
+    },
+    {
+      id: "limit",
+      kind: "input",
+      type: "number",
+      label: "최대 처리 건수",
+      placeholder: "전체",
+      value: limit,
+      onChange: setLimit,
+      span: 2,
+    },
+    {
+      id: "progressInterval",
+      kind: "input",
+      type: "number",
+      label: "진행 확인 간격 (건)",
+      value: progressInterval,
+      onChange: setProgressInterval,
+      span: 2,
+    },
+    {
+      id: "resumeParse",
+      kind: "checkbox",
+      checked: resumeParse,
+      onChange: setResumeParse,
+      checkboxLabel: "기존 결과 JSON 이후부터 진행 (이어하기)",
+      span: 2,
+    },
+    {
+      id: "skipErrors",
+      kind: "checkbox",
+      checked: skipErrors,
+      onChange: setSkipErrors,
+      checkboxLabel: "실패 파일 건너뛰기",
+      span: 2,
+    },
+  ];
+
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
@@ -247,61 +329,50 @@ export default function HtmlParsePage() {
   // We can let JobStatusLogger display `status` string as usual, and also show the raw result JSON.
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={HTML_PROCESS_TABS} />
-      <div className="grid lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-6">
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Parsing Settings</p>
-              <CardTitle className="dark:text-white">HTML 파싱 설정</CardTitle>
-              <CardDescription className="dark:text-slate-400">저장된 HTML 원문에서 핵심 데이터를 구조화된 JSON으로 추출합니다.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">입력 경로 (HTML 폴더)</Label>
-                  <PathPickerInput 
-                    mode="folder"
-                    value={inputDirectory}
-                    onChange={handleInputDirectoryChange}
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">결과 경로 (JSON)</Label>
-                  <PathPickerInput 
-                    mode="save"
-                    value={outputPath}
-                    onChange={handleOutputPathChange}
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
-                </div>
-              </div>
+    <HtmlWorkflowPage
+      eyebrow="HTML Parse Guide"
+      title="공시원문 변환"
+      description="저장된 KIND HTML을 모드별 파서로 읽어 핵심 필드, 오류, 경고, 진행 로그를 하나의 JSON에 남깁니다. 결과 파일은 이어하기, 공시 정정내역 한눈에, 발행내역 한눈에, Excel 내보내기의 기준 데이터가 됩니다."
+      notice={
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>새 양식에서 필드가 비면 warnings와 원본 HTML을 함께 확인하세요.</span>
+          </div>
+        </div>
+      }
+    >
 
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">최대 처리 건수</Label>
-                  <Input type="number" placeholder="전체" value={limit} onChange={(e) => setLimit(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">진행 확인 간격 (건)</Label>
-                  <Input type="number" value={progressInterval} onChange={(e) => setProgressInterval(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                </div>
-              </div>
+      <HtmlStepGuide items={WORKFLOW_GUIDE} />
 
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox id="resumeParse" checked={resumeParse} onCheckedChange={(v) => setResumeParse(!!v)} className="dark:border-[#30363d]" />
-                  <Label htmlFor="resumeParse" className="cursor-pointer dark:text-slate-300">기존 결과 JSON 이후부터 진행 (이어하기)</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox id="skipErrors" checked={skipErrors} onCheckedChange={(v) => setSkipErrors(!!v)} className="dark:border-[#30363d]" />
-                  <Label htmlFor="skipErrors" className="cursor-pointer dark:text-slate-300">실패 파일 건너뛰기</Label>
-                </div>
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+        <section className="min-w-0 space-y-6">
+          <HtmlWorkflowCard
+            title="공시원문 변환 설정"
+            description="저장된 HTML 원문에서 핵심 데이터를 구조화된 JSON으로 추출합니다."
+          >
+              <HtmlWorkflowForm fields={parseSettingFields} />
+          </HtmlWorkflowCard>
+
+          <HtmlWorkflowCard
+            title="작동 원리와 파싱 방식"
+            description="버그 리포트가 들어왔을 때 확인할 기준 흐름입니다."
+          >
+              <div className="flex items-center gap-2">
+                <Info className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">How Parsing Works</p>
               </div>
-            </CardContent>
-          </Card>
+              <ol className="grid gap-3">
+                {PARSING_RULES.map((rule, index) => (
+                  <li key={rule} className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white dark:bg-slate-100 dark:text-slate-900">
+                      {index + 1}
+                    </span>
+                    <span>{rule}</span>
+                  </li>
+                ))}
+              </ol>
+          </HtmlWorkflowCard>
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
@@ -349,7 +420,7 @@ export default function HtmlParsePage() {
                 <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#30363d]" />
                 <Label htmlFor="exportLatestOnly" className="cursor-pointer dark:text-slate-300">최신버전만 보기</Label>
               </div>
-              <Button onClick={handleExport} disabled={!outputPath} variant="outline" className="dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
+              <Button onClick={handleExport} disabled={!outputPath} variant="outline" className="h-10 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
                 <FileSpreadsheet className="mr-2 h-4 w-4" />
                 Excel로 내보내기
               </Button>
@@ -364,11 +435,11 @@ export default function HtmlParsePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col gap-2">
-                <Button className="w-full" onClick={handleRun} disabled={isJobActive}>
+                <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
                   {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
-                <Button variant="outline" className="w-full" onClick={handleCancel} disabled={!activeCancelToken}>
+                <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
                   <Square className="mr-2 h-4 w-4" />
                   중지
                 </Button>
@@ -398,6 +469,6 @@ export default function HtmlParsePage() {
           </Card>
         </section>
       </div>
-    </main>
+    </HtmlWorkflowPage>
   );
 }

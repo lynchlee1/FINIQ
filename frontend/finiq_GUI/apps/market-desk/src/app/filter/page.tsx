@@ -3,19 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Play, Plus, Save, Trash2, Loader2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { cn } from "@finiq/ui/utils";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobStreaming } from "@/hooks/useJobStreaming";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-
-const BUILD_TABS = [
-  { href: "/download", step: 1, label: "공시 다운로드" },
-  { href: "/table", step: 2, label: "SQLITE 변환" },
-  { href: "/filter", step: 3, label: "공시 필터" },
-];
 
 const TRANSFER_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const PAGE_SIZE = 20;
@@ -295,11 +289,9 @@ export default function FilterPage() {
   }
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={BUILD_TABS} />
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-6">
+    <WorkflowPageShell workflowId="disclosure-build">
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+        <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source</p>
@@ -382,9 +374,9 @@ export default function FilterPage() {
               )) : <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-500 dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-400">조건 블록을 추가하세요.</span>}
             </div>
 
-            <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50/80 p-2 dark:bg-[#0d1117] dark:border-[#30363d]">
+            <div className="grid gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50/80 p-2 dark:bg-[#0d1117] dark:border-[#30363d]">
               {conditions.map((condition, index) => (
-                <div key={index} className="grid items-center gap-2 rounded-lg border border-slate-200 bg-white/80 p-2 dark:bg-[#161b22] dark:border-[#30363d] lg:grid-cols-[96px_minmax(0,1fr)_58px]">
+                <div key={index} className="grid min-w-[980px] items-center gap-2 rounded-lg border border-slate-200 bg-white/80 p-2 dark:bg-[#161b22] dark:border-[#30363d] lg:grid-cols-[96px_minmax(0,1fr)_58px]">
                   <select
                     value={condition.connector}
                     disabled={index === 0}
@@ -446,15 +438,15 @@ export default function FilterPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-[minmax(270px,1.35fr)_minmax(120px,.75fr)_minmax(130px,.8fr)]">
             <Label className="grid gap-2 dark:text-slate-300">
               최대 반환
               <div className="flex min-h-9 items-center gap-3">
-                <label className="flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
+                <label className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
                   <input type="checkbox" checked={limitUnlimited} onChange={(event) => setLimitUnlimited(event.target.checked)} />
                   제한 없음
                 </label>
-                <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className="h-9 max-w-[160px] dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 disabled:opacity-50" />
+                <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className="h-9 min-w-0 max-w-[120px] dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 disabled:opacity-50" />
               </div>
             </Label>
             <Label className="grid gap-2 dark:text-slate-300">
@@ -561,6 +553,6 @@ export default function FilterPage() {
           </Card>
         </section>
       </div>
-    </main>
+    </WorkflowPageShell>
   );
 }

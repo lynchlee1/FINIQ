@@ -8,10 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { Input } from "@finiq/ui";
 import { Label } from "@finiq/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
-import { PriceChart } from "@/components/PriceChart";
+import dynamic from "next/dynamic";
 import { cn } from "@finiq/ui/utils";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@finiq/ui";
 import { Suspense } from "react";
+
+const PriceChart = dynamic(() => import("@/components/PriceChart").then(mod => mod.PriceChart), { ssr: false });
+const CompanyGraphViewer = dynamic(() => import("./CompanyGraphViewer").then(mod => mod.CompanyGraphViewer), { ssr: false });
 
 interface TimelineItem {
   disclosed_at: string;
@@ -74,10 +78,16 @@ function CompanyDetailContent() {
   const [stockCode, setStockCode] = useState(searchParams.get("stock_code") || "");
 
   const fetchInsight = useCallback(async () => {
+    const classificationPath = searchParams.get("classification_path") || "";
+    if (!classificationPath) {
+      setLoading(false);
+      return;
+    }
+    
     try {
       setLoading(true);
       const query = new URLSearchParams({
-        classification_path: searchParams.get("classification_path") || "",
+        classification_path: classificationPath,
         company_key: id,
         start_date: startDate,
         end_date: endDate,
@@ -156,14 +166,16 @@ function CompanyDetailContent() {
           </Button>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{insight?.company.company_name}</h2>
-              <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-[#21262d] text-xs font-bold text-slate-600 dark:text-slate-400">
-                {insight?.company.market}
-              </span>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{insight?.company?.company_name || '회사 정보 없음'}</h2>
+              {insight?.company?.market && (
+                <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-[#21262d] text-xs font-bold text-slate-600 dark:text-slate-400">
+                  {insight.company.market}
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap gap-2 text-sm text-slate-500 dark:text-slate-400 font-medium">
-              <span>공시 {formatNumber(insight?.company.disclosure_count || 0)}건</span>
-              {insight?.company.badges.map((badge, i) => (
+              <span>공시 {formatNumber(insight?.company?.disclosure_count || 0)}건</span>
+              {insight?.company?.badges?.map((badge, i) => (
                 <span key={i}>· {badge}</span>
               ))}
             </div>
@@ -227,7 +239,16 @@ function CompanyDetailContent() {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden dark:bg-[#161b22] dark:border-[#30363d]">
+      <Tabs defaultValue="analysis" className="w-full">
+        <div className="flex items-center justify-between mb-4">
+          <TabsList className="dark:bg-[#0d1117] dark:border-[#30363d]">
+            <TabsTrigger value="analysis" className="data-[state=active]:bg-[#21262d] data-[state=active]:text-white">공시&주가 차트</TabsTrigger>
+            <TabsTrigger value="graph" className="data-[state=active]:bg-[#21262d] data-[state=active]:text-white">관계망 그래프</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="analysis" className="flex flex-col gap-6 m-0">
+          <Card className="overflow-hidden dark:bg-[#161b22] dark:border-[#30363d]">
         <CardHeader className="bg-slate-50 dark:bg-[#0d1117] border-b dark:border-[#30363d] py-3 px-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-6">
@@ -247,7 +268,7 @@ function CompanyDetailContent() {
               )}
             </div>
             <div className="flex gap-2">
-              {insight?.chart.groups.map((group) => (
+              {insight?.chart?.groups?.map((group) => (
                 <button
                   key={group.name}
                   onClick={() => toggleGroup(group.name)}
@@ -307,7 +328,7 @@ function CompanyDetailContent() {
                       <span className="flex items-center gap-1.5 font-bold text-xs dark:text-slate-200">
                         <span 
                           className="w-2 h-2 rounded-full" 
-                          style={{ backgroundColor: insight?.chart.groups.find(g => g.name === item.group)?.color }} 
+                          style={{ backgroundColor: insight?.chart?.groups?.find(g => g.name === item.group)?.color }} 
                         />
                         {item.group}
                       </span>
@@ -330,6 +351,12 @@ function CompanyDetailContent() {
           </div>
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="graph" className="m-0">
+          <CompanyGraphViewer />
+        </TabsContent>
+      </Tabs>
     </main>
   );
 }

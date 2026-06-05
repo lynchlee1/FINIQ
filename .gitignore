@@ -34,3 +34,4 @@ logs/
 .env.*
 *.local
 Archive.zip
+assets/quantiwise-xlsx/

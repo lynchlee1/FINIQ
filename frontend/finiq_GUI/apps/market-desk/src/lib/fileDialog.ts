@@ -1,3 +1,5 @@
+import { apiPost } from "@/api/client";
+
 export type PathDialogMode = "file" | "folder" | "save";
 
 type PickPathOptions = {
@@ -9,7 +11,6 @@ type PickPathOptions = {
 type FileDialogResponse = {
   path?: string;
   cancelled?: boolean;
-  detail?: string;
 };
 
 export async function pickPath({
@@ -17,14 +18,6 @@ export async function pickPath({
   title,
   defaultPath = "",
 }: PickPathOptions): Promise<string> {
-  const response = await fetch("/api/file-dialog", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, title, default_path: defaultPath }),
-  });
-  const data = (await response.json()) as FileDialogResponse;
-  if (!response.ok) {
-    throw new Error(data.detail || "경로 선택에 실패했습니다.");
-  }
+  const data = await apiPost<FileDialogResponse>("/api/file-dialog", { mode, title, default_path: defaultPath });
   return data.path || "";
 }

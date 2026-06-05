@@ -6,19 +6,12 @@ import { usePathname } from "next/navigation";
 import { Sun, Moon } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-
-const NAV_ITEMS = [
-  { href: "/", label: "공시 조회", paths: ["/"] },
-  { href: "/download", label: "공시데이터 구축", paths: ["/download", "/table", "/filter"] },
-  { href: "/html-download", label: "원문 처리", paths: ["/html-download", "/html-content-download", "/html-parse", "/html-change-log", "/html-bond-summary"] },
-  { href: "/integrated-data", label: "종합데이터 구축", paths: ["/integrated-data", "/integrated-merge", "/integrated-market-history"] },
-  { href: "/utility", label: "유틸리티", paths: ["/utility"] },
-];
+import { getActiveNavItem, NAV_ITEMS } from "@/config/navigation";
 
 export function Topbar() {
   const pathname = usePathname();
   const [isDark, setIsDark] = useState(false);
-  const activeItem = NAV_ITEMS.find((item) => item.paths.includes(pathname));
+  const activeItem = getActiveNavItem(pathname);
 
   useEffect(() => {
     // Initial check
@@ -50,7 +43,7 @@ export function Topbar() {
         <div>
           <p className="text-sm font-medium text-slate-500 dark:text-slate-500 uppercase tracking-wider">FINIQ MarketDesk</p>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-            {activeItem?.label || "공시 조회"}
+            {activeItem?.label || "Ontology"}
           </h1>
         </div>
         <Button 

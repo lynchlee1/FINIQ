@@ -56,7 +56,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
     draftLayout.linkDistance !== layout.linkDistance ||
     draftLayout.chargeStrength !== layout.chargeStrength ||
     draftLayout.collisionRadius !== layout.collisionRadius ||
-    draftLayout.alphaDecay !== layout.alphaDecay
+    draftLayout.alphaDecay !== layout.alphaDecay ||
+    draftLayout.pinLimit !== layout.pinLimit
 
   const applyDraftLayout = (): void => {
     onLayoutChange({
@@ -65,6 +66,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       chargeStrength: draftLayout.chargeStrength,
       collisionRadius: draftLayout.collisionRadius,
       alphaDecay: draftLayout.alphaDecay,
+      pinLimit: draftLayout.pinLimit,
     })
   }
 
@@ -252,6 +254,30 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 value={draftLayout.collisionRadius}
                 onChange={(event) => setDraftLayout({ ...draftLayout, collisionRadius: Number(event.target.value) })}
                 className="w-full h-4 accent-primary"
+              />
+            </div>
+            <div className="space-y-1.5 flex-1 max-w-[200px]">
+              <div className="flex items-center justify-between">
+                <Label className="text-[10px] uppercase text-muted-foreground tracking-tight">Pin Limit ({draftLayout.pinLimit ?? 'Unlimited'})</Label>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    id="no-limit"
+                    checked={draftLayout.pinLimit === undefined || draftLayout.pinLimit === 0}
+                    onChange={(e) => setDraftLayout({ ...draftLayout, pinLimit: e.target.checked ? undefined : 3 })}
+                    className="accent-primary"
+                  />
+                  <Label htmlFor="no-limit" className="text-[10px] uppercase text-muted-foreground cursor-pointer">No Limit</Label>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={draftLayout.pinLimit ?? 10}
+                disabled={draftLayout.pinLimit === undefined || draftLayout.pinLimit === 0}
+                onChange={(event) => setDraftLayout({ ...draftLayout, pinLimit: Number(event.target.value) })}
+                className="w-full h-4 accent-primary disabled:opacity-50"
               />
             </div>
           </div>

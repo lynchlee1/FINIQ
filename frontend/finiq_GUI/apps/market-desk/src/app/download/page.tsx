@@ -8,36 +8,14 @@ import { Input } from "@finiq/ui";
 import { Label } from "@finiq/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { Checkbox } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-
-const BUILD_TABS = [
-  { href: "/download", step: 1, label: "공시 다운로드" },
-  { href: "/table", step: 2, label: "SQLITE 변환" },
-  { href: "/filter", step: 3, label: "공시 필터" },
-];
-
-interface DisclosureItem {
-  code: string;
-  name: string;
-}
-
-interface DisclosureGroup {
-  label: string;
-  suffix: string;
-  items: DisclosureItem[];
-}
-
-interface DownloadOptions {
-  market_types: { label: string }[];
-  securities_types: { label: string }[];
-  disclosure_groups: DisclosureGroup[];
-  default_output_directory: string;
-}
+import { fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
+import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
 
 export default function DownloadPage() {
   const [options, setOptions] = useState<DownloadOptions | null>(null);
@@ -76,9 +54,7 @@ export default function DownloadPage() {
 
   const fetchOptions = useCallback(async () => {
     try {
-      const response = await fetch("/api/download/options");
-      if (!response.ok) throw new Error("Failed to fetch download options");
-      const data: DownloadOptions = await response.json();
+      const data = await fetchDownloadOptions();
       setOptions(data);
       
       if (!useSettingsStore.getState().download_output_directory && data.default_output_directory) {
@@ -101,7 +77,7 @@ export default function DownloadPage() {
     fetchOptions();
   }, [fetchOptions]);
 
-  const buildPayload = () => ({
+  const buildPayload = (): DownloadPayload => ({
     mode: "yearly",
     output_directory: outputDirectory,
     start_date: startDate,
@@ -125,13 +101,7 @@ export default function DownloadPage() {
   const handlePreview = async () => {
     try {
       setStatus("미리보기 생성 중...");
-      const response = await fetch("/api/download/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
-      if (!response.ok) throw new Error("Preview failed");
-      const data = await response.json();
+      const data = await previewDownload(buildPayload());
       setResult(data);
       setStatus("미리보기 완료");
     } catch (err: any) {
@@ -141,34 +111,18 @@ export default function DownloadPage() {
   };
 
   const startDownloadJob = async () => {
-    const response = await fetch("/api/download/run/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload()),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.detail || "Job start failed");
-    }
-    const data = await response.json();
+    const data = await startDownload(buildPayload());
     setResult(null);
     startPolling(data.job_id);
   };
 
   const inspectExistingFiles = async (dryRun: boolean) => {
-    const response = await fetch("/api/download/inspect-folder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...buildPayload(),
-        dry_run: dryRun,
-        delete_confirmed: deleteConfirmed,
-        delete_confirmation_text: deleteConfirmationText,
-      }),
+    return inspectDownloadFolder({
+      ...buildPayload(),
+      dry_run: dryRun,
+      delete_confirmed: deleteConfirmed,
+      delete_confirmation_text: deleteConfirmationText,
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail || "Download folder inspection failed");
-    return data;
   };
 
   const buildInspectionStatus = (data: any, deleted: boolean) => {
@@ -289,11 +243,9 @@ export default function DownloadPage() {
   }
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={BUILD_TABS} />
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-6">
+    <WorkflowPageShell workflowId="disclosure-build">
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+        <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Download Settings</p>
@@ -507,6 +459,6 @@ export default function DownloadPage() {
           </Card>
         </section>
       </div>
-    </main>
+    </WorkflowPageShell>
   );
 }

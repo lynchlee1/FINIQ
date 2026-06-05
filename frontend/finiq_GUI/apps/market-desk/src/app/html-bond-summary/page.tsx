@@ -1,22 +1,19 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Search, Loader2, Info, ExternalLink } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { Loader2, Info, ExternalLink, FileText } from "lucide-react";
+import { Button } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-
-const HTML_PROCESS_TABS = [
-  { href: "/html-download", step: 1, label: "HTML 외부 저장" },
-  { href: "/html-content-download", step: 2, label: "HTML 내부 저장" },
-  { href: "/html-parse", step: 3, label: "HTML 파싱" },
-  { href: "/html-change-log", step: 4, label: "변동기록조회" },
-  { href: "/html-bond-summary", step: 5, label: "사채 발행 요약" },
-];
+import {
+  HtmlSearchInput,
+  HtmlWorkflowForm,
+  HtmlWorkflowCard,
+  HtmlWorkflowPage,
+  type HtmlWorkflowField,
+} from "@/components/html-workflow/HtmlWorkflowTemplate";
 
 export default function HtmlBondSummaryPage() {
   const [loading, setLoading] = useState(true);
@@ -109,6 +106,20 @@ export default function HtmlBondSummaryPage() {
     return targets.map((target) => Array.isArray(target) ? target.join(" ") : String(target || "")).join(" ");
   };
 
+  const parsedFieldRows = (record: any) => [
+    ["기업명(발행사)", getField(record, "기업명(발행사)")],
+    ["회차", getField(record, "회차")],
+    ["종류", getField(record, "종류")],
+    ["기업명(행사대상)", getField(record, "기업명(행사대상)")],
+    ["상장구분", getField(record, "상장구분")],
+    ["발행금액(억원)", formatHundredMillion(getField(record, "발행금액"))],
+    ["행사가액", formatNumber(getField(record, "행사가액"))],
+    ["납입일", getField(record, "납입일")],
+    ["만기일", getField(record, "만기일")],
+    ["행사시작일", getField(record, "행사시작일")],
+    ["행사종료일", getField(record, "행사종료일")],
+  ];
+
   const filteredRecords = useMemo(() => {
     if (!bondSummary?.records) return [];
     
@@ -147,76 +158,79 @@ export default function HtmlBondSummaryPage() {
     return filteredRecords.find((r: any) => getRecordKey(r) === selectedBondKey) || filteredRecords[0] || null;
   }, [filteredRecords, selectedBondKey]);
 
+  const conditionFields: HtmlWorkflowField[] = [
+    {
+      id: "outputPath",
+      kind: "path",
+      label: "파싱 결과 경로",
+      mode: "file",
+      value: outputPath || "",
+      onChange: (val) => saveSetting("html_parse_result_path", val),
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 2,
+    },
+    {
+      id: "bondCorrectionFilter",
+      kind: "select",
+      label: "정정 상태",
+      value: bondCorrectionFilter,
+      onChange: setBondCorrectionFilter,
+      options: [
+        { value: "all", label: "전체" },
+        { value: "corrected", label: "정정 이력 있음" },
+        { value: "current", label: "현재가 정정공시" },
+        { value: "latest", label: "최신 공시" },
+      ],
+    },
+    {
+      id: "bondLimit",
+      kind: "select",
+      label: "표시 건수",
+      value: bondLimit,
+      onChange: setBondLimit,
+      options: [
+        { value: "20", label: "20건" },
+        { value: "100", label: "100건" },
+        { value: "300", label: "300건" },
+        { value: "1000", label: "1000건" },
+        { value: "all", label: "전체" },
+      ],
+    },
+    {
+      id: "bondSearch",
+      kind: "custom",
+      span: 4,
+      content: (
+        <HtmlSearchInput
+          placeholder="제목, 접수번호, 대상자 검색..."
+          value={bondSearch}
+          onChange={setBondSearch}
+        />
+      ),
+    },
+  ];
+
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={HTML_PROCESS_TABS} />
-      
-      <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <div>
-            <CardTitle className="dark:text-white">사채 발행 요약</CardTitle>
-            <CardDescription className="dark:text-slate-400">파싱된 사채 발행 데이터를 조회하고 정정 이력을 확인합니다.</CardDescription>
-          </div>
-          <Button onClick={loadBondSummary} disabled={isFetching}>
+    <HtmlWorkflowPage
+      eyebrow="Bond Summary"
+      title="발행내역 한눈에"
+      description="파싱된 사채 발행 데이터를 조회하고 정정 이력, 원문 테이블, 투자자 정보를 한 화면에서 확인합니다."
+    >
+      <HtmlWorkflowCard
+        title="조회 조건"
+        description="파싱 결과 JSON을 불러와 목록과 상세 패널을 구성합니다."
+        actions={
+          <Button onClick={loadBondSummary} disabled={isFetching} className="h-10">
             {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             결과 불러오기
           </Button>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid md:grid-cols-4 gap-4">
-            <div className="md:col-span-2 space-y-2">
-              <Label className="dark:text-slate-300">파싱 결과 경로</Label>
-              <PathPickerInput 
-                mode="file"
-                value={outputPath || ""}
-                onChange={(val) => saveSetting("html_parse_result_path", val)}
-                onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="dark:text-slate-300">정정 상태</Label>
-              <Select value={bondCorrectionFilter} onValueChange={setBondCorrectionFilter}>
-                <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                  <SelectItem value="all">전체</SelectItem>
-                  <SelectItem value="corrected">정정 이력 있음</SelectItem>
-                  <SelectItem value="current">현재가 정정공시</SelectItem>
-                  <SelectItem value="latest">최신 공시</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="dark:text-slate-300">표시 건수</Label>
-              <Select value={bondLimit} onValueChange={setBondLimit}>
-                <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                  <SelectItem value="20">20건</SelectItem>
-                  <SelectItem value="100">100건</SelectItem>
-                  <SelectItem value="300">300건</SelectItem>
-                  <SelectItem value="1000">1000건</SelectItem>
-                  <SelectItem value="all">전체</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input 
-              className="pl-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" 
-              placeholder="제목, 접수번호, 대상자 검색..." 
-              value={bondSearch} 
-              onChange={(e) => setBondSearch(e.target.value)} 
-            />
-          </div>
+        }
+      >
+          <HtmlWorkflowForm fields={conditionFields} />
 
           <div className="grid lg:grid-cols-2 gap-6 min-h-[500px]">
             {/* Table Area */}
@@ -297,25 +311,73 @@ export default function HtmlBondSummaryPage() {
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">{selectedRecord.title}</h3>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-x-8 gap-y-3 border-y border-slate-200 dark:border-[#30363d] py-4">
-                    {[
-                      ["기업명(발행사)", getField(selectedRecord, "기업명(발행사)")],
-                      ["회차", getField(selectedRecord, "회차")],
-                      ["종류", getField(selectedRecord, "종류")],
-                      ["기업명(행사대상)", getField(selectedRecord, "기업명(행사대상)")],
-                      ["상장구분", getField(selectedRecord, "상장구분")],
-                      ["발행금액(억원)", formatHundredMillion(getField(selectedRecord, "발행금액"))],
-                      ["행사가액", formatNumber(getField(selectedRecord, "행사가액"))],
-                      ["납입일", getField(selectedRecord, "납입일")],
-                      ["만기일", getField(selectedRecord, "만기일")],
-                      ["행사시작일", getField(selectedRecord, "행사시작일")],
-                      ["행사종료일", getField(selectedRecord, "행사종료일")],
-                    ].map(([label, value]) => (
-                      <div key={label} className="flex flex-col gap-0.5">
-                        <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">{label}</span>
-                        <span className="text-sm text-slate-700 dark:text-slate-300 font-semibold">{String(value || "-")}</span>
+                  <div className="grid xl:grid-cols-2 gap-4 border-y border-slate-200 dark:border-[#30363d] py-4">
+                    <section className="space-y-3">
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-slate-400 uppercase tracking-wider">파싱 결과</h4>
+                      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-3">
+                        {parsedFieldRows(selectedRecord).map(([label, value]) => (
+                          <div key={label} className="flex flex-col gap-0.5 min-w-0">
+                            <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">{label}</span>
+                            <span className="text-sm text-slate-700 dark:text-slate-300 font-semibold break-words">{String(value || "-")}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </section>
+
+                    <section className="space-y-3 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-slate-400 uppercase tracking-wider">원문 테이블</h4>
+                      </div>
+                      {(() => {
+                        const source = selectedRecord.source_preview;
+                        if (!source?.available) {
+                          return (
+                            <p className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-500 dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-400">
+                              원문을 불러올 수 없습니다. {source?.error || ""}
+                            </p>
+                          );
+                        }
+                        const tables = Array.isArray(source.tables) ? source.tables : [];
+                        if (tables.length === 0) {
+                          return <p className="text-xs text-slate-400 dark:text-slate-600">표 형태의 원문 행이 없습니다.</p>;
+                        }
+                        return (
+                          <div className="space-y-3">
+                            {tables.map((table: any, tableIndex: number) => (
+                              <div key={`${table.index}-${tableIndex}`} className="rounded-lg border border-slate-200 bg-white dark:bg-[#161b22] dark:border-[#30363d] overflow-hidden">
+                                <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
+                                  {table.chapter_title || `Table ${Number(table.index ?? tableIndex) + 1}`}
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full min-w-[360px] text-[11px]">
+                                    <tbody className="divide-y divide-slate-100 dark:divide-[#30363d]">
+                                      {(table.rows || []).map((row: any[], rowIndex: number) => (
+                                        <tr key={rowIndex}>
+                                          {row.map((cell: any, cellIndex: number) => (
+                                            <td key={cellIndex} className="max-w-[220px] px-2 py-1.5 align-top text-slate-700 dark:text-slate-300 break-words">
+                                              {String(cell || "-")}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                {table.omitted_rows > 0 ? (
+                                  <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400 dark:border-[#30363d] dark:text-slate-500">
+                                    생략된 행 {table.omitted_rows}개
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                            {source.omitted_rows > 0 ? (
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500">표시 제한으로 생략된 원문 행 {source.omitted_rows}개</p>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+                    </section>
                   </div>
 
                   <div className="space-y-3">
@@ -378,11 +440,10 @@ export default function HtmlBondSummaryPage() {
               )}
             </div>
           </div>
-        </CardContent>
         {status && (
           <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
         )}
-      </Card>
-    </main>
+      </HtmlWorkflowCard>
+    </HtmlWorkflowPage>
   );
 }

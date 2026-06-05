@@ -65,5 +65,11 @@ html, body {
   color: var(--foreground) !important;
 }
 
+*,
+*::before,
+*::after {
+  border-color: var(--color-border);
+}
+
 /* Ensure Tailwind dark utilities work with .dark class on html */
 @custom-variant dark (&:where(.dark, .dark *));

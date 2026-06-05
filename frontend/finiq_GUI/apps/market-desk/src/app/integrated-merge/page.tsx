@@ -3,17 +3,11 @@
 import { useCallback, useEffect } from "react";
 import { Play, Loader2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-
-const INTEGRATED_TABS = [
-  { href: "/integrated-data", step: 1, label: "원천 데이터 변환" },
-  { href: "/integrated-merge", step: 2, label: "Parquet 병합" },
-  { href: "/integrated-market-history", step: 3, label: "시장 구분 이력" },
-];
 
 export default function IntegratedMergePage() {
   const { 
@@ -61,11 +55,9 @@ export default function IntegratedMergePage() {
   };
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={INTEGRATED_TABS} />
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-6">
+    <WorkflowPageShell workflowId="integrated-data">
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+        <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Dataset Merge</p>
@@ -124,6 +116,6 @@ export default function IntegratedMergePage() {
           </Card>
         </section>
       </div>
-    </main>
+    </WorkflowPageShell>
   );
 }

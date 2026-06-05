@@ -9,11 +9,13 @@ import sqlite3
 from typing import Any, Callable
 
 from finiq.market_desk.data.facade import load_company_classification_file
+from finiq.market_desk.web.discovery import (
+    list_classification_files,
+    resolve_default_classification,
+)
 from finiq.market_desk.web.service import (
     _find_source_body_files,
     _parse_source_body_file,
-    list_classification_files,
-    resolve_default_classification,
 )
 
 

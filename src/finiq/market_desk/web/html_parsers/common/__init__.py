@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 from .text import (
-    decode_html_markup,
     clean_text,
     element_text,
     parse_int,
     parse_float,
 )
 from .io import (
+    decode_html_markup,
     parse_html_document,
     fetch_selected_viewer_body,
 )

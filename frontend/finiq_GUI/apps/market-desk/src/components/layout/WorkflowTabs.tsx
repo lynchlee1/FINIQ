@@ -3,33 +3,29 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@finiq/ui/utils";
-
-interface Tab {
-  href: string;
-  step: number;
-  label: string;
-}
+import type { WorkflowTab } from "@/config/navigation";
 
 interface WorkflowTabsProps {
-  tabs: Tab[];
+  tabs: WorkflowTab[];
 }
 
 export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
   const pathname = usePathname();
 
   return (
-    <nav className="bg-white dark:bg-[#161b22] rounded-xl shadow-sm border border-slate-200 dark:border-[#30363d] p-1 flex gap-1 mb-6 transition-colors" aria-label="Workflow steps">
+    <nav className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm transition-colors dark:bg-[#161b22] dark:border-[#30363d]" aria-label="Workflow steps">
+      <div className="flex min-w-max gap-1 lg:min-w-0">
       {tabs.map((tab) => {
         const isActive = pathname === tab.href;
         return (
           <Link
-            key={tab.href}
-            href={tab.href}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-3 py-3 px-4 rounded-lg transition-all",
-              isActive 
-                ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md" 
-                : "text-slate-500 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-[#21262d] hover:text-slate-900 dark:hover:text-slate-100"
+              key={tab.href}
+              href={tab.href}
+              className={cn(
+                "flex min-w-[132px] flex-1 items-center justify-center gap-3 rounded-lg px-4 py-3 transition-all",
+                isActive 
+                  ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md" 
+                  : "text-slate-500 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-[#21262d] hover:text-slate-900 dark:hover:text-slate-100"
             )}
           >
             <span className={cn(
@@ -44,6 +40,7 @@ export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
           </Link>
         );
       })}
+      </div>
     </nav>
   );
 }

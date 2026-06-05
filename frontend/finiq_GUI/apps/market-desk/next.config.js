@@ -1,6 +1,11 @@
+const path = require('path')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ['@finiq/theme', '@finiq/ui'],
+  transpilePackages: ['@finiq/theme', '@finiq/ui', '@finiq/graph-viewer'],
+  turbopack: {
+    root: path.resolve(__dirname, '../../..'),
+  },
   experimental: {
     staleTimes: {
       dynamic: 30,

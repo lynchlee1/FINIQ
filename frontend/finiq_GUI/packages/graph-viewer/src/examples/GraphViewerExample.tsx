@@ -178,6 +178,7 @@ export function GraphViewerExample() {
                     onNodeHover={viewer.onNodeHover}
                     onContextAction={viewer.onContextAction}
                     onVisibleBounds={viewer.onVisibleBounds}
+                    onUnpinAll={viewer.unpinAllNodes}
                     jumpToNodeId={undefined}
                     showToolbar={true}
                   />

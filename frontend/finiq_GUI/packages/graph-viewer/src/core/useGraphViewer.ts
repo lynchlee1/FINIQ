@@ -53,6 +53,7 @@ export const DEFAULT_LAYOUT: LayoutConfig = {
   alphaDecay: 0.0228,
   preservePinnedNodes: true,
   autoLayoutAfterFilter: true,
+  pinLimit: 3,
 }
 
 const DEFAULT_THEME_PRESETS: Record<GraphViewerTheme, string> = {
@@ -116,6 +117,7 @@ export interface GraphViewerController {
   onContextAction: GraphContextActionHandler
   onVisibleBounds: (width: number, height: number) => void
   runCorporateAnalysis: () => void
+  unpinAllNodes: () => void
 }
 
 function cloneStyle(style: GraphStyleConfig): GraphStyleConfig {
@@ -482,6 +484,18 @@ export function useGraphViewer(options: UseGraphViewerOptions = {}): GraphViewer
     })
   }, [setGraph])
 
+  const unpinAllNodes = useCallback(() => {
+    setGraph((current) => ({
+      nodes: current.nodes.map((node) => ({
+        ...node,
+        pinned: false,
+        fx: undefined,
+        fy: undefined,
+      })),
+      edges: current.edges,
+    }))
+  }, [setGraph])
+
   return {
     appTheme,
     importText,
@@ -526,6 +540,7 @@ export function useGraphViewer(options: UseGraphViewerOptions = {}): GraphViewer
     onContextAction,
     onVisibleBounds,
     runCorporateAnalysis,
+    unpinAllNodes,
   }
 }
 

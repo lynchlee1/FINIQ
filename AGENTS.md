@@ -59,3 +59,7 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## Project-Specific Notes
+
+- For assets Excel conversion work, follow `docs/assets-excel-conversion.md`. It records the implemented feature surface and the user's explicit rules for Wide Format + Parquet output, date range metadata, segment merging, and conflict handling.

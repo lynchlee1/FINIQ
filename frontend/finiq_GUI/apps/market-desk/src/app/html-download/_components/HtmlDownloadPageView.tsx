@@ -1,23 +1,20 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { FolderOpen, FileJson, Play, Square, Loader2, Info, Trash2 } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Label, Checkbox } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { FolderOpen, FileJson, Play, Square, Loader2, Trash2 } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-
-const HTML_PROCESS_TABS = [
-  { href: "/html-download", step: 1, label: "HTML 외부 저장" },
-  { href: "/html-content-download", step: 2, label: "HTML 내부 저장" },
-  { href: "/html-parse", step: 3, label: "HTML 파싱" },
-  { href: "/html-change-log", step: 4, label: "변동기록조회" },
-  { href: "/html-bond-summary", step: 5, label: "사채 발행 요약" },
-];
+import {
+  HtmlWorkflowForm,
+  HtmlWorkflowCard,
+  HtmlWorkflowPage,
+  htmlControlClassName,
+  type HtmlWorkflowField,
+} from "@/components/html-workflow/HtmlWorkflowTemplate";
 
 type DownloadVariant = "external" | "content";
 type SplitByYearButtonProps = {
@@ -27,7 +24,7 @@ type SplitByYearButtonProps = {
 
 const DOWNLOAD_VARIANTS = {
   external: {
-    settingsTitle: "HTML 외부 저장 설정",
+    settingsTitle: "공시원문 외부 저장 설정",
     description: "다운로드된 공시 결과 JSON을 바탕으로 KIND 공시 뷰어 HTML을 대량 저장합니다.",
     sourceLabel: "필터 결과 JSON 파일",
     sourceHelp: "공시 필터링 결과 파일(JSON)을 선택하세요.",
@@ -40,23 +37,23 @@ const DOWNLOAD_VARIANTS = {
     startEndpoint: "/api/disclosures/html/download/start",
     cancelEndpoint: "/api/disclosures/html/download/cancel",
     inspectEndpoint: "/api/disclosures/html/download/inspect-folder",
-    stopMessage: "HTML 외부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
+    stopMessage: "공시원문 외부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
   content: {
-    settingsTitle: "HTML 내부 저장 설정",
-    description: "HTML 외부 저장 폴더를 바탕으로 KIND 공시 본문 HTML을 대량 저장합니다.",
-    sourceLabel: "HTML 외부 저장 경로",
-    sourceHelp: "HTML 외부 저장으로 만든 뷰어 HTML 폴더를 선택하세요.",
+    settingsTitle: "공시원문 내부 저장 설정",
+    description: "공시원문 외부 저장 폴더를 바탕으로 KIND 공시 본문 HTML을 대량 저장합니다.",
+    sourceLabel: "공시원문 외부 저장 경로",
+    sourceHelp: "공시원문 외부 저장으로 만든 뷰어 HTML 폴더를 선택하세요.",
     sourcePickMode: "folder",
     sourceSettingKey: "html_output_directory",
-    sourceRequiredMessage: "HTML 외부 저장 경로를 선택하세요.",
+    sourceRequiredMessage: "공시원문 외부 저장 경로를 선택하세요.",
     sourcePayloadKey: "source_directory",
     defaultDirectoryKey: "html_content_output_directory",
     defaultDirectorySuffix: "viewer_html_contents",
     startEndpoint: "/api/disclosures/html/content-download/start",
     cancelEndpoint: "/api/disclosures/html/content-download/cancel",
     inspectEndpoint: "/api/disclosures/html/content-download/inspect-folder",
-    stopMessage: "HTML 내부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
+    stopMessage: "공시원문 내부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
 } as const;
 
@@ -65,7 +62,7 @@ function SplitByYearButton({ checked, onChange }: SplitByYearButtonProps) {
     <Button
       variant={checked ? "default" : "outline"}
       onClick={onChange}
-      className="shrink-0 w-[116px]"
+      className="h-10 w-[116px] shrink-0"
     >
       분할저장 {checked ? "On" : "Off"}
     </Button>
@@ -74,7 +71,6 @@ function SplitByYearButton({ checked, onChange }: SplitByYearButtonProps) {
 
 export function HtmlDownloadPageView({ variant = "external" }: { variant?: DownloadVariant }) {
   const variantConfig = DOWNLOAD_VARIANTS[variant];
-  const SourceIcon = variant === "content" ? FolderOpen : FileJson;
   
   const {
     fetchSettings,
@@ -373,7 +369,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const handleCompressExternalHtml = async () => {
     if (variant !== "external") return;
     if (!outputDirectory) {
-      setStatus("HTML 외부 저장 경로를 선택하세요.");
+      setStatus("공시원문 외부 저장 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -388,177 +384,150 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     startJob("/api/disclosures/html/download/compress/start", payload);
   };
 
+  const saveOutputDirectory = (val: string) => {
+    setOutputDirectory(val);
+    saveSetting(variantConfig.defaultDirectoryKey, val);
+    if (variant === "content") {
+      setMergeOutputPath(mergeSplitByYear ? val : (val ? `${val}/merged-content-html.json` : ""));
+    }
+  };
+
+  const saveSourcePath = (val: string) => {
+    setSourcePath(val);
+    saveSetting(variantConfig.sourceSettingKey, val);
+  };
+
+  const baseFields: HtmlWorkflowField[] = [
+    {
+      id: "sourcePath",
+      kind: "path",
+      label: variantConfig.sourceLabel,
+      help: variantConfig.sourceHelp,
+      mode: variantConfig.sourcePickMode,
+      value: sourcePath,
+      onChange: saveSourcePath,
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 4,
+      trailing: variantConfig.sourcePickMode === "folder" ? (
+        <SplitByYearButton
+          checked={contentSourceSplitByYear}
+          onChange={() => setContentSourceSplitByYear((value) => !value)}
+        />
+      ) : null,
+    },
+    {
+      id: "outputDirectory",
+      kind: "path",
+      label: "저장 경로",
+      mode: "folder",
+      value: outputDirectory,
+      onChange: saveOutputDirectory,
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 4,
+      trailing: (
+        <SplitByYearButton
+          checked={downloadSplitByYear}
+          onChange={() => setDownloadSplitByYear((value) => !value)}
+        />
+      ),
+    },
+    { id: "timeout", kind: "input", type: "number", label: "타임아웃 (초)", value: timeout, onChange: setTimeoutVal },
+    { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
+    { id: "waitSeconds", kind: "input", type: "number", label: "요청 간격 (초)", value: waitSeconds, onChange: setWaitSeconds },
+    { id: "limit", kind: "input", type: "number", label: "최대 처리 건수", placeholder: "전체", value: limit, onChange: setLimit },
+    { id: "progressInterval", kind: "input", type: "number", label: "진행 확인 간격 (건)", value: progressInterval, onChange: setProgressInterval, span: 2 },
+    { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
+  ];
+
+  const compressionFields: HtmlWorkflowField[] = [
+    {
+      id: "compressOutputDirectory",
+      kind: "path",
+      label: "공시원문 외부 저장 경로",
+      mode: "folder",
+      value: outputDirectory,
+      onChange: saveOutputDirectory,
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 4,
+      trailing: (
+        <SplitByYearButton
+          checked={compressSplitByYear}
+          onChange={() => setCompressSplitByYear((value) => !value)}
+        />
+      ),
+    },
+  ];
+
+  const mergeFields: HtmlWorkflowField[] = [
+    {
+      id: "mergeOutputPath",
+      kind: "path",
+      label: "병합 파일 저장 경로",
+      mode: mergeSplitByYear ? "folder" : "save",
+      value: mergeOutputPath || (mergeSplitByYear ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : "")),
+      onChange: (val) => {
+        setMergeOutputPath(val);
+        saveSetting("html_merge_output_path", val);
+      },
+      placeholder: mergeSplitByYear ? `${outputDirectory || "/path/to/content_html"}` : `${outputDirectory || "/path/to/content_html"}/merged-content-html.json`,
+      span: 4,
+      trailing: (
+        <SplitByYearButton
+          checked={mergeSplitByYear}
+          onChange={() => setMergeSplitByYear((value) => {
+            const nextVal = !value;
+            const newPath = nextVal ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : "");
+            setMergeOutputPath(newPath);
+            return nextVal;
+          })}
+        />
+      ),
+    },
+  ];
+
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={HTML_PROCESS_TABS} />
-      <div className="grid lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-6">
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">{variantConfig.settingsTitle}</CardTitle>
-              <CardDescription className="dark:text-slate-400">{variantConfig.description}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">{variantConfig.sourceLabel}</Label>
-                <div className="flex gap-2">
-                  <PathPickerInput 
-                    mode={variantConfig.sourcePickMode as any}
-                    value={sourcePath}
-                    onChange={(val) => {
-                      setSourcePath(val);
-                      saveSetting(variantConfig.sourceSettingKey, val);
-                    }}
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                    className="flex-1"
-                  />
-                  {variantConfig.sourcePickMode === "folder" && (
-                    <SplitByYearButton
-                      checked={contentSourceSplitByYear}
-                      onChange={() => setContentSourceSplitByYear((value) => !value)}
-                    />
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                  <Info className="h-3 w-3" /> {variantConfig.sourceHelp}
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">저장 경로</Label>
-                <div className="flex gap-2">
-                  <PathPickerInput 
-                    mode="folder"
-                    value={outputDirectory}
-                    onChange={(val) => {
-                      setOutputDirectory(val);
-                      saveSetting(variantConfig.defaultDirectoryKey, val);
-                      if (variant === "content") {
-                        setMergeOutputPath(mergeSplitByYear ? val : (val ? `${val}/merged-content-html.json` : ""));
-                      }
-                    }}
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                    className="flex-1"
-                  />
-                  <SplitByYearButton
-                    checked={downloadSplitByYear}
-                    onChange={() => setDownloadSplitByYear((value) => !value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">타임아웃 (초)</Label>
-                  <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">최대 요청/분</Label>
-                  <Input type="number" value={maxRequestsPerMinute} onChange={(e) => setMaxRequestsPerMinute(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">요청 간격 (초)</Label>
-                  <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">최대 처리 건수</Label>
-                  <Input type="number" placeholder="전체" value={limit} onChange={(e) => setLimit(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">진행 확인 간격 (건)</Label>
-                  <Input type="number" value={progressInterval} onChange={(e) => setProgressInterval(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                </div>
-                <div className="flex items-center space-x-2 pt-8">
-                  <Checkbox id="skipExisting" checked={skipExisting} onCheckedChange={(v) => setSkipExisting(!!v)} className="dark:border-[#30363d]" />
-                  <Label htmlFor="skipExisting" className="cursor-pointer dark:text-slate-300">기존 파일 건너뛰기</Label>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+    <HtmlWorkflowPage
+      eyebrow={variant === "external" ? "External HTML Save" : "Content HTML Save"}
+      title={variantConfig.settingsTitle}
+      description={variantConfig.description}
+    >
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+        <section className="min-w-0 space-y-6">
+          <HtmlWorkflowCard
+            title="저장 조건"
+            description="경로, 속도 제한, 이어받기 기준을 같은 입력 규칙으로 관리합니다."
+          >
+              <HtmlWorkflowForm fields={baseFields} />
+          </HtmlWorkflowCard>
 
           {variant === "external" && (
-            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-              <CardHeader>
-                <CardTitle className="dark:text-white">외부 HTML JSON 압축</CardTitle>
-                <CardDescription className="dark:text-slate-400">저장된 KIND 공시 뷰어 HTML에서 핵심 정보만 추출해 하나의 JSON으로 저장합니다.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">HTML 외부 저장 경로</Label>
-                  <div className="flex gap-2">
-                    <PathPickerInput 
-                      mode="folder"
-                      value={outputDirectory}
-                      onChange={(val) => {
-                        setOutputDirectory(val);
-                        saveSetting(variantConfig.defaultDirectoryKey, val);
-                      }}
-                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                      className="flex-1"
-                    />
-                    <SplitByYearButton
-                      checked={compressSplitByYear}
-                      onChange={() => setCompressSplitByYear((value) => !value)}
-                    />
-                  </div>
-                </div>
-
-                <Button variant="outline" className="w-full" onClick={handleCompressExternalHtml} disabled={isJobActive}>
+            <HtmlWorkflowCard
+              title="외부 HTML JSON 압축"
+              description="저장된 KIND 공시 뷰어 HTML에서 핵심 정보만 추출해 하나의 JSON으로 저장합니다."
+            >
+                <HtmlWorkflowForm fields={compressionFields} />
+                <Button variant="outline" className="h-10 w-full" onClick={handleCompressExternalHtml} disabled={isJobActive}>
                   <FileJson className="mr-2 h-4 w-4" />
                   외부 HTML JSON 압축
                 </Button>
-              </CardContent>
-            </Card>
+            </HtmlWorkflowCard>
           )}
 
           {variant === "content" && (
-            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-              <CardHeader>
-                <CardTitle className="dark:text-white">내부 HTML JSON 병합</CardTitle>
-                <CardDescription className="dark:text-slate-400">저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">병합 파일 저장 경로</Label>
-                  <div className="flex gap-2">
-                    <PathPickerInput
-                      mode={mergeSplitByYear ? "folder" : "save"}
-                      value={mergeOutputPath || (mergeSplitByYear ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : ""))}
-                      onChange={(val) => {
-                        setMergeOutputPath(val);
-                        saveSetting("html_merge_output_path", val);
-                      }}
-                      placeholder={mergeSplitByYear ? `${outputDirectory || "/path/to/content_html"}` : `${outputDirectory || "/path/to/content_html"}/merged-content-html.json`}
-                      className="flex-1"
-                    />
-                    <SplitByYearButton
-                      checked={mergeSplitByYear}
-                      onChange={() => setMergeSplitByYear((value) => {
-                        const nextVal = !value;
-                        const newPath = nextVal ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : "");
-                        setMergeOutputPath(newPath);
-                        return nextVal;
-                      })}
-                    />
-                  </div>
-                </div>
-
-                <Button variant="outline" className="w-full" onClick={handleMergeContentHtml} disabled={isJobActive}>
+            <HtmlWorkflowCard
+              title="내부 HTML JSON 병합"
+              description="저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다."
+            >
+                <HtmlWorkflowForm fields={mergeFields} />
+                <Button variant="outline" className="h-10 w-full" onClick={handleMergeContentHtml} disabled={isJobActive}>
                   <FileJson className="mr-2 h-4 w-4" />
                   내부 HTML JSON 병합
                 </Button>
-              </CardContent>
-            </Card>
+            </HtmlWorkflowCard>
           )}
         </section>
 
@@ -569,7 +538,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col gap-2">
-                <Button variant="outline" className="w-full" onClick={handleInspectFolder} disabled={isJobActive || inspectRunning}>
+                <Button variant="outline" className="h-10 w-full" onClick={handleInspectFolder} disabled={isJobActive || inspectRunning}>
                   {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
                   폴더 검사하기
                 </Button>
@@ -582,11 +551,11 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                     value={deleteConfirmationText}
                     onChange={(e) => setDeleteConfirmationText(e.target.value)}
                     placeholder="확인했습니다."
-                    className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                    className={htmlControlClassName}
                   />
                   <Button
                     variant="outline"
-                    className="w-full"
+                    className="h-10 w-full"
                     onClick={handleDeleteUnexpectedFiles}
                     disabled={
                       isJobActive ||
@@ -600,11 +569,11 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                     삭제 예정 파일 {lastInspectionCandidateCount}개 삭제
                   </Button>
                 </div>
-                <Button className="w-full" onClick={handleRun} disabled={isJobActive}>
+                <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
                   <Play className="mr-2 h-4 w-4" />
                   실행
                 </Button>
-                <Button variant="outline" className="w-full" onClick={handleCancel} disabled={!activeCancelToken}>
+                <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
                   <Square className="mr-2 h-4 w-4" />
                   중지
                 </Button>
@@ -717,6 +686,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           </Card>
         </section>
       </div>
-    </main>
+    </HtmlWorkflowPage>
   );
 }

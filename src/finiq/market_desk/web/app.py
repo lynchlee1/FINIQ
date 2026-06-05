@@ -5,38 +5,48 @@ import os
 import uuid
 import json
 import queue
-import subprocess
-import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, List, Dict, Union
+from typing import Any, Callable, Optional, List, Dict, Union
 
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from finiq.config import init_config, save_settings, normalize_path
+from finiq.config import ASSETS_DIR, init_config
+from finiq.data.assets_excel import (
+    DEFAULT_ASSET_PARQUET_DIR,
+    convert_asset_excels_to_wide_parquet,
+    inspect_asset_excel_conversion,
+    inspect_asset_excel_output,
+    list_asset_excel_files,
+    read_asset_excel,
+    read_asset_excel_interpreted,
+)
 from finiq.market_desk.web.jobs import job_manager
+from finiq.market_desk.web.discovery import (
+    list_classification_files,
+    list_price_source_files,
+    resolve_default_classification,
+    resolve_default_price_source,
+)
 from finiq.market_desk.web.service import (
-    DISPLAY_FREQUENCY_OPTIONS,
-    INSIGHT_RANGE_OPTIONS,
-    PRICE_SOURCE_FDR,
-    PRICE_SOURCE_LABELS,
     PRICE_SOURCE_QUANTI,
     build_company_list_export,
     filter_disclosures_payload,
     build_insight_payload,
-    list_classification_files,
     list_integrated_providers,
-    list_price_source_files,
     load_company_index_payload,
-    resolve_default_classification,
-    resolve_default_price_source,
     run_integrated_convert_payload,
     run_integrated_market_history_payload,
     run_integrated_merge_payload,
+)
+from finiq.market_desk.web.routers.config import (
+    _choose_finder_path as _router_choose_finder_path,
+    _normalize_file_dialog_mode,
+    create_config_router,
 )
 from finiq.market_desk.web.download import (
     build_download_options_payload,
@@ -79,100 +89,59 @@ app.add_middleware(
 # Global config instance
 config = init_config()
 
+
+def _choose_finder_path(*, mode: str, title: str, default_path: str = "") -> str:
+    return _router_choose_finder_path(mode=mode, title=title, default_path=default_path)
+
+
+app.include_router(create_config_router(config, choose_finder_path=lambda **kwargs: _choose_finder_path(**kwargs)))
+
 # --- Async Job Management ---
+
+JobProgressCallback = Callable[[str], None]
+JobHandler = Callable[[dict[str, Any], JobProgressCallback], Any]
+
+
+def _run_asset_excel_convert_job(payload: dict[str, Any], progress_callback: JobProgressCallback) -> dict[str, Any]:
+    return convert_asset_excels_to_wide_parquet(
+        ASSETS_DIR,
+        payload.get("output_directory") or DEFAULT_ASSET_PARQUET_DIR,
+        selected_files=payload.get("selected_files") or None,
+        conflict_policy=str(payload.get("conflict_policy") or "error"),
+        write_mode=str(payload.get("write_mode") or "update"),
+        progress_callback=progress_callback,
+    )
+
+
+JOB_HANDLERS: dict[str, JobHandler] = {
+    "download": download_disclosure_html_payload,
+    "external_compress": compress_disclosure_external_html_payload,
+    "content_download": download_disclosure_html_contents_payload,
+    "content_merge": merge_disclosure_content_html_payload,
+    "parse": parse_disclosure_html_payload,
+    "integrated_convert": run_integrated_convert_payload,
+    "integrated_merge": run_integrated_merge_payload,
+    "integrated_market_history": run_integrated_market_history_payload,
+    "table_build": build_disclosure_table_payload,
+    "utility_partition": run_partition_storage_payload,
+    "asset_excel_convert": _run_asset_excel_convert_job,
+}
+
 
 def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
     try:
         job_manager.start_job(job_id)
         progress_callback = lambda m: job_manager.add_log(job_id, m)
-        
-        if kind == "download":
-            result = download_disclosure_html_payload(payload, progress_callback=progress_callback)
-        elif kind == "external_compress":
-            result = compress_disclosure_external_html_payload(payload, progress_callback=progress_callback)
-        elif kind == "content_download":
-            result = download_disclosure_html_contents_payload(payload, progress_callback=progress_callback)
-        elif kind == "content_merge":
-            result = merge_disclosure_content_html_payload(payload, progress_callback=progress_callback)
-        elif kind == "parse":
-            result = parse_disclosure_html_payload(payload, progress_callback=progress_callback)
-        elif kind == "integrated_convert":
-            result = run_integrated_convert_payload(payload, progress_callback=progress_callback)
-        elif kind == "integrated_merge":
-            result = run_integrated_merge_payload(payload, progress_callback=progress_callback)
-        elif kind == "integrated_market_history":
-            result = run_integrated_market_history_payload(payload, progress_callback=progress_callback)
-        elif kind == "table_build":
-            result = build_disclosure_table_payload(payload, progress_callback=progress_callback)
-        elif kind == "utility_partition":
-            result = run_partition_storage_payload(payload, progress_callback=progress_callback)
-        else:
+        handler = JOB_HANDLERS.get(kind)
+        if handler is None:
             raise ValueError(f"Unhandled job kind: {kind}")
 
+        result = handler(payload, progress_callback=progress_callback)
         job_manager.complete_job(job_id, result)
     except Exception as exc:
         job_manager.fail_job(job_id, str(exc))
 
 # --- Helper Functions ---
-
-def _normalize_file_dialog_mode(mode: str) -> str:
-    normalized = str(mode or "file").strip().lower()
-    if normalized in {"dir", "folder", "directory"}:
-        return "folder"
-    if normalized in {"file", "save"}:
-        return normalized
-    raise HTTPException(status_code=400, detail=f"Unsupported file dialog mode: {mode}")
-
-
-def _choose_finder_path(*, mode: str, title: str, default_path: str = "") -> str:
-    if sys.platform != "darwin":
-        raise HTTPException(status_code=400, detail="Finder path selection is only available on macOS.")
-    normalized_mode = _normalize_file_dialog_mode(mode)
-    
-    path = Path(default_path).expanduser()
-    default_directory = path.parent if path.suffix else path
-    while not default_directory.exists() and default_directory != default_directory.parent:
-        default_directory = default_directory.parent
-    if not default_directory.exists():
-        default_directory = Path.home()
-    
-    default_name = path.name if path.suffix else ""
-    
-    script = r'''
-on run argv
-  set dialogTitle to item 1 of argv
-  set modeName to item 2 of argv
-  set defaultDirectory to item 3 of argv
-  set defaultName to item 4 of argv
-  set defaultLocation to POSIX file defaultDirectory
-
-  if modeName is "folder" then
-    set chosenPath to choose folder with prompt dialogTitle default location defaultLocation
-  else if modeName is "save" then
-    if defaultName is "" then
-      set defaultName to "untitled"
-    end if
-    set chosenPath to choose file name with prompt dialogTitle default name defaultName default location defaultLocation
-  else
-    set chosenPath to choose file with prompt dialogTitle default location defaultLocation
-  end if
-
-  return POSIX path of chosenPath
-end run
-'''
-    result = subprocess.run(
-        ["osascript", "-e", script, title, normalized_mode, str(default_directory), default_name],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        if "User canceled" in stderr or "사용자가 취소" in stderr:
-            return ""
-        raise HTTPException(status_code=500, detail=stderr or "Finder path selection failed")
-    return result.stdout.strip()
 
 def _write_transfer_file(payload: dict[str, Any], requested_path: str = "") -> dict[str, Any]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -200,117 +169,11 @@ def _attach_html_download_transfer(payload: dict[str, Any], requested_path: str 
 
 # --- API Routes ---
 
-def _config_payload(*, include_discovery: bool = False) -> dict[str, Any]:
-    price_root = config.price_root_directory or str(Path(config.quanti_dir).expanduser().parent)
-    payload = {
-        "output_root": config.output_root,
-        "quanti_dir": config.quanti_dir,
-        "price_root_directory": price_root,
-        "download_output_directory": config.download_output_directory or config.output_root,
-        "sqlite_manifest_path": config.sqlite_manifest_path,
-        "html_output_directory": config.html_output_directory or f"{config.output_root}/viewer_html",
-        "html_content_output_directory": config.html_content_output_directory or f"{config.output_root}/viewer_html_contents",
-        "html_transfer_directory": config.html_transfer_directory or f"{config.output_root}/.finiq/transfers",
-        "html_parse_result_path": config.html_parse_result_path,
-        "html_parse_mode": config.html_parse_mode,
-        "price_files": [],
-        "selected_price_path": config.quanti_dir,
-        "classification_files": [],
-        "selected_classification_path": config.selected_classification_path,
-        "sqlite_source_path": config.sqlite_source_path,
-        "integrated_merge_input_path": config.integrated_merge_input_path,
-        "integrated_merge_output_path": config.integrated_merge_output_path,
-        "integrated_history_item_registry_path": config.integrated_history_item_registry_path,
-        "integrated_history_output_path": config.integrated_history_output_path,
-        "html_download_source_path": config.html_download_source_path,
-        "integrated_data_values": config.integrated_data_values,
-        "change_log_date_thresholds": config.change_log_date_thresholds,
-        "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
-        "condition_presets": config.condition_presets,
-        "range_options": list(INSIGHT_RANGE_OPTIONS),
-        "display_frequency_options": list(DISPLAY_FREQUENCY_OPTIONS),
-        "price_sources": [
-            {"key": PRICE_SOURCE_QUANTI, "label": PRICE_SOURCE_LABELS[PRICE_SOURCE_QUANTI]},
-            {"key": PRICE_SOURCE_FDR, "label": PRICE_SOURCE_LABELS[PRICE_SOURCE_FDR]},
-        ],
-    }
-
-    if include_discovery:
-        payload["price_files"] = list_price_source_files(price_root)
-        payload["selected_price_path"] = resolve_default_price_source(price_root, config.quanti_dir)
-        payload["classification_files"] = list_classification_files(config.output_root)
-        payload["selected_classification_path"] = config.selected_classification_path or resolve_default_classification(config.output_root)
-
-    return payload
-
-@app.get("/api/config")
-async def get_config(response: Response, include_discovery: bool = False):
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return _config_payload(include_discovery=include_discovery)
-
-class SettingsUpdate(BaseModel):
-    output_root: Optional[str] = None
-    quanti_dir: Optional[str] = None
-    price_root_directory: Optional[str] = None
-    selected_classification_path: Optional[str] = None
-    sqlite_source_path: Optional[str] = None
-    download_output_directory: Optional[str] = None
-    sqlite_manifest_path: Optional[str] = None
-    html_output_directory: Optional[str] = None
-    html_content_output_directory: Optional[str] = None
-    html_transfer_directory: Optional[str] = None
-    html_parse_result_path: Optional[str] = None
-    html_parse_mode: Optional[str] = None
-    integrated_merge_input_path: Optional[str] = None
-    integrated_merge_output_path: Optional[str] = None
-    integrated_history_item_registry_path: Optional[str] = None
-    integrated_history_output_path: Optional[str] = None
-    html_download_source_path: Optional[str] = None
-    integrated_data_values: Optional[dict[str, str]] = None
-    change_log_date_thresholds: Optional[dict[str, float]] = None
-    change_log_numeric_thresholds: Optional[dict[str, float]] = None
-    condition_presets: Optional[list[dict[str, Any]]] = None
-
-@app.post("/api/settings")
-async def save_app_settings(update: SettingsUpdate):
-    global config
-    payload = update.model_dump(exclude_unset=True)
-    current_settings = {}
-    for key in config.__slots__:
-        val = getattr(config, key)
-        if isinstance(val, (str, int, float, bool, dict)):
-            current_settings[key] = val
-
-    for key, value in payload.items():
-        if value is None: continue
-        if key == "html_parse_mode":
-            normalized = str(value)
-        elif key in ("integrated_data_values", "change_log_date_thresholds", "change_log_numeric_thresholds", "condition_presets") and isinstance(value, (dict, list)):
-            normalized = value
-        else:
-            normalized = normalize_path(str(value))
-        setattr(config, key, normalized)
-        current_settings[key] = normalized
-    
-    save_settings(config.settings_path, current_settings)
-    return _config_payload()
-
-class FileDialogRequest(BaseModel):
-    mode: str = "file"
-    title: str = "경로 선택"
-    default_path: str = ""
-
-@app.post("/api/file-dialog")
-async def file_dialog(req: FileDialogRequest):
-    path = await asyncio.to_thread(
-        _choose_finder_path,
-        mode=req.mode,
-        title=req.title,
-        default_path=req.default_path,
-    )
-    return {"path": path, "cancelled": not bool(path)}
+class AssetExcelConvertRequest(BaseModel):
+    output_directory: Optional[str] = None
+    selected_files: List[str] = []
+    conflict_policy: str = "error"
+    write_mode: str = "update"
 
 @app.get("/api/classifications")
 async def get_classifications(root_directory: Optional[str] = None):
@@ -335,16 +198,113 @@ async def get_price_sources(root_directory: Optional[str] = None, selected_path:
 async def get_integrated_providers_route():
     return {"providers": list_integrated_providers()}
 
+@app.get("/api/assets/excels")
+async def get_asset_excels():
+    return {
+        "root_directory": str(ASSETS_DIR.resolve()),
+        "excel_files": list_asset_excel_files(ASSETS_DIR),
+    }
+
+@app.get("/api/assets/excels/output")
+async def get_asset_excel_output(output_directory: Optional[str] = None):
+    return inspect_asset_excel_output(output_directory or DEFAULT_ASSET_PARQUET_DIR)
+
+@app.post("/api/assets/excels/preview-conversion")
+async def preview_asset_excel_conversion(request: AssetExcelConvertRequest):
+    try:
+        return await asyncio.to_thread(
+            inspect_asset_excel_conversion,
+            ASSETS_DIR,
+            request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
+            selected_files=request.selected_files or None,
+            conflict_policy=request.conflict_policy,
+            write_mode=request.write_mode,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@app.post("/api/assets/excels/convert-wide-parquet")
+async def convert_asset_excels(request: AssetExcelConvertRequest):
+    try:
+        return await asyncio.to_thread(
+            convert_asset_excels_to_wide_parquet,
+            ASSETS_DIR,
+            request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
+            selected_files=request.selected_files or None,
+            conflict_policy=request.conflict_policy,
+            write_mode=request.write_mode,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@app.post("/api/assets/excels/convert-wide-parquet/start")
+async def start_convert_asset_excels(request: AssetExcelConvertRequest, background_tasks: BackgroundTasks):
+    job_id = uuid.uuid4().hex
+    job_manager.create_job(job_id, "asset_excel_convert")
+    background_tasks.add_task(
+        _run_job_worker,
+        job_id,
+        "asset_excel_convert",
+        request.model_dump(),
+    )
+    return job_manager.get_snapshot(job_id)
+
+@app.get("/api/assets/excels/jobs/{job_id}")
+async def get_asset_excel_job_status(job_id: str):
+    snapshot = job_manager.get_snapshot(job_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return snapshot
+
+@app.get("/api/assets/excels/{file_name:path}")
+async def get_asset_excel(
+    file_name: str,
+    sheet_name: Optional[str] = None,
+    row_limit: Optional[int] = 100,
+    interpreted: bool = False,
+):
+    try:
+        if interpreted:
+            if sheet_name is None:
+                raise ValueError("sheet_name is required for interpreted preview")
+            return read_asset_excel_interpreted(
+                file_name,
+                sheet_name=sheet_name,
+                row_limit=row_limit,
+                root_directory=ASSETS_DIR,
+            )
+        return read_asset_excel(
+            file_name,
+            sheet_name=sheet_name,
+            row_limit=row_limit,
+            root_directory=ASSETS_DIR,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (IsADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
 @app.get("/api/companies")
 async def get_companies(
     classification_path: Optional[str] = None,
     keyword: Optional[str] = None,
     market: str = "전체"
 ):
-    path = classification_path or config.selected_classification_path or resolve_default_classification(config.output_root) or ""
-    if not path:
+    path = ""
+    if classification_path and Path(classification_path).exists():
+        path = classification_path
+    elif config.selected_classification_path and Path(config.selected_classification_path).exists():
+        path = config.selected_classification_path
+    else:
+        path = resolve_default_classification(config.output_root) or ""
+
+    if not path or not Path(path).exists():
         return {"summary": {}, "markets": ["전체"], "companies": []}
-    return load_company_index_payload(path, keyword=keyword, market=market)
+
+    try:
+        return load_company_index_payload(path, keyword=keyword, market=market)
+    except Exception:
+        return {"summary": {}, "markets": ["전체"], "companies": []}
 
 @app.get("/api/insight")
 async def get_insight(
@@ -358,9 +318,29 @@ async def get_insight(
     quanti_dir: Optional[str] = None,
     stock_code: Optional[str] = None,
 ):
+    path = classification_path
+    if not Path(path).exists():
+        path = config.selected_classification_path or resolve_default_classification(config.output_root) or ""
+        
+    if not path or not Path(path).exists():
+        return {
+            "company": {"company_name": "알 수 없음" if company_key != "demo" else "FINIQ (데모)", "market": "", "disclosure_count": 0, "badges": []},
+            "chart": {"candles": [], "markers": [], "groups": []},
+            "timeline": [],
+            "display_frequency_label": display_frequency,
+            "range_start": "",
+            "range_end": "",
+            "visible_range_end": "",
+            "manual_start": start_date or "",
+            "manual_end": end_date or "",
+            "stock_code": stock_code or "",
+            "inferred_stock_code": "",
+            "messages": ["분류 파일을 찾을 수 없습니다."],
+        }
+
     try:
         return build_insight_payload(
-            classification_path,
+            path,
             company_key,
             start_date_iso=start_date,
             end_date_iso=end_date,
@@ -379,11 +359,21 @@ async def export_companies(
     keyword: Optional[str] = None,
     market: str = "전체"
 ):
-    payload = build_company_list_export(classification_path, keyword=keyword, market=market)
-    filename = f"{Path(classification_path).stem}.company_list.xlsx"
-    temp_path = Path(f"/tmp/{filename}")
-    temp_path.write_bytes(payload)
-    return FileResponse(temp_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    path = classification_path
+    if not Path(path).exists():
+        path = config.selected_classification_path or resolve_default_classification(config.output_root) or ""
+        
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=404, detail="Classification file not found")
+
+    try:
+        payload = build_company_list_export(path, keyword=keyword, market=market)
+        filename = f"{Path(path).stem}.company_list.xlsx"
+        temp_path = Path(f"/tmp/{filename}")
+        temp_path.write_bytes(payload)
+        return FileResponse(temp_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/download/options")
 async def get_download_options_route(response: Response):

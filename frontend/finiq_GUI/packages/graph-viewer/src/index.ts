@@ -1,4 +1,5 @@
 export { GraphCanvas } from './components/GraphCanvas'
+export { SettingsPanel } from './components/SettingsPanel'
 export type {
   GraphCanvasContextAction,
   GraphCanvasContextMenuItem,

@@ -19,7 +19,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className={cn(inter.className, "antialiased")}>
-        <div className="max-w-6xl mx-auto p-4 md:p-8 flex flex-col min-h-screen">
+        <div className="max-w-7xl mx-auto p-4 md:px-7 md:py-8 flex flex-col min-h-screen">
           <Topbar />
           {children}
         </div>

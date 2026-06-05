@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@finiq/ui/utils";
 import { pickPath, type PathDialogMode } from "@/lib/fileDialog";
+import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 
 interface ConfigFile {
   path: string;
@@ -191,7 +192,8 @@ export default function Home() {
     : classificationFiles;
 
   return (
-    <main className="flex flex-col gap-6 w-full">
+    <WorkflowPageShell workflowId="ontology">
+    <div className="flex flex-col gap-6 w-full">
       <section className="flex items-center gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -337,7 +339,7 @@ export default function Home() {
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <div>
             <CardDescription className="dark:text-slate-400">회사 목록</CardDescription>
-            <CardTitle className="dark:text-white">회사 코드</CardTitle>
+            <CardTitle className="dark:text-white">Chart View</CardTitle>
           </div>
           <div className="bg-slate-100 dark:bg-[#21262d] text-slate-700 dark:text-slate-200 px-3 py-1 rounded-full text-sm font-semibold">
             {formatNumber(companies.length)}
@@ -415,6 +417,7 @@ export default function Home() {
           )}
         </CardContent>
       </Card>
-    </main>
+    </div>
+    </WorkflowPageShell>
   );
 }
