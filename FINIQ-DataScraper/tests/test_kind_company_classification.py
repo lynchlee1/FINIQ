@@ -92,16 +92,50 @@ def test_disclosure_rows_extract_company_market_badges_and_doc_numbers() -> None
         "company_id": "19955"
     }
     assert parsed[0] == {
+        "row_no": "1",
         "company_name": "레이저옵텍",
         "company_id": "19955",
         "market": "코스닥",
         "badges": ["관리종목", "KOSDAQ150"],
         "disclosed_at": "2026-01-02 20:02",
         "title": "[투자주의]소수계좌 거래집중 종목",
+        "title_attr": "[투자주의]소수계좌 거래집중 종목",
+        "title_base": "[투자주의]소수계좌 거래집중 종목",
+        "title_display": "[투자주의]소수계좌 거래집중 종목",
+        "title_flags": ["투자주의"],
+        "is_correction_report": False,
+        "has_later_correction": False,
         "acpt_no": "20260102000687",
         "doc_no": "20260102000688",
         "submitter": "시장감시위원회",
     }
+
+
+def test_disclosure_rows_preserves_display_title_flags_and_later_correction() -> None:
+    html = _results_page(
+        """
+        <tr>
+          <td>7</td>
+          <td>2026-01-02 20:02</td>
+          <td><img alt="코스닥"><a id="companysum" onclick="companysummary_open('19955')" title="레이저옵텍">레이저옵텍</a></td>
+          <td>
+            <a href="#viewer" onclick="openDisclsViewer('20260102000687','20260102000688')" title="주주총회소집결의"><font color="#FF8040">[정정]</font>주주총회소집결의<img alt="해당보고서 이후에 정정된 보고서 있음"></a>
+          </td>
+          <td>레이저옵텍</td>
+        </tr>
+        """
+    )
+
+    parsed = disclosure_rows(html)[0]
+
+    assert parsed["row_no"] == "7"
+    assert parsed["title"] == "[정정]주주총회소집결의"
+    assert parsed["title_attr"] == "주주총회소집결의"
+    assert parsed["title_display"] == "[정정]주주총회소집결의"
+    assert parsed["title_flags"] == ["정정"]
+    assert parsed["is_correction_report"] is True
+    assert parsed["has_later_correction"] is True
+    assert parsed["doc_no"] == "20260102000688"
 
 
 def test_export_kind_company_classification_recurses_and_merges_same_company(
@@ -236,14 +270,14 @@ def test_export_kind_company_classification_recurses_and_merges_same_company(
     assert merged_company["market"] == "코스닥"
     assert merged_company["badges"] == ["관리종목", "KOSDAQ150"]
     assert len(merged_company["disclosures"]) == 2
-    assert merged_company["disclosures"][0] == {
-        "disclosed_at": "2026-01-01 09:00",
-        "title": "주요사항보고서",
-        "acpt_no": "20260101000001",
-        "submitter": "에이컴퍼니",
-    }
+    assert merged_company["disclosures"][0]["disclosed_at"] == "2026-01-01 09:00"
+    assert merged_company["disclosures"][0]["title"] == "주요사항보고서"
+    assert merged_company["disclosures"][0]["acpt_no"] == "20260101000001"
+    assert merged_company["disclosures"][0]["doc_no"] is None
+    assert merged_company["disclosures"][0]["submitter"] == "에이컴퍼니"
     assert "source_folder" not in merged_company["disclosures"][0]
-    assert "source_file" not in merged_company["disclosures"][0]
+    assert merged_company["disclosures"][0]["source_file"].endswith("001_post_page_00001.body")
+    assert merged_company["disclosures"][0]["source_page"] == 1
     assert "page_number" not in merged_company["disclosures"][0]
     assert payload["companies"][3]["company_id"] == "IGNORED"
 
@@ -379,7 +413,9 @@ def test_export_kind_company_classification_deduplicates_overlapping_disclosures
         "20260120000001",
         "20260201000003",
     ]
-    assert all("doc_no" not in row for row in disclosures)
+    assert all("doc_no" in row for row in disclosures)
+    assert all("source_file" in row for row in disclosures)
+    assert all("source_page" in row for row in disclosures)
 
 
 def test_export_kind_company_classification_detects_incomplete_folder_when_validating(

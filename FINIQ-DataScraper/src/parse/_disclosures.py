@@ -15,6 +15,8 @@ _COMPANYSUMMARY_OPEN_RE = re.compile(
     r"companysummary_open\(\s*['\"](?P<company_id>[^'\"]*)['\"]\s*\)"
 )
 _DISCLOSURE_TABLE_SUMMARY_TERMS = ("\ud68c\uc0ac\uba85", "\uacf5\uc2dc\uc81c\ubaa9")
+_TITLE_FLAG_RE = re.compile(r"\[([^\[\]]+)\]")
+_LATER_CORRECTION_LABEL = "해당보고서 이후에 정정된 보고서 있음"
 
 
 def companysummary_onclick(onclick_value: str | None) -> dict[str, str | None] | None:
@@ -56,6 +58,28 @@ def _element_text(node: html.HtmlElement | None) -> str:
     return _clean_text(" ".join(text for text in node.itertext()))
 
 
+def _display_text(node: html.HtmlElement | None) -> str:
+    if node is None:
+        return ""
+    return _clean_text(node.text_content())
+
+
+def _title_flags(title: str) -> list[str]:
+    flags: list[str] = []
+    for match in _TITLE_FLAG_RE.finditer(title):
+        flag = _clean_text(match.group(1))
+        if flag and flag not in flags:
+            flags.append(flag)
+    return flags
+
+
+def _has_later_correction(disclosure_cell: html.HtmlElement) -> bool:
+    return any(
+        _clean_text(str(image_tag.get("alt") or "")) == _LATER_CORRECTION_LABEL
+        for image_tag in disclosure_cell.xpath(".//img")
+    )
+
+
 def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any] | None:
     cells = row_tag.xpath("./td")
     if len(cells) < 5:
@@ -87,21 +111,31 @@ def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any] | None:
         disclosure_onclick(disclosure_link.get("onclick")) if disclosure_link is not None else None
     ) or {"acpt_no": None, "doc_no": None}
 
-    title = ""
+    title_attr = ""
+    title_display = ""
     if disclosure_link is not None:
-        title = _clean_text(
-            str(disclosure_link.get("title") or _element_text(disclosure_link))
-        )
+        title_attr = _clean_text(str(disclosure_link.get("title") or ""))
+        title_display = _display_text(disclosure_link)
+    title = title_display or title_attr
     if not title:
-        title = _element_text(disclosure_cell)
+        title = _display_text(disclosure_cell)
+        title_display = title
+    title_flags = _title_flags(title_display or title)
 
     return {
+        "row_no": _element_text(cells[0]),
         "company_name": company_name,
         "company_id": company_id,
         "market": market,
         "badges": badges,
         "disclosed_at": _element_text(cells[1]),
         "title": title,
+        "title_attr": title_attr,
+        "title_base": title_attr,
+        "title_display": title_display or title,
+        "title_flags": title_flags,
+        "is_correction_report": "정정" in title_flags,
+        "has_later_correction": _has_later_correction(disclosure_cell),
         "acpt_no": disclosure_info.get("acpt_no"),
         "doc_no": disclosure_info.get("doc_no"),
         "submitter": _element_text(submitter_cell),

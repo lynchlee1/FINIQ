@@ -10,7 +10,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev:graph-viewer": "npm run dev -w @finiq/app-graph-viewer",
-    "dev:consigliere-ai": "npm run dev -w @finiq/app-consigliere-ai"
+    "dev:market-desk": "npm run dev -w @finiq/app-market-desk"
   },
   "dependencies": {
     "d3-force": "^3.0.0",
