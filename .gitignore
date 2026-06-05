@@ -3,7 +3,13 @@
 __pycache__/
 .pytest_cache/
 .venv/
-.venv-local/
 *.egg-info/
 resources/
 .vite/
+node_modules/
+dist/
+dist-ssr/
+apps/*/dist/
+logs/
+*.log
+*.local

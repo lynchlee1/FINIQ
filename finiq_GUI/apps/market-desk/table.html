@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FINIQ MarketDesk SQLITE 변환</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/table.js"></script>
+  </head>
+  <body data-page="table">
+    <div class="page-shell">
+      <header class="topbar panel">
+        <div class="topbar-copy">
+          <p class="brand-label">FINIQ MarketDesk</p>
+          <h1>SQLITE 변환</h1>
+        </div>
+        <nav class="topbar-nav" aria-label="주요 메뉴">
+          <a class="nav-link" href="/">공시 조회</a>
+          <a class="nav-link active" href="/download">데이터 구축</a>
+          <a class="nav-link" href="/html-download">원문 처리</a>
+        </nav>
+      </header>
+
+      <main class="download-view">
+        <nav class="workflow-tabs panel" aria-label="데이터 구축 세부 페이지">
+          <a class="workflow-tab" href="/download">
+            <span class="workflow-step">1</span>
+            <span>공시 다운로드</span>
+          </a>
+          <a class="workflow-tab active" href="/table">
+            <span class="workflow-step">2</span>
+            <span>SQLITE 변환</span>
+          </a>
+          <a class="workflow-tab" href="/filter">
+            <span class="workflow-step">3</span>
+            <span>공시 필터</span>
+          </a>
+        </nav>
+
+        <section class="panel download-panel">
+          <div class="download-grid download-grid-2">
+            <label class="field">
+              <span>입력 경로</span>
+              <div class="path-input-row path-input-row-3">
+                <input id="classificationPath" type="text" list="classificationPathOptions" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="classificationPath"
+                  data-dialog-mode="folder"
+                  data-dialog-title="원본 폴더 선택"
+                >
+                  📁
+                </button>
+              </div>
+              <datalist id="classificationPathOptions"></datalist>
+            </label>
+            <label class="field">
+              <span>저장 경로</span>
+              <div class="path-input-row">
+                <input id="outputPath" type="text" />
+                <button
+                  class="action-button action-button-muted action-button-compact"
+                  type="button"
+                  data-path-target="outputPath"
+                  data-dialog-mode="folder"
+                  data-dialog-title="저장 경로 선택"
+                >
+                  📁
+                </button>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="download-actions">
+            <button id="refreshBtn" class="action-button action-button-muted action-button-compact" type="button">
+              소스 새로고침
+            </button>
+            <button id="buildBtn" class="action-button action-button-primary action-button-compact" type="button">
+              테이블 생성
+            </button>
+          </div>
+          <div id="status" class="download-status"></div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
