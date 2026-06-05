@@ -37,8 +37,12 @@
             <span class="workflow-step">5</span>
             <span>HTML 파싱</span>
           </a>
-          <a class="workflow-tab" href="/html-bond-summary">
+          <a class="workflow-tab" href="/html-change-log">
             <span class="workflow-step">6</span>
+            <span>변동기록조회</span>
+          </a>
+          <a class="workflow-tab" href="/html-bond-summary">
+            <span class="workflow-step">7</span>
             <span>사채 발행 요약</span>
           </a>
         </nav>
@@ -47,7 +51,7 @@
           <div class="panel-header">
             <div>
               <div class="panel-kicker">Source</div>
-              <div class="panel-title">로컬 HTML 폴더</div>
+              <div class="panel-title">HTML 파싱</div>
             </div>
           </div>
           <div class="download-grid download-grid-2">
@@ -134,6 +138,29 @@
             </button>
           </div>
           <div id="status" class="download-status"></div>
+        </section>
+
+        <section class="panel download-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-kicker">Export</div>
+              <div class="panel-title">결과 내보내기</div>
+            </div>
+          </div>
+          <div class="download-grid download-grid-2">
+            <label class="field">
+              <span>필터</span>
+              <span class="checkbox-card">
+                <input id="exportLatestOnly" type="checkbox" />
+                최신버전만 보기
+              </span>
+            </label>
+            <div class="field" style="justify-content: flex-end;">
+              <button id="exportExcelBtn" class="action-button action-button-primary action-button-compact" type="button">
+                Export
+              </button>
+            </div>
+          </div>
         </section>
 
         <section class="panel download-panel">

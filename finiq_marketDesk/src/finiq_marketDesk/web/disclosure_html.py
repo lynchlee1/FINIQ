@@ -161,6 +161,8 @@ def download_disclosure_html_payload(
             skip_existing=bool(body.get("skip_existing", True)),
             progress_callback=handle_progress,
             cancel_check=lambda: _is_cancelled(cancel_token),
+            max_workers=int(body.get("max_workers") or 5),
+            max_retries=int(body.get("max_retries") or 2),
         )
         cancelled = _is_cancelled(cancel_token)
     finally:

@@ -1098,6 +1098,8 @@ def download_kind_viewer_htmls_from_result_folder(
     skip_existing: bool = True,
     progress_callback: KindProgressCallback | None = None,
     saved_file_callback: KindViewerSavedFileCallback | None = None,
+    max_workers: int = 5,
+    max_retries: int = 2,
 ) -> dict[str, Any]:
     """저장된 KIND 검색 결과 폴더의 접수번호별 뷰어 HTML 전체를 저장한다."""
     source_folder = Path(result_folder).resolve()
@@ -1127,6 +1129,8 @@ def download_kind_viewer_htmls_from_result_folder(
         skip_existing=skip_existing,
         progress_callback=progress_callback,
         saved_file_callback=saved_file_callback,
+        max_workers=max_workers,
+        max_retries=max_retries,
     )
     return {
         "source_folder": str(source_folder),

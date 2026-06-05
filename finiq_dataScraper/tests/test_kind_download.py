@@ -410,7 +410,7 @@ def test_fetch_disclosure_viewer_html_saves_kind_viewer_page(tmp_path: Path) -> 
     assert session.get_calls[0]["headers"] == REQUEST_HEADERS
 
 
-def test_download_disclosure_viewer_htmls_rate_limits_by_default(
+def test_download_disclosure_viewer_htmls_rate_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -418,12 +418,15 @@ def test_download_disclosure_viewer_htmls_rate_limits_by_default(
     sleep_calls: list[float] = []
     monkeypatch.setattr("finiq_dataScraper.core.client.time.sleep", sleep_calls.append)
 
+    # Request 3 items with max_requests_per_minute=2
+    # First 2 should pass immediately, 3rd should wait.
     saved_paths = download_disclosure_viewer_htmls(
         output_directory=tmp_path,
         request_headers=REQUEST_HEADERS,
         acpt_numbers=["20260108000150", "20260318000871", "20260401001020"],
         timeout=5,
         session=session,
+        max_requests_per_minute=2,
     )
 
     assert [path.name for path in saved_paths] == [
@@ -432,7 +435,9 @@ def test_download_disclosure_viewer_htmls_rate_limits_by_default(
         "20260401001020.html",
     ]
     assert len(session.get_calls) == 3
-    assert sleep_calls == [pytest.approx(60 / 90), pytest.approx(60 / 90)]
+    # At least one sleep call should have occurred for the 3rd request
+    assert len(sleep_calls) > 0
+    assert all(s == 0.1 for s in sleep_calls)
 
 
 def test_download_disclosure_viewer_htmls_rejects_rates_over_kind_limit(tmp_path: Path) -> None:

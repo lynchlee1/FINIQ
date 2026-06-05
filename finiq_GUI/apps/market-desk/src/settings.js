@@ -13,6 +13,9 @@ export async function savePathSetting(partialPayload) {
 
 export function bindPathSetting(input, buildPayload, onError) {
   const save = async () => {
+    if (input) {
+      input.dataset.touched = "true";
+    }
     try {
       await savePathSetting(buildPayload(input));
     } catch (error) {
@@ -30,6 +33,7 @@ export function bindPathSetting(input, buildPayload, onError) {
       return;
     }
     event.preventDefault();
+    event.stopPropagation();
     save();
   });
 }

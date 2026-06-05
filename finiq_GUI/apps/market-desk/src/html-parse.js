@@ -11,8 +11,8 @@ const PARSE_MODES = [
   {
     key: "rights_issuance",
     label: "유무상증자파싱",
-    status: "원본 테이블 구조 지원",
-    description: "유무상증자 HTML을 공통 구조로 파싱합니다. 상세 필드 규칙은 아직 추가되지 않았습니다.",
+    status: "상세 필드 지원",
+    description: "유무상증자 HTML에서 신주 수, 발행목적, 발행가액, 기준주가, 납입일, 상장예정일, 배정 대상자를 추출합니다.",
   },
   {
     key: "shareholder_meeting",
@@ -53,6 +53,16 @@ const elements = {
   bondLimit: document.getElementById("bondLimit"),
   bondRows: document.getElementById("bondRows"),
   bondDetail: document.getElementById("bondDetail"),
+  changeMode: document.getElementById("changeMode"),
+  loadChangeLogBtn: document.getElementById("loadChangeLogBtn"),
+  changeSearch: document.getElementById("changeSearch"),
+  changeShowOnlyChanges: document.getElementById("changeShowOnlyChanges"),
+  changeLimit: document.getElementById("changeLimit"),
+  changeLimitAll: document.getElementById("changeLimitAll"),
+  changeFamilyRail: document.getElementById("changeFamilyRail"),
+  changeDetailStage: document.getElementById("changeDetailStage"),
+  exportExcelBtn: document.getElementById("exportExcelBtn"),
+  exportLatestOnly: document.getElementById("exportLatestOnly"),
 };
 
 let activeCancelToken = "";
@@ -61,6 +71,8 @@ let activeJobId = "";
 let jobPollTimer = 0;
 let bondSummary = null;
 let selectedBondKey = "";
+let changeLog = null;
+let selectedChangeFamilyId = "";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -77,6 +89,52 @@ function formatNumber(value) {
   }
   const number = Number(value);
   return Number.isFinite(number) ? number.toLocaleString("ko-KR") : String(value);
+}
+
+function formatValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    // Check if it's a list of targets/entities
+    if (Array.isArray(value[0])) {
+      return value.map((v) => v.filter((item) => item !== null && item !== "").join(" ")).join("\n");
+    }
+    return value.join(", ");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
+}
+
+function formatValueWithField(value, fieldName) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+
+  // Handle specific fields that need 100M unit formatting
+  if (fieldName === "발행금액" || fieldName === "발행가액") {
+    return formatHundredMillion(value);
+  }
+
+  // Handle list fields (like targets) that might contain amounts
+  if (fieldName === "발행대상자" && Array.isArray(value)) {
+    return value.map((target) => {
+      if (Array.isArray(target)) {
+        const name = target[0];
+        const amount = target[target.length - 1];
+        if (target.length > 1 && !isNaN(Number(amount))) {
+          return `${name} (${formatNumber(amount)})`;
+        }
+        return target.join(" ");
+      }
+      return String(target);
+    }).join("\n");
+  }
+
+  return formatValue(value);
 }
 
 function formatHundredMillion(value) {
@@ -202,8 +260,16 @@ function formatFailureLines(errors) {
 
 function defaultOutputPath() {
   const inputDirectory = elements.inputDirectory?.value || "";
-  const mode = elements.parseMode?.value || PARSE_MODES[0].key;
+  const mode = elements.parseMode?.value || elements.changeMode?.value || PARSE_MODES[0].key;
   return inputDirectory ? `${inputDirectory}/parsed-${mode}.json` : "";
+}
+
+function defaultParseResultPath(htmlDirectory, mode) {
+  return htmlDirectory ? `${htmlDirectory}/parsed-${mode}.json` : "";
+}
+
+function defaultParseResultDirectory(htmlDirectory) {
+  return htmlDirectory || "";
 }
 
 function refreshOutputPath() {
@@ -254,12 +320,33 @@ async function fetchJson(url, init) {
 
 async function loadConfig() {
   const config = await fetchJson("/api/config");
+  if (config.html_parse_mode) {
+    if (elements.parseMode) {
+      elements.parseMode.value = config.html_parse_mode;
+      syncModeCards();
+    }
+    if (elements.changeMode) {
+      elements.changeMode.value = config.html_parse_mode;
+    }
+  }
+
   if (elements.inputDirectory) {
     elements.inputDirectory.value = config.html_output_directory || `${config.output_root || ""}/viewer_html`;
-    refreshOutputPath();
+    if (config.html_parse_result_path) {
+      elements.outputPath.value = config.html_parse_result_path;
+      elements.outputPath.dataset.touched = "true";
+    } else {
+      refreshOutputPath();
+    }
   } else if (elements.outputPath && elements.outputPath.dataset.touched !== "true") {
     const htmlDirectory = config.html_output_directory || `${config.output_root || ""}/viewer_html`;
-    elements.outputPath.value = htmlDirectory ? `${htmlDirectory}/parsed-bond_issuance.json` : "";
+    const mode = elements.changeMode?.value || elements.parseMode?.value || "bond_issuance";
+    if (config.html_parse_result_path) {
+      elements.outputPath.value = config.html_parse_result_path;
+      elements.outputPath.dataset.touched = "true";
+    } else {
+      elements.outputPath.value = defaultParseResultPath(htmlDirectory, mode);
+    }
   }
   setStatus("저장된 HTML 폴더 기본값을 불러왔습니다.");
 }
@@ -497,6 +584,418 @@ async function loadBondSummary() {
   }
 }
 
+function modeLabel(mode) {
+  return PARSE_MODES.find((item) => item.key === mode)?.label || mode || "-";
+}
+
+function changedFieldsForFamily(family) {
+  const fields = [];
+  const seen = new Set();
+  for (const change of family.changes || []) {
+    for (const fieldChange of change.changes || []) {
+      const field = String(fieldChange.field || "").trim();
+      if (!field || seen.has(field)) {
+        continue;
+      }
+      seen.add(field);
+      fields.push(field);
+    }
+  }
+  return fields;
+}
+
+function familyMatches(family, keyword) {
+  if (!keyword) {
+    return true;
+  }
+  const fieldNames = family.has_details ? changedFieldsForFamily(family) : [];
+  const haystack = [
+    family.family_id,
+    family.title || "",
+    ...(family.records || []).flatMap((record) => [record.title, record.acpt_no, record.rcept_no]),
+    ...(family.changes || []).flatMap((change) => [
+      change.before?.title,
+      change.after?.title,
+    ]),
+    ...fieldNames,
+  ].join(" ").toLowerCase();
+  return haystack.includes(keyword);
+}
+
+function visibleChangeFamilies() {
+  const keyword = String(elements.changeSearch?.value || "").trim().toLowerCase();
+  const showOnlyChanges = elements.changeShowOnlyChanges?.checked ?? false;
+  return (changeLog?.families || [])
+    .filter((family) => {
+      if (showOnlyChanges && !family.changed_fields) {
+        return false;
+      }
+      return familyMatches(family, keyword);
+    })
+    .sort((left, right) => {
+      const leftFields = Number(left.changed_fields || 0);
+      const rightFields = Number(right.changed_fields || 0);
+      if (Boolean(rightFields) !== Boolean(leftFields)) {
+        return Number(Boolean(rightFields)) - Number(Boolean(leftFields));
+      }
+      if (rightFields !== leftFields) {
+        return rightFields - leftFields;
+      }
+      return String(right.family_id || "").localeCompare(String(left.family_id || ""), "ko-KR");
+    });
+}
+
+function _json_stable(value) {
+  if (value === null || value === undefined) return "null";
+  if (typeof value !== "object") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch (e) {
+    return String(value);
+  }
+}
+
+function renderChangeRail() {
+  const families = visibleChangeFamilies();
+  if (!elements.changeFamilyRail) {
+    return;
+  }
+  if (!changeLog) {
+    elements.changeFamilyRail.innerHTML = `<div class="empty-state">파싱 결과를 불러오면 정정 패밀리별 변동 사항이 표시됩니다.</div>`;
+    return;
+  }
+  if (!families.length) {
+    elements.changeFamilyRail.innerHTML = `<div class="empty-state">표시할 정정 패밀리가 없습니다.</div>`;
+    return;
+  }
+
+  elements.changeFamilyRail.innerHTML = families
+    .map((family) => {
+      const fields = family.has_details ? changedFieldsForFamily(family) : [];
+      const metaInfo = family.has_details
+        ? `<span>문서 ${formatNumber(family.record_count)}</span><span>필드 ${formatNumber(family.changed_fields)}</span>`
+        : `<span>문서 ${formatNumber(family.record_count)}</span><span style="color:var(--muted)">미분석</span>`;
+
+      return `
+      <button class="change-family-card" type="button" data-family-id="${escapeHtml(
+        family.family_id,
+      )}" data-selected="${family.family_id === selectedChangeFamilyId ? "true" : "false"}" data-changed="${
+        family.has_details && family.changed_fields > 0 ? "true" : "false"
+      }">
+        <strong>${escapeHtml(family.title || family.family_id || "-")}</strong>
+        <div class="change-family-meta">
+          ${metaInfo}
+        </div>
+        ${
+          family.has_details
+            ? fields.length > 0
+              ? `<div class="change-field-chips">${fields
+                  .slice(0, 3)
+                  .map((f) => `<span>${escapeHtml(f)}</span>`)
+                  .join("")}${fields.length > 3 ? `<span>+${fields.length - 3}</span>` : ""}</div>`
+              : `<div class="change-no-diff">변동 없음</div>`
+            : `<div class="change-no-diff" style="opacity:0.6">대기 중...</div>`
+        }
+      </button>
+    `;
+    })
+    .join("");
+}
+
+async function loadFamilyDetail(familyId) {
+  if (!changeLog || !familyId) return;
+
+  const family = changeLog.families.find((f) => f.family_id === familyId);
+  if (!family || family.has_details) {
+    renderChangeDetail(family);
+    return;
+  }
+
+  // Show loading in detail stage if it's the active one
+  if (selectedChangeFamilyId === familyId) {
+    elements.changeDetailStage.innerHTML = `
+      <div class="change-matrix-empty">
+        <div class="change-matrix-empty-icon">⏳</div>
+        <p>${escapeHtml(family.title || family.family_id)}</p>
+        <span>상세 변동 내역을 분석하고 있습니다...</span>
+      </div>
+    `;
+  }
+
+  try {
+    const payload = await fetchJson("/api/disclosures/html/parse/change-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        output_path: elements.outputPath.value,
+        mode: elements.changeMode.value,
+        family_id: familyId,
+      }),
+    });
+
+    const detailedFamily = payload.families.find((f) => f.family_id === familyId);
+    if (detailedFamily) {
+      // Update the local cache
+      Object.assign(family, detailedFamily);
+      family.has_details = true;
+
+      if (selectedChangeFamilyId === familyId) {
+        renderChangeRail(); // Update rail (for severity colors/chips)
+        renderChangeDetail(family);
+      }
+    }
+  } catch (error) {
+    if (selectedChangeFamilyId === familyId) {
+      elements.changeDetailStage.innerHTML = `<div class="empty-state">상세 내역 로드 실패: ${escapeHtml(error.message)}</div>`;
+    }
+  }
+}
+
+function renderChangeDetail(family) {
+  if (!elements.changeDetailStage) {
+    return;
+  }
+  if (!family) {
+    elements.changeDetailStage.innerHTML = `<div class="empty-state">패밀리를 선택하면 변경 필드와 이전/이후 값이 표시됩니다.</div>`;
+    return;
+  }
+
+  const records = family.records || [];
+  const changes = family.changes || [];
+  const changedFieldNames = changedFieldsForFamily(family);
+
+  // Build the Matrix
+  // Matrix structure: { [fieldName]: [val1, val2, val3...] }
+  const matrix = {};
+  for (const field of changedFieldNames) {
+    matrix[field] = new Array(records.length).fill(null);
+  }
+
+  // Populate Matrix
+  // Record 0 (Original) values
+  if (changes.length > 0) {
+    const firstChange = changes[0];
+    for (const field of changedFieldNames) {
+      const fieldDelta = firstChange.changes.find((c) => c.field === field);
+      if (fieldDelta) {
+        matrix[field][0] = fieldDelta.before;
+      }
+    }
+  }
+
+  // Successive records values
+  for (let i = 0; i < changes.length; i++) {
+    const change = changes[i];
+    const versionIndex = i + 1; // After version
+    for (const field of changedFieldNames) {
+      const fieldDelta = change.changes.find((c) => c.field === field);
+      if (fieldDelta) {
+        matrix[field][versionIndex] = fieldDelta.after;
+      } else {
+        // Carry forward
+        matrix[field][versionIndex] = matrix[field][versionIndex - 1];
+      }
+    }
+  }
+
+  // If a field didn't appear in the first change, we need to backtrack it
+  for (const field of changedFieldNames) {
+    let firstKnownIndex = matrix[field].findIndex((v) => v !== null);
+    if (firstKnownIndex > 0) {
+      const value = matrix[field][firstKnownIndex];
+      // This is tricky: if it wasn't in change[0].before, we don't know the exact value at V0
+      // unless we assume it was the same as the first time it appeared.
+      // But build_record_change only includes it if it CHANGED.
+      // So if it's in change[k], it means V[k] != V[k+1].
+      // If k > 0, we don't know V[0...k].
+      // However, usually fields that change once tend to be present in all.
+      // For now, let's fill backwards.
+      for (let j = 0; j < firstKnownIndex; j++) {
+        matrix[field][j] = matrix[field][firstKnownIndex];
+      }
+    }
+  }
+
+  const tableHeader = `
+    <thead>
+      <tr>
+        <th class="change-matrix-field-col">변동 필드</th>
+        ${records
+          .map(
+            (r, i) => `
+          <th class="change-matrix-version-header">
+            <strong>#${i + 1}</strong>
+            <code>${escapeHtml(r.rcept_no || "-")}</code>
+          </th>
+        `,
+          )
+          .join("")}
+      </tr>
+    </thead>
+  `;
+
+  const parseKoreanDate = (dateStr) => {
+    if (!dateStr || typeof dateStr !== "string") return NaN;
+    const match = dateStr.match(/(\d{4})\s*[년.-]\s*(\d{1,2})\s*[월.-]\s*(\d{1,2})/);
+    if (match) {
+      const y = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10) - 1;
+      const d = parseInt(match[3], 10);
+      return new Date(y, m, d).getTime();
+    }
+    const clean = dateStr.replace(/[^\d]/g, "");
+    if (clean.length === 8) {
+      const y = parseInt(clean.substring(0, 4), 10);
+      const m = parseInt(clean.substring(4, 6), 10) - 1;
+      const d = parseInt(clean.substring(6, 8), 10);
+      return new Date(y, m, d).getTime();
+    }
+    return NaN;
+  };
+
+  const getDaysDiff = (val1, val2) => {
+    const t1 = parseKoreanDate(val1);
+    const t2 = parseKoreanDate(val2);
+    if (isNaN(t1) || isNaN(t2)) return Infinity;
+    return Math.abs(t1 - t2) / (1000 * 60 * 60 * 24);
+  };
+
+  const tableRows = changedFieldNames
+    .map((field) => {
+      const values = matrix[field];
+      return `
+      <tr class="change-matrix-row">
+        <td class="change-matrix-field-col">${escapeHtml(field)}</td>
+        ${values
+          .map((val, i) => {
+            let isChanged = false;
+            let changeType = "none";
+            let indicatorHtml = "";
+            
+            if (i > 0 && _json_stable(val) !== _json_stable(values[i - 1])) {
+              isChanged = true;
+              changeType = "correction";
+              
+              if (field === "회차") {
+                changeType = "minor";
+              } else if (["만기일", "전환시작일", "전환종료일", "청약일", "납입일"].includes(field)) {
+                const daysDiff = getDaysDiff(val, values[i - 1]);
+                if (daysDiff <= 3) {
+                  changeType = "minor";
+                }
+              }
+
+              if (changeType === "correction") {
+                indicatorHtml = `<span class="change-matrix-diff-indicator correction">정정</span>`;
+              } else if (changeType === "minor") {
+                indicatorHtml = `<span class="change-matrix-diff-indicator minor">단순변동</span>`;
+              }
+            }
+            
+            return `
+            <td class="change-matrix-cell" data-changed="${isChanged ? changeType : "false"}">
+              <div class="change-matrix-cell-content">
+                ${indicatorHtml}
+                <div class="change-matrix-value">${escapeHtml(formatValueWithField(val, field))}</div>
+              </div>
+            </td>
+          `;
+          })
+          .join("")}
+      </tr>
+    `;
+    })
+    .join("");
+
+  elements.changeDetailStage.innerHTML = `
+    <div class="change-detail-head">
+      <div>
+        <strong>${escapeHtml(family.records?.at(-1)?.title || "-")}</strong>
+        <code>${escapeHtml(family.family_id || "-")}</code>
+      </div>
+    </div>
+    <div class="change-matrix-container">
+      ${
+        changedFieldNames.length > 0
+          ? `
+        <table class="change-matrix-table">
+          ${tableHeader}
+          <tbody>${tableRows}</tbody>
+        </table>
+      `
+          : `
+        <div class="change-matrix-empty">
+          <div class="change-matrix-empty-icon">🔍</div>
+          <p>비교 대상 필드에서 감지된 값 변동이 없습니다.</p>
+          <span>모든 필드가 이전 버전과 동일합니다.</span>
+        </div>
+      `
+      }
+    </div>
+  `;
+}
+
+async function loadChangeLog() {
+  const outputPath = elements.outputPath?.value || "";
+  if (!outputPath) {
+    setStatus("파싱 결과 경로가 필요합니다.", true);
+    return;
+  }
+  const btn = elements.loadChangeLogBtn;
+  const originalText = btn ? btn.textContent : "변동 불러오기";
+
+  // Clear existing state and show loading in UI
+  changeLog = null;
+  selectedChangeFamilyId = "";
+  if (elements.changeFamilyRail) {
+    elements.changeFamilyRail.innerHTML = `<div class="empty-state">변동 기록 목록을 불러오는 중...</div>`;
+  }
+  if (elements.changeDetailStage) {
+    elements.changeDetailStage.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "불러오는 중";
+  }
+
+  try {
+    const limitValue = elements.changeLimit ? elements.changeLimit.value : "50";
+    const limit = (limitValue === "" || limitValue === undefined) ? null : Number(limitValue);
+
+    // Phase 1: Load summaries only (Fast)
+    const payload = await fetchJson("/api/disclosures/html/parse/change-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        output_path: outputPath,
+        mode: elements.changeMode?.value || "",
+        summary_only: true,
+        limit: limit,
+      }),
+    });
+    changeLog = payload;
+    renderChangeRail();
+    setStatus(`${modeLabel(payload.mode)} 목록 ${payload.families.length}건을 불러왔습니다.`);
+
+    // Phase 2: Automatically load the first family if available
+    if (payload.families.length > 0) {
+      selectedChangeFamilyId = payload.families[0].family_id;
+      loadFamilyDetail(selectedChangeFamilyId);
+    }
+  } catch (error) {
+    setStatus(error.message, true);
+    if (elements.changeFamilyRail) {
+      elements.changeFamilyRail.innerHTML = `<div class="empty-state">목록을 불러오지 못했습니다.</div>`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+}
+
 function formatParseJobStatus(payload) {
   const result = payload.result || {};
   const lines = [`작업 상태: ${statusLabel(payload.status)}`];
@@ -600,6 +1099,7 @@ elements.parseMode?.addEventListener("change", () => {
   }
   refreshOutputPath();
   syncModeCards();
+  savePathSetting({ html_parse_mode: elements.parseMode.value }).catch((error) => setStatus(error.message, true));
 });
 
 elements.outputPath?.addEventListener("input", () => {
@@ -620,6 +1120,39 @@ elements.bondCorrectionFilter?.addEventListener("change", renderBondRows);
 elements.bondLimit?.addEventListener("change", () => {
   loadBondSummary().catch((error) => setStatus(error.message, true));
 });
+elements.changeMode?.addEventListener("change", () => {
+  if (elements.outputPath) {
+    elements.outputPath.dataset.touched = "false";
+  }
+  refreshOutputPath();
+  changeLog = null;
+  selectedChangeFamilyId = "";
+  renderChangeRail();
+  savePathSetting({ html_parse_mode: elements.changeMode.value }).catch((error) => setStatus(error.message, true));
+});
+elements.loadChangeLogBtn?.addEventListener("click", () => {
+  loadChangeLog().catch((error) => setStatus(error.message, true));
+});
+elements.changeSearch?.addEventListener("input", renderChangeRail);
+elements.changeShowOnlyChanges?.addEventListener("change", renderChangeRail);
+elements.changeLimitAll?.addEventListener("click", () => {
+  if (elements.changeLimit) {
+    elements.changeLimit.value = "";
+    loadChangeLog().catch((error) => setStatus(error.message, true));
+  }
+});
+elements.changeLimit?.addEventListener("change", () => {
+  loadChangeLog().catch((error) => setStatus(error.message, true));
+});
+elements.changeFamilyRail?.addEventListener("click", (event) => {
+  const card = event.target.closest(".change-family-card");
+  if (!card) {
+    return;
+  }
+  selectedChangeFamilyId = card.dataset.familyId || "";
+  renderChangeRail();
+  loadFamilyDetail(selectedChangeFamilyId);
+});
 elements.bondRows?.addEventListener("click", (event) => {
   if (event.target.closest("a")) {
     return;
@@ -632,10 +1165,34 @@ elements.bondRows?.addEventListener("click", (event) => {
   renderBondRows();
 });
 
+elements.exportExcelBtn?.addEventListener("click", () => {
+  const outputPath = elements.outputPath?.value || "";
+  const mode = elements.parseMode?.value || elements.changeMode?.value || "";
+  const latestOnly = elements.exportLatestOnly?.checked || false;
+  if (!outputPath) {
+    setStatus("결과 경로가 필요합니다.", true);
+    return;
+  }
+  const params = new URLSearchParams({
+    output_path: outputPath,
+    mode: mode,
+    latest_only: latestOnly,
+  });
+  window.location.href = `/api/disclosures/html/parse/export.xlsx?${params.toString()}`;
+});
+
 if (elements.inputDirectory) {
   bindPathSetting(
     elements.inputDirectory,
     () => ({ html_output_directory: elements.inputDirectory.value }),
+    (error) => setStatus(error.message, true),
+  );
+}
+
+if (elements.outputPath) {
+  bindPathSetting(
+    elements.outputPath,
+    () => ({ html_parse_result_path: elements.outputPath.value }),
     (error) => setStatus(error.message, true),
   );
 }
