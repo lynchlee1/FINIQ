@@ -104,7 +104,7 @@ export default function HtmlBondSummaryPage() {
   };
 
   const getTargetText = (record: any) => {
-    const targets = getField(record, "발행대상자");
+    const targets = getField(record, "투자자");
     if (!Array.isArray(targets)) return "";
     return targets.map((target) => Array.isArray(target) ? target.join(" ") : String(target || "")).join(" ");
   };
@@ -123,6 +123,8 @@ export default function HtmlBondSummaryPage() {
           record.rcept_no,
           record.family_id,
           getField(record, "회차"),
+          getField(record, "기업명(발행사)"),
+          getField(record, "기업명(행사대상)"),
           getField(record, "납입일"),
           getTargetText(record),
         ].join(" ").toLowerCase();
@@ -225,6 +227,7 @@ export default function HtmlBondSummaryPage() {
                     <tr className="border-b border-slate-200 dark:border-[#30363d]">
                       <th className="px-4 py-3 text-left font-semibold text-slate-900 dark:text-slate-100">제목</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-900 dark:text-slate-100 w-16">회차</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-900 dark:text-slate-100 w-20">종류</th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100 w-32">금액(억원)</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-900 dark:text-slate-100 w-32">접수번호</th>
                       <th className="px-4 py-3 text-center font-semibold text-slate-900 dark:text-slate-100 w-16">원문</th>
@@ -247,6 +250,7 @@ export default function HtmlBondSummaryPage() {
                           >
                             <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-200">{record.title || "-"}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{getField(record, "회차") || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{getField(record, "종류") || "-"}</td>
                             <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-400 tabular-nums">{formatHundredMillion(getField(record, "발행금액"))}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{record.rcept_no || "-"}</td>
                             <td className="px-4 py-3 text-center">
@@ -267,7 +271,7 @@ export default function HtmlBondSummaryPage() {
                       })
                     ) : (
                       <tr>
-                        <td colSpan={5} className="px-4 py-12 text-center text-slate-400 dark:text-slate-600">
+                        <td colSpan={6} className="px-4 py-12 text-center text-slate-400 dark:text-slate-600">
                           {bondSummary ? "검색 결과가 없습니다." : "파싱 결과를 불러오면 채권 정보가 표시됩니다."}
                         </td>
                       </tr>
@@ -295,22 +299,17 @@ export default function HtmlBondSummaryPage() {
 
                   <div className="grid grid-cols-2 gap-x-8 gap-y-3 border-y border-slate-200 dark:border-[#30363d] py-4">
                     {[
-                      ["상장시장", getField(selectedRecord, "상장시장")],
+                      ["기업명(발행사)", getField(selectedRecord, "기업명(발행사)")],
                       ["회차", getField(selectedRecord, "회차")],
+                      ["종류", getField(selectedRecord, "종류")],
+                      ["기업명(행사대상)", getField(selectedRecord, "기업명(행사대상)")],
+                      ["상장구분", getField(selectedRecord, "상장구분")],
                       ["발행금액(억원)", formatHundredMillion(getField(selectedRecord, "발행금액"))],
-                      ["발행목적", getField(selectedRecord, "발행목적")],
-                      ["표면이자율", getField(selectedRecord, "표면이자율")],
-                      ["만기이자율", getField(selectedRecord, "만기이자율")],
-                      ["만기일", getField(selectedRecord, "만기일")],
-                      ["할증률(%)", getField(selectedRecord, "할증률(%)")],
                       ["행사가액", formatNumber(getField(selectedRecord, "행사가액"))],
-                      ["행사대상", getField(selectedRecord, "행사대상")],
-                      ["전환시작일", getField(selectedRecord, "전환시작일")],
-                      ["전환종료일", getField(selectedRecord, "전환종료일")],
-                      ["리픽싱(%)", getField(selectedRecord, "리픽싱(%)")],
-                      ["청약일", getField(selectedRecord, "청약일")],
                       ["납입일", getField(selectedRecord, "납입일")],
-                      ["납입방법", getField(selectedRecord, "납입방법")],
+                      ["만기일", getField(selectedRecord, "만기일")],
+                      ["행사시작일", getField(selectedRecord, "행사시작일")],
+                      ["행사종료일", getField(selectedRecord, "행사종료일")],
                     ].map(([label, value]) => (
                       <div key={label} className="flex flex-col gap-0.5">
                         <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">{label}</span>
@@ -350,11 +349,11 @@ export default function HtmlBondSummaryPage() {
                   </div>
 
                   <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-slate-400 uppercase tracking-wider">발행 대상자</h4>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-slate-400 uppercase tracking-wider">투자자</h4>
                     <div className="space-y-1.5">
                       {(() => {
-                        const targets = getField(selectedRecord, "발행대상자");
-                        if (!Array.isArray(targets) || targets.length === 0) return <p className="text-xs text-slate-400 dark:text-slate-600">대상자 정보가 없습니다.</p>;
+                        const targets = getField(selectedRecord, "투자자");
+                        if (!Array.isArray(targets) || targets.length === 0) return <p className="text-xs text-slate-400 dark:text-slate-600">투자자 정보가 없습니다.</p>;
                         return targets.map((target: any, idx: number) => {
                           const name = Array.isArray(target) ? target[0] : target;
                           const amount = Array.isArray(target) ? target[target.length - 1] : "";

@@ -10,7 +10,7 @@ export const formatValueWithField = (value: any, fieldName: string) => {
     const num = Number(value);
     return Number.isFinite(num) ? (num / 100000000).toLocaleString("ko-KR", { maximumFractionDigits: 2 }) : String(value);
   }
-  if (fieldName === "발행대상자" && Array.isArray(value)) {
+  if ((fieldName === "발행대상자" || fieldName === "투자자") && Array.isArray(value)) {
     return value.map((target: any) => {
       if (Array.isArray(target)) {
         const name = target[0];

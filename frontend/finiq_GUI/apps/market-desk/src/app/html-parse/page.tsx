@@ -24,7 +24,7 @@ const PARSE_MODES = [
     key: "bond_issuance",
     label: "사채발행파싱",
     status: "상세 필드 지원",
-    description: "전환사채 등 사채 발행 HTML에서 회차, 발행금액, 발행목적, 만기일, 행사가액, 리픽싱, 납입일, 발행대상자를 추출합니다.",
+    description: "전환사채 등 사채 발행 HTML에서 발행사, 종류, 행사대상, 발행금액, 행사가액, 일정, 투자자를 추출합니다.",
   },
   {
     key: "rights_issuance",

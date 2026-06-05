@@ -640,6 +640,28 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                       );
                     }
 
+                    if (result.format === "kind_disclosure_html_folder_cleanup_v1") {
+                      const existingCount = result.existing_target_html_count || 0;
+                      const missingCount = result.missing_target_html_count || 0;
+                      const candidateCount = result.deletion_candidate_count || 0;
+                      const isAllSaved = reqCount !== undefined && missingCount === 0;
+                      const hasDeleteCandidates = candidateCount > 0;
+
+                      return (
+                        <div className={cn(
+                          "p-4 rounded-lg border text-sm font-semibold",
+                          isAllSaved && !hasDeleteCandidates
+                            ? "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30 text-green-700 dark:text-green-400"
+                            : "bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/30 text-amber-700 dark:text-amber-400"
+                        )}>
+                          {isAllSaved
+                            ? `폴더 검사 완료: 전체 ${existingCount}/${reqCount} 저장 확인`
+                            : `폴더 검사 완료: 전체 ${reqCount || 0}건 중 ${existingCount}건 저장, 누락 ${missingCount}건`}
+                          {hasDeleteCandidates ? `, 삭제 예정 ${candidateCount}건` : ""}
+                        </div>
+                      );
+                    }
+
                     // 다른 형태의 결과 (예: merge)
                     const summary = result.summary;
                     if (summary && summary.merged_files !== undefined) {
