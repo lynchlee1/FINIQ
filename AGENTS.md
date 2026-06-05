@@ -59,32 +59,3 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-## 5. Git Hygiene
-
-**Do not leave the user guessing what changed.**
-
-Before ending a coding task:
-- Run `git status --short` from the repository root.
-- State exactly which files changed and whether they are staged.
-- If the user asked for a commit, stage only the files directly related to the request, commit them, and report the commit hash.
-- If the user did not ask for a commit, do not stage or commit silently. Tell the user the exact `git add`/`git commit` commands to run, or ask whether to commit when that is the obvious next step.
-- Never discard or restore changes unless the user explicitly asks for that.
-
-## 6. KIND Bond Issuance Parsing
-
-**Preserve legacy output fields while accepting issuer-specific table labels.**
-
-- `finiq_marketDesk`의 사채 발행 파서는 전환사채와 신주인수권부사채를 같은 `bond_issuance` 레코드로 내보낸다.
-- 출력 필드는 기존 호환성을 위해 `전환시작일`/`전환종료일`을 유지한다.
-- 전환사채는 `전환청구기간` + `시작일`/`종료일` 행에서 값을 가져온다.
-- 신주인수권부사채는 같은 출력 필드에 `권리행사기간` + `시작일`/`종료일` 행을 매핑해야 한다. `resources/kind_kosdaq/kind_html/20080825000412.html`, `20080826000146.html`, `20080826000267.html`이 이 케이스다.
-- 신주인수권부사채의 `행사가액`, `행사대상`, `납입방법`은 각각 `행사가액 (원/주)`, `인수권행사에 따라 발행할 주식의 종류`, `신주대금 납입방법` 행에서 가져온다.
-- 신주인수권부사채 여부는 본문 전체 키워드가 아니라 `사채의 종류` 행에 `신주인수권`이 있는지로 판단한다. 전환사채의 조정 설명문에 신주인수권부사채가 언급될 수 있다.
-- 신주인수권부사채의 만기상환률 `100%+` 값은 `할증률(%)`로 파싱하지 않는다.
-- 리픽싱은 `행사가액 조정` 문맥 안의 `최저조정가액비율 : N%`, `조정한도 ... N%이상`, `행사가액에 N%를 한도`처럼 최저 조정 한도를 나타내는 표현에서만 가져온다. 만기상환률, 조기상환률, 청약증거금 `100%` 같은 주변 숫자를 리픽싱으로 쓰지 않는다.
-- `rowspan`/`colspan` 확장 후 같은 행에 보이는 라벨 조합을 기준으로 찾고, 임의의 본문 정규식으로 날짜를 뽑지 않는다.
-
----
-
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

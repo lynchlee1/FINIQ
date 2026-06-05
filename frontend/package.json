@@ -1,0 +1,37 @@
+{
+  "name": "finiq",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "finiq_GUI/apps/*",
+    "finiq_GUI/packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:graph-viewer": "npm run dev -w @finiq/app-graph-viewer --",
+    "dev:market-desk": "npm run dev -w @finiq/app-market-desk --",
+    "start:graph-viewer": "npm run start -w @finiq/app-graph-viewer --",
+    "start:market-desk": "npm run start -w @finiq/app-market-desk --",
+    "lint:graph-viewer": "npm run lint -w @finiq/graph-viewer"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "postcss": "^8.5.14",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwindcss": "^4.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^10.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.5.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.2"
+  }
+}

@@ -1,0 +1,69 @@
+@import "tailwindcss";
+@import "@finiq/theme/base.css";
+
+@source "../../../../packages/ui/src/**/*.tsx";
+
+@theme {
+  --font-sans: "IBM Plex Sans KR", sans-serif;
+  --font-mono: "Space Grotesk", monospace;
+
+  --color-primary: var(--color-slate-900);
+  --color-primary-foreground: var(--color-slate-50);
+  
+  --color-secondary: var(--color-slate-100);
+  --color-secondary-foreground: var(--color-slate-900);
+
+  --color-accent: var(--color-slate-100);
+  --color-accent-foreground: var(--color-slate-900);
+
+  --color-destructive: var(--color-red-600);
+  --color-destructive-foreground: var(--color-slate-50);
+
+  --color-muted: var(--color-slate-100);
+  --color-muted-foreground: var(--color-slate-500);
+
+  --color-card: var(--color-white);
+  --color-card-foreground: var(--color-slate-900);
+
+  --color-popover: var(--color-white);
+  --color-popover-foreground: var(--color-slate-900);
+
+  --color-border: var(--color-slate-200);
+  --color-input: var(--color-slate-200);
+  --color-ring: var(--color-slate-900);
+}
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  color-scheme: light;
+  background-color: var(--background) !important;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+:root.dark {
+  --background: #0d1117;
+  --foreground: #f0f6fc;
+  --color-card: #161b22;
+  --color-card-foreground: #f0f6fc;
+  --color-border: #30363d;
+  --color-muted: #21262d;
+  --color-muted-foreground: #8b949e;
+  --color-primary: #2f81f7;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #30363d;
+  --color-secondary-foreground: #f0f6fc;
+  --color-accent: #2f81f7;
+  --color-accent-foreground: #ffffff;
+  color-scheme: dark;
+}
+
+html, body {
+  height: auto !important;
+  min-height: 100% !important;
+  background-color: var(--background) !important;
+  color: var(--foreground) !important;
+}
+
+/* Ensure Tailwind dark utilities work with .dark class on html */
+@custom-variant dark (&:where(.dark, .dark *));

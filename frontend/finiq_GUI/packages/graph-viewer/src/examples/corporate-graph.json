@@ -1,0 +1,358 @@
+{
+  "nodes": [
+    {
+      "id": "samsung-elec",
+      "label": "Samsung Electronics",
+      "type": "Company",
+      "group": "Samsung Group",
+      "tags": ["Technology", "Semiconductors"],
+      "properties": {
+        "sector": "Semiconductors & Electronics",
+        "country": "South Korea",
+        "creditRating": "AAA",
+        "employees": "270,000",
+        "hq": "Suwon, South Korea"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "samsung-c-t",
+      "label": "Samsung C&T",
+      "type": "Company",
+      "group": "Samsung Group",
+      "tags": ["Conglomerate", "Holding"],
+      "properties": {
+        "sector": "Trade, Construction, Fashion",
+        "country": "South Korea",
+        "creditRating": "AA",
+        "hq": "Seoul, South Korea"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "samsung-life",
+      "label": "Samsung Life Insurance",
+      "type": "Company",
+      "group": "Samsung Group",
+      "tags": ["Finance", "Insurance"],
+      "properties": {
+        "sector": "Life Insurance & Finance",
+        "country": "South Korea",
+        "creditRating": "AAA",
+        "hq": "Seoul, South Korea"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "lee-jae-yong",
+      "label": "Lee Jae-yong",
+      "type": "Person",
+      "group": "Owner Family",
+      "tags": ["Executive", "Chairman"],
+      "properties": {
+        "title": "Chairman of Samsung Electronics",
+        "country": "South Korea"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "nvidia",
+      "label": "NVIDIA Corp",
+      "type": "Company",
+      "tags": ["Semiconductors", "AI"],
+      "properties": {
+        "sector": "AI Hardware & GPUs",
+        "country": "United States",
+        "creditRating": "AA",
+        "hq": "Santa Clara, CA"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "apple",
+      "label": "Apple Inc",
+      "type": "Company",
+      "tags": ["Consumer Electronics", "BigTech"],
+      "properties": {
+        "sector": "Consumer Tech & Software",
+        "country": "United States",
+        "creditRating": "AAA",
+        "hq": "Cupertino, CA"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "tsmc",
+      "label": "TSMC",
+      "type": "Company",
+      "tags": ["Semiconductors", "Foundry"],
+      "properties": {
+        "sector": "Pure-play Foundry",
+        "country": "Taiwan",
+        "creditRating": "AAA",
+        "hq": "Hsinchu, Taiwan"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "asml",
+      "label": "ASML Holding",
+      "type": "Company",
+      "tags": ["Semiconductors", "Equipment"],
+      "properties": {
+        "sector": "Lithography Systems",
+        "country": "Netherlands",
+        "creditRating": "AAA",
+        "hq": "Veldhoven, Netherlands"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "sk-hynix",
+      "label": "SK Hynix",
+      "type": "Company",
+      "tags": ["Semiconductors", "Memory"],
+      "properties": {
+        "sector": "Memory Chips (DRAM/NAND)",
+        "country": "South Korea",
+        "creditRating": "A",
+        "hq": "Icheon, South Korea"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "microsoft",
+      "label": "Microsoft Corp",
+      "type": "Company",
+      "tags": ["Software", "Cloud"],
+      "properties": {
+        "sector": "Cloud & Productivity",
+        "country": "United States",
+        "creditRating": "AAA",
+        "hq": "Redmond, WA"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "foxconn",
+      "label": "Foxconn (Hon Hai)",
+      "type": "Company",
+      "tags": ["Manufacturing", "EMS"],
+      "properties": {
+        "sector": "Electronics Assembly",
+        "country": "Taiwan",
+        "creditRating": "A",
+        "hq": "New Taipei, Taiwan"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "vanguard-group",
+      "label": "Vanguard Group",
+      "type": "Company",
+      "tags": ["Finance", "Investment"],
+      "properties": {
+        "sector": "Asset Management",
+        "country": "United States",
+        "creditRating": "AAA",
+        "hq": "Malvern, PA"
+      },
+      "riskLevel": "low"
+    },
+    {
+      "id": "berkshire-hathaway",
+      "label": "Berkshire Hathaway",
+      "type": "Company",
+      "tags": ["Finance", "Investment"],
+      "properties": {
+        "sector": "Holding Company",
+        "country": "United States",
+        "creditRating": "AAA",
+        "hq": "Omaha, NE"
+      },
+      "riskLevel": "low"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-1",
+      "source": "lee-jae-yong",
+      "target": "samsung-c-t",
+      "relation": "Largest Shareholder",
+      "category": "equity",
+      "weight": 17.97,
+      "directed": true
+    },
+    {
+      "id": "e-2",
+      "source": "lee-jae-yong",
+      "target": "samsung-elec",
+      "relation": "Chairman",
+      "category": "personnel",
+      "weight": 1.63,
+      "directed": true
+    },
+    {
+      "id": "e-3",
+      "source": "samsung-c-t",
+      "target": "samsung-elec",
+      "relation": "Subsidiary",
+      "category": "equity",
+      "weight": 5.01,
+      "directed": true
+    },
+    {
+      "id": "e-4",
+      "source": "samsung-life",
+      "target": "samsung-elec",
+      "relation": "Major Shareholder",
+      "category": "equity",
+      "weight": 8.51,
+      "directed": true
+    },
+    {
+      "id": "e-5",
+      "source": "vanguard-group",
+      "target": "nvidia",
+      "relation": "Institutional Shareholder",
+      "category": "equity",
+      "weight": 8.2,
+      "directed": true
+    },
+    {
+      "id": "e-6",
+      "source": "vanguard-group",
+      "target": "apple",
+      "relation": "Institutional Shareholder",
+      "category": "equity",
+      "weight": 8.1,
+      "directed": true
+    },
+    {
+      "id": "e-7",
+      "source": "berkshire-hathaway",
+      "target": "apple",
+      "relation": "Institutional Shareholder",
+      "category": "equity",
+      "weight": 5.7,
+      "directed": true
+    },
+    {
+      "id": "e-8",
+      "source": "tsmc",
+      "target": "nvidia",
+      "relation": "Foundry Services",
+      "category": "transaction",
+      "weight": 35.0,
+      "directed": true
+    },
+    {
+      "id": "e-9",
+      "source": "tsmc",
+      "target": "apple",
+      "relation": "Silicon Supply",
+      "category": "transaction",
+      "weight": 18.0,
+      "directed": true
+    },
+    {
+      "id": "e-10",
+      "source": "sk-hynix",
+      "target": "nvidia",
+      "relation": "HBM Supply",
+      "category": "transaction",
+      "weight": 18.0,
+      "directed": true
+    },
+    {
+      "id": "e-11",
+      "source": "samsung-elec",
+      "target": "nvidia",
+      "relation": "HBM Supply",
+      "category": "transaction",
+      "weight": 12.0,
+      "directed": true
+    },
+    {
+      "id": "e-12",
+      "source": "asml",
+      "target": "tsmc",
+      "relation": "EUV Equipment",
+      "category": "transaction",
+      "weight": 28.0,
+      "directed": true
+    },
+    {
+      "id": "e-13",
+      "source": "asml",
+      "target": "samsung-elec",
+      "relation": "EUV Equipment",
+      "category": "transaction",
+      "weight": 15.0,
+      "directed": true
+    },
+    {
+      "id": "e-14",
+      "source": "nvidia",
+      "target": "microsoft",
+      "relation": "GPU Cloud Compute",
+      "category": "transaction",
+      "weight": 15.0,
+      "directed": true
+    },
+    {
+      "id": "e-15",
+      "source": "nvidia",
+      "target": "apple",
+      "relation": "AI GPU Supply",
+      "category": "transaction",
+      "weight": 8.0,
+      "directed": true
+    },
+    {
+      "id": "e-16",
+      "source": "samsung-elec",
+      "target": "apple",
+      "relation": "Display/OLED Supply",
+      "category": "transaction",
+      "weight": 12.0,
+      "directed": true
+    },
+    {
+      "id": "e-17",
+      "source": "foxconn",
+      "target": "apple",
+      "relation": "Assembly Partner",
+      "category": "transaction",
+      "weight": 45.0,
+      "directed": true
+    },
+    {
+      "id": "e-18",
+      "source": "tsmc",
+      "target": "samsung-elec",
+      "relation": "Foundry Competitor",
+      "category": "other",
+      "weight": 0.0,
+      "directed": false
+    },
+    {
+      "id": "e-19",
+      "source": "apple",
+      "target": "samsung-elec",
+      "relation": "Device Competitor",
+      "category": "other",
+      "weight": 0.0,
+      "directed": false
+    },
+    {
+      "id": "e-20",
+      "source": "sk-hynix",
+      "target": "samsung-elec",
+      "relation": "Memory Competitor",
+      "category": "other",
+      "weight": 0.0,
+      "directed": false
+    }
+  ]
+}

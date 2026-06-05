@@ -1,15 +1,36 @@
-.env
+# macOS
 .DS_Store
+
+# Python
 __pycache__/
+*.py[cod]
 .pytest_cache/
-.venv/
-*.egg-info/
-resources/
-.vite/
-node_modules/
+.coverage
+htmlcov/
+build/
 dist/
+*.egg-info/
+.venv/
+venv/
+
+# Node/frontend
+node_modules/
+frontend/node_modules/
+.vite/
+.next/
+frontend/**/dist/
+frontend/**/.next/
+frontend/**/tsconfig.tsbuildinfo
 dist-ssr/
 apps/*/dist/
+
+# Local data/cache
+resources/
 logs/
 *.log
+
+# Environment files
+.env
+.env.*
 *.local
+Archive.zip
