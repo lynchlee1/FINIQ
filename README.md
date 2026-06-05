@@ -20,11 +20,7 @@ KRX KIND 공시 데이터를 다운로드하고 파싱합니다. 검색 결과, 
 
 ### finiq_GUI
 
-FINIQ의 웹 화면을 담은 프론트엔드 워크스페이스입니다. MarketDesk 화면과 Graph Viewer 앱, 공통 UI/theme 패키지를 포함합니다.
-
-### finiq_graphViewer
-
-그래프 데이터를 검증, 필터링, 탐색, export하는 Graph Viewer core입니다. 시각화 UI는 `finiq_GUI`에서 사용합니다.
+FINIQ의 웹 화면을 담은 프론트엔드 워크스페이스입니다. MarketDesk 화면과 Graph Viewer 앱, 공통 UI/theme 패키지, 그리고 Graph Viewer core(@finiq/graph-viewer)를 포함합니다.
 
 ## UI
 
@@ -58,6 +54,9 @@ npm run build
 npm run dev:graph-viewer
 npm run dev:market-desk
 ```
+
+Backend API는 `src/finiq/market_desk/web/app.py`에서 실행하며, 기본 포트는 `8765`입니다.
+공통 설정은 `src/finiq/config.py`에서 관리됩니다.
 
 Python 테스트도 저장소 루트에서 실행합니다.
 
