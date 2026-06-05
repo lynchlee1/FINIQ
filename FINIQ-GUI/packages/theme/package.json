@@ -1,0 +1,10 @@
+{
+  "name": "@finiq/theme",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./base.css": "./src/base.css",
+    "./graph-viewer.css": "./src/graph-viewer.css"
+  }
+}
