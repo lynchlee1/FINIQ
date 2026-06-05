@@ -1,0 +1,15 @@
+{
+  "name": "@finiq/app-market-desk",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@finiq/theme": "0.1.0"
+  },
+  "devDependencies": {}
+}

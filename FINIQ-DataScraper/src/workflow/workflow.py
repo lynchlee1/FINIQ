@@ -301,10 +301,20 @@ def _collect_company_records_from_folder(
             classified_disclosures += 1
             company_name = str(row.get("company_name") or "").strip()
             disclosure_item = {
+                "row_no": row.get("row_no"),
                 "disclosed_at": row.get("disclosed_at"),
                 "title": row.get("title"),
+                "title_attr": row.get("title_attr"),
+                "title_base": row.get("title_base"),
+                "title_display": row.get("title_display"),
+                "title_flags": list(row.get("title_flags") or []),
+                "is_correction_report": row.get("is_correction_report"),
+                "has_later_correction": row.get("has_later_correction"),
                 "acpt_no": row.get("acpt_no"),
+                "doc_no": row.get("doc_no"),
                 "submitter": row.get("submitter"),
+                "source_file": str(body_path),
+                "source_page": result_page_number(body_path),
             }
             intra_folder_duplicates += _merge_company_record(
                 companies_by_key,
