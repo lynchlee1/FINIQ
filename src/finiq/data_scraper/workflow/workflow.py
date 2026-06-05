@@ -18,6 +18,7 @@ from finiq.data_scraper.core.client import (
     KIND_SEARCH_RESULTS_URL,
     SEARCH_RESULTS_FILENAME_TEMPLATE,
     KindProgressCallback,
+    KindCancelCheck,
     KindSavedFileCallback,
     KindSavedFileValidator,
     KindViewerSavedFileCallback,
@@ -1629,6 +1630,7 @@ class KindWorkflow:
         session: requests.Session | None = None,
         progress_callback: KindProgressCallback | None = None,
         saved_file_callback: KindSavedFileCallback | None = None,
+        cancel_check: KindCancelCheck | None = None,
         input_snapshot_path: str | Path | None = None,
         checkpoint_path: str | Path | None = None,
     ) -> dict[str, Any]:
@@ -1681,6 +1683,7 @@ class KindWorkflow:
                 resolved_checkpoint_path,
                 saved_file_callback,
             ),
+            cancel_check=cancel_check,
         )
         checkpoint.completed = True
         _write_json_file(resolved_checkpoint_path, checkpoint.to_dict())
@@ -1716,6 +1719,7 @@ class KindWorkflow:
         session: requests.Session | None = None,
         progress_callback: KindProgressCallback | None = None,
         saved_file_callback: KindSavedFileCallback | None = None,
+        cancel_check: KindCancelCheck | None = None,
         input_snapshot_path: str | Path | None = None,
         checkpoint_path: str | Path | None = None,
     ) -> dict[str, Any]:
@@ -1749,6 +1753,7 @@ class KindWorkflow:
             session=session,
             progress_callback=progress_callback,
             saved_file_callback=saved_file_callback,
+            cancel_check=cancel_check,
             input_snapshot_path=input_snapshot_path,
             checkpoint_path=checkpoint_path,
         )

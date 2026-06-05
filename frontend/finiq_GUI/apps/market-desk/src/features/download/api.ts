@@ -14,6 +14,10 @@ export function startDownload(payload: DownloadPayload) {
   return apiPost<JobStartResponse>("/api/download/run/start", payload);
 }
 
+export function cancelDownload(jobId: string) {
+  return apiPost<any>("/api/download/run/cancel", { job_id: jobId });
+}
+
 export function inspectDownloadFolder(payload: DownloadInspectPayload) {
   return apiPost<any>("/api/download/inspect-folder", payload);
 }

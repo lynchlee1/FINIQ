@@ -52,6 +52,7 @@ from finiq.market_desk.web.download import (
     build_download_options_payload,
     build_download_preview_payload,
     build_download_status_payload,
+    cancel_download_job,
     get_download_job,
     inspect_download_output_directory_payload,
     run_download_action,
@@ -397,6 +398,13 @@ async def download_inspect_folder_route(payload: dict[str, Any]):
 @app.post("/api/download/run/start")
 async def download_start_route(payload: dict[str, Any]):
     return start_download_job(payload)
+
+@app.post("/api/download/run/cancel")
+async def download_cancel_route(payload: dict[str, Any]):
+    try:
+        return cancel_download_job(str(payload.get("job_id") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 @app.get("/api/download/jobs/{job_id}")
 async def get_download_job_status_route(job_id: str):
