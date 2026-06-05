@@ -32,6 +32,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
               case "running": return "실행 중";
               case "completed": return "완료";
               case "failed": return "실패";
+              case "cancelled": return "중단됨";
               default: return s || "-";
             }
           };
@@ -50,6 +51,9 @@ export function useJobPolling(options: UseJobPollingOptions) {
         if (data.status === "completed") {
           setActiveJobId(null);
           if (onSuccess) onSuccess(data.result || data);
+          return;
+        } else if (data.status === "cancelled") {
+          setActiveJobId(null);
           return;
         } else if (data.status === "failed") {
           setActiveJobId(null);

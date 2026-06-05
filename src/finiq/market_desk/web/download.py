@@ -44,7 +44,16 @@ class DownloadJob:
 
 _DOWNLOAD_JOBS: dict[str, DownloadJob] = {}
 _DOWNLOAD_JOBS_LOCK = threading.Lock()
+_CANCELLED_DOWNLOAD_JOBS: set[str] = set()
 DOWNLOAD_DELETE_CONFIRMATION_TEXT = "확인했습니다."
+
+
+class DownloadCancelled(Exception):
+    """Raised when a running download job is cancelled by the user."""
+
+
+def _is_download_cancelled(job_id: str | None) -> bool:
+    return bool(job_id and job_id in _CANCELLED_DOWNLOAD_JOBS)
 
 _DOWNLOAD_PAGE_HTML = """<!doctype html>
 <html lang="ko">
@@ -1229,7 +1238,11 @@ def _aggregate_download_summary(results: list[dict[str, Any]]) -> dict[str, int]
     return summary
 
 
-def _run_single(payload: dict[str, Any], progress_callback: Any | None = None) -> dict[str, Any]:
+def _run_single(
+    payload: dict[str, Any],
+    progress_callback: Any | None = None,
+    cancel_check: Any | None = None,
+) -> dict[str, Any]:
     output_directory_raw = str(payload.get("output_directory") or "").strip()
     if not output_directory_raw:
         raise ValueError("output_directory is required")
@@ -1290,7 +1303,10 @@ def _run_single(payload: dict[str, Any], progress_callback: Any | None = None) -
             parse_mode="simpletable",
             save=True,
             progress_callback=local_progress_callback,
+            cancel_check=cancel_check,
         )
+        if cancel_check is not None and cancel_check():
+            raise DownloadCancelled("download job cancelled")
     else:
         _append_progress(progress_log, "SINGLE auto_page_download first_page_probe=1", progress_callback)
         workflow.run(
@@ -1310,7 +1326,10 @@ def _run_single(payload: dict[str, Any], progress_callback: Any | None = None) -
             parse_mode="simpletable",
             save=True,
             progress_callback=local_progress_callback,
+            cancel_check=cancel_check,
         )
+        if cancel_check is not None and cancel_check():
+            raise DownloadCancelled("download job cancelled")
         paging = _detect_pagination(output_directory)
         if paging and int(paging.get("total_pages") or 0) > 1:
             saved_input = _load_workflow_input(output_directory)
@@ -1336,10 +1355,13 @@ def _run_single(payload: dict[str, Any], progress_callback: Any | None = None) -
                 wait_seconds_between_requests=wait_seconds,
                 timeout=float(saved_input.get("timeout", timeout)),
                 progress_callback=local_progress_callback,
+                cancel_check=cancel_check,
                 saved_file_validator=make_page_size_integrity_validator(
                     expected_page_size=int(saved_input.get("page_size", page_size)),
                 ),
             )
+            if cancel_check is not None and cancel_check():
+                raise DownloadCancelled("download job cancelled")
 
     status = _download_integrity_status(output_directory, page_size)
     _append_status_progress(progress_log, status, progress_callback)
@@ -1378,17 +1400,24 @@ def _run_yearly_task(
     *,
     resume_yearly: bool,
     progress_callback: Any | None = None,
+    cancel_check: Any | None = None,
 ) -> dict[str, Any]:
+    if cancel_check is not None and cancel_check():
+        raise DownloadCancelled("download job cancelled")
     resume_payload = _yearly_task_resume_payload(task) if resume_yearly else None
     if resume_payload is None:
         if resume_yearly:
             _append_progress(deque(maxlen=0), "resume_unavailable -> full_download", progress_callback)
-        return _run_single(task, progress_callback=progress_callback)
+        return _run_single(task, progress_callback=progress_callback, cancel_check=cancel_check)
     _append_progress(deque(maxlen=0), "resume_available -> resume_download", progress_callback)
-    return _run_resume(resume_payload, progress_callback=progress_callback)
+    return _run_resume(resume_payload, progress_callback=progress_callback, cancel_check=cancel_check)
 
 
-def _run_yearly(payload: dict[str, Any], progress_callback: Any | None = None) -> dict[str, Any]:
+def _run_yearly(
+    payload: dict[str, Any],
+    progress_callback: Any | None = None,
+    cancel_check: Any | None = None,
+) -> dict[str, Any]:
     output_directory_raw = str(payload.get("output_directory") or "").strip()
     if not output_directory_raw:
         raise ValueError("output_directory is required")
@@ -1453,6 +1482,8 @@ def _run_yearly(payload: dict[str, Any], progress_callback: Any | None = None) -
     chunk_results_by_folder: dict[str, dict[str, Any]] = {}
     if worker_count == 1:
         for task in tasks:
+            if cancel_check is not None and cancel_check():
+                raise DownloadCancelled("download job cancelled")
             folder_name = str(task["_folder_name"])
             _append_progress(progress_log, f"[{folder_name}] worker_start thread=main", progress_callback)
             chunk_results_by_folder[folder_name] = _run_yearly_task(
@@ -1463,12 +1494,15 @@ def _run_yearly(payload: dict[str, Any], progress_callback: Any | None = None) -
                     f"[{folder}] {line}",
                     progress_callback,
                 ),
+                cancel_check=cancel_check,
             )
             _append_progress(progress_log, f"[{folder_name}] worker_done", progress_callback)
     else:
         with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="kind-download") as executor:
             future_to_folder = {}
             for worker_index, task in enumerate(tasks, start=1):
+                if cancel_check is not None and cancel_check():
+                    break
                 folder_name = str(task["_folder_name"])
                 _append_progress(
                     progress_log,
@@ -1484,6 +1518,7 @@ def _run_yearly(payload: dict[str, Any], progress_callback: Any | None = None) -
                         f"[{folder}] {line}",
                         progress_callback,
                     ),
+                    cancel_check=cancel_check,
                 )
                 future_to_folder[future] = folder_name
             for future in as_completed(future_to_folder):
@@ -1491,9 +1526,14 @@ def _run_yearly(payload: dict[str, Any], progress_callback: Any | None = None) -
                 try:
                     chunk_results_by_folder[folder_name] = future.result()
                     _append_progress(progress_log, f"[{folder_name}] worker_done", progress_callback)
+                except DownloadCancelled:
+                    raise
                 except Exception as exc:
                     _append_progress(progress_log, f"[{folder_name}] worker_failed error={exc}", progress_callback)
                     raise ValueError(f"{folder_name} download failed: {exc}") from exc
+
+    if cancel_check is not None and cancel_check():
+        raise DownloadCancelled("download job cancelled")
 
     results: list[dict[str, Any]] = []
     for task in tasks:
@@ -1519,7 +1559,11 @@ def _run_yearly(payload: dict[str, Any], progress_callback: Any | None = None) -
     }
 
 
-def _run_resume(payload: dict[str, Any], progress_callback: Any | None = None) -> dict[str, Any]:
+def _run_resume(
+    payload: dict[str, Any],
+    progress_callback: Any | None = None,
+    cancel_check: Any | None = None,
+) -> dict[str, Any]:
     output_directory_raw = str(payload.get("output_directory") or "").strip()
     if not output_directory_raw:
         raise ValueError("output_directory is required")
@@ -1575,10 +1619,13 @@ def _run_resume(payload: dict[str, Any], progress_callback: Any | None = None) -
         wait_seconds_between_requests=wait_seconds,
         timeout=timeout,
         progress_callback=local_progress_callback,
+        cancel_check=cancel_check,
         saved_file_validator=make_page_size_integrity_validator(
             expected_page_size=page_size,
         ),
     )
+    if cancel_check is not None and cancel_check():
+        raise DownloadCancelled("download job cancelled")
     status_after = _download_integrity_status(output_directory, page_size)
     _append_status_progress(progress_log, status_after, progress_callback)
     return {
@@ -1675,14 +1722,18 @@ def build_download_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_download_action(payload: dict[str, Any], progress_callback: Any | None = None) -> dict[str, Any]:
+def run_download_action(
+    payload: dict[str, Any],
+    progress_callback: Any | None = None,
+    cancel_check: Any | None = None,
+) -> dict[str, Any]:
     mode = str(payload.get("mode") or "single").strip().lower()
     if mode == "single":
-        return _run_single(payload, progress_callback=progress_callback)
+        return _run_single(payload, progress_callback=progress_callback, cancel_check=cancel_check)
     if mode == "yearly":
-        return _run_yearly(payload, progress_callback=progress_callback)
+        return _run_yearly(payload, progress_callback=progress_callback, cancel_check=cancel_check)
     if mode == "resume":
-        return _run_resume(payload, progress_callback=progress_callback)
+        return _run_resume(payload, progress_callback=progress_callback, cancel_check=cancel_check)
     raise ValueError("mode must be one of: single, yearly, resume")
 
 
@@ -1719,6 +1770,7 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
     job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
     with _DOWNLOAD_JOBS_LOCK:
         _DOWNLOAD_JOBS[job_id] = job
+        _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
 
     def _worker() -> None:
         try:
@@ -1729,9 +1781,18 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
             result = run_download_action(
                 payload,
                 progress_callback=lambda message: _append_job_progress(job_id, message),
+                cancel_check=lambda: _is_download_cancelled(job_id),
             )
             _update_job(job_id, status="completed", result=result)
             _append_job_progress(job_id, f"JOB completed id={job_id}")
+        except DownloadCancelled:
+            try:
+                current = inspect_download_output_directory_payload({**payload, "dry_run": True})
+                _update_job(job_id, result=current)
+            except Exception:
+                pass
+            _update_job(job_id, status="cancelled")
+            _append_job_progress(job_id, f"JOB cancelled id={job_id}")
         except Exception as exc:  # pragma: no cover - runtime path
             try:
                 current = inspect_download_output_directory_payload({**payload, "dry_run": True})
@@ -1745,10 +1806,29 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
                 pass
             _update_job(job_id, status="failed", error=str(exc))
             _append_job_progress(job_id, f"JOB failed error={exc}")
+        finally:
+            with _DOWNLOAD_JOBS_LOCK:
+                _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
 
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
     return get_download_job(job_id)
+
+
+def cancel_download_job(job_id: str) -> dict[str, Any]:
+    normalized_job_id = str(job_id or "").strip()
+    if not normalized_job_id:
+        raise ValueError("job_id is required")
+    with _DOWNLOAD_JOBS_LOCK:
+        job = _DOWNLOAD_JOBS.get(normalized_job_id)
+        if job is None:
+            raise ValueError(f"download job not found: {normalized_job_id}")
+        if job.status in {"completed", "failed", "cancelled"}:
+            return _job_snapshot(job)
+        _CANCELLED_DOWNLOAD_JOBS.add(normalized_job_id)
+        job.updated_at = time.time()
+    _append_job_progress(normalized_job_id, "JOB cancel_requested")
+    return get_download_job(normalized_job_id)
 
 
 def get_download_job(job_id: str) -> dict[str, Any]:

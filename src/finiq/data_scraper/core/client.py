@@ -351,6 +351,7 @@ def download_pages(
     progress_callback: KindProgressCallback | None = None,
     saved_file_validator: KindSavedFileValidator | None = None,
     saved_file_callback: KindSavedFileCallback | None = None,
+    cancel_check: KindCancelCheck | None = None,
 ) -> None:
     """KIND 검색 결과를 순서대로 내려받아 file로 저장한다.
 
@@ -370,6 +371,9 @@ def download_pages(
     active_session = session or requests.Session()
 
     try:
+        if cancel_check is not None and cancel_check():
+            _report_progress(progress_callback, "Download cancelled before search page request.")
+            return
         _fetch_and_save_search_page(
             session=active_session,
             output_directory=output_directory,
@@ -382,7 +386,12 @@ def download_pages(
 
         total_pages = end_page - start_page + 1
         for page_offset, page_number in enumerate(range(start_page, end_page + 1), start=1):
-            _sleep_between_requests(wait_seconds_between_requests)
+            if _sleep_between_requests(wait_seconds_between_requests, cancel_check):
+                _report_progress(progress_callback, "Download cancelled between result page requests.")
+                return
+            if cancel_check is not None and cancel_check():
+                _report_progress(progress_callback, "Download cancelled before result page request.")
+                return
             _fetch_and_save_results_page(
                 session=active_session,
                 output_directory=output_directory,
