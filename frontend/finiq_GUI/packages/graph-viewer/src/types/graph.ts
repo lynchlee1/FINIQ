@@ -16,9 +16,13 @@ export interface InputEdge {
   source: string
   target: string
   relation: string
-  category?: 'equity' | 'personnel' | 'address' | 'transaction' | 'other'
+  category?: string
   weight?: number
   directed?: boolean
+  start_date?: string
+  end_date?: string
+  is_active?: boolean
+  source_url?: string
   properties?: JsonMap
 }
 
@@ -40,9 +44,13 @@ export interface GraphEdge extends LinkObject<GraphNode> {
   source: string | GraphNode
   target: string | GraphNode
   relation: string
-  category: 'equity' | 'personnel' | 'address' | 'transaction' | 'other'
+  category: string
   weight: number
   directed: boolean
+  start_date?: string
+  end_date?: string
+  is_active?: boolean
+  source_url?: string
   properties: JsonMap
   hidden?: boolean
   curvature?: number
@@ -70,7 +78,7 @@ export interface FilterState {
   groups: string[]
   tags: string[]
   edgeRelations: string[]
-  edgeCategories: ('equity' | 'personnel' | 'address' | 'transaction' | 'other')[]
+  edgeCategories: string[]
   minWeight: number
   minDegree: number
   direction: 'all' | 'directed' | 'undirected'
@@ -129,6 +137,7 @@ export interface LayoutConfig {
   alphaDecay: number
   preservePinnedNodes: boolean
   autoLayoutAfterFilter: boolean
+  pinLimit?: number
 }
 
 export interface GraphSnapshot {

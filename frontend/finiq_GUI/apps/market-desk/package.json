@@ -3,12 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --turbopack",
+    "build": "next build --turbopack",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "@finiq/graph-viewer": "0.1.0",
     "@finiq/theme": "0.1.0",
     "@finiq/ui": "0.1.0",
     "lucide-react": "^1.16.0",

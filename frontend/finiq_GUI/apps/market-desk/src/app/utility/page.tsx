@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FolderTree, Loader2, Play } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
@@ -11,10 +11,6 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
 
 type PartitionMode = "split" | "flatten";
-
-const UTILITY_TABS = [
-  { href: "/utility", step: 1, label: "분할저장" },
-];
 
 function formatResult(result: any): string[] {
   if (!result) return [];
@@ -115,11 +111,9 @@ export default function UtilityPage() {
   }
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={UTILITY_TABS} />
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-6">
+    <WorkflowPageShell workflowId="utility">
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+        <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Storage Utility</p>
@@ -210,6 +204,6 @@ export default function UtilityPage() {
           </Card>
         </section>
       </div>
-    </main>
+    </WorkflowPageShell>
   );
 }

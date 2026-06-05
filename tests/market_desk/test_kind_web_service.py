@@ -1989,6 +1989,56 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
     assert "리픽싱(%)" not in payload["records"][0]["fields"]
 
 
+def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path) -> None:
+    source_path = tmp_path / "20250102000002.html"
+    source_path.write_text(
+        """
+        <html>
+          <head><title>전환사채권발행결정</title></head>
+          <body>
+            <table>
+              <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
+              <tr><th>2. 사채의 권면(전자등록)총액</th><td>1,000,000,000</td></tr>
+              <tr><th>3. 자금조달의 목적</th><td>운영자금</td></tr>
+            </table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parsed-bond_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "bond_issuance",
+                "records": [
+                    {
+                        "title": "전환사채권발행결정",
+                        "acpt_no": "20250102000002",
+                        "rcept_no": "20250102009999",
+                        "source_file": str(source_path),
+                        "기업명(발행사)": "발행사",
+                        "회차": "1",
+                        "종류": "CB",
+                        "발행금액": 1_000_000_000,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bond_parse_summary_payload({"output_path": str(parse_path)})
+
+    preview = payload["records"][0]["source_preview"]
+    assert preview["available"] is True
+    assert preview["source_file"] == str(source_path)
+    assert preview["tables"][0]["rows"][0] == ["1. 사채의 종류", "전환사채"]
+    assert preview["tables"][0]["rows"][1] == ["2. 사채의 권면(전자등록)총액", "1,000,000,000"]
+
+
 def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path, monkeypatch) -> None:
     from finiq.market_desk.web.app import config as app_config
 
@@ -2495,7 +2545,7 @@ def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path
     """
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.html_parsers.bond_issuance._fetch_selected_viewer_body",
+        "finiq.market_desk.web.html_parsers.bond_issuance.utils.fetch_selected_viewer_body",
         lambda html_text, **kwargs: body_html.encode("utf-8"),
     )
 
@@ -2657,7 +2707,7 @@ def test_parse_bond_issuance_maps_kind_warrant_resource_examples(
     )
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.html_parsers.bond_issuance._fetch_selected_viewer_body",
+        "finiq.market_desk.web.html_parsers.bond_issuance.utils.fetch_selected_viewer_body",
         lambda html_text, **kwargs: body_html.encode("utf-8"),
     )
 
@@ -2733,7 +2783,7 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> N
     </body></html>
     """
     monkeypatch.setattr(
-        "finiq.market_desk.web.html_parsers.rights_issuance._fetch_selected_viewer_body",
+        "finiq.market_desk.web.html_parsers.rights_issuance.fetch_selected_viewer_body",
         lambda html_text, **kwargs: body_html.encode("utf-8"),
     )
 

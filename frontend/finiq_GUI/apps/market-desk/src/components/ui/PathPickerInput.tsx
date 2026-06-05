@@ -1,5 +1,6 @@
 import { FolderOpen, File, Save } from "lucide-react";
 import { Button, Input } from "@finiq/ui";
+import { cn } from "@finiq/ui/utils";
 import { pickPath } from "@/lib/fileDialog";
 
 interface PathPickerInputProps {
@@ -40,17 +41,17 @@ export function PathPickerInput({
   };
 
   return (
-    <div className={`flex gap-2 ${className || ""}`}>
+    <div className={cn("flex min-w-0 gap-2", className)}>
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={placeholder}
-        className="flex-1 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+        className="h-10 flex-1 text-sm dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:placeholder:text-slate-600"
       />
       <Button
         variant="outline"
-        size="icon"
+        size="icon-lg"
         onClick={handlePickPath}
         className="dark:border-[#30363d] dark:hover:bg-[#21262d]"
       >

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d'
-import { forceCollide, forceLink, forceManyBody } from 'd3-force'
+import { forceCollide, forceLink, forceManyBody, forceX, forceY } from 'd3-force'
 import { Button } from '@finiq/ui'
 import type { GraphData, GraphEdge, GraphNode, GraphStyleConfig, LayoutConfig, NodeShape, NodeTypeStyle } from '../types/graph'
 import type { GraphContextActionHandler, GraphEdgeContextAction, GraphNodeContextAction } from '../core'
@@ -47,6 +47,7 @@ export interface GraphCanvasProps {
   jumpToNodeId?: string
   showToolbar?: boolean
   contextMenuItems?: GraphCanvasContextMenuItems
+  onUnpinAll?: () => void
 }
 
 function truncateLabel(label: string, maxLength: number): string {
@@ -98,6 +99,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     jumpToNodeId,
     showToolbar = true,
     contextMenuItems,
+    onUnpinAll,
   } = props
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -110,18 +112,31 @@ export function GraphCanvas(props: GraphCanvasProps) {
   )
 
   useEffect(() => {
+    const element = containerRef.current
+    if (!element) return
+
     const resize = () => {
-      const element = containerRef.current
-      if (!element) {
-        return
-      }
       const rect = element.getBoundingClientRect()
       setSize({ width: Math.max(300, rect.width), height: Math.max(300, rect.height) })
       onVisibleBounds(Math.max(300, rect.width), Math.max(300, rect.height))
     }
+
+    // Initial resize
     resize()
+
+    // Use ResizeObserver to detect flex container size changes
+    const observer = new ResizeObserver(() => {
+      resize()
+    })
+    observer.observe(element)
+
+    // Fallback window resize just in case
     window.addEventListener('resize', resize)
-    return () => window.removeEventListener('resize', resize)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', resize)
+    }
   }, [onVisibleBounds])
 
   useEffect(() => {
@@ -132,9 +147,11 @@ export function GraphCanvas(props: GraphCanvasProps) {
       .id((node: GraphNode) => String(node.id))
       .distance(layout.linkDistance) as unknown as (alpha: number) => void
     fgRef.current
-      .d3Force('charge', forceManyBody().strength(layout.chargeStrength))
+      .d3Force('charge', forceManyBody().strength(layout.chargeStrength).distanceMax(600))
       .d3Force('link', linkForce)
       .d3Force('collide', forceCollide(layout.collisionRadius))
+      .d3Force('x', forceX((d: any) => d.userX ?? 0).strength((d: any) => d.userX !== undefined ? 0.08 : 0.015))
+      .d3Force('y', forceY((d: any) => d.userY ?? 0).strength((d: any) => d.userY !== undefined ? 0.08 : 0.015))
     if (simulationRunning) {
       fgRef.current.d3ReheatSimulation()
     }
@@ -158,6 +175,10 @@ export function GraphCanvas(props: GraphCanvasProps) {
     fgRef.current.centerAt(node.x, node.y, 600)
     fgRef.current.zoom(4, 600)
   }, [jumpToNodeId, graph.nodes])
+
+  // Track double click
+  const lastClickRef = useRef<{ id: string; time: number } | null>(null);
+  const pinnedHistoryRef = useRef<string[]>([]);
 
   const nodeById = useMemo(() => {
     const map = new Map<string, GraphNode>()
@@ -311,6 +332,27 @@ export function GraphCanvas(props: GraphCanvasProps) {
           >
             Fullscreen
           </Button>
+          {onUnpinAll && (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={(event) => {
+                event.stopPropagation()
+                graph.nodes.forEach((n: any) => {
+                  delete n.fx
+                  delete n.fy
+                })
+                onUnpinAll()
+                if (!simulationRunning) {
+                  onSimulationToggle(true)
+                }
+                fgRef.current?.d3ReheatSimulation()
+              }}
+              className="h-7 px-2 text-[11px] font-bold uppercase tracking-tight"
+            >
+              Unpin All
+            </Button>
+          )}
         </div>
       ) : null}
 
@@ -321,7 +363,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
         height={size.height}
         backgroundColor={style.backgroundColor}
         warmupTicks={simulationRunning ? 0 : 100}
-        cooldownTicks={simulationRunning ? 80 : 0}
+        cooldownTicks={simulationRunning ? Infinity : 0}
         d3AlphaDecay={layout.alphaDecay}
         onEngineStop={() => {
           if (simulationRunning) {
@@ -384,24 +426,93 @@ export function GraphCanvas(props: GraphCanvasProps) {
           return overrides.color ?? style.edgeColor
         }}
         linkWidth={(edge) =>
-          (selectedEdgeIds.has(edge.id) ? 2.2 : (edgeRuleStyle(edge).size ?? style.edgeWidth)) + Math.max(0, edge.weight * 0.1)
+          (selectedEdgeIds.has(edge.id) ? 2.2 : (edgeRuleStyle(edge).size ?? style.edgeWidth)) + (edge.weight ? Math.log10(Math.max(1, edge.weight)) * 0.5 : 0)
         }
+        linkLineDash={(edge) => edge.is_active === false ? [4, 4] : null}
         linkCurvature={(edge) => edge.curvature ?? 0}
         linkDirectionalArrowLength={(edge) =>
-          (style.arrowVisibility && edge.directed) ? 4 + edge.weight * 0.8 : 0
+          (style.arrowVisibility && edge.directed) ? Math.min(8, 3.5 + (edge.weight ? Math.log10(Math.max(1, edge.weight)) * 1.5 : 0)) : 0
         }
         linkDirectionalArrowRelPos={0.85}
-        onNodeClick={(node, event) => onNodeClick(node, event.shiftKey)}
+        onNodeClick={(node, event) => {
+          const now = Date.now();
+          const lastClick = lastClickRef.current;
+          
+          if (lastClick && lastClick.id === node.id && now - lastClick.time < 300) {
+            // Double click
+            if (typeof node.x === 'number' && typeof node.y === 'number' && fgRef.current) {
+              fgRef.current.centerAt(node.x, node.y, 600);
+              fgRef.current.zoom(4, 600);
+            }
+            lastClickRef.current = null; // reset
+          } else {
+            lastClickRef.current = { id: node.id, time: now };
+            onNodeClick(node, event.shiftKey);
+          }
+
+          // Pin action on every click
+          node.fx = node.x;
+          node.fy = node.y;
+          pinnedHistoryRef.current.push(node.id);
+          
+          if (layout.pinLimit !== undefined && layout.pinLimit > 0) {
+            while (pinnedHistoryRef.current.length > layout.pinLimit) {
+              const oldestId = pinnedHistoryRef.current.shift();
+              if (oldestId && !pinnedHistoryRef.current.includes(oldestId)) {
+                const oldestNode = graph.nodes.find(n => n.id === oldestId) as any;
+                if (oldestNode) {
+                  delete oldestNode.fx;
+                  delete oldestNode.fy;
+                }
+                onContextAction('node', oldestId, 'unpin');
+              }
+            }
+          }
+
+          onContextAction('node', node.id, 'pin');
+          
+          if (!simulationRunning) {
+            onSimulationToggle(true);
+          }
+          fgRef.current?.d3ReheatSimulation();
+        }}
         onNodeHover={(node) => onNodeHover(node)}
         onNodeRightClick={(node, event) => {
           event.preventDefault()
           setContextMenu({ x: event.clientX, y: event.clientY, kind: 'node', id: node.id })
         }}
-        onNodeDragEnd={(node) => {
-          if (layout.preservePinnedNodes && node.pinned) {
-            node.fx = node.x
-            node.fy = node.y
+        onNodeDrag={() => {
+          if (!simulationRunning) {
+            onSimulationToggle(true)
           }
+        }}
+        onNodeDragEnd={(node) => {
+          // Soft pinning: moved nodes become pinned automatically
+          node.fx = node.x
+          node.fy = node.y
+          
+          pinnedHistoryRef.current.push(node.id)
+          
+          if (layout.pinLimit !== undefined && layout.pinLimit > 0) {
+            while (pinnedHistoryRef.current.length > layout.pinLimit) {
+              const oldestId = pinnedHistoryRef.current.shift()
+              if (oldestId && !pinnedHistoryRef.current.includes(oldestId)) {
+                const oldestNode = graph.nodes.find(n => n.id === oldestId) as any
+                if (oldestNode) {
+                  delete oldestNode.fx
+                  delete oldestNode.fy
+                }
+                onContextAction('node', oldestId, 'unpin')
+              }
+            }
+          }
+
+          onContextAction('node', node.id, 'pin')
+
+          if (!simulationRunning) {
+            onSimulationToggle(true)
+          }
+          fgRef.current?.d3ReheatSimulation()
         }}
         onLinkClick={(edge) => onEdgeClick(edge)}
         onLinkRightClick={(edge, event) => {
@@ -427,6 +538,14 @@ export function GraphCanvas(props: GraphCanvasProps) {
               className="justify-start h-8 px-2 text-xs font-medium"
               onClick={() => {
                 if (contextMenu.kind === 'node') {
+                  if (item.action === 'unpin') {
+                    const internalNode = graph.nodes.find(n => n.id === contextMenu.id) as any
+                    if (internalNode) {
+                      delete internalNode.fx
+                      delete internalNode.fy
+                      fgRef.current?.d3ReheatSimulation()
+                    }
+                  }
                   onContextAction('node', contextMenu.id, item.action as GraphNodeContextAction)
                 } else {
                   onContextAction('edge', contextMenu.id, item.action as GraphEdgeContextAction)

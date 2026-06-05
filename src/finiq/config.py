@@ -21,6 +21,7 @@ def _resolve_workspace_root() -> Path:
     return cwd
 
 PROJECT_ROOT = _resolve_workspace_root()
+ASSETS_DIR = PROJECT_ROOT / "assets"
 RESOURCES_DIR = PROJECT_ROOT / "resources"
 KIND_DATA_DIR = RESOURCES_DIR / "kind"
 DATABASE_DIR = RESOURCES_DIR / "database"

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiGet, apiPost } from "@/api/client";
 
 interface SettingsState {
   output_root: string;
@@ -59,12 +60,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   fetchSettings: async () => {
     try {
-      const response = await fetch("/api/config");
-      if (response.ok) {
-        const config = await response.json();
-        set((state) => ({ ...state, ...config }));
-        return config;
-      }
+      const config = await apiGet<any>("/api/config");
+      set((state) => ({ ...state, ...config }));
+      return config;
     } catch (err) {
       console.error("Failed to fetch settings:", err);
     }
@@ -73,11 +71,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSetting: async (key, value) => {
     set((state) => ({ ...state, [key]: value }));
     try {
-      await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [key]: value }),
-      });
+      await apiPost("/api/settings", { [key]: value });
     } catch (err) {
       console.error(`Failed to save setting ${String(key)}:`, err);
     }
@@ -86,11 +80,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSettings: async (payload) => {
     set((state) => ({ ...state, ...payload }));
     try {
-      await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      await apiPost("/api/settings", payload);
     } catch (err) {
       console.error(`Failed to save settings:`, err);
     }

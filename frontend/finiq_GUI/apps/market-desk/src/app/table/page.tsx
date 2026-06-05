@@ -5,19 +5,13 @@ import { Play, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
 import { Label } from "@finiq/ui";
-import { WorkflowTabs } from "@/components/layout/WorkflowTabs";
+import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { cn } from "@finiq/ui/utils";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-
-const BUILD_TABS = [
-  { href: "/download", step: 1, label: "공시 다운로드" },
-  { href: "/table", step: 2, label: "SQLITE 변환" },
-  { href: "/filter", step: 3, label: "공시 필터" },
-];
 
 export default function TablePage() {
   const [loading, setLoading] = useState(true);
@@ -145,15 +139,13 @@ export default function TablePage() {
   }
 
   return (
-    <main className="flex flex-col gap-6 w-full">
-      <WorkflowTabs tabs={BUILD_TABS} />
-      
-      <div className="grid lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-6">
+    <WorkflowPageShell workflowId="disclosure-build">
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+        <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source Pipeline</p>
-              <CardTitle className="dark:text-white">SQLITE 변환</CardTitle>
+              <CardTitle className="dark:text-white">공시내역 변환</CardTitle>
           <CardDescription className="dark:text-slate-400">회사별로 분류된 Raw JSON 데이터를 검색과 분석에 용이한 SQLite 형식으로 변환합니다.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -211,6 +203,6 @@ export default function TablePage() {
           </Card>
         </section>
       </div>
-    </main>
+    </WorkflowPageShell>
   );
 }

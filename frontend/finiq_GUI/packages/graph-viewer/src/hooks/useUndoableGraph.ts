@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import type { GraphData, GraphSnapshot } from '../types/graph'
 
 function cloneGraph(graph: GraphData): GraphSnapshot {
@@ -22,19 +22,19 @@ export function useUndoableGraph(initialGraph: GraphData) {
   const [present, setPresent] = useState<GraphSnapshot>(() => cloneGraph(initialGraph))
   const [future, setFuture] = useState<GraphSnapshot[]>([])
 
-  const setGraph = (updater: (current: GraphData) => GraphData): void => {
+  const setGraph = useCallback((updater: (current: GraphData) => GraphData): void => {
     setPast((prevPast) => [...prevPast, cloneGraph(present)])
     setPresent((prevPresent) => cloneGraph(updater(prevPresent)))
     setFuture([])
-  }
+  }, [present])
 
-  const replaceGraph = (graph: GraphData): void => {
+  const replaceGraph = useCallback((graph: GraphData): void => {
     setPast([])
     setPresent(cloneGraph(graph))
     setFuture([])
-  }
+  }, [])
 
-  const undo = (): void => {
+  const undo = useCallback((): void => {
     setPast((prevPast) => {
       if (prevPast.length === 0) {
         return prevPast
@@ -44,9 +44,9 @@ export function useUndoableGraph(initialGraph: GraphData) {
       setPresent(cloneGraph(previous))
       return prevPast.slice(0, -1)
     })
-  }
+  }, [present])
 
-  const redo = (): void => {
+  const redo = useCallback((): void => {
     setFuture((prevFuture) => {
       if (prevFuture.length === 0) {
         return prevFuture
@@ -56,7 +56,7 @@ export function useUndoableGraph(initialGraph: GraphData) {
       setPresent(cloneGraph(next))
       return rest
     })
-  }
+  }, [present])
 
   const controls = useMemo(
     () => ({
