@@ -32,6 +32,7 @@ from finiq.market_desk.web.disclosure_html import (
     download_disclosure_html_payload,
     merge_disclosure_content_html_payload,
 )
+from finiq.market_desk.web.download import inspect_download_output_directory_payload
 from finiq.market_desk.web.disclosure_html_parse import (
     PARSER_REGISTRY,
     build_bond_parse_summary_payload,
@@ -61,6 +62,46 @@ EXPECTED_PARSE_MODES = {
     "asset_transaction",
     "security_transaction",
 }
+
+
+def _build_download_result_page_html(
+    *,
+    page_number: int,
+    page_size: int,
+    total_items: int,
+) -> bytes:
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    row_count = page_size if page_number < total_pages else total_items - (page_size * (total_pages - 1))
+    rows = []
+    for row_index in range(row_count):
+        item_no = ((page_number - 1) * page_size) + row_index + 1
+        rows.append(
+            f"""
+            <tr>
+              <td>{item_no}</td>
+              <td>2025-01-01 09:00</td>
+              <td><a id="companysum" title="테스트회사" onclick="companysummary_open('000001')">테스트회사</a></td>
+              <td><a title="테스트 공시" onclick="openDisclsViewer('20250101000001','')">테스트 공시</a></td>
+              <td>테스트제출인</td>
+            </tr>
+            """
+        )
+    return (
+        f"""
+        <html>
+          <body>
+            <section class="paging-group">
+              <div class="paging type-00">
+                전체 <em>{total_items}</em>건 : <strong>{page_number}</strong>/{total_pages}
+              </div>
+            </section>
+            <table class="list" summary="번호, 일시, 회사명, 공시제목, 제출인">
+              <tbody>{''.join(rows)}</tbody>
+            </table>
+          </body>
+        </html>
+        """
+    ).encode("utf-8")
 
 
 def _write_classification_fixture(tmp_path: Path) -> Path:
@@ -1346,6 +1387,77 @@ def test_download_disclosure_html_payload_resumes_split_files(
     ]
 
 
+def test_inspect_download_output_directory_requires_confirmation_for_mismatch(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "download"
+    output_directory.mkdir()
+    body_path = output_directory / "001_post_page_00001.body"
+    body_path.write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (output_directory / "kind_workflow.input.json").write_text(
+        json.dumps({"page_size": 50}),
+        encoding="utf-8",
+    )
+
+    dry_run_payload = inspect_download_output_directory_payload(
+        {
+            "mode": "single",
+            "output_directory": str(output_directory),
+            "page_size": 50,
+            "dry_run": True,
+        }
+    )
+
+    assert dry_run_payload["deleted_count"] == 0
+    assert dry_run_payload["deletion_candidate_count"] == 1
+    assert dry_run_payload["deletion_candidates"][0]["name"] == "001_post_page_00001.body"
+    assert body_path.exists()
+
+    with pytest.raises(ValueError, match='"확인했습니다." 입력과 삭제 허가가 필요합니다'):
+        inspect_download_output_directory_payload(
+            {
+                "mode": "single",
+                "output_directory": str(output_directory),
+                "page_size": 50,
+                "dry_run": False,
+            }
+        )
+
+    assert body_path.exists()
+
+
+def test_inspect_download_output_directory_deletes_confirmed_mismatch(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "download"
+    output_directory.mkdir()
+    body_path = output_directory / "001_post_page_00001.body"
+    body_path.write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (output_directory / "kind_workflow.input.json").write_text(
+        json.dumps({"page_size": 50}),
+        encoding="utf-8",
+    )
+
+    payload = inspect_download_output_directory_payload(
+        {
+            "mode": "single",
+            "output_directory": str(output_directory),
+            "page_size": 50,
+            "dry_run": False,
+            "delete_confirmed": True,
+            "delete_confirmation_text": "확인했습니다.",
+        }
+    )
+
+    assert payload["deleted_count"] == 1
+    assert payload["summary"] == {"success": 0, "failed": 0, "total": 0}
+    assert not body_path.exists()
+
+
 def test_download_disclosure_html_contents_payload_reads_and_writes_split_files(
     tmp_path: Path,
     monkeypatch,
@@ -1733,7 +1845,13 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
         json.dumps(
             {
                 "format": "finiq_disclosure_html_manifest_v1",
-                "disclosures": [{"acpt_no": "20250101000001", "market": "코스닥"}],
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "market": "코스닥",
+                        "company_name": "테스트발행사",
+                    }
+                ],
             },
             ensure_ascii=False,
         ),
@@ -1748,7 +1866,8 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
         }
     )
 
-    assert payload["records"][0]["상장시장"] == "코스닥"
+    assert payload["records"][0]["상장구분"] == "코스닥"
+    assert payload["records"][0]["기업명(발행사)"] == "테스트발행사"
 
 
 def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
@@ -1834,12 +1953,18 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
                                 ],
                             }
                         },
+                        "기업명(발행사)": "발행사",
                         "회차": "1",
+                        "종류": "CB",
+                        "기업명(행사대상)": "대상회사",
+                        "상장구분": "코스닥",
                         "발행금액": 1_000_000_000,
                         "행사가액": 1000,
-                        "리픽싱(%)": 70,
                         "납입일": "2025년 01월 02일",
-                        "발행대상자": [["테스트조합", 1_000_000_000]],
+                        "만기일": "2028년 01월 02일",
+                        "행사시작일": "2026년 01월 02일",
+                        "행사종료일": "2027년 12월 02일",
+                        "투자자": [["테스트조합", 1_000_000_000]],
                     }
                 ],
             },
@@ -1860,6 +1985,8 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
     }
     assert payload["records"][0]["family_id"] == "20250102009999"
     assert payload["records"][0]["fields"]["발행금액"] == 1_000_000_000
+    assert payload["records"][0]["fields"]["투자자"] == [["테스트조합", 1_000_000_000]]
+    assert "리픽싱(%)" not in payload["records"][0]["fields"]
 
 
 def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path, monkeypatch) -> None:
@@ -2317,29 +2444,21 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
 
     assert parsed["회차"] == "16"
+    assert parsed["종류"] == "CB"
     assert parsed["발행금액"] == 40_000_000_000
-    assert parsed["발행목적"] == [
-        ["시설자금", 0],
-        ["영업양수자금", 0],
-        ["운영자금", 8_000_000_000],
-        ["채무상환자금", 32_000_000_000],
-        ["타법인 증권 취득자금", 0],
-        ["기타자금", 0],
-    ]
+    assert parsed["상장구분"] == "기타"
     assert parsed["만기일"] == "2031년 05월 08일"
-    assert parsed["할증률(%)"] == 5.101
     assert parsed["행사가액"] == 54_315
-    assert parsed["행사대상"] == "주식회사 아이티센글로벌 기명식 보통주"
-    assert parsed["전환시작일"] == "2027년 05월 08일"
-    assert parsed["전환종료일"] == "2031년 04월 29일"
-    assert parsed["리픽싱(%)"] == 70
-    assert parsed["청약일"] == "2026년 04월 30일"
+    assert parsed["기업명(행사대상)"] == "아이티센글로벌"
+    assert parsed["행사시작일"] == "2027년 05월 08일"
+    assert parsed["행사종료일"] == "2031년 04월 29일"
     assert parsed["납입일"] == "2026년 05월 08일"
-    assert parsed["납입방법"] == "현금"
-    assert parsed["발행대상자"] == [["아이티씨홀딩스(유)", 40_000_000_000]]
+    assert parsed["투자자"] == [["아이티씨홀딩스(유)", 40_000_000_000]]
     assert parsed["발행대상자세부엔티티"] == [
         ["아이티씨홀딩스(유)", "임현철", "케이씨지아이혁신성장이에스지제1호사모투자 합자회사"]
     ]
+    for removed_field in ("발행목적", "할증률(%)", "행사대상", "전환시작일", "전환종료일", "리픽싱(%)", "청약일", "납입방법"):
+        assert removed_field not in parsed
 
 
 def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path: Path) -> None:
@@ -2394,24 +2513,30 @@ def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path
         }
     }
     assert parsed["회차"] == "9"
+    assert parsed["종류"] == "CB"
     assert parsed["발행금액"] == 15_000_000_000
-    assert parsed["발행목적"] == [
-        ["시설자금", 0],
-        ["영업양수자금", 0],
-        ["운영자금", 4_000_000_000],
-        ["채무상환자금", 0],
-        ["타법인 증권 취득자금", 0],
-        ["기타자금", 11_000_000_000],
-    ]
+    assert parsed["만기일"] == "2011년 10월 01일"
+    assert parsed["투자자"] == []
 
 
-def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing() -> None:
-    fixture_path = REPO_ROOT / "resources" / "kind_kosdaq" / "kind_html" / "20090506000331.html"
+def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20090506000331.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1"><p class="SECTION-1">전환사채발행결정</p></h2>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환가액 (원/주)</td><td>500</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환에 따라 발행할 주식의 종류</td><td>(주)아이에스이커머스 기명식 보통주</td></tr>
+      </table>
+    </body></html>
+    """
 
-    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["행사대상"] == "(주)아이에스이커머스 기명식 보통주"
-    assert parsed["리픽싱(%)"] == 80
+    assert parsed["기업명(행사대상)"] == "아이에스이커머스"
 
 
 @pytest.mark.parametrize(
@@ -2436,13 +2561,11 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing() -> Non
             </body></html>
             """,
             {
-                "할증률(%)": None,
+                "종류": "BW",
                 "행사가액": 730,
-                "행사대상": "기명식 보통주",
-                "전환시작일": "2009년 08월 29일",
-                "전환종료일": "2011년 07월 29일",
-                "리픽싱(%)": 70,
-                "납입방법": "현금납입 또는 사채대용납입",
+                "기업명(행사대상)": "기명식 보통주",
+                "행사시작일": "2009년 08월 29일",
+                "행사종료일": "2011년 07월 29일",
             },
         ),
         (
@@ -2464,13 +2587,11 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing() -> Non
             </body></html>
             """,
             {
-                "할증률(%)": None,
+                "종류": "BW",
                 "행사가액": 848,
-                "행사대상": "기명식 보통주",
-                "전환시작일": "2009년 08월 26일",
-                "전환종료일": "2011년 08월 26일",
-                "리픽싱(%)": 70,
-                "납입방법": "현금 및 대용",
+                "기업명(행사대상)": "기명식 보통주",
+                "행사시작일": "2009년 08월 26일",
+                "행사종료일": "2011년 08월 26일",
             },
         ),
         (
@@ -2493,21 +2614,47 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing() -> Non
             </body></html>
             """,
             {
-                "할증률(%)": None,
+                "종류": "BW",
                 "행사가액": 1035,
-                "행사대상": "기명식 보통주",
-                "전환시작일": "2008년 10월 08일",
-                "전환종료일": "2010년 08월 08일",
-                "리픽싱(%)": 70,
-                "납입방법": "현금납입 또는 사채대용납입",
+                "기업명(행사대상)": "기명식 보통주",
+                "행사시작일": "2008년 10월 08일",
+                "행사종료일": "2010년 08월 08일",
+            },
+        ),
+        (
+            "20080826000499",
+            """
+            <html><body>
+              <h2 class="SECTION-1"><p class="SECTION-1">교환사채발행결정</p></h2>
+              <table>
+                <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무기명식 무보증 교환사채</td></tr>
+                <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+                <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
+                <tr><td>9. 교환에 관한 사항</td><td>교환가액 (원/주)</td><td>12,500</td></tr>
+                <tr><td>9. 교환에 관한 사항</td><td>교환대상 주식의 종류</td><td>주식회사 테스트타겟 기명식 보통주</td></tr>
+                <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>시작일</td><td>2026년 01월 01일</td></tr>
+                <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>종료일</td><td>2028년 01월 01일</td></tr>
+              </table>
+            </body></html>
+            """,
+            {
+                "종류": "EB",
+                "행사가액": 12500,
+                "기업명(행사대상)": "테스트타겟",
+                "행사시작일": "2026년 01월 01일",
+                "행사종료일": "2028년 01월 01일",
             },
         ),
     ],
 )
 def test_parse_bond_issuance_maps_kind_warrant_resource_examples(
-    monkeypatch, acpt_no: str, body_html: str, expected: dict[str, object]
+    monkeypatch, tmp_path: Path, acpt_no: str, body_html: str, expected: dict[str, object]
 ) -> None:
-    fixture_path = REPO_ROOT / "resources" / "kind_kosdaq" / "kind_html" / f"{acpt_no}.html"
+    fixture_path = tmp_path / f"{acpt_no}.html"
+    fixture_path.write_text(
+        "<html><body><select id='mainDoc'><option value='DOC001|Y' selected>main</option></select></body></html>",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(
         "finiq.market_desk.web.html_parsers.bond_issuance._fetch_selected_viewer_body",
@@ -2526,7 +2673,7 @@ def test_parse_bond_issuance_collects_multiple_target_entity_tables() -> None:
 
     parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
 
-    assert parsed["발행대상자"] == [
+    assert parsed["투자자"] == [
         ["퀸버메자닌1호조합", 2_500_000_000],
         ["주식회사 비에스파트너", 2_000_000_000],
         ["송 준", 1_500_000_000],
@@ -2538,7 +2685,8 @@ def test_parse_bond_issuance_collects_multiple_target_entity_tables() -> None:
 
 
 def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> None:
-    fixture_path = REPO_ROOT / "resources" / "kind_kosdaq" / "kind_html_stockissue" / "20240822000349.html"
+    fixture_path = Path("20240822000349.html")
+    wrapper_html = "<html><body><select id='mainDoc'><option value='DOC001|Y' selected>main</option></select></body></html>"
     body_html = """
     <html><body>
       <h2 class="SECTION-1"><p class="SECTION-1">유상증자결정</p></h2>
@@ -2589,7 +2737,7 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> N
         lambda html_text, **kwargs: body_html.encode("utf-8"),
     )
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(wrapper_html.encode("utf-8"), file_path=fixture_path)
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 2_495_327], ["기타주식", 0]]
     assert parsed["발행목적"] == [

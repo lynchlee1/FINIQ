@@ -1,4 +1,4 @@
-"""Mode-specific KIND disclosure HTML parsers."""
+"""KIND 공시 유형별 HTML parser 모음."""
 
 from __future__ import annotations
 

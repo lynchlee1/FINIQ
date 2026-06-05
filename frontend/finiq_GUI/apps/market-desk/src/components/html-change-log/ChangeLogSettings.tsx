@@ -5,9 +5,8 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 
 export const DATE_FIELDS_CONFIG = [
   { field: "만기일", default: 3 },
-  { field: "전환시작일", default: 3 },
-  { field: "전환종료일", default: 3 },
-  { field: "청약일", default: 3 },
+  { field: "행사시작일", default: 3 },
+  { field: "행사종료일", default: 3 },
   { field: "납입일", default: 3 },
   { field: "신주권교부예정일", default: 3 },
   { field: "상장예정일", default: 3 },
@@ -20,9 +19,6 @@ export const NUMERIC_FIELDS_CONFIG = [
   { field: "발행가액", default: 1 },
   { field: "행사가액", default: 1 },
   { field: "기준주가", default: 1 },
-  { field: "표면이자율", default: 0.5 },
-  { field: "만기이자율", default: 0.5 },
-  { field: "리픽싱(%)", default: 0.5 },
   { field: "신주의 종류와 수", default: 1 },
 ];
 

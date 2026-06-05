@@ -27,6 +27,7 @@ from finiq.data_scraper.workflow import (
     KindWorkflow,
     inspect_download_directory_pages,
     make_page_size_integrity_validator,
+    validate_downloaded_result_page,
 )
 
 
@@ -43,6 +44,7 @@ class DownloadJob:
 
 _DOWNLOAD_JOBS: dict[str, DownloadJob] = {}
 _DOWNLOAD_JOBS_LOCK = threading.Lock()
+DOWNLOAD_DELETE_CONFIRMATION_TEXT = "확인했습니다."
 
 _DOWNLOAD_PAGE_HTML = """<!doctype html>
 <html lang="ko">
@@ -278,6 +280,11 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         color: var(--button-color);
         background: var(--button-bg);
       }
+      button.danger {
+        color: #991b1b;
+        border-color: rgba(248, 113, 113, 0.56);
+        background: linear-gradient(135deg, rgba(254, 226, 226, 0.98), rgba(255, 241, 242, 0.9)), #ffffff;
+      }
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -295,6 +302,37 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         font-size: 13px;
         font-weight: 700;
         white-space: pre-wrap;
+      }
+      #deletePanel {
+        display: none;
+        margin-top: 12px;
+        border: 1px solid rgba(248, 113, 113, 0.42);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(254, 242, 242, 0.92);
+      }
+      #deletePanel.visible {
+        display: grid;
+        gap: 10px;
+      }
+      #deleteCandidates {
+        display: grid;
+        gap: 8px;
+        max-height: 180px;
+        overflow: auto;
+        border: 1px solid rgba(248, 113, 113, 0.24);
+        border-radius: 7px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.92);
+        font-size: 12px;
+      }
+      .candidate-name {
+        color: var(--text);
+        font-weight: 800;
+      }
+      .candidate-reason {
+        margin-top: 3px;
+        color: var(--muted);
       }
       pre {
         margin: 0;
@@ -444,9 +482,24 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
       <section class="panel">
         <div class="actions">
           <button id="previewBtn" class="muted" type="button">페이로드 미리보기</button>
+          <button id="inspectBtn" class="muted" type="button">기존 파일 검사</button>
           <button id="runBtn" class="primary" type="button">다운로드 실행</button>
         </div>
         <div id="status"></div>
+        <div id="deletePanel">
+          <div>
+            <strong>삭제 확인 필요</strong>
+            <p class="hint">기존 다운로드 파일이 현재 요청과 맞지 않습니다. 삭제 후보를 확인한 뒤 실행하세요.</p>
+          </div>
+          <div id="deleteCandidates"></div>
+          <div id="deleteSummary" class="hint"></div>
+          <label class="checkbox-card"><input id="deleteConfirmed" type="checkbox" /> 삭제 허가</label>
+          <label>
+            확인 문구
+            <input id="deleteConfirmationText" type="text" placeholder="확인했습니다." />
+          </label>
+          <button id="deleteCandidatesBtn" class="danger" type="button">삭제 후보 삭제</button>
+        </div>
       </section>
 
       <section class="panel">
@@ -477,12 +530,20 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         lastReportOnly: document.getElementById("lastReportOnly"),
         disclosureGroups: document.getElementById("disclosureGroups"),
         previewBtn: document.getElementById("previewBtn"),
+        inspectBtn: document.getElementById("inspectBtn"),
         runBtn: document.getElementById("runBtn"),
         status: document.getElementById("status"),
         result: document.getElementById("result"),
+        deletePanel: document.getElementById("deletePanel"),
+        deleteCandidates: document.getElementById("deleteCandidates"),
+        deleteSummary: document.getElementById("deleteSummary"),
+        deleteConfirmed: document.getElementById("deleteConfirmed"),
+        deleteConfirmationText: document.getElementById("deleteConfirmationText"),
+        deleteCandidatesBtn: document.getElementById("deleteCandidatesBtn"),
       };
 
       let optionsPayload = null;
+      let currentDeleteCandidates = [];
 
       function setStatus(message, isError = false) {
         el.status.textContent = message || "";
@@ -502,9 +563,46 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
           payload = {};
         }
         if (!response.ok) {
-          throw new Error(payload.error || `Request failed: ${response.status}`);
+          throw new Error(payload.detail || payload.error || `Request failed: ${response.status}`);
         }
         return payload;
+      }
+
+      function renderDeleteCandidates(payload) {
+        currentDeleteCandidates = Array.isArray(payload.deletion_candidates) ? payload.deletion_candidates : [];
+        el.deleteCandidates.innerHTML = "";
+        currentDeleteCandidates.forEach((file) => {
+          const item = document.createElement("div");
+          const name = document.createElement("div");
+          name.className = "candidate-name";
+          name.textContent = file.name || file.path || "";
+          const reason = document.createElement("div");
+          reason.className = "candidate-reason";
+          reason.textContent = file.reason || "";
+          item.appendChild(name);
+          item.appendChild(reason);
+          el.deleteCandidates.appendChild(item);
+        });
+        const summary = payload.summary || {};
+        el.deleteSummary.textContent = `최신 상태: 성공 ${summary.success || 0}/${summary.total || 0}건, 삭제 후보 ${currentDeleteCandidates.length}개`;
+        el.deletePanel.classList.toggle("visible", currentDeleteCandidates.length > 0);
+      }
+
+      async function inspectDownloadFolder(dryRun) {
+        const payload = {
+          ...buildPayload(),
+          dry_run: dryRun,
+          delete_confirmed: Boolean(el.deleteConfirmed.checked),
+          delete_confirmation_text: String(el.deleteConfirmationText.value || "").trim(),
+        };
+        const result = await fetchJson("/api/download/inspect-folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        renderDeleteCandidates(result);
+        setResult(result);
+        return result;
       }
 
       async function chooseOutputDirectory() {
@@ -662,10 +760,43 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         }
       });
 
+      el.inspectBtn.addEventListener("click", async () => {
+        try {
+          setStatus("기존 다운로드 파일을 검사하는 중...");
+          const result = await inspectDownloadFolder(true);
+          const count = result.deletion_candidate_count || 0;
+          setStatus(count ? `삭제 확인이 필요한 기존 파일 ${count}개가 있습니다.` : "삭제할 기존 불일치 파일이 없습니다.");
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      });
+
+      el.deleteCandidatesBtn.addEventListener("click", async () => {
+        try {
+          if (!el.deleteConfirmed.checked || String(el.deleteConfirmationText.value || "").trim() !== "확인했습니다.") {
+            setStatus('삭제하려면 삭제 허가를 체크하고 "확인했습니다."를 입력하세요.', true);
+            return;
+          }
+          setStatus("확인된 기존 파일을 삭제하는 중...");
+          const result = await inspectDownloadFolder(false);
+          el.deleteConfirmed.checked = false;
+          el.deleteConfirmationText.value = "";
+          setStatus(`기존 파일 ${result.deleted_count || 0}개를 삭제했습니다. 최신 상태 기준 성공 ${result.summary?.success || 0}/${result.summary?.total || 0}건입니다.`);
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      });
+
       el.runBtn.addEventListener("click", async () => {
         try {
-          setStatus("다운로드 실행 중... (시간이 걸릴 수 있습니다)");
+          setStatus("기존 다운로드 파일을 검사하는 중...");
           const payload = buildPayload();
+          const inspection = await inspectDownloadFolder(true);
+          if ((inspection.deletion_candidate_count || 0) > 0) {
+            setStatus(`삭제 확인이 필요한 기존 파일 ${inspection.deletion_candidate_count}개가 있습니다.`);
+            return;
+          }
+          setStatus("다운로드 실행 중... (시간이 걸릴 수 있습니다)");
           const result = await fetchJson("/api/download/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -877,6 +1008,144 @@ def _download_integrity_status(output_directory: Path, page_size: int) -> dict[s
     return status
 
 
+def _result_body_files(output_directory: Path) -> list[Path]:
+    return sorted(output_directory.glob("*_post_page_*.body"))
+
+
+def _workflow_auxiliary_files(output_directory: Path) -> list[Path]:
+    return [
+        path
+        for path in (
+            output_directory / "kind_workflow.input.json",
+            output_directory / "kind_workflow.checkpoint.json",
+        )
+        if path.exists()
+    ]
+
+
+def _relative_candidate(path: Path, base: Path, reason: str) -> dict[str, str]:
+    return {
+        "path": str(path),
+        "name": str(path.relative_to(base)),
+        "reason": reason,
+    }
+
+
+def _download_cleanup_targets(payload: dict[str, Any]) -> tuple[Path, list[tuple[Path, int]]]:
+    mode = str(payload.get("mode") or "single").strip().lower()
+    output_directory_raw = str(payload.get("output_directory") or "").strip()
+    if not output_directory_raw:
+        raise ValueError("output_directory is required")
+    output_directory = Path(output_directory_raw).expanduser().resolve()
+    page_size = _as_int(payload, "page_size", 100)
+    if mode != "yearly":
+        return output_directory, [(output_directory, page_size)]
+
+    start_date_raw = str(payload.get("start_date") or "").strip()
+    end_date_raw = str(payload.get("end_date") or "").strip()
+    if not start_date_raw or not end_date_raw:
+        raise ValueError("start_date and end_date are required")
+    start_date = _parse_iso_date(start_date_raw, "start_date")
+    end_date = _parse_iso_date(end_date_raw, "end_date")
+    if end_date < start_date:
+        raise ValueError("end_date must be >= start_date")
+    targets = [
+        (
+            output_directory / f"{chunk_start.strftime('%Y%m%d')}_{chunk_end.strftime('%Y%m%d')}",
+            page_size,
+        )
+        for chunk_start, chunk_end in _split_yearly_ranges(start_date, end_date)
+    ]
+    return output_directory, targets
+
+
+def _folder_download_deletion_candidates(folder: Path, page_size: int, base: Path) -> list[dict[str, str]]:
+    if not folder.exists():
+        return []
+    body_files = _result_body_files(folder)
+    if not body_files:
+        return []
+
+    candidates: list[dict[str, str]] = []
+    input_snapshot = _load_workflow_input(folder)
+    if input_snapshot is None:
+        return [
+            _relative_candidate(path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과")
+            for path in body_files
+        ]
+
+    locked_page_size = input_snapshot.get("page_size")
+    if locked_page_size is None or int(locked_page_size) != page_size:
+        reason = "현재 요청의 페이지 크기와 맞지 않는 기존 다운로드 상태"
+        return [
+            _relative_candidate(path, base, reason)
+            for path in body_files + _workflow_auxiliary_files(folder)
+        ]
+
+    for path in body_files:
+        try:
+            validate_downloaded_result_page(path, expected_page_size=page_size)
+        except Exception as exc:
+            candidates.append(_relative_candidate(path, base, str(exc)))
+
+    if candidates:
+        return candidates
+
+    try:
+        inspect_download_directory_pages(folder, expected_page_size=page_size, require_complete=False)
+    except Exception as exc:
+        reason = str(exc)
+        return [_relative_candidate(path, base, reason) for path in body_files]
+    return []
+
+
+def inspect_download_output_directory_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Report or delete existing download files that would block a clean run."""
+    base, targets = _download_cleanup_targets(payload)
+    dry_run = bool(payload.get("dry_run", False))
+    candidates_by_path: dict[str, dict[str, str]] = {}
+    for folder, page_size in targets:
+        for candidate in _folder_download_deletion_candidates(folder, page_size, base):
+            candidates_by_path[candidate["path"]] = candidate
+
+    deletion_candidates = sorted(candidates_by_path.values(), key=lambda item: item["name"])
+    if deletion_candidates and not dry_run:
+        confirmed = (
+            payload.get("delete_confirmed") is True
+            and str(payload.get("delete_confirmation_text") or "").strip() == DOWNLOAD_DELETE_CONFIRMATION_TEXT
+        )
+        if not confirmed:
+            msg = f'파일 삭제 전 "{DOWNLOAD_DELETE_CONFIRMATION_TEXT}" 입력과 삭제 허가가 필요합니다.'
+            raise ValueError(msg)
+        for candidate in deletion_candidates:
+            Path(candidate["path"]).unlink(missing_ok=True)
+
+    statuses = [
+        _download_integrity_status(folder, page_size)
+        for folder, page_size in targets
+        if folder.exists()
+    ]
+    downloaded_pages = sum(int(status.get("downloaded_pages") or 0) for status in statuses)
+    total_pages = sum(int(status.get("total_pages") or 0) for status in statuses)
+    return {
+        "format": "kind_download_folder_cleanup_v1",
+        "output_directory": str(base),
+        "split_by_year": str(payload.get("mode") or "single").strip().lower() == "yearly",
+        "dry_run": dry_run,
+        "deleted_count": 0 if dry_run else len(deletion_candidates),
+        "deletion_candidate_count": len(deletion_candidates),
+        "deletion_candidates": deletion_candidates,
+        "deleted_files": [] if dry_run else deletion_candidates,
+        "requested_count": total_pages,
+        "download_statuses": statuses,
+        "summary": {
+            "success": downloaded_pages,
+            "failed": max(total_pages - downloaded_pages, 0),
+            "total": total_pages,
+        },
+    }
+
+
 def _append_progress(
     progress_log: MutableSequence[str] | deque[str],
     message: str,
@@ -937,6 +1206,27 @@ def _append_status_progress(
             "INTEGRITY failed " + " / ".join(status.get("errors") or ["unknown"]),
             progress_callback,
         )
+
+
+def _download_status_summary(status: dict[str, Any]) -> dict[str, int]:
+    pagination = status.get("pagination") or {}
+    downloaded = int(status.get("downloaded_pages") or pagination.get("downloaded_pages") or 0)
+    total = int(status.get("total_pages") or pagination.get("total_pages") or downloaded)
+    return {
+        "success": downloaded,
+        "failed": max(total - downloaded, 0),
+        "total": total,
+    }
+
+
+def _aggregate_download_summary(results: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {"success": 0, "failed": 0, "total": 0}
+    for result in results:
+        item = _download_status_summary(dict(result.get("download_status") or {}))
+        summary["success"] += item["success"]
+        summary["failed"] += item["failed"]
+        summary["total"] += item["total"]
+    return summary
 
 
 def _run_single(payload: dict[str, Any], progress_callback: Any | None = None) -> dict[str, Any]:
@@ -1058,6 +1348,7 @@ def _run_single(payload: dict[str, Any], progress_callback: Any | None = None) -
         "output_directory": str(output_directory),
         "pagination": status.get("pagination"),
         "download_status": status,
+        "summary": _download_status_summary(status),
         "progress_log": list(progress_log),
     }
 
@@ -1223,6 +1514,7 @@ def _run_yearly(payload: dict[str, Any], progress_callback: Any | None = None) -
         "ranges": len(yearly_ranges),
         "worker_count": worker_count,
         "results": results,
+        "summary": _aggregate_download_summary(results),
         "progress_log": list(progress_log),
     }
 
@@ -1257,6 +1549,7 @@ def _run_resume(payload: dict[str, Any], progress_callback: Any | None = None) -
             "message": "all pages already downloaded",
             "pagination": paging,
             "download_status": status_before,
+            "summary": _download_status_summary(status_before),
             "progress_log": list(progress_log),
         }
 
@@ -1293,6 +1586,7 @@ def _run_resume(payload: dict[str, Any], progress_callback: Any | None = None) -
         "output_directory": str(output_directory),
         "pagination": status_after.get("pagination"),
         "download_status": status_after,
+        "summary": _download_status_summary(status_after),
         "progress_log": list(progress_log),
     }
 
@@ -1376,6 +1670,7 @@ def build_download_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "output_directory": str(output_directory),
         "pagination": status.get("pagination"),
         "download_status": status,
+        "summary": _download_status_summary(status),
         "progress_log": list(progress_log),
     }
 
@@ -1438,6 +1733,16 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
             _update_job(job_id, status="completed", result=result)
             _append_job_progress(job_id, f"JOB completed id={job_id}")
         except Exception as exc:  # pragma: no cover - runtime path
+            try:
+                current = inspect_download_output_directory_payload({**payload, "dry_run": True})
+                summary = current.get("summary") or {}
+                _append_job_progress(
+                    job_id,
+                    f"CURRENT success={summary.get('success', 0)}/{summary.get('total', 0)} failed={summary.get('failed', 0)}",
+                )
+                _update_job(job_id, result=current)
+            except Exception:
+                pass
             _update_job(job_id, status="failed", error=str(exc))
             _append_job_progress(job_id, f"JOB failed error={exc}")
 

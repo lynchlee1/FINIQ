@@ -33,43 +33,33 @@ PARSER_REGISTRY = {
 }
 
 BOND_SUMMARY_FIELDS = (
-    "상장시장",
+    "기업명(발행사)",
     "회차",
+    "종류",
+    "기업명(행사대상)",
+    "상장구분",
     "발행금액",
-    "발행목적",
-    "표면이자율",
-    "만기이자율",
-    "만기일",
-    "할증률(%)",
     "행사가액",
-    "행사대상",
-    "전환시작일",
-    "전환종료일",
-    "리픽싱(%)",
-    "청약일",
     "납입일",
-    "납입방법",
-    "발행대상자",
+    "만기일",
+    "행사시작일",
+    "행사종료일",
+    "투자자",
 )
 CHANGE_LOG_FIELDS = {
     "bond_issuance": (
-        "상장시장",
+        "기업명(발행사)",
         "회차",
+        "종류",
+        "기업명(행사대상)",
+        "상장구분",
         "발행금액",
-        "발행목적",
-        "표면이자율",
-        "만기이자율",
-        "만기일",
-        "할증률(%)",
         "행사가액",
-        "행사대상",
-        "전환시작일",
-        "전환종료일",
-        "리픽싱(%)",
-        "청약일",
         "납입일",
-        "납입방법",
-        "발행대상자",
+        "만기일",
+        "행사시작일",
+        "행사종료일",
+        "투자자",
         "발행대상자세부엔티티",
     ),
     "rights_issuance": (
@@ -88,18 +78,17 @@ CHANGE_LOG_FIELDS = {
 }
 MAJOR_CHANGE_FIELDS = {
     "bond_issuance": {
+        "기업명(발행사)",
+        "종류",
+        "기업명(행사대상)",
+        "상장구분",
         "발행금액",
-        "발행목적",
-        "만기일",
         "행사가액",
-        "행사대상",
-        "전환시작일",
-        "전환종료일",
-        "리픽싱(%)",
-        "청약일",
         "납입일",
-        "납입방법",
-        "발행대상자",
+        "만기일",
+        "행사시작일",
+        "행사종료일",
+        "투자자",
         "발행대상자세부엔티티",
     },
     "rights_issuance": {
@@ -136,7 +125,7 @@ def _normalize_listing_market(value: Any) -> str:
     return market
 
 
-def _load_html_manifest_market_index(input_directory: Path) -> dict[str, str]:
+def _load_html_manifest_metadata_index(input_directory: Path) -> dict[str, dict[str, str]]:
     manifest_path = input_directory / HTML_MANIFEST_FILENAME
     if not manifest_path.is_file():
         return {}
@@ -146,24 +135,41 @@ def _load_html_manifest_market_index(input_directory: Path) -> dict[str, str]:
         raise ValueError(f"HTML 메타데이터 manifest를 읽을 수 없습니다: {manifest_path}") from exc
     if not isinstance(payload, dict):
         return {}
-    market_index: dict[str, str] = {}
+    metadata_index: dict[str, dict[str, str]] = {}
     for item in payload.get("disclosures") or []:
         if not isinstance(item, dict):
             continue
         acpt_no = str(item.get("acpt_no") or "").strip()
         market = _normalize_listing_market(item.get("market"))
-        if acpt_no and market:
-            market_index[acpt_no] = market
-    return market_index
+        company_name = str(item.get("company_name") or "").strip()
+        if acpt_no:
+            metadata_index[acpt_no] = {
+                "market": market,
+                "company_name": company_name,
+            }
+    return metadata_index
 
 
-def _apply_manifest_listing_market(record: dict[str, Any], market_index: dict[str, str]) -> dict[str, Any]:
+def _apply_manifest_metadata(
+    record: dict[str, Any],
+    metadata_index: dict[str, dict[str, str]],
+    *,
+    mode: str,
+) -> dict[str, Any]:
     acpt_no = str(record.get("acpt_no") or "").strip()
-    market = market_index.get(acpt_no)
-    if not market:
+    metadata = metadata_index.get(acpt_no) or {}
+    market = metadata.get("market")
+    company_name = metadata.get("company_name")
+    if not market and not company_name:
         return record
     updated_record = dict(record)
-    updated_record["상장시장"] = market
+    if mode == "bond_issuance":
+        if market:
+            updated_record["상장구분"] = market
+        if company_name:
+            updated_record["기업명(발행사)"] = company_name
+    elif market:
+        updated_record["상장시장"] = market
     return updated_record
 
 
@@ -402,7 +408,7 @@ def parse_disclosure_html_payload(
     cancel_token = str(body.get("cancel_token") or "").strip() or None
     _clear_cancel_token(cancel_token)
     html_files = _collect_html_files(input_directory, limit)
-    manifest_market_index = _load_html_manifest_market_index(input_directory)
+    manifest_metadata_index = _load_html_manifest_metadata_index(input_directory)
 
     records: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -420,7 +426,11 @@ def parse_disclosure_html_payload(
         existing_payload = _load_existing_parse_payload(output_path, mode)
         if existing_payload is not None:
             records = [
-                _apply_manifest_listing_market(record, manifest_market_index)
+                _apply_manifest_metadata(
+                    record,
+                    manifest_metadata_index,
+                    mode=mode,
+                )
                 for record in list(existing_payload.get("records") or [])
                 if isinstance(record, dict)
             ]
@@ -465,7 +475,13 @@ def parse_disclosure_html_payload(
                     }
                     warnings.append(warning_info)
                     emit(f"파싱 경고 {index}/{len(html_files)}: {html_file.name} {warning}")
-                records.append(_apply_manifest_listing_market(parsed_record, manifest_market_index))
+                records.append(
+                    _apply_manifest_metadata(
+                        parsed_record,
+                        manifest_metadata_index,
+                        mode=mode,
+                    )
+                )
                 processed_files.add(source_file)
             except Exception as exc:
                 error_info = {

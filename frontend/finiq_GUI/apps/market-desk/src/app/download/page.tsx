@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { Play, Search, ChevronRight, ChevronDown, CheckSquare, Square, Loader2 } from "lucide-react";
+import { Play, Search, ChevronRight, ChevronDown, CheckSquare, Square, Loader2, Trash2, FolderOpen } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
 import { Input } from "@finiq/ui";
@@ -69,6 +69,10 @@ export default function DownloadPage() {
   const [resumeYearly, setResumeYearly] = useState(false);
   const [logLimit, setLogLimit] = useState("20");
   const [selectedDisclosures, setSelectedDisclosures] = useState<Record<string, string[]>>({});
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+  const [inspectRunning, setInspectRunning] = useState(false);
+  const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
 
   const fetchOptions = useCallback(async () => {
     try {
@@ -136,21 +140,118 @@ export default function DownloadPage() {
     }
   };
 
-  const handleRun = async () => {
+  const startDownloadJob = async () => {
+    const response = await fetch("/api/download/run/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload()),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || "Job start failed");
+    }
+    const data = await response.json();
+    setResult(null);
+    startPolling(data.job_id);
+  };
+
+  const inspectExistingFiles = async (dryRun: boolean) => {
+    const response = await fetch("/api/download/inspect-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...buildPayload(),
+        dry_run: dryRun,
+        delete_confirmed: deleteConfirmed,
+        delete_confirmation_text: deleteConfirmationText,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || "Download folder inspection failed");
+    return data;
+  };
+
+  const buildInspectionStatus = (data: any, deleted: boolean) => {
+    const files = Array.isArray(deleted ? data.deleted_files : data.deletion_candidates)
+      ? (deleted ? data.deleted_files : data.deletion_candidates)
+      : [];
+    const lines = [
+      deleted ? "파일 삭제 완료" : "폴더 검사 완료",
+      `대상 페이지: ${data.requested_count || data.summary?.total || 0}`,
+      `연도별 분할: ${data.split_by_year ? "On" : "Off"}`,
+      `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${deleted ? data.deleted_count || 0 : data.deletion_candidate_count || 0}`,
+      `최신 상태: 성공 ${data.summary?.success || 0}/${data.summary?.total || 0}건`,
+      `저장 경로: ${data.output_directory || ""}`,
+    ];
+    if (files.length) {
+      lines.push("", deleted ? "삭제한 파일" : "삭제 예정 파일", ...files.map((file: any) => `- ${file.name} (${file.reason})`));
+    }
+    return lines.join("\n");
+  };
+
+  const handleInspectFolder = async () => {
+    if (!outputDirectory) {
+      setStatus("저장 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
     try {
-      setStatus("다운로드 작업을 시작하는 중...");
-      const response = await fetch("/api/download/run/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
-      if (!response.ok) throw new Error("Job start failed");
-      const data = await response.json();
+      setInspectRunning(true);
+      setIsErrorStatus(false);
+      setStatus("폴더를 검사하는 중입니다...");
+      const data = await inspectExistingFiles(true);
+      setLastInspectionCandidateCount(data.deletion_candidate_count || 0);
       setResult(data);
-      startPolling(data.job_id);
+      setStatus(buildInspectionStatus(data, false));
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
+    } finally {
+      setInspectRunning(false);
+    }
+  };
+
+  const handleRun = async () => {
+    try {
+      setStatus("기존 다운로드 파일을 검사하는 중...");
+      const inspection = await inspectExistingFiles(true);
+      const candidates = Array.isArray(inspection.deletion_candidates) ? inspection.deletion_candidates : [];
+      setLastInspectionCandidateCount(inspection.deletion_candidate_count || 0);
+      if (candidates.length) {
+        setResult(inspection);
+        setStatus(buildInspectionStatus(inspection, false));
+        setIsErrorStatus(false);
+        return;
+      }
+      setStatus("다운로드 작업을 시작하는 중...");
+      await startDownloadJob();
+    } catch (err: any) {
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    }
+  };
+
+  const handleDeleteUnexpectedFiles = async () => {
+    try {
+      if (!deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다.") {
+        setStatus('삭제하려면 삭제 허가를 체크하고 "확인했습니다."를 입력하세요.');
+        setIsErrorStatus(true);
+        return;
+      }
+      setInspectRunning(true);
+      setIsErrorStatus(false);
+      setStatus("확인된 기존 파일을 삭제하는 중...");
+      const inspection = await inspectExistingFiles(false);
+      setLastInspectionCandidateCount(0);
+      setDeleteConfirmed(false);
+      setDeleteConfirmationText("");
+      setResult(inspection);
+      setStatus(buildInspectionStatus(inspection, true));
+    } catch (err: any) {
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    } finally {
+      setInspectRunning(false);
     }
   };
 
@@ -341,6 +442,37 @@ export default function DownloadPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col gap-2">
+                <Button variant="outline" className="w-full" onClick={handleInspectFolder} disabled={!!activeJobId || inspectRunning}>
+                  {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
+                  폴더 검사하기
+                </Button>
+                <div className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="downloadDeleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="dark:border-[#30363d]" />
+                    <Label htmlFor="downloadDeleteConfirmed" className="cursor-pointer text-xs dark:text-slate-300">삭제 허가</Label>
+                  </div>
+                  <Input
+                    value={deleteConfirmationText}
+                    onChange={(e) => setDeleteConfirmationText(e.target.value)}
+                    placeholder="확인했습니다."
+                    className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                  />
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={handleDeleteUnexpectedFiles}
+                    disabled={
+                      !!activeJobId ||
+                      inspectRunning ||
+                      lastInspectionCandidateCount === 0 ||
+                      !deleteConfirmed ||
+                      deleteConfirmationText.trim() !== "확인했습니다."
+                    }
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    삭제 예정 파일 {lastInspectionCandidateCount}개 삭제
+                  </Button>
+                </div>
                 <Button variant="outline" className="w-full" onClick={handlePreview} disabled={!!activeJobId}>
                   <Search className="mr-2 h-4 w-4" />
                   미리보기
@@ -362,7 +494,7 @@ export default function DownloadPage() {
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
                       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary?.success || result.success_count || result.total_count || 0}</strong>
+                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary?.success || result.success_count || 0}/{result.summary?.total || result.total_count || result.summary?.success || 0}</strong>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
                       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">실패</span>

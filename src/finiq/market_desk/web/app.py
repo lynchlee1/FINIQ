@@ -43,6 +43,7 @@ from finiq.market_desk.web.download import (
     build_download_preview_payload,
     build_download_status_payload,
     get_download_job,
+    inspect_download_output_directory_payload,
     run_download_action,
     start_download_job,
 )
@@ -62,6 +63,7 @@ from finiq.market_desk.web.disclosure_html_parse import (
     parse_disclosure_html_payload,
 )
 from finiq.market_desk.web.table_export import build_disclosure_table_payload
+from finiq.market_desk.web.utility import run_partition_storage_payload
 
 app = FastAPI(title="FINIQ MarketDesk API")
 
@@ -102,6 +104,8 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
             result = run_integrated_market_history_payload(payload, progress_callback=progress_callback)
         elif kind == "table_build":
             result = build_disclosure_table_payload(payload, progress_callback=progress_callback)
+        elif kind == "utility_partition":
+            result = run_partition_storage_payload(payload, progress_callback=progress_callback)
         else:
             raise ValueError(f"Unhandled job kind: {kind}")
 
@@ -396,6 +400,10 @@ async def download_preview(payload: dict[str, Any]):
 async def download_status_route(payload: dict[str, Any]):
     return build_download_status_payload(payload)
 
+@app.post("/api/download/inspect-folder")
+async def download_inspect_folder_route(payload: dict[str, Any]):
+    return inspect_download_output_directory_payload(payload)
+
 @app.post("/api/download/run/start")
 async def download_start_route(payload: dict[str, Any]):
     return start_download_job(payload)
@@ -476,6 +484,13 @@ async def get_html_job_status(job_id: str):
 
 @app.get("/api/integrated-data/jobs/{job_id}")
 async def get_integrated_job_status(job_id: str):
+    snapshot = job_manager.get_snapshot(job_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return snapshot
+
+@app.get("/api/utility/jobs/{job_id}")
+async def get_utility_job_status(job_id: str):
     snapshot = job_manager.get_snapshot(job_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -577,6 +592,13 @@ async def start_integrated_market_history(payload: dict[str, Any], background_ta
     job_id = uuid.uuid4().hex
     job_manager.create_job(job_id, "integrated_market_history")
     background_tasks.add_task(_run_job_worker, job_id, "integrated_market_history", payload)
+    return job_manager.get_snapshot(job_id)
+
+@app.post("/api/utility/partition-storage/start")
+async def start_partition_storage(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    job_id = uuid.uuid4().hex
+    job_manager.create_job(job_id, "utility_partition")
+    background_tasks.add_task(_run_job_worker, job_id, "utility_partition", payload)
     return job_manager.get_snapshot(job_id)
 
 if __name__ == "__main__":

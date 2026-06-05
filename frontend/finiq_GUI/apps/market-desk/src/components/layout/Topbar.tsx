@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/download", label: "공시데이터 구축", paths: ["/download", "/table", "/filter"] },
   { href: "/html-download", label: "원문 처리", paths: ["/html-download", "/html-content-download", "/html-parse", "/html-change-log", "/html-bond-summary"] },
   { href: "/integrated-data", label: "종합데이터 구축", paths: ["/integrated-data", "/integrated-merge", "/integrated-market-history"] },
+  { href: "/utility", label: "유틸리티", paths: ["/utility"] },
 ];
 
 export function Topbar() {

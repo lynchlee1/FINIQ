@@ -1,0 +1,163 @@
+"""공시 기초 메타데이터 및 공통 레코드 구성 유틸리티."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+from lxml import html
+
+from .text import clean_text
+from .io import parse_html_document
+from .tables import extract_tables
+
+
+def extract_title(document: html.HtmlElement) -> str:
+    """다양한 HTML 구조 속에서 가장 신뢰도 높은 공시 제목을 추출한다.
+
+    연도별로 뷰어 내 제목 위치가 다르기 때문에 메타 태그부터 헤딩 태그까지 
+    우선순위에 따라 순차적으로 탐색한다.
+    """
+    for xpath in (
+        "//meta[translate(@property, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='og:title']/@content",
+        "//meta[translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='title']/@content",
+        "//title/text()",
+        "//*[@title]/@title",
+        "//h1/text()",
+        "//h2/text()",
+    ):
+        values = document.xpath(xpath)
+        for value in values:
+            title = clean_text(str(value))
+            if title:
+                return title
+    return ""
+
+
+def extract_acpt_no(file_path: str | Path) -> str:
+    """HTML 파일명을 기반으로 KIND 접수번호를 추론한다."""
+    stem = Path(file_path).stem
+    candidate = stem.split("_", 1)[0]
+    return candidate if candidate.isdigit() else ""
+
+
+def _viewer_acpt_no(document: html.HtmlElement, file_path: str | Path) -> str:
+    """HTML 내에서 KIND 접수번호를 찾고, 실패할 경우 파일명에서 추론한다."""
+    values = document.xpath("//input[@name='acptNo']/@value")
+    for value in values:
+        acpt_no = clean_text(str(value))
+        if acpt_no:
+            return acpt_no
+    return extract_acpt_no(file_path)
+
+
+def _main_doc_options(document: html.HtmlElement) -> list[dict[str, Any]]:
+    """KIND 뷰어 내 정정 문서 버전 선택기(select) 목록을 파싱한다."""
+    options: list[dict[str, Any]] = []
+    for option in document.xpath("//select[@id='mainDoc' or @name='mainDoc']/option"):
+        raw_value = clean_text(str(option.get("value") or ""))
+        if not raw_value:
+            continue
+        doc_no, _, latest_flag = raw_value.partition("|")
+        rcept_no = clean_text(doc_no)
+        if not rcept_no:
+            continue
+        options.append(
+            {
+                "rcept_no": rcept_no,
+                "latest_flag": clean_text(latest_flag).upper(),
+                "selected": option.get("selected") is not None,
+            }
+        )
+    return options
+
+
+def _correction_families(document: html.HtmlElement, *, acpt_no: str) -> tuple[str | None, dict[str, Any]]:
+    """메인 문서 목록을 통해 정정 공시 묶음(family) 메타데이터를 구성한다.
+
+    최신 접수번호가 family ID가 되며, 현재 선택된 옵션을 통해 
+    파싱 중인 HTML의 정정 차수를 식별한다.
+    """
+    main_docs = _main_doc_options(document)
+    if not main_docs:
+        return None, {}
+
+    current_sequence = next(
+        (index for index, item in enumerate(main_docs) if item["selected"]),
+        None,
+    )
+    latest_item = next(
+        (item for item in main_docs if item["latest_flag"] == "Y"),
+        main_docs[-1],
+    )
+    family_id = latest_item["rcept_no"]
+    current_rcept_no = (
+        main_docs[current_sequence]["rcept_no"]
+        if current_sequence is not None
+        else None
+    )
+    members = []
+    for sequence, item in enumerate(main_docs):
+        members.append(
+            {
+                "sequence": sequence,
+                "acpt_no": acpt_no if sequence == current_sequence else None,
+                "rcept_no": item["rcept_no"],
+            }
+        )
+    return current_rcept_no, {
+        family_id: {
+            "current_sequence": current_sequence,
+            "members": members,
+        }
+    }
+
+
+def _listing_market(document_text: str) -> str:
+    """명시적인 메타데이터가 없을 경우 문서 본문을 통해 상장 시장을 추론한다."""
+    if "코스닥시장" in document_text:
+        return "코스닥"
+    if "유가증권시장" in document_text:
+        return "코스피"
+    if "코넥스시장" in document_text:
+        return "코넥스"
+    return "기타"
+
+
+def preserve_viewer_metadata(
+    record: dict[str, Any], viewer_record: dict[str, Any]
+) -> None:
+    """본문 HTML 파싱 시 래퍼 HTML의 고유 메타데이터를 유지한다."""
+    if not record.get("title"):
+        record["title"] = viewer_record.get("title") or ""
+    if not record.get("correction_families") and viewer_record.get(
+        "correction_families"
+    ):
+        record["correction_families"] = viewer_record["correction_families"]
+    if not record.get("rcept_no") and viewer_record.get("rcept_no"):
+        record["rcept_no"] = viewer_record["rcept_no"]
+    if viewer_record.get("acpt_no"):
+        record["acpt_no"] = viewer_record["acpt_no"]
+
+
+def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: str) -> dict[str, Any]:
+    """공시 HTML 파일의 기초가 되는 공통 파싱 레코드를 생성한다.
+
+    유형별 파서는 반환된 레코드 위에 비즈니스 필드를 덧붙이는 구조로 동작한다.
+    파싱 과정 전반에서 사용할 수 있도록 원본 테이블 데이터를 포함한다.
+    """
+    document = parse_html_document(html_markup)
+    raw_tables = extract_tables(document)
+    acpt_no = _viewer_acpt_no(document, file_path)
+    rcept_no, correction_families = _correction_families(document, acpt_no=acpt_no)
+    document_text = clean_text(" ".join(document.itertext()))
+    return {
+        "correction_families": correction_families,
+        "rcept_no": rcept_no,
+        "acpt_no": acpt_no,
+        "source_file": str(Path(file_path).resolve()),
+        "mode": mode,
+        "title": extract_title(document),
+        "상장시장": _listing_market(document_text),
+        "raw_tables": raw_tables,
+        "raw_rows": [row for table in raw_tables for row in table["logical_rows"]],
+    }
