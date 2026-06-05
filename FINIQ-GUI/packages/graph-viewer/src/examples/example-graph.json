@@ -1,0 +1,142 @@
+{
+  "nodes": [
+    {
+      "id": "alice",
+      "label": "Alice Kim",
+      "type": "Person",
+      "group": "Engineering",
+      "tags": ["staff", "mentor"],
+      "properties": {
+        "title": "Staff Engineer",
+        "location": "Seoul"
+      }
+    },
+    {
+      "id": "bob",
+      "label": "Bob Lee",
+      "type": "Person",
+      "group": "Engineering",
+      "tags": ["staff"],
+      "properties": {
+        "title": "Senior Engineer"
+      }
+    },
+    {
+      "id": "charlie",
+      "label": "Charlie Park",
+      "type": "Person",
+      "group": "Product",
+      "tags": ["staff", "pm"],
+      "properties": {
+        "title": "Product Manager"
+      }
+    },
+    {
+      "id": "diana",
+      "label": "Diana Choi",
+      "type": "Person",
+      "group": "Design",
+      "tags": ["staff", "ux"],
+      "properties": {
+        "title": "Lead Designer"
+      }
+    },
+    {
+      "id": "proj-atlas",
+      "label": "Project Atlas",
+      "type": "Project",
+      "group": "Q2",
+      "tags": ["priority", "platform"],
+      "properties": {
+        "status": "active"
+      }
+    },
+    {
+      "id": "proj-orion",
+      "label": "Project Orion",
+      "type": "Project",
+      "group": "Q3",
+      "tags": ["new"],
+      "properties": {
+        "status": "planning"
+      }
+    },
+    {
+      "id": "acme",
+      "label": "ACME Corp",
+      "type": "Organization",
+      "tags": ["partner"],
+      "properties": {
+        "tier": "gold"
+      }
+    },
+    {
+      "id": "finiq",
+      "label": "FINIQ",
+      "type": "Organization",
+      "tags": ["internal"],
+      "properties": {
+        "domain": "graph-analytics"
+      }
+    },
+    {
+      "id": "graph-db",
+      "label": "GraphDB",
+      "type": "System",
+      "group": "Platform",
+      "tags": ["infra"],
+      "properties": {
+        "owner": "Engineering"
+      }
+    },
+    {
+      "id": "design-system",
+      "label": "Design System",
+      "type": "System",
+      "group": "Frontend",
+      "tags": ["ui"],
+      "properties": {
+        "owner": "Design"
+      }
+    },
+    {
+      "id": "kpi-growth",
+      "label": "Growth KPI",
+      "type": "Metric",
+      "tags": ["business"],
+      "properties": {
+        "target": "25%"
+      }
+    },
+    {
+      "id": "kpi-reliability",
+      "label": "Reliability KPI",
+      "type": "Metric",
+      "tags": ["technical"],
+      "properties": {
+        "target": "99.9%"
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "alice", "target": "bob", "relation": "mentors", "weight": 2, "directed": true },
+    { "id": "e2", "source": "bob", "target": "alice", "relation": "reports_to", "weight": 1, "directed": true },
+    { "id": "e3", "source": "alice", "target": "charlie", "relation": "collaborates_with", "weight": 2, "directed": false },
+    { "id": "e4", "source": "charlie", "target": "diana", "relation": "collaborates_with", "weight": 2, "directed": false },
+    { "id": "e5", "source": "diana", "target": "design-system", "relation": "owns", "weight": 3, "directed": true },
+    { "id": "e6", "source": "alice", "target": "proj-atlas", "relation": "works_on", "weight": 4, "directed": true },
+    { "id": "e7", "source": "bob", "target": "proj-atlas", "relation": "works_on", "weight": 3, "directed": true },
+    { "id": "e8", "source": "charlie", "target": "proj-atlas", "relation": "owns", "weight": 4, "directed": true },
+    { "id": "e9", "source": "diana", "target": "proj-orion", "relation": "supports", "weight": 2, "directed": true },
+    { "id": "e10", "source": "proj-atlas", "target": "graph-db", "relation": "depends_on", "weight": 5, "directed": true },
+    { "id": "e11", "source": "proj-orion", "target": "design-system", "relation": "depends_on", "weight": 3, "directed": true },
+    { "id": "e12", "source": "acme", "target": "proj-atlas", "relation": "funds", "weight": 5, "directed": true },
+    { "id": "e13", "source": "finiq", "target": "proj-orion", "relation": "sponsors", "weight": 4, "directed": true },
+    { "id": "e14", "source": "proj-atlas", "target": "kpi-growth", "relation": "impacts", "weight": 4, "directed": true },
+    { "id": "e15", "source": "graph-db", "target": "kpi-reliability", "relation": "impacts", "weight": 5, "directed": true },
+    { "id": "e16", "source": "alice", "target": "graph-db", "relation": "owns", "weight": 2, "directed": true },
+    { "id": "e17", "source": "alice", "target": "graph-db", "relation": "owns", "weight": 1.5, "directed": true },
+    { "id": "e18", "source": "bob", "target": "proj-atlas", "relation": "works_on", "weight": 2.5, "directed": true },
+    { "id": "e19", "source": "kpi-growth", "target": "kpi-growth", "relation": "correlates_with", "weight": 1, "directed": false }
+  ]
+}

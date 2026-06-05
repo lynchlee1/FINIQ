@@ -1,0 +1,31 @@
+{
+  "name": "finiq-gui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:graph-viewer": "npm run dev -w @finiq/app-graph-viewer",
+    "dev:consigliere-ai": "npm run dev -w @finiq/app-consigliere-ai"
+  },
+  "dependencies": {
+    "d3-force": "^3.0.0",
+    "picomatch": "^4.0.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-force-graph-2d": "^1.29.1"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.10"
+  }
+}
