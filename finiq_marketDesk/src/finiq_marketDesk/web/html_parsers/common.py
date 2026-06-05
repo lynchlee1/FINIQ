@@ -1,0 +1,363 @@
+"""Shared helpers for KIND disclosure viewer HTML parsers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import re
+from typing import Any
+
+from lxml import etree, html
+
+
+def decode_html_markup(html_markup: str | bytes) -> str:
+    """Return HTML markup as text with forgiving byte decoding."""
+    if isinstance(html_markup, str):
+        return html_markup
+    for encoding in ("utf-8", "cp949", "euc-kr"):
+        try:
+            return html_markup.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return html_markup.decode("utf-8", errors="replace")
+
+
+def parse_html_document(html_markup: str | bytes) -> html.HtmlElement:
+    """Parse imperfect viewer HTML into an lxml document."""
+    parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
+    decoded = decode_html_markup(html_markup)
+    document = html.fromstring(decoded, parser=parser)
+    return document
+
+
+def clean_text(value: str | None) -> str:
+    """Collapse whitespace in display text."""
+    return " ".join((value or "").split())
+
+
+def element_text(element: etree._Element) -> str:
+    """Extract normalized text from an lxml element."""
+    return clean_text(" ".join(element.itertext()))
+
+
+def parse_int(value: str | None, *, dash_as_zero: bool = False) -> int | None:
+    """Parse a comma-formatted integer from text."""
+    text = clean_text(value)
+    if dash_as_zero and text in {"", "-"}:
+        return 0
+    match = re.search(r"-?\d[\d,]*", text)
+    if match is None:
+        return None
+    return int(match.group(0).replace(",", ""))
+
+
+def parse_float(value: str | None) -> float | None:
+    """Parse a decimal number from text."""
+    text = clean_text(value)
+    match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
+    return float(match.group(0)) if match else None
+
+
+def extract_title(document: html.HtmlElement) -> str:
+    """Extract the best available disclosure title from viewer HTML."""
+    for xpath in (
+        "//meta[translate(@property, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='og:title']/@content",
+        "//meta[translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='title']/@content",
+        "//title/text()",
+        "//*[@title]/@title",
+        "//h1/text()",
+        "//h2/text()",
+    ):
+        values = document.xpath(xpath)
+        for value in values:
+            title = clean_text(str(value))
+            if title:
+                return title
+    return ""
+
+
+def extract_acpt_no(file_path: str | Path) -> str:
+    """Infer KIND receipt number from a viewer HTML filename."""
+    stem = Path(file_path).stem
+    candidate = stem.split("_", 1)[0]
+    return candidate if candidate.isdigit() else ""
+
+
+def _viewer_acpt_no(document: html.HtmlElement, file_path: str | Path) -> str:
+    values = document.xpath("//input[@name='acptNo']/@value")
+    for value in values:
+        acpt_no = clean_text(str(value))
+        if acpt_no:
+            return acpt_no
+    return extract_acpt_no(file_path)
+
+
+def _main_doc_options(document: html.HtmlElement) -> list[dict[str, Any]]:
+    options: list[dict[str, Any]] = []
+    for option in document.xpath("//select[@id='mainDoc' or @name='mainDoc']/option"):
+        raw_value = clean_text(str(option.get("value") or ""))
+        if not raw_value:
+            continue
+        doc_no, _, latest_flag = raw_value.partition("|")
+        rcept_no = clean_text(doc_no)
+        if not rcept_no:
+            continue
+        options.append(
+            {
+                "rcept_no": rcept_no,
+                "latest_flag": clean_text(latest_flag).upper(),
+                "selected": option.get("selected") is not None,
+            }
+        )
+    return options
+
+
+def _correction_families(document: html.HtmlElement, *, acpt_no: str) -> tuple[str | None, dict[str, Any]]:
+    main_docs = _main_doc_options(document)
+    if not main_docs:
+        return None, {}
+
+    current_sequence = next(
+        (index for index, item in enumerate(main_docs) if item["selected"]),
+        None,
+    )
+    latest_item = next(
+        (item for item in main_docs if item["latest_flag"] == "Y"),
+        main_docs[-1],
+    )
+    family_id = latest_item["rcept_no"]
+    current_rcept_no = (
+        main_docs[current_sequence]["rcept_no"]
+        if current_sequence is not None
+        else None
+    )
+    members = []
+    for sequence, item in enumerate(main_docs):
+        members.append(
+            {
+                "sequence": sequence,
+                "acpt_no": acpt_no if sequence == current_sequence else None,
+                "rcept_no": item["rcept_no"],
+            }
+        )
+    return current_rcept_no, {
+        family_id: {
+            "current_sequence": current_sequence,
+            "members": members,
+        }
+    }
+
+
+def extract_table_rows(document: html.HtmlElement) -> list[list[str]]:
+    """Return all table rows as normalized cell text."""
+    rows: list[list[str]] = []
+    for table in extract_tables(document):
+        rows.extend(table["logical_rows"])
+    return rows
+
+
+def _span_size(cell: etree._Element, attribute_name: str) -> int:
+    raw_value = cell.get(attribute_name)
+    try:
+        value = int(str(raw_value or "1"))
+    except ValueError:
+        return 1
+    return max(value, 1)
+
+
+def _cell_slot(
+    cell: etree._Element,
+    *,
+    row_index: int,
+    col_index: int,
+    source_row: int,
+    source_col: int,
+    rowspan: int,
+    colspan: int,
+    from_span: bool,
+) -> dict[str, Any]:
+    return {
+        "text": element_text(cell),
+        "row_index": row_index,
+        "col_index": col_index,
+        "source_row": source_row,
+        "source_col": source_col,
+        "rowspan": rowspan,
+        "colspan": colspan,
+        "from_span": from_span,
+    }
+
+
+def expand_table(table: etree._Element) -> list[list[dict[str, Any]]]:
+    """Expand a table grid so rowspan/colspan cells appear in every occupied slot."""
+    active_spans: dict[int, tuple[int, etree._Element, int, int, int, int]] = {}
+    grid: list[list[dict[str, Any]]] = []
+
+    for row_index, row in enumerate(table.xpath(".//tr")):
+        expanded_row: list[dict[str, Any]] = []
+        col_index = 0
+        source_col = 0
+        consumed_active_cols: set[int] = set()
+
+        def append_active_span() -> bool:
+            nonlocal col_index
+            span = active_spans.get(col_index)
+            if span is None:
+                return False
+            consumed_active_cols.add(col_index)
+            _, span_cell, source_row, span_source_col, rowspan, colspan = span
+            expanded_row.append(
+                _cell_slot(
+                    span_cell,
+                    row_index=row_index,
+                    col_index=col_index,
+                    source_row=source_row,
+                    source_col=span_source_col,
+                    rowspan=rowspan,
+                    colspan=colspan,
+                    from_span=True,
+                )
+            )
+            col_index += 1
+            return True
+
+        for cell in row.xpath("./th|./td"):
+            while append_active_span():
+                pass
+
+            rowspan = _span_size(cell, "rowspan")
+            colspan = _span_size(cell, "colspan")
+            for offset in range(colspan):
+                expanded_row.append(
+                    _cell_slot(
+                        cell,
+                        row_index=row_index,
+                        col_index=col_index + offset,
+                        source_row=row_index,
+                        source_col=source_col,
+                        rowspan=rowspan,
+                        colspan=colspan,
+                        from_span=False,
+                    )
+                )
+                if rowspan > 1:
+                    active_spans[col_index + offset] = (
+                        rowspan - 1,
+                        cell,
+                        row_index,
+                        source_col,
+                        rowspan,
+                        colspan,
+                    )
+            col_index += colspan
+            source_col += 1
+
+        while active_spans and col_index <= max(active_spans):
+            if not append_active_span():
+                expanded_row.append(
+                    {
+                        "text": "",
+                        "row_index": row_index,
+                        "col_index": col_index,
+                        "source_row": row_index,
+                        "source_col": source_col,
+                        "rowspan": 1,
+                        "colspan": 1,
+                        "from_span": False,
+                    }
+                )
+                col_index += 1
+
+        if any(slot["text"] for slot in expanded_row):
+            grid.append(expanded_row)
+
+        next_active_spans: dict[int, tuple[int, etree._Element, int, int, int, int]] = {}
+        for active_col, (remaining, span_cell, source_row, span_source_col, rowspan, colspan) in active_spans.items():
+            next_remaining = remaining - 1 if active_col in consumed_active_cols else remaining
+            if next_remaining > 0:
+                next_active_spans[active_col] = (
+                    next_remaining,
+                    span_cell,
+                    source_row,
+                    span_source_col,
+                    rowspan,
+                    colspan,
+                )
+        active_spans = next_active_spans
+
+    return grid
+
+
+def compress_repeated_texts(row: list[str]) -> list[str]:
+    """Drop empty and consecutive duplicate values from an expanded row."""
+    compressed: list[str] = []
+    for value in row:
+        cleaned = clean_text(value)
+        if not cleaned or (compressed and compressed[-1] == cleaned):
+            continue
+        compressed.append(cleaned)
+    return compressed
+
+
+def extract_tables(document: html.HtmlElement) -> list[dict[str, Any]]:
+    """Return all tables with raw span-aware cells and normalized logical rows."""
+    tables: list[dict[str, Any]] = []
+    for table_index, table in enumerate(document.xpath("//table")):
+        grid = expand_table(table)
+        logical_rows = [
+            compress_repeated_texts([slot["text"] for slot in row])
+            for row in grid
+        ]
+        logical_rows = [row for row in logical_rows if row]
+        tables.append(
+            {
+                "index": table_index,
+                "chapter_title": _nearest_chapter_title(table),
+                "cells": grid,
+                "logical_rows": logical_rows,
+            }
+        )
+    return tables
+
+
+def _nearest_chapter_title(table: etree._Element) -> str:
+    chapter_nodes = table.xpath(
+        "preceding::*["
+        "self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6 or "
+        "(self::p and contains(concat(' ', normalize-space(@class), ' '), ' CORRECTION ')) or "
+        "(self::p and contains(concat(' ', normalize-space(@class), ' '), ' SECTION-')) or "
+        "(self::p and contains(concat(' ', normalize-space(@class), ' '), ' COVER-TITLE '))"
+        "][1]"
+    )
+    if not chapter_nodes:
+        return ""
+    return element_text(chapter_nodes[0])
+
+
+def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: str) -> dict[str, Any]:
+    """Build the shared architecture-level parse record for a disclosure HTML file."""
+    document = parse_html_document(html_markup)
+    raw_tables = extract_tables(document)
+    acpt_no = _viewer_acpt_no(document, file_path)
+    rcept_no, correction_families = _correction_families(document, acpt_no=acpt_no)
+    document_text = clean_text(" ".join(document.itertext()))
+    return {
+        "correction_families": correction_families,
+        "rcept_no": rcept_no,
+        "acpt_no": acpt_no,
+        "source_file": str(Path(file_path).resolve()),
+        "mode": mode,
+        "title": extract_title(document),
+        "상장시장": _listing_market(document_text),
+        "raw_tables": raw_tables,
+        "raw_rows": [row for table in raw_tables for row in table["logical_rows"]],
+    }
+
+
+def _listing_market(document_text: str) -> str:
+    if "코스닥시장" in document_text:
+        return "코스닥"
+    if "유가증권시장" in document_text:
+        return "코스피"
+    if "코넥스시장" in document_text:
+        return "코넥스"
+    return "기타"
