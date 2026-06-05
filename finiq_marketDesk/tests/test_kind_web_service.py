@@ -22,6 +22,7 @@ from finiq_marketDesk.web.disclosure_html import (
 from finiq_marketDesk.web.disclosure_html_parse import (
     PARSER_REGISTRY,
     build_bond_parse_summary_payload,
+    build_parse_change_log_payload,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
@@ -29,12 +30,14 @@ from finiq_marketDesk.web.html_parsers.bond_issuance import parse_bond_issuance
 from finiq_marketDesk.web.html_parsers.common import expand_table, parse_html_document
 from finiq_marketDesk.web.table_export import build_disclosure_table_payload
 from finiq_marketDesk.analytics.quanti import list_quanti_stock_codes
+from finiq_marketDesk.web.html_parsers.rights_issuance import parse_rights_issuance
 
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parents[1]
 HTML_PARSERS_DIR = REPO_ROOT / "finiq_marketDesk" / "src" / "finiq_marketDesk" / "web" / "html_parsers"
 GUI_HTML_DOWNLOAD_PAGE = REPO_ROOT / "finiq_GUI" / "apps" / "market-desk" / "html-download.html"
 GUI_HTML_PARSE_PAGE = REPO_ROOT / "finiq_GUI" / "apps" / "market-desk" / "html-parse.html"
+GUI_HTML_CHANGE_LOG_PAGE = REPO_ROOT / "finiq_GUI" / "apps" / "market-desk" / "html-change-log.html"
 EXPECTED_PARSE_MODES = {
     "bond_issuance",
     "rights_issuance",
@@ -1091,12 +1094,96 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
     assert payload["format"] == "finiq_bond_parse_summary_v1"
     assert payload["summary"] == {
         "records": 1,
+        "visible_records": 1,
         "families": 1,
         "correction_records": 1,
         "latest_records": 1,
     }
     assert payload["records"][0]["family_id"] == "20250102009999"
     assert payload["records"][0]["fields"]["발행금액"] == 1_000_000_000
+
+
+def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path) -> None:
+    parse_path = tmp_path / "parsed-rights_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "rights_issuance",
+                "records": [
+                    {
+                        "title": "유상증자결정",
+                        "acpt_no": "20240822000001",
+                        "rcept_no": "20240822009999",
+                        "source_file": "/tmp/20240822000001.html",
+                        "correction_families": {
+                            "20240829009999": {
+                                "current_sequence": 0,
+                                "members": [
+                                    {"sequence": 0, "acpt_no": "20240822000001", "rcept_no": "20240822009999"},
+                                    {"sequence": 1, "acpt_no": "20240829000001", "rcept_no": "20240829009999"},
+                                ],
+                            }
+                        },
+                        "신주의 종류와 수": [["보통주식", 100]],
+                        "발행목적": [["운영자금", 1000]],
+                        "발행가액": [["보통주식", 1000]],
+                        "납입일": "2024년 08월 30일",
+                    },
+                    {
+                        "title": "[정정]유상증자결정",
+                        "acpt_no": "20240829000001",
+                        "rcept_no": "20240829009999",
+                        "source_file": "/tmp/20240829000001.html",
+                        "correction_families": {
+                            "20240829009999": {
+                                "current_sequence": 1,
+                                "members": [
+                                    {"sequence": 0, "acpt_no": "20240822000001", "rcept_no": "20240822009999"},
+                                    {"sequence": 1, "acpt_no": "20240829000001", "rcept_no": "20240829009999"},
+                                ],
+                            }
+                        },
+                        "신주의 종류와 수": [["보통주식", 100]],
+                        "발행목적": [["운영자금", 2000]],
+                        "발행가액": [["보통주식", 1000]],
+                        "납입일": "2024년 09월 02일",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_change_log_payload({"output_path": str(parse_path)})
+
+    assert payload["format"] == "finiq_parse_change_log_v1"
+    assert payload["mode"] == "rights_issuance"
+    assert payload["summary"]["major_changes"] == 1
+    assert payload["summary"]["minor_changes"] == 0
+    assert payload["families"][0]["severity"] == "major"
+    assert payload["families"][0]["changed_fields"] == 2
+    assert [change["field"] for change in payload["families"][0]["changes"][0]["changes"]] == ["발행목적", "납입일"]
+
+
+def test_build_parse_change_log_payload_accepts_result_folder(tmp_path: Path) -> None:
+    parse_path = tmp_path / "parsed-rights_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "rights_issuance",
+                "records": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_change_log_payload({"output_path": str(tmp_path), "mode": "rights_issuance"})
+
+    assert payload["source_path"] == str(parse_path.resolve())
 
 
 def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
@@ -1374,6 +1461,7 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     readme = (HTML_PARSERS_DIR / "README.md").read_text(encoding="utf-8")
     download_ui_html = GUI_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
+    change_log_ui_html = GUI_HTML_CHANGE_LOG_PAGE.read_text(encoding="utf-8")
     parse_ui_js = (GUI_HTML_PARSE_PAGE.parent / "src" / "html-parse.js").read_text(encoding="utf-8")
 
     assert set(PARSER_REGISTRY) == EXPECTED_PARSE_MODES
@@ -1381,6 +1469,10 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
         assert mode in readme
         assert mode in parse_ui_js
     assert 'href="/html-parse"' in parse_ui_html
+    assert 'href="/html-change-log"' in parse_ui_html
+    assert 'href="/html-bond-summary"' in change_log_ui_html
+    assert "변동기록조회" in change_log_ui_html
+    assert "/api/disclosures/html/parse/change-log" in parse_ui_js
     assert "parseMode" not in download_ui_html
     assert "sourceJsonPath" in download_ui_html
     assert "cancelHtmlBtn" in download_ui_html
@@ -1634,6 +1726,79 @@ def test_parse_bond_issuance_collects_multiple_target_entity_tables() -> None:
         ["퀸버메자닌1호조합", "이기승", "이기승"],
         ["주식회사 비에스파트너", "이기승", "박락호", "소민지"],
     ]
+
+
+def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> None:
+    fixture_path = REPO_ROOT / "resources" / "kind_kosdaq" / "kind_html_stockissue" / "20240822000349.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1"><p class="SECTION-1">유상증자결정</p></h2>
+      <table>
+        <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>2,495,327</td></tr>
+        <tr><td>기타주식 (주)</td><td>-</td></tr>
+        <tr><td rowspan="6">4. 자금조달의 목적</td><td>시설자금 (원)</td><td>2,002,499,917</td></tr>
+        <tr><td>영업양수자금 (원)</td><td>-</td></tr>
+        <tr><td>운영자금 (원)</td><td>2,002,499,918</td></tr>
+        <tr><td>채무상환자금 (원)</td><td>-</td></tr>
+        <tr><td>타법인 증권<br>취득자금 (원)</td><td>-</td></tr>
+        <tr><td>기타자금 (원)</td><td>-</td></tr>
+        <tr><td colspan="2">5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr><td rowspan="2">6. 신주 발행가액</td><td>보통주식 (원)</td><td>1,605</td></tr>
+        <tr><td>기타주식 (원)</td><td>-</td></tr>
+        <tr><td rowspan="2">7. 기준주가</td><td>보통주식 (원)</td><td>1,783</td></tr>
+        <tr><td>기타주식 (원)</td><td>-</td></tr>
+        <tr><td colspan="2">9. 납입일</td><td>2024년 08월 30일</td></tr>
+        <tr><td colspan="2">11. 신주권교부예정일</td><td>2023년 10월 04일</td></tr>
+        <tr><td colspan="2">12. 신주의 상장 예정일</td><td>2024년 10월 04일</td></tr>
+      </table>
+      <table>
+        <tr>
+          <th>제3자배정 대상자</th><th>회사 또는 최대주주와의 관계</th><th>선정경위</th>
+          <th>증자결정 전후 6월이내 거래내역 및 계획</th><th>배정주식수 (주)</th><th>비 고</th>
+        </tr>
+        <tr><td>주식회사 에프앤지</td><td>없음</td><td>회사 경영상의 필요</td><td>-</td><td>2,495,327</td><td>-</td></tr>
+      </table>
+      <table>
+        <tr>
+          <th rowspan="2">명칭</th><th rowspan="2">출자자수(명)</th>
+          <th colspan="2">대표이사(대표조합원)</th><th colspan="2">업무집행자(업무집행조합원)</th>
+          <th colspan="2">최대주주(최대출자자)</th>
+        </tr>
+        <tr><th>성명</th><th>지분(%)</th><th>성명</th><th>지분(%)</th><th>성명</th><th>지분(%)</th></tr>
+        <tr>
+          <td rowspan="2">주식회사 에프앤지</td><td rowspan="2">5</td>
+          <td>이미란</td><td>-</td><td>이미란</td><td>-</td><td>(주)에스제이씨</td><td>30</td>
+        </tr>
+        <tr><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+      </table>
+    </body></html>
+    """
+    monkeypatch.setattr(
+        "finiq_marketDesk.web.html_parsers.rights_issuance._fetch_selected_viewer_body",
+        lambda html_text: body_html.encode("utf-8"),
+    )
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["신주의 종류와 수"] == [["보통주식", 2_495_327], ["기타주식", 0]]
+    assert parsed["발행목적"] == [
+        ["시설자금", 2_002_499_917],
+        ["영업양수자금", 0],
+        ["운영자금", 2_002_499_918],
+        ["채무상환자금", 0],
+        ["타법인 증권 취득자금", 0],
+        ["기타자금", 0],
+    ]
+    assert parsed["발행가액"] == [["보통주식", 1_605], ["기타주식", 0]]
+    assert parsed["기준주가"] == [["보통주식", 1_783], ["기타주식", 0]]
+    assert parsed["증자방식"] == "제3자배정증자"
+    assert parsed["납입일"] == "2024년 08월 30일"
+    assert parsed["신주권교부예정일"] == "2023년 10월 04일"
+    assert parsed["상장예정일"] == "2024년 10월 04일"
+    assert parsed["발행대상자"] == [["주식회사 에프앤지", 2_495_327]]
+    assert parsed["발행대상자세부엔티티"] == [["주식회사 에프앤지", "이미란", "(주)에스제이씨"]]
 
 
 def test_build_insight_payload_groups_disclosures(tmp_path: Path, monkeypatch) -> None:
