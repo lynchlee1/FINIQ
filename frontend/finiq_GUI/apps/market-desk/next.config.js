@@ -1,5 +1,7 @@
 const path = require('path')
 
+const apiBaseUrl = (process.env.FINIQ_API_BASE_URL || 'http://127.0.0.1:8765').replace(/\/$/, '')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ['@finiq/theme', '@finiq/ui', '@finiq/graph-viewer'],
@@ -15,7 +17,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://127.0.0.1:8765/api/:path*' // Backend port updated to match default configuration
+        destination: `${apiBaseUrl}/api/:path*`
       }
     ]
   }

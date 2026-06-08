@@ -8,6 +8,7 @@ import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { useJobPolling } from "@/hooks/useJobPolling";
+import { ActionDock } from "@/components/ui/ActionDock";
 import {
   HtmlStepGuide,
   HtmlWorkflowForm,
@@ -319,6 +320,8 @@ export default function HtmlParsePage() {
       span: 2,
     },
   ];
+  const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputPath");
+  const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputPath");
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
@@ -345,13 +348,13 @@ export default function HtmlParsePage() {
 
       <HtmlStepGuide items={WORKFLOW_GUIDE} />
 
-      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+      <div className="relative space-y-6">
         <section className="min-w-0 space-y-6">
           <HtmlWorkflowCard
-            title="공시원문 변환 설정"
-            description="저장된 HTML 원문에서 핵심 데이터를 구조화된 JSON으로 추출합니다."
+            title="공시원문 변환 경로"
+            description="입력 HTML 폴더와 결과 JSON 경로는 작업 대상이므로 메인 화면에서 관리합니다."
           >
-              <HtmlWorkflowForm fields={parseSettingFields} />
+            <HtmlWorkflowForm fields={parsePathFields} />
           </HtmlWorkflowCard>
 
           <HtmlWorkflowCard
@@ -412,29 +415,11 @@ export default function HtmlParsePage() {
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Export Results</p>
-              <CardTitle className="dark:text-white">결과 내보내기</CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#30363d]" />
-                <Label htmlFor="exportLatestOnly" className="cursor-pointer dark:text-slate-300">최신버전만 보기</Label>
-              </div>
-              <Button onClick={handleExport} disabled={!outputPath} variant="outline" className="h-10 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
-                <FileSpreadsheet className="mr-2 h-4 w-4" />
-                Excel로 내보내기
-              </Button>
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="space-y-6">
-          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-col gap-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
                   {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
@@ -443,17 +428,24 @@ export default function HtmlParsePage() {
                   <Square className="mr-2 h-4 w-4" />
                   중지
                 </Button>
+                <Button onClick={handleExport} disabled={!outputPath} variant="outline" className="h-10 w-full dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                  Excel로 내보내기
+                </Button>
               </div>
+            </CardContent>
+          </Card>
+        </section>
 
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">작업 상태</Label>
-                <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-              </div>
-
+        <ActionDock
+          activityActive={isJobActive}
+          activityContent={
+            <>
+              <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
               {result?.summary && (
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">실행 결과 요약</Label>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
                       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공</span>
                       <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary.parsed_files || 0}</strong>
@@ -465,9 +457,31 @@ export default function HtmlParsePage() {
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </section>
+            </>
+          }
+          notificationActive={isErrorStatus || !!result?.warnings?.length}
+          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          settingsTitle="설정"
+          settingsContent={
+            <>
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+                </div>
+                <HtmlWorkflowForm fields={parseOptionFields} />
+              </div>
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">내보내기</p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#30363d]" />
+                  <Label htmlFor="exportLatestOnly" className="cursor-pointer dark:text-slate-300">최신버전만 보기</Label>
+                </div>
+              </div>
+            </>
+          }
+        />
       </div>
     </HtmlWorkflowPage>
   );

@@ -10,6 +10,7 @@ import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobStreaming } from "@/hooks/useJobStreaming";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 const TRANSFER_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const PAGE_SIZE = 20;
@@ -290,7 +291,7 @@ export default function FilterPage() {
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
-      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+      <div className="relative space-y-6">
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
@@ -438,27 +439,20 @@ export default function FilterPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-[minmax(270px,1.35fr)_minmax(120px,.75fr)_minmax(130px,.8fr)]">
-            <Label className="grid gap-2 dark:text-slate-300">
-              최대 반환
-              <div className="flex min-h-9 items-center gap-3">
-                <label className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                  <input type="checkbox" checked={limitUnlimited} onChange={(event) => setLimitUnlimited(event.target.checked)} />
-                  제한 없음
-                </label>
-                <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className="h-9 min-w-0 max-w-[120px] dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 disabled:opacity-50" />
-              </div>
-            </Label>
-            <Label className="grid gap-2 dark:text-slate-300">
-              파싱 worker 수
-              <Input type="number" min="1" max="32" step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-            </Label>
-            <Label className="grid gap-2 dark:text-slate-300">
-              진행 표시 간격
-              <Input type="number" min="1" max="10000" step="1" value={progressInterval} onChange={(event) => setProgressInterval(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-            </Label>
-          </div>
           </CardContent>
+          </Card>
+
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
+              <CardTitle className="dark:text-white">작업 실행</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={handleFilter} disabled={isStreaming} className="w-full md:w-auto">
+                {isStreaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                실행
+              </Button>
+            </CardContent>
           </Card>
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
@@ -526,32 +520,53 @@ export default function FilterPage() {
           <pre className="mt-4 max-h-[420px] overflow-auto rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-xs leading-relaxed text-blue-100 dark:border-[#30363d]">{jsonPreview}</pre>
         </CardContent>
           </Card>
+
         </section>
 
-        <section className="space-y-6">
-          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">작업 실행</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <Button onClick={handleFilter} disabled={isStreaming} className="w-full">
-                  {isStreaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                  실행
-                </Button>
-              </div>
+        <ActionDock
+          activityActive={isStreaming}
+          activityContent={
+            <JobStatusLogger 
+              status={status} 
+              isErrorStatus={isErrorStatus} 
+              isCancellable={isStreaming} 
+              onCancel={abortJob} 
+            />
+          }
+          notificationActive={isErrorStatus || !!result?.html_download_transfer}
+          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          settingsTitle="필터 설정"
+          settingsContent={
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>
+                </div>
               <div className="space-y-2">
-                <Label className="dark:text-slate-300">작업 상태</Label>
-                <JobStatusLogger 
-                  status={status} 
-                  isErrorStatus={isErrorStatus} 
-                  isCancellable={isStreaming} 
-                  onCancel={abortJob} 
-                />
+                <Label className="dark:text-slate-300">최대 반환</Label>
+                <label className="flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
+                  <input type="checkbox" checked={limitUnlimited} onChange={(event) => setLimitUnlimited(event.target.checked)} />
+                  제한 없음
+                </label>
+                <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 disabled:opacity-50" />
               </div>
-            </CardContent>
-          </Card>
-        </section>
+              </div>
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+                </div>
+              <Label className="grid gap-2 dark:text-slate-300">
+                파싱 worker 수
+                <Input type="number" min="1" max="32" step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+              </Label>
+              <Label className="grid gap-2 dark:text-slate-300">
+                진행 표시 간격
+                <Input type="number" min="1" max="10000" step="1" value={progressInterval} onChange={(event) => setProgressInterval(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+              </Label>
+              </div>
+            </div>
+          }
+        />
       </div>
     </WorkflowPageShell>
   );

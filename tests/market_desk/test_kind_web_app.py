@@ -52,6 +52,23 @@ def test_api_settings_does_not_discover_files(tmp_path: Path, monkeypatch):
     assert response.json()["classification_files"] == []
     assert response.json()["price_files"] == []
 
+
+def test_download_inspect_folder_route_returns_bad_request_on_validation_error(monkeypatch):
+    def fail_inspection(_payload):
+        raise ValueError("inspection failed")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.routers.download.inspect_download_output_directory_payload",
+        fail_inspection,
+    )
+
+    client = TestClient(app)
+    response = client.post("/api/download/inspect-folder", json={"output_directory": "/tmp"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "inspection failed"
+
+
 def test_api_classifications(tmp_path: Path):
     # Create a dummy classification file
     kind_dir = tmp_path / "classification"
@@ -217,3 +234,18 @@ def test_html_download_inspect_folder_route_dry_run_reports_unexpected_file(tmp_
     assert payload["deletion_candidate_count"] == 1
     assert payload["deletion_candidates"][0]["name"] == "20240101000001.html"
     assert unexpected.exists()
+
+
+def test_html_download_inspect_folder_route_rejects_high_risk_directory() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/download/inspect-folder",
+        json={
+            "output_directory": str(Path(Path.cwd().anchor).resolve()),
+            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "high-risk output_directory" in response.json()["detail"]

@@ -14,6 +14,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 export default function HtmlBondSummaryPage() {
   const [loading, setLoading] = useState(true);
@@ -209,6 +210,8 @@ export default function HtmlBondSummaryPage() {
       ),
     },
   ];
+  const pathFields = conditionFields.filter((field) => field.id === "outputPath");
+  const optionFields = conditionFields.filter((field) => field.id !== "outputPath");
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
@@ -220,17 +223,18 @@ export default function HtmlBondSummaryPage() {
       title="발행내역 한눈에"
       description="파싱된 사채 발행 데이터를 조회하고 정정 이력, 원문 테이블, 투자자 정보를 한 화면에서 확인합니다."
     >
-      <HtmlWorkflowCard
-        title="조회 조건"
-        description="파싱 결과 JSON을 불러와 목록과 상세 패널을 구성합니다."
-        actions={
-          <Button onClick={loadBondSummary} disabled={isFetching} className="h-10">
-            {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            결과 불러오기
-          </Button>
-        }
-      >
-          <HtmlWorkflowForm fields={conditionFields} />
+      <div className="relative space-y-6">
+        <HtmlWorkflowCard
+          title="조회"
+          description="파싱 결과 JSON을 불러와 목록과 상세 패널을 구성합니다."
+          actions={
+            <Button onClick={loadBondSummary} disabled={isFetching} className="h-10">
+              {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              결과 불러오기
+            </Button>
+          }
+        >
+          <HtmlWorkflowForm fields={pathFields} />
 
           <div className="grid lg:grid-cols-2 gap-6 min-h-[500px]">
             {/* Table Area */}
@@ -440,10 +444,23 @@ export default function HtmlBondSummaryPage() {
               )}
             </div>
           </div>
-        {status && (
-          <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-        )}
-      </HtmlWorkflowCard>
+        </HtmlWorkflowCard>
+        <ActionDock
+          activityActive={isFetching}
+          activityContent={<JobStatusLogger status={status || "조회 전"} isErrorStatus={isErrorStatus} />}
+          notificationActive={isErrorStatus}
+          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          settingsTitle="조회 설정"
+          settingsContent={
+            <div className="space-y-3">
+              <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">필터</p>
+              </div>
+              <HtmlWorkflowForm fields={optionFields} />
+            </div>
+          }
+        />
+      </div>
     </HtmlWorkflowPage>
   );
 }

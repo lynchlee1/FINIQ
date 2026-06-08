@@ -306,12 +306,14 @@ def _find_marker_row(frame: pd.DataFrame, marker: str) -> int | None:
     return None
 
 
-def _read_quanti_wide_sheet(xlsx_path: Path, sheet_name: str) -> pd.DataFrame:
+def _read_quanti_wide_sheet(xlsx_path: Path | pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
     raw_frame = pd.read_excel(xlsx_path, sheet_name=sheet_name, header=None, dtype=object)
     code_row = _find_marker_row(raw_frame, "Code")
     date_header_row = _find_marker_row(raw_frame, "D A T E")
     if code_row is None or date_header_row is None:
-        msg = f"Unsupported sheet format: {xlsx_path.name} / {sheet_name}"
+        excel_source = getattr(xlsx_path, "io", None) or getattr(xlsx_path, "_io", None)
+        excel_name = Path(str(excel_source)).name if isinstance(xlsx_path, pd.ExcelFile) else xlsx_path.name
+        msg = f"Unsupported sheet format: {excel_name} / {sheet_name}"
         raise ValueError(msg)
 
     codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1:].tolist()]
@@ -496,7 +498,7 @@ def _scan_asset_excel_frames(
                 sheet_summaries.append(summary)
                 continue
             try:
-                frame = _read_quanti_wide_sheet(xlsx_path, sheet_name)
+                frame = _read_quanti_wide_sheet(excel, sheet_name)
             except ValueError as exc:
                 summary = _sheet_summary_payload(
                     xlsx_path,

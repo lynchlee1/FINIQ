@@ -416,7 +416,14 @@ def test_download_disclosure_viewer_htmls_rate_limits(
 ) -> None:
     session = ViewerFakeSession()
     sleep_calls: list[float] = []
-    monkeypatch.setattr("finiq.data_scraper.core.client.time.sleep", sleep_calls.append)
+    clock = [0.0]
+
+    def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr("finiq.data_scraper.core.client.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("finiq.data_scraper.core.client.time.sleep", fake_sleep)
 
     # Request 3 items with max_requests_per_minute=2
     # First 2 should pass immediately, 3rd should wait.
@@ -427,6 +434,7 @@ def test_download_disclosure_viewer_htmls_rate_limits(
         timeout=5,
         session=session,
         max_requests_per_minute=2,
+        max_workers=1,
     )
 
     assert [path.name for path in saved_paths] == [

@@ -9,6 +9,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from finiq.data_scraper.storage.classification_store import (
+    company_classification_artifact_complete,
+    load_company_classification_artifact,
+    load_company_classification_company as load_company_classification_company_artifact,
+    load_company_classification_index as load_company_classification_index_artifact,
+)
+
 CLASSIFICATION_INDEX_FORMAT = "company_classification_index_v2"
 
 _DEFAULT_EMPTY_CLASSIFICATION = {
@@ -20,6 +27,14 @@ _DEFAULT_EMPTY_CLASSIFICATION = {
     },
     "companies": [],
 }
+
+
+def _has_sqlite_classification_artifact(path: Path) -> bool:
+    if path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}:
+        return path.is_file()
+    if path.suffix.lower() == ".json":
+        return path.with_suffix(".sqlite").is_file()
+    return False
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -108,7 +123,7 @@ def company_classification_is_stale(
         if output_path is not None
         else company_classification_path(root_directory)
     )
-    return not destination.exists()
+    return not company_classification_artifact_complete(destination)
 
 
 def load_company_classification(
@@ -129,7 +144,7 @@ def load_company_classification(
         raise RuntimeError(msg)
 
     destination = company_classification_path(root)
-    if not destination.exists():
+    if not company_classification_artifact_complete(destination):
         return {
             "summary": dict(_DEFAULT_EMPTY_CLASSIFICATION["summary"]),
             "companies": list(_DEFAULT_EMPTY_CLASSIFICATION["companies"]),
@@ -155,7 +170,7 @@ def load_company_classification_index(
         raise RuntimeError(msg)
 
     destination = company_classification_path(root)
-    if not destination.exists():
+    if not company_classification_artifact_complete(destination):
         return {
             "summary": dict(_DEFAULT_EMPTY_CLASSIFICATION["summary"]),
             "companies": list(_DEFAULT_EMPTY_CLASSIFICATION["companies"]),
@@ -187,8 +202,15 @@ def load_company_classification_company(
 
 
 def load_company_classification_file(file_path: str | Path) -> dict[str, Any]:
-    """Load a prebuilt company-classification JSON file."""
+    """Load a prebuilt company-classification artifact."""
     target = Path(file_path).resolve()
+    if _has_sqlite_classification_artifact(target):
+        payload = load_company_classification_artifact(target)
+        if payload:
+            return {
+                "summary": dict(payload.get("summary") or {}),
+                "companies": list(payload.get("companies") or []),
+            }
     payload = _load_json(target)
     if payload.get("format") != CLASSIFICATION_INDEX_FORMAT:
         return payload
@@ -199,8 +221,16 @@ def load_company_classification_file(file_path: str | Path) -> dict[str, Any]:
 
 
 def load_company_classification_index_file(file_path: str | Path) -> dict[str, Any]:
-    """Load only the metadata/index portion of a prebuilt classification file."""
+    """Load only the metadata/index portion of a prebuilt classification artifact."""
     target = Path(file_path).resolve()
+    if _has_sqlite_classification_artifact(target):
+        payload = load_company_classification_index_artifact(target)
+        if payload:
+            return {
+                "summary": dict(payload.get("summary") or {}),
+                "companies": list(payload.get("companies") or []),
+                "shards": list(payload.get("shards") or []),
+            }
     payload = _load_json(target)
     if payload.get("format") == CLASSIFICATION_INDEX_FORMAT:
         return {
@@ -225,13 +255,16 @@ def load_company_classification_company_file(
     file_path: str | Path,
     company_key: str,
 ) -> dict[str, Any]:
-    """Load one company disclosure bundle from a prebuilt classification file."""
+    """Load one company disclosure bundle from a prebuilt classification artifact."""
     target = Path(file_path).resolve()
-    payload = _load_json(target)
     normalized_key = str(company_key).strip()
     if not normalized_key:
         msg = "company_key must not be empty"
         raise ValueError(msg)
+    if _has_sqlite_classification_artifact(target):
+        return load_company_classification_company_artifact(target, normalized_key)
+
+    payload = _load_json(target)
 
     if payload.get("format") != CLASSIFICATION_INDEX_FORMAT:
         for company in list(payload.get("companies") or []):

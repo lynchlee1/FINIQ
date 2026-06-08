@@ -56,7 +56,7 @@ from finiq.market_desk.web.discovery import (
     resolve_default_price_source,
 )
 
-from finiq.config import KIND_DATA_DIR, QUANTI_DIR
+from finiq.config import KIND_DATA_DIR, PROJECT_ROOT, QUANTI_DIR
 
 DEFAULT_OUTPUT_ROOT = str(KIND_DATA_DIR)
 DEFAULT_QUANTI_DIR = str(QUANTI_DIR)
@@ -1006,6 +1006,18 @@ def _find_source_body_files(root: Path) -> list[Path]:
     )
 
 
+def _ensure_safe_source_root_directory(root: Path) -> None:
+    risky_directories = {
+        Path(root.anchor).resolve(),
+        Path.home().resolve(),
+        PROJECT_ROOT.resolve(),
+    }
+    risky_directories.update(PROJECT_ROOT.resolve().parents)
+    if root in risky_directories:
+        msg = f"Refusing to recursively inspect high-risk root_directory: {root}"
+        raise ValueError(msg)
+
+
 def _source_cache_key(root: Path, body_paths: list[Path]) -> tuple[str, int, int, int]:
     latest_modified_ns = 0
     total_size = 0
@@ -1071,6 +1083,7 @@ def _iter_source_disclosure_records(
     if not root.is_dir():
         msg = f"root_directory is not a directory: {root}"
         raise ValueError(msg)
+    _ensure_safe_source_root_directory(root)
     body_paths = _find_source_body_files(root)
     folders: dict[Path, list[Path]] = {}
     for body_path in body_paths:
@@ -1101,6 +1114,8 @@ def filter_disclosures_payload(
     """Filter a company-classification artifact and return a portable disclosure JSON."""
     classification_path = str(body.get("classification_path") or "").strip()
     root_directory = str(body.get("root_directory") or "").strip()
+    if root_directory:
+        _ensure_safe_source_root_directory(Path(root_directory).expanduser().resolve())
     if not classification_path:
         if not root_directory:
             msg = "classification_path or root_directory is required"

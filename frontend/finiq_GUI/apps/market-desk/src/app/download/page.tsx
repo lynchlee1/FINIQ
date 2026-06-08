@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { Bell, Download, X, Play, Search, Loader2, Trash2, FolderOpen, Square, Settings, ChevronDown, ChevronRight } from "lucide-react";
+import { Activity, Bell, X, Play, Search, Loader2, Trash2, FolderOpen, Square, Settings, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
 import { Input } from "@finiq/ui";
@@ -25,7 +25,6 @@ export default function DownloadPage() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
-  const [hasDownloadActivity, setHasDownloadActivity] = useState(false);
 
   const { download_output_directory: outputDirectory, saveSetting } = useSettingsStore();
 
@@ -124,7 +123,6 @@ export default function DownloadPage() {
   const startDownloadJob = async () => {
     const data = await startDownload(buildPayload());
     setResult(null);
-    setHasDownloadActivity(true);
     setDownloadPanelOpen(true);
     setNotificationPanelOpen(false);
     setSettingsPanelOpen(false);
@@ -459,14 +457,14 @@ export default function DownloadPage() {
                 setSettingsPanelOpen(false);
               }}
               className={
-                hasDownloadActivity || activeJobId
+                activeJobId
                   ? "relative h-10 w-10 border-blue-300 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-500/60 dark:bg-blue-500/15 dark:text-blue-200"
                   : "relative h-10 w-10 border-slate-200 bg-white shadow-sm dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300"
               }
-              title={downloadPanelOpen ? "다운로드 정보 닫기" : "다운로드 정보 열기"}
+              title={downloadPanelOpen ? "실행 현황 닫기" : "실행 현황 열기"}
             >
-              <Download className="h-5 w-5" />
-              {(hasDownloadActivity || activeJobId) && (
+              <Activity className="h-5 w-5" />
+              {activeJobId && (
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500 dark:bg-blue-300" />
               )}
             </Button>
@@ -599,7 +597,7 @@ export default function DownloadPage() {
               <CardContent className="space-y-5">
                 <div className="space-y-3">
                   <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">페이지 크기</Label>
@@ -641,7 +639,7 @@ export default function DownloadPage() {
 
                 <div className="space-y-3">
                   <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 상태</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">워커 수</Label>
@@ -660,13 +658,13 @@ export default function DownloadPage() {
             <Card className="absolute right-full top-0 mr-3 w-[min(420px,calc(100vw-2rem))] max-h-[calc(100vh-8rem)] overflow-auto shadow-xl dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
-                <CardTitle className="dark:text-white">다운로드 현황</CardTitle>
+                  <CardTitle className="dark:text-white">실행 현황</CardTitle>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => setDownloadPanelOpen(false)}
                   className="h-8 w-8 dark:hover:bg-[#21262d]"
-                  title="다운로드 정보 닫기"
+                  title="실행 현황 닫기"
                 >
                   <X className="h-4 w-4" />
                 </Button>
