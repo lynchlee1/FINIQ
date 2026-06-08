@@ -29,6 +29,43 @@ const formatDateToISO = (date: Date) => {
   return `${y}-${m}-${d}`;
 };
 
+const areDisclosureGroupsMatching = (g1: Record<string, string[]>, g2: Record<string, string[]>) => {
+  const canonicalize = (groups: Record<string, string[]>) => {
+    const obj: Record<string, string[]> = {};
+    for (const key of Object.keys(groups).sort()) {
+      const vals = groups[key] || [];
+      if (vals.length > 0) {
+        obj[key] = [...vals].sort();
+      }
+    }
+    return JSON.stringify(obj);
+  };
+  return canonicalize(g1) === canonicalize(g2);
+};
+
+const areFiltersMatching = (
+  current: {
+    companyName: string;
+    submitterName: string;
+    marketLabel: string;
+    securitiesLabel: string;
+    selectedDisclosures: Record<string, string[]>;
+    lastReportOnly: boolean;
+  },
+  saved: any
+) => {
+  if (!saved) return true;
+  if (current.companyName.trim() !== (saved.company_name || "").trim()) return false;
+  if (current.submitterName.trim() !== (saved.submitter_name || "").trim()) return false;
+  if (current.marketLabel !== (saved.market_label || "검색대상")) return false;
+  if (current.securitiesLabel !== (saved.securities_label || "전체")) return false;
+  if (current.lastReportOnly !== !!saved.last_report_only) return false;
+  if (!areDisclosureGroupsMatching(current.selectedDisclosures, saved.disclosure_type_groups || {})) {
+    return false;
+  }
+  return true;
+};
+
 export default function DownloadPage() {
   const [options, setOptions] = useState<DownloadOptions | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,6 +87,14 @@ export default function DownloadPage() {
       status: "validated" | "stale" | "unverified";
       error_detail: string | null;
     }[];
+    saved_filters?: {
+      company_name: string;
+      submitter_name: string;
+      market_label: string;
+      securities_label: string;
+      disclosure_type_groups: Record<string, string[]>;
+      last_report_only: boolean;
+    } | null;
   } | null>(null);
   const [forceContinue, setForceContinue] = useState(false);
 
@@ -124,6 +169,18 @@ export default function DownloadPage() {
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
   const [expandedDisclosureGroups, setExpandedDisclosureGroups] = useState<Record<string, boolean>>({});
 
+  const filtersMatch = areFiltersMatching(
+    {
+      companyName,
+      submitterName,
+      marketLabel,
+      securitiesLabel,
+      selectedDisclosures,
+      lastReportOnly,
+    },
+    existingData?.saved_filters
+  );
+
   const fetchOptions = useCallback(async () => {
     try {
       const data = await fetchDownloadOptions();
@@ -134,10 +191,14 @@ export default function DownloadPage() {
       }
 
       const today = new Date();
-      const start = new Date(today);
-      start.setDate(today.getDate() - 30);
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      
+      const start = new Date(yesterday);
+      start.setDate(yesterday.getDate() - 30);
+      
       setStartDate(formatDateToISO(start));
-      setEndDate(formatDateToISO(today));
+      setEndDate(formatDateToISO(yesterday));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -157,13 +218,18 @@ export default function DownloadPage() {
     }
     try {
       const result = await checkExistingDownload(dir);
+      if (dir !== useSettingsStore.getState().download_output_directory) {
+        return;
+      }
       if (result && result.has_existing) {
         setExistingData(result);
       } else {
         setExistingData(null);
       }
     } catch {
-      setExistingData(null);
+      if (dir === useSettingsStore.getState().download_output_directory) {
+        setExistingData(null);
+      }
     }
   }, []);
 
@@ -449,8 +515,9 @@ export default function DownloadPage() {
                       className="h-8 shrink-0 self-start md:self-auto border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-[#21262d] dark:hover:text-slate-100"
                       onClick={handleApplyUpdateRange}
                       disabled={
-                        (existingData.ranges?.some(r => r.status === "stale" || r.status === "unverified") ?? false) &&
-                        !forceContinue
+                        (existingData.ranges?.some(r => r.status === "stale") ?? false) ||
+                        !filtersMatch ||
+                        ((existingData.ranges?.some(r => r.status === "unverified") ?? false) && !forceContinue)
                       }
                     >
                       이어서 다운로드하기 (업데이트)
@@ -505,6 +572,33 @@ export default function DownloadPage() {
                     </div>
                   )}
 
+                  {/* Warning message if filters mismatch */}
+                  {!filtersMatch && existingData.saved_filters && (
+                    <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                      <strong>⚠ 오류:</strong> 현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 폴더 내 데이터가 오염(mixed dataset)되는 것을 방지하기 위해 <strong>이어서 다운로드하기가 비활성화</strong>됩니다. 검색 필터를 메타데이터와 동일하게 일치시키거나 다른 경로를 선택해 주세요.
+                      <div className="mt-2 pl-3 border-l-2 border-rose-300 space-y-1 text-[11px] opacity-90">
+                        {existingData.saved_filters.company_name.trim() !== companyName.trim() && (
+                          <p>• 회사명 불일치: (기존) &ldquo;{existingData.saved_filters.company_name}&rdquo; &harr; (현재) &ldquo;{companyName}&rdquo;</p>
+                        )}
+                        {existingData.saved_filters.submitter_name.trim() !== submitterName.trim() && (
+                          <p>• 제출인 불일치: (기존) &ldquo;{existingData.saved_filters.submitter_name}&rdquo; &harr; (현재) &ldquo;{submitterName}&rdquo;</p>
+                        )}
+                        {existingData.saved_filters.market_label !== marketLabel && (
+                          <p>• 시장 불일치: (기존) &ldquo;{existingData.saved_filters.market_label}&rdquo; &harr; (현재) &ldquo;{marketLabel}&rdquo;</p>
+                        )}
+                        {existingData.saved_filters.securities_label !== securitiesLabel && (
+                          <p>• 증권종류 불일치: (기존) &ldquo;{existingData.saved_filters.securities_label}&rdquo; &harr; (현재) &ldquo;{securitiesLabel}&rdquo;</p>
+                        )}
+                        {!!existingData.saved_filters.last_report_only !== lastReportOnly && (
+                          <p>• 최종보고서만 불일치: (기존) &ldquo;{existingData.saved_filters.last_report_only ? "예" : "아니오"}&rdquo; &harr; (현재) &ldquo;{lastReportOnly ? "예" : "아니오"}&rdquo;</p>
+                        )}
+                        {!areDisclosureGroupsMatching(selectedDisclosures, existingData.saved_filters.disclosure_type_groups || {}) && (
+                          <p>• 공시 종류 불일치</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Warning message if unverified ranges exist */}
                   {existingData.ranges?.some(r => r.status === "unverified") && (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
@@ -512,20 +606,22 @@ export default function DownloadPage() {
                     </div>
                   )}
 
-                  {/* Override checkbox if any stale/unverified range exists */}
-                  {existingData.ranges?.some(r => r.status === "stale" || r.status === "unverified") && (
-                    <div className="flex items-center space-x-2 rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-[#0d1117]">
-                      <Checkbox
-                        id="forceContinueCheckbox"
-                        checked={forceContinue}
-                        onCheckedChange={(v) => setForceContinue(!!v)}
-                        className="dark:border-[#30363d]"
-                      />
-                      <Label htmlFor="forceContinueCheckbox" className="text-xs cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                        검증 실패/불가 경고를 확인했으며, 강제로 이어서 다운로드하기를 진행합니다.
-                      </Label>
-                    </div>
-                  )}
+                  {/* Override checkbox if any unverified range exists and no stale ranges or filter mismatches exist */}
+                  {existingData.ranges?.some(r => r.status === "unverified") &&
+                    !(existingData.ranges?.some(r => r.status === "stale") ?? false) &&
+                    filtersMatch && (
+                      <div className="flex items-center space-x-2 rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-[#0d1117]">
+                        <Checkbox
+                          id="forceContinueCheckbox"
+                          checked={forceContinue}
+                          onCheckedChange={(v) => setForceContinue(!!v)}
+                          className="dark:border-[#30363d]"
+                        />
+                        <Label htmlFor="forceContinueCheckbox" className="text-xs cursor-pointer font-medium text-slate-700 dark:text-slate-300">
+                          검증 불가 경고를 확인했으며, 강제로 이어서 다운로드하기를 진행합니다.
+                        </Label>
+                      </div>
+                    )}
                 </div>
               )}
 

@@ -27,6 +27,23 @@ export function checkExistingDownload(outputDirectory: string) {
     has_existing: boolean;
     earliest_date?: string;
     latest_date?: string;
+    ranges?: {
+      start_date: string;
+      end_date: string;
+      folder_name: string;
+      local_count: number | null;
+      kind_count: number | null;
+      status: "validated" | "stale" | "unverified";
+      error_detail: string | null;
+    }[];
+    saved_filters?: {
+      company_name: string;
+      submitter_name: string;
+      market_label: string;
+      securities_label: string;
+      disclosure_type_groups: Record<string, string[]>;
+      last_report_only: boolean;
+    } | null;
   }>("/api/download/check-existing", { output_directory: outputDirectory });
 }
 

@@ -1,6 +1,6 @@
 [project]
 name = "finiq"
-version = "1.0.1"
+version = "1.0.2"
 description = "FINIQ monorepo"
 requires-python = ">=3.11"
 
