@@ -36,16 +36,23 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def start_job(self, job_id: str):
+    def start_job(self, job_id: str) -> bool:
         with self._lock:
             if job := self._jobs.get(job_id):
+                if job.status == "cancelled":
+                    return False
                 job.status = "running"
                 job.updated_at = time.time()
                 self.add_log(job_id, f"JOB start kind={job.kind} id={job_id}")
+                return True
+            return False
+
 
     def complete_job(self, job_id: str, result: Any):
         with self._lock:
             if job := self._jobs.get(job_id):
+                if job.status == "cancelled":
+                    return
                 job.status = "completed"
                 job.result = result
                 job.updated_at = time.time()
@@ -54,6 +61,8 @@ class JobManager:
     def fail_job(self, job_id: str, error: str):
         with self._lock:
             if job := self._jobs.get(job_id):
+                if job.status == "cancelled":
+                    return
                 job.status = "failed"
                 job.error = error
                 job.updated_at = time.time()
@@ -82,5 +91,22 @@ class JobManager:
                 "error": job.error,
             }
 
+    def cancel_job(self, job_id: str) -> bool:
+        with self._lock:
+            if job := self._jobs.get(job_id):
+                if job.status not in {"completed", "failed", "cancelled"}:
+                    job.status = "cancelled"
+                    job.updated_at = time.time()
+                    self.add_log(job_id, "작업 중단이 요청되었습니다.")
+                return True
+            return False
+
+    def is_cancelled(self, job_id: str) -> bool:
+        with self._lock:
+            if job := self._jobs.get(job_id):
+                return job.status == "cancelled"
+            return False
+
 # Global job manager instance
 job_manager = JobManager()
+

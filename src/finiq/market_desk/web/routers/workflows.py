@@ -136,6 +136,15 @@ def create_workflows_router(
             run_job_worker=run_job_worker,
         )
 
+    @router.post("/api/disclosures/table/build/cancel")
+    async def cancel_build_disclosure_table(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
+
     @router.get("/api/disclosures/table/jobs/{job_id}")
     async def get_table_job_status(job_id: str):
         return _job_snapshot(job_id)
@@ -148,9 +157,28 @@ def create_workflows_router(
     async def get_integrated_job_status(job_id: str):
         return _job_snapshot(job_id)
 
+    @router.post("/api/integrated-data/cancel")
+    async def cancel_integrated_job(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
+
     @router.get("/api/utility/jobs/{job_id}")
     async def get_utility_job_status(job_id: str):
         return _job_snapshot(job_id)
+
+    @router.post("/api/utility/cancel")
+    async def cancel_utility_job(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
+
 
     @router.post("/api/disclosures/html/download/start")
     async def start_html_download(payload: dict[str, Any], background_tasks: BackgroundTasks):

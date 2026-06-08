@@ -1600,26 +1600,29 @@ def run_integrated_convert_payload(
     payload: dict[str, Any],
     *,
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     provider_id = str(payload.get("provider_id") or "quantiwise").strip()
     provider = ProviderRegistry.get(provider_id)
-    return provider.convert(payload, progress_callback=progress_callback)
+    return provider.convert(payload, progress_callback=progress_callback, cancel_check=cancel_check)
 
 
 def run_integrated_merge_payload(
     payload: dict[str, Any],
     *,
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     provider_id = str(payload.get("provider_id") or "quantiwise").strip()
     provider = ProviderRegistry.get(provider_id)
-    return provider.merge(payload, progress_callback=progress_callback)
+    return provider.merge(payload, progress_callback=progress_callback, cancel_check=cancel_check)
 
 
 def run_integrated_market_history_payload(
     payload: dict[str, Any],
     *,
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     quanti_dir = str(payload.get("quanti_dir") or "").strip()
     output_path = str(payload.get("output_path") or "").strip()
@@ -1640,4 +1643,6 @@ def run_integrated_market_history_payload(
         market_item_code=market_item_code,
         output_path=output_path,
         value_map=value_map,
+        cancel_check=cancel_check,
     )
+

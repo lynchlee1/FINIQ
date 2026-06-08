@@ -40,10 +40,16 @@ export default function UtilityPage() {
   const [loading, setLoading] = useState(true);
 
   const { output_root, fetchSettings } = useSettingsStore();
-  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
+  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/utility/jobs/{jobId}",
+    cancelEndpoint: "/api/utility/cancel",
     formatStatus: (data) => {
-      const statusLabel = data.status === "completed" ? "완료" : data.status === "failed" ? "실패" : data.status === "running" ? "실행 중" : "대기 중";
+      const statusLabel =
+        data.status === "completed" ? "완료" :
+        data.status === "failed" ? "실패" :
+        data.status === "running" ? "실행 중" :
+        data.status === "cancelled" ? "중단됨" :
+        "대기 중";
       const lines = [`작업 상태: ${statusLabel}`];
       if (data.error) lines.push(`오류: ${data.error}`);
       if (data.progress_log?.length) lines.push("", "최근 로그:", ...data.progress_log.slice(-10));
@@ -131,10 +137,17 @@ export default function UtilityPage() {
                   <PathPickerInput mode="folder" value={outputDirectory} onChange={setOutputDirectory} placeholder="/path/to/output" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
               </div>
-              <Button onClick={handleStart} disabled={!!activeJobId} className="w-full md:w-auto">
-                {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                {actionLabel}
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={handleStart} disabled={!!activeJobId} className="w-full md:w-auto">
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  {actionLabel}
+                </Button>
+                {activeJobId && (
+                  <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
+                    중단
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">

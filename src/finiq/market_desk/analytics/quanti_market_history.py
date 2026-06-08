@@ -6,7 +6,7 @@ from datetime import date, timedelta
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -83,6 +83,7 @@ def build_quanti_market_history(
     market_item_code: str,
     output_path: str | Path,
     value_map: dict[str, str] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Collapse a wide Quantiwise market item into interval rows and write parquet."""
     by_item_dir = _resolve_quanti_dir(quanti_dir)
@@ -112,7 +113,10 @@ def build_quanti_market_history(
     rows: list[dict[str, Any]] = []
     unknown_values: dict[str, set[str]] = {}
     for column in entity_columns:
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         stock_code = _stock_code_from_column(column)
+
         if stock_code is None:
             continue
         series = (

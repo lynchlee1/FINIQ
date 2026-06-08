@@ -31,6 +31,7 @@ def _copy_flat_to_year_directories(
     *,
     overwrite: bool,
     progress_callback: ProgressCallback,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     files = sorted(path for path in source_directory.iterdir() if path.is_file())
     copied = 0
@@ -39,6 +40,8 @@ def _copy_flat_to_year_directories(
     years: set[str] = set()
 
     for index, source_path in enumerate(files, start=1):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         year = _year_from_filename(source_path)
         if year is None:
             skipped_invalid_year += 1
@@ -72,6 +75,7 @@ def _copy_year_directories_to_flat(
     *,
     overwrite: bool,
     progress_callback: ProgressCallback,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     year_directories = [
         path
@@ -88,6 +92,8 @@ def _copy_year_directories_to_flat(
     skipped_existing = 0
 
     for index, source_path in enumerate(files, start=1):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         result = _copy_file(source_path, output_directory / source_path.name, overwrite=overwrite)
         if result == "copied":
             copied += 1
@@ -113,6 +119,7 @@ def run_partition_storage_payload(
     payload: dict[str, Any],
     *,
     progress_callback: ProgressCallback = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     mode = str(payload.get("mode") or "").strip()
     if mode not in {"split", "flatten"}:
@@ -140,6 +147,7 @@ def run_partition_storage_payload(
             output_directory,
             overwrite=overwrite,
             progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
     else:
         result = _copy_year_directories_to_flat(
@@ -147,6 +155,7 @@ def run_partition_storage_payload(
             output_directory,
             overwrite=overwrite,
             progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
 
     if progress_callback:
@@ -155,6 +164,7 @@ def run_partition_storage_payload(
             f"{result['skipped_existing_files']}개 기존 파일 건너뜀."
         )
     return result
+
 
 
 __all__ = ["run_partition_storage_payload"]

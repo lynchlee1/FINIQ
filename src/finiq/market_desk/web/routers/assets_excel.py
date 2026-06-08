@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -86,12 +86,22 @@ def create_assets_excel_router(
         )
         return job_manager.get_snapshot(job_id)
 
+    @router.post("/api/assets/excels/cancel")
+    async def cancel_asset_excel_job(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
+
     @router.get("/api/assets/excels/jobs/{job_id}")
     async def get_asset_excel_job_status(job_id: str):
         snapshot = job_manager.get_snapshot(job_id)
         if not snapshot:
             raise HTTPException(status_code=404, detail="Job not found")
         return snapshot
+
 
     @router.get("/api/assets/excels/{file_name:path}")
     async def get_asset_excel(
