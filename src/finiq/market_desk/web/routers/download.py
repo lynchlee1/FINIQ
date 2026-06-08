@@ -23,7 +23,10 @@ def create_download_router(config: Any) -> APIRouter:
 
     @router.post("/api/download/check-existing")
     def check_existing_downloads_route(payload: dict[str, Any]):
-        return check_existing_downloads(str(payload.get("output_directory") or ""))
+        return check_existing_downloads(
+            str(payload.get("output_directory") or ""),
+            verify_with_kind=payload.get("verify_with_kind", True),
+        )
 
     @router.get("/api/download/options")
     async def get_download_options_route(response: Response):
