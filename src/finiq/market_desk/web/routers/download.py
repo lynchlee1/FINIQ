@@ -13,6 +13,7 @@ from finiq.market_desk.web.download import (
     inspect_download_output_directory_payload,
     run_download_action,
     start_download_job,
+    start_inspect_folder_job,
 )
 
 
@@ -38,6 +39,13 @@ def create_download_router(config: Any) -> APIRouter:
     async def download_inspect_folder_route(payload: dict[str, Any]):
         try:
             return inspect_download_output_directory_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/download/inspect-folder/start")
+    async def download_inspect_folder_start_route(payload: dict[str, Any]):
+        try:
+            return start_inspect_folder_job(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import MutableSequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from datetime import date
 import json
@@ -29,6 +30,7 @@ from finiq.data_scraper.workflow import (
     make_page_size_integrity_validator,
     validate_downloaded_result_page,
 )
+from finiq.data_scraper.workflow.workflow import _validate_downloaded_result_page_task
 
 
 @dataclass(slots=True)
@@ -989,7 +991,11 @@ def _build_progress_collector(prefix: str = "", external_callback: Any | None = 
     return progress_log, _callback
 
 
-def _download_integrity_status(output_directory: Path, page_size: int) -> dict[str, Any]:
+def _download_integrity_status(
+    output_directory: Path,
+    page_size: int,
+    precomputed_status: dict[str, int] | None = None,
+) -> dict[str, Any]:
     pagination = _detect_pagination(output_directory)
     status: dict[str, Any] = {
         "output_directory": str(output_directory),
@@ -999,6 +1005,16 @@ def _download_integrity_status(output_directory: Path, page_size: int) -> dict[s
         "missing_pages": [],
         "errors": [],
     }
+    if precomputed_status is not None:
+        status.update(precomputed_status)
+        status["integrity_valid"] = True
+        total_pages = int(precomputed_status.get("total_pages") or 0)
+        downloaded_pages = int(precomputed_status.get("downloaded_pages") or 0)
+        status["complete"] = total_pages > 0 and downloaded_pages == total_pages
+        if total_pages > downloaded_pages:
+            status["missing_pages"] = list(range(downloaded_pages + 1, total_pages + 1))
+        return status
+
     try:
         inspected = inspect_download_directory_pages(
             output_directory,
@@ -1046,6 +1062,18 @@ def _download_cleanup_targets(payload: dict[str, Any]) -> tuple[Path, list[tuple
     if not output_directory_raw:
         raise ValueError("output_directory is required")
     output_directory = Path(output_directory_raw).expanduser().resolve()
+
+    from finiq.config import PROJECT_ROOT
+    risky_directories = {
+        Path(output_directory.anchor).resolve(),
+        Path.home().resolve(),
+        PROJECT_ROOT.resolve(),
+    }
+    risky_directories.update(PROJECT_ROOT.resolve().parents)
+    if output_directory in risky_directories:
+        msg = f"Refusing to inspect or clean high-risk output_directory: {output_directory}"
+        raise ValueError(msg)
+
     page_size = _as_int(payload, "page_size", 100)
     if mode != "yearly":
         return output_directory, [(output_directory, page_size)]
@@ -1108,17 +1136,166 @@ def _folder_download_deletion_candidates(folder: Path, page_size: int, base: Pat
     return []
 
 
-def inspect_download_output_directory_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def inspect_download_output_directory_payload(
+    payload: dict[str, Any],
+    progress_callback: Any | None = None,
+    cancel_check: Any | None = None,
+) -> dict[str, Any]:
     """Report or delete existing download files that would block a clean run."""
+    def log(message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(message)
+
+    def check_cancel() -> None:
+        if cancel_check is not None and cancel_check():
+            raise DownloadCancelled("Folder inspection cancelled by the user")
+
+    log("기존 다운로드 파일 구조를 검사하는 중...")
     base, targets = _download_cleanup_targets(payload)
     dry_run = bool(payload.get("dry_run", False))
+
+    files_to_validate: list[tuple[Path, int]] = []
     candidates_by_path: dict[str, dict[str, str]] = {}
+    folder_body_files: dict[Path, list[Path]] = {}
+
+    log("연도별 대상 폴더 수집 중...")
     for folder, page_size in targets:
-        for candidate in _folder_download_deletion_candidates(folder, page_size, base):
-            candidates_by_path[candidate["path"]] = candidate
+        check_cancel()
+        if not folder.exists():
+            continue
+        body_files = _result_body_files(folder)
+        if not body_files:
+            continue
+
+        folder_body_files[folder] = body_files
+
+        input_snapshot = _load_workflow_input(folder)
+        if input_snapshot is None:
+            for path in body_files:
+                candidates_by_path[str(path)] = _relative_candidate(
+                    path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과"
+                )
+            continue
+
+        locked_page_size = input_snapshot.get("page_size")
+        if locked_page_size is None or int(locked_page_size) != page_size:
+            reason = "현재 요청의 페이지 크기와 맞지 않는 기존 다운로드 상태"
+            for path in body_files + _workflow_auxiliary_files(folder):
+                candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
+            continue
+
+        for path in body_files:
+            files_to_validate.append((path, page_size))
+
+    total_files = len(files_to_validate)
+    log(f"검증 대상 파일 {total_files}개 수집 완료. 1패스 병렬 무결성 검사 시작...")
+
+    page_infos: dict[str, dict[str, int]] = {}
+    if files_to_validate:
+        worker_count = min(os.cpu_count() or 1, total_files)
+        executor = None
+        is_cancelled = False
+        try:
+            executor = ProcessPoolExecutor(max_workers=worker_count)
+            future_to_path = {
+                executor.submit(_validate_downloaded_result_page_task, (str(path), page_size)): path
+                for path, page_size in files_to_validate
+            }
+            completed_count = 0
+            for future in as_completed(future_to_path):
+                if cancel_check is not None and cancel_check():
+                    is_cancelled = True
+                    for fut in future_to_path:
+                        fut.cancel()
+                    try:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        executor.shutdown(wait=False)
+                    raise DownloadCancelled("Folder inspection cancelled by the user")
+                path = future_to_path[future]
+                try:
+                    page_infos[str(path)] = future.result()
+                except BrokenProcessPool:
+                    raise
+                except Exception as exc:
+                    candidates_by_path[str(path)] = _relative_candidate(path, base, str(exc))
+                completed_count += 1
+                if completed_count % 500 == 0 or completed_count == total_files:
+                    log(f"파일 무결성 검증 중... ({completed_count}/{total_files})")
+        except (BrokenProcessPool, OSError, PermissionError):
+            if is_cancelled:
+                raise
+            log("멀티프로세싱 검증 실패로 인해 싱글스레드 순차 검증으로 전환합니다...")
+            for path, page_size in files_to_validate:
+                check_cancel()
+                try:
+                    page_infos[str(path)] = validate_downloaded_result_page(path, expected_page_size=page_size)
+                except Exception as exc:
+                    candidates_by_path[str(path)] = _relative_candidate(path, base, str(exc))
+        finally:
+            if executor is not None and not is_cancelled:
+                try:
+                    executor.shutdown(wait=True, cancel_futures=False)
+                except TypeError:
+                    executor.shutdown(wait=True)
+
+    log("폴더 간 페이지 번호 연속성 및 메타데이터 일관성 검사 중...")
+    precomputed_statuses: dict[str, dict[str, int]] = {}
+    for folder, page_size in targets:
+        check_cancel()
+        if folder not in folder_body_files:
+            continue
+        body_files = folder_body_files[folder]
+
+        folder_candidates = [path for path in body_files if str(path) in candidates_by_path]
+        if folder_candidates:
+            continue
+
+        folder_page_infos = {}
+        for path in body_files:
+            info = page_infos.get(str(path))
+            if info is not None:
+                folder_page_infos[path] = info
+
+        if len(folder_page_infos) != len(body_files):
+            continue
+
+        page_numbers = set()
+        total_pages_values = set()
+        total_items_values = set()
+        for path, info in folder_page_infos.items():
+            current_page = int(info["current_page"])
+            if current_page in page_numbers:
+                for p in body_files:
+                    candidates_by_path[str(p)] = _relative_candidate(p, base, f"중복되는 페이지 번호 {current_page}")
+                break
+            page_numbers.add(current_page)
+            total_pages_values.add(int(info["total_pages"]))
+            total_items_values.add(int(info["total_items"]))
+        else:
+            if len(total_pages_values) != 1 or len(total_items_values) != 1:
+                reason = "페이지들 사이의 전체 페이지 수 또는 건수가 다릅니다."
+                for p in body_files:
+                    candidates_by_path[str(p)] = _relative_candidate(p, base, reason)
+            else:
+                downloaded_pages = len(body_files)
+                total_pages = next(iter(total_pages_values))
+                total_items = next(iter(total_items_values))
+                expected_prefix = set(range(1, downloaded_pages + 1))
+                if page_numbers != expected_prefix:
+                    reason = f"페이지 번호가 1부터 연속적이지 않습니다: {sorted(page_numbers)}"
+                    for p in body_files:
+                        candidates_by_path[str(p)] = _relative_candidate(p, base, reason)
+                else:
+                    precomputed_statuses[str(folder)] = {
+                        "downloaded_pages": downloaded_pages,
+                        "total_pages": total_pages,
+                        "total_items": total_items,
+                    }
 
     deletion_candidates = sorted(candidates_by_path.values(), key=lambda item: item["name"])
     if deletion_candidates and not dry_run:
+        check_cancel()
         confirmed = (
             payload.get("delete_confirmed") is True
             and str(payload.get("delete_confirmation_text") or "").strip() == DOWNLOAD_DELETE_CONFIRMATION_TEXT
@@ -1126,16 +1303,21 @@ def inspect_download_output_directory_payload(payload: dict[str, Any]) -> dict[s
         if not confirmed:
             msg = f'파일 삭제 전 "{DOWNLOAD_DELETE_CONFIRMATION_TEXT}" 입력과 삭제 허가가 필요합니다.'
             raise ValueError(msg)
+        log(f"삭제 예정 파일 {len(deletion_candidates)}개 삭제 중...")
         for candidate in deletion_candidates:
+            check_cancel()
             Path(candidate["path"]).unlink(missing_ok=True)
+        log("파일 삭제 완료.")
 
+    log("폴더 검증 요약 데이터 구성 중...")
     statuses = [
-        _download_integrity_status(folder, page_size)
+        _download_integrity_status(folder, page_size, precomputed_statuses.get(str(folder)))
         for folder, page_size in targets
         if folder.exists()
     ]
     downloaded_pages = sum(int(status.get("downloaded_pages") or 0) for status in statuses)
     total_pages = sum(int(status.get("total_pages") or 0) for status in statuses)
+    log("폴더 구조 검사 완료.")
     return {
         "format": "kind_download_folder_cleanup_v1",
         "output_directory": str(base),
@@ -1846,3 +2028,36 @@ def get_download_job(job_id: str) -> dict[str, Any]:
         if job is None:
             raise ValueError(f"download job not found: {job_id}")
         return _job_snapshot(job)
+
+
+def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
+    job_id = uuid.uuid4().hex
+    job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
+    with _DOWNLOAD_JOBS_LOCK:
+        _DOWNLOAD_JOBS[job_id] = job
+        _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
+
+    def _worker() -> None:
+        try:
+            _update_job(job_id, status="running")
+            _append_job_progress(job_id, f"JOB inspect start id={job_id}")
+            result = inspect_download_output_directory_payload(
+                payload,
+                progress_callback=lambda message: _append_job_progress(job_id, message),
+                cancel_check=lambda: _is_download_cancelled(job_id),
+            )
+            _update_job(job_id, status="completed", result=result)
+            _append_job_progress(job_id, f"JOB inspect completed id={job_id}")
+        except DownloadCancelled:
+            _update_job(job_id, status="cancelled")
+            _append_job_progress(job_id, f"JOB inspect cancelled id={job_id}")
+        except Exception as exc:
+            _update_job(job_id, status="failed", error=str(exc))
+            _append_job_progress(job_id, f"JOB inspect failed error={exc}")
+        finally:
+            with _DOWNLOAD_JOBS_LOCK:
+                _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    return get_download_job(job_id)
