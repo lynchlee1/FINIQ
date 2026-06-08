@@ -3407,3 +3407,28 @@ def test_check_existing_downloads_corrupted_local(tmp_path: Path, monkeypatch) -
     assert range_info["kind_count"] == 100
     assert "local count is null" in range_info["error_detail"]
 
+
+def test_check_existing_downloads_missing_pages(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 200)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    # Write page 1 and page 3, but page 2 is missing. Expected page size is 100, total items is 200.
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=200)
+    )
+    (folder / "001_post_page_00003.body").write_bytes(
+        _build_download_result_page_html(page_number=3, page_size=100, total_items=200)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "stale"
+    assert "Page completeness check failed" in range_info["error_detail"]
+

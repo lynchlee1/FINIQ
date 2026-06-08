@@ -1890,26 +1890,45 @@ def _validate_single_folder(folder: Path, folder_name: str, date_range: tuple[da
         except Exception:
             pass
 
-    paging = _detect_pagination(folder)
-    local_count = paging.get("total_items") if paging else None
-    
     status = "validated"
     error_detail = None
     kind_count = None
-    
+    local_count = None
+
     if input_snapshot:
+        expected_page_size = 100
+        try:
+            expected_page_size = int(input_snapshot.get("page_size") or 100)
+        except Exception:
+            pass
+
         kind_count = get_current_kind_total_count(input_snapshot)
-        if kind_count is not None:
-            if local_count is None:
-                status = "stale"
-                error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}."
-            elif local_count != kind_count:
-                status = "stale"
-                error_detail = f"KIND current count ({kind_count}) differs from local count ({local_count})."
-        else:
-            status = "unverified"
-            error_detail = "Failed to fetch current count from KIND (network error or timeout)."
+
+        try:
+            inspected = inspect_download_directory_pages(
+                folder,
+                expected_page_size=expected_page_size,
+                require_complete=True,
+            )
+            local_count = inspected.get("total_items")
+        except Exception as exc:
+            status = "stale"
+            error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}. Page completeness check failed: {exc}"
+
+        if status != "stale":
+            if kind_count is not None:
+                if local_count is None:
+                    status = "stale"
+                    error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}."
+                elif local_count != kind_count:
+                    status = "stale"
+                    error_detail = f"KIND current count ({kind_count}) differs from local count ({local_count})."
+            else:
+                status = "unverified"
+                error_detail = "Failed to fetch current count from KIND (network error or timeout)."
     else:
+        paging = _detect_pagination(folder)
+        local_count = paging.get("total_items") if paging else None
         status = "unverified"
         error_detail = "Missing kind_workflow.input.json metadata to verify range against KIND."
 
@@ -2003,11 +2022,45 @@ def check_existing_downloads(output_directory_raw: str) -> dict[str, Any]:
     earliest_date = min(r["start_date"] for r in ranges_data)
     latest_date = max(r["end_date"] for r in ranges_data)
 
+    saved_filters = None
+    for folder, _, _ in candidates:
+        input_snapshot = get_dates_from_input_json(folder)
+        if input_snapshot:
+            try:
+                search_filters_dict = dict(input_snapshot.get("search_filters") or [])
+                
+                market_val = search_filters_dict.get("marketType", "")
+                market_label = "검색대상"
+                for label, val in MARKET_TYPES.items():
+                    if val == market_val:
+                        market_label = label
+                        break
+                
+                securities_val = search_filters_dict.get("securities", "")
+                securities_label = "전체"
+                for label, val in SECURITIES_TYPES.items():
+                    if val == securities_val:
+                        securities_label = label
+                        break
+                
+                saved_filters = {
+                    "company_name": search_filters_dict.get("searchCorpName", ""),
+                    "submitter_name": search_filters_dict.get("submitOblgNm", ""),
+                    "market_label": market_label,
+                    "securities_label": securities_label,
+                    "disclosure_type_groups": input_snapshot.get("disclosure_type_groups") or {},
+                    "last_report_only": bool(input_snapshot.get("last_report_only")),
+                }
+                break
+            except Exception:
+                pass
+
     return {
         "has_existing": True,
         "earliest_date": earliest_date,
         "latest_date": latest_date,
-        "ranges": sorted_ranges
+        "ranges": sorted_ranges,
+        "saved_filters": saved_filters,
     }
 
 
