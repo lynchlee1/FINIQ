@@ -44,6 +44,6 @@ export function checkExistingDownload(outputDirectory: string) {
       disclosure_type_groups: Record<string, string[]>;
       last_report_only: boolean;
     } | null;
-  }>("/api/download/check-existing", { output_directory: outputDirectory });
+  }>("/api/download/check-existing", { output_directory: outputDirectory, verify_with_kind: false });
 }
 

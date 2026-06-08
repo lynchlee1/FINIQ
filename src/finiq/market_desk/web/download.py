@@ -1222,7 +1222,7 @@ def inspect_download_output_directory_payload(
                 completed_count += 1
                 if completed_count % 500 == 0 or completed_count == total_files:
                     log(f"파일 무결성 검증 중... ({completed_count}/{total_files})")
-        except (BrokenProcessPool, OSError, PermissionError):
+        except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
             if is_cancelled:
                 raise
             log("멀티프로세싱 검증 실패로 인해 싱글스레드 순차 검증으로 전환합니다...")
@@ -1864,7 +1864,13 @@ def get_current_kind_total_count(input_snapshot: dict[str, Any]) -> int | None:
     return None
 
 
-def _validate_single_folder(folder: Path, folder_name: str, date_range: tuple[date, date]) -> dict[str, Any] | None:
+def _validate_single_folder(
+    folder: Path,
+    folder_name: str,
+    date_range: tuple[date, date],
+    *,
+    verify_with_kind: bool = True,
+) -> dict[str, Any] | None:
     body_files = list(folder.glob("*_post_page_*.body"))
     if not body_files:
         return None
@@ -1902,30 +1908,73 @@ def _validate_single_folder(folder: Path, folder_name: str, date_range: tuple[da
         except Exception:
             pass
 
-        kind_count = get_current_kind_total_count(input_snapshot)
+        if verify_with_kind:
+            kind_count = get_current_kind_total_count(input_snapshot)
+        else:
+            kind_count = None
 
         try:
-            inspected = inspect_download_directory_pages(
-                folder,
-                expected_page_size=expected_page_size,
-                require_complete=True,
-            )
-            local_count = inspected.get("total_items")
+            if not verify_with_kind:
+                # 1. Check page number continuity using filenames.
+                # Extract page numbers from files like *_post_page_(\d+).body
+                page_nums = []
+                import re
+                page_num_re = re.compile(r"_post_page_(\d+)\.body$")
+                for f in body_files:
+                    m = page_num_re.search(f.name)
+                    if m:
+                        page_nums.append(int(m.group(1)))
+                
+                if not page_nums or len(page_nums) != len(body_files):
+                    raise ValueError("Failed to extract page numbers from all files")
+                sorted_page_nums = sorted(page_nums)
+                expected_page_nums = list(range(1, len(page_nums) + 1))
+                if sorted_page_nums != expected_page_nums:
+                    raise ValueError(f"Page numbers are not contiguous: {sorted_page_nums}")
+
+                # 2. Extract total items and total pages by parsing the last page.
+                paging = _detect_pagination(folder)
+                if paging is None:
+                    raise ValueError("Failed to parse pagination metadata from the last page")
+                
+                local_count = paging.get("total_items")
+                total_pages = paging.get("total_pages")
+                downloaded_pages = len(body_files)
+                
+                if downloaded_pages != total_pages:
+                    raise ValueError(
+                        f"Page completeness check failed: downloaded pages ({downloaded_pages}) "
+                        f"does not match total pages ({total_pages})"
+                    )
+            else:
+                inspected = inspect_download_directory_pages(
+                    folder,
+                    expected_page_size=expected_page_size,
+                    require_complete=True,
+                )
+                local_count = inspected.get("total_items")
         except Exception as exc:
             status = "stale"
-            error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}. Page completeness check failed: {exc}"
+            if verify_with_kind:
+                error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}. Page completeness check failed: {exc}"
+            else:
+                error_detail = f"Page completeness check failed: {exc}"
 
         if status != "stale":
-            if kind_count is not None:
-                if local_count is None:
-                    status = "stale"
-                    error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}."
-                elif local_count != kind_count:
-                    status = "stale"
-                    error_detail = f"KIND current count ({kind_count}) differs from local count ({local_count})."
+            if verify_with_kind:
+                if kind_count is not None:
+                    if local_count is None:
+                        status = "stale"
+                        error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}."
+                    elif local_count != kind_count:
+                        status = "stale"
+                        error_detail = f"KIND current count ({kind_count}) differs from local count ({local_count})."
+                else:
+                    status = "unverified"
+                    error_detail = "Failed to fetch current count from KIND (network error or timeout)."
             else:
-                status = "unverified"
-                error_detail = "Failed to fetch current count from KIND (network error or timeout)."
+                kind_count = local_count
+                status = "validated"
     else:
         paging = _detect_pagination(folder)
         local_count = paging.get("total_items") if paging else None
@@ -1943,7 +1992,7 @@ def _validate_single_folder(folder: Path, folder_name: str, date_range: tuple[da
     }
 
 
-def check_existing_downloads(output_directory_raw: str) -> dict[str, Any]:
+def check_existing_downloads(output_directory_raw: str, *, verify_with_kind: bool = True) -> dict[str, Any]:
     """Inspect output directory to detect and validate existing downloaded date ranges."""
     if not output_directory_raw:
         return {"has_existing": False}
@@ -2004,7 +2053,13 @@ def check_existing_downloads(output_directory_raw: str) -> dict[str, Any]:
     # Run validation checks concurrently in a ThreadPool
     with ThreadPoolExecutor(max_workers=min(10, len(candidates))) as executor:
         futures = {
-            executor.submit(_validate_single_folder, folder, folder_name, date_range): folder_name
+            executor.submit(
+                _validate_single_folder,
+                folder,
+                folder_name,
+                date_range,
+                verify_with_kind=verify_with_kind,
+            ): folder_name
             for folder, folder_name, date_range in candidates
         }
         for future in futures:

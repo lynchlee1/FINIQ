@@ -705,7 +705,7 @@ def _collect_all_folder_summaries(
                     [validate_integrity] * len(folder_targets),
                 )
             )
-    except (BrokenProcessPool, OSError, PermissionError):
+    except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
         return [
             _collect_company_records_from_folder(folder, validate_integrity=validate_integrity)
             for folder in folder_targets
@@ -966,7 +966,7 @@ def export_kind_mode_folders(
     try:
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
             return list(executor.map(_export_kind_mode_folder_task, tasks))
-    except (BrokenProcessPool, OSError, PermissionError):
+    except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
         return [_export_kind_mode_folder_task(task) for task in tasks]
 
 
@@ -1327,7 +1327,7 @@ def validate_download_directory_page_size(
                     [(str(page_path), expected_page_size) for page_path in page_paths],
                 )
             )
-    except (BrokenProcessPool, OSError, PermissionError):
+    except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
         for page_path in page_paths:
             validate_downloaded_result_page(page_path, expected_page_size=expected_page_size)
 
@@ -1368,7 +1368,7 @@ def inspect_download_directory_pages(
                         [(str(page_path), expected_page_size) for page_path in page_paths],
                     )
                 )
-        except (BrokenProcessPool, OSError, PermissionError):
+        except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
             inspected_pages = [
                 validate_downloaded_result_page(page_path, expected_page_size=expected_page_size)
                 for page_path in page_paths
