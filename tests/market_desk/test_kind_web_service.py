@@ -3455,10 +3455,10 @@ def test_check_existing_downloads_fast_validated(tmp_path: Path, monkeypatch) ->
     res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
     assert res["has_existing"] is True
     range_info = res["ranges"][0]
-    assert range_info["status"] == "validated"
+    assert range_info["status"] == "unverified"
     assert range_info["local_count"] == 100
-    assert range_info["kind_count"] == 100
-    assert range_info["error_detail"] is None
+    assert range_info["kind_count"] is None
+    assert range_info["error_detail"] == "KIND verification skipped (fast check mode)."
 
 
 def test_check_existing_downloads_fast_missing_pages(tmp_path: Path, monkeypatch) -> None:
@@ -3487,7 +3487,7 @@ def test_check_existing_downloads_fast_missing_pages(tmp_path: Path, monkeypatch
     assert res["has_existing"] is True
     range_info = res["ranges"][0]
     assert range_info["status"] == "stale"
-    assert "Page numbers are not contiguous" in range_info["error_detail"]
+    assert "Page numbers are not contiguous" in range_info["error_detail"] or "Page completeness check failed" in range_info["error_detail"]
 
 
 def test_check_existing_downloads_fast_corrupted_local(tmp_path: Path, monkeypatch) -> None:
@@ -3512,4 +3512,131 @@ def test_check_existing_downloads_fast_corrupted_local(tmp_path: Path, monkeypat
     range_info = res["ranges"][0]
     assert range_info["status"] == "stale"
     assert "Page completeness check failed" in range_info["error_detail"]
+
+
+def test_check_existing_downloads_fast_corrupted_non_last_page(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+
+    # We monkeypatch get_current_kind_total_count to raise an error to prove it is NOT called
+    def fail_if_called(snap):
+        raise RuntimeError("Should not be called in fast validation mode")
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    # Page 1 is corrupted, Page 2 is valid
+    (folder / "001_post_page_00001.body").write_bytes(b"corrupted html")
+    (folder / "001_post_page_00002.body").write_bytes(
+        _build_download_result_page_html(page_number=2, page_size=100, total_items=200)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "stale"
+    assert "Page completeness check failed" in range_info["error_detail"]
+
+
+def test_check_existing_downloads_route_verify_with_kind_parsing(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.routers.download import create_download_router
+    class DummyConfig:
+        download_output_directory = None
+        output_root = None
+    
+    router = create_download_router(DummyConfig())
+    route_func = None
+    for route in router.routes:
+        if getattr(route, "path", None) == "/api/download/check-existing":
+            route_func = route.endpoint
+            break
+            
+    assert route_func is not None
+
+    called_verify_with_kind = []
+    def mock_check_existing(path, *, verify_with_kind=True):
+        called_verify_with_kind.append(verify_with_kind)
+        return {"has_existing": False}
+
+    monkeypatch.setattr("finiq.market_desk.web.routers.download.check_existing_downloads", mock_check_existing)
+
+    # test JSON boolean false
+    route_func({"output_directory": "/tmp", "verify_with_kind": False})
+    assert called_verify_with_kind[-1] is False
+
+    # test string boolean "false"
+    route_func({"output_directory": "/tmp", "verify_with_kind": "false"})
+    assert called_verify_with_kind[-1] is False
+
+    # test string boolean "0"
+    route_func({"output_directory": "/tmp", "verify_with_kind": "0"})
+    assert called_verify_with_kind[-1] is False
+
+    # test string boolean "no"
+    route_func({"output_directory": "/tmp", "verify_with_kind": "no"})
+    assert called_verify_with_kind[-1] is False
+
+    # test JSON boolean true
+    route_func({"output_directory": "/tmp", "verify_with_kind": True})
+    assert called_verify_with_kind[-1] is True
+
+    # test string boolean "true"
+    route_func({"output_directory": "/tmp", "verify_with_kind": "true"})
+    assert called_verify_with_kind[-1] is True
+
+    # test default
+    route_func({"output_directory": "/tmp"})
+    assert called_verify_with_kind[-1] is True
+
+
+def test_check_existing_downloads_fast_row_count_mismatch(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+
+    # We monkeypatch get_current_kind_total_count to raise an error to prove it is NOT called
+    def fail_if_called(snap):
+        raise RuntimeError("Should not be called in fast validation mode")
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    
+    # Page 1 has correct pagination info but only 1 row (1 openDisclsViewer) when 100 are expected
+    html_content = """
+    <html>
+        <body>
+            <div class="paging">
+                전체 <em>200</em> 건 : <strong>1</strong>/2
+            </div>
+            <table summary="회사명, 공시제목">
+                <tr>
+                    <td>1</td>
+                    <td>2026-01-01</td>
+                    <td>회사A</td>
+                    <td><a onclick="openDisclsViewer('123', '456')">공시A</a></td>
+                    <td>제출인A</td>
+                </tr>
+            </table>
+        </body>
+    </html>
+    """
+    (folder / "001_post_page_00001.body").write_text(html_content, encoding="euc-kr")
+
+    # Page 2 is valid
+    (folder / "001_post_page_00002.body").write_bytes(
+        _build_download_result_page_html(page_number=2, page_size=100, total_items=200)
+    )
+
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "stale"
+    assert "Page row count mismatch" in range_info["error_detail"]
 

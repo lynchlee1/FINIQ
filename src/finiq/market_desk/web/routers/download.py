@@ -23,9 +23,19 @@ def create_download_router(config: Any) -> APIRouter:
 
     @router.post("/api/download/check-existing")
     def check_existing_downloads_route(payload: dict[str, Any]):
+        val = payload.get("verify_with_kind")
+        if val is None or val == "":
+            verify_with_kind = True
+        elif isinstance(val, bool):
+            verify_with_kind = val
+        elif isinstance(val, str):
+            verify_with_kind = val.strip().lower() not in {"false", "0", "no"}
+        else:
+            verify_with_kind = bool(val)
+
         return check_existing_downloads(
             str(payload.get("output_directory") or ""),
-            verify_with_kind=payload.get("verify_with_kind", True),
+            verify_with_kind=verify_with_kind,
         )
 
     @router.get("/api/download/options")
