@@ -24,6 +24,7 @@ def convert_quanti_excel_to_parquet(
     output_dir: str | Path,
     *,
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Convert Quantiwise Excel files to wide-item Parquet files.
 
@@ -51,9 +52,13 @@ def convert_quanti_excel_to_parquet(
     _emit(progress_callback, f"Found {len(xlsx_files)} Excel files. Scanning sheets...")
 
     for xlsx_path in xlsx_files:
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         try:
             excel = pd.ExcelFile(xlsx_path)
             for sheet_name in excel.sheet_names:
+                if cancel_check and cancel_check():
+                    raise RuntimeError("Job cancelled")
                 item_code = str(sheet_name).strip().upper()
                 # Basic validation: item code usually starts with S or similar, 7 chars
                 if not item_code:
@@ -67,10 +72,14 @@ def convert_quanti_excel_to_parquet(
 
     results = []
     for index, (item_code, paths) in enumerate(item_files.items(), start=1):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         _emit(progress_callback, f"[{index}/{total_items}] Processing {item_code}...")
         item_df = pd.DataFrame()
 
         for xlsx_path in paths:
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
             try:
                 # Assuming first column is 'date' or unnamed date column
                 df = pd.read_excel(xlsx_path, sheet_name=item_code, index_col=0)
@@ -117,6 +126,7 @@ def merge_quanti_by_item_datasets(
     output_dir: str | Path,
     *,
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Merge multiple by_item Parquet datasets into one."""
     inputs = [Path(p).expanduser().resolve() for p in input_dirs]
@@ -140,9 +150,13 @@ def merge_quanti_by_item_datasets(
 
     merged_items = []
     for index, (item_code, paths) in enumerate(item_map.items(), start=1):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         _emit(progress_callback, f"[{index}/{total_items}] Merging {item_code}...")
         combined_df = pd.DataFrame()
         for p in paths:
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
             df = pd.read_parquet(p)
             if "date" not in df.columns:
                 continue

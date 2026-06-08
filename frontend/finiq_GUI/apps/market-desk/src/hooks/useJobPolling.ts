@@ -1,9 +1,10 @@
 import { useState, useCallback } from "react";
-import { apiGet } from "@/api/client";
+import { apiGet, apiPost } from "@/api/client";
 import type { JobSnapshot } from "@/types/api";
 
 interface UseJobPollingOptions {
   pollingEndpoint: string;
+  cancelEndpoint?: string;
   onSuccess?: (data: any) => void;
   onError?: (error: Error) => void;
   onCancel?: () => void;
@@ -12,7 +13,7 @@ interface UseJobPollingOptions {
 }
 
 export function useJobPolling(options: UseJobPollingOptions) {
-  const { pollingEndpoint, onSuccess, onError, onCancel, pollInterval = 1000, formatStatus } = options;
+  const { pollingEndpoint, cancelEndpoint, onSuccess, onError, onCancel, pollInterval = 1000, formatStatus } = options;
   const [status, setStatus] = useState<string>("작업을 실행할 준비가 되었습니다.");
   const [isErrorStatus, setIsErrorStatus] = useState<boolean>(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -84,6 +85,17 @@ export function useJobPolling(options: UseJobPollingOptions) {
     [pollJob]
   );
 
+  const cancelJob = useCallback(async () => {
+    if (!activeJobId || !cancelEndpoint) return;
+    try {
+      setStatus("작업 중단을 요청했습니다...");
+      await apiPost<any>(cancelEndpoint, { job_id: activeJobId });
+    } catch (err: any) {
+      setStatus(`작업 중단 요청 실패: ${err.message}`);
+      setIsErrorStatus(true);
+    }
+  }, [activeJobId, cancelEndpoint]);
+
   const appendStatus = useCallback((message: string, isError = false) => {
     setStatus((prev) => {
       const lines = prev ? prev.split("\n") : [];
@@ -108,5 +120,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
     setStatus,
     setIsErrorStatus,
     setActiveJobId,
+    cancelJob,
   };
 }
+

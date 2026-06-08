@@ -30,9 +30,11 @@ export default function IntegratedDataPage() {
   const [loading, setLoading] = useState(true);
 
   const { integrated_data_values, fetchSettings, saveSetting } = useSettingsStore();
-  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
+  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/integrated-data/jobs/{jobId}",
+    cancelEndpoint: "/api/integrated-data/cancel",
   });
+
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -132,10 +134,18 @@ export default function IntegratedDataPage() {
                   ))}
                 </div>
               )}
-              <Button onClick={handleStartConvert} disabled={!!activeJobId} className="w-full md:w-auto">
-                {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                실행
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={handleStartConvert} disabled={!!activeJobId} className="w-full md:w-auto">
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  실행
+                </Button>
+                {activeJobId && (
+                  <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
+                    중단
+                  </Button>
+                )}
+              </div>
+
             </CardContent>
           </Card>
         </section>

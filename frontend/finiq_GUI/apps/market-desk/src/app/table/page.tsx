@@ -18,8 +18,9 @@ export default function TablePage() {
   const [loading, setLoading] = useState(true);
   
   const { fetchSettings, saveSetting } = useSettingsStore();
-  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
+  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/disclosures/table/jobs/{jobId}",
+    cancelEndpoint: "/api/disclosures/table/build/cancel",
   });
   
   // Data State
@@ -175,7 +176,7 @@ export default function TablePage() {
                   />
                 </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <Button variant="outline" onClick={handleRefresh} disabled={!!activeJobId} className="w-full">
                   <RefreshCw className={cn("mr-2 h-4 w-4", !!activeJobId ? "animate-spin" : "")} />
                   소스 새로고침
@@ -183,6 +184,9 @@ export default function TablePage() {
                 <Button className="w-full" onClick={handleBuild} disabled={!!activeJobId}>
                   {!!activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
+                </Button>
+                <Button variant="outline" onClick={cancelJob} disabled={!activeJobId} className="w-full">
+                  중단
                 </Button>
               </div>
             </CardContent>

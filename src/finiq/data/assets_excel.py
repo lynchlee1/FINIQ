@@ -461,6 +461,7 @@ def _scan_asset_excel_frames(
     *,
     selected_files: list[str] | None = None,
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[dict[str, list[tuple[pd.DataFrame, SourceInfo]]], dict[str, list[SourceInfo]], list[dict[str, str]], list[dict[str, Any]]]:
     source = Path(source_directory).expanduser().resolve()
     xlsx_files = _selected_asset_excel_paths(source, selected_files)
@@ -474,9 +475,13 @@ def _scan_asset_excel_frames(
     sheet_summaries: list[dict[str, Any]] = []
 
     for file_index, xlsx_path in enumerate(xlsx_files, start=1):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] {xlsx_path.name} 스캔 중...")
         excel = pd.ExcelFile(xlsx_path)
         for sheet_index, sheet_name in enumerate(excel.sheet_names, start=1):
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
             _emit(progress_callback, f"[Sheet {sheet_index}/{len(excel.sheet_names)}] {xlsx_path.name} / {sheet_name}")
             account_name = _account_name_for_sheet(sheet_name)
             if account_name is None:
@@ -616,6 +621,7 @@ def convert_asset_excels_to_wide_parquet(
     conflict_policy: str = "error",
     write_mode: str = "update",
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Merge assets Excel sheets by account name and save each account as wide Parquet."""
     source = Path(source_directory).expanduser().resolve()
@@ -631,6 +637,7 @@ def convert_asset_excels_to_wide_parquet(
         source,
         selected_files=selected_files,
         progress_callback=progress_callback,
+        cancel_check=cancel_check,
     )
     output_info = inspect_asset_excel_output(output)
     updated_accounts: list[str] = []
@@ -647,6 +654,8 @@ def convert_asset_excels_to_wide_parquet(
     merged_by_account: dict[str, pd.DataFrame] = {}
     conflicts_by_account: dict[str, list[dict[str, str]]] = {}
     for account_name, frames in sorted(frames_by_account.items()):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         _emit(progress_callback, f"Merging {account_name}...")
         merged, conflicts = _merge_account_frames(
             account_name,
@@ -659,6 +668,8 @@ def convert_asset_excels_to_wide_parquet(
 
     accounts: dict[str, Any] = {}
     for account_name, merged in sorted(merged_by_account.items()):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         _emit(progress_callback, f"Saving {account_name}.parquet...")
         parquet_path = output / f"{account_name}.parquet"
         merged.reset_index().to_parquet(parquet_path, index=False, compression="snappy")

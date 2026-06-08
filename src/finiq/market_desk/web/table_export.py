@@ -172,15 +172,19 @@ def _resolve_source(raw_path: str, root_directory: str) -> tuple[str, Path]:
     raise ValueError(msg)
 
 
-def _iter_disclosure_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _iter_disclosure_rows(payload: dict[str, Any], cancel_check: Callable[[], bool] | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for company_index, company in enumerate(list(payload.get("companies") or [])):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         company_key = _company_key(company)
         company_name = company.get("company_name")
         company_id = company.get("company_id")
         market = company.get("market")
         badges = list(company.get("badges") or [])
         for disclosure in _company_disclosures(company, company_index):
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
             disclosed_at = disclosure.get("disclosed_at")
             rows.append(
                 {
@@ -235,10 +239,12 @@ def _validate_classification_disclosure_counts(
         raise ValueError(msg)
 
 
-def _iter_source_folder_rows(source_folder: Path) -> list[dict[str, Any]]:
+def _iter_source_folder_rows(source_folder: Path, cancel_check: Callable[[], bool] | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, str, str, str]] = set()
     for body_path in _find_source_body_files(source_folder):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         for record in _parse_source_body_file(body_path):
             key = (
                 str(record.get("acpt_no") or ""),
@@ -524,7 +530,11 @@ def _write_manifest(manifest_path: Path, payload: dict[str, Any]) -> None:
     temporary_path.replace(manifest_path)
 
 
-def build_disclosure_table_payload(body: dict[str, Any], progress_callback: Callable[[str], None] | None = None) -> dict[str, Any]:
+def build_disclosure_table_payload(
+    body: dict[str, Any],
+    progress_callback: Callable[[str], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     if progress_callback:
         progress_callback("작업 설정 및 경로를 파악합니다...")
     root_directory = str(body.get("root_directory") or "").strip()
@@ -541,11 +551,11 @@ def build_disclosure_table_payload(body: dict[str, Any], progress_callback: Call
     
     if source_type == "classification":
         payload = load_company_classification_file(source_path)
-        rows = _iter_disclosure_rows(payload)
+        rows = _iter_disclosure_rows(payload, cancel_check=cancel_check)
         _validate_classification_disclosure_counts(payload, rows, source_path)
         companies = len(list(payload.get("companies") or []))
     else:
-        rows = _iter_source_folder_rows(source_path)
+        rows = _iter_source_folder_rows(source_path, cancel_check=cancel_check)
         companies = len(
             {
                 str(row.get("company_key") or row.get("company_id") or row.get("company_name") or "").strip()
@@ -560,6 +570,8 @@ def build_disclosure_table_payload(body: dict[str, Any], progress_callback: Call
 
     shards: list[dict[str, Any]] = []
     for i, (year, shard_rows) in enumerate(sorted(rows_by_year.items()), 1):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
         if progress_callback:
             progress_callback(f"[{i}/{len(rows_by_year)}] {year}년 샤드 생성 중... ({len(shard_rows)} 건)")
         shard_path = shard_root / f"{year}.sqlite"
@@ -576,6 +588,7 @@ def build_disclosure_table_payload(body: dict[str, Any], progress_callback: Call
 
     if progress_callback:
         progress_callback("매니페스트 파일을 기록합니다...")
+
 
     manifest = {
         "format": MANIFEST_FORMAT,

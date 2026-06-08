@@ -20,8 +20,9 @@ export default function IntegratedMarketHistoryPage() {
     sqlite_manifest_path
   } = useSettingsStore();
 
-  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
+  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/integrated-data/jobs/{jobId}",
+    cancelEndpoint: "/api/integrated-data/cancel",
   });
 
   useEffect(() => {
@@ -83,10 +84,17 @@ export default function IntegratedMarketHistoryPage() {
                 <PathPickerInput mode="save" value={outputPath || ""} onChange={(val) => saveSetting("integrated_history_output_path", val)} onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
               </div>
             </div>
-            <Button onClick={handleStartMarketHistory} disabled={!!activeJobId} className="w-full md:w-auto">
-              {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-              실행
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={handleStartMarketHistory} disabled={!!activeJobId} className="w-full md:w-auto">
+                {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                실행
+              </Button>
+              {activeJobId && (
+                <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
+                  중단
+                </Button>
+              )}
+            </div>
             </CardContent>
           </Card>
         </section>

@@ -1006,14 +1006,10 @@ export default function DownloadPage() {
               {result && result.format !== "kind_download_folder_cleanup_v1" && (
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">실행 결과 요약</Label>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="grid grid-cols-1 gap-2 mt-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공 / 전체</span>
                       <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary?.success || result.success_count || 0}/{result.summary?.total || result.total_count || result.summary?.success || 0}</strong>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">실패</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary?.failed || result.failed_count || result.error_count || 0}</strong>
                     </div>
                   </div>
                 </div>

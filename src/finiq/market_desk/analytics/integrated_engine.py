@@ -38,6 +38,7 @@ class BaseProvider(abc.ABC):
         self,
         payload: Dict[str, Any],
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """Convert source data to FINIQ standard wide-item Parquet."""
 
@@ -46,6 +47,7 @@ class BaseProvider(abc.ABC):
         self,
         payload: Dict[str, Any],
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """Merge multiple datasets produced by this provider."""
 
@@ -110,18 +112,21 @@ class QuantiwiseProvider(BaseProvider):
         self,
         payload: Dict[str, Any],
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         from finiq.market_desk.analytics.quanti_integrated import convert_quanti_excel_to_parquet
         return convert_quanti_excel_to_parquet(
             payload.get("source_directory", ""),
             payload.get("output_directory", ""),
             progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
 
     def merge(
         self,
         payload: Dict[str, Any],
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         from finiq.market_desk.analytics.quanti_integrated import merge_quanti_by_item_datasets
         input_dirs = payload.get("input_directories")
@@ -131,6 +136,7 @@ class QuantiwiseProvider(BaseProvider):
             input_dirs,
             payload.get("output_directory", ""),
             progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
 
 
@@ -166,6 +172,7 @@ class FDRProvider(BaseProvider):
         self,
         payload: Dict[str, Any],
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         # Implementation for FDR fetching and wide-item conversion
         if progress_callback:
@@ -176,6 +183,7 @@ class FDRProvider(BaseProvider):
         self,
         payload: Dict[str, Any],
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         if progress_callback:
             progress_callback("FDR Provider merging is not yet implemented.")

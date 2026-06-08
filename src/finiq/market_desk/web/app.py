@@ -55,7 +55,11 @@ JobProgressCallback = Callable[[str], None]
 JobHandler = Callable[[dict[str, Any], JobProgressCallback], Any]
 
 
-def _run_asset_excel_convert_job(payload: dict[str, Any], progress_callback: JobProgressCallback) -> dict[str, Any]:
+def _run_asset_excel_convert_job(
+    payload: dict[str, Any],
+    progress_callback: JobProgressCallback,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     return convert_asset_excels_to_wide_parquet(
         ASSETS_DIR,
         payload.get("output_directory") or DEFAULT_ASSET_PARQUET_DIR,
@@ -63,6 +67,7 @@ def _run_asset_excel_convert_job(payload: dict[str, Any], progress_callback: Job
         conflict_policy=str(payload.get("conflict_policy") or "error"),
         write_mode=str(payload.get("write_mode") or "update"),
         progress_callback=progress_callback,
+        cancel_check=cancel_check,
     )
 
 
@@ -83,16 +88,30 @@ JOB_HANDLERS: dict[str, JobHandler] = {
 
 def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
     try:
-        job_manager.start_job(job_id)
+        if not job_manager.start_job(job_id):
+            return
         progress_callback = lambda m: job_manager.add_log(job_id, m)
         handler = JOB_HANDLERS.get(kind)
         if handler is None:
             raise ValueError(f"Unhandled job kind: {kind}")
 
-        result = handler(payload, progress_callback=progress_callback)
+        import inspect
+        sig = inspect.signature(handler)
+        kwargs = {"progress_callback": progress_callback}
+        if "cancel_check" in sig.parameters:
+            kwargs["cancel_check"] = lambda: job_manager.is_cancelled(job_id)
+
+        result = handler(payload, **kwargs)
+
+        if job_manager.is_cancelled(job_id):
+            return
+
         job_manager.complete_job(job_id, result)
     except Exception as exc:
+        if job_manager.is_cancelled(job_id):
+            return
         job_manager.fail_job(job_id, str(exc))
+
 
 
 def _filter_disclosures_payload(*args: Any, **kwargs: Any) -> dict[str, Any]:

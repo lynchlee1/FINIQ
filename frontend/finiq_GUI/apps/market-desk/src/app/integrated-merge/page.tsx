@@ -18,8 +18,9 @@ export default function IntegratedMergePage() {
     saveSetting 
   } = useSettingsStore();
 
-  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
+  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/integrated-data/jobs/{jobId}",
+    cancelEndpoint: "/api/integrated-data/cancel",
   });
 
   useEffect(() => {
@@ -75,10 +76,17 @@ export default function IntegratedMergePage() {
                   <PathPickerInput mode="folder" value={outputDir || ""} onChange={(val) => saveSetting("integrated_merge_output_path", val)} placeholder="병합된 데이터가 저장될 폴더 경로" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
               </div>
-              <Button onClick={handleStartMerge} disabled={!!activeJobId} className="w-full md:w-auto">
-                {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                실행
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={handleStartMerge} disabled={!!activeJobId} className="w-full md:w-auto">
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  실행
+                </Button>
+                {activeJobId && (
+                  <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
+                    중단
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         </section>
