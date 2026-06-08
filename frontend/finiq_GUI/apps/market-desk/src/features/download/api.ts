@@ -21,3 +21,12 @@ export function cancelDownload(jobId: string) {
 export function inspectDownloadFolder(payload: DownloadInspectPayload) {
   return apiPost<JobStartResponse>("/api/download/inspect-folder/start", payload);
 }
+
+export function checkExistingDownload(outputDirectory: string) {
+  return apiPost<{
+    has_existing: boolean;
+    earliest_date?: string;
+    latest_date?: string;
+  }>("/api/download/check-existing", { output_directory: outputDirectory });
+}
+
