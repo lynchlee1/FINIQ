@@ -14,8 +14,20 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
+import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, checkExistingDownload } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
+
+const parseISODate = (dateStr: string) => {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day);
+};
+
+const formatDateToISO = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 export default function DownloadPage() {
   const [options, setOptions] = useState<DownloadOptions | null>(null);
@@ -25,6 +37,21 @@ export default function DownloadPage() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
+  const [existingData, setExistingData] = useState<{
+    has_existing: boolean;
+    earliest_date?: string;
+    latest_date?: string;
+    ranges?: {
+      start_date: string;
+      end_date: string;
+      folder_name: string;
+      local_count: number | null;
+      kind_count: number | null;
+      status: "validated" | "stale" | "unverified";
+      error_detail: string | null;
+    }[];
+  } | null>(null);
+  const [forceContinue, setForceContinue] = useState(false);
 
   const { download_output_directory: outputDirectory, saveSetting } = useSettingsStore();
 
@@ -109,8 +136,8 @@ export default function DownloadPage() {
       const today = new Date();
       const start = new Date(today);
       start.setDate(today.getDate() - 30);
-      setStartDate(start.toISOString().slice(0, 10));
-      setEndDate(today.toISOString().slice(0, 10));
+      setStartDate(formatDateToISO(start));
+      setEndDate(formatDateToISO(today));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -121,6 +148,56 @@ export default function DownloadPage() {
   useEffect(() => {
     fetchOptions();
   }, [fetchOptions]);
+
+  const checkExisting = useCallback(async (dir: string) => {
+    setForceContinue(false);
+    if (!dir) {
+      setExistingData(null);
+      return;
+    }
+    try {
+      const result = await checkExistingDownload(dir);
+      if (result && result.has_existing) {
+        setExistingData(result);
+      } else {
+        setExistingData(null);
+      }
+    } catch {
+      setExistingData(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkExisting(outputDirectory);
+  }, [outputDirectory, checkExisting]);
+
+  const handleApplyUpdateRange = () => {
+    if (!existingData || !existingData.latest_date) return;
+    try {
+      const latest = parseISODate(existingData.latest_date);
+      latest.setDate(latest.getDate() + 1);
+      const nextStartStr = formatDateToISO(latest);
+      
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const yesterdayStr = formatDateToISO(yesterday);
+      
+      if (nextStartStr > yesterdayStr) {
+        setStatus("이미 어제 날짜 공시 내역까지 다운로드되어 있거나 최신 상태입니다.");
+        return;
+      }
+      
+      setStartDate(nextStartStr);
+      setEndDate(yesterdayStr);
+      setStatus(`다운로드 기간이 업데이트용(어제까지)으로 변경되었습니다: ${nextStartStr} ~ ${yesterdayStr}`);
+    } catch (err: any) {
+      setStatus(`날짜 계산 중 오류가 발생했습니다: ${err.message}`);
+      setIsErrorStatus(true);
+    }
+  };
+
+
 
   const buildPayload = (): DownloadPayload => ({
     mode: "yearly",
@@ -353,6 +430,105 @@ export default function DownloadPage() {
                   onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                 />
               </div>
+
+              {existingData && existingData.has_existing && (
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-[#30363d] dark:bg-[#161b22] text-sm animate-fade-in transition-all">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d]">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                        📂 기존 다운로드 시도 범위 감지됨
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        전체 범위: <span className="font-semibold">{existingData.earliest_date}</span> ~ <span className="font-semibold">{existingData.latest_date}</span>
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 shrink-0 self-start md:self-auto border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-[#21262d] dark:hover:text-slate-100"
+                      onClick={handleApplyUpdateRange}
+                      disabled={
+                        (existingData.ranges?.some(r => r.status === "stale" || r.status === "unverified") ?? false) &&
+                        !forceContinue
+                      }
+                    >
+                      이어서 다운로드하기 (업데이트)
+                    </Button>
+                  </div>
+
+                  {/* Range List */}
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                    {existingData.ranges?.map((range, index) => {
+                      const statusColors = {
+                        validated: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-900/40",
+                        stale: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-300 dark:border-rose-900/40",
+                        unverified: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
+                      };
+                      const statusLabels = {
+                        validated: "검증 완료: KIND 건수 일치",
+                        stale: "검증 실패: KIND 건수 불일치 (stale)",
+                        unverified: "검증 불가 (네트워크 상태/메타데이터 없음)",
+                      };
+
+                      return (
+                        <div
+                          key={index}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded border dark:bg-[#0d1117] dark:border-[#30363d] gap-2 text-xs"
+                        >
+                          <div className="space-y-0.5">
+                            <p className="font-medium text-slate-800 dark:text-slate-200">
+                              {range.folder_name} ({range.start_date} ~ {range.end_date})
+                            </p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                              로컬 건수: {range.local_count ?? "-"} | KIND 건수: {range.kind_count ?? "-"}
+                            </p>
+                            {range.error_detail && (
+                              <p className="text-[10px] text-rose-500 dark:text-rose-400 font-medium">
+                                ⚠ {range.error_detail}
+                              </p>
+                            )}
+                          </div>
+                          <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${statusColors[range.status]}`}>
+                            {statusLabels[range.status]}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Warning message if stale ranges exist */}
+                  {existingData.ranges?.some(r => r.status === "stale") && (
+                    <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                      <strong>⚠ 경고:</strong> 기존 다운로드한 데이터 중 일부가 KIND의 현재 검색 결과와 일치하지 않습니다 (데이터 변경/정정/누락 가능성). 
+                      무결성이 손상되었으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다. mismatch 폴더를 수동으로 검사/보완하거나 삭제 후 재실행해야 합니다.
+                    </div>
+                  )}
+
+                  {/* Warning message if unverified ranges exist */}
+                  {existingData.ranges?.some(r => r.status === "unverified") && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                      <strong>💡 알림:</strong> 일부 다운로드 범위는 오프라인 상태이거나 workflow 메타데이터가 없어 검증하지 못했습니다. 무결성을 보장할 수 없으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다.
+                    </div>
+                  )}
+
+                  {/* Override checkbox if any stale/unverified range exists */}
+                  {existingData.ranges?.some(r => r.status === "stale" || r.status === "unverified") && (
+                    <div className="flex items-center space-x-2 rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-[#0d1117]">
+                      <Checkbox
+                        id="forceContinueCheckbox"
+                        checked={forceContinue}
+                        onCheckedChange={(v) => setForceContinue(!!v)}
+                        className="dark:border-[#30363d]"
+                      />
+                      <Label htmlFor="forceContinueCheckbox" className="text-xs cursor-pointer font-medium text-slate-700 dark:text-slate-300">
+                        검증 실패/불가 경고를 확인했으며, 강제로 이어서 다운로드하기를 진행합니다.
+                      </Label>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">시작일</Label>
@@ -731,7 +907,7 @@ export default function DownloadPage() {
                 />
               </div>
 
-              {result && (
+              {result && result.format !== "kind_download_folder_cleanup_v1" && (
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">실행 결과 요약</Label>
                   <div className="grid grid-cols-2 gap-2 mt-2">

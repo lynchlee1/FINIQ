@@ -3248,3 +3248,162 @@ def test_quanti_market_registry_helpers_load_market_item_and_values(tmp_path: Pa
 
     assert item_code == "S999999"
     assert market_value_map_from_registry(registry, item_code)["2"] == "코스닥"
+
+
+def test_check_existing_downloads_empty(tmp_path: Path) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    res = check_existing_downloads(str(tmp_path / "non_existent"))
+    assert res == {"has_existing": False}
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res == {"has_existing": False}
+
+
+def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+
+    folder1 = tmp_path / "20260101_20260501"
+    folder1.mkdir()
+    (folder1 / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder1 / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        encoding="utf-8"
+    )
+
+    folder2 = tmp_path / "20260502_20260601"
+    folder2.mkdir()
+    (folder2 / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder2 / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-05-02", "end_date": "2026-06-01"}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res["has_existing"] is True
+    assert res["earliest_date"] == "2026-01-01"
+    assert res["latest_date"] == "2026-06-01"
+    assert len(res["ranges"]) == 2
+    assert res["ranges"][0]["start_date"] == "2026-01-01"
+    assert res["ranges"][0]["end_date"] == "2026-05-01"
+    assert res["ranges"][0]["status"] == "validated"
+    assert res["ranges"][1]["start_date"] == "2026-05-02"
+    assert res["ranges"][1]["end_date"] == "2026-06-01"
+    assert res["ranges"][1]["status"] == "validated"
+
+
+def test_check_existing_downloads_single(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+
+    (tmp_path / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (tmp_path / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-02-01", "end_date": "2026-03-01"}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res["has_existing"] is True
+    assert res["earliest_date"] == "2026-02-01"
+    assert res["latest_date"] == "2026-03-01"
+    assert res["ranges"][0]["start_date"] == "2026-02-01"
+    assert res["ranges"][0]["end_date"] == "2026-03-01"
+    assert res["ranges"][0]["status"] == "validated"
+
+
+def test_check_existing_downloads_validated(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "validated"
+    assert range_info["local_count"] == 100
+    assert range_info["kind_count"] == 100
+    assert range_info["error_detail"] is None
+
+
+def test_check_existing_downloads_stale(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 120)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "stale"
+    assert range_info["local_count"] == 100
+    assert range_info["kind_count"] == 120
+    assert "differs from local count" in range_info["error_detail"]
+
+
+def test_check_existing_downloads_unverified(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: None)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "unverified"
+    assert range_info["local_count"] == 100
+    assert range_info["kind_count"] is None
+    assert "Failed to fetch current count" in range_info["error_detail"]
+
+
+def test_check_existing_downloads_corrupted_local(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    # Write a corrupted body file (non-HTML text so pagination detection returns None)
+    (folder / "001_post_page_00001.body").write_bytes(b"corrupted html")
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        encoding="utf-8"
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "stale"
+    assert range_info["local_count"] is None
+    assert range_info["kind_count"] == 100
+    assert "local count is null" in range_info["error_detail"]
+

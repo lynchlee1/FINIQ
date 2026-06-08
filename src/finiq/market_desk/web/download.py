@@ -1827,6 +1827,188 @@ def _run_resume(
         "summary": _download_status_summary(status_after),
         "progress_log": list(progress_log),
     }
+def get_current_kind_total_count(input_snapshot: dict[str, Any]) -> int | None:
+    """Make a live query to KIND to fetch the current total count for the given filters."""
+    try:
+        import requests
+        from finiq.data_scraper.core.client import KIND_SEARCH_RESULTS_URL
+        from finiq.data_scraper.core.payload import build_search_form
+        from finiq.data_scraper.parse import pagination_info
+        
+        request_headers = input_snapshot.get("request_headers") or DEFAULT_REQUEST_HEADERS
+        
+        request_data = build_search_form(
+            page_number=1,
+            start_date=input_snapshot.get("start_date") or "",
+            end_date=input_snapshot.get("end_date") or "",
+            page_size=input_snapshot.get("page_size") or 100,
+            search_filters=input_snapshot.get("search_filters"),
+            disclosure_type_groups=input_snapshot.get("disclosure_type_groups"),
+            last_report_only=input_snapshot.get("last_report_only"),
+            include_previous_disclosures=input_snapshot.get("include_previous_disclosures"),
+        )
+        
+        response = requests.post(
+            KIND_SEARCH_RESULTS_URL,
+            headers=request_headers,
+            data=request_data,
+            timeout=5.0
+        )
+        response.raise_for_status()
+        
+        info = pagination_info(response.content)
+        if info and "total_items" in info:
+            return int(info["total_items"])
+    except Exception:
+        pass
+    return None
+
+
+def _validate_single_folder(folder: Path, folder_name: str, date_range: tuple[date, date]) -> dict[str, Any] | None:
+    body_files = list(folder.glob("*_post_page_*.body"))
+    if not body_files:
+        return None
+
+    def get_dates_from_input_json(f: Path) -> dict[str, Any] | None:
+        input_path = f / "kind_workflow.input.json"
+        if input_path.is_file():
+            try:
+                data = json.loads(input_path.read_text(encoding="utf-8"))
+                return data
+            except Exception:
+                pass
+        return None
+
+    input_snapshot = get_dates_from_input_json(folder)
+    start_date = date_range[0]
+    end_date = date_range[1]
+    
+    if input_snapshot:
+        try:
+            start_date = date.fromisoformat(input_snapshot["start_date"])
+            end_date = date.fromisoformat(input_snapshot["end_date"])
+        except Exception:
+            pass
+
+    paging = _detect_pagination(folder)
+    local_count = paging.get("total_items") if paging else None
+    
+    status = "validated"
+    error_detail = None
+    kind_count = None
+    
+    if input_snapshot:
+        kind_count = get_current_kind_total_count(input_snapshot)
+        if kind_count is not None:
+            if local_count is None:
+                status = "stale"
+                error_detail = f"Failed to parse local download files (local count is null), while KIND current count is {kind_count}."
+            elif local_count != kind_count:
+                status = "stale"
+                error_detail = f"KIND current count ({kind_count}) differs from local count ({local_count})."
+        else:
+            status = "unverified"
+            error_detail = "Failed to fetch current count from KIND (network error or timeout)."
+    else:
+        status = "unverified"
+        error_detail = "Missing kind_workflow.input.json metadata to verify range against KIND."
+
+    return {
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "folder_name": folder_name,
+        "local_count": local_count,
+        "kind_count": kind_count,
+        "status": status,
+        "error_detail": error_detail
+    }
+
+
+def check_existing_downloads(output_directory_raw: str) -> dict[str, Any]:
+    """Inspect output directory to detect and validate existing downloaded date ranges."""
+    if not output_directory_raw:
+        return {"has_existing": False}
+    try:
+        output_directory = Path(output_directory_raw).expanduser().resolve()
+    except Exception:
+        return {"has_existing": False}
+
+    if not output_directory.is_dir():
+        return {"has_existing": False}
+
+    def get_dates_from_input_json(folder: Path) -> dict[str, Any] | None:
+        input_path = folder / "kind_workflow.input.json"
+        if input_path.is_file():
+            try:
+                data = json.loads(input_path.read_text(encoding="utf-8"))
+                return data
+            except Exception:
+                pass
+        return None
+
+    candidates = []
+
+    # Check for yearly subfolders (YYYYMMDD_YYYYMMDD)
+    try:
+        for child in output_directory.iterdir():
+            if child.is_dir():
+                parts = child.name.split("_")
+                if len(parts) == 2 and len(parts[0]) == 8 and len(parts[1]) == 8 and parts[0].isdigit() and parts[1].isdigit():
+                    try:
+                        folder_start = date(int(child.name[0:4]), int(child.name[4:6]), int(child.name[6:8]))
+                        folder_end = date(int(child.name[9:13]), int(child.name[13:15]), int(child.name[15:17]))
+                        candidates.append((child, child.name, (folder_start, folder_end)))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # If no yearly subfolders, check the directory itself (Single mode)
+    if not candidates:
+        try:
+            if list(output_directory.glob("*_post_page_*.body")):
+                input_snapshot = get_dates_from_input_json(output_directory)
+                if input_snapshot:
+                    try:
+                        start_date = date.fromisoformat(input_snapshot["start_date"])
+                        end_date = date.fromisoformat(input_snapshot["end_date"])
+                        candidates.append((output_directory, output_directory.name, (start_date, end_date)))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    if not candidates:
+        return {"has_existing": False}
+
+    ranges_data = []
+    # Run validation checks concurrently in a ThreadPool
+    with ThreadPoolExecutor(max_workers=min(10, len(candidates))) as executor:
+        futures = {
+            executor.submit(_validate_single_folder, folder, folder_name, date_range): folder_name
+            for folder, folder_name, date_range in candidates
+        }
+        for future in futures:
+            try:
+                res = future.result()
+                if res is not None:
+                    ranges_data.append(res)
+            except Exception:
+                pass
+
+    if not ranges_data:
+        return {"has_existing": False}
+
+    sorted_ranges = sorted(ranges_data, key=lambda x: x["start_date"])
+    earliest_date = min(r["start_date"] for r in ranges_data)
+    latest_date = max(r["end_date"] for r in ranges_data)
+
+    return {
+        "has_existing": True,
+        "earliest_date": earliest_date,
+        "latest_date": latest_date,
+        "ranges": sorted_ranges
+    }
 
 
 def build_download_options_payload(*, default_output_directory: str | Path) -> dict[str, Any]:

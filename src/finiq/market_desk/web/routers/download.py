@@ -9,6 +9,7 @@ from finiq.market_desk.web.download import (
     build_download_preview_payload,
     build_download_status_payload,
     cancel_download_job,
+    check_existing_downloads,
     get_download_job,
     inspect_download_output_directory_payload,
     run_download_action,
@@ -19,6 +20,10 @@ from finiq.market_desk.web.download import (
 
 def create_download_router(config: Any) -> APIRouter:
     router = APIRouter()
+
+    @router.post("/api/download/check-existing")
+    def check_existing_downloads_route(payload: dict[str, Any]):
+        return check_existing_downloads(str(payload.get("output_directory") or ""))
 
     @router.get("/api/download/options")
     async def get_download_options_route(response: Response):
