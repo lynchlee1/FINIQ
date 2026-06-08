@@ -19,5 +19,5 @@ export function cancelDownload(jobId: string) {
 }
 
 export function inspectDownloadFolder(payload: DownloadInspectPayload) {
-  return apiPost<any>("/api/download/inspect-folder", payload);
+  return apiPost<JobStartResponse>("/api/download/inspect-folder/start", payload);
 }

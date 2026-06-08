@@ -1531,6 +1531,210 @@ def test_inspect_download_output_directory_deletes_confirmed_mismatch(
     assert not body_path.exists()
 
 
+def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> None:
+    def write_page(folder: Path, page_number: int, page_size: int, total_items: int, html_content: bytes | None = None) -> Path:
+        p = folder / f"001_post_page_{page_number:05d}.body"
+        if html_content is None:
+            html_content = _build_download_result_page_html(
+                page_number=page_number, page_size=page_size, total_items=total_items
+            )
+        p.write_bytes(html_content)
+        return p
+
+    # 1. Corrupt page
+    dir_corrupt = tmp_path / "corrupt"
+    dir_corrupt.mkdir()
+    (dir_corrupt / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_corrupt, 1, 100, 100, html_content=b"<html><body>no paging group</body></html>")
+
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_corrupt),
+        "page_size": 100,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 1
+    assert "무결성 검사 실패" in res["deletion_candidates"][0]["reason"]
+
+    # 2. Duplicate page
+    dir_dup = tmp_path / "duplicate"
+    dir_dup.mkdir()
+    (dir_dup / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_dup, 1, 100, 150)
+    p2 = dir_dup / "001_post_page_00002.body"
+    p2.write_bytes(_build_download_result_page_html(page_number=1, page_size=100, total_items=150))
+
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_dup),
+        "page_size": 100,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 2
+    assert "중복되는 페이지 번호" in res["deletion_candidates"][0]["reason"]
+
+    # 3. Page gap
+    dir_gap = tmp_path / "gap"
+    dir_gap.mkdir()
+    (dir_gap / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_gap, 1, 100, 300)
+    write_page(dir_gap, 3, 100, 300)
+
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_gap),
+        "page_size": 100,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 2
+    assert "연속적이지 않습니다" in res["deletion_candidates"][0]["reason"]
+
+    # 4. Inconsistent totals
+    dir_inc = tmp_path / "inconsistent"
+    dir_inc.mkdir()
+    (dir_inc / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_inc, 1, 100, 150)
+    p2 = dir_inc / "001_post_page_00002.body"
+    p2.write_bytes(_build_download_result_page_html(page_number=2, page_size=100, total_items=200))
+
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_inc),
+        "page_size": 100,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 2
+    assert "전체 페이지 수 또는 건수가 다릅니다" in res["deletion_candidates"][0]["reason"]
+
+    # 5. Page_size mismatch (metadata vs request)
+    dir_ps_meta = tmp_path / "ps_meta"
+    dir_ps_meta.mkdir()
+    (dir_ps_meta / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_ps_meta, 1, 100, 100)
+
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_ps_meta),
+        "page_size": 50,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 2
+    assert "페이지 크기와 맞지 않는" in res["deletion_candidates"][0]["reason"]
+
+    # 5b. Page_size mismatch (actual rows in html)
+    dir_ps_rows = tmp_path / "ps_rows"
+    dir_ps_rows.mkdir()
+    (dir_ps_rows / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_ps_rows, 1, 100, 150, html_content=_build_download_result_page_html(page_number=1, page_size=50, total_items=150))
+
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_ps_rows),
+        "page_size": 100,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 1
+    assert "기대값" in res["deletion_candidates"][0]["reason"]
+
+    # 6. Missing snapshot
+    dir_missing = tmp_path / "missing_snapshot"
+    dir_missing.mkdir()
+    write_page(dir_missing, 1, 100, 100)
+
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_missing),
+        "page_size": 100,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 1
+    assert "입력 스냅샷 없이 남아 있는" in res["deletion_candidates"][0]["reason"]
+
+    # 7. Yearly mode
+    dir_yearly = tmp_path / "yearly"
+    dir_yearly.mkdir()
+
+    dir_2024 = dir_yearly / "20240101_20241231"
+    dir_2024.mkdir()
+    (dir_2024 / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_2024, 1, 100, 100)
+
+    dir_2025 = dir_yearly / "20250101_20251231"
+    dir_2025.mkdir()
+    (dir_2025 / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+    write_page(dir_2025, 1, 100, 150, html_content=_build_download_result_page_html(page_number=1, page_size=50, total_items=150))
+
+    res = inspect_download_output_directory_payload({
+        "mode": "yearly",
+        "output_directory": str(dir_yearly),
+        "page_size": 100,
+        "dry_run": True,
+        "start_date": "2024-01-01",
+        "end_date": "2025-12-31",
+    })
+    assert res["deletion_candidate_count"] == 1
+    assert "20250101_20251231" in res["deletion_candidates"][0]["path"]
+    assert "기대값" in res["deletion_candidates"][0]["reason"]
+
+
+def test_inspect_folder_job_cancellation(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import (
+        start_inspect_folder_job,
+        cancel_download_job,
+        get_download_job,
+        DownloadCancelled,
+    )
+    import time
+
+    def blocking_inspect(payload, progress_callback=None, cancel_check=None):
+        for _ in range(200):
+            if cancel_check is not None and cancel_check():
+                raise DownloadCancelled("Folder inspection cancelled by the user")
+            time.sleep(0.01)
+        return {"format": "kind_download_folder_cleanup_v1"}
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.download.inspect_download_output_directory_payload",
+        blocking_inspect,
+    )
+
+    output_dir = tmp_path / "cancel_job"
+    output_dir.mkdir()
+    (output_dir / "kind_workflow.input.json").write_text(json.dumps({"page_size": 100}), encoding="utf-8")
+
+    payload = {
+        "mode": "single",
+        "output_directory": str(output_dir),
+        "page_size": 100,
+        "dry_run": True,
+    }
+
+    job = start_inspect_folder_job(payload)
+    job_id = job["job_id"]
+
+    cancel_download_job(job_id)
+
+    for _ in range(50):
+        status = get_download_job(job_id)
+        if status["status"] in {"cancelled", "failed", "completed"}:
+            break
+        time.sleep(0.05)
+
+    status = get_download_job(job_id)
+    assert status["status"] == "cancelled"
+    assert any("cancelled" in msg.lower() for msg in status["progress_log"])
+
+
+def test_inspect_download_output_directory_rejects_high_risk_directory() -> None:
+    root = Path(Path.cwd().anchor).resolve()
+    with pytest.raises(ValueError, match="high-risk output_directory"):
+        inspect_download_output_directory_payload({
+            "mode": "single",
+            "output_directory": str(root),
+            "page_size": 100,
+        })
+
+
 def test_download_disclosure_html_contents_payload_reads_and_writes_split_files(
     tmp_path: Path,
     monkeypatch,

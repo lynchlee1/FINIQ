@@ -6,12 +6,13 @@ interface UseJobPollingOptions {
   pollingEndpoint: string;
   onSuccess?: (data: any) => void;
   onError?: (error: Error) => void;
+  onCancel?: () => void;
   pollInterval?: number;
   formatStatus?: (data: JobSnapshot<any>) => string[];
 }
 
 export function useJobPolling(options: UseJobPollingOptions) {
-  const { pollingEndpoint, onSuccess, onError, pollInterval = 1000, formatStatus } = options;
+  const { pollingEndpoint, onSuccess, onError, onCancel, pollInterval = 1000, formatStatus } = options;
   const [status, setStatus] = useState<string>("작업을 실행할 준비가 되었습니다.");
   const [isErrorStatus, setIsErrorStatus] = useState<boolean>(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -54,6 +55,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
           return;
         } else if (data.status === "cancelled") {
           setActiveJobId(null);
+          if (onCancel) onCancel();
           return;
         } else if (data.status === "failed") {
           setActiveJobId(null);
@@ -69,7 +71,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
         if (onError) onError(err);
       }
     },
-    [pollingEndpoint, onSuccess, onError, pollInterval, formatStatus]
+    [pollingEndpoint, onSuccess, onError, onCancel, pollInterval, formatStatus]
   );
 
   const startPolling = useCallback(

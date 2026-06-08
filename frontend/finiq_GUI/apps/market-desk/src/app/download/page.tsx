@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Activity, Bell, X, Play, Search, Loader2, Trash2, FolderOpen, Square, Settings, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
@@ -28,9 +28,50 @@ export default function DownloadPage() {
 
   const { download_output_directory: outputDirectory, saveSetting } = useSettingsStore();
 
+  const isRunTriggeredRef = useRef(false);
+  const capturedPayloadRef = useRef<any>(null);
+
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
     pollingEndpoint: "/api/download/jobs/{jobId}",
-    onSuccess: (data) => setResult(data.result || data),
+    onSuccess: async (data) => {
+      if (data && data.format === "kind_download_folder_cleanup_v1") {
+        const candidateCount = data.dry_run ? (data.deletion_candidate_count || 0) : 0;
+        setLastInspectionCandidateCount(candidateCount);
+        setResult(data);
+        setStatus(buildInspectionStatus(data, !data.dry_run));
+
+        if (isRunTriggeredRef.current) {
+          isRunTriggeredRef.current = false;
+          if (candidateCount > 0) {
+            setNotificationPanelOpen(true);
+            setDownloadPanelOpen(false);
+            setSettingsPanelOpen(false);
+          } else {
+            try {
+              setStatus("다운로드 작업을 시작하는 중...");
+              await startDownloadJob();
+            } catch (err: any) {
+              setStatus(err.message);
+              setIsErrorStatus(true);
+            }
+          }
+        } else {
+          setNotificationPanelOpen(true);
+          setDownloadPanelOpen(false);
+          setSettingsPanelOpen(false);
+        }
+      } else {
+        setResult(data.result || data);
+      }
+    },
+    onError: (error) => {
+      isRunTriggeredRef.current = false;
+      capturedPayloadRef.current = null;
+    },
+    onCancel: () => {
+      isRunTriggeredRef.current = false;
+      capturedPayloadRef.current = null;
+    },
   });
 
   // Form State
@@ -60,11 +101,11 @@ export default function DownloadPage() {
     try {
       const data = await fetchDownloadOptions();
       setOptions(data);
-      
+
       if (!useSettingsStore.getState().download_output_directory && data.default_output_directory) {
         saveSetting("download_output_directory", data.default_output_directory);
       }
-      
+
       const today = new Date();
       const start = new Date(today);
       start.setDate(today.getDate() - 30);
@@ -121,7 +162,9 @@ export default function DownloadPage() {
   };
 
   const startDownloadJob = async () => {
-    const data = await startDownload(buildPayload());
+    const payload = capturedPayloadRef.current || buildPayload();
+    capturedPayloadRef.current = null;
+    const data = await startDownload(payload);
     setResult(null);
     setDownloadPanelOpen(true);
     setNotificationPanelOpen(false);
@@ -140,9 +183,10 @@ export default function DownloadPage() {
     }
   };
 
-  const inspectExistingFiles = async (dryRun: boolean) => {
+  const inspectExistingFiles = async (dryRun: boolean, customPayload?: any) => {
+    const basePayload = customPayload || buildPayload();
     return inspectDownloadFolder({
-      ...buildPayload(),
+      ...basePayload,
       dry_run: dryRun,
       delete_confirmed: deleteConfirmed,
       delete_confirmation_text: deleteConfirmationText,
@@ -176,14 +220,13 @@ export default function DownloadPage() {
     try {
       setInspectRunning(true);
       setIsErrorStatus(false);
-      setStatus("폴더를 검사하는 중입니다...");
+      setStatus("폴더 검사 작업을 시작하는 중...");
+      isRunTriggeredRef.current = false;
+      capturedPayloadRef.current = null;
       const data = await inspectExistingFiles(true);
-      const candidateCount = data.deletion_candidate_count || 0;
-      setLastInspectionCandidateCount(candidateCount);
-      setResult(data);
-      setStatus(buildInspectionStatus(data, false));
-      setNotificationPanelOpen(true);
-      setDownloadPanelOpen(false);
+      startPolling(data.job_id);
+      setDownloadPanelOpen(true);
+      setNotificationPanelOpen(false);
       setSettingsPanelOpen(false);
     } catch (err: any) {
       setStatus(err.message);
@@ -198,24 +241,21 @@ export default function DownloadPage() {
 
   const handleRun = async () => {
     try {
+      const payload = buildPayload();
+      capturedPayloadRef.current = payload;
+      isRunTriggeredRef.current = true;
+      setIsErrorStatus(false);
       setStatus("기존 다운로드 파일을 검사하는 중...");
-      const inspection = await inspectExistingFiles(true);
-      const candidates = Array.isArray(inspection.deletion_candidates) ? inspection.deletion_candidates : [];
-      setLastInspectionCandidateCount(inspection.deletion_candidate_count || 0);
-      if (candidates.length) {
-        setResult(inspection);
-        setStatus(buildInspectionStatus(inspection, false));
-        setIsErrorStatus(false);
-        setNotificationPanelOpen(true);
-        setDownloadPanelOpen(false);
-        setSettingsPanelOpen(false);
-        return;
-      }
-      setStatus("다운로드 작업을 시작하는 중...");
-      await startDownloadJob();
+      const data = await inspectExistingFiles(true, payload);
+      startPolling(data.job_id);
+      setDownloadPanelOpen(true);
+      setNotificationPanelOpen(false);
+      setSettingsPanelOpen(false);
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
+      isRunTriggeredRef.current = false;
+      capturedPayloadRef.current = null;
     }
   };
 
@@ -232,14 +272,15 @@ export default function DownloadPage() {
       setInspectRunning(true);
       setIsErrorStatus(false);
       setStatus("확인된 기존 파일을 삭제하는 중...");
-      const inspection = await inspectExistingFiles(false);
+      isRunTriggeredRef.current = false;
+      const payload = capturedPayloadRef.current || buildPayload();
+      const data = await inspectExistingFiles(false, payload);
       setLastInspectionCandidateCount(0);
       setDeleteConfirmed(false);
       setDeleteConfirmationText("");
-      setResult(inspection);
-      setStatus(buildInspectionStatus(inspection, true));
-      setNotificationPanelOpen(true);
-      setDownloadPanelOpen(false);
+      startPolling(data.job_id);
+      setDownloadPanelOpen(true);
+      setNotificationPanelOpen(false);
       setSettingsPanelOpen(false);
     } catch (err: any) {
       setStatus(err.message);
@@ -255,10 +296,10 @@ export default function DownloadPage() {
   const toggleDisclosure = (suffix: string, code: string) => {
     setSelectedDisclosures(prev => {
       const current = prev[suffix] || [];
-      const next = current.includes(code) 
-        ? current.filter(c => c !== code) 
+      const next = current.includes(code)
+        ? current.filter(c => c !== code)
         : [...current, code];
-      
+
       const newObj = { ...prev };
       if (next.length === 0) delete newObj[suffix];
       else newObj[suffix] = next;
@@ -304,10 +345,10 @@ export default function DownloadPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label className="dark:text-slate-300">저장 경로</Label>
-                <PathPickerInput 
-                  value={outputDirectory} 
-                  onChange={(val) => saveSetting("download_output_directory", val)} 
-                  placeholder="저장 경로를 선택하세요" 
+                <PathPickerInput
+                  value={outputDirectory}
+                  onChange={(val) => saveSetting("download_output_directory", val)}
+                  placeholder="저장 경로를 선택하세요"
                   mode="folder"
                   onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                 />
@@ -396,14 +437,14 @@ export default function DownloadPage() {
                     <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
                       {group.items.map((item) => (
                         <div key={item.code} className="flex items-center space-x-2">
-                          <Checkbox 
-                            id={`${group.suffix}-${item.code}`} 
+                          <Checkbox
+                            id={`${group.suffix}-${item.code}`}
                             checked={selectedDisclosures[group.suffix]?.includes(item.code) || false}
                             onCheckedChange={() => toggleDisclosure(group.suffix, item.code)}
                             className="dark:border-[#30363d]"
                           />
-                          <Label 
-                            htmlFor={`${group.suffix}-${item.code}`} 
+                          <Label
+                            htmlFor={`${group.suffix}-${item.code}`}
                             className="text-xs cursor-pointer truncate dark:text-slate-400 dark:hover:text-slate-200"
                             title={item.name}
                           >

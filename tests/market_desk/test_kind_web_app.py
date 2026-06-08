@@ -249,3 +249,36 @@ def test_html_download_inspect_folder_route_rejects_high_risk_directory() -> Non
 
     assert response.status_code == 400
     assert "high-risk output_directory" in response.json()["detail"]
+
+
+def test_download_inspect_folder_start_route(tmp_path: Path, monkeypatch) -> None:
+    def fake_inspect(payload, progress_callback=None, cancel_check=None):
+        return {"format": "kind_download_folder_cleanup_v1", "dry_run": True, "deletion_candidates": []}
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.download.inspect_download_output_directory_payload",
+        fake_inspect,
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/download/inspect-folder/start",
+        json={
+            "mode": "single",
+            "output_directory": str(tmp_path),
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-10",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "job_id" in data
+    assert data["status"] in {"queued", "running", "completed"}
+
+    # Poll status
+    job_id = data["job_id"]
+    response = client.get(f"/api/download/jobs/{job_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["job_id"] == job_id
