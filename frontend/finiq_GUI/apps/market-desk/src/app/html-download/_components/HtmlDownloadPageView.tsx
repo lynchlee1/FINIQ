@@ -205,6 +205,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     });
   }, [fetchSettings, variant, variantConfig.defaultDirectoryKey, variantConfig.defaultDirectorySuffix, setStatus, setIsErrorStatus]);
 
+  useEffect(() => {
+    if (!isJobActive) {
+      setActiveCancelToken(null);
+    }
+  }, [isJobActive]);
+
   const handleRun = async () => {
     if (!sourcePath) {
       setStatus(variantConfig.sourceRequiredMessage);
@@ -558,7 +564,14 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
         <ActionDock
           activityActive={isJobActive}
-          activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+          activityContent={
+            <JobStatusLogger
+              status={status}
+              isErrorStatus={isErrorStatus}
+              isCancellable={!!activeCancelToken}
+              onCancel={handleCancel}
+            />
+          }
           notificationActive={isErrorStatus || lastInspectionCandidateCount > 0 || !!result}
           notificationContent={
             <>

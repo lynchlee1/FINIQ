@@ -100,7 +100,14 @@ export default function IntegratedMarketHistoryPage() {
         </section>
         <ActionDock
           activityActive={!!activeJobId}
-          activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+          activityContent={
+            <JobStatusLogger
+              status={status}
+              isErrorStatus={isErrorStatus}
+              isCancellable={!!activeJobId}
+              onCancel={cancelJob}
+            />
+          }
           notificationActive={isErrorStatus}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
           settingsTitle="시장 이력 설정"

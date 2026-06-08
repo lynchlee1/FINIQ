@@ -211,6 +211,12 @@ export default function HtmlParsePage() {
     saveSetting("html_parse_mode", val);
   };
 
+  useEffect(() => {
+    if (!isJobActive) {
+      setActiveCancelToken(null);
+    }
+  }, [isJobActive]);
+
   const handleRun = async () => {
     if (!inputDirectory) {
       setStatus("입력 경로를 선택하세요.");
@@ -441,7 +447,12 @@ export default function HtmlParsePage() {
           activityActive={isJobActive}
           activityContent={
             <>
-              <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
+              <JobStatusLogger
+                status={status}
+                isErrorStatus={isErrorStatus}
+                isCancellable={!!activeCancelToken}
+                onCancel={handleCancel}
+              />
               {result?.summary && (
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">실행 결과 요약</Label>

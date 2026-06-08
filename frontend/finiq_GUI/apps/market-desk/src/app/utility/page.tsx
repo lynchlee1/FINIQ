@@ -165,7 +165,14 @@ export default function UtilityPage() {
         </section>
         <ActionDock
           activityActive={!!activeJobId}
-          activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+          activityContent={
+            <JobStatusLogger
+              status={status}
+              isErrorStatus={isErrorStatus}
+              isCancellable={!!activeJobId}
+              onCancel={cancelJob}
+            />
+          }
           notificationActive={isErrorStatus}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
           settingsTitle="분할저장 설정"

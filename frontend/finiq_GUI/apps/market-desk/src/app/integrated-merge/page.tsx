@@ -92,7 +92,14 @@ export default function IntegratedMergePage() {
         </section>
         <ActionDock
           activityActive={!!activeJobId}
-          activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+          activityContent={
+            <JobStatusLogger
+              status={status}
+              isErrorStatus={isErrorStatus}
+              isCancellable={!!activeJobId}
+              onCancel={cancelJob}
+            />
+          }
           notificationActive={isErrorStatus}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
           settingsTitle="병합 설정"

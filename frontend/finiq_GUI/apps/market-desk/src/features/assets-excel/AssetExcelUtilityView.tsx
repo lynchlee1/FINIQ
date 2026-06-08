@@ -744,7 +744,12 @@ export default function AssetExcelUtilityPage() {
                   </span>
                 </div>
               </div>
-              <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
+              <JobStatusLogger
+                status={status}
+                isErrorStatus={isErrorStatus}
+                isCancellable={!!activeJobId}
+                onCancel={cancelJob}
+              />
             </>
           }
           notificationActive={isErrorStatus || !!previewData || !!lastResult}
