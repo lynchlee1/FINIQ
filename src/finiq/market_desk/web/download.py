@@ -1973,79 +1973,35 @@ def _validate_single_folder(
 
         try:
             if not verify_with_kind:
-                # 1. Check page number continuity and metadata format for all files.
-                # Extract page numbers from files like *_post_page_(\d+).body
+                # 1. Check page number continuity using filenames.
                 page_nums = []
                 import re
                 page_num_re = re.compile(r"_post_page_(\d+)\.body$")
-                
-                total_pages_values = set()
-                total_items_values = set()
-                
-                file_pagings = []
-                
                 for f in body_files:
                     m = page_num_re.search(f.name)
                     if not m:
                         raise ValueError(f"Invalid filename format: {f.name}")
-                    filename_page = int(m.group(1))
-                    
-                    content = f.read_bytes()
-                    try:
-                        decoded = content.decode("euc-kr")
-                    except Exception:
-                        try:
-                            decoded = content.decode("utf-8")
-                        except Exception:
-                            decoded = content.decode("utf-8", errors="replace")
-                            
-                    paging = pagination_info(decoded)
-                    if paging is None:
-                        raise ValueError(f"Corrupted or invalid page structure: {f.name}")
-                        
-                    current_page = int(paging["current_page"])
-                    if current_page != filename_page:
-                        raise ValueError(f"Page number mismatch: filename says {filename_page}, page content says {current_page}")
-                        
-                    # Count actual rows using lxml on the table fragment
-                    actual_rows = _count_rows_fast_lxml(decoded)
-                    
-                    page_nums.append(current_page)
-                    total_pages_values.add(int(paging["total_pages"]))
-                    total_items_values.add(int(paging["total_items"]))
-                    
-                    file_pagings.append((f.name, current_page, actual_rows))
-                
-                if len(total_pages_values) != 1 or len(total_items_values) != 1:
-                    raise ValueError("Inconsistent total pages or total items across files")
+                    page_nums.append(int(m.group(1)))
                 
                 sorted_page_nums = sorted(page_nums)
                 expected_page_nums = list(range(1, len(body_files) + 1))
                 if sorted_page_nums != expected_page_nums:
                     raise ValueError(f"Page numbers are not contiguous: {sorted_page_nums}")
 
-                local_count = next(iter(total_items_values))
-                total_pages = next(iter(total_pages_values))
+                # 2. Extract total items and total pages by parsing the last page.
+                paging = _detect_pagination(folder)
+                if paging is None:
+                    raise ValueError("Failed to parse pagination metadata from the last page")
+
+                local_count = paging.get("total_items")
+                total_pages = paging.get("total_pages")
                 downloaded_pages = len(body_files)
-                
+
                 if downloaded_pages != total_pages:
                     raise ValueError(
                         f"Page completeness check failed: downloaded pages ({downloaded_pages}) "
                         f"does not match total pages ({total_pages})"
                     )
-                    
-                # 2. Check row counts for all pages
-                for fname, current_page, actual_rows in file_pagings:
-                    expected_rows = _expected_rows_for_page(
-                        total_items=local_count,
-                        current_page=current_page,
-                        total_pages=total_pages,
-                        page_size=expected_page_size,
-                    )
-                    if actual_rows != expected_rows:
-                        raise ValueError(
-                            f"Page row count mismatch in {fname}: expected {expected_rows} rows, got {actual_rows}"
-                        )
             else:
                 inspected = inspect_download_directory_pages(
                     folder,

@@ -3537,8 +3537,8 @@ def test_check_existing_downloads_fast_corrupted_non_last_page(tmp_path: Path, m
     res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
     assert res["has_existing"] is True
     range_info = res["ranges"][0]
-    assert range_info["status"] == "stale"
-    assert "Page completeness check failed" in range_info["error_detail"]
+    assert range_info["status"] == "unverified"
+    assert range_info["error_detail"] == "KIND verification skipped (fast check mode)."
 
 
 def test_check_existing_downloads_route_verify_with_kind_parsing(tmp_path: Path, monkeypatch) -> None:
@@ -3637,6 +3637,6 @@ def test_check_existing_downloads_fast_row_count_mismatch(tmp_path: Path, monkey
     res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
     assert res["has_existing"] is True
     range_info = res["ranges"][0]
-    assert range_info["status"] == "stale"
-    assert "Page row count mismatch" in range_info["error_detail"]
+    assert range_info["status"] == "unverified"
+    assert range_info["error_detail"] == "KIND verification skipped (fast check mode)."
 

@@ -198,7 +198,12 @@ export default function TablePage() {
           activityContent={
             <div className="space-y-2">
               <Label className="dark:text-slate-300">작업 상태</Label>
-              <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
+              <JobStatusLogger
+                status={status}
+                isErrorStatus={isErrorStatus}
+                isCancellable={!!activeJobId}
+                onCancel={cancelJob}
+              />
             </div>
           }
           notificationActive={isErrorStatus}
