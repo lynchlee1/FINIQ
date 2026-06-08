@@ -63,7 +63,7 @@ class _RateLimiter:
             if cancel_check is not None and cancel_check():
                 return True
 
-            now = time.time()
+            now = time.monotonic()
             with self.lock:
                 # Remove timestamps older than 60 seconds
                 self.request_timestamps = [t for t in self.request_timestamps if now - t < 60]

@@ -259,6 +259,27 @@ def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_
     assert output["parquet_files"] == ["stock_price.parquet"]
 
 
+def test_inspect_asset_excel_conversion_skips_bad_quanti_sheet(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    excel_path = source_dir / "bad.xlsx"
+    pd.DataFrame([{"not": "quanti"}]).to_excel(excel_path, sheet_name="종가", index=False)
+
+    preview = inspect_asset_excel_conversion(source_dir, output_dir)
+
+    assert preview["skipped"] == [
+        {
+            "file_name": "bad.xlsx",
+            "relative_path": "bad.xlsx",
+            "sheet_name": "종가",
+            "reason": "Unsupported sheet format: bad.xlsx / 종가",
+            "status": "format_error",
+        }
+    ]
+    assert preview["sheets"][0]["status"] == "format_error"
+
+
 def test_convert_asset_excels_rejects_conflicting_overlaps(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"

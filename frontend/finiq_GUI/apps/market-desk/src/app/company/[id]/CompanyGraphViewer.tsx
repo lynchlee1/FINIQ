@@ -5,13 +5,13 @@ import { GraphCanvas, SettingsPanel, useGraphViewer, DEFAULT_STYLE, DEFAULT_LAYO
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Button } from '@finiq/ui'
 import { fetchCompanyGraphData } from './exampleGraphData'
 import { PageLoadingSpinner } from '@/components/ui/PageLoadingSpinner'
-import { Search, X, Save, Download, Settings, Unlock } from 'lucide-react'
+import { Search, X, Save, Download, Unlock } from 'lucide-react'
+import { ActionDock } from '@/components/ui/ActionDock'
 
 export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string }) {
   const [loading, setLoading] = useState(true)
   const [simulationRunning, setSimulationRunning] = useState(true)
   const [searchValue, setSearchValue] = useState('')
-  const [showSettings, setShowSettings] = useState(false)
 
   // useGraphViewer hook processes GraphData and handles layout states
   const {
@@ -113,33 +113,7 @@ export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string 
   }
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 h-[700px]">
-      {showSettings && (
-        <Card className="w-80 flex-shrink-0 dark:bg-[#161b22] dark:border-[#30363d] flex flex-col h-full">
-          <div className="flex items-center justify-between p-4 border-b dark:border-[#30363d]">
-            <h3 className="font-bold text-slate-900 dark:text-white">그래프 환경 설정</h3>
-            <Button variant="ghost" size="icon" onClick={() => setShowSettings(false)} className="h-6 w-6">
-              <X className="h-4 w-4 text-slate-500" />
-            </Button>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            <SettingsPanel
-              style={style}
-              layout={layout}
-              nodeTypes={Array.from(new Set(visibleGraph.nodes.map(n => n.type)))}
-              presetNames={Object.keys(STYLE_PRESETS)}
-              onStyleChange={setStyle}
-              onLayoutChange={setLayout}
-              onPresetChange={(presetName) => {
-                const preset = STYLE_PRESETS[presetName]
-                if (preset) setStyle(preset)
-              }}
-              onPresetSave={() => {}}
-            />
-          </div>
-        </Card>
-      )}
-
+    <div className="relative flex h-[700px] flex-col gap-4">
       <Card className="flex-1 dark:bg-[#161b22] dark:border-[#30363d] flex flex-col h-full">
         <CardHeader className="flex flex-row items-center justify-between pb-2 border-b dark:border-[#30363d]">
         <div>
@@ -183,10 +157,6 @@ export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string 
             <Button variant="ghost" size="icon" onClick={() => unpinAllNodes()} title="모든 핀 해제" className="h-6 w-6">
               <Unlock className="h-4 w-4 text-slate-500 hover:text-blue-600" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)} title="설정" className="h-6 w-6">
-              <Settings className="h-4 w-4 text-slate-500 hover:text-blue-600" />
-            </Button>
-            <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
             <Button variant="ghost" size="icon" onClick={handleSaveLayout} title="현재 레이아웃 저장" className="h-6 w-6">
               <Save className="h-4 w-4 text-slate-500 hover:text-blue-600" />
             </Button>
@@ -269,6 +239,29 @@ export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string 
         )}
       </CardContent>
       </Card>
+      <ActionDock
+        activityTitle="그래프 현황"
+        activityActive={simulationRunning}
+        activityContent={<div className="text-sm dark:text-slate-300">노드 {visibleGraph.nodes.length}개, 엣지 {visibleGraph.edges.length}개</div>}
+        notificationActive={selectedNodeIds.size > 0}
+        notificationContent={<div className="text-sm dark:text-slate-300">{selectedNodeIds.size ? `선택 노드 ${selectedNodeIds.size}개` : "알림 없음"}</div>}
+        settingsTitle="그래프 설정"
+        settingsContent={
+          <SettingsPanel
+            style={style}
+            layout={layout}
+            nodeTypes={Array.from(new Set(visibleGraph.nodes.map(n => n.type)))}
+            presetNames={Object.keys(STYLE_PRESETS)}
+            onStyleChange={setStyle}
+            onLayoutChange={setLayout}
+            onPresetChange={(presetName) => {
+              const preset = STYLE_PRESETS[presetName]
+              if (preset) setStyle(preset)
+            }}
+            onPresetSave={() => {}}
+          />
+        }
+      />
     </div>
   )
 }

@@ -1,45 +1,32 @@
-import httpx
-import json
+from pathlib import Path
 
-BASE_URL = "http://127.0.0.1:8765"
+import pytest
+from fastapi.testclient import TestClient
 
-def test_persistence():
-    # 1. Get initial config
-    print("Fetching initial config...")
-    try:
-        resp = httpx.get(f"{BASE_URL}/api/config")
-        if resp.status_code != 200:
-            print(f"Error: {resp.status_code}")
-            return
-        initial_config = resp.json()
-        print(f"Initial html_parse_result_path: {initial_config.get('html_parse_result_path')}")
-    except Exception as e:
-        print(f"Failed to connect: {e}")
-        return
+from finiq.market_desk.web.app import app, config
 
-    # 2. Update a setting
-    test_path = "/tmp/test-persistence-path.json"
-    print(f"Updating html_parse_result_path to: {test_path}")
-    resp = httpx.post(
-        f"{BASE_URL}/api/settings",
-        json={"html_parse_result_path": test_path}
-    )
-    if resp.status_code != 200:
-        print(f"Error updating: {resp.status_code} {resp.text}")
-        return
-    
-    updated_config = resp.json()
-    print(f"Updated html_parse_result_path from response: {updated_config.get('html_parse_result_path')}")
 
-    # 3. Verify config again
-    resp = httpx.get(f"{BASE_URL}/api/config")
+@pytest.fixture(autouse=True)
+def restore_config():
+    original = {key: getattr(config, key) for key in config.__slots__}
+    yield
+    for key, value in original.items():
+        setattr(config, key, value)
+
+
+def test_persistence(tmp_path: Path):
+    config.settings_path = str(tmp_path / "settings.json")
+    client = TestClient(app)
+
+    resp = client.get("/api/config")
+    assert resp.status_code == 200
+
+    test_path = tmp_path / "test-persistence-path.json"
+    resp = client.post("/api/settings", json={"html_parse_result_path": str(test_path)})
+    assert resp.status_code == 200
+    assert resp.json().get("html_parse_result_path") == str(test_path.resolve())
+
+    resp = client.get("/api/config")
+    assert resp.status_code == 200
     verified_config = resp.json()
-    print(f"Verified html_parse_result_path from GET: {verified_config.get('html_parse_result_path')}")
-
-    if verified_config.get('html_parse_result_path') == test_path:
-        print("Persistence test PASSED (in-memory)")
-    else:
-        print("Persistence test FAILED (in-memory)")
-
-if __name__ == "__main__":
-    test_persistence()
+    assert verified_config.get("html_parse_result_path") == str(test_path.resolve())

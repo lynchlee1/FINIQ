@@ -9,6 +9,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 interface ProviderField {
   id: string;
@@ -98,14 +99,14 @@ export default function IntegratedDataPage() {
 
   return (
     <WorkflowPageShell workflowId="integrated-data">
-      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+      <div className="relative space-y-6">
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source Pipeline</p>
               <CardTitle className="text-xl dark:text-white">원천 데이터 변환</CardTitle>
             </CardHeader>
-            <CardContent className="pt-6 space-y-6">
+            <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="providerSelect" className="dark:text-slate-300">데이터 소스 (Source of Truth)</Label>
                 <Select value={selectedProviderId} onValueChange={setSelectedProviderId}>
@@ -113,66 +114,39 @@ export default function IntegratedDataPage() {
                     <SelectValue placeholder="Select a provider" />
                   </SelectTrigger>
                   <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                    {providers.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
+                    {providers.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-
               {selectedProvider && (
-                <div className="grid md:grid-cols-2 gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
                   {selectedProvider.fields.map((field) => (
                     <div key={field.id} className="space-y-2">
                       <Label className="dark:text-slate-300">{field.label}</Label>
                       {(field.type === "folder" || field.type === "file") ? (
-                        <PathPickerInput
-                          mode={field.type}
-                          value={integrated_data_values?.[field.id] || ""}
-                          onChange={(val) => handleFieldChange(field.id, val)}
-                          placeholder={field.placeholder}
-                          onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                        />
+                        <PathPickerInput mode={field.type} value={integrated_data_values?.[field.id] || ""} onChange={(val) => handleFieldChange(field.id, val)} placeholder={field.placeholder} onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                       ) : (
-                        <Input
-                          placeholder={field.placeholder}
-                          value={integrated_data_values?.[field.id] || ""}
-                          onChange={(e) => handleFieldChange(field.id, e.target.value)}
-                          className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-                        />
+                        <Input placeholder={field.placeholder} value={integrated_data_values?.[field.id] || ""} onChange={(e) => handleFieldChange(field.id, e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
                       )}
                     </div>
                   ))}
                 </div>
               )}
+              <Button onClick={handleStartConvert} disabled={!!activeJobId} className="w-full md:w-auto">
+                {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                실행
+              </Button>
             </CardContent>
           </Card>
         </section>
-
-        <section className="space-y-6">
-          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">작업 실행</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <Button 
-                  onClick={handleStartConvert} 
-                  disabled={!!activeJobId}
-                  className="w-full"
-                >
-                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                  실행
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">작업 상태</Label>
-                <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        <ActionDock
+          activityActive={!!activeJobId}
+          activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+          notificationActive={isErrorStatus}
+          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          settingsTitle="원천 데이터 설정"
+          settingsContent={<div className="text-sm text-slate-500 dark:text-slate-400">추가 원천 데이터 설정이 없습니다. 데이터 소스와 입력 필드는 메인 화면에서 조정합니다.</div>}
+        />
       </div>
     </WorkflowPageShell>
   );

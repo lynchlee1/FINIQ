@@ -1,0 +1,278 @@
+from __future__ import annotations
+
+import json
+import queue
+import tempfile
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
+
+from finiq.market_desk.web.disclosure_html import (
+    cancel_disclosure_html_download,
+    clean_disclosure_html_output_directory_payload,
+)
+from finiq.market_desk.web.disclosure_html_parse import (
+    build_bond_parse_summary_payload,
+    build_parse_change_log_payload,
+    build_parse_export_xlsx,
+    cancel_disclosure_html_parse,
+)
+from finiq.market_desk.web.jobs import job_manager
+from finiq.market_desk.web.table_export import build_disclosure_table_payload
+
+
+FilterDisclosuresPayload = Callable[..., dict[str, Any]]
+RunJobWorker = Callable[[str, str, dict[str, Any]], None]
+
+
+def _write_transfer_file(config: Any, payload: dict[str, Any], requested_path: str = "") -> dict[str, Any]:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if requested_path:
+        transfer_path = Path(requested_path).expanduser().resolve()
+        if transfer_path.suffix.lower() != ".json":
+            transfer_path = transfer_path / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
+    else:
+        transfer_dir = Path(config.output_root).expanduser().resolve() / ".finiq" / "transfers"
+        transfer_path = transfer_dir / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
+
+    transfer_path.parent.mkdir(parents=True, exist_ok=True)
+    transfer_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "format": payload.get("format", ""),
+        "path": str(transfer_path),
+        "acpt_numbers": len(payload.get("html_download_acpt_numbers") or payload.get("acptNumbers") or []),
+    }
+
+
+def _attach_html_download_transfer(config: Any, payload: dict[str, Any], requested_path: str = "") -> dict[str, Any]:
+    if payload.get("format") == "kind_disclosure_filter_v1":
+        payload["html_download_transfer"] = _write_transfer_file(config, payload, requested_path=requested_path)
+    return payload
+
+
+def _job_snapshot(job_id: str) -> dict[str, Any]:
+    snapshot = job_manager.get_snapshot(job_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return snapshot
+
+
+def _start_background_job(
+    *,
+    kind: str,
+    payload: dict[str, Any],
+    background_tasks: BackgroundTasks,
+    run_job_worker: RunJobWorker,
+) -> dict[str, Any]:
+    job_id = uuid.uuid4().hex
+    job_manager.create_job(job_id, kind)
+    background_tasks.add_task(run_job_worker, job_id, kind, payload)
+    return job_manager.get_snapshot(job_id)
+
+
+def create_workflows_router(
+    *,
+    config: Any,
+    filter_disclosures_payload: FilterDisclosuresPayload,
+    run_job_worker: RunJobWorker,
+) -> APIRouter:
+    router = APIRouter()
+
+    @router.post("/api/disclosures/filter")
+    async def filter_disclosures(request: Request):
+        body = await request.json()
+        accept = request.headers.get("Accept", "")
+        if "application/x-ndjson" in accept:
+            def generate():
+                events: queue.Queue[dict[str, Any]] = queue.Queue()
+
+                def run_filter() -> None:
+                    try:
+                        payload = filter_disclosures_payload(
+                            body,
+                            progress_callback=lambda progress: events.put({"type": "progress", "progress": progress}),
+                        )
+                        _attach_html_download_transfer(
+                            config,
+                            payload,
+                            requested_path=str(body.get("html_transfer_path") or "").strip(),
+                        )
+                        events.put({"type": "result", "payload": payload})
+                    except Exception as e:
+                        events.put({"type": "error", "error": str(e)})
+
+                thread = threading.Thread(target=run_filter, daemon=True)
+                thread.start()
+                while thread.is_alive() or not events.empty():
+                    try:
+                        event = events.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+
+            return StreamingResponse(generate(), media_type="application/x-ndjson")
+        try:
+            payload = filter_disclosures_payload(body)
+            _attach_html_download_transfer(config, payload, requested_path=str(body.get("html_transfer_path") or "").strip())
+            return payload
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/table/build")
+    async def build_disclosure_table(payload: dict[str, Any]):
+        return build_disclosure_table_payload(payload)
+
+    @router.post("/api/disclosures/table/build/start")
+    async def start_build_disclosure_table(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="table_build",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.get("/api/disclosures/table/jobs/{job_id}")
+    async def get_table_job_status(job_id: str):
+        return _job_snapshot(job_id)
+
+    @router.get("/api/disclosures/html/jobs/{job_id}")
+    async def get_html_job_status(job_id: str):
+        return _job_snapshot(job_id)
+
+    @router.get("/api/integrated-data/jobs/{job_id}")
+    async def get_integrated_job_status(job_id: str):
+        return _job_snapshot(job_id)
+
+    @router.get("/api/utility/jobs/{job_id}")
+    async def get_utility_job_status(job_id: str):
+        return _job_snapshot(job_id)
+
+    @router.post("/api/disclosures/html/download/start")
+    async def start_html_download(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="download",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/html/download/cancel")
+    async def cancel_html_download_route(payload: dict[str, Any]):
+        return cancel_disclosure_html_download(str(payload.get("cancel_token") or ""))
+
+    @router.post("/api/disclosures/html/download/inspect-folder")
+    async def inspect_html_download_folder(payload: dict[str, Any]):
+        try:
+            return clean_disclosure_html_output_directory_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/download/compress/start")
+    async def start_html_external_compress(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="external_compress",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/html/content-download/start")
+    async def start_html_content_download(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="content_download",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/html/content-download/cancel")
+    async def cancel_html_content_download_route(payload: dict[str, Any]):
+        return cancel_disclosure_html_download(str(payload.get("cancel_token") or ""))
+
+    @router.post("/api/disclosures/html/content-download/inspect-folder")
+    async def inspect_html_content_download_folder(payload: dict[str, Any]):
+        try:
+            return clean_disclosure_html_output_directory_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/content-download/merge/start")
+    async def start_html_content_merge(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="content_merge",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/html/parse/start")
+    async def start_html_parse(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="parse",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/html/parse/cancel")
+    async def cancel_html_parse_route(payload: dict[str, Any]):
+        return cancel_disclosure_html_parse(str(payload.get("cancel_token") or ""))
+
+    @router.post("/api/disclosures/html/parse/bond-summary")
+    async def bond_parse_summary_route(payload: dict[str, Any]):
+        return build_bond_parse_summary_payload(payload)
+
+    @router.post("/api/disclosures/html/parse/change-log")
+    async def parse_change_log_route(payload: dict[str, Any]):
+        return build_parse_change_log_payload(payload)
+
+    @router.get("/api/disclosures/html/parse/export.xlsx")
+    async def export_parse_results(output_path: str, mode: str, latest_only: bool = False):
+        payload = build_parse_export_xlsx(output_path, mode, latest_only=latest_only)
+        filename = f"{Path(output_path).stem}_export.xlsx"
+        temp_path = Path(tempfile.gettempdir()) / filename
+        temp_path.write_bytes(payload)
+        return FileResponse(temp_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    @router.post("/api/integrated-data/convert/start")
+    async def start_integrated_convert(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="integrated_convert",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/integrated-data/merge/start")
+    async def start_integrated_merge(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="integrated_merge",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/integrated-data/market-history/start")
+    async def start_integrated_market_history(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="integrated_market_history",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/utility/partition-storage/start")
+    async def start_partition_storage(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="utility_partition",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    return router

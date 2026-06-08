@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from finiq.data.common import find_company_classification_files
+from finiq.data_scraper.storage.classification_store import write_company_classification_artifact
+from finiq.market_desk.data.facade import (
+    load_company_classification_company_file,
+    load_company_classification_index_file,
+)
+
+
+def test_market_desk_finds_and_loads_sqlite_company_classification(tmp_path: Path) -> None:
+    output_path = tmp_path / "kind.company_classification.json"
+    write_company_classification_artifact(
+        output_path,
+        {
+            "summary": {
+                "source_folders": 1,
+                "body_files": 1,
+                "companies": 1,
+                "disclosures": 1,
+            },
+            "companies": [
+                {
+                    "company_name": "테스트회사",
+                    "company_id": "T001",
+                    "market": "코스닥",
+                    "badges": [],
+                    "disclosures": [
+                        {
+                            "disclosed_at": "2026-01-01 09:00",
+                            "title": "주요사항보고서",
+                            "acpt_no": "20260101000001",
+                        }
+                    ],
+                }
+            ],
+        },
+        compact=True,
+    )
+    output_path.write_text('{"companies":[]}\n', encoding="utf-8")
+
+    assert find_company_classification_files(tmp_path) == [tmp_path / "kind.company_classification.sqlite"]
+
+    index_payload = load_company_classification_index_file(output_path)
+    assert index_payload["summary"]["companies"] == 1
+    assert index_payload["companies"] == [
+        {
+            "company_key": "T001",
+            "company_name": "테스트회사",
+            "company_id": "T001",
+            "market": "코스닥",
+            "badges": [],
+            "disclosure_count": 1,
+            "first_disclosed_at": "2026-01-01 09:00",
+            "last_disclosed_at": "2026-01-01 09:00",
+            "shard": None,
+        }
+    ]
+
+    company_payload = load_company_classification_company_file(output_path, "T001")
+    assert company_payload["company_name"] == "테스트회사"
+    assert company_payload["disclosures"][0]["acpt_no"] == "20260101000001"

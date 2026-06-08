@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { FolderOpen, FileJson, Play, Square, Loader2, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
-import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
@@ -15,6 +14,7 @@ import {
   htmlControlClassName,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 type DownloadVariant = "external" | "content";
 type SplitByYearButtonProps = {
@@ -438,6 +438,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     { id: "progressInterval", kind: "input", type: "number", label: "진행 확인 간격 (건)", value: progressInterval, onChange: setProgressInterval, span: 2 },
     { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
   ];
+  const basePathFields = baseFields.filter((field) => field.id === "sourcePath" || field.id === "outputDirectory");
+  const requestOptionFields = baseFields.filter((field) => ["timeout", "maxRequestsPerMinute", "waitSeconds", "limit"].includes(field.id));
+  const executionOptionFields = baseFields.filter((field) => field.id === "progressInterval" || field.id === "skipExisting");
 
   const compressionFields: HtmlWorkflowField[] = [
     {
@@ -495,13 +498,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       title={variantConfig.settingsTitle}
       description={variantConfig.description}
     >
-      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+      <div className="relative space-y-6">
         <section className="min-w-0 space-y-6">
           <HtmlWorkflowCard
-            title="저장 조건"
-            description="경로, 속도 제한, 이어받기 기준을 같은 입력 규칙으로 관리합니다."
+            title="저장 경로"
+            description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
           >
-              <HtmlWorkflowForm fields={baseFields} />
+            <HtmlWorkflowForm fields={basePathFields} />
           </HtmlWorkflowCard>
 
           {variant === "external" && (
@@ -529,46 +532,17 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 </Button>
             </HtmlWorkflowCard>
           )}
-        </section>
 
-        <section className="space-y-6">
-          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col gap-2">
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-3">
                 <Button variant="outline" className="h-10 w-full" onClick={handleInspectFolder} disabled={isJobActive || inspectRunning}>
                   {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
                   폴더 검사하기
                 </Button>
-                <div className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="dark:border-[#30363d]" />
-                    <Label htmlFor="deleteConfirmed" className="cursor-pointer text-xs dark:text-slate-300">삭제 허가</Label>
-                  </div>
-                  <Input
-                    value={deleteConfirmationText}
-                    onChange={(e) => setDeleteConfirmationText(e.target.value)}
-                    placeholder="확인했습니다."
-                    className={htmlControlClassName}
-                  />
-                  <Button
-                    variant="outline"
-                    className="h-10 w-full"
-                    onClick={handleDeleteUnexpectedFiles}
-                    disabled={
-                      isJobActive ||
-                      inspectRunning ||
-                      lastInspectionCandidateCount === 0 ||
-                      !deleteConfirmed ||
-                      deleteConfirmationText.trim() !== "확인했습니다."
-                    }
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    삭제 예정 파일 {lastInspectionCandidateCount}개 삭제
-                  </Button>
-                </div>
                 <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
                   <Play className="mr-2 h-4 w-4" />
                   실행
@@ -578,113 +552,66 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   중지
                 </Button>
               </div>
-
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">작업 상태</Label>
-                <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-              </div>
-
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">실행 결과</Label>
-                {result ? (
-                  (() => {
-                    const reqCount = result.requested_count;
-                    const savedCount = result.saved_count;
-                    
-                    if (reqCount !== undefined && savedCount !== undefined) {
-                      const failedCount = reqCount - savedCount;
-                      const isAllSuccess = failedCount === 0;
-                      
-                      return (
-                        <div className={cn(
-                          "p-4 rounded-lg border text-sm font-semibold",
-                          isAllSuccess
-                            ? "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30 text-green-700 dark:text-green-400"
-                            : "bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 text-red-700 dark:text-red-400"
-                        )}>
-                          {isAllSuccess
-                            ? `전체 ${savedCount}/${reqCount} 저장 완료`
-                            : `전체 ${reqCount}건 중 ${savedCount}건/${failedCount}건 저장 완료`}
-                        </div>
-                      );
-                    }
-
-                    if (result.format === "kind_disclosure_html_folder_cleanup_v1") {
-                      const existingCount = result.existing_target_html_count || 0;
-                      const missingCount = result.missing_target_html_count || 0;
-                      const candidateCount = result.deletion_candidate_count || 0;
-                      const isAllSaved = reqCount !== undefined && missingCount === 0;
-                      const hasDeleteCandidates = candidateCount > 0;
-
-                      return (
-                        <div className={cn(
-                          "p-4 rounded-lg border text-sm font-semibold",
-                          isAllSaved && !hasDeleteCandidates
-                            ? "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30 text-green-700 dark:text-green-400"
-                            : "bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/30 text-amber-700 dark:text-amber-400"
-                        )}>
-                          {isAllSaved
-                            ? `폴더 검사 완료: 전체 ${existingCount}/${reqCount} 저장 확인`
-                            : `폴더 검사 완료: 전체 ${reqCount || 0}건 중 ${existingCount}건 저장, 누락 ${missingCount}건`}
-                          {hasDeleteCandidates ? `, 삭제 예정 ${candidateCount}건` : ""}
-                        </div>
-                      );
-                    }
-
-                    // 다른 형태의 결과 (예: merge)
-                    const summary = result.summary;
-                    if (summary && summary.merged_files !== undefined) {
-                      const isAllSuccess = summary.merged_files === summary.written_files;
-
-                      return (
-                        <div className={cn(
-                          "p-4 rounded-lg border text-sm font-semibold",
-                          isAllSuccess
-                            ? "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30 text-green-700 dark:text-green-400"
-                            : "bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 text-red-700 dark:text-red-400"
-                        )}>
-                          병합 HTML {summary.merged_files}건 중 {summary.written_files}건 저장 완료
-                        </div>
-                      );
-                    }
-
-                    if (summary && summary.compressed_files !== undefined) {
-                      const verification = result.verification;
-                      const isAllSuccess = verification
-                        ? verification.passed === true
-                        : summary.written_files > 0;
-                      const missingRecords = verification?.missing_records || 0;
-
-                      return (
-                        <div className={cn(
-                          "p-4 rounded-lg border text-sm font-semibold",
-                          isAllSuccess
-                            ? "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30 text-green-700 dark:text-green-400"
-                            : "bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 text-red-700 dark:text-red-400"
-                        )}>
-                          {isAllSuccess
-                            ? `외부 HTML ${summary.compressed_files}건 압축 완료`
-                            : `외부 HTML ${summary.compressed_files}건 압축 완료, 누락 ${missingRecords}건`}
-                        </div>
-                      );
-                    }
-
-                    // 기본 폴백
-                    return (
-                      <div className="p-4 rounded-lg border text-sm font-semibold bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 text-red-700 dark:text-red-400">
-                        저장 결과를 확인할 수 없습니다.
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <div className="p-3 rounded-lg border border-slate-200 dark:border-[#30363d] bg-slate-50 dark:bg-[#161b22] text-slate-400 dark:text-slate-500 text-sm italic">
-                    결과 없음
-                  </div>
-                )}
-              </div>
             </CardContent>
           </Card>
         </section>
+
+        <ActionDock
+          activityActive={isJobActive}
+          activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+          notificationActive={isErrorStatus || lastInspectionCandidateCount > 0 || !!result}
+          notificationContent={
+            <>
+              {lastInspectionCandidateCount > 0 && (
+                <div className="space-y-3">
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                    삭제 예정 파일 {lastInspectionCandidateCount}개
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="dark:border-[#30363d]" />
+                    <Label htmlFor="deleteConfirmed" className="cursor-pointer text-sm dark:text-slate-300">삭제 허가</Label>
+                  </div>
+                  <Input value={deleteConfirmationText} onChange={(e) => setDeleteConfirmationText(e.target.value)} placeholder="확인했습니다." className={htmlControlClassName} />
+                  <Button
+                    variant="outline"
+                    className="h-10 w-full"
+                    onClick={handleDeleteUnexpectedFiles}
+                    disabled={isJobActive || inspectRunning || !deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다."}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    삭제 예정 파일 {lastInspectionCandidateCount}개 삭제
+                  </Button>
+                </div>
+              )}
+              {result && (
+                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#30363d]">
+                  <Label className="dark:text-slate-300">실행 결과</Label>
+                  <pre className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#090d12] dark:text-blue-100">
+                    {JSON.stringify(result, null, 2)}
+                  </pre>
+                </div>
+              )}
+              {!lastInspectionCandidateCount && !result && <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+            </>
+          }
+          settingsTitle="저장 설정"
+          settingsContent={
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
+                </div>
+                <HtmlWorkflowForm fields={requestOptionFields} />
+              </div>
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+                </div>
+                <HtmlWorkflowForm fields={executionOptionFields} />
+              </div>
+            </div>
+          }
+        />
       </div>
     </HtmlWorkflowPage>
   );

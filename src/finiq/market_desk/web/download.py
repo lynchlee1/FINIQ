@@ -1498,8 +1498,9 @@ def _run_yearly(
             )
             _append_progress(progress_log, f"[{folder_name}] worker_done", progress_callback)
     else:
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="kind-download") as executor:
-            future_to_folder = {}
+        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="kind-download")
+        future_to_folder = {}
+        try:
             for worker_index, task in enumerate(tasks, start=1):
                 if cancel_check is not None and cancel_check():
                     break
@@ -1530,7 +1531,15 @@ def _run_yearly(
                     raise
                 except Exception as exc:
                     _append_progress(progress_log, f"[{folder_name}] worker_failed error={exc}", progress_callback)
+                    for pending_future in future_to_folder:
+                        if pending_future is not future:
+                            pending_future.cancel()
                     raise ValueError(f"{folder_name} download failed: {exc}") from exc
+        except BaseException:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
 
     if cancel_check is not None and cancel_check():
         raise DownloadCancelled("download job cancelled")

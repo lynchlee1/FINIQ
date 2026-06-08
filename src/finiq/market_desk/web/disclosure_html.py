@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 import requests
 
+from finiq.config import PROJECT_ROOT
 from finiq.data_scraper.core.client import (
     KIND_DISCLOSURE_VIEWER_URL,
     VIEWER_HTML_FILENAME_TEMPLATE,
@@ -17,6 +18,8 @@ from finiq.data_scraper.core.client import (
 )
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.parse._snippets import dart_main_doc_no, search_paths, viewer_html
+from finiq.data_scraper.parse._disclosures import disclosure_file_rows
+from finiq.data_scraper.storage.result_files import sorted_result_page_paths
 
 ACPT_NUMBER_KEYS = {"acpt_no", "acptno", "acptNo", "acpt_no_list", "acptNumbers"}
 HTML_MANIFEST_FILENAME = "kind_disclosure_html_manifest.json"
@@ -30,6 +33,18 @@ HTML_DELETE_CONFIRMATION_TEXT = "확인했습니다."
 _CANCELLED_DOWNLOADS: set[str] = set()
 _CANCEL_LOCK = Lock()
 ProgressCallback = Callable[[str], None]
+
+
+def _ensure_safe_html_cleanup_directory(output_directory: Path) -> None:
+    risky_directories = {
+        Path(output_directory.anchor).resolve(),
+        Path.home().resolve(),
+        PROJECT_ROOT.resolve(),
+    }
+    risky_directories.update(PROJECT_ROOT.resolve().parents)
+    if output_directory in risky_directories:
+        msg = f"Refusing to inspect or clean high-risk output_directory: {output_directory}"
+        raise ValueError(msg)
 
 
 def cancel_disclosure_html_download(token: str) -> dict[str, Any]:
@@ -118,6 +133,40 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
 
     visit(value)
     return metadata
+
+
+def _load_result_directory_disclosures(source_directory: Path) -> dict[str, Any]:
+    body_paths = sorted_result_page_paths(source_directory)
+    if not body_paths:
+        msg = f"No KIND result page body files found in source_json_path directory: {source_directory}"
+        raise ValueError(msg)
+    disclosures: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for body_path in body_paths:
+        for row in disclosure_file_rows(body_path):
+            acpt_no = str(row.get("acpt_no") or "").strip()
+            if not acpt_no or acpt_no in seen:
+                continue
+            disclosures.append(row)
+            seen.add(acpt_no)
+    if not disclosures:
+        msg = f"No acpt_no values found in KIND result page body files: {source_directory}"
+        raise ValueError(msg)
+    return {
+        "format": "kind_disclosure_result_directory_v1",
+        "source_json_path": str(source_directory),
+        "disclosures": disclosures,
+    }
+
+
+def _load_source_json_path_payload(source_json_path: Any) -> tuple[Any, str]:
+    source_path = Path(str(source_json_path)).expanduser().resolve()
+    if source_path.is_dir():
+        return _load_result_directory_disclosures(source_path), str(source_path)
+    if not source_path.is_file():
+        msg = f"source_json_path does not exist: {source_path}"
+        raise ValueError(msg)
+    return json.loads(source_path.read_text(encoding="utf-8")), str(source_path)
 
 
 def _as_split_by_year(body: dict[str, Any]) -> bool:
@@ -817,14 +866,7 @@ def clean_disclosure_html_output_directory_payload(body: dict[str, Any]) -> dict
         if not source_json_path and isinstance(source_json, dict):
             source_json_path = source_json.get("source_json_path")
         if source_json_path:
-            import json
-
-            source_json_file = Path(str(source_json_path)).expanduser().resolve()
-            if not source_json_file.is_file():
-                msg = f"source_json_path does not exist: {source_json_file}"
-                raise ValueError(msg)
-            source_json = json.loads(source_json_file.read_text(encoding="utf-8"))
-            source_path = str(source_json_file)
+            source_json, source_path = _load_source_json_path_payload(source_json_path)
         else:
             source_path = ""
         if source_json is None:
@@ -839,6 +881,7 @@ def clean_disclosure_html_output_directory_payload(body: dict[str, Any]) -> dict
         source_type = "external"
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
+    _ensure_safe_html_cleanup_directory(resolved_output_directory)
     dry_run = bool(body.get("dry_run", False))
     if not dry_run and not _is_delete_confirmed(body):
         planned_summary = _delete_unexpected_html_output_directory_files(
@@ -894,14 +937,7 @@ def download_disclosure_html_payload(
     if not source_json_path and isinstance(source_json, dict):
         source_json_path = source_json.get("source_json_path")
     if source_json_path:
-        source_json_file = Path(str(source_json_path)).expanduser().resolve()
-        if not source_json_file.is_file():
-            msg = f"source_json_path does not exist: {source_json_file}"
-            raise ValueError(msg)
-        import json
-
-        resolved_source_json_path = str(source_json_file)
-        source_json = json.loads(source_json_file.read_text(encoding="utf-8"))
+        source_json, resolved_source_json_path = _load_source_json_path_payload(source_json_path)
     if source_json is None:
         msg = "json is required"
         raise ValueError(msg)

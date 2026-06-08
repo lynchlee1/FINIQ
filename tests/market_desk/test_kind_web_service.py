@@ -273,6 +273,13 @@ def test_filter_disclosures_payload_reads_source_folder_without_classification_j
     assert any(event["unit_label"] == "공시" and event["total"] == 2 for event in progress_events)
 
 
+def test_filter_disclosures_payload_rejects_high_risk_source_root() -> None:
+    root = Path(Path.cwd().anchor).resolve()
+
+    with pytest.raises(ValueError, match="high-risk root_directory"):
+        filter_disclosures_payload({"root_directory": str(root)})
+
+
 def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
@@ -1083,6 +1090,59 @@ def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Pat
     ]
 
 
+def test_download_disclosure_html_payload_accepts_result_directory_source_json_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_download(**kwargs):
+        acpt_numbers = list(kwargs["acpt_numbers"])
+        calls.append(acpt_numbers)
+        return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in acpt_numbers]
+
+    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    result_directory = tmp_path / "download_results"
+    result_directory.mkdir()
+    (result_directory / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=1, total_items=1)
+    )
+
+    payload = download_disclosure_html_payload(
+        {
+            "output_directory": str(tmp_path / "viewer_html"),
+            "source_json_path": str(result_directory),
+        }
+    )
+
+    assert calls == [["20250101000001"]]
+    assert payload["requested_count"] == 1
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["source_json_path"] == str(result_directory.resolve())
+
+
+def test_clean_disclosure_html_output_directory_accepts_result_directory_source_json_path(
+    tmp_path: Path,
+) -> None:
+    result_directory = tmp_path / "download_results"
+    result_directory.mkdir()
+    (result_directory / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=1, total_items=1)
+    )
+
+    payload = clean_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(tmp_path / "viewer_html"),
+            "source_json_path": str(result_directory),
+            "dry_run": True,
+        }
+    )
+
+    assert payload["source_type"] == "external"
+    assert payload["source_path"] == str(result_directory.resolve())
+    assert payload["requested_count"] == 1
+
+
 def test_download_disclosure_html_payload_logs_existing_html_overlap(
     tmp_path: Path,
     monkeypatch,
@@ -1236,6 +1296,19 @@ def test_clean_disclosure_html_output_directory_requires_delete_confirmation(
         raise AssertionError("expected ValueError")
 
     assert unexpected.exists()
+
+
+def test_clean_disclosure_html_output_directory_rejects_high_risk_directory() -> None:
+    root = Path(Path.cwd().anchor).resolve()
+
+    with pytest.raises(ValueError, match="high-risk output_directory"):
+        clean_disclosure_html_output_directory_payload(
+            {
+                "output_directory": str(root),
+                "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
+                "dry_run": True,
+            }
+        )
 
 
 def test_clean_disclosure_html_output_directory_dry_run_reports_delete_count(
@@ -2454,13 +2527,13 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
         assert mode in parse_ui_html
     assert "/html-parse" in parse_ui_html
     assert "/html-content-download" in parse_ui_html
-    assert "HTML 외부 저장" in download_component_html
-    assert "HTML 내부 저장" in download_component_html
+    assert "공시원문 외부 저장" in download_component_html
+    assert "공시원문 내부 저장" in download_component_html
     assert "content" in content_download_ui_html
     assert "/api/disclosures/html/content-download/start" in download_component_html
     assert "/html-change-log" in parse_ui_html
     assert "/html-bond-summary" in change_log_ui_html
-    assert "변동기록조회" in change_log_ui_html
+    assert "변동 불러오기" in change_log_ui_html
     assert "/api/disclosures/html/parse/change-log" in change_log_ui_html
     assert "parseMode" not in download_ui_html
     assert "cancel_token" in parse_ui_html  # In React, we use cancel_token for cancellation

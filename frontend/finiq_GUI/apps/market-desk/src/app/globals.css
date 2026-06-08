@@ -73,3 +73,25 @@ html, body {
 
 /* Ensure Tailwind dark utilities work with .dark class on html */
 @custom-variant dark (&:where(.dark, .dark *));
+
+.action-dock-settings-panel :where(.grid) {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.action-dock-settings-panel :where([class*="md:col-span-"], [class*="lg:col-span-"], [class*="xl:col-span-"]) {
+  grid-column: auto !important;
+}
+
+.action-dock-settings-panel :where([class*="md:flex-row"], [class*="sm:flex-row"], [class*="lg:flex-row"], [class*="xl:flex-row"]) {
+  flex-direction: column !important;
+  align-items: stretch !important;
+}
+
+.action-dock-settings-panel :where([role="tabpanel"].flex, [data-slot="tabs-content"].flex) {
+  flex-direction: column !important;
+  align-items: stretch !important;
+}
+
+.action-dock-settings-panel :where([role="tabpanel"] > .flex, [data-slot="tabs-content"] > .flex) {
+  flex-direction: column !important;
+}

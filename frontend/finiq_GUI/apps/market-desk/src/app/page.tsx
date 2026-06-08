@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { Settings, FolderOpen, Search, Building2, Calendar, FileText } from "lucide-react";
+import { FolderOpen, Search, Building2, Calendar, FileText } from "lucide-react";
 import { Input } from "@finiq/ui";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
@@ -9,9 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@finiq/ui";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { cn } from "@finiq/ui/utils";
 import { pickPath, type PathDialogMode } from "@/lib/fileDialog";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 interface ConfigFile {
   path: string;
@@ -41,7 +41,6 @@ interface Company {
 
 export default function Home() {
   const router = useRouter();
-  const [settingsOpen, setSettingsOpen] = useState(true);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(true);
@@ -193,7 +192,7 @@ export default function Home() {
 
   return (
     <WorkflowPageShell workflowId="ontology">
-    <div className="flex flex-col gap-6 w-full">
+    <div className="relative flex w-full flex-col gap-6">
       <section className="flex items-center gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -205,21 +204,18 @@ export default function Home() {
             onChange={(e) => setKeyword(e.target.value)}
           />
         </div>
-        <Button 
-          variant="outline" 
-          size="lg"
-          onClick={() => setSettingsOpen(!settingsOpen)}
-          className={cn(settingsOpen ? "bg-slate-100 dark:bg-[#21262d]" : "", "dark:border-[#30363d] dark:text-slate-300 dark:hover:bg-[#21262d]")}
-        >
-          <Settings className="mr-2 h-4 w-4" />
-          설정
-        </Button>
       </section>
 
-      {settingsOpen && (
-        <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-          <CardContent className="p-6">
-            <div className="grid md:grid-cols-2 gap-8">
+      <ActionDock
+        activityTitle="조회 현황"
+        activityActive={loading}
+        activityContent={<div className="text-sm dark:text-slate-300">{loading ? "회사 목록을 불러오는 중입니다." : `회사 ${formatNumber(companies.length)}개를 불러왔습니다.`}</div>}
+        notificationActive={!!error}
+        notificationContent={<div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm dark:text-slate-300"}>{error || "알림 없음"}</div>}
+        settingsTitle="조회 설정"
+        settingsContent={
+          <>
+            <div className="grid gap-6">
               <div className="space-y-4">
                 <h3 className="font-semibold text-slate-900 dark:text-white border-b dark:border-[#30363d] pb-2">주가 소스</h3>
                 <div className="space-y-2">
@@ -328,12 +324,12 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            <div className="mt-8 flex justify-end">
+            <div className="flex justify-end">
               <Button onClick={() => handleSaveSettings()}>설정 저장</Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </>
+        }
+      />
 
       <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">

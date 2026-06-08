@@ -1,13 +1,11 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react";
-import { Loader2, FileSpreadsheet, Settings } from "lucide-react";
+import { Loader2, FileSpreadsheet } from "lucide-react";
 import { Button, Label, Checkbox } from "@finiq/ui";
-import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { ChangeLogSettings } from "@/components/html-change-log/ChangeLogSettings";
 import { ChangeLogSidebar } from "@/components/html-change-log/ChangeLogSidebar";
 import { ChangeLogMatrix } from "@/components/html-change-log/ChangeLogMatrix";
 import { getChangedFields } from "@/utils/matrixUtils";
@@ -18,6 +16,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 const PARSE_MODES = [
   { key: "bond_issuance", label: "사채발행파싱" },
@@ -42,7 +41,6 @@ export default function HtmlChangeLogPage() {
   const [changeLimit, setChangeLimit] = useState("50");
   const [exportLatestOnly, setExportLatestOnly] = useState(false);
 
-  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     fetchSettings().finally(() => setLoading(false));
@@ -231,6 +229,10 @@ export default function HtmlChangeLogPage() {
       ),
     },
   ];
+  const pathFields = conditionFields.filter((field) => field.id === "outputPath");
+  const optionFields = conditionFields.filter((field) => field.id !== "outputPath");
+  const filterOnlyFields = filterFields.filter((field) => field.id !== "exportControls");
+  const exportFields = filterFields.filter((field) => field.id === "exportControls");
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
@@ -242,25 +244,19 @@ export default function HtmlChangeLogPage() {
       title="공시 정정내역 한눈에"
       description="정정공시 전후의 필드 값 변화를 매트릭스 형태로 비교합니다. 파싱 결과 JSON을 기준으로 목록, 상세 변경 필드, Excel 내보내기를 한 화면에서 처리합니다."
     >
-      <HtmlWorkflowCard
-        title="조회 조건"
-        description="모든 조회형 원문 처리 화면은 같은 필드 높이와 열 규칙을 사용합니다."
-        actions={
-          <>
-            <Button variant="outline" size="icon-lg" onClick={() => setShowSettings(!showSettings)} className={cn(showSettings ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#30363d]" : "dark:border-[#30363d] dark:hover:bg-[#21262d]")}>
-              <Settings className={cn("h-4 w-4", showSettings ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-slate-500")} />
-            </Button>
+      <div className="relative space-y-6">
+        <HtmlWorkflowCard
+          title="조회 조건"
+          description="모든 조회형 원문 처리 화면은 같은 필드 높이와 열 규칙을 사용합니다."
+          actions={
             <Button onClick={loadChangeLog} disabled={isFetching} className="h-10 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white transition-colors">
               {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               변동 불러오기
             </Button>
-          </>
-        }
-      >
-          {showSettings && <ChangeLogSettings onClose={() => setShowSettings(false)} />}
+          }
+        >
 
-          <HtmlWorkflowForm fields={conditionFields} />
-          <HtmlWorkflowForm fields={filterFields} />
+          <HtmlWorkflowForm fields={pathFields} />
 
           <div className="grid lg:grid-cols-10 gap-6 min-h-[500px]">
             <ChangeLogSidebar 
@@ -272,10 +268,37 @@ export default function HtmlChangeLogPage() {
             <ChangeLogMatrix selectedFamily={selectedFamily} />
           </div>
 
-          {status && (
-            <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-          )}
-      </HtmlWorkflowCard>
+        </HtmlWorkflowCard>
+        <ActionDock
+          activityActive={isFetching}
+          activityContent={<JobStatusLogger status={status || "조회 전"} isErrorStatus={isErrorStatus} />}
+          notificationActive={isErrorStatus}
+          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          settingsTitle="조회 설정"
+          settingsContent={
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>
+                </div>
+                <HtmlWorkflowForm fields={optionFields} />
+              </div>
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">필터</p>
+                </div>
+                <HtmlWorkflowForm fields={filterOnlyFields} />
+              </div>
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">내보내기</p>
+                </div>
+                <HtmlWorkflowForm fields={exportFields} />
+              </div>
+            </div>
+          }
+        />
+      </div>
     </HtmlWorkflowPage>
   );
 }

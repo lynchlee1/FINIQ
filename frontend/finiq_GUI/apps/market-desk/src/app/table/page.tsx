@@ -12,6 +12,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 export default function TablePage() {
   const [loading, setLoading] = useState(true);
@@ -140,51 +141,41 @@ export default function TablePage() {
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
-      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+      <div className="relative space-y-6">
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source Pipeline</p>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">공시내역 변환</CardTitle>
-          <CardDescription className="dark:text-slate-400">회사별로 분류된 Raw JSON 데이터를 검색과 분석에 용이한 SQLite 형식으로 변환합니다.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label className="dark:text-slate-300">입력 경로 (Raw JSON 폴더)</Label>
-                <PathPickerInput
-                  value={classificationPath}
-                  onChange={handleClassificationPathChange}
-                  mode="folder"
-                  placeholder="분류 파일 또는 폴더 경로를 선택하세요"
-                  onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                />
-            </div>
-            <div className="space-y-2">
-              <Label className="dark:text-slate-300">저장 경로 (SQLite)</Label>
-                <PathPickerInput 
-                  value={outputPath} 
-                  onChange={(val) => {
-                    setOutputPath(val);
-                    saveSetting("output_root", val);
-                  }}
-                  mode="folder"
-                  placeholder="저장 경로를 선택하세요"
-                  onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                />
-            </div>
-            </div>
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="space-y-6">
-          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">작업 실행</CardTitle>
+              <CardDescription className="dark:text-slate-400">회사별로 분류된 Raw JSON 데이터를 검색과 분석에 용이한 SQLite 형식으로 변환합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-col gap-2">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">입력 경로 (Raw JSON 폴더)</Label>
+                  <PathPickerInput
+                    value={classificationPath}
+                    onChange={handleClassificationPathChange}
+                    mode="folder"
+                    placeholder="분류 파일 또는 폴더 경로를 선택하세요"
+                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">저장 경로 (SQLite)</Label>
+                  <PathPickerInput 
+                    value={outputPath} 
+                    onChange={(val) => {
+                      setOutputPath(val);
+                      saveSetting("output_root", val);
+                    }}
+                    mode="folder"
+                    placeholder="저장 경로를 선택하세요"
+                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
                 <Button variant="outline" onClick={handleRefresh} disabled={!!activeJobId} className="w-full">
                   <RefreshCw className={cn("mr-2 h-4 w-4", !!activeJobId ? "animate-spin" : "")} />
                   소스 새로고침
@@ -194,14 +185,30 @@ export default function TablePage() {
                   실행
                 </Button>
               </div>
-
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">작업 상태</Label>
-                <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-              </div>
             </CardContent>
           </Card>
         </section>
+
+        <ActionDock
+          activityActive={!!activeJobId}
+          activityContent={
+            <div className="space-y-2">
+              <Label className="dark:text-slate-300">작업 상태</Label>
+              <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
+            </div>
+          }
+          notificationActive={isErrorStatus}
+          notificationContent={
+            <div className="space-y-2">
+              <Label className="dark:text-slate-300">알림</Label>
+              <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />
+            </div>
+          }
+          settingsTitle="설정"
+          settingsContent={
+            <div className="text-sm text-slate-500 dark:text-slate-400">추가 변환 설정이 없습니다. 입출력 경로는 메인 화면에서 조정합니다.</div>
+          }
+        />
       </div>
     </WorkflowPageShell>
   );

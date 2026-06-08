@@ -75,12 +75,11 @@ def company_classification_is_stale(
     body_files = _iter_body_files(root)
     if not body_files:
         return False
-    if not destination.exists():
-        return True
     if not company_classification_artifact_complete(destination):
         return True
 
-    destination_mtime = destination.stat().st_mtime
+    artifact_path = destination if destination.exists() else destination.with_suffix(".sqlite")
+    destination_mtime = artifact_path.stat().st_mtime
     return any(body_path.stat().st_mtime > destination_mtime for body_path in body_files)
 
 
@@ -99,7 +98,7 @@ def load_company_classification(
     if force_refresh or company_classification_is_stale(root, output_path=destination):
         export_kind_company_classification(root, output_path=destination, compact=False)
 
-    if not destination.exists():
+    if not company_classification_artifact_complete(destination):
         return {
             "summary": dict(_DEFAULT_EMPTY_CLASSIFICATION["summary"]),
             "companies": list(_DEFAULT_EMPTY_CLASSIFICATION["companies"]),
@@ -122,7 +121,7 @@ def load_company_classification_index(
     if force_refresh or company_classification_is_stale(root, output_path=destination):
         export_kind_company_classification(root, output_path=destination, compact=False)
 
-    if not destination.exists():
+    if not company_classification_artifact_complete(destination):
         return {
             "summary": dict(_DEFAULT_EMPTY_CLASSIFICATION["summary"]),
             "companies": list(_DEFAULT_EMPTY_CLASSIFICATION["companies"]),
@@ -147,8 +146,8 @@ def load_company_classification_company(
     if force_refresh or company_classification_is_stale(root, output_path=destination):
         export_kind_company_classification(root, output_path=destination, compact=False)
 
-    if not destination.exists():
-        msg = f"Classification JSON not found: {destination}"
+    if not company_classification_artifact_complete(destination):
+        msg = f"Classification artifact not found: {destination}"
         raise FileNotFoundError(msg)
     return load_company_classification_company_artifact(destination, company_key)
 

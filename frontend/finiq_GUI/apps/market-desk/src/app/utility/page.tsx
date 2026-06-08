@@ -9,6 +9,7 @@ import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { ActionDock } from "@/components/ui/ActionDock";
 
 type PartitionMode = "split" | "flatten";
 
@@ -112,84 +113,30 @@ export default function UtilityPage() {
 
   return (
     <WorkflowPageShell workflowId="utility">
-      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,0.85fr)] gap-6">
+      <div className="relative space-y-6">
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Storage Utility</p>
               <CardTitle className="text-xl dark:text-white">분할저장</CardTitle>
             </CardHeader>
-            <CardContent className="pt-6 space-y-6">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">변환 방향</Label>
-                  <Select value={mode} onValueChange={(value) => setMode(value as PartitionMode)}>
-                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectItem value="split">일반 폴더 → 연도별 폴더</SelectItem>
-                      <SelectItem value="flatten">연도별 폴더 → 일반 폴더</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-end gap-3 rounded-lg border border-slate-200 p-3 dark:border-[#30363d]">
-                  <Checkbox
-                    id="overwrite"
-                    checked={overwrite}
-                    onCheckedChange={(checked) => setOverwrite(checked === true)}
-                    className="mt-1 dark:border-[#30363d]"
-                  />
-                  <Label htmlFor="overwrite" className="text-sm dark:text-slate-300">기존 파일 덮어쓰기</Label>
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">입력 폴더</Label>
-                  <PathPickerInput
-                    mode="folder"
-                    value={sourceDirectory}
-                    onChange={setSourceDirectory}
-                    placeholder="/path/to/source"
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
+                  <PathPickerInput mode="folder" value={sourceDirectory} onChange={setSourceDirectory} placeholder="/path/to/source" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
-
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">저장 폴더</Label>
-                  <PathPickerInput
-                    mode="folder"
-                    value={outputDirectory}
-                    onChange={setOutputDirectory}
-                    placeholder="/path/to/output"
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
+                  <PathPickerInput mode="folder" value={outputDirectory} onChange={setOutputDirectory} placeholder="/path/to/output" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="space-y-6">
-          <Card className="sticky top-6 dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">작업 실행</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button onClick={handleStart} disabled={!!activeJobId} className="w-full">
+              <Button onClick={handleStart} disabled={!!activeJobId} className="w-full md:w-auto">
                 {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                 {actionLabel}
               </Button>
-
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">작업 상태</Label>
-                <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-              </div>
             </CardContent>
           </Card>
-
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base dark:text-white">
@@ -203,6 +150,31 @@ export default function UtilityPage() {
             </CardContent>
           </Card>
         </section>
+        <ActionDock
+          activityActive={!!activeJobId}
+          activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+          notificationActive={isErrorStatus}
+          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          settingsTitle="분할저장 설정"
+          settingsContent={
+            <>
+              <div className="space-y-2">
+                <Label className="dark:text-slate-300">변환 방향</Label>
+                <Select value={mode} onValueChange={(value) => setMode(value as PartitionMode)}>
+                  <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"><SelectValue /></SelectTrigger>
+                  <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
+                    <SelectItem value="split">일반 폴더 → 연도별 폴더</SelectItem>
+                    <SelectItem value="flatten">연도별 폴더 → 일반 폴더</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-[#30363d]">
+                <Checkbox id="overwrite" checked={overwrite} onCheckedChange={(checked) => setOverwrite(checked === true)} className="dark:border-[#30363d]" />
+                <Label htmlFor="overwrite" className="text-sm dark:text-slate-300">기존 파일 덮어쓰기</Label>
+              </div>
+            </>
+          }
+        />
       </div>
     </WorkflowPageShell>
   );
