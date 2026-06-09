@@ -12,6 +12,7 @@ import { useJobStreaming } from "@/hooks/useJobStreaming";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { UI_TEXT } from "@/config/uiText";
+import { formatInteger } from "@/lib/format";
 
 const TRANSFER_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const PAGE_SIZE = 20;
@@ -232,8 +233,8 @@ export default function FilterPage() {
       } else {
         sessionStorage.removeItem(TRANSFER_STORAGE_KEY);
       }
-      const saved = transferPath ? `접수번호 ${payload.html_download_transfer?.acpt_numbers || 0}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
-      appendStatus(`매칭 ${payload.summary?.matched_disclosures || 0}건 중 ${payload.summary?.returned_disclosures || 0}건을 표시했고, ${saved}`, !transferPath);
+      const saved = transferPath ? `접수번호 ${formatInteger(payload.html_download_transfer?.acpt_numbers)}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
+      appendStatus(`매칭 ${formatInteger(payload.summary?.matched_disclosures)}건 중 ${formatInteger(payload.summary?.returned_disclosures)}건을 표시했고, ${saved}`, !transferPath);
     });
   };
 

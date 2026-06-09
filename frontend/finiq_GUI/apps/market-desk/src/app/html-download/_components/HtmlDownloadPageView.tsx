@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { FolderOpen, FileJson, Play, Square, Loader2, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -16,6 +16,7 @@ import {
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { UI_TEXT } from "@/config/uiText";
+import { formatInteger } from "@/lib/format";
 
 type DownloadVariant = "external" | "content";
 type SplitByYearButtonProps = {
@@ -38,6 +39,7 @@ const DOWNLOAD_VARIANTS = {
     startEndpoint: "/api/disclosures/html/download/start",
     cancelEndpoint: "/api/disclosures/html/download/cancel",
     inspectEndpoint: "/api/disclosures/html/download/inspect-folder",
+    checkExistingEndpoint: "/api/disclosures/html/download/check-existing",
     stopMessage: "공시원문 외부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
   content: {
@@ -54,6 +56,7 @@ const DOWNLOAD_VARIANTS = {
     startEndpoint: "/api/disclosures/html/content-download/start",
     cancelEndpoint: "/api/disclosures/html/content-download/cancel",
     inspectEndpoint: "/api/disclosures/html/content-download/inspect-folder",
+    checkExistingEndpoint: "/api/disclosures/html/content-download/check-existing",
     stopMessage: "공시원문 내부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
 } as const;
@@ -94,27 +97,27 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     const lines = [`작업 상태: ${statusLbl(data.status)}`];
     if (data.error) lines.push(`오류: ${data.error}`);
     if (res.requested_count !== undefined) {
-      lines.push(`요청 접수번호: ${res.requested_count || 0}`);
+      lines.push(`요청 접수번호: ${formatInteger(res.requested_count)}`);
       lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
-      lines.push(`저장 파일: ${res.saved_count || 0}`);
+      lines.push(`저장 파일: ${formatInteger(res.saved_count)}`);
       lines.push(`저장 경로: ${res.output_directory || ""}`);
     }
     if (res.summary?.merged_files !== undefined) {
-      lines.push(`병합 HTML: ${res.summary.merged_files || 0}`);
-      lines.push(`저장 JSON: ${res.summary.written_files || 0}`);
+      lines.push(`병합 HTML: ${formatInteger(res.summary.merged_files)}`);
+      lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
       lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       if (Array.isArray(res.written_files)) {
         lines.push("결과 파일", ...res.written_files);
       }
     }
     if (res.summary?.compressed_files !== undefined) {
-      lines.push(`압축 HTML: ${res.summary.compressed_files || 0}`);
-      lines.push(`저장 JSON: ${res.summary.written_files || 0}`);
+      lines.push(`압축 HTML: ${formatInteger(res.summary.compressed_files)}`);
+      lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
       lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       if (res.verification) {
         lines.push(`재검사: ${res.verification.passed ? "통과" : "누락/불일치 있음"}`);
-        lines.push(`재검사 기록: ${res.verification.verified_records || 0}/${res.verification.expected_records || 0}`);
-        lines.push(`누락 기록: ${res.verification.missing_records || 0}`);
+        lines.push(`재검사 기록: ${formatInteger(res.verification.verified_records)}/${formatInteger(res.verification.expected_records)}`);
+        lines.push(`누락 기록: ${formatInteger(res.verification.missing_records)}`);
       }
       if (Array.isArray(res.written_files)) {
         lines.push("결과 파일", ...res.written_files);
@@ -146,6 +149,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
+  const [existingData, setExistingData] = useState<any>(null);
+  const [checkingExisting, setCheckingExisting] = useState(false);
+  const checkExistingRequestRef = useRef({ id: 0, key: "" });
 
   // Form State
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -161,6 +167,11 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [mergeSplitByYear, setMergeSplitByYear] = useState(false);
   const [progressInterval, setProgressInterval] = useState("10");
   const [mergeOutputPath, setMergeOutputPath] = useState("");
+
+  const existingSplitMismatch = !!existingData && (
+    (typeof existingData.detected_output_split_by_year === "boolean" && existingData.detected_output_split_by_year !== downloadSplitByYear) ||
+    (variant === "content" && typeof existingData.detected_source_split_by_year === "boolean" && existingData.detected_source_split_by_year !== contentSourceSplitByYear)
+  );
 
   const startJob = useCallback(async (endpoint: string, payload: any) => {
     try {
@@ -212,16 +223,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     }
   }, [isJobActive]);
 
-  const handleRun = async () => {
-    if (!sourcePath) {
-      setStatus(variantConfig.sourceRequiredMessage);
-      setIsErrorStatus(true);
-      return;
-    }
-    const cancelToken = window.crypto.randomUUID();
-    setActiveCancelToken(cancelToken);
-    
-    const payload = {
+  const buildRunPayload = useCallback((cancelToken: string) => ({
       output_directory: outputDirectory,
       [variantConfig.sourcePayloadKey]: sourcePath,
       timeout: Number(timeout),
@@ -234,12 +236,41 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       output_split_by_year: downloadSplitByYear,
       progress_interval: Number(progressInterval),
       cancel_token: cancelToken,
-    };
+  }), [
+    outputDirectory,
+    sourcePath,
+    timeout,
+    maxRequestsPerMinute,
+    waitSeconds,
+    limit,
+    skipExisting,
+    downloadSplitByYear,
+    contentSourceSplitByYear,
+    progressInterval,
+    variant,
+    variantConfig.sourcePayloadKey,
+  ]);
+
+  const handleRun = async () => {
+    if (!sourcePath) {
+      setStatus(variantConfig.sourceRequiredMessage);
+      setIsErrorStatus(true);
+      return;
+    }
+    if (existingSplitMismatch) {
+      setStatus("분할저장 설정이 기존 폴더 구조와 다릅니다. 기존 메타데이터 기준으로 설정을 맞춘 뒤 실행하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const cancelToken = window.crypto.randomUUID();
+    setActiveCancelToken(cancelToken);
+
+    const payload = buildRunPayload(cancelToken);
 
     startJob(variantConfig.startEndpoint, payload);
   };
 
-  const buildCleanupPayload = (dryRun: boolean) => ({
+  const buildCleanupPayload = useCallback((dryRun: boolean) => ({
     output_directory: outputDirectory,
     [variantConfig.sourcePayloadKey]: sourcePath,
     limit: limit ? Number(limit) : null,
@@ -249,7 +280,71 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     dry_run: dryRun,
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
-  });
+  }), [
+    outputDirectory,
+    sourcePath,
+    limit,
+    downloadSplitByYear,
+    contentSourceSplitByYear,
+    deleteConfirmed,
+    deleteConfirmationText,
+    variant,
+    variantConfig.sourcePayloadKey,
+  ]);
+
+  const checkExisting = useCallback(async () => {
+    if (!sourcePath || !outputDirectory) {
+      checkExistingRequestRef.current = { id: checkExistingRequestRef.current.id + 1, key: "" };
+      setExistingData(null);
+      setCheckingExisting(false);
+      return;
+    }
+    const payload = buildCleanupPayload(true);
+    const requestId = checkExistingRequestRef.current.id + 1;
+    const requestKey = JSON.stringify({
+      endpoint: variantConfig.checkExistingEndpoint,
+      payload,
+    });
+    checkExistingRequestRef.current = { id: requestId, key: requestKey };
+    setCheckingExisting(true);
+    try {
+      const response = await fetch(variantConfig.checkExistingEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Existing HTML check failed");
+      if (
+        checkExistingRequestRef.current.id !== requestId ||
+        checkExistingRequestRef.current.key !== requestKey
+      ) {
+        return;
+      }
+      setExistingData(data.has_existing ? data : null);
+    } catch {
+      if (
+        checkExistingRequestRef.current.id === requestId &&
+        checkExistingRequestRef.current.key === requestKey
+      ) {
+        setExistingData(null);
+      }
+    } finally {
+      if (
+        checkExistingRequestRef.current.id === requestId &&
+        checkExistingRequestRef.current.key === requestKey
+      ) {
+        setCheckingExisting(false);
+      }
+    }
+  }, [sourcePath, outputDirectory, buildCleanupPayload, variantConfig.checkExistingEndpoint]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      checkExisting();
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [checkExisting]);
 
   const handleInspectFolder = async () => {
     if (!sourcePath) {
@@ -279,9 +374,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setLastInspectionCandidateCount(data.deletion_candidate_count || 0);
       const lines = [
         "폴더 검사 완료",
-        `대상 접수번호: ${data.requested_count || 0}`,
+        `대상 접수번호: ${formatInteger(data.requested_count)}`,
         `분할저장: ${data.split_by_year ? "On" : "Off"}`,
-        `삭제 예정 파일: ${data.deletion_candidate_count || 0}`,
+        `삭제 예정 파일: ${formatInteger(data.deletion_candidate_count)}`,
         `저장 경로: ${data.output_directory || ""}`,
       ];
       if (deleteCandidates.length) {
@@ -321,9 +416,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setDeleteConfirmationText("");
       const lines = [
         "파일 삭제 완료",
-        `대상 접수번호: ${data.requested_count || 0}`,
+        `대상 접수번호: ${formatInteger(data.requested_count)}`,
         `분할저장: ${data.split_by_year ? "On" : "Off"}`,
-        `삭제 파일: ${data.deleted_count || 0}`,
+        `삭제 파일: ${formatInteger(data.deleted_count)}`,
         `저장 경로: ${data.output_directory || ""}`,
       ];
       if (deletedFiles.length) {
@@ -496,6 +591,42 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     },
   ];
 
+  const existingSummary = existingData ? (() => {
+    const requestedCount = existingData.requested_count || 0;
+    const existingCount = existingData.existing_target_html_count || 0;
+    const missingCount = existingData.missing_target_html_count || 0;
+    if (requestedCount > 0 && missingCount === 0) {
+      return `이번 대상 ${formatInteger(requestedCount)}건이 모두 저장되어 있습니다.`;
+    }
+    if (requestedCount > 0) {
+      return `기존 원문 저장 ${formatInteger(existingCount)}건 감지됨. 이번 대상 ${formatInteger(requestedCount)}건 중 ${formatInteger(missingCount)}건을 새로 저장합니다.`;
+    }
+    return `기존 원문 저장 ${formatInteger(existingCount)}건 감지됨.`;
+  })() : "";
+
+  const existingDetail = existingData ? (() => {
+    const deletionCount = existingData.deletion_candidate_count || 0;
+    if (deletionCount > 0) {
+      return `대상 외 파일 ${formatInteger(deletionCount)}개가 있어 실행 전 폴더 검사가 필요합니다.`;
+    }
+    if (skipExisting) {
+      return "기존 파일 건너뛰기 옵션이 켜져 있습니다.";
+    }
+    return "기존 파일 건너뛰기 옵션이 꺼져 있어 실행 시 다시 저장합니다.";
+  })() : "";
+
+  const handleApplyExistingSettings = () => {
+    if (!existingData) return;
+    if (typeof existingData.detected_output_split_by_year === "boolean") {
+      setDownloadSplitByYear(existingData.detected_output_split_by_year);
+    }
+    if (variant === "content" && typeof existingData.detected_source_split_by_year === "boolean") {
+      setContentSourceSplitByYear(existingData.detected_source_split_by_year);
+    }
+    setStatus("기존 메타데이터 기준으로 설정을 맞췄습니다.");
+    setIsErrorStatus(false);
+  };
+
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
@@ -513,6 +644,63 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
           >
             <HtmlWorkflowForm fields={basePathFields} />
+            {checkingExisting && !existingData && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-[#30363d] dark:bg-[#161b22]">
+                <div className="flex items-start gap-3">
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
+                  <div className="space-y-1">
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">기존 원문 저장 폴더 확인 중...</p>
+                    <p className="break-all text-xs text-slate-500 dark:text-slate-400">{outputDirectory}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {existingData && (
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-[#30363d] dark:bg-[#161b22]">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="space-y-1">
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">
+                      {existingSummary}
+                      {checkingExisting && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          재확인 중
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{existingDetail}</p>
+                    {existingSplitMismatch && (
+                      <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                        분할저장 설정이 기존 폴더 구조와 다릅니다. 설정을 맞춘 뒤 실행할 수 있습니다.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                    <Button
+                      type="button"
+                      variant={existingSplitMismatch ? "default" : "outline"}
+                      size="sm"
+                      className="h-8"
+                      onClick={handleApplyExistingSettings}
+                    >
+                      기존 메타데이터 기준으로 설정 맞추기
+                    </Button>
+                    {(existingData.deletion_candidate_count || 0) > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={handleInspectFolder}
+                        disabled={isJobActive || inspectRunning}
+                      >
+                        폴더 검사하기
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </HtmlWorkflowCard>
 
           {variant === "external" && (
@@ -551,7 +739,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
                   폴더 검사하기
                 </Button>
-                <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
+                <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive || existingSplitMismatch}>
                   <Play className="mr-2 h-4 w-4" />
                   실행
                 </Button>
@@ -580,7 +768,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
               {lastInspectionCandidateCount > 0 && (
                 <div className="space-y-3">
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
-                    삭제 예정 파일 {lastInspectionCandidateCount}개
+                    삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
                   </div>
                   <div className="flex items-center space-x-2">
                     <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="dark:border-[#30363d]" />
@@ -594,7 +782,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                     disabled={isJobActive || inspectRunning || !deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다."}
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
-                    삭제 예정 파일 {lastInspectionCandidateCount}개 삭제
+                    삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개 삭제
                   </Button>
                 </div>
               )}

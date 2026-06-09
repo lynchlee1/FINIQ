@@ -17,6 +17,7 @@ import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
+import { formatInteger } from "@/lib/format";
 
 const parseISODate = (dateStr: string) => {
   const [year, month, day] = dateStr.split("-").map(Number);
@@ -492,11 +493,11 @@ export default function DownloadPage() {
       : [];
     const lines = [
       deleted ? "파일 삭제 완료" : "폴더 검사 완료",
-      `대상 페이지: ${data.requested_count || data.summary?.total || 0}`,
+      `대상 페이지: ${formatInteger(data.requested_count || data.summary?.total)}`,
       `연도별 분할: ${data.split_by_year ? "On" : "Off"}`,
-      `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${deleted ? data.deleted_count || 0 : data.deletion_candidate_count || 0}`,
-      `추가 다운로드 필요: ${data.download_needed_count || 0}건`,
-      `최신 상태: 성공 ${data.summary?.success || 0}/${data.summary?.total || 0}건`,
+      `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${formatInteger(deleted ? data.deleted_count : data.deletion_candidate_count)}`,
+      `추가 다운로드 필요: ${formatInteger(data.download_needed_count)}건`,
+      `최신 상태: 성공 ${formatInteger(data.summary?.success)}/${formatInteger(data.summary?.total)}건`,
       `저장 경로: ${data.output_directory || ""}`,
     ];
     if (files.length) {
@@ -734,7 +735,7 @@ export default function DownloadPage() {
                                   {range.folder_name} ({range.start_date} ~ {range.end_date})
                                 </p>
                                 <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                                  로컬 건수: {range.local_count ?? "-"} | KIND 건수: {range.kind_count ?? "-"}
+                                  로컬 건수: {range.local_count == null ? "-" : formatInteger(range.local_count)} | KIND 건수: {range.kind_count == null ? "-" : formatInteger(range.kind_count)}
                                 </p>
                                 {range.error_detail && (
                                   <p className="text-[10px] text-rose-500 dark:text-rose-400 font-medium">
@@ -873,7 +874,7 @@ export default function DownloadPage() {
                       className="flex min-w-0 flex-1 items-center gap-2 text-left font-semibold text-sm dark:text-slate-200"
                     >
                       {expandedDisclosureGroups[group.suffix] ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                      <span className="truncate">{group.label} ({group.items.length})</span>
+                      <span className="truncate">{group.label} ({formatInteger(group.items.length)})</span>
                     </button>
                     <div className="flex gap-2">
                       <Button
@@ -1036,7 +1037,7 @@ export default function DownloadPage() {
                 {lastInspectionCandidateCount > 0 && (
                   <div className="space-y-4 border-t border-slate-200 pt-4 dark:border-[#30363d]">
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
-                      삭제 예정 파일 {lastInspectionCandidateCount}개
+                      삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
                     </div>
                     <div className="flex items-center space-x-2">
                       <Checkbox id="downloadDeleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="dark:border-[#30363d]" />
@@ -1063,7 +1064,7 @@ export default function DownloadPage() {
                       }
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
-                      삭제 예정 파일 {lastInspectionCandidateCount}개 삭제
+                      삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개 삭제
                     </Button>
                   </div>
                 )}
@@ -1198,7 +1199,7 @@ export default function DownloadPage() {
                   <div className="grid grid-cols-1 gap-2 mt-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
                       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공 / 전체</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary?.success || result.success_count || 0}/{result.summary?.total || result.total_count || result.summary?.success || 0}</strong>
+                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{formatInteger(result.summary?.success || result.success_count)}/{formatInteger(result.summary?.total || result.total_count || result.summary?.success)}</strong>
                     </div>
                   </div>
                 </div>

@@ -1,5 +1,6 @@
 import { cn } from "@finiq/ui/utils";
 import { getChangedFields } from "@/utils/matrixUtils";
+import { formatInteger } from "@/lib/format";
 
 interface ChangeLogSidebarProps {
   families: any[];
@@ -45,14 +46,14 @@ export function ChangeLogSidebar({ families, selectedFamilyId, onSelectFamily, h
                         ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" 
                         : "bg-slate-100 text-slate-400 dark:bg-[#30363d] dark:text-slate-500"
                     )}>
-                      {displayCount > 0 ? `Changed ${displayCount}` : "No Change"}
+                      {displayCount > 0 ? `Changed ${formatInteger(displayCount)}` : "No Change"}
                     </div>
                   </div>
                   
                   <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 font-medium">
                     <code className="bg-slate-50 dark:bg-[#161b22] px-1 rounded border dark:border-[#30363d]">{family.family_id}</code>
                     <span>•</span>
-                    <span>문서 {family.record_count}</span>
+                    <span>문서 {formatInteger(family.record_count)}</span>
                   </div>
 
                   {displayCount > 0 && (
@@ -61,7 +62,7 @@ export function ChangeLogSidebar({ families, selectedFamilyId, onSelectFamily, h
                         <span key={f} className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-[#161b22] text-blue-600 dark:text-blue-400 text-[9px] font-medium border border-blue-100 dark:border-[#30363d]">{f}</span>
                       ))}
                       {displayChangedFields.length > 5 && (
-                        <span className="text-[9px] text-slate-400 dark:text-slate-600 font-medium self-center ml-0.5">+{displayChangedFields.length - 5}</span>
+                        <span className="text-[9px] text-slate-400 dark:text-slate-600 font-medium self-center ml-0.5">+{formatInteger(displayChangedFields.length - 5)}</span>
                       )}
                     </div>
                   )}

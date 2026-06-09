@@ -281,7 +281,7 @@ function CompanyDetailContent() {
                 >
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: group.color }} />
                   {group.name}
-                  <span className="ml-1 opacity-60">{group.count}</span>
+                  <span className="ml-1 opacity-60">{formatNumber(group.count)}</span>
                 </button>
               ))}
             </div>
