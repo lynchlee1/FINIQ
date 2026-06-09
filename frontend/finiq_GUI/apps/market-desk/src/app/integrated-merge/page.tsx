@@ -9,6 +9,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { UI_TEXT } from "@/config/uiText";
 
 export default function IntegratedMergePage() {
   const { 
@@ -83,7 +84,7 @@ export default function IntegratedMergePage() {
                 </Button>
                 {activeJobId && (
                   <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
-                    중단
+                    {UI_TEXT.actions.cancelJob}
                   </Button>
                 )}
               </div>

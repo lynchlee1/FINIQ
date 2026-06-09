@@ -10,6 +10,7 @@ import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { UI_TEXT } from "@/config/uiText";
 
 type PartitionMode = "split" | "flatten";
 
@@ -144,7 +145,7 @@ export default function UtilityPage() {
                 </Button>
                 {activeJobId && (
                   <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
-                    중단
+                    {UI_TEXT.actions.cancelJob}
                   </Button>
                 )}
               </div>

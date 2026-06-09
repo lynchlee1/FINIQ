@@ -14,6 +14,7 @@ import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { UI_TEXT } from "@/config/uiText";
 
 export default function TablePage() {
   const [loading, setLoading] = useState(true);
@@ -193,7 +194,7 @@ export default function TablePage() {
                   실행
                 </Button>
                 <Button variant="outline" onClick={cancelJob} disabled={!activeJobId} className="w-full">
-                  중단
+                  {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
             </CardContent>

@@ -8,6 +8,7 @@ import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { UI_TEXT } from "@/config/uiText";
 import {
   fetchAssetExcelFiles,
   fetchAssetExcelOutput,
@@ -701,7 +702,7 @@ export default function AssetExcelUtilityPage() {
                 자산 엑셀 변환
               </Button>
               <Button variant="outline" onClick={cancelJob} disabled={!activeJobId} className="w-full md:w-auto">
-                중단
+                {UI_TEXT.actions.cancelJob}
               </Button>
             </CardContent>
           </Card>
