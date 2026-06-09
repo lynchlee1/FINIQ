@@ -104,6 +104,24 @@ def _build_download_result_page_html(
     ).encode("utf-8")
 
 
+def _trusted_download_input_snapshot(
+    *,
+    start_date: str = "2026-01-01",
+    end_date: str = "2026-05-01",
+    page_size: int = 100,
+) -> dict[str, object]:
+    return {
+        "request_headers": {"User-Agent": "pytest"},
+        "start_date": start_date,
+        "end_date": end_date,
+        "page_size": page_size,
+        "search_filters": [],
+        "disclosure_type_groups": {},
+        "last_report_only": False,
+        "include_previous_disclosures": None,
+    }
+
+
 def _write_classification_fixture(tmp_path: Path) -> Path:
     payload = {
         "summary": {"companies": 1, "disclosures": 3},
@@ -3269,7 +3287,7 @@ def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
     (folder1 / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01")),
         encoding="utf-8"
     )
 
@@ -3279,7 +3297,7 @@ def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
     (folder2 / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-05-02", "end_date": "2026-06-01"}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-05-02", end_date="2026-06-01")),
         encoding="utf-8"
     )
 
@@ -3304,7 +3322,7 @@ def test_check_existing_downloads_single(tmp_path: Path, monkeypatch) -> None:
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
     (tmp_path / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-02-01", "end_date": "2026-03-01"}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-02-01", end_date="2026-03-01")),
         encoding="utf-8"
     )
 
@@ -3327,7 +3345,7 @@ def test_check_existing_downloads_validated(tmp_path: Path, monkeypatch) -> None
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01")),
         encoding="utf-8"
     )
 
@@ -3350,7 +3368,7 @@ def test_check_existing_downloads_stale(tmp_path: Path, monkeypatch) -> None:
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01")),
         encoding="utf-8"
     )
 
@@ -3373,7 +3391,7 @@ def test_check_existing_downloads_unverified(tmp_path: Path, monkeypatch) -> Non
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01")),
         encoding="utf-8"
     )
 
@@ -3395,7 +3413,7 @@ def test_check_existing_downloads_corrupted_local(tmp_path: Path, monkeypatch) -
     # Write a corrupted body file (non-HTML text so pagination detection returns None)
     (folder / "001_post_page_00001.body").write_bytes(b"corrupted html")
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01"}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01")),
         encoding="utf-8"
     )
 
@@ -3422,7 +3440,7 @@ def test_check_existing_downloads_missing_pages(tmp_path: Path, monkeypatch) -> 
         _build_download_result_page_html(page_number=3, page_size=100, total_items=200)
     )
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01", page_size=100)),
         encoding="utf-8"
     )
 
@@ -3448,7 +3466,7 @@ def test_check_existing_downloads_fast_validated(tmp_path: Path, monkeypatch) ->
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01", page_size=100)),
         encoding="utf-8"
     )
 
@@ -3479,7 +3497,7 @@ def test_check_existing_downloads_fast_missing_pages(tmp_path: Path, monkeypatch
         _build_download_result_page_html(page_number=3, page_size=100, total_items=300)
     )
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01", page_size=100)),
         encoding="utf-8"
     )
 
@@ -3503,7 +3521,7 @@ def test_check_existing_downloads_fast_corrupted_local(tmp_path: Path, monkeypat
     # Write corrupted last page (non-HTML text)
     (folder / "001_post_page_00001.body").write_bytes(b"corrupted html")
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01", page_size=100)),
         encoding="utf-8"
     )
 
@@ -3530,7 +3548,7 @@ def test_check_existing_downloads_fast_corrupted_non_last_page(tmp_path: Path, m
         _build_download_result_page_html(page_number=2, page_size=100, total_items=200)
     )
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01", page_size=100)),
         encoding="utf-8"
     )
 
@@ -3557,15 +3575,18 @@ def test_check_existing_downloads_route_verify_with_kind_parsing(tmp_path: Path,
     assert route_func is not None
 
     called_verify_with_kind = []
-    def mock_check_existing(path, *, verify_with_kind=True):
+    called_current_payloads = []
+    def mock_check_existing(path, *, verify_with_kind=True, current_payload=None):
         called_verify_with_kind.append(verify_with_kind)
+        called_current_payloads.append(current_payload)
         return {"has_existing": False}
 
     monkeypatch.setattr("finiq.market_desk.web.routers.download.check_existing_downloads", mock_check_existing)
 
     # test JSON boolean false
-    route_func({"output_directory": "/tmp", "verify_with_kind": False})
+    route_func({"output_directory": "/tmp", "verify_with_kind": False, "company_name": "삼성전자"})
     assert called_verify_with_kind[-1] is False
+    assert called_current_payloads[-1]["company_name"] == "삼성전자"
 
     # test string boolean "false"
     route_func({"output_directory": "/tmp", "verify_with_kind": "false"})
@@ -3630,7 +3651,7 @@ def test_check_existing_downloads_fast_row_count_mismatch(tmp_path: Path, monkey
     )
 
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        json.dumps(_trusted_download_input_snapshot(start_date="2026-01-01", end_date="2026-05-01", page_size=100)),
         encoding="utf-8"
     )
 
@@ -3657,6 +3678,262 @@ def test_check_existing_downloads_detects_metadata_missing(tmp_path: Path) -> No
     range_info = res["ranges"][0]
     assert range_info["status"] == "unverified"
     assert range_info["metadata_missing"] is True
+
+
+def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import detect_existing_downloads
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("detect must not parse downloaded pages or call KIND")
+
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.download.inspect_download_directory_pages", fail_if_called)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(b"corrupted html")
+
+    res = detect_existing_downloads(
+        str(tmp_path),
+        current_payload={
+            "start_date": "2026-01-01",
+            "end_date": "2026-05-01",
+            "company_name": "",
+            "submitter_name": "",
+            "market_label": "검색대상",
+            "securities_label": "전체",
+            "disclosure_type_groups": {},
+            "last_report_only": False,
+            "page_size": 100,
+        },
+    )
+
+    assert res["has_existing"] is True
+    assert res["ranges"][0]["metadata_status"] == "missing"
+    assert res["ranges"][0]["local_count"] is None
+    assert res["ranges"][0]["kind_count"] is None
+
+
+def test_inspect_folder_repairs_missing_metadata_when_current_payload_matches(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from finiq.market_desk.web.download import inspect_download_output_directory_payload
+
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snapshot: 100)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+
+    res = inspect_download_output_directory_payload(
+        {
+            "mode": "yearly",
+            "output_directory": str(tmp_path),
+            "start_date": "2026-01-01",
+            "end_date": "2026-05-01",
+            "company_name": "",
+            "submitter_name": "",
+            "market_label": "검색대상",
+            "securities_label": "전체",
+            "disclosure_type_groups": {},
+            "last_report_only": False,
+            "page_size": 100,
+            "dry_run": True,
+        }
+    )
+
+    assert res["deletion_candidate_count"] == 0
+    assert res["download_needed_count"] == 0
+    assert (folder / "kind_workflow.input.json").is_file()
+
+
+def test_inspect_folder_reports_download_needed_for_missing_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from finiq.market_desk.web.download import inspect_download_output_directory_payload
+
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snapshot: 150)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+
+    res = inspect_download_output_directory_payload(
+        {
+            "mode": "yearly",
+            "output_directory": str(tmp_path),
+            "start_date": "2026-01-01",
+            "end_date": "2026-05-01",
+            "company_name": "",
+            "submitter_name": "",
+            "market_label": "검색대상",
+            "securities_label": "전체",
+            "disclosure_type_groups": {},
+            "last_report_only": False,
+            "page_size": 100,
+            "dry_run": True,
+        }
+    )
+
+    assert res["deletion_candidate_count"] == 0
+    assert res["download_needed_count"] == 50
+    assert res["download_needed_pages"] == 1
+    assert (folder / "kind_workflow.input.json").is_file()
+
+
+def test_check_existing_downloads_does_not_infer_missing_metadata_from_incomplete_payload(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+
+    def fail_if_called(snapshot):
+        raise RuntimeError("Incomplete current payload must not be used for KIND validation")
+
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+
+    res = check_existing_downloads(
+        str(tmp_path),
+        current_payload={"output_directory": str(tmp_path)},
+    )
+
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "unverified"
+    assert range_info["metadata_missing"] is True
+    assert range_info["kind_count"] is None
+    assert range_info["error_detail"] == "Missing or obsolete kind_workflow.input.json metadata to verify range against KIND."
+
+
+def test_check_existing_downloads_treats_obsolete_metadata_as_missing(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+
+    def fail_if_called(snapshot):
+        raise RuntimeError("Obsolete metadata must not be used for KIND validation")
+
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        encoding="utf-8",
+    )
+
+    res = check_existing_downloads(str(tmp_path))
+
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "unverified"
+    assert range_info["metadata_missing"] is True
+    assert range_info["metadata_obsolete"] is True
+    assert range_info["kind_count"] is None
+    assert range_info["error_detail"] == "Missing or obsolete kind_workflow.input.json metadata to verify range against KIND."
+
+
+def test_check_existing_downloads_validates_missing_metadata_with_current_payload(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import DISCLOSURE_GROUPS, check_existing_downloads
+
+    seen_snapshots = []
+    def fake_kind_count(snapshot):
+        seen_snapshots.append(snapshot)
+        return 100
+
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fake_kind_count)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    suffix, _, items = DISCLOSURE_GROUPS[0]
+    code = items[0][0]
+
+    res = check_existing_downloads(
+        str(tmp_path),
+        current_payload={
+            "start_date": "2026-01-01",
+            "end_date": "2026-05-01",
+            "company_name": "삼성전자",
+            "submitter_name": "",
+            "market_label": "검색대상",
+            "securities_label": "전체",
+            "disclosure_type_groups": {suffix: [code]},
+            "last_report_only": True,
+            "page_size": 100,
+        },
+    )
+
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "validated"
+    assert range_info["metadata_missing"] is True
+    assert not (folder / "kind_workflow.input.json").exists()
+    assert seen_snapshots[0]["start_date"] == "2026-01-01"
+    assert seen_snapshots[0]["end_date"] == "2026-05-01"
+    assert seen_snapshots[0]["disclosure_type_groups"] == {suffix: [code]}
+    assert seen_snapshots[0]["last_report_only"] is True
+
+
+def test_check_existing_downloads_validates_obsolete_metadata_with_current_payload(tmp_path: Path, monkeypatch) -> None:
+    from finiq.market_desk.web.download import check_existing_downloads
+
+    seen_snapshots = []
+    def fake_kind_count(snapshot):
+        seen_snapshots.append(snapshot)
+        return 100
+
+    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fake_kind_count)
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
+        encoding="utf-8",
+    )
+
+    res = check_existing_downloads(
+        str(tmp_path),
+        current_payload={
+            "start_date": "2026-01-01",
+            "end_date": "2026-05-01",
+            "company_name": "삼성전자",
+            "submitter_name": "",
+            "market_label": "검색대상",
+            "securities_label": "전체",
+            "disclosure_type_groups": {},
+            "last_report_only": False,
+            "page_size": 100,
+        },
+    )
+
+    assert res["has_existing"] is True
+    range_info = res["ranges"][0]
+    assert range_info["status"] == "validated"
+    assert range_info["metadata_missing"] is True
+    assert range_info["metadata_obsolete"] is True
+    assert (folder / "kind_workflow.input.json").is_file()
+    assert seen_snapshots[0]["start_date"] == "2026-01-01"
+    assert seen_snapshots[0]["end_date"] == "2026-05-01"
+    assert seen_snapshots[0]["search_filters"] == {"searchCorpName": "삼성전자"}
 
 
 def test_create_folder_metadata_success(tmp_path: Path, monkeypatch) -> None:

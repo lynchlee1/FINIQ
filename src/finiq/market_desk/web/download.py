@@ -871,6 +871,47 @@ def _normalize_disclosure_type_groups(payload: dict[str, Any]) -> dict[str, list
     return normalized or None
 
 
+def _has_complete_current_download_payload(payload: dict[str, Any] | None) -> bool:
+    if not payload:
+        return False
+    required_keys = {
+        "start_date",
+        "end_date",
+        "company_name",
+        "submitter_name",
+        "market_label",
+        "securities_label",
+        "page_size",
+        "last_report_only",
+        "disclosure_type_groups",
+    }
+    return required_keys.issubset(payload.keys())
+
+
+def _is_trusted_download_input_snapshot(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    required_keys = {
+        "request_headers",
+        "start_date",
+        "end_date",
+        "page_size",
+        "search_filters",
+        "disclosure_type_groups",
+        "last_report_only",
+        "include_previous_disclosures",
+    }
+    if not required_keys.issubset(snapshot.keys()):
+        return False
+    try:
+        date.fromisoformat(str(snapshot["start_date"]))
+        date.fromisoformat(str(snapshot["end_date"]))
+        int(snapshot["page_size"])
+    except Exception:
+        return False
+    return True
+
+
 def _build_search_filters(payload: dict[str, Any]) -> dict[str, str] | None:
     search_filters: dict[str, str] = {}
 
@@ -1048,6 +1089,109 @@ def _workflow_auxiliary_files(output_directory: Path) -> list[Path]:
     ]
 
 
+def _download_input_snapshot_from_payload(payload: dict[str, Any], *, start: date, end: date, page_size: int) -> dict[str, Any]:
+    return {
+        "request_headers": DEFAULT_REQUEST_HEADERS,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "page_size": page_size,
+        "search_filters": _build_search_filters(payload),
+        "disclosure_type_groups": _normalize_disclosure_type_groups(payload),
+        "last_report_only": _as_bool(payload, "last_report_only"),
+        "include_previous_disclosures": None,
+    }
+
+
+def _write_download_input_snapshot(folder: Path, snapshot: dict[str, Any]) -> None:
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(snapshot, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _folder_date_range_from_name(folder: Path) -> tuple[date, date] | None:
+    parts = folder.name.split("_")
+    if len(parts) != 2 or len(parts[0]) != 8 or len(parts[1]) != 8:
+        return None
+    if not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    try:
+        return (
+            date(int(parts[0][0:4]), int(parts[0][4:6]), int(parts[0][6:8])),
+            date(int(parts[1][0:4]), int(parts[1][4:6]), int(parts[1][6:8])),
+        )
+    except Exception:
+        return None
+
+
+def _expected_date_range_for_folder(payload: dict[str, Any], folder: Path) -> tuple[date, date]:
+    mode = str(payload.get("mode") or "single").strip().lower()
+    if mode == "yearly":
+        folder_range = _folder_date_range_from_name(folder)
+        if folder_range is not None:
+            return folder_range
+    start_date_raw = str(payload.get("start_date") or "").strip()
+    end_date_raw = str(payload.get("end_date") or "").strip()
+    return _parse_iso_date(start_date_raw, "start_date"), _parse_iso_date(end_date_raw, "end_date")
+
+
+def _snapshot_filters_payload(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    if not _is_trusted_download_input_snapshot(snapshot):
+        return None
+    try:
+        search_filters_dict = dict(snapshot.get("search_filters") or [])
+
+        market_val = search_filters_dict.get("marketType", "")
+        market_label = "검색대상"
+        for label, val in MARKET_TYPES.items():
+            if val == market_val:
+                market_label = label
+                break
+
+        securities_val = search_filters_dict.get("securities", "")
+        securities_label = "전체"
+        for label, val in SECURITIES_TYPES.items():
+            if val == securities_val:
+                securities_label = label
+                break
+
+        return {
+            "company_name": search_filters_dict.get("searchCorpName", ""),
+            "submitter_name": search_filters_dict.get("submitOblgNm", ""),
+            "market_label": market_label,
+            "securities_label": securities_label,
+            "disclosure_type_groups": snapshot.get("disclosure_type_groups") or {},
+            "last_report_only": bool(snapshot.get("last_report_only")),
+        }
+    except Exception:
+        return None
+
+
+def _current_filters_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "company_name": str(payload.get("company_name") or ""),
+        "submitter_name": str(payload.get("submitter_name") or ""),
+        "market_label": str(payload.get("market_label") or "검색대상"),
+        "securities_label": str(payload.get("securities_label") or "전체"),
+        "disclosure_type_groups": _normalize_disclosure_type_groups(payload) or {},
+        "last_report_only": _as_bool(payload, "last_report_only"),
+    }
+
+
+def _filters_payloads_match(current: dict[str, Any], saved: dict[str, Any] | None) -> bool:
+    if saved is None:
+        return True
+    return (
+        str(current.get("company_name") or "").strip() == str(saved.get("company_name") or "").strip()
+        and str(current.get("submitter_name") or "").strip() == str(saved.get("submitter_name") or "").strip()
+        and str(current.get("market_label") or "검색대상") == str(saved.get("market_label") or "검색대상")
+        and str(current.get("securities_label") or "전체") == str(saved.get("securities_label") or "전체")
+        and bool(current.get("last_report_only")) == bool(saved.get("last_report_only"))
+        and json.dumps(current.get("disclosure_type_groups") or {}, sort_keys=True)
+        == json.dumps(saved.get("disclosure_type_groups") or {}, sort_keys=True)
+    )
+
+
 def _relative_candidate(path: Path, base: Path, reason: str) -> dict[str, str]:
     return {
         "path": str(path),
@@ -1157,6 +1301,7 @@ def inspect_download_output_directory_payload(
     files_to_validate: list[tuple[Path, int]] = []
     candidates_by_path: dict[str, dict[str, str]] = {}
     folder_body_files: dict[Path, list[Path]] = {}
+    candidate_repair_snapshots: dict[Path, dict[str, Any]] = {}
 
     log("연도별 대상 폴더 수집 중...")
     for folder, page_size in targets:
@@ -1169,13 +1314,60 @@ def inspect_download_output_directory_payload(
 
         folder_body_files[folder] = body_files
 
-        input_snapshot = _load_workflow_input(folder)
-        if input_snapshot is None:
-            for path in body_files:
-                candidates_by_path[str(path)] = _relative_candidate(
-                    path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과"
+        try:
+            input_snapshot = _load_workflow_input(folder)
+        except Exception:
+            input_snapshot = None
+        if _is_trusted_download_input_snapshot(input_snapshot):
+            saved_filters = _snapshot_filters_payload(input_snapshot or {})
+            if _has_complete_current_download_payload(payload) and not _filters_payloads_match(
+                _current_filters_payload(payload),
+                saved_filters,
+            ):
+                raise ValueError(
+                    f"{folder.name}: 기존 메타데이터의 검색 설정이 현재 검색 설정과 다릅니다. "
+                    "기존 메타데이터 기준으로 설정을 맞춘 뒤 다시 실행하세요."
                 )
-            continue
+        else:
+            if not _has_complete_current_download_payload(payload):
+                if isinstance(input_snapshot, dict) and input_snapshot.get("page_size") is not None:
+                    input_snapshot = {**input_snapshot, "page_size": input_snapshot.get("page_size")}
+                    log(f"{folder.name}: 신뢰할 수 없는 메타데이터지만 로컬 무결성 검사만 진행합니다.")
+                    locked_page_size = input_snapshot.get("page_size")
+                    if locked_page_size is None or int(locked_page_size) != page_size:
+                        reason = "현재 요청의 페이지 크기와 맞지 않는 기존 다운로드 상태"
+                        for path in body_files + _workflow_auxiliary_files(folder):
+                            candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
+                        continue
+                    for path in body_files:
+                        files_to_validate.append((path, page_size))
+                    continue
+                else:
+                    for path in body_files:
+                        candidates_by_path[str(path)] = _relative_candidate(
+                            path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과"
+                        )
+                    continue
+
+            expected_start, expected_end = _expected_date_range_for_folder(payload, folder)
+            evidence_range = _folder_date_range_from_name(folder) or _infer_date_range_from_disclosures(folder)
+            if evidence_range is not None and evidence_range != (expected_start, expected_end):
+                reason = (
+                    "현재 검색 설정의 날짜 범위와 맞지 않는 기존 다운로드 결과 "
+                    f"({evidence_range[0].isoformat()}~{evidence_range[1].isoformat()})"
+                )
+                for path in body_files:
+                    candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
+                continue
+
+            input_snapshot = _download_input_snapshot_from_payload(
+                payload,
+                start=expected_start,
+                end=expected_end,
+                page_size=page_size,
+            )
+            candidate_repair_snapshots[folder] = input_snapshot
+            log(f"{folder.name}: 메타데이터가 없어 현재 검색 설정 기준으로 검사합니다.")
 
         locked_page_size = input_snapshot.get("page_size")
         if locked_page_size is None or int(locked_page_size) != page_size:
@@ -1241,6 +1433,8 @@ def inspect_download_output_directory_payload(
 
     log("폴더 간 페이지 번호 연속성 및 메타데이터 일관성 검사 중...")
     precomputed_statuses: dict[str, dict[str, int]] = {}
+    download_needed_count = 0
+    download_needed_pages = 0
     for folder, page_size in targets:
         check_cancel()
         if folder not in folder_body_files:
@@ -1292,6 +1486,31 @@ def inspect_download_output_directory_payload(
                         "total_pages": total_pages,
                         "total_items": total_items,
                     }
+                    repair_snapshot = candidate_repair_snapshots.get(folder)
+                    if repair_snapshot is not None:
+                        log(f"{folder.name}: KIND 현재 건수 대조 중...")
+                        kind_count = get_current_kind_total_count(repair_snapshot)
+                        if kind_count is None:
+                            reason = "KIND 현재 건수를 확인할 수 없어 메타데이터를 자동 복구할 수 없습니다."
+                            for p in body_files:
+                                candidates_by_path[str(p)] = _relative_candidate(p, base, reason)
+                            precomputed_statuses.pop(str(folder), None)
+                        elif total_items > kind_count:
+                            reason = f"현재 검색 설정의 KIND 건수({kind_count})보다 로컬 건수({total_items})가 많습니다."
+                            for p in body_files:
+                                candidates_by_path[str(p)] = _relative_candidate(p, base, reason)
+                            precomputed_statuses.pop(str(folder), None)
+                        else:
+                            if total_items < kind_count:
+                                download_needed_count += kind_count - total_items
+                                expected_pages = (kind_count + page_size - 1) // page_size
+                                download_needed_pages += max(expected_pages - total_pages, 0)
+                                log(
+                                    f"{folder.name}: 현재 설정 기준 추가 다운로드 필요 "
+                                    f"{kind_count - total_items}건"
+                                )
+                            _write_download_input_snapshot(folder, repair_snapshot)
+                            log(f"{folder.name}: 현재 검색 설정으로 메타데이터를 자동 작성했습니다.")
 
     deletion_candidates = sorted(candidates_by_path.values(), key=lambda item: item["name"])
     if deletion_candidates and not dry_run:
@@ -1334,6 +1553,8 @@ def inspect_download_output_directory_payload(
             "failed": max(total_pages - downloaded_pages, 0),
             "total": total_pages,
         },
+        "download_needed_count": download_needed_count,
+        "download_needed_pages": download_needed_pages,
     }
 
 
@@ -1928,6 +2149,7 @@ def _validate_single_folder(
     date_range: tuple[date, date],
     *,
     verify_with_kind: bool = True,
+    current_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     body_files = list(folder.glob("*_post_page_*.body"))
     if not body_files:
@@ -1943,16 +2165,40 @@ def _validate_single_folder(
                 pass
         return None
 
-    input_snapshot = get_dates_from_input_json(folder)
+    saved_input_snapshot = get_dates_from_input_json(folder)
+    metadata_path_exists = (folder / "kind_workflow.input.json").is_file()
+    metadata_obsolete = metadata_path_exists and not _is_trusted_download_input_snapshot(saved_input_snapshot)
+    input_snapshot = saved_input_snapshot if not metadata_obsolete else None
     start_date = date_range[0]
     end_date = date_range[1]
-    
-    if input_snapshot:
+
+    if saved_input_snapshot:
         try:
-            start_date = date.fromisoformat(input_snapshot["start_date"])
-            end_date = date.fromisoformat(input_snapshot["end_date"])
+            start_date = date.fromisoformat(saved_input_snapshot["start_date"])
+            end_date = date.fromisoformat(saved_input_snapshot["end_date"])
         except Exception:
             pass
+    if input_snapshot is None and _has_complete_current_download_payload(current_payload):
+        search_filters = _build_search_filters(current_payload)
+        disclosure_type_groups = _normalize_disclosure_type_groups(current_payload)
+        last_report_only = _as_bool(current_payload, "last_report_only")
+
+        inferred_page_size = _infer_page_size_from_files(folder)
+        if inferred_page_size <= 0:
+            inferred_page_size = _as_int(current_payload, "page_size", 100)
+            if inferred_page_size <= 0:
+                inferred_page_size = 100
+
+        input_snapshot = {
+            "request_headers": DEFAULT_REQUEST_HEADERS,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "page_size": inferred_page_size,
+            "search_filters": search_filters,
+            "disclosure_type_groups": disclosure_type_groups,
+            "last_report_only": last_report_only,
+            "include_previous_disclosures": None,
+        }
 
     status = "validated"
     error_detail = None
@@ -2036,7 +2282,7 @@ def _validate_single_folder(
         paging = _detect_pagination(folder)
         local_count = paging.get("total_items") if paging else None
         status = "unverified"
-        error_detail = "Missing kind_workflow.input.json metadata to verify range against KIND."
+        error_detail = "Missing or obsolete kind_workflow.input.json metadata to verify range against KIND."
 
     return {
         "start_date": start_date.isoformat(),
@@ -2046,12 +2292,18 @@ def _validate_single_folder(
         "kind_count": kind_count,
         "status": status,
         "error_detail": error_detail,
-        "metadata_missing": input_snapshot is None,
+        "metadata_missing": not metadata_path_exists or metadata_obsolete,
+        "metadata_obsolete": metadata_obsolete,
         "folder_path": str(folder),
     }
 
 
-def check_existing_downloads(output_directory_raw: str, *, verify_with_kind: bool = True) -> dict[str, Any]:
+def check_existing_downloads(
+    output_directory_raw: str,
+    *,
+    verify_with_kind: bool = True,
+    current_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Inspect output directory to detect and validate existing downloaded date ranges."""
     if not output_directory_raw:
         return {"has_existing": False}
@@ -2122,6 +2374,7 @@ def check_existing_downloads(output_directory_raw: str, *, verify_with_kind: boo
                 folder_name,
                 date_range,
                 verify_with_kind=verify_with_kind,
+                current_payload=current_payload,
             ): folder_name
             for folder, folder_name, date_range in candidates
         }
@@ -2143,7 +2396,7 @@ def check_existing_downloads(output_directory_raw: str, *, verify_with_kind: boo
     saved_filters = None
     for folder, _, _ in candidates:
         input_snapshot = get_dates_from_input_json(folder)
-        if input_snapshot:
+        if _is_trusted_download_input_snapshot(input_snapshot):
             try:
                 search_filters_dict = dict(input_snapshot.get("search_filters") or [])
                 
@@ -2178,6 +2431,114 @@ def check_existing_downloads(output_directory_raw: str, *, verify_with_kind: boo
         "earliest_date": earliest_date,
         "latest_date": latest_date,
         "ranges": sorted_ranges,
+        "saved_filters": saved_filters,
+    }
+
+
+def detect_existing_downloads(
+    output_directory_raw: str,
+    *,
+    current_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Detect existing download folders and metadata state without parsing downloaded pages."""
+    if not output_directory_raw:
+        return {"has_existing": False}
+    try:
+        output_directory = Path(output_directory_raw).expanduser().resolve()
+    except Exception:
+        return {"has_existing": False}
+
+    if not output_directory.is_dir():
+        return {"has_existing": False}
+
+    candidates: list[tuple[Path, str, tuple[date, date] | None]] = []
+    try:
+        for child in output_directory.iterdir():
+            if not child.is_dir():
+                continue
+            folder_range = _folder_date_range_from_name(child)
+            if folder_range is not None:
+                candidates.append((child, child.name, folder_range))
+    except Exception:
+        pass
+
+    if not candidates:
+        try:
+            if list(output_directory.glob("*_post_page_*.body")):
+                input_snapshot = _load_workflow_input(output_directory)
+                folder_range = None
+                if _is_trusted_download_input_snapshot(input_snapshot):
+                    folder_range = (
+                        date.fromisoformat(str(input_snapshot["start_date"])),
+                        date.fromisoformat(str(input_snapshot["end_date"])),
+                    )
+                elif current_payload and str(current_payload.get("start_date") or "") and str(current_payload.get("end_date") or ""):
+                    folder_range = (
+                        _parse_iso_date(str(current_payload["start_date"]), "start_date"),
+                        _parse_iso_date(str(current_payload["end_date"]), "end_date"),
+                    )
+                candidates.append((output_directory, output_directory.name, folder_range))
+        except Exception:
+            pass
+
+    if not candidates:
+        return {"has_existing": False}
+
+    current_filters = _current_filters_payload(current_payload or {}) if current_payload else None
+    ranges_data: list[dict[str, Any]] = []
+    saved_filters = None
+    for folder, folder_name, folder_range in candidates:
+        metadata_exists = (folder / "kind_workflow.input.json").is_file()
+        try:
+            snapshot = _load_workflow_input(folder)
+        except Exception:
+            snapshot = None
+        metadata_trusted = _is_trusted_download_input_snapshot(snapshot)
+        metadata_obsolete = metadata_exists and not metadata_trusted
+        folder_start = folder_range[0] if folder_range else None
+        folder_end = folder_range[1] if folder_range else None
+        if metadata_trusted:
+            try:
+                folder_start = date.fromisoformat(str(snapshot["start_date"]))
+                folder_end = date.fromisoformat(str(snapshot["end_date"]))
+            except Exception:
+                pass
+
+        range_saved_filters = _snapshot_filters_payload(snapshot or {}) if metadata_trusted else None
+        filters_match = _filters_payloads_match(current_filters, range_saved_filters) if current_filters else True
+        if saved_filters is None and range_saved_filters is not None:
+            saved_filters = range_saved_filters
+
+        if metadata_trusted:
+            metadata_status = "ok" if filters_match else "mismatch"
+        elif metadata_obsolete:
+            metadata_status = "obsolete"
+        else:
+            metadata_status = "missing"
+
+        ranges_data.append(
+            {
+                "start_date": folder_start.isoformat() if folder_start else None,
+                "end_date": folder_end.isoformat() if folder_end else None,
+                "folder_name": folder_name,
+                "local_count": None,
+                "kind_count": None,
+                "status": "unverified",
+                "error_detail": None,
+                "metadata_missing": not metadata_exists or metadata_obsolete,
+                "metadata_obsolete": metadata_obsolete,
+                "metadata_status": metadata_status,
+                "filters_match": filters_match,
+                "folder_path": str(folder),
+            }
+        )
+
+    dated_ranges = [r for r in ranges_data if r.get("start_date") and r.get("end_date")]
+    return {
+        "has_existing": True,
+        "earliest_date": min((r["start_date"] for r in dated_ranges), default=None),
+        "latest_date": max((r["end_date"] for r in dated_ranges), default=None),
+        "ranges": sorted(ranges_data, key=lambda x: x.get("start_date") or ""),
         "saved_filters": saved_filters,
     }
 
@@ -2588,4 +2949,3 @@ def create_folder_metadata(payload: dict[str, Any]) -> dict[str, Any]:
             "kind_count": kind_count,
             "message": message
         }
-
