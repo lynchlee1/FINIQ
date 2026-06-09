@@ -187,26 +187,6 @@ export default function FilterPage() {
     return rows.slice(safeIndex * PAGE_SIZE, (safeIndex + 1) * PAGE_SIZE);
   }, [pageCount, pageIndex, result]);
 
-  const companyCount = useMemo(() => {
-    const rows = result?.disclosures || [];
-    return new Set(rows.map((item) => item.company_key || item.company_name).filter(Boolean)).size;
-  }, [result]);
-
-  const jsonPreview = useMemo(() => {
-    if (!result) return "결과 없음";
-    return JSON.stringify({
-      ...result,
-      summary: {
-        ...(result.summary || {}),
-        json_preview: true,
-        preview_page: pageIndex + 1,
-        preview_page_size: PAGE_SIZE,
-        preview_disclosures: pageRows.length,
-      },
-      disclosures: pageRows,
-    }, null, 2);
-  }, [pageIndex, pageRows, result]);
-
   const buildPayload = () => ({
     root_directory: rootDirectory,
     html_transfer_path: htmlTransferPath,
@@ -482,19 +462,6 @@ export default function FilterPage() {
           <CardTitle className="dark:text-white">필터 결과</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              ["매칭", result?.summary?.matched_disclosures || 0],
-              ["반환", result?.summary?.returned_disclosures || 0],
-              ["회사", companyCount],
-              ["접수번호", result?.summary?.unique_acpt_numbers || 0],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:bg-[#0d1117] dark:border-[#30363d]">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</span>
-                <strong className="mt-1 block text-2xl font-bold text-slate-950 dark:text-slate-100">{Number(value).toLocaleString("ko-KR")}</strong>
-              </div>
-            ))}
-          </div>
           <div className="mb-2 flex items-center justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setPageIndex((value) => Math.max(0, value - 1))} disabled={!result?.disclosures?.length || pageIndex <= 0}>이전</Button>
             <span className="min-w-[72px] text-center text-sm font-bold text-slate-500 dark:text-slate-400">{result?.disclosures?.length ? `${Math.min(pageIndex + 1, pageCount)} / ${pageCount}` : "0 / 0"}</span>
@@ -538,7 +505,6 @@ export default function FilterPage() {
               </tbody>
             </table>
           </div>
-          <pre className="mt-4 max-h-[420px] overflow-auto rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-xs leading-relaxed text-blue-100 dark:border-[#30363d]">{jsonPreview}</pre>
         </CardContent>
           </Card>
 

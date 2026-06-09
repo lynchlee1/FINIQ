@@ -62,4 +62,5 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Project-Specific Notes
 
+- Always use `PLANS.md` to record the purpose, implementation summary, and verification result for completed code changes.
 - For assets Excel conversion work, follow `docs/assets-excel-conversion.md`. It records the implemented feature surface and the user's explicit rules for Wide Format + Parquet output, date range metadata, segment merging, and conflict handling.
