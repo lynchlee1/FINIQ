@@ -20,11 +20,12 @@ export function JobStatusLogger({
 }: JobStatusLoggerProps) {
   return (
     <div className="space-y-3">
-      {isCancellable && onCancel && (
+      {onCancel && (
         <div className="flex justify-end">
           <Button
             variant="outline"
             onClick={onCancel}
+            disabled={!isCancellable}
             className="dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300"
           >
             <Square className="mr-2 h-4 w-4" />

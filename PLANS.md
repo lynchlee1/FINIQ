@@ -1,25 +1,19 @@
-# 실행 현황 버튼 라벨 리소스 통합 계획
+## 공시내역 필터링 실행 박스 정리
 
-## Assumptions
+1. [완료] `filter/page.tsx`의 현재 실행 카드와 작업 상태 흐름을 확인한다.
+   - verify: 실행 버튼이 어디에 있고, 새로고침/중단에 연결할 기존 함수가 있는지 확인한다.
+2. [완료] 실행 카드에 `소스 새로고침`, `실행`, `작업 중단` 버튼을 구성한다.
+   - verify: 새 버튼들이 기존 상태(`isStreaming`)와 핸들러에 맞게 활성/비활성 처리된다.
+3. [완료] 프론트엔드 빌드로 변경을 검증한다.
+   - verify: `npm run build`가 통과한다.
 
-- "우측 버튼"은 `ActionDock`의 `실행 현황` 패널을 뜻한다.
-- 현재 불일치는 실행 현황 안의 취소 버튼이 페이지별로 `중단`, `작업 중단` 등으로 흩어진 문제다.
-- 기본 라벨은 더 명확한 `작업 중단`으로 통일한다.
-- 특정 기능에서 다른 문구가 필요하면 공통 컴포넌트 prop으로 override한다.
+## 우측 실행 현황 작업 중단 버튼 렌더링 점검
 
-## Steps
-
-1. 공통 UI 텍스트 리소스 추가
-   - `src/config/uiText.ts`에 실행 관련 기본 버튼 라벨을 둔다.
-   - verify: 버튼 라벨 문자열의 기본값이 한 파일에서 조회된다.
-
-2. `JobStatusLogger` 기본 취소 라벨 연결
-   - `cancelLabel` prop을 optional로 추가하고 기본값으로 공통 리소스를 쓴다.
-   - verify: 기존 호출부는 prop 추가 없이 `작업 중단`을 표시한다.
-
-3. 실행 현황 커스텀 취소 버튼 정리
-   - `download/page.tsx`처럼 `JobStatusLogger` 밖에서 직접 렌더링하는 실행 현황 취소 버튼도 같은 리소스를 쓴다.
-   - verify: 실행 현황 패널 취소 버튼 문구가 `작업 중단`으로 통일된다.
-
-4. 타입 검사 실행
-   - `npm run build --workspace @finiq/app-market-desk` 또는 가능한 TypeScript 검증 명령을 실행한다.
+1. [완료] `ActionDock` 사용 페이지의 우측 `실행 현황` 패널과 중단 핸들러 연결을 검사한다.
+   - verify: `table`, `filter`, `utility`, `assets-excel`, `integrated-*`, `html-parse`, `html-download` 계열에서 `JobStatusLogger`의 `onCancel` 연결 여부를 확인한다.
+2. [완료] 버튼이 안 보이는 원인을 렌더링 조건 기준으로 확인한다.
+   - verify: 기존 `JobStatusLogger`는 `isCancellable && onCancel`일 때만 버튼을 렌더링해 실행 전에는 버튼 DOM 자체가 없음을 확인한다.
+3. [완료] 공통 `JobStatusLogger`에서 `onCancel`이 있으면 `작업 중단` 버튼을 항상 렌더링하고, 실행 가능 상태가 아닐 때는 disabled 처리한다.
+   - verify: 우측 `실행 현황` 패널을 쓰는 모든 페이지에 같은 렌더링 규칙이 적용된다.
+4. [완료] 빌드 및 산출물로 변경을 검증한다.
+   - verify: `npm --prefix frontend/finiq_GUI/apps/market-desk run build`가 통과하고, 컴파일된 Next chunk에 `onCancel` 기준 렌더링과 `disabled={!isCancellable}`이 반영된다.
