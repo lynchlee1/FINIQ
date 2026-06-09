@@ -14,7 +14,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, checkExistingDownload } from "@/features/download/api";
+import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, checkExistingDownload, createMetadata } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
 
 const parseISODate = (dateStr: string) => {
@@ -71,8 +71,8 @@ export default function DownloadPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
-  const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
+  const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [existingData, setExistingData] = useState<{
     has_existing: boolean;
@@ -86,6 +86,8 @@ export default function DownloadPage() {
       kind_count: number | null;
       status: "validated" | "stale" | "unverified";
       error_detail: string | null;
+      metadata_missing?: boolean;
+      folder_path: string;
     }[];
     saved_filters?: {
       company_name: string;
@@ -97,11 +99,12 @@ export default function DownloadPage() {
     } | null;
   } | null>(null);
   const [forceContinue, setForceContinue] = useState(false);
+  const [createMetadataOnRun, setCreateMetadataOnRun] = useState(false);
+  const [runStarting, setRunStarting] = useState(false);
+  const isRunTriggeredRef = useRef(false);
+  const capturedPayloadRef = useRef<DownloadPayload | null>(null);
 
   const { download_output_directory: outputDirectory, saveSetting } = useSettingsStore();
-
-  const isRunTriggeredRef = useRef(false);
-  const capturedPayloadRef = useRef<any>(null);
 
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
     pollingEndpoint: "/api/download/jobs/{jobId}",
@@ -233,9 +236,110 @@ export default function DownloadPage() {
     }
   }, []);
 
+  const handleCreateMetadata = async (range: any, force = false) => {
+    try {
+      setStatus(`[${range.folder_name}] 메타데이터 생성 체크 중...`);
+      setIsErrorStatus(false);
+      
+      const folderPath = range.folder_path;
+      
+      const payload = {
+        output_directory: folderPath,
+        start_date: range.start_date,
+        end_date: range.end_date,
+        company_name: companyName,
+        submitter_name: submitterName,
+        market_label: marketLabel,
+        securities_label: securitiesLabel,
+        disclosure_type_groups: selectedDisclosures,
+        last_report_only: lastReportOnly,
+        page_size: Number(pageSize),
+        wait_seconds: Number(waitSeconds),
+        timeout: Number(timeout),
+        force: force,
+      };
+
+      const res = await createMetadata(payload);
+      if (res.success) {
+        setStatus(`[${range.folder_name}] 메타데이터가 성공적으로 생성되었습니다.`);
+        await checkExisting(outputDirectory);
+      } else {
+        setStatus(`[${range.folder_name}] 메타데이터 작성 보류: ${res.message}`);
+        setIsErrorStatus(true);
+        
+        const confirmForce = window.confirm(
+          `${res.message}\n\n현재 검색 설정으로 메타데이터를 강제로 작성하시겠습니까?`
+        );
+        if (confirmForce) {
+          await handleCreateMetadata(range, true);
+        }
+      }
+    } catch (err: any) {
+      setStatus(`[${range.folder_name}] 메타데이터 작성 중 오류가 발생했습니다: ${err.message}`);
+      setIsErrorStatus(true);
+    }
+  };
+
   useEffect(() => {
+    setCreateMetadataOnRun(false);
     checkExisting(outputDirectory);
   }, [outputDirectory, checkExisting]);
+
+  const autoCreateMissingMetadata = async (): Promise<boolean> => {
+    if (!existingData || !existingData.ranges) return true;
+    const missingRanges = existingData.ranges.filter(r => r.metadata_missing);
+    if (missingRanges.length === 0) return true;
+
+    for (const range of missingRanges) {
+      try {
+        setStatus(`[${range.folder_name}] 누락된 메타데이터 작성 중...`);
+        setIsErrorStatus(false);
+        const folderPath = range.folder_path;
+        const payload = {
+          output_directory: folderPath,
+          start_date: range.start_date,
+          end_date: range.end_date,
+          company_name: companyName,
+          submitter_name: submitterName,
+          market_label: marketLabel,
+          securities_label: securitiesLabel,
+          disclosure_type_groups: selectedDisclosures,
+          last_report_only: lastReportOnly,
+          page_size: Number(pageSize),
+          wait_seconds: Number(waitSeconds),
+          timeout: Number(timeout),
+          force: false,
+        };
+
+        const res = await createMetadata(payload);
+        if (!res.success) {
+          const confirmForce = window.confirm(
+            `[${range.folder_name}] ${res.message}\n\n현재 검색 설정으로 메타데이터를 강제로 작성하시겠습니까?`
+          );
+          if (confirmForce) {
+            const forceRes = await createMetadata({ ...payload, force: true });
+            if (!forceRes.success) {
+              setStatus(`[${range.folder_name}] 메타데이터 강제 작성 실패: ${forceRes.message}`);
+              setIsErrorStatus(true);
+              return false;
+            }
+          } else {
+            setStatus(`[${range.folder_name}] 메타데이터 작성이 취소되었습니다.`);
+            setIsErrorStatus(true);
+            return false;
+          }
+        }
+      } catch (err: any) {
+        setStatus(`[${range.folder_name}] 메타데이터 작성 중 오류가 발생했습니다: ${err.message}`);
+        setIsErrorStatus(true);
+        return false;
+      }
+    }
+
+    // Refresh existing status after creation
+    await checkExisting(outputDirectory);
+    return true;
+  };
 
   const handleApplyUpdateRange = () => {
     if (!existingData || !existingData.latest_date) return;
@@ -383,7 +487,17 @@ export default function DownloadPage() {
   };
 
   const handleRun = async () => {
+    if (runStarting) return;
     try {
+      setRunStarting(true);
+      if (createMetadataOnRun) {
+        // P2 fix: Gate auto-creation if filters are mismatched to prevent mixed-dataset contamination
+        if (existingData?.saved_filters && !filtersMatch) {
+          throw new Error("현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 필터를 먼저 일치시켜 주세요.");
+        }
+        const success = await autoCreateMissingMetadata();
+        if (!success) return;
+      }
       const payload = buildPayload();
       capturedPayloadRef.current = payload;
       isRunTriggeredRef.current = true;
@@ -399,6 +513,8 @@ export default function DownloadPage() {
       setIsErrorStatus(true);
       isRunTriggeredRef.current = false;
       capturedPayloadRef.current = null;
+    } finally {
+      setRunStarting(false);
     }
   };
 
@@ -535,7 +651,9 @@ export default function DownloadPage() {
                       const statusLabels = {
                         validated: "검증 완료: KIND 건수 일치",
                         stale: "검증 실패: KIND 건수 불일치 (stale)",
-                        unverified: "검증 불가 (네트워크 상태/메타데이터 없음)",
+                        unverified: range.metadata_missing
+                          ? "검증 불가: 메타데이터 없음"
+                          : "검증 보류: KIND 대조 생략됨",
                       };
 
                       return (
@@ -555,6 +673,18 @@ export default function DownloadPage() {
                                 ⚠ {range.error_detail}
                               </p>
                             )}
+                            {range.metadata_missing && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCreateMetadata(range);
+                                }}
+                                className="mt-1.5 px-2 py-0.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded text-[10px] font-semibold transition-all dark:bg-blue-950/20 dark:text-blue-300 dark:border-blue-900/40 dark:hover:bg-blue-900/30"
+                              >
+                                현재 설정으로 메타데이터 작성
+                              </button>
+                            )}
                           </div>
                           <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${statusColors[range.status]}`}>
                             {statusLabels[range.status]}
@@ -563,6 +693,21 @@ export default function DownloadPage() {
                       );
                     })}
                   </div>
+
+                  {existingData.ranges?.some(r => r.metadata_missing) && filtersMatch && (
+                    <div className="flex items-center gap-2 px-2.5 py-2 bg-blue-50/30 dark:bg-blue-950/10 border border-blue-200/50 dark:border-blue-900/30 rounded-md animate-fade-in">
+                      <input
+                        type="checkbox"
+                        id="createMetadataOnRun"
+                        checked={createMetadataOnRun}
+                        onChange={(e) => setCreateMetadataOnRun(e.target.checked)}
+                        className="rounded border-slate-300 dark:border-slate-700 dark:bg-[#0d1117] h-3.5 w-3.5 text-blue-600 focus:ring-blue-500"
+                      />
+                      <label htmlFor="createMetadataOnRun" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                        현재 설정으로 메타데이터 작성하기 (실행 시 자동 생성)
+                      </label>
+                    </div>
+                  )}
 
                   {/* Warning message if stale ranges exist */}
                   {existingData.ranges?.some(r => r.status === "stale") && (
@@ -738,16 +883,16 @@ export default function DownloadPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-4">
-                <Button variant="outline" className="w-full" onClick={handleInspectFolder} disabled={!!activeJobId || inspectRunning}>
+                <Button variant="outline" className="w-full" onClick={handleInspectFolder} disabled={!!activeJobId || inspectRunning || runStarting}>
                   {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
                   폴더 검사하기
                 </Button>
-                <Button variant="outline" className="w-full" onClick={handlePreview} disabled={!!activeJobId}>
+                <Button variant="outline" className="w-full" onClick={handlePreview} disabled={!!activeJobId || runStarting}>
                   <Search className="mr-2 h-4 w-4" />
                   미리보기
                 </Button>
-                <Button className="w-full" onClick={handleRun} disabled={!!activeJobId}>
-                  {!!activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                <Button className="w-full" onClick={handleRun} disabled={!!activeJobId || runStarting}>
+                  {!!activeJobId || runStarting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
                 <Button variant="outline" className="w-full" onClick={handleCancelDownload} disabled={!activeJobId}>

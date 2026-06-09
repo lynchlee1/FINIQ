@@ -2045,7 +2045,9 @@ def _validate_single_folder(
         "local_count": local_count,
         "kind_count": kind_count,
         "status": status,
-        "error_detail": error_detail
+        "error_detail": error_detail,
+        "metadata_missing": input_snapshot is None,
+        "folder_path": str(folder),
     }
 
 
@@ -2100,6 +2102,10 @@ def check_existing_downloads(output_directory_raw: str, *, verify_with_kind: boo
                         candidates.append((output_directory, output_directory.name, (start_date, end_date)))
                     except Exception:
                         pass
+                else:
+                    date_range = _infer_date_range_from_disclosures(output_directory)
+                    if date_range:
+                        candidates.append((output_directory, output_directory.name, date_range))
         except Exception:
             pass
 
@@ -2408,3 +2414,178 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
     return get_download_job(job_id)
+
+
+def _infer_page_size_from_files(folder: Path) -> int:
+    body_files = list(folder.glob("*_post_page_*.body"))
+    if not body_files:
+        return 100
+    
+    import re
+    page_num_re = re.compile(r"_post_page_(\d+)\.body$")
+    inspected_pages = []
+    for file_path in body_files:
+        try:
+            m = page_num_re.search(file_path.name)
+            if not m:
+                continue
+            current_page = int(m.group(1))
+            
+            content = file_path.read_text(encoding="utf-8", errors="ignore")
+            actual_rows = _count_rows_fast_lxml(content)
+            
+            paging = pagination_info(content.encode("utf-8"))
+            if paging:
+                total_pages = int(paging["total_pages"])
+            else:
+                total_pages = 1
+                
+            inspected_pages.append({
+                "current_page": current_page,
+                "total_pages": total_pages,
+                "actual_rows": actual_rows
+            })
+        except Exception:
+            pass
+            
+    non_last_sizes = [
+        int(page_info["actual_rows"])
+        for page_info in inspected_pages
+        if int(page_info["current_page"]) < int(page_info["total_pages"])
+    ]
+    if non_last_sizes:
+        return max(non_last_sizes)
+    if inspected_pages:
+        return max(int(page_info["actual_rows"]) for page_info in inspected_pages)
+    return 100
+
+
+def _infer_date_range_from_disclosures(folder: Path) -> tuple[date, date] | None:
+    from finiq.data_scraper.parse import disclosure_rows
+    body_files = list(folder.glob("*_post_page_*.body"))
+    if not body_files:
+        return None
+    
+    dates = []
+    for file_path in body_files:
+        try:
+            content = file_path.read_bytes()
+            rows = disclosure_rows(content)
+            for row in rows:
+                disclosed_at_str = row.get("disclosed_at")
+                if disclosed_at_str:
+                    date_part = str(disclosed_at_str).split()[0].replace(".", "-")
+                    if len(date_part) == 10 and date_part[4] == "-" and date_part[7] == "-":
+                        dates.append(date.fromisoformat(date_part))
+        except Exception:
+            pass
+            
+    if not dates:
+        return None
+        
+    return min(dates), max(dates)
+
+
+def create_folder_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    output_directory_raw = str(payload.get("output_directory") or "").strip()
+    if not output_directory_raw:
+        raise ValueError("output_directory is required")
+    output_directory = Path(output_directory_raw).expanduser().resolve()
+    if not output_directory.is_dir():
+        raise ValueError(f"directory not found: {output_directory}")
+
+    start_date_raw = str(payload.get("start_date") or "").strip()
+    end_date_raw = str(payload.get("end_date") or "").strip()
+    if not start_date_raw or not end_date_raw:
+        raise ValueError("start_date and end_date are required")
+
+    # Detect local pagination count
+    paging = _detect_pagination(output_directory)
+    if paging is None:
+        raise ValueError("no downloaded files found in the folder to detect local count")
+    local_count = paging.get("total_items")
+    total_pages = paging.get("total_pages")
+    if local_count is None or total_pages is None:
+        raise ValueError("failed to detect local count or page info from downloaded files")
+
+    # Infer page size from local files and validate
+    inferred_page_size = _infer_page_size_from_files(output_directory)
+    if inferred_page_size <= 0:
+        inferred_page_size = _as_int(payload, "page_size", 100)
+        if inferred_page_size <= 0:
+            inferred_page_size = 100
+
+    # Validate integrity using the inferred page size
+    try:
+        inspect_download_directory_pages(
+            output_directory,
+            expected_page_size=inferred_page_size,
+            require_complete=True,
+        )
+    except Exception as exc:
+        raise ValueError(f"Local files are not consistent with inferred page size ({inferred_page_size}): {exc}")
+
+    # Build input snapshot/workflow parameters using the inferred page size
+    search_filters = _build_search_filters(payload)
+    disclosure_type_groups = _normalize_disclosure_type_groups(payload)
+    last_report_only = _as_bool(payload, "last_report_only")
+    wait_seconds = _as_float(payload, "wait_seconds", 1.0)
+    timeout = _as_float(payload, "timeout", 20.0)
+    force = bool(_as_bool(payload, "force"))
+
+    input_snapshot = {
+        "request_headers": DEFAULT_REQUEST_HEADERS,
+        "start_date": start_date_raw,
+        "end_date": end_date_raw,
+        "page_size": inferred_page_size,
+        "search_filters": search_filters,
+        "disclosure_type_groups": disclosure_type_groups,
+        "last_report_only": last_report_only,
+        "include_previous_disclosures": None,
+    }
+
+    # Fetch KIND live total count
+    kind_count = get_current_kind_total_count(input_snapshot)
+
+    # Compare
+    is_matching = (kind_count is not None and local_count == kind_count)
+    
+    if is_matching or force:
+        # Write metadata file using KindWorkflow
+        workflow = KindWorkflow()
+        workflow.configure(
+            output_directory=output_directory,
+            request_headers=DEFAULT_REQUEST_HEADERS,
+            start_date=start_date_raw,
+            end_date=end_date_raw,
+            start_page=1,
+            end_page=total_pages,
+            page_size=inferred_page_size,
+            search_filters=search_filters,
+            disclosure_type_groups=disclosure_type_groups,
+            last_report_only=last_report_only,
+            include_previous_disclosures=None,
+            wait_seconds_between_requests=wait_seconds,
+            timeout=timeout,
+        )
+        workflow.save_input_snapshot()
+        return {
+            "success": True,
+            "local_count": local_count,
+            "kind_count": kind_count,
+            "message": "Metadata created successfully."
+        }
+    else:
+        # Construct error message for mismatch
+        if kind_count is None:
+            message = f"Failed to fetch live count from KIND. Local count is {local_count}."
+        else:
+            message = f"KIND current count ({kind_count}) differs from local count ({local_count})."
+        
+        return {
+            "success": False,
+            "local_count": local_count,
+            "kind_count": kind_count,
+            "message": message
+        }
+
