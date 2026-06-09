@@ -14,7 +14,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, checkExistingDownload, createMetadata } from "@/features/download/api";
+import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
 
 const parseISODate = (dateStr: string) => {
@@ -66,6 +66,40 @@ const areFiltersMatching = (
   return true;
 };
 
+const checkExistingPayloadKey = (payload: {
+  output_directory: string;
+  start_date: string;
+  end_date: string;
+  company_name: string;
+  submitter_name: string;
+  market_label: string;
+  securities_label: string;
+  page_size: number;
+  last_report_only: boolean;
+  disclosure_type_groups: Record<string, string[]>;
+}) => JSON.stringify({
+  ...payload,
+  disclosure_type_groups: Object.fromEntries(
+    Object.entries(payload.disclosure_type_groups)
+      .filter(([, values]) => values.length > 0)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, values]) => [key, [...values].sort()])
+  ),
+});
+
+const existingPayloadFromDownloadPayload = (payload: DownloadPayload) => ({
+  output_directory: payload.output_directory,
+  start_date: payload.start_date,
+  end_date: payload.end_date,
+  company_name: payload.company_name,
+  submitter_name: payload.submitter_name,
+  market_label: payload.market_label,
+  securities_label: payload.securities_label,
+  page_size: payload.page_size,
+  last_report_only: payload.last_report_only,
+  disclosure_type_groups: payload.disclosure_type_groups,
+});
+
 export default function DownloadPage() {
   const [options, setOptions] = useState<DownloadOptions | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,17 +110,20 @@ export default function DownloadPage() {
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [existingData, setExistingData] = useState<{
     has_existing: boolean;
-    earliest_date?: string;
-    latest_date?: string;
+    earliest_date?: string | null;
+    latest_date?: string | null;
     ranges?: {
-      start_date: string;
-      end_date: string;
+      start_date: string | null;
+      end_date: string | null;
       folder_name: string;
       local_count: number | null;
       kind_count: number | null;
       status: "validated" | "stale" | "unverified";
       error_detail: string | null;
       metadata_missing?: boolean;
+      metadata_obsolete?: boolean;
+      metadata_status?: "ok" | "missing" | "obsolete" | "mismatch";
+      filters_match?: boolean;
       folder_path: string;
     }[];
     saved_filters?: {
@@ -98,11 +135,13 @@ export default function DownloadPage() {
       last_report_only: boolean;
     } | null;
   } | null>(null);
-  const [forceContinue, setForceContinue] = useState(false);
-  const [createMetadataOnRun, setCreateMetadataOnRun] = useState(false);
+  const [checkingExisting, setCheckingExisting] = useState(false);
   const [runStarting, setRunStarting] = useState(false);
   const isRunTriggeredRef = useRef(false);
   const capturedPayloadRef = useRef<DownloadPayload | null>(null);
+  const activeInspectionKeyRef = useRef<string | null>(null);
+  const checkExistingRequestRef = useRef({ id: 0, key: "" });
+  const [lastInspectedExistingKey, setLastInspectedExistingKey] = useState<string | null>(null);
 
   const { download_output_directory: outputDirectory, saveSetting } = useSettingsStore();
 
@@ -111,6 +150,11 @@ export default function DownloadPage() {
     onSuccess: async (data) => {
       if (data && data.format === "kind_download_folder_cleanup_v1") {
         const candidateCount = data.dry_run ? (data.deletion_candidate_count || 0) : 0;
+        if (activeInspectionKeyRef.current) {
+          setLastInspectedExistingKey(activeInspectionKeyRef.current);
+          activeInspectionKeyRef.current = null;
+        }
+        await checkExisting(useSettingsStore.getState().download_output_directory);
         setLastInspectionCandidateCount(candidateCount);
         setResult(data);
         setStatus(buildInspectionStatus(data, !data.dry_run));
@@ -184,6 +228,19 @@ export default function DownloadPage() {
     existingData?.saved_filters
   );
 
+  const handleApplySavedFilters = () => {
+    const saved = existingData?.saved_filters;
+    if (!saved) return;
+    setCompanyName(saved.company_name || "");
+    setSubmitterName(saved.submitter_name || "");
+    setMarketLabel(saved.market_label || "검색대상");
+    setSecuritiesLabel(saved.securities_label || "전체");
+    setSelectedDisclosures(saved.disclosure_type_groups || {});
+    setLastReportOnly(!!saved.last_report_only);
+    setStatus("기존 메타데이터 기준으로 검색 설정을 맞췄습니다.");
+    setIsErrorStatus(false);
+  };
+
   const fetchOptions = useCallback(async () => {
     try {
       const data = await fetchDownloadOptions();
@@ -214,14 +271,36 @@ export default function DownloadPage() {
   }, [fetchOptions]);
 
   const checkExisting = useCallback(async (dir: string) => {
-    setForceContinue(false);
     if (!dir) {
+      checkExistingRequestRef.current = { id: checkExistingRequestRef.current.id + 1, key: "" };
+      setCheckingExisting(false);
       setExistingData(null);
       return;
     }
+    const submittedPayload = {
+      output_directory: dir,
+      start_date: startDate,
+      end_date: endDate,
+      company_name: companyName,
+      submitter_name: submitterName,
+      market_label: marketLabel,
+      securities_label: securitiesLabel,
+      page_size: Number(pageSize),
+      last_report_only: lastReportOnly,
+      disclosure_type_groups: selectedDisclosures,
+    };
+    const requestId = checkExistingRequestRef.current.id + 1;
+    const requestKey = checkExistingPayloadKey(submittedPayload);
+    checkExistingRequestRef.current = { id: requestId, key: requestKey };
+    setCheckingExisting(true);
+
     try {
-      const result = await checkExistingDownload(dir);
-      if (dir !== useSettingsStore.getState().download_output_directory) {
+      const result = await detectExistingDownload(submittedPayload);
+      if (
+        checkExistingRequestRef.current.id !== requestId ||
+        checkExistingRequestRef.current.key !== requestKey ||
+        dir !== useSettingsStore.getState().download_output_directory
+      ) {
         return;
       }
       if (result && result.has_existing) {
@@ -230,11 +309,33 @@ export default function DownloadPage() {
         setExistingData(null);
       }
     } catch {
-      if (dir === useSettingsStore.getState().download_output_directory) {
+      if (
+        checkExistingRequestRef.current.id === requestId &&
+        checkExistingRequestRef.current.key === requestKey &&
+        dir === useSettingsStore.getState().download_output_directory
+      ) {
         setExistingData(null);
       }
+    } finally {
+      if (
+        checkExistingRequestRef.current.id === requestId &&
+        checkExistingRequestRef.current.key === requestKey &&
+        dir === useSettingsStore.getState().download_output_directory
+      ) {
+        setCheckingExisting(false);
+      }
     }
-  }, []);
+  }, [
+    startDate,
+    endDate,
+    companyName,
+    submitterName,
+    marketLabel,
+    securitiesLabel,
+    pageSize,
+    lastReportOnly,
+    selectedDisclosures,
+  ]);
 
   const handleCreateMetadata = async (range: any, force = false) => {
     try {
@@ -281,65 +382,8 @@ export default function DownloadPage() {
   };
 
   useEffect(() => {
-    setCreateMetadataOnRun(false);
     checkExisting(outputDirectory);
   }, [outputDirectory, checkExisting]);
-
-  const autoCreateMissingMetadata = async (): Promise<boolean> => {
-    if (!existingData || !existingData.ranges) return true;
-    const missingRanges = existingData.ranges.filter(r => r.metadata_missing);
-    if (missingRanges.length === 0) return true;
-
-    for (const range of missingRanges) {
-      try {
-        setStatus(`[${range.folder_name}] 누락된 메타데이터 작성 중...`);
-        setIsErrorStatus(false);
-        const folderPath = range.folder_path;
-        const payload = {
-          output_directory: folderPath,
-          start_date: range.start_date,
-          end_date: range.end_date,
-          company_name: companyName,
-          submitter_name: submitterName,
-          market_label: marketLabel,
-          securities_label: securitiesLabel,
-          disclosure_type_groups: selectedDisclosures,
-          last_report_only: lastReportOnly,
-          page_size: Number(pageSize),
-          wait_seconds: Number(waitSeconds),
-          timeout: Number(timeout),
-          force: false,
-        };
-
-        const res = await createMetadata(payload);
-        if (!res.success) {
-          const confirmForce = window.confirm(
-            `[${range.folder_name}] ${res.message}\n\n현재 검색 설정으로 메타데이터를 강제로 작성하시겠습니까?`
-          );
-          if (confirmForce) {
-            const forceRes = await createMetadata({ ...payload, force: true });
-            if (!forceRes.success) {
-              setStatus(`[${range.folder_name}] 메타데이터 강제 작성 실패: ${forceRes.message}`);
-              setIsErrorStatus(true);
-              return false;
-            }
-          } else {
-            setStatus(`[${range.folder_name}] 메타데이터 작성이 취소되었습니다.`);
-            setIsErrorStatus(true);
-            return false;
-          }
-        }
-      } catch (err: any) {
-        setStatus(`[${range.folder_name}] 메타데이터 작성 중 오류가 발생했습니다: ${err.message}`);
-        setIsErrorStatus(true);
-        return false;
-      }
-    }
-
-    // Refresh existing status after creation
-    await checkExisting(outputDirectory);
-    return true;
-  };
 
   const handleApplyUpdateRange = () => {
     if (!existingData || !existingData.latest_date) return;
@@ -432,6 +476,7 @@ export default function DownloadPage() {
 
   const inspectExistingFiles = async (dryRun: boolean, customPayload?: any) => {
     const basePayload = customPayload || buildPayload();
+    activeInspectionKeyRef.current = checkExistingPayloadKey(existingPayloadFromDownloadPayload(basePayload));
     return inspectDownloadFolder({
       ...basePayload,
       dry_run: dryRun,
@@ -449,6 +494,7 @@ export default function DownloadPage() {
       `대상 페이지: ${data.requested_count || data.summary?.total || 0}`,
       `연도별 분할: ${data.split_by_year ? "On" : "Off"}`,
       `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${deleted ? data.deleted_count || 0 : data.deletion_candidate_count || 0}`,
+      `추가 다운로드 필요: ${data.download_needed_count || 0}건`,
       `최신 상태: 성공 ${data.summary?.success || 0}/${data.summary?.total || 0}건`,
       `저장 경로: ${data.output_directory || ""}`,
     ];
@@ -490,13 +536,8 @@ export default function DownloadPage() {
     if (runStarting) return;
     try {
       setRunStarting(true);
-      if (createMetadataOnRun) {
-        // P2 fix: Gate auto-creation if filters are mismatched to prevent mixed-dataset contamination
-        if (existingData?.saved_filters && !filtersMatch) {
-          throw new Error("현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 필터를 먼저 일치시켜 주세요.");
-        }
-        const success = await autoCreateMissingMetadata();
-        if (!success) return;
+      if (existingData?.saved_filters && !filtersMatch) {
+        throw new Error("현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 필터를 먼저 일치시켜 주세요.");
       }
       const payload = buildPayload();
       capturedPayloadRef.current = payload;
@@ -592,6 +633,11 @@ export default function DownloadPage() {
     return <PageLoadingSpinner message="옵션을 불러오는 중입니다..." />;
   }
 
+  const currentExistingKey = outputDirectory
+    ? checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()))
+    : "";
+  const hasCompletedCurrentInspection = currentExistingKey === lastInspectedExistingKey;
+
   return (
     <WorkflowPageShell workflowId="disclosure-build">
       <div className="relative space-y-6" onClick={() => setNotificationPanelOpen(false)}>
@@ -613,160 +659,157 @@ export default function DownloadPage() {
                 />
               </div>
 
+              {checkingExisting && !existingData && (
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-[#30363d] dark:bg-[#161b22] text-sm animate-fade-in transition-all">
+                  <div className="flex items-start gap-3">
+                    <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
+                    <div className="space-y-1">
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">기존 다운로드 폴더 확인 중...</p>
+                      <p className="break-all text-xs text-slate-500 dark:text-slate-400">
+                        선택한 저장 경로의 폴더와 메타데이터 상태만 빠르게 확인하고 있습니다: {outputDirectory}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {existingData && existingData.has_existing && (
                 <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-[#30363d] dark:bg-[#161b22] text-sm animate-fade-in transition-all">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d]">
-                    <div className="space-y-1">
-                      <p className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                        📂 기존 다운로드 시도 범위 감지됨
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        전체 범위: <span className="font-semibold">{existingData.earliest_date}</span> ~ <span className="font-semibold">{existingData.latest_date}</span>
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 shrink-0 self-start md:self-auto border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-[#21262d] dark:hover:text-slate-100"
-                      onClick={handleApplyUpdateRange}
-                      disabled={
-                        (existingData.ranges?.some(r => r.status === "stale") ?? false) ||
-                        !filtersMatch ||
-                        ((existingData.ranges?.some(r => r.status === "unverified") ?? false) && !forceContinue)
-                      }
-                    >
-                      이어서 다운로드하기 (업데이트)
-                    </Button>
-                  </div>
-
-                  {/* Range List */}
-                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                    {existingData.ranges?.map((range, index) => {
-                      const statusColors = {
-                        validated: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-900/40",
-                        stale: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-300 dark:border-rose-900/40",
-                        unverified: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
-                      };
-                      const statusLabels = {
-                        validated: "검증 완료: KIND 건수 일치",
-                        stale: "검증 실패: KIND 건수 불일치 (stale)",
-                        unverified: range.metadata_missing
-                          ? "검증 불가: 메타데이터 없음"
-                          : "검증 보류: KIND 대조 생략됨",
-                      };
-
-                      return (
-                        <div
-                          key={index}
-                          className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded border dark:bg-[#0d1117] dark:border-[#30363d] gap-2 text-xs"
-                        >
-                          <div className="space-y-0.5">
-                            <p className="font-medium text-slate-800 dark:text-slate-200">
-                              {range.folder_name} ({range.start_date} ~ {range.end_date})
-                            </p>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                              로컬 건수: {range.local_count ?? "-"} | KIND 건수: {range.kind_count ?? "-"}
-                            </p>
-                            {range.error_detail && (
-                              <p className="text-[10px] text-rose-500 dark:text-rose-400 font-medium">
-                                ⚠ {range.error_detail}
-                              </p>
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d]">
+                        <div className="space-y-1">
+                          <p className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                            📂 기존 다운로드 시도 범위 감지됨
+                            {checkingExisting && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                재확인 중
+                              </span>
                             )}
-                            {range.metadata_missing && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleCreateMetadata(range);
-                                }}
-                                className="mt-1.5 px-2 py-0.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded text-[10px] font-semibold transition-all dark:bg-blue-950/20 dark:text-blue-300 dark:border-blue-900/40 dark:hover:bg-blue-900/30"
-                              >
-                                현재 설정으로 메타데이터 작성
-                              </button>
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            전체 범위: <span className="font-semibold">{existingData?.earliest_date}</span> ~ <span className="font-semibold">{existingData?.latest_date}</span>
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 self-start md:self-auto border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-[#21262d] dark:hover:text-slate-100"
+                          onClick={handleApplyUpdateRange}
+                          disabled={
+                            (existingData?.ranges?.some(r => r.status === "stale") ?? false) ||
+                            !filtersMatch
+                          }
+                        >
+                          이어서 다운로드하기 (업데이트)
+                        </Button>
+                      </div>
+
+                      {/* Range List */}
+                      <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                        {existingData?.ranges?.map((range, index) => {
+                          const statusColors = {
+                            validated: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-900/40",
+                            stale: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-300 dark:border-rose-900/40",
+                            unverified: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
+                          };
+                          const statusLabels = {
+                            validated: "검증 완료: KIND 건수 일치",
+                            stale: "검증 실패: KIND 건수 불일치 (stale)",
+                            unverified: range.metadata_status === "mismatch"
+                              ? "메타데이터 설정 불일치"
+                              : range.metadata_missing
+                                ? (range.metadata_obsolete ? "구버전 메타데이터: 실행 시 보정 검사" : "메타데이터 없음: 실행 시 보정 검사")
+                                : "메타데이터 확인됨",
+                          };
+
+                          return (
+                            <div
+                              key={index}
+                              className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded border dark:bg-[#0d1117] dark:border-[#30363d] gap-2 text-xs"
+                            >
+                              <div className="space-y-0.5">
+                                <p className="font-medium text-slate-800 dark:text-slate-200">
+                                  {range.folder_name} ({range.start_date} ~ {range.end_date})
+                                </p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                  로컬 건수: {range.local_count ?? "-"} | KIND 건수: {range.kind_count ?? "-"}
+                                </p>
+                                {range.error_detail && (
+                                  <p className="text-[10px] text-rose-500 dark:text-rose-400 font-medium">
+                                    ⚠ {range.error_detail}
+                                  </p>
+                                )}
+                                {range.metadata_missing && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCreateMetadata(range);
+                                    }}
+                                    className="mt-1.5 px-2 py-0.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded text-[10px] font-semibold transition-all dark:bg-blue-950/20 dark:text-blue-300 dark:border-blue-900/40 dark:hover:bg-blue-900/30"
+                                  >
+                                    현재 설정으로 메타데이터 작성
+                                  </button>
+                                )}
+                              </div>
+                              <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${statusColors[range.status]}`}>
+                                {statusLabels[range.status]}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Warning message if stale ranges exist */}
+                      {existingData?.ranges?.some(r => r.status === "stale") && (
+                        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                          <strong>⚠ 경고:</strong> 기존 다운로드한 데이터 중 일부가 KIND의 현재 검색 결과와 일치하지 않습니다 (데이터 변경/정정/누락 가능성). 
+                          무결성이 손상되었으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다. mismatch 폴더를 수동으로 검사/보완하거나 삭제 후 재실행해야 합니다.
+                        </div>
+                      )}
+
+                      {/* Warning message if filters mismatch */}
+                      {!filtersMatch && existingData?.saved_filters && (
+                        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                          <strong>⚠ 오류:</strong> 현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 폴더 내 데이터가 오염(mixed dataset)되는 것을 방지하기 위해 <strong>이어서 다운로드하기가 비활성화</strong>됩니다. 검색 필터를 메타데이터와 동일하게 일치시키거나 다른 경로를 선택해 주세요.
+                          <div className="mt-2 pl-3 border-l-2 border-rose-300 space-y-1 text-[11px] opacity-90">
+                            {existingData.saved_filters.company_name.trim() !== companyName.trim() && (
+                              <p>• 회사명 불일치: (기존) &ldquo;{existingData.saved_filters.company_name}&rdquo; &harr; (현재) &ldquo;{companyName}&rdquo;</p>
+                            )}
+                            {existingData.saved_filters.submitter_name.trim() !== submitterName.trim() && (
+                              <p>• 제출인 불일치: (기존) &ldquo;{existingData.saved_filters.submitter_name}&rdquo; &harr; (현재) &ldquo;{submitterName}&rdquo;</p>
+                            )}
+                            {existingData.saved_filters.market_label !== marketLabel && (
+                              <p>• 시장 불일치: (기존) &ldquo;{existingData.saved_filters.market_label}&rdquo; &harr; (현재) &ldquo;{marketLabel}&rdquo;</p>
+                            )}
+                            {existingData.saved_filters.securities_label !== securitiesLabel && (
+                              <p>• 증권종류 불일치: (기존) &ldquo;{existingData.saved_filters.securities_label}&rdquo; &harr; (현재) &ldquo;{securitiesLabel}&rdquo;</p>
+                            )}
+                            {!!existingData.saved_filters.last_report_only !== lastReportOnly && (
+                              <p>• 최종보고서만 불일치: (기존) &ldquo;{existingData.saved_filters.last_report_only ? "예" : "아니오"}&rdquo; &harr; (현재) &ldquo;{lastReportOnly ? "예" : "아니오"}&rdquo;</p>
+                            )}
+                            {!areDisclosureGroupsMatching(selectedDisclosures, existingData.saved_filters.disclosure_type_groups || {}) && (
+                              <p>• 공시 종류 불일치</p>
                             )}
                           </div>
-                          <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${statusColors[range.status]}`}>
-                            {statusLabels[range.status]}
-                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="mt-3 h-8 border-rose-300 bg-white text-rose-800 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-900/30"
+                            onClick={handleApplySavedFilters}
+                          >
+                            기존 메타데이터 기준으로 설정 맞추기
+                          </Button>
                         </div>
-                      );
-                    })}
-                  </div>
+                      )}
 
-                  {existingData.ranges?.some(r => r.metadata_missing) && filtersMatch && (
-                    <div className="flex items-center gap-2 px-2.5 py-2 bg-blue-50/30 dark:bg-blue-950/10 border border-blue-200/50 dark:border-blue-900/30 rounded-md animate-fade-in">
-                      <input
-                        type="checkbox"
-                        id="createMetadataOnRun"
-                        checked={createMetadataOnRun}
-                        onChange={(e) => setCreateMetadataOnRun(e.target.checked)}
-                        className="rounded border-slate-300 dark:border-slate-700 dark:bg-[#0d1117] h-3.5 w-3.5 text-blue-600 focus:ring-blue-500"
-                      />
-                      <label htmlFor="createMetadataOnRun" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
-                        현재 설정으로 메타데이터 작성하기 (실행 시 자동 생성)
-                      </label>
-                    </div>
-                  )}
-
-                  {/* Warning message if stale ranges exist */}
-                  {existingData.ranges?.some(r => r.status === "stale") && (
-                    <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                      <strong>⚠ 경고:</strong> 기존 다운로드한 데이터 중 일부가 KIND의 현재 검색 결과와 일치하지 않습니다 (데이터 변경/정정/누락 가능성). 
-                      무결성이 손상되었으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다. mismatch 폴더를 수동으로 검사/보완하거나 삭제 후 재실행해야 합니다.
-                    </div>
-                  )}
-
-                  {/* Warning message if filters mismatch */}
-                  {!filtersMatch && existingData.saved_filters && (
-                    <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                      <strong>⚠ 오류:</strong> 현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 폴더 내 데이터가 오염(mixed dataset)되는 것을 방지하기 위해 <strong>이어서 다운로드하기가 비활성화</strong>됩니다. 검색 필터를 메타데이터와 동일하게 일치시키거나 다른 경로를 선택해 주세요.
-                      <div className="mt-2 pl-3 border-l-2 border-rose-300 space-y-1 text-[11px] opacity-90">
-                        {existingData.saved_filters.company_name.trim() !== companyName.trim() && (
-                          <p>• 회사명 불일치: (기존) &ldquo;{existingData.saved_filters.company_name}&rdquo; &harr; (현재) &ldquo;{companyName}&rdquo;</p>
-                        )}
-                        {existingData.saved_filters.submitter_name.trim() !== submitterName.trim() && (
-                          <p>• 제출인 불일치: (기존) &ldquo;{existingData.saved_filters.submitter_name}&rdquo; &harr; (현재) &ldquo;{submitterName}&rdquo;</p>
-                        )}
-                        {existingData.saved_filters.market_label !== marketLabel && (
-                          <p>• 시장 불일치: (기존) &ldquo;{existingData.saved_filters.market_label}&rdquo; &harr; (현재) &ldquo;{marketLabel}&rdquo;</p>
-                        )}
-                        {existingData.saved_filters.securities_label !== securitiesLabel && (
-                          <p>• 증권종류 불일치: (기존) &ldquo;{existingData.saved_filters.securities_label}&rdquo; &harr; (현재) &ldquo;{securitiesLabel}&rdquo;</p>
-                        )}
-                        {!!existingData.saved_filters.last_report_only !== lastReportOnly && (
-                          <p>• 최종보고서만 불일치: (기존) &ldquo;{existingData.saved_filters.last_report_only ? "예" : "아니오"}&rdquo; &harr; (현재) &ldquo;{lastReportOnly ? "예" : "아니오"}&rdquo;</p>
-                        )}
-                        {!areDisclosureGroupsMatching(selectedDisclosures, existingData.saved_filters.disclosure_type_groups || {}) && (
-                          <p>• 공시 종류 불일치</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Warning message if unverified ranges exist */}
-                  {existingData.ranges?.some(r => r.status === "unverified") && (
-                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                      <strong>💡 알림:</strong> 일부 다운로드 범위는 오프라인 상태이거나 workflow 메타데이터가 없어 검증하지 못했습니다. 무결성을 보장할 수 없으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다.
-                    </div>
-                  )}
-
-                  {/* Override checkbox if any unverified range exists and no stale ranges or filter mismatches exist */}
-                  {existingData.ranges?.some(r => r.status === "unverified") &&
-                    !(existingData.ranges?.some(r => r.status === "stale") ?? false) &&
-                    filtersMatch && (
-                      <div className="flex items-center space-x-2 rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-[#0d1117]">
-                        <Checkbox
-                          id="forceContinueCheckbox"
-                          checked={forceContinue}
-                          onCheckedChange={(v) => setForceContinue(!!v)}
-                          className="dark:border-[#30363d]"
-                        />
-                        <Label htmlFor="forceContinueCheckbox" className="text-xs cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                          검증 불가 경고를 확인했으며, 강제로 이어서 다운로드하기를 진행합니다.
-                        </Label>
-                      </div>
-                    )}
+                      {existingData?.ranges?.some(r => r.status === "unverified") && !hasCompletedCurrentInspection && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                          <strong>💡 알림:</strong> 일부 다운로드 범위는 {existingData.ranges?.some(r => r.metadata_obsolete) ? "workflow 메타데이터가 구버전입니다" : existingData.ranges?.some(r => r.metadata_missing) ? "workflow 메타데이터가 없습니다" : "아직 무결성 검사를 하지 않았습니다"}. 실행 또는 폴더 검사하기를 누르면 현재 검색 설정을 기준으로 무결성 검사와 메타데이터 보정을 진행합니다.
+                        </div>
+                      )}
                 </div>
               )}
 
