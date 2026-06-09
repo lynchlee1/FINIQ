@@ -25,8 +25,6 @@ TABLE_SCHEMA_VERSION = 2
 DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
 SQLITE_FORMAT = "finiq_disclosure_table_sqlite_shard"
-DEFAULT_SHARD_WORKERS = 4
-MAX_SHARD_WORKERS = 8
 
 
 def _date_part(value: object) -> str:
@@ -305,14 +303,14 @@ def _group_rows_by_year(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:
     if shard_count <= 1:
         return 1
+    cpu_limit = os.cpu_count() or 1
     try:
-        requested = int(value or DEFAULT_SHARD_WORKERS)
+        requested = int(value or cpu_limit)
     except (TypeError, ValueError):
-        requested = DEFAULT_SHARD_WORKERS
+        requested = cpu_limit
     if requested <= 1:
         return 1
-    cpu_limit = os.cpu_count() or 1
-    return max(1, min(requested, shard_count, cpu_limit, MAX_SHARD_WORKERS))
+    return max(1, min(requested, shard_count, cpu_limit))
 
 
 def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) -> None:

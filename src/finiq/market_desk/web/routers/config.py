@@ -32,6 +32,7 @@ class SettingsUpdate(BaseModel):
     selected_classification_path: Optional[str] = None
     sqlite_source_path: Optional[str] = None
     download_output_directory: Optional[str] = None
+    sqlite_output_directory: Optional[str] = None
     sqlite_manifest_path: Optional[str] = None
     html_output_directory: Optional[str] = None
     html_content_output_directory: Optional[str] = None
@@ -128,6 +129,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "quanti_dir": config.quanti_dir,
             "price_root_directory": price_root,
             "download_output_directory": config.download_output_directory or config.output_root,
+            "sqlite_output_directory": config.sqlite_output_directory or config.output_root,
             "sqlite_manifest_path": config.sqlite_manifest_path,
             "html_output_directory": config.html_output_directory or f"{config.output_root}/viewer_html",
             "html_content_output_directory": config.html_content_output_directory or f"{config.output_root}/viewer_html_contents",
