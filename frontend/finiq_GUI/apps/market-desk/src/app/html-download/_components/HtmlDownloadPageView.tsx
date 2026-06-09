@@ -439,15 +439,16 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       ),
     },
     { id: "timeout", kind: "input", type: "number", label: "타임아웃 (초)", value: timeout, onChange: setTimeoutVal },
-    { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
+    { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", help: "KIND에 인터넷 요청을 보내는 저장 실행에만 적용됩니다.", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
     { id: "waitSeconds", kind: "input", type: "number", label: "요청 간격 (초)", value: waitSeconds, onChange: setWaitSeconds },
-    { id: "limit", kind: "input", type: "number", label: "최대 처리 건수", placeholder: "전체", value: limit, onChange: setLimit },
+    { id: "limit", kind: "input", type: "number", label: "최대 처리 건수", help: "테스트 실행이나 샘플 JSON 생성 때만 입력하세요. 비워 두면 전체 대상을 처리합니다.", placeholder: "전체", value: limit, onChange: setLimit },
     { id: "progressInterval", kind: "input", type: "number", label: "진행 확인 간격 (건)", value: progressInterval, onChange: setProgressInterval, span: 2 },
     { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
   ];
   const basePathFields = baseFields.filter((field) => field.id === "sourcePath" || field.id === "outputDirectory");
-  const requestOptionFields = baseFields.filter((field) => ["timeout", "maxRequestsPerMinute", "waitSeconds", "limit"].includes(field.id));
+  const requestOptionFields = baseFields.filter((field) => ["timeout", "maxRequestsPerMinute", "waitSeconds"].includes(field.id));
   const executionOptionFields = baseFields.filter((field) => field.id === "progressInterval" || field.id === "skipExisting");
+  const testOptionFields = baseFields.filter((field) => field.id === "limit");
 
   const compressionFields: HtmlWorkflowField[] = [
     {
@@ -517,7 +518,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           {variant === "external" && (
             <HtmlWorkflowCard
               title="외부 HTML JSON 압축"
-              description="저장된 KIND 공시 뷰어 HTML에서 핵심 정보만 추출해 하나의 JSON으로 저장합니다."
+              description="저장된 KIND 공시 뷰어 HTML에서 핵심 정보만 추출해 하나의 JSON으로 저장합니다. 로컬 파일 처리이므로 최대 요청/분은 적용되지 않습니다."
             >
                 <HtmlWorkflowForm fields={compressionFields} />
                 <Button variant="outline" className="h-10 w-full" onClick={handleCompressExternalHtml} disabled={isJobActive}>
@@ -530,7 +531,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           {variant === "content" && (
             <HtmlWorkflowCard
               title="내부 HTML JSON 병합"
-              description="저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다."
+              description="저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다. 로컬 파일 처리이므로 최대 요청/분은 적용되지 않습니다."
             >
                 <HtmlWorkflowForm fields={mergeFields} />
                 <Button variant="outline" className="h-10 w-full" onClick={handleMergeContentHtml} disabled={isJobActive}>
@@ -622,6 +623,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
                 <HtmlWorkflowForm fields={executionOptionFields} />
+              </div>
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
+                </div>
+                <HtmlWorkflowForm fields={testOptionFields} />
               </div>
             </div>
           }

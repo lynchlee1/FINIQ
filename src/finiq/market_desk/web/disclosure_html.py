@@ -1235,6 +1235,15 @@ def _collect_content_targets_from_external_directory(
     )
     targets = [target_by_acpt_no[acpt_no] for acpt_no in ordered_acpt_numbers]
     if not targets:
+        if not split_by_year and any(
+            child.is_dir() and len(child.name) == 4 and child.name.isdigit()
+            for child in source_directory.iterdir()
+        ):
+            msg = (
+                "No external viewer HTML files found in source_directory. "
+                "The source directory appears to contain year folders; enable source_split_by_year."
+            )
+            raise ValueError(msg)
         msg = "No external viewer HTML files found in source_directory"
         raise ValueError(msg)
     return targets, manifest_payload
