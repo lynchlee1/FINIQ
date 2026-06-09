@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Play, Plus, Save, Trash2, Loader2 } from "lucide-react";
+import { Play, Plus, Save, Trash2, Loader2, RefreshCw } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { cn } from "@finiq/ui/utils";
@@ -11,6 +11,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobStreaming } from "@/hooks/useJobStreaming";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { UI_TEXT } from "@/config/uiText";
 
 const TRANSFER_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const PAGE_SIZE = 20;
@@ -218,6 +219,17 @@ export default function FilterPage() {
     filter_workers: Number(filterWorkers || 8),
     progress_interval: Number(progressInterval || 100),
   });
+
+  const handleRefresh = async () => {
+    const config = await fetchSettings();
+    if (!config) {
+      setStatus("공시 소스 폴더 새로고침에 실패했습니다.");
+      setIsErrorStatus(true);
+      return;
+    }
+    setStatus("공시 소스 폴더를 새로고침했습니다.");
+    setIsErrorStatus(false);
+  };
 
   const handleFilter = async () => {
     if (!rootDirectory?.trim()) {
@@ -447,11 +459,20 @@ export default function FilterPage() {
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
-            <CardContent>
-              <Button onClick={handleFilter} disabled={isStreaming} className="w-full md:w-auto">
-                {isStreaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                실행
-              </Button>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <Button variant="outline" onClick={handleRefresh} disabled={isStreaming} className="w-full">
+                  <RefreshCw className={cn("mr-2 h-4 w-4", isStreaming ? "animate-spin" : "")} />
+                  소스 새로고침
+                </Button>
+                <Button onClick={handleFilter} disabled={isStreaming} className="w-full">
+                  {isStreaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  실행
+                </Button>
+                <Button variant="outline" onClick={abortJob} disabled={!isStreaming} className="w-full">
+                  {UI_TEXT.actions.cancelJob}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
