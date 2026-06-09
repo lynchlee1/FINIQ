@@ -1952,6 +1952,32 @@ def test_download_disclosure_html_contents_payload_allows_separate_source_and_ou
     assert payload["saved_files"] == [str(tmp_path / "content_html" / "20250101000001.html")]
 
 
+def test_download_disclosure_html_contents_payload_explains_missing_source_split(
+    tmp_path: Path,
+) -> None:
+    external_dir = tmp_path / "viewer_html"
+    year_dir = external_dir / "2025"
+    year_dir.mkdir(parents=True)
+    (year_dir / "20250101000001.html").write_text(
+        """
+        <html><body>
+          <select id="mainDoc">
+            <option value="20250101000099|Y" selected="selected">본문</option>
+          </select>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="enable source_split_by_year"):
+        download_disclosure_html_contents_payload(
+            {
+                "output_directory": str(tmp_path / "content_html"),
+                "source_directory": str(external_dir),
+            }
+        )
+
+
 def test_download_disclosure_html_contents_payload_prefers_compressed_external_json(
     tmp_path: Path,
     monkeypatch,
