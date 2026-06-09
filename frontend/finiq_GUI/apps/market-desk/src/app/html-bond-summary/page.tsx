@@ -15,6 +15,7 @@ import {
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { formatInteger } from "@/lib/format";
 
 export default function HtmlBondSummaryPage() {
   const [loading, setLoading] = useState(true);
@@ -193,7 +194,7 @@ export default function HtmlBondSummaryPage() {
         { value: "20", label: "20건" },
         { value: "100", label: "100건" },
         { value: "300", label: "300건" },
-        { value: "1000", label: "1000건" },
+        { value: "1000", label: "1,000건" },
         { value: "all", label: "전체" },
       ],
     },
@@ -370,13 +371,13 @@ export default function HtmlBondSummaryPage() {
                                 </div>
                                 {table.omitted_rows > 0 ? (
                                   <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400 dark:border-[#30363d] dark:text-slate-500">
-                                    생략된 행 {table.omitted_rows}개
+                                    생략된 행 {formatInteger(table.omitted_rows)}개
                                   </div>
                                 ) : null}
                               </div>
                             ))}
                             {source.omitted_rows > 0 ? (
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500">표시 제한으로 생략된 원문 행 {source.omitted_rows}개</p>
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500">표시 제한으로 생략된 원문 행 {formatInteger(source.omitted_rows)}개</p>
                             ) : null}
                           </div>
                         );

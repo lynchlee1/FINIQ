@@ -17,6 +17,7 @@ import {
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { UI_TEXT } from "@/config/uiText";
+import { formatInteger } from "@/lib/format";
 
 const PARSE_MODES = [
   {
@@ -104,11 +105,11 @@ export default function HtmlParsePage() {
     if (data.error) lines.push(`오류: ${data.error}`);
     
     if (summary.found_files !== undefined) {
-      lines.push(`대상 HTML: ${summary.found_files || 0}`);
-      lines.push(`이어받은 파일: ${summary.resumed_files || 0}`);
-      lines.push(`파싱 성공: ${summary.parsed_files || 0}`);
-      lines.push(`파싱 경고: ${warningCount}`);
-      lines.push(`파싱 실패: ${summary.failed_files || 0}`);
+      lines.push(`대상 HTML: ${formatInteger(summary.found_files)}`);
+      lines.push(`이어받은 파일: ${formatInteger(summary.resumed_files)}`);
+      lines.push(`파싱 성공: ${formatInteger(summary.parsed_files)}`);
+      lines.push(`파싱 경고: ${formatInteger(warningCount)}`);
+      lines.push(`파싱 실패: ${formatInteger(summary.failed_files)}`);
       lines.push(`결과 경로: ${res.output_path || ""}`);
     }
 
@@ -460,11 +461,11 @@ export default function HtmlParsePage() {
                   <div className="grid grid-cols-2 gap-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
                       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary.parsed_files || 0}</strong>
+                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{formatInteger(result.summary.parsed_files)}</strong>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
                       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">실패</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{result.summary.failed_files || 0}</strong>
+                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{formatInteger(result.summary.failed_files)}</strong>
                     </div>
                   </div>
                 </div>

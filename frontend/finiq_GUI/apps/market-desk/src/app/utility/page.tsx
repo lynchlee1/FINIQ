@@ -11,6 +11,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { UI_TEXT } from "@/config/uiText";
+import { formatInteger } from "@/lib/format";
 
 type PartitionMode = "split" | "flatten";
 
@@ -19,12 +20,12 @@ function formatResult(result: any): string[] {
   const modeLabel = result.mode === "flatten" ? "분할저장 해제" : "분할저장";
   const lines = [
     `${modeLabel} 완료`,
-    `입력 파일: ${result.input_files || 0}개`,
-    `복사 파일: ${result.copied_files || 0}개`,
-    `기존 파일 건너뜀: ${result.skipped_existing_files || 0}개`,
+    `입력 파일: ${formatInteger(result.input_files)}개`,
+    `복사 파일: ${formatInteger(result.copied_files)}개`,
+    `기존 파일 건너뜀: ${formatInteger(result.skipped_existing_files)}개`,
   ];
   if (result.skipped_invalid_year_files) {
-    lines.push(`연도 판별 불가: ${result.skipped_invalid_year_files}개`);
+    lines.push(`연도 판별 불가: ${formatInteger(result.skipped_invalid_year_files)}개`);
   }
   if (result.years?.length) {
     lines.push(`대상 연도: ${result.years.join(", ")}`);

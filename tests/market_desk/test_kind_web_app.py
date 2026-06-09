@@ -255,6 +255,34 @@ def test_html_download_inspect_folder_route_dry_run_reports_unexpected_file(tmp_
     assert unexpected.exists()
 
 
+def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path) -> None:
+    output_directory = tmp_path / "viewer_html"
+    output_directory.mkdir()
+    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/download/check-existing",
+        json={
+            "output_directory": str(output_directory),
+            "json": {
+                "disclosures": [
+                    {"acpt_no": "20250101000001"},
+                    {"acpt_no": "20250101000002"},
+                ]
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["format"] == "kind_disclosure_html_existing_check_v1"
+    assert payload["has_existing"] is True
+    assert payload["existing_target_html_count"] == 1
+    assert payload["missing_target_html_count"] == 1
+    assert payload["detected_output_split_by_year"] is False
+
+
 def test_html_content_download_inspect_folder_route_honors_split_options(tmp_path: Path) -> None:
     source_directory = tmp_path / "viewer_html"
     source_year_directory = source_directory / "2025"
@@ -293,6 +321,49 @@ def test_html_content_download_inspect_folder_route_honors_split_options(tmp_pat
     assert payload["requested_count"] == 1
     assert payload["deletion_candidate_count"] == 1
     assert payload["deletion_candidates"][0]["name"] == "20240101000001.html"
+
+
+def test_html_content_download_check_existing_route_honors_split_options(tmp_path: Path) -> None:
+    source_directory = tmp_path / "viewer_html"
+    source_year_directory = source_directory / "2025"
+    source_year_directory.mkdir(parents=True)
+    (source_year_directory / "20250101000001.html").write_text(
+        """
+        <html><body>
+          <select id="mainDoc">
+            <option value="20250101000099|Y" selected="selected">본문</option>
+          </select>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "content_html"
+    output_year_directory = output_directory / "2025"
+    output_year_directory.mkdir(parents=True)
+    (output_year_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/content-download/check-existing",
+        json={
+            "source_directory": str(source_directory),
+            "output_directory": str(output_directory),
+            "source_split_by_year": False,
+            "output_split_by_year": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["format"] == "kind_disclosure_html_existing_check_v1"
+    assert payload["source_type"] == "content"
+    assert payload["source_split_by_year"] is True
+    assert payload["output_split_by_year"] is True
+    assert payload["has_existing"] is True
+    assert payload["existing_target_html_count"] == 1
+    assert payload["missing_target_html_count"] == 0
+    assert payload["detected_source_split_by_year"] is True
+    assert payload["detected_output_split_by_year"] is True
 
 
 def test_html_download_inspect_folder_route_rejects_high_risk_directory() -> None:

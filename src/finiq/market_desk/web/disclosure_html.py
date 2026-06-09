@@ -233,6 +233,24 @@ def _iter_html_output_files(output_directory: Path, *, split_by_year: bool) -> l
     return sorted(files)
 
 
+def _detect_html_split_by_year(directory: Path) -> bool | None:
+    if not directory.is_dir():
+        return None
+    has_root_html = any(path.is_file() and path.suffix.lower() == ".html" for path in directory.iterdir())
+    has_year_html = any(
+        child.is_dir()
+        and len(child.name) == 4
+        and child.name.isdigit()
+        and any(path.is_file() and path.suffix.lower() == ".html" for path in child.iterdir())
+        for child in directory.iterdir()
+    )
+    if has_year_html:
+        return True
+    if has_root_html:
+        return False
+    return None
+
+
 def _relative_name(path: Path, root: Path) -> str:
     try:
         return str(path.relative_to(root))
@@ -916,6 +934,39 @@ def clean_disclosure_html_output_directory_payload(body: dict[str, Any]) -> dict
         "deletion_candidate_count": len(summary["deleted_files"]),
         "deletion_candidates": summary["deleted_files"],
         **summary,
+    }
+
+
+def check_disclosure_html_output_directory_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Inspect existing HTML download files without deleting anything."""
+    payload = dict(body)
+    payload["dry_run"] = True
+    output_directory_raw = str(body.get("output_directory") or "").strip()
+    detected_output_split_by_year = None
+    if output_directory_raw:
+        detected_output_split_by_year = _detect_html_split_by_year(
+            Path(output_directory_raw).expanduser()
+        )
+        if detected_output_split_by_year is not None:
+            payload["split_by_year"] = detected_output_split_by_year
+            payload["output_split_by_year"] = detected_output_split_by_year
+    source_directory_raw = str(body.get("source_directory") or "").strip()
+    detected_source_split_by_year = None
+    if source_directory_raw:
+        detected_source_split_by_year = _detect_html_split_by_year(
+            Path(source_directory_raw).expanduser()
+        )
+        if detected_source_split_by_year is not None:
+            payload["source_split_by_year"] = detected_source_split_by_year
+    summary = clean_disclosure_html_output_directory_payload(payload)
+    existing_count = int(summary.get("existing_target_html_count") or 0)
+    total_file_count = int(summary.get("total_file_count") or 0)
+    return {
+        **summary,
+        "format": "kind_disclosure_html_existing_check_v1",
+        "has_existing": existing_count > 0 or total_file_count > 0,
+        "detected_output_split_by_year": detected_output_split_by_year,
+        "detected_source_split_by_year": detected_source_split_by_year,
     }
 
 

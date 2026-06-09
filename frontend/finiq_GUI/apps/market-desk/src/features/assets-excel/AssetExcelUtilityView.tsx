@@ -9,6 +9,7 @@ import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { UI_TEXT } from "@/config/uiText";
+import { formatInteger } from "@/lib/format";
 import {
   fetchAssetExcelFiles,
   fetchAssetExcelOutput,
@@ -44,9 +45,9 @@ function jobStatusLines(data: any): string[] {
     lines.push(
       "",
       "변환 완료",
-      `계정 파일: ${data.result.accounts_processed || 0}개`,
-      `업데이트 계정: ${data.result.updated_accounts?.length || 0}개`,
-      `건너뛴 Sheet: ${data.result.skipped?.length || 0}개`,
+      `계정 파일: ${formatInteger(data.result.accounts_processed)}개`,
+      `업데이트 계정: ${formatInteger(data.result.updated_accounts?.length)}개`,
+      `건너뛴 Sheet: ${formatInteger(data.result.skipped?.length)}개`,
       `저장 경로: ${data.result.output_directory || ""}`,
     );
   }
@@ -242,7 +243,7 @@ export default function AssetExcelUtilityPage() {
       });
       setPreviewData(data);
       setPreviewSignature(currentPreviewSignature);
-      setStatus(`사전 점검 완료\n계정: ${Object.keys(data.accounts || {}).length}개\n정상 Sheet: ${(data.sheets || []).filter((sheet: any) => sheet.status === "mapped").length}개\n충돌: ${Object.keys(data.conflicts || {}).length}개 계정`);
+      setStatus(`사전 점검 완료\n계정: ${formatInteger(Object.keys(data.accounts || {}).length)}개\n정상 Sheet: ${formatInteger((data.sheets || []).filter((sheet: any) => sheet.status === "mapped").length)}개\n충돌: ${formatInteger(Object.keys(data.conflicts || {}).length)}개 계정`);
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
@@ -345,7 +346,7 @@ export default function AssetExcelUtilityPage() {
                     <p className="font-medium">기존 결과가 감지되었습니다.</p>
                     <p>{writeMode === "update" ? "기존 Parquet를 읽어 새 Excel 데이터와 병합합니다." : "기존 Parquet는 병합에 쓰지 않고 선택 파일에서 나온 계정 파일만 저장합니다."}</p>
                     <p>{writeMode === "update" ? "선택 파일에 없는 기존 계정도 기존 출력에서 함께 유지됩니다." : "선택 파일에서 다시 생성된 계정 파일만 덮어쓰며, 선택 파일에 없는 기존 Parquet는 삭제하지 않습니다."}</p>
-                    <p>기존 계정 파일: {activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length || 0}개</p>
+                    <p>기존 계정 파일: {formatInteger(activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length)}개</p>
                   </div>
                 </div>
               ) : null}
@@ -367,11 +368,11 @@ export default function AssetExcelUtilityPage() {
                 </div>
                 <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
                   <p className="text-slate-500 dark:text-slate-400">전체 파일</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{loading ? "-" : excelFiles.length}</p>
+                  <p className="font-medium text-slate-900 dark:text-slate-100">{loading ? "-" : formatInteger(excelFiles.length)}</p>
                 </div>
                 <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
                   <p className="text-slate-500 dark:text-slate-400">선택 파일</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{selectedFiles.length}</p>
+                  <p className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(selectedFiles.length)}</p>
                 </div>
                 <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
                   <p className="text-slate-500 dark:text-slate-400">선택 크기</p>
@@ -466,14 +467,14 @@ export default function AssetExcelUtilityPage() {
                   <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
                     <span>계정: {sheetPayload.account_name}</span>
                     <span>상태: {sheetStatusLabel(sheetPayload.status)}</span>
-                    <span>행: {sheetPayload.row_count ?? sheetPayload.preview_row_count ?? 0}</span>
+                    <span>행: {formatInteger(sheetPayload.row_count ?? sheetPayload.preview_row_count)}</span>
                     {sheetPayload.date_start && sheetPayload.date_end ? <span>{sheetPayload.date_start} ~ {sheetPayload.date_end}</span> : null}
                   </div>
                 ) : null}
               </div>
 
               {(sheetPayload?.columns || []).length > 12 ? (
-                <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {sheetPayload?.columns?.length}개</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {formatInteger(sheetPayload?.columns?.length)}개</p>
               ) : null}
 
               <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
@@ -527,7 +528,7 @@ export default function AssetExcelUtilityPage() {
               <div className="grid md:grid-cols-5 gap-3 text-sm">
                 <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
                   <p className="text-slate-500 dark:text-slate-400">계정</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{Object.keys(previewData?.accounts || {}).length}</p>
+                  <p className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(Object.keys(previewData?.accounts || {}).length)}</p>
                 </div>
                 <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
                   <p className="text-slate-500 dark:text-slate-400">정상 Sheet</p>
@@ -567,7 +568,7 @@ export default function AssetExcelUtilityPage() {
                         <td className="px-3 py-2">{sheetStatusLabel(sheet.status)}</td>
                         <td className="px-3 py-2">{sheet.account_name || sheet.reason || "-"}</td>
                         <td className="px-3 py-2 tabular-nums">{sheet.date_start && sheet.date_end ? `${sheet.date_start} ~ ${sheet.date_end}` : "-"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{sheet.columns || 0}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatInteger(sheet.columns)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -662,8 +663,8 @@ export default function AssetExcelUtilityPage() {
                       <tr key={name} className="dark:text-slate-300">
                         <td className="px-3 py-2 font-medium">{name}</td>
                         <td className="px-3 py-2 break-all">{item.path || item.output_file || `${name}.parquet`}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{item.rows || 0}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{item.columns || 0}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.rows)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.columns)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatPercent(item.quality?.missing_ratio)}</td>
                         <td className="px-3 py-2">{(item.date_segments || []).map((segment: any) => `${segment.start}~${segment.end}`).join(", ") || "-"}</td>
                       </tr>
@@ -715,19 +716,19 @@ export default function AssetExcelUtilityPage() {
               <div className="space-y-3 rounded-md border border-slate-200 p-3 text-sm dark:border-[#30363d]">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">선택 파일</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{selectedFiles.length}개</span>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(selectedFiles.length)}개</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">예상 계정</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{Object.keys(previewData?.accounts || {}).length}개</span>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(Object.keys(previewData?.accounts || {}).length)}개</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">업데이트 계정</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{updatingAccountCount}개</span>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(updatingAccountCount)}개</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">Skipped / 충돌</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{skippedRows.length} / {conflictCount}</span>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(skippedRows.length)} / {formatInteger(conflictCount)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">실행 영향</span>

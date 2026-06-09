@@ -17,6 +17,7 @@ import {
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { formatInteger } from "@/lib/format";
 
 const PARSE_MODES = [
   { key: "bond_issuance", label: "사채발행파싱" },
@@ -75,7 +76,7 @@ export default function HtmlChangeLogPage() {
       if (!response.ok) throw new Error("Failed to load change log");
       const data = await response.json();
       setChangeLog(data);
-      setStatus(`${data.families.length}건의 목록을 불러왔습니다.`);
+      setStatus(`${formatInteger(data.families.length)}건의 목록을 불러왔습니다.`);
       
       if (data.families.length > 0) {
         handleSelectFamily(data.families[0].family_id);

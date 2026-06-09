@@ -25,6 +25,7 @@ from finiq.market_desk.web.service import (
 )
 from finiq.market_desk.web.disclosure_html import (
     cancel_disclosure_html_download,
+    check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
     collect_acpt_numbers_from_json,
     compress_disclosure_external_html_payload,
@@ -1264,6 +1265,34 @@ def test_clean_disclosure_html_output_directory_accepts_result_directory_source_
     assert payload["source_type"] == "external"
     assert payload["source_path"] == str(result_directory.resolve())
     assert payload["requested_count"] == 1
+
+
+def test_check_disclosure_html_output_directory_reports_existing_overlap(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "viewer_html"
+    output_directory.mkdir()
+    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    payload = check_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(output_directory),
+            "json": {
+                "disclosures": [
+                    {"acpt_no": "20250101000001"},
+                    {"acpt_no": "20250101000002"},
+                ]
+            },
+        }
+    )
+
+    assert payload["format"] == "kind_disclosure_html_existing_check_v1"
+    assert payload["has_existing"] is True
+    assert payload["deleted_count"] == 0
+    assert payload["existing_target_html_count"] == 1
+    assert payload["missing_target_html_count"] == 1
+    assert payload["detected_output_split_by_year"] is False
+    assert (output_directory / "20250101000001.html").exists()
 
 
 def test_download_disclosure_html_payload_logs_existing_html_overlap(
@@ -2884,6 +2913,11 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "공시원문 내부 저장" in download_component_html
     assert "content" in content_download_ui_html
     assert "/api/disclosures/html/content-download/start" in download_component_html
+    assert "/api/disclosures/html/download/check-existing" in download_component_html
+    assert "/api/disclosures/html/content-download/check-existing" in download_component_html
+    assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
+    assert "기존 메타데이터 기준으로 설정 맞추기" in download_component_html
+    assert "분할저장 설정이 기존 폴더 구조와 다릅니다" in download_component_html
     assert "/html-change-log" in parse_ui_html
     assert "/html-bond-summary" in change_log_ui_html
     assert "변동 불러오기" in change_log_ui_html

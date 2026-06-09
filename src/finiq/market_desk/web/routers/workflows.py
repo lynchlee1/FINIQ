@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from finiq.market_desk.web.disclosure_html import (
     cancel_disclosure_html_download,
+    check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
 )
 from finiq.market_desk.web.disclosure_html_parse import (
@@ -200,6 +201,13 @@ def create_workflows_router(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
+    @router.post("/api/disclosures/html/download/check-existing")
+    async def check_html_download_folder(payload: dict[str, Any]):
+        try:
+            return check_disclosure_html_output_directory_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     @router.post("/api/disclosures/html/download/compress/start")
     async def start_html_external_compress(payload: dict[str, Any], background_tasks: BackgroundTasks):
         return _start_background_job(
@@ -226,6 +234,13 @@ def create_workflows_router(
     async def inspect_html_content_download_folder(payload: dict[str, Any]):
         try:
             return clean_disclosure_html_output_directory_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/content-download/check-existing")
+    async def check_html_content_download_folder(payload: dict[str, Any]):
+        try:
+            return check_disclosure_html_output_directory_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
