@@ -15,11 +15,19 @@ from finiq.market_desk.web.download import (
     run_download_action,
     start_download_job,
     start_inspect_folder_job,
+    create_folder_metadata,
 )
 
 
 def create_download_router(config: Any) -> APIRouter:
     router = APIRouter()
+
+    @router.post("/api/download/create-metadata")
+    def create_metadata_route(payload: dict[str, Any]):
+        try:
+            return create_folder_metadata(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/download/check-existing")
     def check_existing_downloads_route(payload: dict[str, Any]):
