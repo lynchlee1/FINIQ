@@ -707,21 +707,27 @@ def _looks_like_sqlite_manifest(path: Path) -> bool:
 
 def _resolve_sqlite_manifest_path(path: str | Path) -> Path | None:
     candidate = Path(path).expanduser().resolve()
-    if candidate.is_file() and _looks_like_sqlite_manifest(candidate):
+    if candidate.is_file():
+        if not _looks_like_sqlite_manifest(candidate):
+            return None
+        if not candidate.parent.name.endswith("_shards"):
+            msg = f"SQLite manifest must be inside a *_shards directory: {candidate}"
+            raise ValueError(msg)
         return candidate
     if not candidate.is_dir():
         return None
     if candidate.name.endswith("_shards"):
-        sibling_manifest = candidate.with_name(f"{candidate.name.removesuffix('_shards')}.json")
-        if _looks_like_sqlite_manifest(sibling_manifest):
-            return sibling_manifest
+        nested_manifest = candidate / f"{candidate.name.removesuffix('_shards')}.json"
+        if _looks_like_sqlite_manifest(nested_manifest):
+            return nested_manifest
+        manifests = sorted(candidate.glob("*.sqlite_manifest.json"))
+        for manifest_path in manifests:
+            if _looks_like_sqlite_manifest(manifest_path):
+                return manifest_path
     search_dirs = [candidate, candidate / "kind_sqlite"]
     for search_dir in search_dirs:
-        preferred = search_dir / "kind.sqlite_manifest.json"
-        if _looks_like_sqlite_manifest(preferred):
-            return preferred
-        manifests = sorted(search_dir.glob("*.sqlite_manifest.json"))
-        for manifest_path in manifests:
+        shard_manifests = sorted(search_dir.glob("*_shards/*.sqlite_manifest.json"))
+        for manifest_path in shard_manifests:
             if _looks_like_sqlite_manifest(manifest_path):
                 return manifest_path
     return None
@@ -756,10 +762,9 @@ def _resolve_sqlite_shard_path(manifest_path: Path, shard: dict[str, Any]) -> Pa
 
     relative_path = str(shard.get("relative_path") or "").strip()
     if relative_path:
-        shard_root = manifest_parent / f"{manifest_path.name.removesuffix('.json')}_shards"
-        fallback_path = (shard_root / relative_path).resolve()
-        if fallback_path.is_file():
-            return fallback_path
+        same_directory_path = (manifest_parent / relative_path).resolve()
+        if same_directory_path.is_file():
+            return same_directory_path
     return shard_path
 
 
@@ -1645,4 +1650,3 @@ def run_integrated_market_history_payload(
         value_map=value_map,
         cancel_check=cancel_check,
     )
-

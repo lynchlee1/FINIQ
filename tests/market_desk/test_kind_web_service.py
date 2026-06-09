@@ -64,6 +64,10 @@ EXPECTED_PARSE_MODES = {
 }
 
 
+def _nested_sqlite_manifest_path(path: Path) -> Path:
+    return path.with_name(f"{path.stem}_shards") / path.name
+
+
 def _build_download_result_page_html(
     *,
     page_number: int,
@@ -311,10 +315,12 @@ def test_filter_disclosures_payload_rejects_high_risk_source_root() -> None:
 def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
+    output_path = sqlite_root / "kind.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
-            "output_path": str(sqlite_root / "kind.sqlite_manifest.json"),
+            "output_path": str(output_path),
         }
     )
 
@@ -333,7 +339,7 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
     )
 
     assert payload["source_type"] == "sqlite_manifest"
-    assert payload["source_sqlite_manifest_path"] == str((sqlite_root / "kind.sqlite_manifest.json").resolve())
+    assert payload["source_sqlite_manifest_path"] == str(manifest_path.resolve())
     assert payload["summary"]["source_disclosures"] == 2
     assert payload["summary"]["matched_disclosures"] == 1
     assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
@@ -348,11 +354,12 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
 def test_filter_disclosures_payload_reads_sqlite_manifest_shard_directory(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
-    manifest_path = sqlite_root / "kind.sqlite_manifest.json"
+    output_path = sqlite_root / "kind.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
-            "output_path": str(manifest_path),
+            "output_path": str(output_path),
         }
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -384,11 +391,12 @@ def test_filter_disclosures_payload_reads_nested_kind_sqlite_manifest(tmp_path: 
     source_root = _write_source_body_fixture(tmp_path)
     root = tmp_path / "kind_kosdaq"
     sqlite_root = root / "kind_sqlite"
-    manifest_path = sqlite_root / "kind_kosdaq.sqlite_manifest.json"
+    output_path = sqlite_root / "kind_kosdaq.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
-            "output_path": str(manifest_path),
+            "output_path": str(output_path),
         }
     )
 
@@ -462,7 +470,7 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(
         connection.commit()
     finally:
         connection.close()
-    manifest_path = sqlite_root / "kind.sqlite_manifest.json"
+    manifest_path = shard_root / "kind.sqlite_manifest.json"
     manifest_path.write_text(
         json.dumps(
             {
@@ -472,7 +480,7 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(
                 "shards": [
                     {
                         "year": "2025",
-                        "path": str(shard_path),
+                        "relative_path": shard_path.name,
                         "companies": 1,
                         "disclosures": 1,
                     }
@@ -501,16 +509,36 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(
     assert payload["disclosures"][0]["acpt_no"] == "1"
 
 
+def test_filter_disclosures_payload_rejects_direct_legacy_sqlite_manifest(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "kind.sqlite_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_table_manifest_v1",
+                "table_name": "disclosures",
+                "summary": {"companies": 0, "disclosures": 0, "shards": 0},
+                "shards": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"must be inside a \*_shards directory"):
+        filter_disclosures_payload({"classification_path": str(manifest_path)})
+
+
 def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
-    manifest_path = sqlite_root / "kind.sqlite_manifest.json"
+    output_path = sqlite_root / "kind.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
-            "output_path": str(manifest_path),
+            "output_path": str(output_path),
         }
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -825,6 +853,7 @@ def test_filter_disclosures_payload_supports_exact_match_operator(tmp_path: Path
 def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: Path) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
     output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
 
     payload = build_disclosure_table_payload(
         {
@@ -838,8 +867,10 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert payload["summary"]["companies"] == 1
     assert payload["summary"]["disclosures"] == 3
     assert payload["summary"]["shards"] == 1
-    assert output_path.exists()
-    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    assert not output_path.exists()
+    assert manifest_path.exists()
+    assert payload["output_path"] == str(manifest_path.resolve())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["format"] == "finiq_disclosure_table_manifest_v1"
     assert manifest["shards"][0]["year"] == "2025"
 
@@ -877,6 +908,7 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
 def test_build_disclosure_table_payload_writes_yearly_shards_in_parallel(tmp_path: Path) -> None:
     fixture_path = _write_multiyear_classification_fixture(tmp_path)
     output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
     progress_log: list[str] = []
 
     payload = build_disclosure_table_payload(
@@ -894,7 +926,7 @@ def test_build_disclosure_table_payload_writes_yearly_shards_in_parallel(tmp_pat
     assert [shard["year"] for shard in payload["shards"]] == ["2023", "2024", "2025"]
     assert any("workers=2" in message for message in progress_log)
 
-    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert [shard["year"] for shard in manifest["shards"]] == ["2023", "2024", "2025"]
     for shard in manifest["shards"]:
         shard_path = Path(shard["path"])
@@ -909,6 +941,7 @@ def test_build_disclosure_table_payload_writes_yearly_shards_in_parallel(tmp_pat
 def test_build_disclosure_table_payload_cancelled_parallel_shards_skips_manifest(tmp_path: Path) -> None:
     fixture_path = _write_multiyear_classification_fixture(tmp_path)
     output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
     should_cancel = False
 
     def progress_callback(message: str) -> None:
@@ -932,6 +965,7 @@ def test_build_disclosure_table_payload_cancelled_parallel_shards_skips_manifest
         )
 
     assert not output_path.exists()
+    assert not manifest_path.exists()
 
 
 def test_build_disclosure_table_payload_accepts_nested_folder_path(tmp_path: Path) -> None:
@@ -979,6 +1013,7 @@ def test_build_disclosure_table_payload_rejects_malformed_disclosure_item(
 def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     output_path = tmp_path / "kind.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
 
     payload = build_disclosure_table_payload(
         {
@@ -990,7 +1025,7 @@ def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Pat
     assert payload["source_type"] == "source_folder"
     assert payload["summary"]["disclosures"] == 2
     assert payload["summary"]["shards"] == 1
-    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["source_type"] == "source_folder"
     assert manifest["shards"][0]["year"] == "2025"
 
@@ -1018,7 +1053,7 @@ def test_build_disclosure_table_payload_recovers_misnested_resource_path(
 
     assert payload["source_type"] == "source_folder"
     assert payload["source_path"] == str(source_root.resolve())
-    assert payload["output_path"] == str((source_root / "kind.sqlite_manifest.json").resolve())
+    assert payload["output_path"] == str(_nested_sqlite_manifest_path(source_root / "kind.sqlite_manifest.json").resolve())
     assert payload["summary"]["disclosures"] == 2
 
 
