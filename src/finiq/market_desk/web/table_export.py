@@ -73,18 +73,27 @@ def _default_output_path(classification_path: Path) -> Path:
 
 
 def _shard_directory(manifest_path: Path) -> Path:
+    if manifest_path.parent.name.endswith("_shards"):
+        return manifest_path.parent
     return manifest_path.with_name(f"{manifest_path.stem}_shards")
+
+
+def _manifest_path_inside_shard_directory(manifest_path: Path) -> Path:
+    if manifest_path.parent.name.endswith("_shards"):
+        return manifest_path
+    shard_root = manifest_path.with_name(f"{manifest_path.stem}_shards")
+    return shard_root / manifest_path.name
 
 
 def _manifest_output_path(raw_path: str, classification_path: Path) -> Path:
     if not raw_path:
-        return _default_output_path(classification_path).resolve()
+        return _manifest_path_inside_shard_directory(_default_output_path(classification_path)).resolve()
     output_path = _normalize_workspace_resource_path(Path(raw_path).expanduser(), allow_missing_leaf=True).resolve()
     if output_path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}:
-        return output_path.with_suffix(".sqlite_manifest.json")
+        return _manifest_path_inside_shard_directory(output_path.with_suffix(".sqlite_manifest.json"))
     if output_path.suffix:
-        return output_path
-    return output_path / _default_output_path(classification_path).name
+        return _manifest_path_inside_shard_directory(output_path)
+    return _manifest_path_inside_shard_directory(output_path / _default_output_path(classification_path).name)
 
 
 def _source_has_body_files(path: Path) -> bool:
@@ -174,50 +183,9 @@ def _resolve_source(raw_path: str, root_directory: str) -> tuple[str, Path]:
     raise ValueError(msg)
 
 
-def _iter_disclosure_rows(payload: dict[str, Any], cancel_check: Callable[[], bool] | None = None) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for company_index, company in enumerate(list(payload.get("companies") or [])):
-        if cancel_check and cancel_check():
-            raise RuntimeError("Job cancelled")
-        company_key = _company_key(company)
-        company_name = company.get("company_name")
-        company_id = company.get("company_id")
-        market = company.get("market")
-        badges = list(company.get("badges") or [])
-        for disclosure in _company_disclosures(company, company_index):
-            if cancel_check and cancel_check():
-                raise RuntimeError("Job cancelled")
-            disclosed_at = disclosure.get("disclosed_at")
-            rows.append(
-                {
-                    "row_no": disclosure.get("row_no"),
-                    "company_key": company_key,
-                    "company_name": company_name,
-                    "company_id": company_id,
-                    "market": market,
-                    "badges_json": json.dumps(badges, ensure_ascii=False),
-                    "disclosed_at": disclosed_at,
-                    "disclosed_date": _date_part(disclosed_at),
-                    "title": disclosure.get("title"),
-                    "title_attr": disclosure.get("title_attr"),
-                    "title_base": disclosure.get("title_base") or disclosure.get("title_attr"),
-                    "title_display": disclosure.get("title_display") or disclosure.get("title"),
-                    "title_flags_json": json.dumps(list(disclosure.get("title_flags") or []), ensure_ascii=False),
-                    "is_correction_report": 1 if disclosure.get("is_correction_report") else 0,
-                    "has_later_correction": 1 if disclosure.get("has_later_correction") else 0,
-                    "acpt_no": disclosure.get("acpt_no") or disclosure.get("acptno"),
-                    "doc_no": disclosure.get("doc_no"),
-                    "submitter": disclosure.get("submitter"),
-                    "source_file": disclosure.get("source_file"),
-                    "source_page": disclosure.get("source_page"),
-                }
-            )
-    return rows
-
-
 def _validate_classification_disclosure_counts(
     payload: dict[str, Any],
-    rows: list[dict[str, Any]],
+    row_count: int,
     source_path: Path,
 ) -> None:
     companies = list(payload.get("companies") or [])
@@ -225,10 +193,10 @@ def _validate_classification_disclosure_counts(
         len(_company_disclosures(company, company_index))
         for company_index, company in enumerate(companies)
     )
-    if len(rows) != actual_disclosures:
+    if row_count != actual_disclosures:
         msg = (
             "SQLite export did not inspect every classification disclosure: "
-            f"source={source_path}, inspected={len(rows)}, expected={actual_disclosures}"
+            f"source={source_path}, inspected={row_count}, expected={actual_disclosures}"
         )
         raise ValueError(msg)
 
@@ -241,9 +209,69 @@ def _validate_classification_disclosure_counts(
         raise ValueError(msg)
 
 
-def _iter_source_folder_rows(source_folder: Path, cancel_check: Callable[[], bool] | None = None) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def _row_year(row: dict[str, Any]) -> str:
+    disclosed_date = str(row.get("disclosed_date") or "").strip()
+    year = disclosed_date[:4]
+    if len(year) == 4 and year.isdigit():
+        return year
+    return "unknown"
+
+
+def _collect_classification_rows_by_year(
+    payload: dict[str, Any],
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], int, int]:
+    rows_by_year: dict[str, list[dict[str, Any]]] = {}
+    row_count = 0
+    companies = list(payload.get("companies") or [])
+    for company_index, company in enumerate(companies):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
+        company_key = _company_key(company)
+        company_name = company.get("company_name")
+        company_id = company.get("company_id")
+        market = company.get("market")
+        badges = list(company.get("badges") or [])
+        badges_json = json.dumps(badges, ensure_ascii=False)
+        for disclosure in _company_disclosures(company, company_index):
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
+            disclosed_at = disclosure.get("disclosed_at")
+            row = {
+                "row_no": disclosure.get("row_no"),
+                "company_key": company_key,
+                "company_name": company_name,
+                "company_id": company_id,
+                "market": market,
+                "badges_json": badges_json,
+                "disclosed_at": disclosed_at,
+                "disclosed_date": _date_part(disclosed_at),
+                "title": disclosure.get("title"),
+                "title_attr": disclosure.get("title_attr"),
+                "title_base": disclosure.get("title_base") or disclosure.get("title_attr"),
+                "title_display": disclosure.get("title_display") or disclosure.get("title"),
+                "title_flags_json": json.dumps(list(disclosure.get("title_flags") or []), ensure_ascii=False),
+                "is_correction_report": 1 if disclosure.get("is_correction_report") else 0,
+                "has_later_correction": 1 if disclosure.get("has_later_correction") else 0,
+                "acpt_no": disclosure.get("acpt_no") or disclosure.get("acptno"),
+                "doc_no": disclosure.get("doc_no"),
+                "submitter": disclosure.get("submitter"),
+                "source_file": disclosure.get("source_file"),
+                "source_page": disclosure.get("source_page"),
+            }
+            rows_by_year.setdefault(_row_year(row), []).append(row)
+            row_count += 1
+    return rows_by_year, len(companies), row_count
+
+
+def _collect_source_folder_rows_by_year(
+    source_folder: Path,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], int, int]:
+    rows_by_year: dict[str, list[dict[str, Any]]] = {}
     seen_keys: set[tuple[str, str, str, str]] = set()
+    company_keys: set[str] = set()
+    row_count = 0
     for body_path in _find_source_body_files(source_folder):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
@@ -258,46 +286,34 @@ def _iter_source_folder_rows(source_folder: Path, cancel_check: Callable[[], boo
                 continue
             seen_keys.add(key)
             disclosed_at = record.get("disclosed_at")
-            rows.append(
-                {
-                    "row_no": record.get("row_no"),
-                    "company_key": record.get("company_key") or _company_key(record),
-                    "company_name": record.get("company_name"),
-                    "company_id": record.get("company_id"),
-                    "market": record.get("market"),
-                    "badges_json": json.dumps(list(record.get("badges") or []), ensure_ascii=False),
-                    "disclosed_at": disclosed_at,
-                    "disclosed_date": _date_part(disclosed_at),
-                    "title": record.get("title"),
-                    "title_attr": record.get("title_attr"),
-                    "title_base": record.get("title_base") or record.get("title_attr"),
-                    "title_display": record.get("title_display") or record.get("title"),
-                    "title_flags_json": json.dumps(list(record.get("title_flags") or []), ensure_ascii=False),
-                    "is_correction_report": 1 if record.get("is_correction_report") else 0,
-                    "has_later_correction": 1 if record.get("has_later_correction") else 0,
-                    "acpt_no": record.get("acpt_no") or record.get("acptno"),
-                    "doc_no": record.get("doc_no"),
-                    "submitter": record.get("submitter"),
-                    "source_file": record.get("source_file"),
-                    "source_page": record.get("source_page"),
-                }
-            )
-    return rows
-
-
-def _row_year(row: dict[str, Any]) -> str:
-    disclosed_date = str(row.get("disclosed_date") or "").strip()
-    year = disclosed_date[:4]
-    if len(year) == 4 and year.isdigit():
-        return year
-    return "unknown"
-
-
-def _group_rows_by_year(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        grouped.setdefault(_row_year(row), []).append(row)
-    return grouped
+            row = {
+                "row_no": record.get("row_no"),
+                "company_key": record.get("company_key") or _company_key(record),
+                "company_name": record.get("company_name"),
+                "company_id": record.get("company_id"),
+                "market": record.get("market"),
+                "badges_json": json.dumps(list(record.get("badges") or []), ensure_ascii=False),
+                "disclosed_at": disclosed_at,
+                "disclosed_date": _date_part(disclosed_at),
+                "title": record.get("title"),
+                "title_attr": record.get("title_attr"),
+                "title_base": record.get("title_base") or record.get("title_attr"),
+                "title_display": record.get("title_display") or record.get("title"),
+                "title_flags_json": json.dumps(list(record.get("title_flags") or []), ensure_ascii=False),
+                "is_correction_report": 1 if record.get("is_correction_report") else 0,
+                "has_later_correction": 1 if record.get("has_later_correction") else 0,
+                "acpt_no": record.get("acpt_no") or record.get("acptno"),
+                "doc_no": record.get("doc_no"),
+                "submitter": record.get("submitter"),
+                "source_file": record.get("source_file"),
+                "source_page": record.get("source_page"),
+            }
+            company_key = str(row.get("company_key") or row.get("company_id") or row.get("company_name") or "").strip()
+            if company_key:
+                company_keys.add(company_key)
+            rows_by_year.setdefault(_row_year(row), []).append(row)
+            row_count += 1
+    return rows_by_year, len(company_keys), row_count
 
 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:
@@ -649,19 +665,10 @@ def build_disclosure_table_payload(
     
     if source_type == "classification":
         payload = load_company_classification_file(source_path)
-        rows = _iter_disclosure_rows(payload, cancel_check=cancel_check)
-        _validate_classification_disclosure_counts(payload, rows, source_path)
-        companies = len(list(payload.get("companies") or []))
+        rows_by_year, companies, row_count = _collect_classification_rows_by_year(payload, cancel_check=cancel_check)
+        _validate_classification_disclosure_counts(payload, row_count, source_path)
     else:
-        rows = _iter_source_folder_rows(source_path, cancel_check=cancel_check)
-        companies = len(
-            {
-                str(row.get("company_key") or row.get("company_id") or row.get("company_name") or "").strip()
-                for row in rows
-                if str(row.get("company_key") or row.get("company_id") or row.get("company_name") or "").strip()
-            }
-        )
-    rows_by_year = _group_rows_by_year(rows)
+        rows_by_year, companies, row_count = _collect_source_folder_rows_by_year(source_path, cancel_check=cancel_check)
     shard_workers = _resolve_shard_workers(body.get("table_workers") or body.get("shard_workers"), len(rows_by_year))
 
     if progress_callback:
@@ -697,7 +704,7 @@ def build_disclosure_table_payload(
         "table_name": table_name,
         "summary": {
             "companies": companies,
-            "disclosures": len(rows),
+            "disclosures": row_count,
             "shards": len(shards),
         },
         "shards": shards,
@@ -715,7 +722,7 @@ def build_disclosure_table_payload(
         "table_name": table_name,
         "summary": {
             "companies": companies,
-            "disclosures": len(rows),
+            "disclosures": row_count,
             "shards": len(shards),
             "fts_enabled": all(shard["fts_enabled"] for shard in shards) if shards else False,
             "schema_version": TABLE_SCHEMA_VERSION,
