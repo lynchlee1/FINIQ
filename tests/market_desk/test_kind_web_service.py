@@ -166,6 +166,16 @@ def _write_classification_fixture(tmp_path: Path) -> Path:
     return fixture_path
 
 
+def _write_multiyear_classification_fixture(tmp_path: Path) -> Path:
+    fixture_path = _write_classification_fixture(tmp_path)
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload["companies"][0]["disclosures"][0]["disclosed_at"] = "2023-01-02 09:00:00"
+    payload["companies"][0]["disclosures"][1]["disclosed_at"] = "2024-01-10 09:00:00"
+    payload["companies"][0]["disclosures"][2]["disclosed_at"] = "2025-01-15 09:00:00"
+    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return fixture_path
+
+
 def _write_source_body_fixture(tmp_path: Path) -> Path:
     source_dir = tmp_path / "20250101_20250131"
     source_dir.mkdir()
@@ -862,6 +872,66 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert metadata["shard_format"] == "finiq_disclosure_table_sqlite_shard"
     assert metadata["shard_year"] == "2025"
     assert metadata["table_name"] == "disclosures"
+
+
+def test_build_disclosure_table_payload_writes_yearly_shards_in_parallel(tmp_path: Path) -> None:
+    fixture_path = _write_multiyear_classification_fixture(tmp_path)
+    output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
+    progress_log: list[str] = []
+
+    payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(fixture_path),
+            "output_path": str(output_path),
+            "table_name": "disclosures",
+            "table_workers": 2,
+        },
+        progress_callback=progress_log.append,
+    )
+
+    assert payload["summary"]["disclosures"] == 3
+    assert payload["summary"]["shards"] == 3
+    assert [shard["year"] for shard in payload["shards"]] == ["2023", "2024", "2025"]
+    assert any("workers=2" in message for message in progress_log)
+
+    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [shard["year"] for shard in manifest["shards"]] == ["2023", "2024", "2025"]
+    for shard in manifest["shards"]:
+        shard_path = Path(shard["path"])
+        connection = sqlite3.connect(shard_path)
+        try:
+            row_count = connection.execute("SELECT COUNT(*) FROM disclosures").fetchone()[0]
+        finally:
+            connection.close()
+        assert row_count == 1
+
+
+def test_build_disclosure_table_payload_cancelled_parallel_shards_skips_manifest(tmp_path: Path) -> None:
+    fixture_path = _write_multiyear_classification_fixture(tmp_path)
+    output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
+    should_cancel = False
+
+    def progress_callback(message: str) -> None:
+        nonlocal should_cancel
+        if "샤드 생성 예약" in message:
+            should_cancel = True
+
+    def cancel_check() -> bool:
+        return should_cancel
+
+    with pytest.raises(RuntimeError, match="Job cancelled"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(fixture_path),
+                "output_path": str(output_path),
+                "table_name": "disclosures",
+                "table_workers": 2,
+            },
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+
+    assert not output_path.exists()
 
 
 def test_build_disclosure_table_payload_accepts_nested_folder_path(tmp_path: Path) -> None:

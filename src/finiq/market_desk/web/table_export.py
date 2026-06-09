@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from datetime import datetime, timezone
 import json
+import os
 import sqlite3
 from typing import Any, Callable
 
@@ -23,6 +25,8 @@ TABLE_SCHEMA_VERSION = 2
 DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
 SQLITE_FORMAT = "finiq_disclosure_table_sqlite_shard"
+DEFAULT_SHARD_WORKERS = 4
+MAX_SHARD_WORKERS = 8
 
 
 def _date_part(value: object) -> str:
@@ -298,6 +302,19 @@ def _group_rows_by_year(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, 
     return grouped
 
 
+def _resolve_shard_workers(value: object, shard_count: int) -> int:
+    if shard_count <= 1:
+        return 1
+    try:
+        requested = int(value or DEFAULT_SHARD_WORKERS)
+    except (TypeError, ValueError):
+        requested = DEFAULT_SHARD_WORKERS
+    if requested <= 1:
+        return 1
+    cpu_limit = os.cpu_count() or 1
+    return max(1, min(requested, shard_count, cpu_limit, MAX_SHARD_WORKERS))
+
+
 def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) -> None:
     quoted_table = f'"{table_name}"'
     connection.execute(f"DROP TABLE IF EXISTS {quoted_table}")
@@ -530,6 +547,89 @@ def _write_manifest(manifest_path: Path, payload: dict[str, Any]) -> None:
     temporary_path.replace(manifest_path)
 
 
+def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
+    if cancel_check and cancel_check():
+        raise RuntimeError("Job cancelled")
+
+
+def _write_sqlite_shards(
+    *,
+    rows_by_year: dict[str, list[dict[str, Any]]],
+    shard_root: Path,
+    source_path: Path,
+    source_type: str,
+    table_name: str,
+    worker_count: int,
+    progress_callback: Callable[[str], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> list[dict[str, Any]]:
+    shard_items = sorted(rows_by_year.items())
+    total_shards = len(shard_items)
+    if worker_count <= 1:
+        shards: list[dict[str, Any]] = []
+        for i, (year, shard_rows) in enumerate(shard_items, 1):
+            _raise_if_cancelled(cancel_check)
+            if progress_callback:
+                progress_callback(f"[{i}/{total_shards}] {year}년 샤드 생성 중... ({len(shard_rows)} 건)")
+            shard_path = shard_root / f"{year}.sqlite"
+            shards.append(
+                _write_sqlite_shard(
+                    shard_path=shard_path,
+                    rows=shard_rows,
+                    classification_path=source_path,
+                    source_type=source_type,
+                    table_name=table_name,
+                    shard_year=year,
+                )
+            )
+        return shards
+
+    if progress_callback:
+        progress_callback(f"연도 샤드 병렬 생성을 사용합니다. workers={worker_count}")
+
+    shards_by_year: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="kind-table-shard") as executor:
+        pending = {}
+        try:
+            for i, (year, shard_rows) in enumerate(shard_items, 1):
+                _raise_if_cancelled(cancel_check)
+                if progress_callback:
+                    progress_callback(f"[{i}/{total_shards}] {year}년 샤드 생성 예약... ({len(shard_rows)} 건)")
+                shard_path = shard_root / f"{year}.sqlite"
+                future = executor.submit(
+                    _write_sqlite_shard,
+                    shard_path=shard_path,
+                    rows=shard_rows,
+                    classification_path=source_path,
+                    source_type=source_type,
+                    table_name=table_name,
+                    shard_year=year,
+                )
+                pending[future] = year
+
+            completed = 0
+            while pending:
+                _raise_if_cancelled(cancel_check)
+                done, _ = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+                for future in done:
+                    year = pending.pop(future)
+                    result = future.result()
+                    shards_by_year[year] = result
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(f"[{completed}/{total_shards}] {year}년 샤드 생성 완료 ({result['disclosures']} 건)")
+        except RuntimeError as exc:
+            if str(exc) == "Job cancelled":
+                for future in pending:
+                    future.cancel()
+            raise
+
+    _raise_if_cancelled(cancel_check)
+    return [shards_by_year[year] for year, _ in shard_items]
+
+
 def build_disclosure_table_payload(
     body: dict[str, Any],
     progress_callback: Callable[[str], None] | None = None,
@@ -564,28 +664,25 @@ def build_disclosure_table_payload(
             }
         )
     rows_by_year = _group_rows_by_year(rows)
+    shard_workers = _resolve_shard_workers(body.get("table_workers") or body.get("shard_workers"), len(rows_by_year))
 
     if progress_callback:
-        progress_callback(f"데이터 분류 완료 (회사: {companies}개, 연도 샤드: {len(rows_by_year)}개). 샤드 생성을 시작합니다...")
-
-    shards: list[dict[str, Any]] = []
-    for i, (year, shard_rows) in enumerate(sorted(rows_by_year.items()), 1):
-        if cancel_check and cancel_check():
-            raise RuntimeError("Job cancelled")
-        if progress_callback:
-            progress_callback(f"[{i}/{len(rows_by_year)}] {year}년 샤드 생성 중... ({len(shard_rows)} 건)")
-        shard_path = shard_root / f"{year}.sqlite"
-        shards.append(
-            _write_sqlite_shard(
-                shard_path=shard_path,
-                rows=shard_rows,
-                classification_path=source_path,
-                source_type=source_type,
-                table_name=table_name,
-                shard_year=year,
-            )
+        progress_callback(
+            f"데이터 분류 완료 (회사: {companies}개, 연도 샤드: {len(rows_by_year)}개, workers: {shard_workers}). 샤드 생성을 시작합니다..."
         )
 
+    shards = _write_sqlite_shards(
+        rows_by_year=rows_by_year,
+        shard_root=shard_root,
+        source_path=source_path,
+        source_type=source_type,
+        table_name=table_name,
+        worker_count=shard_workers,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
+
+    _raise_if_cancelled(cancel_check)
     if progress_callback:
         progress_callback("매니페스트 파일을 기록합니다...")
 
