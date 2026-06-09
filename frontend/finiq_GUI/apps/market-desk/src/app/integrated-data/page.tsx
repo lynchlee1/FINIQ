@@ -10,6 +10,7 @@ import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { UI_TEXT } from "@/config/uiText";
 
 interface ProviderField {
   id: string;
@@ -141,7 +142,7 @@ export default function IntegratedDataPage() {
                 </Button>
                 {activeJobId && (
                   <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
-                    중단
+                    {UI_TEXT.actions.cancelJob}
                   </Button>
                 )}
               </div>

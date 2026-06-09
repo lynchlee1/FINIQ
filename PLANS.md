@@ -1,27 +1,25 @@
-# 공시내역 변환 SQLite manifest 개선 계획
+# 실행 현황 버튼 라벨 리소스 통합 계획
 
 ## Assumptions
 
-- "공시 메타데이터를 로드합니다..." 병목은 분류 JSON을 로드한 뒤 rows 전체를 만들고 다시 연도별로 그룹핑하는 변환 전처리 구간으로 본다.
-- 출력 형식(`finiq_disclosure_table_manifest_v1`)과 SQLite shard schema는 유지한다.
-- 새 저장 방식은 `*.sqlite_manifest_shards/` 폴더 안에 `*.sqlite_manifest.json` manifest를 두고, shard SQLite 파일도 같은 폴더에 둔다.
-- 필터링 단계는 새 nested manifest 방식만 정상 저장 방식으로 본다.
+- "우측 버튼"은 `ActionDock`의 `실행 현황` 패널을 뜻한다.
+- 현재 불일치는 실행 현황 안의 취소 버튼이 페이지별로 `중단`, `작업 중단` 등으로 흩어진 문제다.
+- 기본 라벨은 더 명확한 `작업 중단`으로 통일한다.
+- 특정 기능에서 다른 문구가 필요하면 공통 컴포넌트 prop으로 override한다.
 
 ## Steps
 
-1. 변환 단계 경로 규칙 변경
-   - `output_path`가 가리키는 manifest 이름은 유지하되 실제 manifest 경로를 shard 폴더 내부로 해석한다.
-   - verify: 변환 결과 manifest가 `sqlite_manifest_shards` 폴더 안에 생성되고 payload 경로가 이를 가리킨다.
+1. 공통 UI 텍스트 리소스 추가
+   - `src/config/uiText.ts`에 실행 관련 기본 버튼 라벨을 둔다.
+   - verify: 버튼 라벨 문자열의 기본값이 한 파일에서 조회된다.
 
-2. 변환 전처리 단순화 및 속도 개선
-   - 분류/source folder rows를 만든 뒤 별도 `_group_rows_by_year`를 도는 대신, rows 생성 중 연도별 버킷과 summary를 같이 만든다.
-   - verify: 기존 row count 검증과 shard 생성 테스트가 그대로 통과한다.
+2. `JobStatusLogger` 기본 취소 라벨 연결
+   - `cancelLabel` prop을 optional로 추가하고 기본값으로 공통 리소스를 쓴다.
+   - verify: 기존 호출부는 prop 추가 없이 `작업 중단`을 표시한다.
 
-3. 필터링 단계 manifest/shard 해석 보강
-   - root가 shard 폴더일 때 내부 manifest를 탐색한다.
-   - root가 상위 폴더일 때 `*_shards/*.sqlite_manifest.json`만 자동 탐색한다.
-   - manifest가 shard 폴더 안에 있을 때 `relative_path`가 shard 파일명인 경우 같은 폴더에서 정상 해석되게 한다.
-   - verify: nested manifest directory/shard directory 테스트가 통과한다.
+3. 실행 현황 커스텀 취소 버튼 정리
+   - `download/page.tsx`처럼 `JobStatusLogger` 밖에서 직접 렌더링하는 실행 현황 취소 버튼도 같은 리소스를 쓴다.
+   - verify: 실행 현황 패널 취소 버튼 문구가 `작업 중단`으로 통일된다.
 
-4. 테스트 실행
-   - `pytest tests/market_desk/test_kind_web_service.py`를 실행한다.
+4. 타입 검사 실행
+   - `npm run build --workspace @finiq/app-market-desk` 또는 가능한 TypeScript 검증 명령을 실행한다.

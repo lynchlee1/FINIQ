@@ -16,6 +16,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { UI_TEXT } from "@/config/uiText";
 
 const PARSE_MODES = [
   {
@@ -432,7 +433,7 @@ export default function HtmlParsePage() {
                 </Button>
                 <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
                   <Square className="mr-2 h-4 w-4" />
-                  중지
+                  {UI_TEXT.actions.cancelJob}
                 </Button>
                 <Button onClick={handleExport} disabled={!outputPath} variant="outline" className="h-10 w-full dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
                   <FileSpreadsheet className="mr-2 h-4 w-4" />

@@ -16,6 +16,7 @@ import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
+import { UI_TEXT } from "@/config/uiText";
 
 const parseISODate = (dateStr: string) => {
   const [year, month, day] = dateStr.split("-").map(Number);
@@ -939,7 +940,7 @@ export default function DownloadPage() {
                   실행
                 </Button>
                 <Button variant="outline" className="w-full" onClick={handleCancelDownload} disabled={!activeJobId}>
-                  중단
+                  {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
 
@@ -1182,7 +1183,7 @@ export default function DownloadPage() {
                     className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300"
                   >
                     <Square className="mr-2 h-4 w-4" />
-                    중단
+                    {UI_TEXT.actions.cancelJob}
                   </Button>
                 </div>
                 <JobStatusLogger

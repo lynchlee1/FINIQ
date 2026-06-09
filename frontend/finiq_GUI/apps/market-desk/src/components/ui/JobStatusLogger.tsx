@@ -1,12 +1,14 @@
 import { cn } from "@finiq/ui/utils";
 import { Button } from "@finiq/ui";
 import { Square } from "lucide-react";
+import { UI_TEXT } from "@/config/uiText";
 
 interface JobStatusLoggerProps {
   status: string;
   isErrorStatus: boolean;
   onCancel?: () => void;
   isCancellable?: boolean;
+  cancelLabel?: string;
 }
 
 export function JobStatusLogger({
@@ -14,6 +16,7 @@ export function JobStatusLogger({
   isErrorStatus,
   onCancel,
   isCancellable = false,
+  cancelLabel = UI_TEXT.actions.cancelJob,
 }: JobStatusLoggerProps) {
   return (
     <div className="space-y-3">
@@ -25,7 +28,7 @@ export function JobStatusLogger({
             className="dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300"
           >
             <Square className="mr-2 h-4 w-4" />
-            작업 중단
+            {cancelLabel}
           </Button>
         </div>
       )}

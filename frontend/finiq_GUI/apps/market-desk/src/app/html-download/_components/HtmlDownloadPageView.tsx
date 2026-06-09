@@ -15,6 +15,7 @@ import {
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { UI_TEXT } from "@/config/uiText";
 
 type DownloadVariant = "external" | "content";
 type SplitByYearButtonProps = {
@@ -555,7 +556,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 </Button>
                 <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
                   <Square className="mr-2 h-4 w-4" />
-                  중지
+                  {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
             </CardContent>
