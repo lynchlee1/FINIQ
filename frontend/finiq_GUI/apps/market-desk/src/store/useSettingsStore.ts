@@ -8,6 +8,7 @@ interface SettingsState {
   selected_classification_path: string;
   sqlite_source_path: string;
   download_output_directory: string;
+  sqlite_output_directory: string;
   sqlite_manifest_path: string;
   html_output_directory: string;
   html_content_output_directory: string;
@@ -39,6 +40,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   selected_classification_path: "",
   sqlite_source_path: "",
   download_output_directory: "",
+  sqlite_output_directory: "",
   sqlite_manifest_path: "",
   html_output_directory: "",
   html_content_output_directory: "",

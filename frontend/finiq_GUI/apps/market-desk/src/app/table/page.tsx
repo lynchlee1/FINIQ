@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Play, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
+import { Input } from "@finiq/ui";
 import { Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { cn } from "@finiq/ui/utils";
@@ -29,6 +30,8 @@ export default function TablePage() {
   // Form State
   const [classificationPath, setClassificationPath] = useState("");
   const [outputPath, setOutputPath] = useState("");
+  const [tableWorkers, setTableWorkers] = useState("1");
+  const [maxTableWorkers, setMaxTableWorkers] = useState(1);
 
   const outputDirectoryFromRawPath = (path: string) => {
     const normalized = String(path || "").trim();
@@ -72,7 +75,7 @@ export default function TablePage() {
         await loadClassifications(
           config.output_root || "",
           config.sqlite_source_path || config.selected_classification_path || "",
-          config.sqlite_manifest_path || ""
+          config.sqlite_output_directory || config.sqlite_manifest_path || ""
         );
       }
     } catch (err: any) {
@@ -84,6 +87,9 @@ export default function TablePage() {
   }, [loadClassifications, fetchSettings]);
 
   useEffect(() => {
+    const hardwareConcurrency = Math.max(1, Math.floor(window.navigator.hardwareConcurrency || 1));
+    setMaxTableWorkers(hardwareConcurrency);
+    setTableWorkers(String(hardwareConcurrency));
     fetchConfig();
   }, [fetchConfig]);
 
@@ -120,6 +126,7 @@ export default function TablePage() {
           classification_path: classificationPath,
           output_path: outputPath,
           table_name: "disclosures",
+          table_workers: Number(tableWorkers || maxTableWorkers || 1),
         }),
       });
       
@@ -168,7 +175,7 @@ export default function TablePage() {
                     value={outputPath} 
                     onChange={(val) => {
                       setOutputPath(val);
-                      saveSetting("output_root", val);
+                      saveSetting("sqlite_output_directory", val);
                     }}
                     mode="folder"
                     placeholder="저장 경로를 선택하세요"
@@ -215,7 +222,28 @@ export default function TablePage() {
           }
           settingsTitle="설정"
           settingsContent={
-            <div className="text-sm text-slate-500 dark:text-slate-400">추가 변환 설정이 없습니다. 입출력 경로는 메인 화면에서 조정합니다.</div>
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+                </div>
+                <Label className="grid gap-2 dark:text-slate-300">
+                  연도 샤드 worker 수
+                  <Input
+                    type="number"
+                    min="1"
+                    max={maxTableWorkers}
+                    step="1"
+                    value={tableWorkers}
+                    onChange={(event) => setTableWorkers(event.target.value)}
+                    className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                  />
+                </Label>
+                <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  최대 {maxTableWorkers}개까지 사용합니다. 실제 worker 수는 CPU 코어 수와 연도 shard 개수 중 작은 값으로 제한됩니다.
+                </p>
+              </div>
+            </div>
           }
         />
       </div>

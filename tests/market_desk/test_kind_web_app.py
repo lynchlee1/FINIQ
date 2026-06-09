@@ -34,6 +34,25 @@ def test_api_settings(tmp_path: Path):
     assert data["output_root"] == str((tmp_path / "new_root").resolve())
     assert settings_path.exists()
 
+
+def test_api_settings_persists_sqlite_output_directory(tmp_path: Path):
+    settings_path = tmp_path / "settings.json"
+    config.settings_path = str(settings_path)
+
+    client = TestClient(app)
+    response = client.post("/api/settings", json={
+        "sqlite_output_directory": str(tmp_path / "sqlite_output"),
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["sqlite_output_directory"] == str((tmp_path / "sqlite_output").resolve())
+
+    response = client.get("/api/config")
+
+    assert response.status_code == 200
+    assert response.json()["sqlite_output_directory"] == str((tmp_path / "sqlite_output").resolve())
+
 def test_api_settings_does_not_discover_files(tmp_path: Path, monkeypatch):
     def fail_discovery(*args, **kwargs):
         raise AssertionError("settings save should not scan source directories")

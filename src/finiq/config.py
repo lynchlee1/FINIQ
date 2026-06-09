@@ -34,6 +34,7 @@ SAVED_SETTINGS_KEYS = (
     "selected_classification_path",
     "sqlite_source_path",
     "download_output_directory",
+    "sqlite_output_directory",
     "sqlite_manifest_path",
     "html_output_directory",
     "html_content_output_directory",
@@ -62,6 +63,7 @@ class AppConfig:
     selected_classification_path: str = ""
     sqlite_source_path: str = ""
     download_output_directory: str = ""
+    sqlite_output_directory: str = ""
     sqlite_manifest_path: str = ""
     html_output_directory: str = ""
     html_content_output_directory: str = ""
@@ -149,6 +151,7 @@ def init_config() -> AppConfig:
         selected_classification_path=settings.get("selected_classification_path", str(KIND_DATA_DIR / "classification" / "all_companies.json")),
         sqlite_source_path=settings.get("sqlite_source_path", str(KIND_DATA_DIR / "kind_disclosures.sqlite")),
         download_output_directory=settings.get("download_output_directory", output_root),
+        sqlite_output_directory=settings.get("sqlite_output_directory", output_root),
         sqlite_manifest_path=settings.get("sqlite_manifest_path", str(KIND_DATA_DIR / "manifest.json")),
         html_output_directory=settings.get("html_output_directory", str(KIND_DATA_DIR / "html")),
         html_content_output_directory=settings.get("html_content_output_directory", str(KIND_DATA_DIR / "html_contents")),
