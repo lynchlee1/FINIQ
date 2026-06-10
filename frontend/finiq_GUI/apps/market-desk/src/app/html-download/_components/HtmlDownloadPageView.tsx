@@ -526,7 +526,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   }), [partitionInputDirectory, partitionMode, partitionOutputDirectory]);
 
   const handlePartitionStorage = async () => {
-    if (!sourcePath) {
+    if (variant === "content" && !sourcePath) {
       setStatus(variantConfig.sourceRequiredMessage);
       setIsErrorStatus(true);
       return;
@@ -590,9 +590,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       const targetSplitByYear = completedMode === "split";
       const verifiedOutputDirectory = String(pendingPartitionResult.output_directory || partitionOutputDirectory || "").trim();
       const verifiedInputDirectory = String(pendingPartitionResult.source_directory || partitionInputDirectory || "").trim();
+      const sourcePayload = variant === "external"
+        ? { source_directory: verifiedInputDirectory }
+        : { [variantConfig.sourcePayloadKey]: sourcePath };
       const integrityPayload = {
         output_directory: verifiedOutputDirectory,
-        [variantConfig.sourcePayloadKey]: sourcePath,
+        ...sourcePayload,
         limit: limit ? Number(limit) : null,
         split_by_year: targetSplitByYear,
         source_split_by_year: variant === "content" ? contentSourceSplitByYear : targetSplitByYear,
@@ -625,7 +628,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             : targetSplitByYear;
           const manifestPayload = {
             output_directory: verifiedOutputDirectory,
-            [variantConfig.sourcePayloadKey]: sourcePath,
+            ...sourcePayload,
             limit: limit ? Number(limit) : null,
             source_split_by_year: manifestSourceSplitByYear,
           };
