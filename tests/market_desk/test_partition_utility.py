@@ -25,6 +25,7 @@ def test_partition_storage_splits_flat_files_by_filename_year(tmp_path: Path) ->
 
     assert (output / "2024" / "20240101000001.html").read_text(encoding="utf-8") == "a"
     assert (output / "2025" / "20250101000002.json").read_text(encoding="utf-8") == "b"
+    assert output.is_dir()
     assert result["copied_files"] == 2
     assert result["skipped_invalid_year_files"] == 1
     assert result["years"] == ["2024", "2025"]
@@ -128,3 +129,21 @@ def test_partition_storage_rejects_unknown_mode(tmp_path: Path) -> None:
                 "output_directory": str(tmp_path / "output"),
             }
         )
+
+
+def test_partition_storage_rejects_split_when_input_is_already_split(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    (source / "2025").mkdir(parents=True)
+    (source / "2025" / "20250101000001.html").write_text("html", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="이미 연도별 폴더 구조"):
+        run_partition_storage_payload(
+            {
+                "mode": "split",
+                "source_directory": str(source),
+                "output_directory": str(output),
+            }
+        )
+
+    assert not output.exists()
