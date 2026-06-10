@@ -1431,6 +1431,49 @@ def test_download_disclosure_html_payload_logs_when_no_existing_html_overlap(
     assert "기존 HTML 겹침 없음: 전체 대상이 새로 저장됩니다." in payload["progress_log"]
 
 
+def test_check_disclosure_html_output_directory_uses_source_directory_manifest(tmp_path: Path) -> None:
+    source_directory = tmp_path / "kind_html"
+    output_directory = tmp_path / "kind_html_grouped"
+    source_directory.mkdir()
+    (source_directory / "20250101000001.html").write_text(
+        """
+        <select id="mainDoc" name="mainDoc">
+          <option value="20250101000001|Y" selected="selected">본문</option>
+        </select>
+        """,
+        encoding="utf-8",
+    )
+    (source_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "source_json_path": str(tmp_path / "filtered.json"),
+                "disclosures": [{"acpt_no": "20250101000001", "company_name": "A"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (output_directory / "2025").mkdir(parents=True)
+    (output_directory / "2025" / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    payload = check_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_directory": str(source_directory),
+            "source_json_path": str(tmp_path / "wrong-filtered.json"),
+            "split_by_year": True,
+            "source_split_by_year": False,
+            "output_split_by_year": True,
+        }
+    )
+
+    assert payload["requested_count"] == 1
+    assert payload["existing_target_html_count"] == 1
+    assert payload["missing_target_html_count"] == 0
+    assert payload["deletion_candidate_count"] == 0
+
+
 def test_download_disclosure_html_payload_rejects_unexpected_resume_files(
     tmp_path: Path,
     monkeypatch,
@@ -2992,6 +3035,7 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/api/disclosures/html/manifest/write" in download_component_html
     assert "/api/utility/partition-storage/start" in download_component_html
     assert "분할저장 구조 전환" in download_component_html
+    assert "source_directory: verifiedInputDirectory" in download_component_html
     assert "overwrite: false" in download_component_html
     assert "move: false" in download_component_html
     assert "분할저장 출력 경로 무결성 검사 통과" in download_component_html
