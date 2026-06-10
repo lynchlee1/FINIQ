@@ -1,0 +1,233 @@
+{
+  "title": "Uncommitted Feature Extraction Save/Discard Table",
+  "scope": "Current uncommitted implementation in src/finiq/market_desk/web/disclosure_html.py",
+  "feature": "KIND external viewer HTML compact metadata extraction",
+  "storage_goal": "Efficient per-disclosure storage: keep values that change by disclosure, classify repeated static viewer/UI metadata as discard candidates.",
+  "current_implementation_rule": "Tests and compressed JSON currently preserve all extracted data. This file classifies each extracted field with save_or_discard so filtering can be applied later without losing review visibility.",
+  "classification_basis": [
+    "save when the value is likely disclosure-specific or needed to fetch/identify the correct document.",
+    "save when the value supports integrity checks or joins with source disclosure rows.",
+    "discard when the value is mostly static KIND viewer shell, repeated UI text, generic item labels, icons, common scripts, or common resources.",
+    "discard does not mean useless forever; it means not recommended for efficient per-disclosure storage unless real sample variance proves otherwise."
+  ],
+  "rows": [
+    {
+      "field_path": "records[].acpt_no",
+      "save_or_discard": "save",
+      "reason": "Primary disclosure-specific receipt number.",
+      "source": "viewer_html parsed payload or HTML filename stem",
+      "extracted_information": "KIND disclosure receipt number"
+    },
+    {
+      "field_path": "records[].title",
+      "save_or_discard": "save",
+      "reason": "Disclosure title changes by filing and is useful for search, review, and downstream grouping.",
+      "source": "viewer_html parsed title or <title> fallback",
+      "extracted_information": "Disclosure viewer title"
+    },
+    {
+      "field_path": "records[].header",
+      "save_or_discard": "save",
+      "reason": "Usually contains disclosure/company context that varies by filing.",
+      "source": "viewer_html parsed header or <h1 class=\"ttl\"> fallback",
+      "extracted_information": "Viewer page header text"
+    },
+    {
+      "field_path": "records[].selected_main_doc_no",
+      "save_or_discard": "save",
+      "reason": "Identifies the active main document for this disclosure.",
+      "source": "selected main document option in viewer HTML",
+      "extracted_information": "Currently selected main document number"
+    },
+    {
+      "field_path": "records[].main_docs",
+      "save_or_discard": "discard",
+      "reason": "The same document numbers, labels, selected state, and latest flags are preserved with more original context in external_metadata.selects mainDoc options.",
+      "source": "main document <select>/<option> data",
+      "extracted_information": "Normalized main document list",
+      "keep_if": "A future storage format chooses normalized document lists over raw select metadata for simpler downstream consumption."
+    },
+    {
+      "field_path": "records[].attached_docs",
+      "save_or_discard": "save",
+      "reason": "Attachment list differs by disclosure and is needed for content download/navigation.",
+      "source": "attached document <select>/<option> data",
+      "extracted_information": "Attached document list"
+    },
+    {
+      "field_path": "records[].metadata",
+      "save_or_discard": "save",
+      "reason": "Current examples are empty, but future source row metadata may be needed for joins, filtering, or audit context.",
+      "source": "source disclosure result JSON or result directory rows",
+      "extracted_information": "Source row metadata when available"
+    },
+    {
+      "field_path": "records[].external_metadata.meta",
+      "save_or_discard": "discard",
+      "reason": "Meta tags are generally static KIND page metadata, browser hints, or service descriptions rather than disclosure-specific values.",
+      "source": "all <meta> tags",
+      "extracted_information": "HTML meta tag attributes",
+      "keep_if": "A meta value is proven to contain disclosure-specific identifiers or filing state in real samples."
+    },
+    {
+      "field_path": "records[].external_metadata.forms[].attrs",
+      "save_or_discard": "discard",
+      "reason": "Form name/id/action/method are usually static viewer shell structure.",
+      "source": "all <form> tags",
+      "extracted_information": "Form attributes",
+      "keep_if": "Action or another form attribute varies by disclosure and is required to reproduce a fetch."
+    },
+    {
+      "field_path": "records[].external_metadata.forms[].inputs",
+      "save_or_discard": "save",
+      "reason": "Nested hidden inputs can contain disclosure-specific viewer state such as acptNo, docLocPath, doc numbers, and title values.",
+      "source": "inputs inside each <form>",
+      "extracted_information": "Form-scoped input attributes"
+    },
+    {
+      "field_path": "records[].external_metadata.forms[].selects",
+      "save_or_discard": "save",
+      "reason": "Form-scoped select options can contain per-disclosure main/attached document numbers and latest flags.",
+      "source": "selects inside each <form>",
+      "extracted_information": "Form-scoped select and option data"
+    },
+    {
+      "field_path": "records[].external_metadata.forms[].textareas",
+      "save_or_discard": "discard",
+      "reason": "Usually absent or static UI payload; not known to be necessary for per-disclosure storage.",
+      "source": "textareas inside each <form>",
+      "extracted_information": "Textarea attributes and text",
+      "keep_if": "Real samples show disclosure-specific values in textarea text or attributes."
+    },
+    {
+      "field_path": "records[].external_metadata.forms[].buttons",
+      "save_or_discard": "discard",
+      "reason": "Button labels and attributes are typically repeated UI controls.",
+      "source": "buttons inside each <form>",
+      "extracted_information": "Button attributes and text",
+      "keep_if": "A button carries disclosure-specific state in attributes."
+    },
+    {
+      "field_path": "records[].external_metadata.inputs",
+      "save_or_discard": "discard",
+      "reason": "Real examples mostly contain empty/static hidden controls plus acptNo and tempTitle, which duplicate acpt_no and title.",
+      "source": "all <input> tags",
+      "extracted_information": "Input attributes",
+      "keep_if": "A future sample contains a non-empty, non-duplicated input value required for document fetches or parser context."
+    },
+    {
+      "field_path": "records[].external_metadata.selects",
+      "save_or_discard": "save",
+      "reason": "Select options encode per-disclosure document numbers, labels, latest flags, and selected state.",
+      "source": "all <select> tags and child <option> tags",
+      "extracted_information": "Select id/name/attributes and option text/value/doc_no/latest_flag/selected state"
+    },
+    {
+      "field_path": "records[].external_metadata.links",
+      "save_or_discard": "discard",
+      "reason": "Most anchors are repeated viewer controls such as print/PDF actions and do not identify the disclosure.",
+      "source": "all <a> tags",
+      "extracted_information": "Anchor attributes, visible text, and nested image attributes",
+      "keep_if": "href/onclick/text contains a disclosure-specific document number or unique fetch parameter."
+    },
+    {
+      "field_path": "records[].external_metadata.frames",
+      "save_or_discard": "discard",
+      "reason": "Frame id/name/title usually describe static viewer layout rather than per-disclosure values.",
+      "source": "all <iframe> and <frame> tags",
+      "extracted_information": "Frame attributes",
+      "keep_if": "src or another attribute contains disclosure-specific document state."
+    },
+    {
+      "field_path": "records[].external_metadata.resources",
+      "save_or_discard": "discard",
+      "reason": "Images, styles, objects, embeds, and sources are generally repeated static assets.",
+      "source": "all <link>, <img>, <object>, <embed>, and <source> tags",
+      "extracted_information": "External/static resource attributes",
+      "keep_if": "A resource URL contains disclosure-specific document paths or file identifiers."
+    },
+    {
+      "field_path": "records[].external_metadata.scripts[].attrs",
+      "save_or_discard": "discard",
+      "reason": "Script src/version references are usually common viewer implementation details.",
+      "source": "all <script> tags",
+      "extracted_information": "Script attributes",
+      "keep_if": "A script URL contains disclosure-specific parameters."
+    },
+    {
+      "field_path": "records[].external_metadata.scripts[].text",
+      "save_or_discard": "discard",
+      "reason": "Full inline script text can be bulky and commonly includes repeated viewer logic. Specific simple variables are captured separately.",
+      "source": "inline <script> text",
+      "extracted_information": "Inline script text",
+      "keep_if": "The inline script contains non-extractable disclosure-specific values that are not available in script_variables or inputs."
+    },
+    {
+      "field_path": "records[].external_metadata.scripts[].variables",
+      "save_or_discard": "save",
+      "reason": "Simple inline variables can include disclosure-specific identifiers, tracking page names, or viewer state with low storage cost.",
+      "source": "inline JavaScript var assignments inside each script",
+      "extracted_information": "Simple variable name/value pairs"
+    },
+    {
+      "field_path": "records[].external_metadata.text_blocks",
+      "save_or_discard": "save",
+      "reason": "Some direct text blocks contain disclosure-specific status notices such as non-final correction notices or exchange correction-request notices.",
+      "source": "direct text from selected text-bearing tags",
+      "extracted_information": "Tag name, attributes, and direct text for button/caption/dd/dt/headings/label/li/p/span/td/th",
+      "filter_recommendation": "When optimizing later, keep unusual/status/disclosure-specific text and drop repeated item descriptions, labels, captions, and static UI text."
+    },
+    {
+      "field_path": "records[].external_metadata.script_variables",
+      "save_or_discard": "save",
+      "reason": "Flattened script variables are compact and may carry disclosure-specific identifiers/state.",
+      "source": "inline JavaScript var assignments across scripts",
+      "extracted_information": "Simple variable name/value pairs"
+    },
+    {
+      "field_path": "records[].external_metadata.source_sha256",
+      "save_or_discard": "save",
+      "reason": "Compact integrity key for verifying the source HTML without retaining full wrapper HTML.",
+      "source": "raw source HTML bytes",
+      "extracted_information": "SHA-256 hash of the original viewer HTML"
+    },
+    {
+      "field_path": "records[].external_metadata.source_size_bytes",
+      "save_or_discard": "save",
+      "reason": "Small sanity-check field for storage impact and source completeness.",
+      "source": "raw source HTML bytes",
+      "extracted_information": "Original viewer HTML size in bytes"
+    }
+  ],
+  "recommended_future_storage_shape": {
+    "save": [
+      "records[].acpt_no",
+      "records[].title",
+      "records[].header",
+      "records[].selected_main_doc_no",
+      "records[].attached_docs",
+      "records[].metadata",
+      "records[].external_metadata.forms[].inputs",
+      "records[].external_metadata.forms[].selects",
+      "records[].external_metadata.selects",
+      "records[].external_metadata.scripts[].variables",
+      "records[].external_metadata.text_blocks after repeated-static-text filtering",
+      "records[].external_metadata.script_variables",
+      "records[].external_metadata.source_sha256",
+      "records[].external_metadata.source_size_bytes"
+    ],
+    "discard": [
+      "records[].main_docs when records[].external_metadata.selects is retained",
+      "records[].external_metadata.meta",
+      "records[].external_metadata.forms[].attrs unless variable",
+      "records[].external_metadata.forms[].textareas unless variable",
+      "records[].external_metadata.forms[].buttons unless variable",
+      "records[].external_metadata.inputs unless non-duplicated variable values appear",
+      "records[].external_metadata.links unless variable",
+      "records[].external_metadata.frames unless variable",
+      "records[].external_metadata.resources unless variable",
+      "records[].external_metadata.scripts[].attrs unless variable",
+      "records[].external_metadata.scripts[].text unless needed"
+    ]
+  }
+}
