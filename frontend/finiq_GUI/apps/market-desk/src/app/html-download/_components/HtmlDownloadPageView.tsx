@@ -466,13 +466,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   };
 
   const handleCancel = async () => {
-    if (!activeCancelToken) return;
+    if (!activeCancelToken && !activeJobId) return;
     setStatus(variantConfig.stopMessage);
     try {
-      await fetch(variantConfig.cancelEndpoint, {
+      await fetch(activeCancelToken ? variantConfig.cancelEndpoint : "/api/utility/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cancel_token: activeCancelToken }),
+        body: JSON.stringify(activeCancelToken ? { cancel_token: activeCancelToken } : { job_id: activeJobId }),
       });
     } catch (err: any) {
       setStatus(err.message);
@@ -547,6 +547,8 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       return;
     }
     partitionRetryRef.current = false;
+    setStatus("분할저장 구조 전환 작업을 시작하는 중입니다...");
+    setIsErrorStatus(false);
     startJob("/api/utility/partition-storage/start", buildPartitionJobPayload());
   };
 
@@ -570,6 +572,21 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
     const verifyPartitionOutput = async () => {
       const completedMode = pendingPartitionResult.mode as PartitionMode;
+      const changedFileCount = Number(pendingPartitionResult.copied_files || 0) + Number(pendingPartitionResult.moved_files || 0);
+      const reusedFileCount = Number(pendingPartitionResult.skipped_existing_files || 0);
+      if (changedFileCount + reusedFileCount === 0) {
+        const sourceYearDirectoryCount = Number(pendingPartitionResult.source_year_directory_count || 0);
+        setPendingPartitionResult(null);
+        if (completedMode === "split" && sourceYearDirectoryCount > 0) {
+          setStatus("입력 경로가 이미 연도별 폴더 구조입니다. 일반 폴더로 만들려면 출력 구조를 일반 폴더로 선택하세요.");
+        } else {
+          setStatus(completedMode === "split"
+            ? "연도별 폴더 출력 대상 파일이 없습니다. 입력 경로에 HTML 파일이 있는지 확인하세요."
+            : "일반 폴더 출력 대상 파일이 없습니다. 입력 경로에 연도별 폴더와 HTML 파일이 있는지 확인하세요.");
+        }
+        setIsErrorStatus(true);
+        return;
+      }
       const targetSplitByYear = completedMode === "split";
       const verifiedOutputDirectory = String(pendingPartitionResult.output_directory || partitionOutputDirectory || "").trim();
       const verifiedInputDirectory = String(pendingPartitionResult.source_directory || partitionInputDirectory || "").trim();
@@ -807,12 +824,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "partitionMode",
       kind: "select",
-      label: "전환 방향",
+      label: "출력 구조",
       value: partitionMode,
       onChange: (value) => setPartitionMode(value as PartitionMode),
       options: [
-        { value: "split", label: "일반 폴더 → 연도별 폴더" },
-        { value: "flatten", label: "연도별 폴더 → 일반 폴더" },
+        { value: "split", label: "연도별 폴더" },
+        { value: "flatten", label: "일반 폴더" },
       ],
       span: 2,
     },
@@ -962,11 +979,11 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           >
               <HtmlWorkflowForm fields={partitionFields} />
               <div className="grid gap-3 md:grid-cols-2">
-                <Button className="h-10 w-full" onClick={handlePartitionStorage} disabled={isJobActive}>
-                  <Play className="mr-2 h-4 w-4" />
-                  실행
+                <Button type="button" className="h-10 w-full" onClick={handlePartitionStorage} disabled={isJobActive}>
+                  {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  {isJobActive ? "실행 중" : "실행"}
                 </Button>
-                <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
+                <Button type="button" variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken && !activeJobId}>
                   <Square className="mr-2 h-4 w-4" />
                   {UI_TEXT.actions.cancelJob}
                 </Button>
@@ -987,7 +1004,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   <Play className="mr-2 h-4 w-4" />
                   실행
                 </Button>
-                <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
+                <Button type="button" variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken && !activeJobId}>
                   <Square className="mr-2 h-4 w-4" />
                   {UI_TEXT.actions.cancelJob}
                 </Button>
@@ -1002,7 +1019,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             <JobStatusLogger
               status={status}
               isErrorStatus={isErrorStatus}
-              isCancellable={!!activeCancelToken}
+              isCancellable={!!activeCancelToken || !!activeJobId}
               onCancel={handleCancel}
             />
           }
