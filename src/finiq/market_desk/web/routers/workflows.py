@@ -16,6 +16,7 @@ from finiq.market_desk.web.disclosure_html import (
     cancel_disclosure_html_download,
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
+    write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.disclosure_html_parse import (
     build_bond_parse_summary_payload,
@@ -241,6 +242,13 @@ def create_workflows_router(
     async def check_html_content_download_folder(payload: dict[str, Any]):
         try:
             return check_disclosure_html_output_directory_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/manifest/write")
+    async def write_html_manifest(payload: dict[str, Any]):
+        try:
+            return write_disclosure_html_manifest_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

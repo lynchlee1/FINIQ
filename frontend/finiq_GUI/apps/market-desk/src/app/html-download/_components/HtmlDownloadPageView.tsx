@@ -19,6 +19,7 @@ import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 
 type DownloadVariant = "external" | "content";
+type PartitionMode = "split" | "flatten";
 type SplitByYearButtonProps = {
   checked: boolean;
   onChange: () => void;
@@ -123,26 +124,27 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         lines.push("결과 파일", ...res.written_files);
       }
     }
+    if (res.mode === "split" || res.mode === "flatten") {
+      lines.push(res.mode === "split" ? "분할저장 전환 완료" : "분할저장 해제 완료");
+      lines.push(`입력 파일: ${formatInteger(res.input_files)}개`);
+      lines.push(`복사 파일: ${formatInteger(res.copied_files || 0)}개`);
+      if (res.moved_files) {
+        lines.push(`이동 파일: ${formatInteger(res.moved_files)}개`);
+      }
+      lines.push(`기존 파일 건너뜀: ${formatInteger(res.skipped_existing_files)}개`);
+      if (res.skipped_invalid_year_files) {
+        lines.push(`연도 판별 불가: ${formatInteger(res.skipped_invalid_year_files)}개`);
+      }
+      if (Array.isArray(res.years) && res.years.length) {
+        lines.push(`대상 연도: ${res.years.join(", ")}`);
+      }
+      lines.push(`저장 경로: ${res.output_directory || ""}`);
+    }
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
       lines.push("", "최근 로그", ...data.progress_log);
     }
     return lines;
   }, []);
-
-  const {
-    status,
-    isErrorStatus,
-    activeJobId,
-    startPolling,
-    setStatus,
-    setIsErrorStatus,
-  } = useJobPolling({
-    pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
-    formatStatus,
-    onSuccess: setResult,
-  });
-
-  const isJobActive = !!activeJobId;
 
   const [activeCancelToken, setActiveCancelToken] = useState<string | null>(null);
   const [inspectRunning, setInspectRunning] = useState(false);
@@ -151,7 +153,10 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
   const [existingData, setExistingData] = useState<any>(null);
   const [checkingExisting, setCheckingExisting] = useState(false);
+  const [existingCheckRefreshKey, setExistingCheckRefreshKey] = useState(0);
+  const [pendingPartitionResult, setPendingPartitionResult] = useState<any>(null);
   const checkExistingRequestRef = useRef({ id: 0, key: "" });
+  const partitionRetryRef = useRef(false);
 
   // Form State
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -165,6 +170,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [contentSourceSplitByYear, setContentSourceSplitByYear] = useState(false);
   const [compressSplitByYear, setCompressSplitByYear] = useState(false);
   const [mergeSplitByYear, setMergeSplitByYear] = useState(false);
+  const [partitionMode, setPartitionMode] = useState<PartitionMode>("split");
+  const [partitionInputDirectory, setPartitionInputDirectory] = useState("");
+  const [partitionOutputDirectory, setPartitionOutputDirectory] = useState("");
   const [progressInterval, setProgressInterval] = useState("10");
   const [mergeOutputPath, setMergeOutputPath] = useState("");
 
@@ -172,6 +180,28 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     (typeof existingData.detected_output_split_by_year === "boolean" && existingData.detected_output_split_by_year !== downloadSplitByYear) ||
     (variant === "content" && typeof existingData.detected_source_split_by_year === "boolean" && existingData.detected_source_split_by_year !== contentSourceSplitByYear)
   );
+
+  const {
+    status,
+    isErrorStatus,
+    activeJobId,
+    startPolling,
+    setStatus,
+    setIsErrorStatus,
+  } = useJobPolling({
+    pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
+    formatStatus,
+    onSuccess: (data) => {
+      setResult(data);
+      if (data?.mode === "split" || data?.mode === "flatten") {
+        setPendingPartitionResult(data);
+        return;
+      }
+      setPendingPartitionResult(null);
+    },
+  });
+
+  const isJobActive = !!activeJobId;
 
   const startJob = useCallback(async (endpoint: string, payload: any) => {
     try {
@@ -196,6 +226,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     fetchSettings().then((config) => {
       const nextOutputDirectory = config[variantConfig.defaultDirectoryKey] || (config.output_root ? `${config.output_root}/${variantConfig.defaultDirectorySuffix}` : "");
       setOutputDirectory(nextOutputDirectory);
+      setPartitionInputDirectory(nextOutputDirectory);
       
       const transferredPayload = variant === "external" ? sessionStorage.getItem("finiq.kind.filteredDisclosures") : null;
       if (transferredPayload) {
@@ -344,7 +375,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       checkExisting();
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [checkExisting]);
+  }, [checkExisting, existingCheckRefreshKey]);
 
   const handleInspectFolder = async () => {
     if (!sourcePath) {
@@ -486,8 +517,42 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     startJob("/api/disclosures/html/download/compress/start", payload);
   };
 
+  const buildPartitionJobPayload = useCallback((mode = partitionMode, sourceDirectory = partitionInputDirectory, outputDir = partitionOutputDirectory) => ({
+    mode,
+    source_directory: sourceDirectory,
+    output_directory: outputDir,
+    overwrite: false,
+    move: false,
+  }), [partitionInputDirectory, partitionMode, partitionOutputDirectory]);
+
+  const handlePartitionStorage = async () => {
+    if (!sourcePath) {
+      setStatus(variantConfig.sourceRequiredMessage);
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!partitionInputDirectory) {
+      setStatus("분할저장 입력 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!partitionOutputDirectory) {
+      setStatus("분할저장 출력 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (partitionInputDirectory.trim() === partitionOutputDirectory.trim()) {
+      setStatus("분할저장 입력 경로와 출력 경로는 달라야 합니다.");
+      setIsErrorStatus(true);
+      return;
+    }
+    partitionRetryRef.current = false;
+    startJob("/api/utility/partition-storage/start", buildPartitionJobPayload());
+  };
+
   const saveOutputDirectory = (val: string) => {
     setOutputDirectory(val);
+    setPartitionInputDirectory(val);
     saveSetting(variantConfig.defaultDirectoryKey, val);
     if (variant === "content") {
       setMergeOutputPath(mergeSplitByYear ? val : (val ? `${val}/merged-content-html.json` : ""));
@@ -498,6 +563,133 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     setSourcePath(val);
     saveSetting(variantConfig.sourceSettingKey, val);
   };
+
+  useEffect(() => {
+    if (!pendingPartitionResult) return;
+    let cancelled = false;
+
+    const verifyPartitionOutput = async () => {
+      const completedMode = pendingPartitionResult.mode as PartitionMode;
+      const targetSplitByYear = completedMode === "split";
+      const verifiedOutputDirectory = String(pendingPartitionResult.output_directory || partitionOutputDirectory || "").trim();
+      const verifiedInputDirectory = String(pendingPartitionResult.source_directory || partitionInputDirectory || "").trim();
+      const integrityPayload = {
+        output_directory: verifiedOutputDirectory,
+        [variantConfig.sourcePayloadKey]: sourcePath,
+        limit: limit ? Number(limit) : null,
+        split_by_year: targetSplitByYear,
+        source_split_by_year: variant === "content" ? contentSourceSplitByYear : targetSplitByYear,
+        output_split_by_year: targetSplitByYear,
+      };
+
+      try {
+        setStatus("분할저장 출력 경로 무결성을 검사하는 중입니다...");
+        setIsErrorStatus(false);
+        const response = await fetch(variantConfig.checkExistingEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(integrityPayload),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Partition integrity check failed");
+        if (cancelled) return;
+
+        const requestedCount = Number(data.requested_count || 0);
+        const existingCount = Number(data.existing_target_html_count || 0);
+        const missingCount = Number(data.missing_target_html_count || 0);
+        const deletionCount = Number(data.deletion_candidate_count || 0);
+        const detectedSplit = data.detected_output_split_by_year;
+        const splitMatches = typeof detectedSplit === "boolean" ? detectedSplit === targetSplitByYear : data.output_split_by_year === targetSplitByYear;
+        const passed = requestedCount > 0 && existingCount === requestedCount && missingCount === 0 && deletionCount === 0 && splitMatches;
+
+        if (passed) {
+          const manifestSourceSplitByYear = variant === "content"
+            ? (typeof data.detected_source_split_by_year === "boolean" ? data.detected_source_split_by_year : Boolean(data.source_split_by_year))
+            : targetSplitByYear;
+          const manifestPayload = {
+            output_directory: verifiedOutputDirectory,
+            [variantConfig.sourcePayloadKey]: sourcePath,
+            limit: limit ? Number(limit) : null,
+            source_split_by_year: manifestSourceSplitByYear,
+          };
+          const manifestResponse = await fetch("/api/disclosures/html/manifest/write", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(manifestPayload),
+          });
+          const manifestData = await manifestResponse.json();
+          if (!manifestResponse.ok) throw new Error(manifestData.detail || "HTML manifest write failed");
+          if (cancelled) return;
+
+          setDownloadSplitByYear(targetSplitByYear);
+          setExistingData(data.has_existing ? data : null);
+          setExistingCheckRefreshKey((value) => value + 1);
+          saveOutputDirectory(verifiedOutputDirectory);
+          setPendingPartitionResult(null);
+          setResult({
+            partition: pendingPartitionResult,
+            verification: data,
+            manifest: manifestData,
+          });
+          setStatus([
+            "분할저장 출력 경로 무결성 검사 통과",
+            `이번 대상 ${formatInteger(requestedCount)}건이 모두 저장되어 있습니다.`,
+            `설정 JSON: ${manifestData.manifest_path || ""}`,
+            `저장 경로: ${verifiedOutputDirectory}`,
+          ].join("\n"));
+          setIsErrorStatus(false);
+          return;
+        }
+
+        if (missingCount > 0 && !partitionRetryRef.current) {
+          partitionRetryRef.current = true;
+          setPendingPartitionResult(null);
+          setStatus(`무결성 검사에서 누락 ${formatInteger(missingCount)}건이 발견되어 출력 경로를 한 번 더 보정합니다.`);
+          startJob(
+            "/api/utility/partition-storage/start",
+            buildPartitionJobPayload(completedMode, verifiedInputDirectory, verifiedOutputDirectory),
+          );
+          return;
+        }
+
+        const details = [
+          "분할저장 출력 경로 무결성 검사 실패",
+          `대상: ${formatInteger(requestedCount)}건`,
+          `저장됨: ${formatInteger(existingCount)}건`,
+          `누락: ${formatInteger(missingCount)}건`,
+          `대상 외 파일: ${formatInteger(deletionCount)}개`,
+          `분할저장 구조: ${splitMatches ? "일치" : "불일치"}`,
+        ];
+        setPendingPartitionResult(null);
+        setStatus(details.join("\n"));
+        setIsErrorStatus(true);
+      } catch (err: any) {
+        if (cancelled) return;
+        setPendingPartitionResult(null);
+        setStatus(err.message);
+        setIsErrorStatus(true);
+      }
+    };
+
+    verifyPartitionOutput();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pendingPartitionResult,
+    partitionOutputDirectory,
+    partitionInputDirectory,
+    sourcePath,
+    limit,
+    variant,
+    contentSourceSplitByYear,
+    variantConfig.sourcePayloadKey,
+    variantConfig.checkExistingEndpoint,
+    setStatus,
+    setIsErrorStatus,
+    startJob,
+    buildPartitionJobPayload,
+  ]);
 
   const baseFields: HtmlWorkflowField[] = [
     {
@@ -588,6 +780,41 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           })}
         />
       ),
+    },
+  ];
+
+  const partitionFields: HtmlWorkflowField[] = [
+    {
+      id: "partitionInputDirectory",
+      kind: "path",
+      label: "입력 경로",
+      mode: "folder",
+      value: partitionInputDirectory,
+      onChange: setPartitionInputDirectory,
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 4,
+    },
+    {
+      id: "partitionOutputDirectory",
+      kind: "path",
+      label: "출력 경로",
+      mode: "folder",
+      value: partitionOutputDirectory,
+      onChange: setPartitionOutputDirectory,
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 4,
+    },
+    {
+      id: "partitionMode",
+      kind: "select",
+      label: "전환 방향",
+      value: partitionMode,
+      onChange: (value) => setPartitionMode(value as PartitionMode),
+      options: [
+        { value: "split", label: "일반 폴더 → 연도별 폴더" },
+        { value: "flatten", label: "연도별 폴더 → 일반 폴더" },
+      ],
+      span: 2,
     },
   ];
 
@@ -728,6 +955,23 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 </Button>
             </HtmlWorkflowCard>
           )}
+
+          <HtmlWorkflowCard
+            title="분할저장 구조 전환"
+            description="입력 경로의 기존 HTML 파일을 재다운로드 없이 별도 출력 경로에 새로 저장한 뒤 무결성 검사를 통과하면 완료합니다."
+          >
+              <HtmlWorkflowForm fields={partitionFields} />
+              <div className="grid gap-3 md:grid-cols-2">
+                <Button className="h-10 w-full" onClick={handlePartitionStorage} disabled={isJobActive}>
+                  <Play className="mr-2 h-4 w-4" />
+                  실행
+                </Button>
+                <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
+                  <Square className="mr-2 h-4 w-4" />
+                  {UI_TEXT.actions.cancelJob}
+                </Button>
+              </div>
+          </HtmlWorkflowCard>
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>

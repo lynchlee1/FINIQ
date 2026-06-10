@@ -76,6 +76,49 @@ def test_partition_storage_skips_existing_files_without_overwrite(tmp_path: Path
     assert result["skipped_existing_files"] == 1
 
 
+def test_partition_storage_moves_flat_files_into_year_directories(tmp_path: Path) -> None:
+    source = tmp_path / "viewer_html"
+    source.mkdir()
+    source_file = source / "20250101000001.html"
+    source_file.write_text("html", encoding="utf-8")
+
+    result = run_partition_storage_payload(
+        {
+            "mode": "split",
+            "source_directory": str(source),
+            "output_directory": str(source),
+            "move": True,
+        }
+    )
+
+    assert not source_file.exists()
+    assert (source / "2025" / "20250101000001.html").read_text(encoding="utf-8") == "html"
+    assert result["copied_files"] == 0
+    assert result["moved_files"] == 1
+
+
+def test_partition_storage_moves_year_directories_to_flat_folder(tmp_path: Path) -> None:
+    source = tmp_path / "viewer_html"
+    source_file = source / "2025" / "20250101000001.html"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text("html", encoding="utf-8")
+
+    result = run_partition_storage_payload(
+        {
+            "mode": "flatten",
+            "source_directory": str(source),
+            "output_directory": str(source),
+            "move": True,
+        }
+    )
+
+    assert not source_file.exists()
+    assert not (source / "2025").exists()
+    assert (source / "20250101000001.html").read_text(encoding="utf-8") == "html"
+    assert result["copied_files"] == 0
+    assert result["moved_files"] == 1
+
+
 def test_partition_storage_rejects_unknown_mode(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="mode must be one of"):
         run_partition_storage_payload(
