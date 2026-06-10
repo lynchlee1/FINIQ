@@ -970,6 +970,61 @@ def check_disclosure_html_output_directory_payload(body: dict[str, Any]) -> dict
     }
 
 
+def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Write the HTML manifest for an already materialized output directory."""
+    output_directory = str(body.get("output_directory") or "").strip()
+    if not output_directory:
+        msg = "output_directory is required"
+        raise ValueError(msg)
+
+    resolved_output_directory = Path(output_directory).expanduser().resolve()
+    source_directory_raw = str(body.get("source_directory") or "").strip()
+    source_json = body.get("json")
+    if source_json is None:
+        source_json = body.get("payload")
+    source_json_path = body.get("source_json_path")
+    resolved_source_path = ""
+
+    if source_directory_raw:
+        source_directory = Path(source_directory_raw).expanduser().resolve()
+        source_split_by_year = _as_source_split_by_year(body)
+        targets, manifest_payload = _collect_content_targets_from_external_directory(
+            source_directory,
+            split_by_year=source_split_by_year,
+        )
+        targets = _apply_limit_to_targets(targets, body.get("limit"))
+        acpt_numbers = [target["acpt_no"] for target in targets]
+        source_json = manifest_payload or {"disclosures": [{"acpt_no": acpt_no} for acpt_no in acpt_numbers]}
+        resolved_source_path = str(source_directory)
+    else:
+        if not source_json_path and isinstance(source_json, dict):
+            source_json_path = source_json.get("source_json_path")
+        if source_json_path:
+            source_json, resolved_source_path = _load_source_json_path_payload(source_json_path)
+        if source_json is None:
+            msg = "json or source_json_path is required"
+            raise ValueError(msg)
+        acpt_numbers = collect_acpt_numbers_from_json(source_json)
+        if not acpt_numbers:
+            msg = "No acpt_no values found in JSON"
+            raise ValueError(msg)
+        acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
+
+    manifest_path = _write_html_manifest(
+        output_directory=resolved_output_directory,
+        source_json_path=resolved_source_path,
+        acpt_numbers=acpt_numbers,
+        source_json=source_json,
+    )
+    return {
+        "format": "finiq_disclosure_html_manifest_write_v1",
+        "output_directory": str(resolved_output_directory),
+        "source_path": resolved_source_path,
+        "requested_count": len(acpt_numbers),
+        "manifest_path": str(manifest_path),
+    }
+
+
 def download_disclosure_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,

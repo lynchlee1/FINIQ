@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { FolderTree, Loader2, Play } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
@@ -22,6 +22,7 @@ function formatResult(result: any): string[] {
     `${modeLabel} 완료`,
     `입력 파일: ${formatInteger(result.input_files)}개`,
     `복사 파일: ${formatInteger(result.copied_files)}개`,
+    `이동 파일: ${formatInteger(result.moved_files || 0)}개`,
     `기존 파일 건너뜀: ${formatInteger(result.skipped_existing_files)}개`,
   ];
   if (result.skipped_invalid_year_files) {
@@ -38,7 +39,6 @@ export default function UtilityPage() {
   const [mode, setMode] = useState<PartitionMode>("split");
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [overwrite, setOverwrite] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const { output_root, fetchSettings } = useSettingsStore();
@@ -100,7 +100,7 @@ export default function UtilityPage() {
           mode,
           source_directory: sourceDirectory,
           output_directory: outputDirectory,
-          overwrite,
+          overwrite: false,
         }),
       });
       if (!response.ok) {
@@ -189,10 +189,6 @@ export default function UtilityPage() {
                     <SelectItem value="flatten">연도별 폴더 → 일반 폴더</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-[#30363d]">
-                <Checkbox id="overwrite" checked={overwrite} onCheckedChange={(checked) => setOverwrite(checked === true)} className="dark:border-[#30363d]" />
-                <Label htmlFor="overwrite" className="text-sm dark:text-slate-300">기존 파일 덮어쓰기</Label>
               </div>
             </>
           }

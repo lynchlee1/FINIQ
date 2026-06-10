@@ -17,10 +17,13 @@ def _year_from_filename(path: Path) -> str | None:
     return None
 
 
-def _copy_file(source: Path, target: Path, *, overwrite: bool) -> str:
+def _transfer_file(source: Path, target: Path, *, overwrite: bool, move: bool) -> str:
     if target.exists() and not overwrite:
         return "skipped_existing"
     target.parent.mkdir(parents=True, exist_ok=True)
+    if move:
+        shutil.move(str(source), str(target))
+        return "moved"
     shutil.copy2(source, target)
     return "copied"
 
@@ -30,11 +33,13 @@ def _copy_flat_to_year_directories(
     output_directory: Path,
     *,
     overwrite: bool,
+    move: bool,
     progress_callback: ProgressCallback,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     files = sorted(path for path in source_directory.iterdir() if path.is_file())
     copied = 0
+    moved = 0
     skipped_existing = 0
     skipped_invalid_year = 0
     years: set[str] = set()
@@ -47,10 +52,12 @@ def _copy_flat_to_year_directories(
             skipped_invalid_year += 1
             continue
 
-        result = _copy_file(source_path, output_directory / year / source_path.name, overwrite=overwrite)
+        result = _transfer_file(source_path, output_directory / year / source_path.name, overwrite=overwrite, move=move)
         years.add(year)
         if result == "copied":
             copied += 1
+        elif result == "moved":
+            moved += 1
         else:
             skipped_existing += 1
 
@@ -63,6 +70,7 @@ def _copy_flat_to_year_directories(
         "output_directory": str(output_directory),
         "input_files": len(files),
         "copied_files": copied,
+        "moved_files": moved,
         "skipped_existing_files": skipped_existing,
         "skipped_invalid_year_files": skipped_invalid_year,
         "years": sorted(years),
@@ -74,6 +82,7 @@ def _copy_year_directories_to_flat(
     output_directory: Path,
     *,
     overwrite: bool,
+    move: bool,
     progress_callback: ProgressCallback,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -89,19 +98,29 @@ def _copy_year_directories_to_flat(
         if path.is_file()
     ]
     copied = 0
+    moved = 0
     skipped_existing = 0
 
     for index, source_path in enumerate(files, start=1):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
-        result = _copy_file(source_path, output_directory / source_path.name, overwrite=overwrite)
+        result = _transfer_file(source_path, output_directory / source_path.name, overwrite=overwrite, move=move)
         if result == "copied":
             copied += 1
+        elif result == "moved":
+            moved += 1
         else:
             skipped_existing += 1
 
         if progress_callback and (index == len(files) or index % 100 == 0):
             progress_callback(f"분할저장 해제 중: {index}/{len(files)}개 검사.")
+
+    if move:
+        for year_directory in year_directories:
+            try:
+                year_directory.rmdir()
+            except OSError:
+                pass
 
     return {
         "mode": "flatten",
@@ -109,6 +128,7 @@ def _copy_year_directories_to_flat(
         "output_directory": str(output_directory),
         "input_files": len(files),
         "copied_files": copied,
+        "moved_files": moved,
         "skipped_existing_files": skipped_existing,
         "skipped_invalid_year_files": 0,
         "years": [path.name for path in year_directories],
@@ -138,6 +158,7 @@ def run_partition_storage_payload(
         raise ValueError(f"source_directory is not a directory: {source_directory}")
 
     overwrite = bool(payload.get("overwrite"))
+    move = bool(payload.get("move"))
     if progress_callback:
         progress_callback("분할저장 유틸리티 작업을 시작합니다.")
 
@@ -146,6 +167,7 @@ def run_partition_storage_payload(
             source_directory,
             output_directory,
             overwrite=overwrite,
+            move=move,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
@@ -154,13 +176,16 @@ def run_partition_storage_payload(
             source_directory,
             output_directory,
             overwrite=overwrite,
+            move=move,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
 
     if progress_callback:
+        action_label = "이동" if move else "복사"
+        changed_files = result["moved_files"] if move else result["copied_files"]
         progress_callback(
-            f"완료: {result['copied_files']}개 복사, "
+            f"완료: {changed_files}개 {action_label}, "
             f"{result['skipped_existing_files']}개 기존 파일 건너뜀."
         )
     return result

@@ -32,6 +32,7 @@ from finiq.market_desk.web.disclosure_html import (
     download_disclosure_html_contents_payload,
     download_disclosure_html_payload,
     merge_disclosure_content_html_payload,
+    write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.download import inspect_download_output_directory_payload
 from finiq.market_desk.web.disclosure_html_parse import (
@@ -1108,6 +1109,79 @@ def test_download_disclosure_html_payload_uses_collected_acpt_numbers(tmp_path: 
     assert payload["saved_files"] == [str(tmp_path / "viewer_html" / "20250101000001.html")]
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["disclosures"][0]["market"] is None
+
+
+def test_write_disclosure_html_manifest_payload_from_source_json_path(tmp_path: Path) -> None:
+    source_json_path = tmp_path / "filtered.json"
+    source_json_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {"acpt_no": "20250101000001", "market": "코스닥"},
+                    {"acpt_no": "20250101000002", "market": "유가증권"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "converted"
+
+    payload = write_disclosure_html_manifest_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_json_path": str(source_json_path),
+        }
+    )
+
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert payload["requested_count"] == 2
+    assert manifest["source_json_path"] == str(source_json_path)
+    assert [item["acpt_no"] for item in manifest["disclosures"]] == [
+        "20250101000001",
+        "20250101000002",
+    ]
+    assert manifest["disclosures"][0]["market"] == "코스닥"
+
+
+def test_write_disclosure_html_manifest_payload_from_external_directory_manifest(tmp_path: Path) -> None:
+    source_directory = tmp_path / "viewer_html"
+    source_directory.mkdir()
+    (source_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "source_json_path": "filtered.json",
+                "disclosures": [
+                    {"acpt_no": "20250101000001", "market": "코스닥"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (source_directory / "20250101000001.html").write_text(
+        """
+        <html><body>
+          <select id="mainDoc">
+            <option value="20250101000099|Y" selected="selected">본문</option>
+          </select>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = write_disclosure_html_manifest_payload(
+        {
+            "output_directory": str(tmp_path / "content_html"),
+            "source_directory": str(source_directory),
+        }
+    )
+
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert payload["requested_count"] == 1
+    assert manifest["source_json_path"] == str(source_directory.resolve())
+    assert manifest["disclosures"][0]["market"] == "코스닥"
 
 
 def test_download_disclosure_html_contents_payload_saves_body_html(tmp_path: Path, monkeypatch) -> None:
@@ -2915,6 +2989,13 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/api/disclosures/html/content-download/start" in download_component_html
     assert "/api/disclosures/html/download/check-existing" in download_component_html
     assert "/api/disclosures/html/content-download/check-existing" in download_component_html
+    assert "/api/disclosures/html/manifest/write" in download_component_html
+    assert "/api/utility/partition-storage/start" in download_component_html
+    assert "분할저장 구조 전환" in download_component_html
+    assert "overwrite: false" in download_component_html
+    assert "move: false" in download_component_html
+    assert "분할저장 출력 경로 무결성 검사 통과" in download_component_html
+    assert "기존 파일 덮어쓰기" not in download_component_html
     assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
     assert "기존 메타데이터 기준으로 설정 맞추기" in download_component_html
     assert "분할저장 설정이 기존 폴더 구조와 다릅니다" in download_component_html
