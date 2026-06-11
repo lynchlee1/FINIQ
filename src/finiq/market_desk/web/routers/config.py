@@ -179,7 +179,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
         current_settings = {}
         for key in config.__slots__:
             val = getattr(config, key)
-            if isinstance(val, (str, int, float, bool, dict)):
+            if isinstance(val, (str, int, float, bool, dict, list)):
                 current_settings[key] = val
 
         for key, value in payload.items():

@@ -404,7 +404,11 @@ def _merge_account_frames(
 
     merged = pd.DataFrame()
     conflicts: list[dict[str, str]] = []
-    sorted_frames = sorted(frames, key=lambda item: item[0].index.min())
+    def sort_key(item: tuple[pd.DataFrame, SourceInfo]) -> Any:
+        min_date = item[0].index.min()
+        return date.min if pd.isna(min_date) else min_date
+
+    sorted_frames = sorted(frames, key=sort_key)
     for frame, source in sorted_frames:
         if merged.empty:
             merged = frame.copy()

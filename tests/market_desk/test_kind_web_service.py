@@ -1230,9 +1230,57 @@ def test_download_disclosure_html_contents_payload_rejects_json_only_input(tmp_p
             }
         )
     except ValueError as exc:
-        assert str(exc) == "source_directory is required"
+        assert str(exc) == "source_directory or source_compressed_json_path is required"
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_download_disclosure_html_contents_payload_accepts_compressed_json_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[tuple[Path, list[dict[str, str]]]] = []
+
+    def fake_download(**kwargs):
+        output_directory = Path(kwargs["output_directory"])
+        targets = list(kwargs["targets"])
+        calls.append((output_directory, targets))
+        return [output_directory / f"{target['acpt_no']}.html" for target in targets]
+
+    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_compress_v1",
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "year": "2025",
+                        "selected_main_doc_no": "20250101000999",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = download_disclosure_html_contents_payload(
+        {
+            "output_directory": str(tmp_path / "content_html"),
+            "source_compressed_json_path": str(compressed_path),
+        }
+    )
+
+    assert calls == [
+        (
+            tmp_path / "content_html",
+            [{"acpt_no": "20250101000001", "doc_no": "20250101000999"}],
+        )
+    ]
+    assert payload["saved_files"] == [str(tmp_path / "content_html" / "20250101000001.html")]
+    assert payload["manifest_path"] == str(tmp_path / "content_html" / "kind_disclosure_html_manifest.json")
 
 
 def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Path, monkeypatch) -> None:

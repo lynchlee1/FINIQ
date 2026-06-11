@@ -46,6 +46,7 @@ class DownloadJob:
 
 _DOWNLOAD_JOBS: dict[str, DownloadJob] = {}
 _DOWNLOAD_JOBS_LOCK = threading.Lock()
+_DOWNLOAD_JOB_SEMAPHORE = threading.Semaphore(1)
 _CANCELLED_DOWNLOAD_JOBS: set[str] = set()
 DOWNLOAD_DELETE_CONFIRMATION_TEXT = "확인했습니다."
 
@@ -2678,7 +2679,13 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
         _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
 
     def _worker() -> None:
+        acquired = False
         try:
+            _append_job_progress(job_id, f"JOB queued id={job_id}")
+            _DOWNLOAD_JOB_SEMAPHORE.acquire()
+            acquired = True
+            if _is_download_cancelled(job_id):
+                raise DownloadCancelled()
             _update_job(job_id, status="running")
             _append_job_progress(job_id, f"JOB start id={job_id}")
             for line in _download_payload_summary(payload):
@@ -2712,6 +2719,8 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
             _update_job(job_id, status="failed", error=str(exc))
             _append_job_progress(job_id, f"JOB failed error={exc}")
         finally:
+            if acquired:
+                _DOWNLOAD_JOB_SEMAPHORE.release()
             with _DOWNLOAD_JOBS_LOCK:
                 _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
 

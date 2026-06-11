@@ -91,6 +91,7 @@ def create_workflows_router(
         accept = request.headers.get("Accept", "")
         if "application/x-ndjson" in accept:
             def generate():
+                cancel_event = threading.Event()
                 events: queue.Queue[dict[str, Any]] = queue.Queue()
 
                 def run_filter() -> None:
@@ -98,6 +99,7 @@ def create_workflows_router(
                         payload = filter_disclosures_payload(
                             body,
                             progress_callback=lambda progress: events.put({"type": "progress", "progress": progress}),
+                            cancel_check=cancel_event.is_set,
                         )
                         _attach_html_download_transfer(
                             config,
@@ -110,12 +112,15 @@ def create_workflows_router(
 
                 thread = threading.Thread(target=run_filter, daemon=True)
                 thread.start()
-                while thread.is_alive() or not events.empty():
-                    try:
-                        event = events.get(timeout=0.1)
-                    except queue.Empty:
-                        continue
-                    yield json.dumps(event, ensure_ascii=False) + "\n"
+                try:
+                    while thread.is_alive() or not events.empty():
+                        try:
+                            event = events.get(timeout=0.1)
+                        except queue.Empty:
+                            continue
+                        yield json.dumps(event, ensure_ascii=False) + "\n"
+                finally:
+                    cancel_event.set()
 
             return StreamingResponse(generate(), media_type="application/x-ndjson")
         try:
@@ -196,14 +201,14 @@ def create_workflows_router(
         return cancel_disclosure_html_download(str(payload.get("cancel_token") or ""))
 
     @router.post("/api/disclosures/html/download/inspect-folder")
-    async def inspect_html_download_folder(payload: dict[str, Any]):
+    def inspect_html_download_folder(payload: dict[str, Any]):
         try:
             return clean_disclosure_html_output_directory_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/download/check-existing")
-    async def check_html_download_folder(payload: dict[str, Any]):
+    def check_html_download_folder(payload: dict[str, Any]):
         try:
             return check_disclosure_html_output_directory_payload(payload)
         except Exception as exc:
@@ -232,14 +237,14 @@ def create_workflows_router(
         return cancel_disclosure_html_download(str(payload.get("cancel_token") or ""))
 
     @router.post("/api/disclosures/html/content-download/inspect-folder")
-    async def inspect_html_content_download_folder(payload: dict[str, Any]):
+    def inspect_html_content_download_folder(payload: dict[str, Any]):
         try:
             return clean_disclosure_html_output_directory_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/content-download/check-existing")
-    async def check_html_content_download_folder(payload: dict[str, Any]):
+    def check_html_content_download_folder(payload: dict[str, Any]):
         try:
             return check_disclosure_html_output_directory_payload(payload)
         except Exception as exc:
@@ -283,12 +288,24 @@ def create_workflows_router(
         return build_parse_change_log_payload(payload)
 
     @router.get("/api/disclosures/html/parse/export.xlsx")
-    async def export_parse_results(output_path: str, mode: str, latest_only: bool = False):
+    async def export_parse_results(
+        output_path: str,
+        mode: str,
+        background_tasks: BackgroundTasks,
+        latest_only: bool = False,
+    ):
         payload = build_parse_export_xlsx(output_path, mode, latest_only=latest_only)
         filename = f"{Path(output_path).stem}_export.xlsx"
-        temp_path = Path(tempfile.gettempdir()) / filename
-        temp_path.write_bytes(payload)
-        return FileResponse(temp_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            temp_path = Path(tmp.name)
+            tmp.write(payload)
+        background_tasks.add_task(temp_path.unlink, missing_ok=True)
+        return FileResponse(
+            temp_path,
+            filename=filename,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            background=background_tasks,
+        )
 
     @router.post("/api/integrated-data/convert/start")
     async def start_integrated_convert(payload: dict[str, Any], background_tasks: BackgroundTasks):

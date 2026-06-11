@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable
 
 from fastapi import FastAPI
@@ -103,7 +104,8 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
 
         result = handler(payload, **kwargs)
 
-        if job_manager.is_cancelled(job_id):
+        if job_manager.is_cancelled(job_id) or (isinstance(result, dict) and result.get("cancelled") is True):
+            job_manager.cancel_job(job_id)
             return
 
         job_manager.complete_job(job_id, result)
@@ -115,6 +117,12 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
 
 
 def _filter_disclosures_payload(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    sig = inspect.signature(filter_disclosures_payload)
+    if "cancel_check" not in sig.parameters and not any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in sig.parameters.values()
+    ):
+        kwargs.pop("cancel_check", None)
     return filter_disclosures_payload(*args, **kwargs)
 
 

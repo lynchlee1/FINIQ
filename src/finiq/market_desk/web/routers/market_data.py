@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 
 from finiq.market_desk.web.discovery import (
@@ -120,6 +120,7 @@ def create_market_data_router(config: Any) -> APIRouter:
     @router.get("/api/company-list.xlsx")
     async def export_companies(
         classification_path: str,
+        background_tasks: BackgroundTasks,
         keyword: Optional[str] = None,
         market: str = "전체",
     ):
@@ -133,9 +134,16 @@ def create_market_data_router(config: Any) -> APIRouter:
         try:
             payload = build_company_list_export(path, keyword=keyword, market=market)
             filename = f"{Path(path).stem}.company_list.xlsx"
-            temp_path = Path(tempfile.gettempdir()) / filename
-            temp_path.write_bytes(payload)
-            return FileResponse(temp_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                temp_path = Path(tmp.name)
+                tmp.write(payload)
+            background_tasks.add_task(temp_path.unlink, missing_ok=True)
+            return FileResponse(
+                temp_path,
+                filename=filename,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                background=background_tasks,
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
