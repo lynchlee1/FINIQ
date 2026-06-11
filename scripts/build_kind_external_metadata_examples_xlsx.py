@@ -20,32 +20,34 @@ from finiq.market_desk.web.disclosure_html import compress_disclosure_external_h
 
 
 SAVE_REASONS = {
-    "records[].acpt_no": "공시별 접수번호",
-    "records[].title": "공시별 제목",
-    "records[].header": "공시별 회사/헤더",
-    "records[].selected_main_doc_no": "선택 본문 문서번호",
-    "records[].attached_docs": "첨부 문서번호",
-    "records[].metadata": "원천 공시 행 메타데이터",
-    "records[].external_metadata.selects": "문서 선택값",
-    "records[].external_metadata.scripts[].variables": "compact script variables",
-    "records[].external_metadata.text_blocks": "공시별 상태/정정 안내 가능성",
-    "records[].external_metadata.script_variables": "flattened script variables",
-    "records[].external_metadata.source_sha256": "원본 무결성",
-    "records[].external_metadata.source_size_bytes": "원본 크기 검증",
+    "records[].acpt_no": "파일명/뷰어 hidden input에서 온 KIND 접수번호로, 공시 식별과 원문/본문 조인의 기본 키입니다.",
+    "records[].title": "공시 제목은 검색/검토/분류에 직접 쓰이고 filing마다 달라지는 사용자-facing 값입니다.",
+    "records[].header": "대개 회사명과 종목코드가 들어 있어 공시별 회사 컨텍스트를 빠르게 확인하는 데 필요합니다.",
+    "records[].selected_main_doc_no": "현재 선택된 본문 docNo입니다. 실제로 처음 열리는 본문 문서를 특정하므로 다운로드/파싱 기준점으로 보존합니다.",
+    "records[].metadata": "현재 샘플은 비어 있어도 원천 검색 row 메타데이터가 들어오면 필터링/감사/조인에 필요합니다.",
+    "records[].external_metadata.selects": "mainDoc/attachedDoc option의 docNo, 라벨, 최신 여부, 선택 상태를 원형에 가깝게 담는 canonical 문서 목록입니다.",
+    "records[].external_metadata.source_sha256": "원본 HTML을 저장하지 않아도 같은 원본인지 검증할 수 있는 무결성 키입니다.",
+    "records[].external_metadata.source_size_bytes": "원본 HTML 누락/절단 여부와 저장량을 빠르게 점검하는 작은 검증 필드입니다.",
 }
 
 DISCARD_REASONS = {
-    "records[].external_metadata.meta": "대부분 KIND 정적 페이지 메타",
-    "records[].main_docs": "external_metadata.selects의 mainDoc에서 재구성 가능",
-    "records[].external_metadata.forms[].attrs": "대부분 정적 form shell",
-    "records[].external_metadata.forms[].textareas": "대부분 없음 또는 정적 UI",
-    "records[].external_metadata.forms[].buttons": "대부분 반복 버튼",
-    "records[].external_metadata.inputs": "대부분 상위 핵심 필드와 중복",
-    "records[].external_metadata.links": "대부분 반복 viewer control",
-    "records[].external_metadata.frames": "대부분 정적 frame shell",
-    "records[].external_metadata.resources": "대부분 반복 static asset",
-    "records[].external_metadata.scripts[].attrs": "대부분 공통 script src/version",
-    "records[].external_metadata.scripts[].text": "큰 반복 viewer logic",
+    "records[].main_docs": "mainDoc의 docNo, 라벨, selected, latest 정보는 external_metadata.selects에서 50건 모두 0 mismatch로 재구성됩니다. convenience보다 중복 제거를 우선해 제외합니다.",
+    "records[].attached_docs": "attachedDoc의 docNo, 라벨, selected 정보는 external_metadata.selects에서 50건 모두 0 mismatch로 재구성됩니다. 첨부 목록도 raw select를 단일 source로 둡니다.",
+    "records[].external_metadata.meta": "50건에서 KIND 브라우저 호환/캐시/서비스 설명 메타로 반복됩니다. 공시 식별자나 상태 값이 없어 per-disclosure 저장 이득이 낮습니다.",
+    "records[].external_metadata.forms[].attrs": "form name/id/action은 KIND viewer shell 구조입니다. 50건 기준 fetch에 필요한 공시별 값은 attrs가 아니라 input/select 쪽에 있습니다.",
+    "records[].external_metadata.forms[].inputs": "form 내부 input을 합치면 external_metadata.inputs와 같은 값입니다. 또한 핵심 값은 acpt_no/title 등 상위 필드와 중복됩니다.",
+    "records[].external_metadata.forms[].selects": "form 내부 select를 합치면 external_metadata.selects와 0 mismatch로 동일합니다. top-level selects만 남기는 쪽이 단일 source of truth입니다.",
+    "records[].external_metadata.forms[].textareas": "50건에서 비어 있거나 공통 UI shell입니다. 공시별 본문/상태 정보의 근거로 확인되지 않았습니다.",
+    "records[].external_metadata.forms[].buttons": "버튼 라벨/onclick은 반복 viewer control입니다. 공시별 식별자나 다운로드 대상 docNo를 새로 제공하지 않습니다.",
+    "records[].external_metadata.inputs": "대부분 빈 hidden control, acptNo, tempTitle입니다. acptNo/title은 이미 상위 필드에 있고 나머지는 static viewer state입니다.",
+    "records[].external_metadata.links": "PDF/인쇄/닫기 같은 반복 viewer action입니다. 50건에서 공시별 href/docNo source로 쓰일 값이 확인되지 않았습니다.",
+    "records[].external_metadata.frames": "toc/doc iframe의 id/name/title 같은 반복 layout shell입니다. 실제 문서 경로는 여기보다 searchContents/setPath 흐름에서 결정됩니다.",
+    "records[].external_metadata.resources": "KIND 공통 css/img/static asset 참조입니다. 50건에서 공시별 파일 경로나 본문 식별자를 제공하지 않았습니다.",
+    "records[].external_metadata.scripts[].attrs": "script src/version은 공통 viewer 구현 참조입니다. 공시별 상태는 attrs가 아니라 inline 변수/inputs/selects에서 추출됩니다.",
+    "records[].external_metadata.scripts[].text": "inline script 전문은 크고 반복 viewer logic이 대부분입니다. 50건에서 단순 변수도 acpt_no/static 값과 중복되어 별도 저장 가치가 낮습니다.",
+    "records[].external_metadata.scripts[].variables": "각 script의 variables를 이어 붙이면 flattened script_variables와 50건 모두 동일하고, 그중 유일한 공시별 값 _TRK_PN도 acpt_no와 같습니다.",
+    "records[].external_metadata.script_variables": "50건에서 공시별로 변하는 값은 _TRK_PN뿐이며 전부 records[].acpt_no와 같습니다. 나머지는 static/empty/common message라 중복입니다.",
+    "records[].external_metadata.text_blocks": "50건에서 대부분 회사명/제목성 텍스트 또는 반복 안내 문구입니다. 회사 컨텍스트는 header/title에 있고, 최종문서 여부는 mainDoc latest/selected 정보로 판단할 수 있어 별도 저장하지 않습니다.",
 }
 
 
@@ -214,16 +216,8 @@ def _save_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
             "records[].title": record.get("title"),
             "records[].header": record.get("header"),
             "records[].selected_main_doc_no": record.get("selected_main_doc_no"),
-            "records[].attached_docs": record.get("attached_docs"),
             "records[].metadata": record.get("metadata"),
             "records[].external_metadata.selects": external.get("selects"),
-            "records[].external_metadata.scripts[].variables": [
-                script.get("variables")
-                for script in external.get("scripts") or []
-                if script.get("variables")
-            ],
-            "records[].external_metadata.text_blocks": external.get("text_blocks"),
-            "records[].external_metadata.script_variables": external.get("script_variables"),
             "records[].external_metadata.source_sha256": external.get("source_sha256"),
             "records[].external_metadata.source_size_bytes": external.get("source_size_bytes"),
         }
@@ -237,14 +231,24 @@ def _discard_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     for record in records:
         external = record.get("external_metadata") or {}
         form_attrs = [form.get("attrs") for form in external.get("forms") or []]
+        form_inputs = [form.get("inputs") for form in external.get("forms") or [] if form.get("inputs")]
+        form_selects = [form.get("selects") for form in external.get("forms") or [] if form.get("selects")]
         form_textareas = [form.get("textareas") for form in external.get("forms") or [] if form.get("textareas")]
         form_buttons = [form.get("buttons") for form in external.get("forms") or [] if form.get("buttons")]
         script_attrs = [script.get("attrs") for script in external.get("scripts") or []]
         script_text = [script.get("text") for script in external.get("scripts") or [] if script.get("text")]
+        script_variables = [
+            script.get("variables")
+            for script in external.get("scripts") or []
+            if script.get("variables")
+        ]
         values = {
-            "records[].external_metadata.meta": external.get("meta"),
             "records[].main_docs": record.get("main_docs"),
+            "records[].attached_docs": record.get("attached_docs"),
+            "records[].external_metadata.meta": external.get("meta"),
             "records[].external_metadata.forms[].attrs": form_attrs,
+            "records[].external_metadata.forms[].inputs": form_inputs,
+            "records[].external_metadata.forms[].selects": form_selects,
             "records[].external_metadata.forms[].textareas": form_textareas,
             "records[].external_metadata.forms[].buttons": form_buttons,
             "records[].external_metadata.inputs": external.get("inputs"),
@@ -253,6 +257,9 @@ def _discard_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
             "records[].external_metadata.resources": external.get("resources"),
             "records[].external_metadata.scripts[].attrs": script_attrs,
             "records[].external_metadata.scripts[].text": script_text,
+            "records[].external_metadata.scripts[].variables": script_variables,
+            "records[].external_metadata.script_variables": external.get("script_variables"),
+            "records[].external_metadata.text_blocks": external.get("text_blocks"),
         }
         for field_path, reason in DISCARD_REASONS.items():
             rows.append([record.get("acpt_no"), field_path, reason, _preview(values.get(field_path))])
@@ -297,8 +304,8 @@ def build_examples_xlsx(input_directory: Path, output_path: Path, limit: int | N
 
     sheets = [
         ("Summary", _summary_rows(records), [16, 42, 28, 22, 12, 14, 10, 10, 12, 16, 16, 60]),
-        ("Save Examples", _save_rows(records), [16, 46, 34, 80]),
-        ("Discard Examples", _discard_rows(records), [16, 48, 34, 80]),
+        ("Save Examples", _save_rows(records), [16, 46, 90, 80]),
+        ("Discard Examples", _discard_rows(records), [16, 48, 90, 80]),
         ("Field Counts", _field_count_rows(records), [16, 24, 10]),
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)

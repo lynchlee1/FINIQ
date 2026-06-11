@@ -42,17 +42,18 @@
     {
       "field_path": "records[].main_docs",
       "save_or_discard": "discard",
-      "reason": "The same document numbers, labels, selected state, and latest flags are preserved with more original context in external_metadata.selects mainDoc options.",
+      "reason": "The same document numbers, labels, selected state, and latest flags are reconstructable from external_metadata.selects mainDoc options with 0 mismatches in the 50-sample set. Prefer external_metadata.selects as the single document option source.",
       "source": "main document <select>/<option> data",
       "extracted_information": "Normalized main document list",
-      "keep_if": "A future storage format chooses normalized document lists over raw select metadata for simpler downstream consumption."
+      "keep_if": "A downstream workflow explicitly needs a normalized convenience field and accepts duplication."
     },
     {
       "field_path": "records[].attached_docs",
-      "save_or_discard": "save",
-      "reason": "Attachment list differs by disclosure and is needed for content download/navigation.",
+      "save_or_discard": "discard",
+      "reason": "The same attachment document numbers, labels, and selected state are reconstructable from external_metadata.selects attachedDoc options with 0 mismatches in the 50-sample set.",
       "source": "attached document <select>/<option> data",
-      "extracted_information": "Attached document list"
+      "extracted_information": "Attached document list",
+      "keep_if": "A downstream workflow explicitly needs a normalized convenience field and accepts duplication."
     },
     {
       "field_path": "records[].metadata",
@@ -79,17 +80,19 @@
     },
     {
       "field_path": "records[].external_metadata.forms[].inputs",
-      "save_or_discard": "save",
-      "reason": "Nested hidden inputs can contain disclosure-specific viewer state such as acptNo, docLocPath, doc numbers, and title values.",
+      "save_or_discard": "discard",
+      "reason": "Form-scoped inputs duplicate external_metadata.inputs in the 50-sample set, and the variable values mostly duplicate top-level acpt_no/title or empty/static viewer controls.",
       "source": "inputs inside each <form>",
-      "extracted_information": "Form-scoped input attributes"
+      "extracted_information": "Form-scoped input attributes",
+      "keep_if": "A future sample contains a non-empty, non-duplicated form input value required for document fetches or parser context."
     },
     {
       "field_path": "records[].external_metadata.forms[].selects",
-      "save_or_discard": "save",
-      "reason": "Form-scoped select options can contain per-disclosure main/attached document numbers and latest flags.",
+      "save_or_discard": "discard",
+      "reason": "Form-scoped selects duplicate external_metadata.selects in the 50-sample set; keep the top-level selects as the canonical document option source.",
       "source": "selects inside each <form>",
-      "extracted_information": "Form-scoped select and option data"
+      "extracted_information": "Form-scoped select and option data",
+      "keep_if": "A future sample has form-scoped select context that cannot be reconstructed from external_metadata.selects."
     },
     {
       "field_path": "records[].external_metadata.forms[].textareas",
@@ -157,32 +160,34 @@
     {
       "field_path": "records[].external_metadata.scripts[].text",
       "save_or_discard": "discard",
-      "reason": "Full inline script text can be bulky and commonly includes repeated viewer logic. Specific simple variables are captured separately.",
+      "reason": "Full inline script text can be bulky and commonly includes repeated viewer logic. In the 50-sample set, extracted simple variables are also redundant with acpt_no/static values.",
       "source": "inline <script> text",
       "extracted_information": "Inline script text",
-      "keep_if": "The inline script contains non-extractable disclosure-specific values that are not available in script_variables or inputs."
+      "keep_if": "The inline script contains non-extractable disclosure-specific values that are not available in top-level fields, inputs, or selects."
     },
     {
       "field_path": "records[].external_metadata.scripts[].variables",
-      "save_or_discard": "save",
-      "reason": "Simple inline variables can include disclosure-specific identifiers, tracking page names, or viewer state with low storage cost.",
+      "save_or_discard": "discard",
+      "reason": "Per-script variables exactly duplicate the flattened external_metadata.script_variables sequence in the 50-sample set. The only per-disclosure value is _TRK_PN, which equals records[].acpt_no; the rest are static, empty, or common messages.",
       "source": "inline JavaScript var assignments inside each script",
-      "extracted_information": "Simple variable name/value pairs"
+      "extracted_information": "Simple variable name/value pairs",
+      "keep_if": "A future workflow needs to retain which specific script tag produced each variable, or new samples show non-duplicated script variables."
     },
     {
       "field_path": "records[].external_metadata.text_blocks",
-      "save_or_discard": "save",
-      "reason": "Some direct text blocks contain disclosure-specific status notices such as non-final correction notices or exchange correction-request notices.",
+      "save_or_discard": "discard",
+      "reason": "In the 50-sample set, text blocks are mostly repeated KIND UI/status notices plus company/title text already available from header/title. Non-final status can be inferred from mainDoc latest/selected information in external_metadata.selects, so this adds no non-duplicated storage value.",
       "source": "direct text from selected text-bearing tags",
       "extracted_information": "Tag name, attributes, and direct text for button/caption/dd/dt/headings/label/li/p/span/td/th",
-      "filter_recommendation": "When optimizing later, keep unusual/status/disclosure-specific text and drop repeated item descriptions, labels, captions, and static UI text."
+      "keep_if": "Future samples contain non-repeated status text that cannot be inferred from title/header/select metadata."
     },
     {
       "field_path": "records[].external_metadata.script_variables",
-      "save_or_discard": "save",
-      "reason": "Flattened script variables are compact and may carry disclosure-specific identifiers/state.",
+      "save_or_discard": "discard",
+      "reason": "In the 50-sample set, the only per-disclosure variable is _TRK_PN and it always equals records[].acpt_no. Other variables are static, empty, or common PDF/viewer messages, so the flattened list adds no non-duplicated storage value.",
       "source": "inline JavaScript var assignments across scripts",
-      "extracted_information": "Simple variable name/value pairs"
+      "extracted_information": "Simple variable name/value pairs",
+      "keep_if": "Future samples contain non-duplicated script variables that are required for fetches, parser context, or audit."
     },
     {
       "field_path": "records[].external_metadata.source_sha256",
@@ -205,21 +210,18 @@
       "records[].title",
       "records[].header",
       "records[].selected_main_doc_no",
-      "records[].attached_docs",
       "records[].metadata",
-      "records[].external_metadata.forms[].inputs",
-      "records[].external_metadata.forms[].selects",
       "records[].external_metadata.selects",
-      "records[].external_metadata.scripts[].variables",
-      "records[].external_metadata.text_blocks after repeated-static-text filtering",
-      "records[].external_metadata.script_variables",
       "records[].external_metadata.source_sha256",
       "records[].external_metadata.source_size_bytes"
     ],
     "discard": [
       "records[].main_docs when records[].external_metadata.selects is retained",
+      "records[].attached_docs when records[].external_metadata.selects is retained",
       "records[].external_metadata.meta",
       "records[].external_metadata.forms[].attrs unless variable",
+      "records[].external_metadata.forms[].inputs unless non-duplicated variable values appear",
+      "records[].external_metadata.forms[].selects unless form-scoped context is required",
       "records[].external_metadata.forms[].textareas unless variable",
       "records[].external_metadata.forms[].buttons unless variable",
       "records[].external_metadata.inputs unless non-duplicated variable values appear",
@@ -227,7 +229,10 @@
       "records[].external_metadata.frames unless variable",
       "records[].external_metadata.resources unless variable",
       "records[].external_metadata.scripts[].attrs unless variable",
-      "records[].external_metadata.scripts[].text unless needed"
+      "records[].external_metadata.scripts[].text unless needed",
+      "records[].external_metadata.scripts[].variables unless non-duplicated variable provenance is needed",
+      "records[].external_metadata.script_variables unless non-duplicated script variables appear",
+      "records[].external_metadata.text_blocks unless non-duplicated status text appears"
     ]
   }
 }

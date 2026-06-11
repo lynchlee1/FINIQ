@@ -12,13 +12,14 @@ KIND_CONTENTS_DIR = os.path.join(
 )
 
 def test_parse_shareholder_meeting_all_samples() -> None:
-    """기존 샘플들을 모두 성공적으로 파싱하고 안건이 리스트로 반환되는지 확인한다."""
+    """기존 샘플 중 주주총회 공시를 성공적으로 파싱하고 안건이 리스트로 반환되는지 확인한다."""
     if not os.path.exists(KIND_HTML_DIR) or not os.path.exists(KIND_CONTENTS_DIR):
         pytest.skip("Sample directories not found")
 
     files = [f for f in os.listdir(KIND_HTML_DIR) if f.endswith(".html")]
     assert len(files) > 0, "No sample files found"
 
+    parsed_files = 0
     for filename in files:
         ext_path = os.path.join(KIND_HTML_DIR, filename)
         int_path = os.path.join(KIND_CONTENTS_DIR, filename)
@@ -28,8 +29,20 @@ def test_parse_shareholder_meeting_all_samples() -> None:
         with open(int_path, "r", encoding="utf-8") as f:
             int_html = f.read()
 
+        soup = BeautifulSoup(ext_html, "html.parser")
+        title_input = soup.find("input", attrs={"name": "tempTitle"})
+        title = str(title_input.get("value") or "") if title_input else ""
+        clean_title = title.replace(" ", "")
+        if not (
+            "주주총회소집결의" in clean_title
+            or "주주총회소집공고" in clean_title
+            or "주주총회결과" in clean_title
+        ):
+            continue
+
         # Parse should not raise any exceptions
         result = parse_shareholder_meeting(ext_html, int_html)
+        parsed_files += 1
 
         # Basic validations
         assert "metadata" in result
@@ -46,6 +59,8 @@ def test_parse_shareholder_meeting_all_samples() -> None:
         # Elections should be a list of dictionaries
         assert "elections" in result
         assert isinstance(result["elections"], list)
+
+    assert parsed_files > 0, "No shareholder meeting sample files found"
 
 def test_parse_shareholder_meeting_unsupported_title() -> None:
     """지원하지 않는 공시 제목이 들어올 경우 ValueError를 발생시키는지 확인한다."""
