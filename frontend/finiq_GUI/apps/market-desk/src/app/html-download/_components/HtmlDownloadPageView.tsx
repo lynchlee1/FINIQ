@@ -112,7 +112,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       }
     }
     if (res.summary?.compressed_files !== undefined) {
-      lines.push(`압축 HTML: ${formatInteger(res.summary.compressed_files)}`);
+      lines.push(`문서 JSON 압축: ${formatInteger(res.summary.compressed_files)}`);
       lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
       lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       if (res.verification) {
@@ -952,13 +952,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
           {variant === "external" && (
             <HtmlWorkflowCard
-              title="외부 HTML JSON 압축"
-              description="저장된 KIND 공시 뷰어 HTML에서 핵심 정보만 추출해 하나의 JSON으로 저장합니다. 로컬 파일 처리이므로 최대 요청/분은 적용되지 않습니다."
+              title="외부 HTML 문서 JSON 압축"
+              description="저장된 KIND 공시 뷰어 HTML에서 본문/첨부 문서 선택 정보와 무결성 정보만 추출해 작은 JSON으로 저장합니다. 로컬 파일 처리이므로 최대 요청/분은 적용되지 않습니다."
             >
                 <HtmlWorkflowForm fields={compressionFields} />
                 <Button variant="outline" className="h-10 w-full" onClick={handleCompressExternalHtml} disabled={isJobActive}>
                   <FileJson className="mr-2 h-4 w-4" />
-                  외부 HTML JSON 압축
+                  외부 HTML 문서 JSON 압축
                 </Button>
             </HtmlWorkflowCard>
           )}

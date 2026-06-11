@@ -798,6 +798,34 @@ def _compact_external_viewer_html(html_markup: str | bytes) -> dict[str, Any]:
     }
 
 
+def _compact_document_options(selects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    documents: list[dict[str, Any]] = []
+    for select_record in selects:
+        select_id = str(select_record.get("id") or "").strip()
+        select_name = str(select_record.get("name") or "").strip()
+        if select_id not in {"mainDoc", "attachedDoc"}:
+            continue
+        for option_index, option in enumerate(select_record.get("options") or []):
+            if not isinstance(option, dict):
+                continue
+            doc_no = str(option.get("doc_no") or "").strip()
+            if not doc_no:
+                continue
+            documents.append(
+                {
+                    "select_id": select_id,
+                    "select_name": select_name,
+                    "option_index": option_index,
+                    "doc_no": doc_no,
+                    "text": option.get("text") or "",
+                    "value": option.get("value") or "",
+                    "latest_flag": option.get("latest_flag"),
+                    "selected": bool(option.get("selected")),
+                }
+            )
+    return documents
+
+
 def _verify_compressed_external_html_files(
     *,
     written_files: list[str],
@@ -895,34 +923,21 @@ def compress_disclosure_external_html_payload(
     emit(f"출력 분할저장: {'예' if output_split_by_year else '아니오'}")
 
     records: list[dict[str, Any]] = []
+    record_years: dict[str, str] = {}
     for index, (year, html_path) in enumerate(html_files, start=1):
         parsed = _compact_external_viewer_html(html_path.read_bytes())
         acpt_no = str(parsed.get("acpt_no") or html_path.stem).strip()
+        record_years[acpt_no] = year
         records.append(
             {
                 "acpt_no": acpt_no,
-                "year": year,
-                "source_file": str(html_path.resolve()),
                 "title": parsed.get("title") or parsed.get("header") or "",
                 "header": parsed.get("header") or "",
                 "selected_main_doc_no": parsed.get("selected_main_doc_no"),
-                "main_docs": parsed.get("main_docs") or [],
-                "attached_docs": parsed.get("attached_docs") or [],
                 "metadata": metadata.get(acpt_no) or {},
-                "external_metadata": {
-                    "meta": parsed.get("meta") or [],
-                    "forms": parsed.get("forms") or [],
-                    "inputs": parsed.get("inputs") or [],
-                    "selects": parsed.get("selects") or [],
-                    "links": parsed.get("links") or [],
-                    "frames": parsed.get("frames") or [],
-                    "resources": parsed.get("resources") or [],
-                    "scripts": parsed.get("scripts") or [],
-                    "text_blocks": parsed.get("text_blocks") or [],
-                    "script_variables": parsed.get("script_variables") or [],
-                    "source_sha256": parsed.get("source_sha256") or "",
-                    "source_size_bytes": parsed.get("source_size_bytes") or 0,
-                },
+                "docs": _compact_document_options(parsed.get("selects") or []),
+                "source_sha256": parsed.get("source_sha256") or "",
+                "source_size_bytes": parsed.get("source_size_bytes") or 0,
             }
         )
         if index % 100 == 0:
@@ -932,12 +947,13 @@ def compress_disclosure_external_html_payload(
     if output_split_by_year:
         records_by_year: dict[str, list[dict[str, Any]]] = {}
         for record in records:
-            records_by_year.setdefault(str(record.get("year") or "unknown"), []).append(record)
+            acpt_no = str(record.get("acpt_no") or "").strip()
+            records_by_year.setdefault(record_years.get(acpt_no) or "unknown", []).append(record)
         for year, year_records in sorted(records_by_year.items()):
             year_output_directory = output_directory / year
             year_output_path = year_output_directory / "compressed-external-html.json"
             payload = {
-                "format": "finiq_disclosure_external_html_compress_v1",
+                "format": "finiq_disclosure_external_html_docs_v1",
                 "input_directory": str(input_directory),
                 "output_directory": str(output_directory),
                 "output_path": str(year_output_path),
@@ -955,7 +971,7 @@ def compress_disclosure_external_html_payload(
     else:
         output_path = output_directory / "compressed-external-html.json"
         payload = {
-            "format": "finiq_disclosure_external_html_compress_v1",
+            "format": "finiq_disclosure_external_html_docs_v1",
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
             "output_path": str(output_path),
@@ -1509,7 +1525,28 @@ def _collect_content_targets_from_compressed_payload(payload: dict[str, Any]) ->
         acpt_no = str(record.get("acpt_no") or "").strip()
         if not acpt_no.isdigit() or acpt_no in seen:
             continue
-        doc_no = str(record.get("selected_main_doc_no") or "").strip()
+        doc_no = ""
+        for document in record.get("docs") or []:
+            if not isinstance(document, dict):
+                continue
+            if str(document.get("select_id") or "").strip() != "mainDoc":
+                continue
+            candidate = str(document.get("doc_no") or "").strip()
+            if candidate and document.get("selected"):
+                doc_no = candidate
+                break
+        if not doc_no:
+            doc_no = str(record.get("selected_main_doc_no") or "").strip()
+        if not doc_no:
+            for document in record.get("docs") or []:
+                if not isinstance(document, dict):
+                    continue
+                if str(document.get("select_id") or "").strip() != "mainDoc":
+                    continue
+                candidate = str(document.get("doc_no") or "").strip()
+                if candidate:
+                    doc_no = candidate
+                    break
         if not doc_no:
             for main_doc in record.get("main_docs") or []:
                 if not isinstance(main_doc, dict):
