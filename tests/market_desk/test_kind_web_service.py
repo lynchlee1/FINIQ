@@ -2172,6 +2172,75 @@ def test_download_disclosure_html_contents_payload_prefers_compressed_external_j
     assert payload["saved_files"] == [str(tmp_path / "content_html" / "20250101000001.html")]
 
 
+def test_download_disclosure_html_contents_payload_reads_compact_docs_json(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[tuple[Path, list[dict[str, str]]]] = []
+
+    def fake_download(**kwargs):
+        output_directory = Path(kwargs["output_directory"])
+        targets = list(kwargs["targets"])
+        calls.append((output_directory, targets))
+        return [output_directory / f"{target['acpt_no']}.html" for target in targets]
+
+    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+
+    external_dir = tmp_path / "viewer_html"
+    external_dir.mkdir()
+    (external_dir / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000000",
+                        "docs": [
+                            {
+                                "select_id": "mainDoc",
+                                "select_name": "mainDoc",
+                                "option_index": 1,
+                                "doc_no": "20250101000998",
+                                "text": "old",
+                                "value": "20250101000998|N",
+                                "latest_flag": "N",
+                                "selected": False,
+                            },
+                            {
+                                "select_id": "mainDoc",
+                                "select_name": "mainDoc",
+                                "option_index": 2,
+                                "doc_no": "20250101000999",
+                                "text": "selected",
+                                "value": "20250101000999|Y",
+                                "latest_flag": "Y",
+                                "selected": True,
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = download_disclosure_html_contents_payload(
+        {
+            "output_directory": str(tmp_path / "content_html"),
+            "source_directory": str(external_dir),
+        }
+    )
+
+    assert calls == [
+        (
+            tmp_path / "content_html",
+            [{"acpt_no": "20250101000001", "doc_no": "20250101000999"}],
+        )
+    ]
+    assert payload["saved_files"] == [str(tmp_path / "content_html" / "20250101000001.html")]
+
+
 def test_merge_disclosure_content_html_payload_writes_single_json(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
@@ -2261,10 +2330,16 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
           <input type="hidden" name="tempTitle" value="뷰어 제목" />
           <h1 class="ttl">테스트 (123456)</h1>
           <select id="mainDoc">
+            <option value="">본문선택</option>
             <option value="20250101000999|Y" selected="selected">본문</option>
           </select>
           <select id="attachedDoc">
+            <option value="">첨부문서선택</option>
             <option value="20250101000888">첨부</option>
+          </select>
+          <select id="orgDisclsId" name="orgDiscls">
+            <option value="">기공시선택</option>
+            <option value="discls"></option>
           </select>
           <div class="viewrIssue" style="display:none;">
             <p>본 문서는 최종문서가 아니므로, 최종 정정문서를 반드시 확인하시기 바랍니다.</p>
@@ -2291,37 +2366,41 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
     output_path = output_directory / "compressed-external-html.json"
     assert payload["written_files"] == [str(output_path)]
     saved = json.loads(output_path.read_text(encoding="utf-8"))
-    assert saved["format"] == "finiq_disclosure_external_html_compress_v1"
+    assert saved["format"] == "finiq_disclosure_external_html_docs_v1"
     assert "html" not in saved["records"][0]
     assert saved["records"][0]["acpt_no"] == "20250101000001"
     assert saved["records"][0]["title"] == "뷰어 제목"
     assert saved["records"][0]["selected_main_doc_no"] == "20250101000999"
-    assert saved["records"][0]["attached_docs"][0]["doc_no"] == "20250101000888"
     assert saved["records"][0]["metadata"]["market"] == "코스닥"
-    external_metadata = saved["records"][0]["external_metadata"]
-    assert external_metadata["source_size_bytes"] > 0
-    assert len(external_metadata["source_sha256"]) == 64
-    assert external_metadata["meta"][0]["name"] == "description"
-    assert external_metadata["forms"][0]["attrs"]["name"] == "docdownloadform"
-    assert any(
-        item["attrs"].get("name") == "docLocPath"
-        and item["attrs"].get("value") == "/external/path"
-        for item in external_metadata["inputs"]
-    )
-    assert external_metadata["selects"][0]["id"] == "mainDoc"
-    assert external_metadata["selects"][0]["options"][0]["latest_flag"] == "Y"
-    assert {"name": "_TRK_PN", "value": "20250101000001"} in external_metadata["script_variables"]
-    assert external_metadata["links"][0]["attrs"]["onclick"] == "pdfPrint();return false;"
-    assert external_metadata["links"][0]["images"][0]["attrs"]["alt"] == "PDF 로 저장"
-    assert external_metadata["frames"][0]["attrs"]["id"] == "docViewFrm"
-    assert any(
-        item["attrs"].get("src") == "../js/viewer.js?version=20250307"
-        for item in external_metadata["scripts"]
-    )
-    assert any(
-        item["text"] == "본 문서는 최종문서가 아니므로, 최종 정정문서를 반드시 확인하시기 바랍니다."
-        for item in external_metadata["text_blocks"]
-    )
+    assert "external_metadata" not in saved["records"][0]
+    assert "main_docs" not in saved["records"][0]
+    assert "attached_docs" not in saved["records"][0]
+    assert "source_file" not in saved["records"][0]
+    assert "year" not in saved["records"][0]
+    assert saved["records"][0]["source_size_bytes"] > 0
+    assert len(saved["records"][0]["source_sha256"]) == 64
+    assert saved["records"][0]["docs"] == [
+        {
+            "select_id": "mainDoc",
+            "select_name": "",
+            "option_index": 1,
+            "doc_no": "20250101000999",
+            "text": "본문",
+            "value": "20250101000999|Y",
+            "latest_flag": "Y",
+            "selected": True,
+        },
+        {
+            "select_id": "attachedDoc",
+            "select_name": "",
+            "option_index": 1,
+            "doc_no": "20250101000888",
+            "text": "첨부",
+            "value": "20250101000888",
+            "latest_flag": None,
+            "selected": False,
+        },
+    ]
 
 
 def test_compress_disclosure_external_html_payload_reads_split_input(tmp_path: Path) -> None:
@@ -2354,7 +2433,9 @@ def test_compress_disclosure_external_html_payload_reads_split_input(tmp_path: P
     output_path = tmp_path / "compressed" / "2025" / "compressed-external-html.json"
     assert payload["written_files"] == [str(output_path)]
     saved = json.loads(output_path.read_text(encoding="utf-8"))
-    assert saved["records"][0]["year"] == "2025"
+    assert saved["year"] == "2025"
+    assert "year" not in saved["records"][0]
+    assert saved["records"][0]["docs"][0]["doc_no"] == "20250101000999"
 
 
 def test_download_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
