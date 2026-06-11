@@ -1128,8 +1128,24 @@ def clean_disclosure_html_output_directory_payload(body: dict[str, Any]) -> dict
         source_json = body.get("payload")
     source_json_path = body.get("source_json_path")
     source_directory_raw = str(body.get("source_directory") or "").strip()
+    source_compressed_json_path_raw = str(body.get("source_compressed_json_path") or "").strip()
 
-    if source_directory_raw:
+    if source_directory_raw and source_compressed_json_path_raw:
+        msg = "source_directory and source_compressed_json_path cannot be used together"
+        raise ValueError(msg)
+    if source_compressed_json_path_raw:
+        source_compressed_json_path = Path(source_compressed_json_path_raw).expanduser().resolve()
+        compressed_payload = _load_compressed_external_html_file_payload(source_compressed_json_path)
+        targets, _manifest_payload = _collect_content_targets_from_compressed_payload(compressed_payload)
+        targets = _apply_limit_to_targets(targets, body.get("limit"))
+        acpt_numbers = [target["acpt_no"] for target in targets]
+        target_years = {
+            target["acpt_no"]: target.get("year") or _year_from_disclosure(target["acpt_no"])
+            for target in targets
+        }
+        source_type = "content"
+        source_path = str(source_compressed_json_path)
+    elif source_directory_raw:
         source_directory = Path(source_directory_raw).expanduser().resolve()
         targets, _manifest_payload = _collect_content_targets_from_external_directory(
             source_directory,
@@ -1242,13 +1258,25 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     source_directory_raw = str(body.get("source_directory") or "").strip()
+    source_compressed_json_path_raw = str(body.get("source_compressed_json_path") or "").strip()
     source_json = body.get("json")
     if source_json is None:
         source_json = body.get("payload")
     source_json_path = body.get("source_json_path")
     resolved_source_path = ""
 
-    if source_directory_raw:
+    if source_directory_raw and source_compressed_json_path_raw:
+        msg = "source_directory and source_compressed_json_path cannot be used together"
+        raise ValueError(msg)
+    if source_compressed_json_path_raw:
+        source_compressed_json_path = Path(source_compressed_json_path_raw).expanduser().resolve()
+        source_json = _load_compressed_external_html_file_payload(source_compressed_json_path)
+        targets, manifest_payload = _collect_content_targets_from_compressed_payload(source_json)
+        targets = _apply_limit_to_targets(targets, body.get("limit"))
+        acpt_numbers = [target["acpt_no"] for target in targets]
+        source_json = manifest_payload
+        resolved_source_path = str(source_compressed_json_path)
+    elif source_directory_raw:
         source_directory = Path(source_directory_raw).expanduser().resolve()
         source_split_by_year = _as_source_split_by_year(body)
         targets, manifest_payload = _collect_content_targets_from_external_directory(
@@ -1516,6 +1544,23 @@ def _load_compressed_external_html_payload(source_directory: Path, *, split_by_y
     }
 
 
+def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, Any]:
+    if not source_path.is_file():
+        msg = f"source_compressed_json_path does not exist: {source_path}"
+        raise ValueError(msg)
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        msg = f"compressed external HTML JSON is not an object: {source_path}"
+        raise ValueError(msg)
+    file_records = payload.get("records")
+    if not isinstance(file_records, list):
+        msg = f"compressed external HTML JSON records is not a list: {source_path}"
+        raise ValueError(msg)
+    payload = dict(payload)
+    payload["source_json_path"] = str(source_path)
+    return payload
+
+
 def _collect_content_targets_from_compressed_payload(payload: dict[str, Any]) -> tuple[list[dict[str, str]], Any]:
     targets: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -1715,16 +1760,25 @@ def download_disclosure_html_contents_payload(
         raise ValueError(msg)
 
     source_directory_raw = str(body.get("source_directory") or "").strip()
-    if not source_directory_raw:
-        msg = "source_directory is required"
+    source_compressed_json_path_raw = str(body.get("source_compressed_json_path") or "").strip()
+    if source_directory_raw and source_compressed_json_path_raw:
+        msg = "source_directory and source_compressed_json_path cannot be used together"
+        raise ValueError(msg)
+    if not source_directory_raw and not source_compressed_json_path_raw:
+        msg = "source_directory or source_compressed_json_path is required"
         raise ValueError(msg)
     source_split_by_year = _as_source_split_by_year(body)
     output_split_by_year = _as_output_split_by_year(body)
-    source_directory = Path(source_directory_raw).expanduser().resolve()
-    targets, manifest_payload = _collect_content_targets_from_external_directory(
-        source_directory,
-        split_by_year=source_split_by_year,
-    )
+    if source_compressed_json_path_raw:
+        source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
+        compressed_payload = _load_compressed_external_html_file_payload(source_path)
+        targets, manifest_payload = _collect_content_targets_from_compressed_payload(compressed_payload)
+    else:
+        source_path = Path(source_directory_raw).expanduser().resolve()
+        targets, manifest_payload = _collect_content_targets_from_external_directory(
+            source_path,
+            split_by_year=source_split_by_year,
+        )
 
     targets = _apply_limit_to_targets(targets, body.get("limit"))
     acpt_numbers = [target["acpt_no"] for target in targets]
@@ -1761,7 +1815,7 @@ def download_disclosure_html_contents_payload(
         emit(message)
 
     emit(f"HTML 내부 저장 대상 접수번호 {len(acpt_numbers)}건을 준비했습니다.")
-    emit(f"외부 HTML 경로: {source_directory}")
+    emit(f"외부 HTML 경로: {source_path}")
     emit(f"저장 경로: {resolved_output_directory}")
     emit(f"입력 분할저장: {'예' if source_split_by_year else '아니오'}")
     emit(f"출력 분할저장: {'예' if output_split_by_year else '아니오'}")
@@ -1847,7 +1901,7 @@ def download_disclosure_html_contents_payload(
         _clear_cancel_token(cancel_token)
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
-        source_json_path=str(source_directory),
+        source_json_path=str(source_path),
         acpt_numbers=acpt_numbers,
         source_json=source_json,
     )

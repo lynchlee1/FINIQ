@@ -20,6 +20,7 @@ import { formatInteger } from "@/lib/format";
 
 type DownloadVariant = "external" | "content";
 type PartitionMode = "split" | "flatten";
+type ContentSourceInputMode = "folder" | "file";
 type SplitByYearButtonProps = {
   checked: boolean;
   onChange: () => void;
@@ -157,10 +158,14 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [pendingPartitionResult, setPendingPartitionResult] = useState<any>(null);
   const checkExistingRequestRef = useRef({ id: 0, key: "" });
   const partitionRetryRef = useRef(false);
+  const checkExistingAbortControllerRef = useRef<AbortController | null>(null);
+  const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
   // Form State
   const [outputDirectory, setOutputDirectory] = useState("");
   const [sourcePath, setSourcePath] = useState("");
+  const [contentSourceInputMode, setContentSourceInputMode] = useState<ContentSourceInputMode>("folder");
+  const [contentSourceFilePath, setContentSourceFilePath] = useState("");
   const [timeout, setTimeoutVal] = useState("20");
   const [maxRequestsPerMinute, setMaxRequestsPerMinute] = useState("90");
   const [waitSeconds, setWaitSeconds] = useState("0");
@@ -236,6 +241,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         setStatus("공시 필터에서 생성한 결과 파일을 불러왔습니다.");
       } else if (variant === "content") {
         setSourcePath(config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : ""));
+        setContentSourceFilePath(config.html_content_compressed_json_path || "");
         setMergeOutputPath(config.html_merge_output_path || (nextOutputDirectory ? `${nextOutputDirectory}/merged-content-html.json` : ""));
       } else if (config.html_download_source_path) {
         setSourcePath(config.html_download_source_path);
@@ -254,22 +260,34 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     }
   }, [isJobActive]);
 
+  const sourcePayload = useCallback(() => {
+    if (variant === "content" && contentSourceInputMode === "file") {
+      return { source_compressed_json_path: contentSourceFilePath };
+    }
+    return { [variantConfig.sourcePayloadKey]: sourcePath };
+  }, [contentSourceFilePath, contentSourceInputMode, sourcePath, variant, variantConfig.sourcePayloadKey]);
+
+  const currentSourcePath = variant === "content" && contentSourceInputMode === "file" ? contentSourceFilePath : sourcePath;
+  const currentSourceRequiredMessage = variant === "content" && contentSourceInputMode === "file"
+    ? "외부 HTML 문서 JSON 압축 파일을 선택하세요."
+    : variantConfig.sourceRequiredMessage;
+
   const buildRunPayload = useCallback((cancelToken: string) => ({
       output_directory: outputDirectory,
-      [variantConfig.sourcePayloadKey]: sourcePath,
+      ...sourcePayload(),
       timeout: Number(timeout),
       max_requests_per_minute: Number(maxRequestsPerMinute),
       wait_seconds: Number(waitSeconds),
       limit: limit ? Number(limit) : null,
       skip_existing: skipExisting,
       split_by_year: downloadSplitByYear,
-      source_split_by_year: variant === "content" ? contentSourceSplitByYear : downloadSplitByYear,
+      source_split_by_year: variant === "content" ? (contentSourceInputMode === "folder" && contentSourceSplitByYear) : downloadSplitByYear,
       output_split_by_year: downloadSplitByYear,
       progress_interval: Number(progressInterval),
       cancel_token: cancelToken,
   }), [
     outputDirectory,
-    sourcePath,
+    sourcePayload,
     timeout,
     maxRequestsPerMinute,
     waitSeconds,
@@ -277,14 +295,14 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     skipExisting,
     downloadSplitByYear,
     contentSourceSplitByYear,
+    contentSourceInputMode,
     progressInterval,
     variant,
-    variantConfig.sourcePayloadKey,
   ]);
 
   const handleRun = async () => {
-    if (!sourcePath) {
-      setStatus(variantConfig.sourceRequiredMessage);
+    if (!currentSourcePath) {
+      setStatus(currentSourceRequiredMessage);
       setIsErrorStatus(true);
       return;
     }
@@ -303,28 +321,33 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
   const buildCleanupPayload = useCallback((dryRun: boolean) => ({
     output_directory: outputDirectory,
-    [variantConfig.sourcePayloadKey]: sourcePath,
+    ...sourcePayload(),
     limit: limit ? Number(limit) : null,
     split_by_year: downloadSplitByYear,
-    source_split_by_year: variant === "content" ? contentSourceSplitByYear : downloadSplitByYear,
+    source_split_by_year: variant === "content" ? (contentSourceInputMode === "folder" && contentSourceSplitByYear) : downloadSplitByYear,
     output_split_by_year: downloadSplitByYear,
     dry_run: dryRun,
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
   }), [
     outputDirectory,
-    sourcePath,
+    sourcePayload,
     limit,
     downloadSplitByYear,
     contentSourceSplitByYear,
+    contentSourceInputMode,
     deleteConfirmed,
     deleteConfirmationText,
     variant,
-    variantConfig.sourcePayloadKey,
   ]);
 
   const checkExisting = useCallback(async () => {
-    if (!sourcePath || !outputDirectory) {
+    if (checkExistingAbortControllerRef.current) {
+      checkExistingAbortControllerRef.current.abort();
+      checkExistingAbortControllerRef.current = null;
+    }
+
+    if (!currentSourcePath || !outputDirectory) {
       checkExistingRequestRef.current = { id: checkExistingRequestRef.current.id + 1, key: "" };
       setExistingData(null);
       setCheckingExisting(false);
@@ -338,11 +361,16 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     });
     checkExistingRequestRef.current = { id: requestId, key: requestKey };
     setCheckingExisting(true);
+
+    const controller = new AbortController();
+    checkExistingAbortControllerRef.current = controller;
+
     try {
       const response = await fetch(variantConfig.checkExistingEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Existing HTML check failed");
@@ -353,7 +381,10 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         return;
       }
       setExistingData(data.has_existing ? data : null);
-    } catch {
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return;
+      }
       if (
         checkExistingRequestRef.current.id === requestId &&
         checkExistingRequestRef.current.key === requestKey
@@ -365,10 +396,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         checkExistingRequestRef.current.id === requestId &&
         checkExistingRequestRef.current.key === requestKey
       ) {
-        setCheckingExisting(false);
+        if (!controller.signal.aborted) {
+          setCheckingExisting(false);
+        }
       }
     }
-  }, [sourcePath, outputDirectory, buildCleanupPayload, variantConfig.checkExistingEndpoint]);
+  }, [currentSourcePath, outputDirectory, buildCleanupPayload, variantConfig.checkExistingEndpoint]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -377,9 +410,20 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     return () => window.clearTimeout(timer);
   }, [checkExisting, existingCheckRefreshKey]);
 
+  useEffect(() => {
+    return () => {
+      if (checkExistingAbortControllerRef.current) {
+        checkExistingAbortControllerRef.current.abort();
+      }
+      if (inspectAbortControllerRef.current) {
+        inspectAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   const handleInspectFolder = async () => {
-    if (!sourcePath) {
-      setStatus(variantConfig.sourceRequiredMessage);
+    if (!currentSourcePath) {
+      setStatus(currentSourceRequiredMessage);
       setIsErrorStatus(true);
       return;
     }
@@ -388,6 +432,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setIsErrorStatus(true);
       return;
     }
+    if (inspectAbortControllerRef.current) {
+      inspectAbortControllerRef.current.abort();
+      inspectAbortControllerRef.current = null;
+    }
+    const controller = new AbortController();
+    inspectAbortControllerRef.current = controller;
+
     try {
       setInspectRunning(true);
       setIsErrorStatus(false);
@@ -397,6 +448,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Folder inspection failed");
@@ -416,10 +468,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setResult(data);
       setStatus(lines.join("\n"));
     } catch (err: any) {
+      if (err.name === 'AbortError') return;
       setStatus(err.message);
       setIsErrorStatus(true);
     } finally {
-      setInspectRunning(false);
+      if (!controller.signal.aborted) {
+        setInspectRunning(false);
+      }
     }
   };
 
@@ -429,6 +484,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setIsErrorStatus(true);
       return;
     }
+    if (inspectAbortControllerRef.current) {
+      inspectAbortControllerRef.current.abort();
+      inspectAbortControllerRef.current = null;
+    }
+    const controller = new AbortController();
+    inspectAbortControllerRef.current = controller;
+
     try {
       setInspectRunning(true);
       setIsErrorStatus(false);
@@ -437,6 +499,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildCleanupPayload(false)),
+        signal: controller.signal,
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Folder cleanup failed");
@@ -458,10 +521,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setResult(data);
       setStatus(lines.join("\n"));
     } catch (err: any) {
+      if (err.name === 'AbortError') return;
       setStatus(err.message);
       setIsErrorStatus(true);
     } finally {
-      setInspectRunning(false);
+      if (!controller.signal.aborted) {
+        setInspectRunning(false);
+      }
     }
   };
 
@@ -566,9 +632,15 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     saveSetting(variantConfig.sourceSettingKey, val);
   };
 
+  const saveContentSourceFilePath = (val: string) => {
+    setContentSourceFilePath(val);
+    saveSetting("html_content_compressed_json_path", val);
+  };
+
   useEffect(() => {
     if (!pendingPartitionResult) return;
     let cancelled = false;
+    const controller = new AbortController();
 
     const verifyPartitionOutput = async () => {
       const completedMode = pendingPartitionResult.mode as PartitionMode;
@@ -592,7 +664,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       const verifiedInputDirectory = String(pendingPartitionResult.source_directory || partitionInputDirectory || "").trim();
       const sourcePayload = variant === "external"
         ? { source_directory: verifiedInputDirectory }
-        : { [variantConfig.sourcePayloadKey]: sourcePath };
+        : (contentSourceInputMode === "file" ? { source_compressed_json_path: contentSourceFilePath } : { [variantConfig.sourcePayloadKey]: sourcePath });
       const integrityPayload = {
         output_directory: verifiedOutputDirectory,
         ...sourcePayload,
@@ -609,6 +681,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(integrityPayload),
+          signal: controller.signal,
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Partition integrity check failed");
@@ -636,6 +709,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(manifestPayload),
+            signal: controller.signal,
           });
           const manifestData = await manifestResponse.json();
           if (!manifestResponse.ok) throw new Error(manifestData.detail || "HTML manifest write failed");
@@ -685,6 +759,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         setIsErrorStatus(true);
       } catch (err: any) {
         if (cancelled) return;
+        if (err.name === 'AbortError') return;
         setPendingPartitionResult(null);
         setStatus(err.message);
         setIsErrorStatus(true);
@@ -694,12 +769,15 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     verifyPartitionOutput();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     pendingPartitionResult,
     partitionOutputDirectory,
     partitionInputDirectory,
     sourcePath,
+    contentSourceFilePath,
+    contentSourceInputMode,
     limit,
     variant,
     contentSourceSplitByYear,
@@ -715,14 +793,14 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "sourcePath",
       kind: "path",
-      label: variantConfig.sourceLabel,
-      help: variantConfig.sourceHelp,
-      mode: variantConfig.sourcePickMode,
-      value: sourcePath,
-      onChange: saveSourcePath,
+      label: variant === "content" && contentSourceInputMode === "file" ? "외부 HTML 문서 JSON 압축 파일" : variantConfig.sourceLabel,
+      help: variant === "content" && contentSourceInputMode === "file" ? "외부 저장 화면의 압축 기능으로 만든 compressed-external-html.json 파일을 선택하세요." : variantConfig.sourceHelp,
+      mode: variant === "content" && contentSourceInputMode === "file" ? "file" : variantConfig.sourcePickMode,
+      value: currentSourcePath,
+      onChange: variant === "content" && contentSourceInputMode === "file" ? saveContentSourceFilePath : saveSourcePath,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
-      trailing: variantConfig.sourcePickMode === "folder" ? (
+      trailing: variantConfig.sourcePickMode === "folder" && contentSourceInputMode === "folder" ? (
         <SplitByYearButton
           checked={contentSourceSplitByYear}
           onChange={() => setContentSourceSplitByYear((value) => !value)}
@@ -889,6 +967,30 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           <HtmlWorkflowCard
             title="저장 경로"
             description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
+            actions={variant === "content" ? (
+              <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+                <Button
+                  type="button"
+                  variant={contentSourceInputMode === "folder" ? "default" : "ghost"}
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setContentSourceInputMode("folder")}
+                >
+                  <FolderOpen className="mr-2 h-4 w-4" />
+                  폴더 입력
+                </Button>
+                <Button
+                  type="button"
+                  variant={contentSourceInputMode === "file" ? "default" : "ghost"}
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setContentSourceInputMode("file")}
+                >
+                  <FileJson className="mr-2 h-4 w-4" />
+                  파일 입력
+                </Button>
+              </div>
+            ) : null}
           >
             <HtmlWorkflowForm fields={basePathFields} />
             {checkingExisting && !existingData && (

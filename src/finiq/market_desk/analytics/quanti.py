@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+import math
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,11 @@ def fetch_quanti_ohlcv(
     rows: list[dict[str, Any]] = []
     for ts, row in combined.iterrows():
         vwap_val = row.get("vwap")
+        vwap = (
+            int(vwap_val)
+            if pd.notna(vwap_val) and math.isfinite(float(vwap_val))
+            else None
+        )
         rows.append(
             {
                 "date": ts.strftime("%Y-%m-%d"),  # type: ignore[union-attr]
@@ -121,7 +127,7 @@ def fetch_quanti_ohlcv(
                 "low": int(row["low"]),
                 "close": int(row["close"]),
                 "volume": int(row["volume"]),
-                "vwap": int(vwap_val) if pd.notna(vwap_val) else None,
+                "vwap": vwap,
             }
         )
     return rows

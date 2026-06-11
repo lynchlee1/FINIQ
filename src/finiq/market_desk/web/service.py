@@ -524,6 +524,11 @@ def _normalize_acpt_numbers(value: object) -> set[str]:
 
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+CancelCheck = Callable[[], bool]
+
+
+class FilterCancelled(Exception):
+    """Raised when a streaming filter request is abandoned by the client."""
 
 
 def _resolve_filter_workers(value: object, item_count: int) -> int:
@@ -1115,8 +1120,11 @@ def filter_disclosures_payload(
     body: dict[str, Any],
     *,
     progress_callback: ProgressCallback | None = None,
+    cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any]:
     """Filter a company-classification artifact and return a portable disclosure JSON."""
+    if cancel_check is not None and cancel_check():
+        raise FilterCancelled("filter cancelled")
     classification_path = str(body.get("classification_path") or "").strip()
     root_directory = str(body.get("root_directory") or "").strip()
     if root_directory:
@@ -1179,6 +1187,8 @@ def filter_disclosures_payload(
     duplicate_count = 0
     inspected_count = 0
     for index, record in enumerate(records, start=1):
+        if cancel_check is not None and cancel_check():
+            raise FilterCancelled("filter cancelled")
         inspected_count = index
         disclosed_date = str(record.get("__filter_disclosed_date") or "")
         acpt_no = str(record.get("__filter_acpt_no") or "")

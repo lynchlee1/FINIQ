@@ -111,7 +111,10 @@ def load_folder_partial_cache(
     cache_path = company_classification_partial_path(folder)
     if not cache_path.exists():
         return None
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
     if payload.get("format") != CLASSIFICATION_PARTIAL_FORMAT:
         return None
     if payload.get("signature") != folder_partial_signature(folder):

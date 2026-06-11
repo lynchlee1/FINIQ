@@ -558,6 +558,18 @@ def download_disclosure_viewer_htmls(
     
     total_count = len(normalized_acpt_numbers)
     lock = threading.Lock()
+    request_spacing_lock = threading.Lock()
+    next_request_time = time.monotonic()
+
+    def wait_for_request_spacing() -> bool:
+        nonlocal next_request_time
+        if wait_seconds_between_requests <= 0:
+            return bool(cancel_check is not None and cancel_check())
+        with request_spacing_lock:
+            now = time.monotonic()
+            sleep_seconds = max(0.0, next_request_time - now)
+            next_request_time = max(now, next_request_time) + wait_seconds_between_requests
+        return _sleep_between_requests(sleep_seconds, cancel_check)
 
     def download_task(acpt_no: str, current_retry: int = 0) -> Path | None:
         if cancel_check is not None and cancel_check():
@@ -574,6 +586,8 @@ def download_disclosure_viewer_htmls(
 
         # Wait for rate limit
         if rate_limiter.wait(cancel_check):
+            return None
+        if wait_for_request_spacing():
             return None
 
         try:

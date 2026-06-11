@@ -276,16 +276,8 @@ def fetch_stock_price_history(
 
 __all__ = [
     "build_company_list_xlsx",
-    "company_classification_is_stale",
-    "company_classification_path",
     "extract_unique_company_list_rows",
     "fetch_stock_price_history",
     "format_stock_code_for_export",
     "infer_stock_code",
-    "load_company_classification",
-    "load_company_classification_company",
-    "load_company_classification_company_file",
-    "load_company_classification_file",
-    "load_company_classification_index",
-    "load_company_classification_index_file",
 ]

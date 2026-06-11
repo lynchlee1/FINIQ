@@ -21,6 +21,7 @@ interface SettingsState {
   integrated_history_output_path: string;
   html_download_source_path: string;
   html_merge_output_path: string;
+  html_content_compressed_json_path: string;
   integrated_data_values: Record<string, string>;
   change_log_date_thresholds: Record<string, number>;
   change_log_numeric_thresholds: Record<string, number>;
@@ -53,6 +54,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   integrated_history_output_path: "",
   html_download_source_path: "",
   html_merge_output_path: "",
+  html_content_compressed_json_path: "",
   integrated_data_values: {},
   change_log_date_thresholds: {},
   change_log_numeric_thresholds: {},
