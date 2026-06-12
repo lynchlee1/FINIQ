@@ -323,6 +323,30 @@ def test_html_content_download_inspect_folder_route_honors_split_options(tmp_pat
     assert payload["deletion_candidates"][0]["name"] == "20240101000001.html"
 
 
+def test_html_content_download_inspect_folder_uses_fast_source_scan(tmp_path: Path) -> None:
+    source_directory = tmp_path / "viewer_html"
+    source_directory.mkdir()
+    (source_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    output_directory = tmp_path / "content_html"
+    output_directory.mkdir()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/content-download/inspect-folder",
+        json={
+            "source_directory": str(source_directory),
+            "output_directory": str(output_directory),
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_type"] == "content"
+    assert payload["requested_count"] == 1
+    assert payload["deletion_candidate_count"] == 0
+
+
 def test_html_content_download_check_existing_route_honors_split_options(tmp_path: Path) -> None:
     source_directory = tmp_path / "viewer_html"
     source_year_directory = source_directory / "2025"
@@ -364,6 +388,88 @@ def test_html_content_download_check_existing_route_honors_split_options(tmp_pat
     assert payload["missing_target_html_count"] == 0
     assert payload["detected_source_split_by_year"] is True
     assert payload["detected_output_split_by_year"] is True
+
+
+def test_html_content_download_check_existing_route_ignores_compressed_json_split_by_year(
+    tmp_path: Path,
+) -> None:
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "split_by_year": True,
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "year": "2025",
+                        "selected_main_doc_no": "20250101000999",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "content_html"
+    output_directory.mkdir()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/content-download/check-existing",
+        json={
+            "source_compressed_json_path": str(compressed_path),
+            "output_directory": str(output_directory),
+            "output_split_by_year": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_type"] == "content"
+    assert payload["output_split_by_year"] is False
+    assert payload["detected_output_split_by_year"] is None
+    assert payload["requested_count"] == 1
+
+
+def test_html_content_download_check_existing_route_prefers_output_directory_split_by_year(
+    tmp_path: Path,
+) -> None:
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "split_by_year": False,
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "year": "2025",
+                        "selected_main_doc_no": "20250101000999",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "content_html"
+    (output_directory / "2025").mkdir(parents=True)
+    (output_directory / "2025" / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/content-download/check-existing",
+        json={
+            "source_compressed_json_path": str(compressed_path),
+            "output_directory": str(output_directory),
+            "output_split_by_year": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["output_split_by_year"] is True
+    assert payload["detected_output_split_by_year"] is True
+    assert payload["existing_target_html_count"] == 1
 
 
 def test_html_download_inspect_folder_route_rejects_high_risk_directory() -> None:

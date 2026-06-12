@@ -1392,7 +1392,20 @@ def test_clean_disclosure_html_output_directory_accepts_result_directory_source_
 
 def test_check_disclosure_html_output_directory_reports_existing_overlap(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    from finiq.market_desk.web import disclosure_html
+
+    used_workers: list[int] = []
+    real_executor = disclosure_html.ThreadPoolExecutor
+
+    def tracking_executor(*args, **kwargs):
+        used_workers.append(kwargs.get("max_workers") or args[0])
+        return real_executor(*args, **kwargs)
+
+    monkeypatch.setattr(disclosure_html, "cpu_count", lambda: 8)
+    monkeypatch.setattr(disclosure_html, "ThreadPoolExecutor", tracking_executor)
+
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
     (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
@@ -1416,6 +1429,33 @@ def test_check_disclosure_html_output_directory_reports_existing_overlap(
     assert payload["missing_target_html_count"] == 1
     assert payload["detected_output_split_by_year"] is False
     assert (output_directory / "20250101000001.html").exists()
+    assert used_workers == [2]
+
+
+def test_check_disclosure_html_output_directory_uses_single_worker_for_single_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from finiq.market_desk.web import disclosure_html
+
+    def fail_executor(*args, **kwargs):
+        raise AssertionError("single target should not start ThreadPoolExecutor")
+
+    monkeypatch.setattr(disclosure_html, "ThreadPoolExecutor", fail_executor)
+
+    output_directory = tmp_path / "viewer_html"
+    output_directory.mkdir()
+    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    payload = check_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(output_directory),
+            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
+        }
+    )
+
+    assert payload["has_existing"] is True
+    assert payload["existing_target_html_count"] == 1
 
 
 def test_download_disclosure_html_payload_logs_existing_html_overlap(
@@ -1666,7 +1706,7 @@ def test_clean_disclosure_html_output_directory_deletes_unexpected_content_files
     unexpected.write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.disclosure_html._collect_content_targets_from_external_directory",
+        "finiq.market_desk.web.disclosure_html._collect_content_cleanup_targets_from_external_directory",
         lambda source, **kwargs: ([{"acpt_no": "20250101000001", "doc_no": "1"}], None),
     )
 
@@ -2416,6 +2456,9 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
     assert payload["written_files"] == [str(output_path)]
     saved = json.loads(output_path.read_text(encoding="utf-8"))
     assert saved["format"] == "finiq_disclosure_external_html_docs_v1"
+    assert "input_directory" not in saved
+    assert "output_directory" not in saved
+    assert "output_path" not in saved
     assert "html" not in saved["records"][0]
     assert saved["records"][0]["acpt_no"] == "20250101000001"
     assert saved["records"][0]["title"] == "뷰어 제목"
@@ -2488,9 +2531,9 @@ def test_compress_disclosure_external_html_payload_reads_split_input(tmp_path: P
         }
     )
 
-    assert payload["split_by_year"] is False
-    assert payload["input_split_by_year"] is True
-    assert payload["output_split_by_year"] is False
+    assert "split_by_year" not in payload
+    assert "input_split_by_year" not in payload
+    assert "output_split_by_year" not in payload
     assert payload["summary"] == {"found_files": 2, "compressed_files": 2, "written_files": 1}
     assert payload["processing_verification"] == {
         "passed": True,
@@ -2504,9 +2547,12 @@ def test_compress_disclosure_external_html_payload_reads_split_input(tmp_path: P
     output_path = tmp_path / "compressed" / "compressed-external-html.json"
     assert payload["written_files"] == [str(output_path)]
     saved = json.loads(output_path.read_text(encoding="utf-8"))
-    assert saved["split_by_year"] is False
-    assert saved["input_split_by_year"] is True
-    assert saved["output_split_by_year"] is False
+    assert "input_directory" not in saved
+    assert "output_directory" not in saved
+    assert "output_path" not in saved
+    assert "split_by_year" not in saved
+    assert "input_split_by_year" not in saved
+    assert "output_split_by_year" not in saved
     assert "year" not in saved
     assert [record["acpt_no"] for record in saved["records"]] == ["20240101000001", "20250101000001"]
     assert "year" not in saved["records"][0]
@@ -2544,6 +2590,88 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
     assert payload["verification"]["passed"] is True
     assert "병렬 처리: 2개 워커" in payload["progress_log"]
     assert [record["acpt_no"] for record in saved["records"]] == ["20250101000001", "20250101000002"]
+
+
+def test_check_disclosure_html_output_directory_ignores_compressed_json_split_by_year(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fail_full_target_scan(*args, **kwargs):
+        raise AssertionError("existing checks should not scan compressed JSON docs for doc_no")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.disclosure_html._collect_content_targets_from_compressed_payload",
+        fail_full_target_scan,
+    )
+
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "split_by_year": True,
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "year": "2025",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "content_html"
+    output_directory.mkdir()
+
+    payload = check_disclosure_html_output_directory_payload(
+        {
+            "source_compressed_json_path": str(compressed_path),
+            "output_directory": str(output_directory),
+            "output_split_by_year": False,
+        }
+    )
+
+    assert payload["source_type"] == "content"
+    assert payload["output_split_by_year"] is False
+    assert payload["detected_output_split_by_year"] is None
+    assert payload["requested_count"] == 1
+
+
+def test_check_disclosure_html_output_directory_prefers_output_directory_split_by_year(
+    tmp_path: Path,
+) -> None:
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "split_by_year": False,
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "year": "2025",
+                        "selected_main_doc_no": "20250101000999",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "content_html"
+    (output_directory / "2025").mkdir(parents=True)
+    (output_directory / "2025" / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    payload = check_disclosure_html_output_directory_payload(
+        {
+            "source_compressed_json_path": str(compressed_path),
+            "output_directory": str(output_directory),
+            "output_split_by_year": False,
+        }
+    )
+
+    assert payload["output_split_by_year"] is True
+    assert payload["detected_output_split_by_year"] is True
+    assert payload["existing_target_html_count"] == 1
 
 
 def test_download_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
@@ -3261,22 +3389,35 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/api/disclosures/html/download/check-existing" in download_component_html
     assert "/api/disclosures/html/content-download/check-existing" in download_component_html
     assert "externalTaskMode" in download_component_html
+    assert "contentTaskMode" in download_component_html
     assert "외부 HTML 저장" in download_component_html
-    assert "문서 JSON 압축" in download_component_html
+    assert "내부 HTML 저장" in download_component_html
+    assert "외부 HTML 압축" in download_component_html
+    assert "내부 HTML 병합" in download_component_html
     assert "외부 HTML 입력 경로" in download_component_html
     assert "압축 JSON 저장 경로" in download_component_html
     assert "압축 설정" not in download_component_html
     assert "압축 처리" in download_component_html
     assert "병렬 워커 수" in download_component_html
     assert "parallel_workers" in download_component_html
+    assert "외부 HTML 압축 JSON 파일" in download_component_html
+    assert "외부 저장 화면의 외부 HTML 압축으로 만든 compressed-external-html.json 파일을 선택하세요." not in download_component_html
+    assert "data.has_existing ||" in download_component_html
+    assert 'typeof data.detected_output_split_by_year === "boolean"' in download_component_html
+    assert "async function readJsonResponse" in download_component_html
+    assert "const handleApplyExistingSettings = () => {" not in download_component_html
+    assert "setDownloadSplitByYear(existingOutputSplitByYear)" not in download_component_html
+    assert "저장 경로 분할저장을" not in download_component_html
+    assert "detected_source_split_by_year !== contentSourceSplitByYear" not in download_component_html
     assert "/api/utility/partition-storage/start" not in download_component_html
     assert "분할저장 구조 전환" not in download_component_html
     assert "/api/utility/partition-storage/start" in utility_ui_html
     assert "분할저장 구조 전환" in utility_ui_html
     assert "move: false" in utility_ui_html
     assert "기존 파일 덮어쓰기" not in download_component_html
+    assert "기존 원문 저장 범위 감지됨" in download_component_html
     assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
-    assert "기존 메타데이터 기준으로 설정 맞추기" in download_component_html
+    assert "기존 메타데이터 기준으로 설정 맞추기" not in download_component_html
     assert "분할저장 설정이 기존 폴더 구조와 다릅니다" in download_component_html
     assert "/html-change-log" in parse_ui_html
     assert "/html-bond-summary" in change_log_ui_html
