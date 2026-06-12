@@ -21,6 +21,7 @@ import { formatInteger } from "@/lib/format";
 type DownloadVariant = "external" | "content";
 type ContentSourceInputMode = "folder" | "file";
 type ExternalTaskMode = "download" | "compress";
+type ContentTaskMode = "download" | "merge";
 type SplitByYearButtonProps = {
   checked: boolean;
   onChange: () => void;
@@ -63,6 +64,19 @@ const DOWNLOAD_VARIANTS = {
   },
 } as const;
 
+async function readJsonResponse(response: Response, fallbackMessage: string) {
+  const text = await response.text();
+  if (!text.trim()) {
+    if (!response.ok) throw new Error(fallbackMessage);
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(response.ok ? fallbackMessage : text);
+  }
+}
+
 function SplitByYearButton({ checked, onChange }: SplitByYearButtonProps) {
   return (
     <Button
@@ -84,7 +98,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   } = useSettingsStore();
 
   const [loading, setLoading] = useState(true);
-  const [result, setResult] = useState<any>(null);
+  const [, setResult] = useState<any>(null);
 
   const formatStatus = useCallback((data: any) => {
     const statusLbl = (s: string) => {
@@ -113,7 +127,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       }
     }
     if (res.summary?.compressed_files !== undefined) {
-      lines.push(`문서 JSON 압축: ${formatInteger(res.summary.compressed_files)}`);
+      lines.push(`외부 HTML 압축: ${formatInteger(res.summary.compressed_files)}`);
       lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
       lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       if (res.verification) {
@@ -136,7 +150,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
+  const [lastInspectionResult, setLastInspectionResult] = useState<any>(null);
   const [existingData, setExistingData] = useState<any>(null);
+  const [existingCheckError, setExistingCheckError] = useState("");
   const [checkingExisting, setCheckingExisting] = useState(false);
   const [existingCheckRefreshKey, setExistingCheckRefreshKey] = useState(0);
   const checkExistingRequestRef = useRef({ id: 0, key: "" });
@@ -147,6 +163,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [outputDirectory, setOutputDirectory] = useState("");
   const [sourcePath, setSourcePath] = useState("");
   const [externalTaskMode, setExternalTaskMode] = useState<ExternalTaskMode>("download");
+  const [contentTaskMode, setContentTaskMode] = useState<ContentTaskMode>("download");
   const [contentSourceInputMode, setContentSourceInputMode] = useState<ContentSourceInputMode>("folder");
   const [contentSourceFilePath, setContentSourceFilePath] = useState("");
   const [compressInputDirectory, setCompressInputDirectory] = useState("");
@@ -164,10 +181,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [progressInterval, setProgressInterval] = useState("10");
   const [mergeOutputPath, setMergeOutputPath] = useState("");
 
-  const existingSplitMismatch = !!existingData && (
-    (typeof existingData.detected_output_split_by_year === "boolean" && existingData.detected_output_split_by_year !== downloadSplitByYear) ||
-    (variant === "content" && typeof existingData.detected_source_split_by_year === "boolean" && existingData.detected_source_split_by_year !== contentSourceSplitByYear)
-  );
+  const existingOutputSplitByYear =
+    existingData && typeof existingData.detected_output_split_by_year === "boolean"
+      ? existingData.detected_output_split_by_year
+      : null;
+  const existingSplitMismatch = existingOutputSplitByYear !== null && existingOutputSplitByYear !== downloadSplitByYear;
+  const existingAllSaved = !!existingData && (existingData.requested_count || 0) > 0 && (existingData.missing_target_html_count || 0) === 0;
 
   const {
     status,
@@ -246,7 +265,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
   const currentSourcePath = variant === "content" && contentSourceInputMode === "file" ? contentSourceFilePath : sourcePath;
   const currentSourceRequiredMessage = variant === "content" && contentSourceInputMode === "file"
-    ? "외부 HTML 문서 JSON 압축 파일을 선택하세요."
+    ? "외부 HTML 압축 JSON 파일을 선택하세요."
     : variantConfig.sourceRequiredMessage;
 
   const buildRunPayload = useCallback((cancelToken: string) => ({
@@ -319,14 +338,10 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   ]);
 
   const checkExisting = useCallback(async () => {
-    if (checkExistingAbortControllerRef.current) {
-      checkExistingAbortControllerRef.current.abort();
-      checkExistingAbortControllerRef.current = null;
-    }
-
     if (!currentSourcePath || !outputDirectory) {
       checkExistingRequestRef.current = { id: checkExistingRequestRef.current.id + 1, key: "" };
       setExistingData(null);
+      setExistingCheckError("");
       setCheckingExisting(false);
       return;
     }
@@ -349,7 +364,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response, "Existing HTML check failed");
       if (!response.ok) throw new Error(data.detail || "Existing HTML check failed");
       if (
         checkExistingRequestRef.current.id !== requestId ||
@@ -357,7 +372,14 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       ) {
         return;
       }
-      setExistingData(data.has_existing ? data : null);
+      setExistingCheckError("");
+      setExistingData(
+        data.has_existing ||
+        typeof data.detected_output_split_by_year === "boolean" ||
+        typeof data.detected_source_split_by_year === "boolean"
+          ? data
+          : null
+      );
     } catch (err: any) {
       if (err.name === 'AbortError') {
         return;
@@ -366,7 +388,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         checkExistingRequestRef.current.id === requestId &&
         checkExistingRequestRef.current.key === requestKey
       ) {
-        setExistingData(null);
+        setExistingCheckError(err.message || "기존 원문 저장 폴더 재확인에 실패했습니다.");
       }
     } finally {
       if (
@@ -427,11 +449,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response, "Folder inspection failed");
       if (!response.ok) throw new Error(data.detail || "Folder inspection failed");
 
       const deleteCandidates = Array.isArray(data.deletion_candidates) ? data.deletion_candidates : [];
       setLastInspectionCandidateCount(data.deletion_candidate_count || 0);
+      setLastInspectionResult(data);
       const lines = [
         "폴더 검사 완료",
         `대상 접수번호: ${formatInteger(data.requested_count)}`,
@@ -442,7 +465,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       if (deleteCandidates.length) {
         lines.push("", "삭제 예정 파일", ...deleteCandidates.map((file: any) => `- ${file.name} (${file.reason})`));
       }
-      setResult(data);
       setStatus(lines.join("\n"));
     } catch (err: any) {
       if (err.name === 'AbortError') return;
@@ -478,11 +500,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         body: JSON.stringify(buildCleanupPayload(false)),
         signal: controller.signal,
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response, "Folder cleanup failed");
       if (!response.ok) throw new Error(data.detail || "Folder cleanup failed");
 
       const deletedFiles = Array.isArray(data.deleted_files) ? data.deleted_files : [];
       setLastInspectionCandidateCount(0);
+      setLastInspectionResult(data);
       setDeleteConfirmed(false);
       setDeleteConfirmationText("");
       const lines = [
@@ -495,7 +518,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       if (deletedFiles.length) {
         lines.push("", "삭제한 파일", ...deletedFiles.map((file: any) => `- ${file.name} (${file.reason})`));
       }
-      setResult(data);
       setStatus(lines.join("\n"));
     } catch (err: any) {
       if (err.name === 'AbortError') return;
@@ -587,8 +609,8 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "sourcePath",
       kind: "path",
-      label: variant === "content" && contentSourceInputMode === "file" ? "외부 HTML 문서 JSON 압축 파일" : variantConfig.sourceLabel,
-      help: variant === "content" && contentSourceInputMode === "file" ? "외부 저장 화면의 압축 기능으로 만든 compressed-external-html.json 파일을 선택하세요." : variantConfig.sourceHelp,
+      label: variant === "content" && contentSourceInputMode === "file" ? "외부 HTML 압축 JSON 파일" : variantConfig.sourceLabel,
+      help: variant === "content" && contentSourceInputMode === "file" ? undefined : variantConfig.sourceHelp,
       mode: variant === "content" && contentSourceInputMode === "file" ? "file" : variantConfig.sourcePickMode,
       value: currentSourcePath,
       onChange: variant === "content" && contentSourceInputMode === "file" ? saveContentSourceFilePath : saveSourcePath,
@@ -727,32 +749,54 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     }
     return "기존 파일 건너뛰기 옵션이 꺼져 있어 실행 시 다시 저장합니다.";
   })() : "";
-
-  const handleApplyExistingSettings = () => {
-    if (!existingData) return;
-    if (typeof existingData.detected_output_split_by_year === "boolean") {
-      setDownloadSplitByYear(existingData.detected_output_split_by_year);
+  const existingStatus = existingData ? (() => {
+    if (existingSplitMismatch) {
+      return {
+        className: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-300 dark:border-rose-900/40",
+        label: "분할저장 설정 불일치",
+      };
     }
-    if (variant === "content" && typeof existingData.detected_source_split_by_year === "boolean") {
-      setContentSourceSplitByYear(existingData.detected_source_split_by_year);
+    if ((existingData.deletion_candidate_count || 0) > 0) {
+      return {
+        className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
+        label: "폴더 검사 필요",
+      };
     }
-    setStatus("기존 메타데이터 기준으로 설정을 맞췄습니다.");
-    setIsErrorStatus(false);
-  };
+    if (existingAllSaved) {
+      return {
+        className: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-900/40",
+        label: "모두 저장됨",
+      };
+    }
+    return {
+      className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
+      label: "신규 저장 대상 있음",
+    };
+  })() : null;
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
-  const showSaveWorkflow = variant === "content" || externalTaskMode === "download";
+  const isExternalCompressMode = variant === "external" && externalTaskMode === "compress";
+  const isContentMergeMode = variant === "content" && contentTaskMode === "merge";
+  const showSaveWorkflow =
+    (variant === "external" && externalTaskMode === "download") ||
+    (variant === "content" && contentTaskMode === "download");
 
   return (
     <HtmlWorkflowPage
       eyebrow={variant === "external" ? "External HTML Save" : "Content HTML Save"}
-      title={variant === "external" && externalTaskMode === "compress" ? "외부 HTML 문서 JSON 압축" : variantConfig.settingsTitle}
-      description={variant === "external" && externalTaskMode === "compress"
+      title={isExternalCompressMode
+        ? "외부 HTML 압축"
+        : isContentMergeMode
+          ? "내부 HTML 병합"
+          : variantConfig.settingsTitle}
+      description={isExternalCompressMode
         ? "저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
-        : variantConfig.description}
+        : isContentMergeMode
+          ? "저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다."
+          : variantConfig.description}
       actions={variant === "external" ? (
         <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
           <Button
@@ -773,7 +817,30 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             onClick={() => setExternalTaskMode("compress")}
           >
             <FileJson className="mr-2 h-4 w-4" />
-            문서 JSON 압축
+            외부 HTML 압축
+          </Button>
+        </div>
+      ) : variant === "content" ? (
+        <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+          <Button
+            type="button"
+            variant={contentTaskMode === "download" ? "default" : "ghost"}
+            size="sm"
+            className="h-8"
+            onClick={() => setContentTaskMode("download")}
+          >
+            <FolderOpen className="mr-2 h-4 w-4" />
+            내부 HTML 저장
+          </Button>
+          <Button
+            type="button"
+            variant={contentTaskMode === "merge" ? "default" : "ghost"}
+            size="sm"
+            className="h-8"
+            onClick={() => setContentTaskMode("merge")}
+          >
+            <FileJson className="mr-2 h-4 w-4" />
+            내부 HTML 병합
           </Button>
         </div>
       ) : null}
@@ -785,7 +852,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
               title="저장 경로"
               description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
               actions={variant === "content" ? (
-                <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+                <div className="inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
                   <Button
                     type="button"
                     variant={contentSourceInputMode === "folder" ? "default" : "ghost"}
@@ -804,7 +871,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                     onClick={() => setContentSourceInputMode("file")}
                   >
                     <FileJson className="mr-2 h-4 w-4" />
-                    파일 입력
+                    JSON 파일 입력
                   </Button>
                 </div>
               ) : null}
@@ -815,48 +882,45 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 <div className="flex items-start gap-3">
                   <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
                   <div className="space-y-1">
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">기존 원문 저장 폴더 확인 중...</p>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">기존 원문 저장 폴더 자동 병렬 확인 중...</p>
                     <p className="break-all text-xs text-slate-500 dark:text-slate-400">{outputDirectory}</p>
                   </div>
                 </div>
               </div>
             )}
+            {existingCheckError && !existingData && !checkingExisting && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                <p className="font-semibold">기존 원문 저장 폴더 재확인 실패</p>
+                <p className="mt-1 break-words text-xs">{existingCheckError}</p>
+              </div>
+            )}
             {existingData && (
-              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-[#30363d] dark:bg-[#161b22]">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-[#30363d] dark:bg-[#161b22] animate-fade-in transition-all">
+                <div className="flex flex-col gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d] md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">
-                      {existingSummary}
+                    <p className="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
+                      📂 기존 원문 저장 범위 감지됨
                       {checkingExisting && (
-                        <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
                           <Loader2 className="h-3 w-3 animate-spin" />
                           재확인 중
                         </span>
                       )}
                     </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{existingDetail}</p>
-                    {existingSplitMismatch && (
-                      <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                        분할저장 설정이 기존 폴더 구조와 다릅니다. 설정을 맞춘 뒤 실행할 수 있습니다.
-                      </p>
-                    )}
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      저장됨: <span className="font-semibold">{formatInteger(existingData.existing_target_html_count || 0)}</span>건
+                      {" "} / 대상: <span className="font-semibold">{formatInteger(existingData.requested_count || 0)}</span>건
+                      {" "} / 신규 저장: <span className="font-semibold">{formatInteger(existingData.missing_target_html_count || 0)}</span>건
+                      {" "} / 대상 외 파일: <span className="font-semibold">{formatInteger(existingData.deletion_candidate_count || 0)}</span>개
+                    </p>
                   </div>
                   <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                    <Button
-                      type="button"
-                      variant={existingSplitMismatch ? "default" : "outline"}
-                      size="sm"
-                      className="h-8"
-                      onClick={handleApplyExistingSettings}
-                    >
-                      기존 메타데이터 기준으로 설정 맞추기
-                    </Button>
                     {(existingData.deletion_candidate_count || 0) > 0 && (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="h-8"
+                        className="h-8 shrink-0 self-start border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-[#21262d] dark:hover:text-slate-100 md:self-auto"
                         onClick={handleInspectFolder}
                         disabled={isJobActive || inspectRunning}
                       >
@@ -865,21 +929,53 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                     )}
                   </div>
                 </div>
+
+                <div className="space-y-2">
+                  <div className="flex flex-col justify-between gap-2 rounded border p-2 text-xs dark:border-[#30363d] dark:bg-[#0d1117] sm:flex-row sm:items-center">
+                    <div className="space-y-0.5">
+                      <p className="font-medium text-slate-800 dark:text-slate-200">{existingSummary}</p>
+                      <p className="break-all text-[10px] text-slate-500 dark:text-slate-400">{outputDirectory}</p>
+                    </div>
+                    {existingStatus && (
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${existingStatus.className}`}>
+                        {existingStatus.label}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {existingSplitMismatch && (
+                  <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                    <strong>⚠ 오류:</strong> 분할저장 설정이 기존 폴더 구조와 다릅니다. 폴더 내 데이터가 섞이지 않도록 저장 경로의 분할저장 On/Off를 맞춘 뒤 실행하세요.
+                  </div>
+                )}
+
+                {(existingData.deletion_candidate_count || 0) > 0 && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                    <strong>💡 알림:</strong> {existingDetail}
+                  </div>
+                )}
+
+                {existingCheckError && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                    <strong>⚠ 재확인 실패:</strong> {existingCheckError}
+                  </div>
+                )}
               </div>
             )}
             </HtmlWorkflowCard>
           )}
 
-          {variant === "external" && externalTaskMode === "compress" && (
+          {isExternalCompressMode && (
             <HtmlWorkflowCard
-              title="외부 HTML 문서 JSON 압축"
+              title="외부 HTML 압축"
               description="저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
             >
                 <HtmlWorkflowForm fields={compressionFields} />
             </HtmlWorkflowCard>
           )}
 
-          {variant === "external" && externalTaskMode === "compress" && (
+          {isExternalCompressMode && (
             <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
               <CardHeader>
                 <CardTitle className="dark:text-white">작업 실행</CardTitle>
@@ -899,15 +995,15 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             </Card>
           )}
 
-          {variant === "content" && (
+          {isContentMergeMode && (
             <HtmlWorkflowCard
-              title="내부 HTML JSON 병합"
+              title="내부 HTML 병합"
               description="저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다. 로컬 파일 처리이므로 최대 요청/분은 적용되지 않습니다."
             >
                 <HtmlWorkflowForm fields={mergeFields} />
                 <Button variant="outline" className="h-10 w-full" onClick={handleMergeContentHtml} disabled={isJobActive}>
                   <FileJson className="mr-2 h-4 w-4" />
-                  내부 HTML JSON 병합
+                  내부 HTML 병합
                 </Button>
             </HtmlWorkflowCard>
           )}
@@ -947,7 +1043,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
               onCancel={handleCancel}
             />
           }
-          notificationActive={isErrorStatus || lastInspectionCandidateCount > 0 || !!result}
+          notificationActive={isErrorStatus || !!existingCheckError || lastInspectionCandidateCount > 0 || !!lastInspectionResult}
           notificationContent={
             <>
               {lastInspectionCandidateCount > 0 && (
@@ -971,25 +1067,32 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   </Button>
                 </div>
               )}
-              {result && (
+              {lastInspectionResult && (
                 <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#30363d]">
-                  <Label className="dark:text-slate-300">실행 결과</Label>
+                  <Label className="dark:text-slate-300">폴더 검사 결과</Label>
                   <pre className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#090d12] dark:text-blue-100">
-                    {JSON.stringify(result, null, 2)}
+                    {JSON.stringify(lastInspectionResult, null, 2)}
                   </pre>
                 </div>
               )}
-              {!lastInspectionCandidateCount && !result && <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+              {!lastInspectionCandidateCount && !lastInspectionResult && <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
             </>
           }
           settingsTitle="시스템 설정"
           settingsContent={
-            variant === "external" && externalTaskMode === "compress" ? (
+            isExternalCompressMode ? (
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">압축 처리</p>
                 </div>
                 <HtmlWorkflowForm fields={compressionSettingFields} />
+              </div>
+            ) : isContentMergeMode ? (
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
+                </div>
+                <HtmlWorkflowForm fields={testOptionFields} />
               </div>
             ) : (
               <div className="space-y-5">
