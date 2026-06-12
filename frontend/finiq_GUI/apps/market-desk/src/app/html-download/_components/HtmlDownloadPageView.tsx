@@ -559,7 +559,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       output_directory: compressOutputDirectory,
       split_by_year: compressSplitByYear,
       input_split_by_year: compressSplitByYear,
-      output_split_by_year: compressSplitByYear,
+      output_split_by_year: false,
       parallel_workers: compressWorkers ? Number(compressWorkers) : null,
     };
     startJob("/api/disclosures/html/download/compress/start", payload);
