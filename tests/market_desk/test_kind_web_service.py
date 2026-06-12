@@ -57,6 +57,7 @@ GUI_HTML_DOWNLOAD_COMPONENT = GUI_APP_DIR / "html-download" / "_components" / "H
 GUI_HTML_CONTENT_DOWNLOAD_PAGE = GUI_APP_DIR / "html-content-download" / "page.tsx"
 GUI_HTML_PARSE_PAGE = GUI_APP_DIR / "html-parse" / "page.tsx"
 GUI_HTML_CHANGE_LOG_PAGE = GUI_APP_DIR / "html-change-log" / "page.tsx"
+GUI_UTILITY_PAGE = GUI_APP_DIR / "utility" / "page.tsx"
 EXPECTED_PARSE_MODES = {
     "bond_issuance",
     "rights_issuance",
@@ -2486,6 +2487,38 @@ def test_compress_disclosure_external_html_payload_reads_split_input(tmp_path: P
     assert saved["records"][0]["docs"][0]["doc_no"] == "20250101000999"
 
 
+def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_path: Path) -> None:
+    input_directory = tmp_path / "viewer_html"
+    input_directory.mkdir()
+    for acpt_no in ("20250101000001", "20250101000002"):
+        (input_directory / f"{acpt_no}.html").write_text(
+            f"""
+            <html><body>
+              <input type="hidden" name="acptNo" value="{acpt_no}" />
+              <select id="mainDoc">
+                <option value="{acpt_no}999|Y" selected="selected">본문</option>
+              </select>
+            </body></html>
+            """,
+            encoding="utf-8",
+        )
+
+    payload = compress_disclosure_external_html_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(tmp_path / "compressed"),
+            "workers": 2,
+        }
+    )
+
+    output_path = tmp_path / "compressed" / "compressed-external-html.json"
+    saved = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["summary"] == {"found_files": 2, "compressed_files": 2, "written_files": 1}
+    assert payload["verification"]["passed"] is True
+    assert "병렬 처리: 2개 워커" in payload["progress_log"]
+    assert [record["acpt_no"] for record in saved["records"]] == ["20250101000001", "20250101000002"]
+
+
 def test_download_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
     def fake_download(**kwargs):
         saved_paths = []
@@ -3186,6 +3219,7 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     content_download_ui_html = GUI_HTML_CONTENT_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
     change_log_ui_html = GUI_HTML_CHANGE_LOG_PAGE.read_text(encoding="utf-8")
+    utility_ui_html = GUI_UTILITY_PAGE.read_text(encoding="utf-8")
 
     assert set(PARSER_REGISTRY) == EXPECTED_PARSE_MODES
     for mode in EXPECTED_PARSE_MODES:
@@ -3199,13 +3233,20 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/api/disclosures/html/content-download/start" in download_component_html
     assert "/api/disclosures/html/download/check-existing" in download_component_html
     assert "/api/disclosures/html/content-download/check-existing" in download_component_html
-    assert "/api/disclosures/html/manifest/write" in download_component_html
-    assert "/api/utility/partition-storage/start" in download_component_html
-    assert "분할저장 구조 전환" in download_component_html
-    assert "source_directory: verifiedInputDirectory" in download_component_html
-    assert "overwrite: false" in download_component_html
-    assert "move: false" in download_component_html
-    assert "분할저장 출력 경로 무결성 검사 통과" in download_component_html
+    assert "externalTaskMode" in download_component_html
+    assert "외부 HTML 저장" in download_component_html
+    assert "문서 JSON 압축" in download_component_html
+    assert "외부 HTML 입력 경로" in download_component_html
+    assert "압축 JSON 저장 경로" in download_component_html
+    assert "압축 설정" not in download_component_html
+    assert "압축 처리" in download_component_html
+    assert "병렬 워커 수" in download_component_html
+    assert "parallel_workers" in download_component_html
+    assert "/api/utility/partition-storage/start" not in download_component_html
+    assert "분할저장 구조 전환" not in download_component_html
+    assert "/api/utility/partition-storage/start" in utility_ui_html
+    assert "분할저장 구조 전환" in utility_ui_html
+    assert "move: false" in utility_ui_html
     assert "기존 파일 덮어쓰기" not in download_component_html
     assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
     assert "기존 메타데이터 기준으로 설정 맞추기" in download_component_html

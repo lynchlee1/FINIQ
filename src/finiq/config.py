@@ -46,6 +46,10 @@ SAVED_SETTINGS_KEYS = (
     "integrated_history_item_registry_path",
     "integrated_history_output_path",
     "html_download_source_path",
+    "html_merge_output_path",
+    "html_content_compressed_json_path",
+    "html_external_compress_input_directory",
+    "html_external_compress_output_directory",
     "integrated_data_values",
     "change_log_date_thresholds",
     "change_log_numeric_thresholds",
@@ -75,6 +79,10 @@ class AppConfig:
     integrated_history_item_registry_path: str = ""
     integrated_history_output_path: str = ""
     html_download_source_path: str = ""
+    html_merge_output_path: str = ""
+    html_content_compressed_json_path: str = ""
+    html_external_compress_input_directory: str = ""
+    html_external_compress_output_directory: str = ""
     integrated_data_values: dict[str, str] = field(default_factory=dict)
     change_log_date_thresholds: dict[str, float] = field(default_factory=dict)
     change_log_numeric_thresholds: dict[str, float] = field(default_factory=dict)
@@ -163,6 +171,10 @@ def init_config() -> AppConfig:
         integrated_history_item_registry_path=settings.get("integrated_history_item_registry_path", ""),
         integrated_history_output_path=settings.get("integrated_history_output_path", ""),
         html_download_source_path=settings.get("html_download_source_path", ""),
+        html_merge_output_path=settings.get("html_merge_output_path", ""),
+        html_content_compressed_json_path=settings.get("html_content_compressed_json_path", ""),
+        html_external_compress_input_directory=settings.get("html_external_compress_input_directory", ""),
+        html_external_compress_output_directory=settings.get("html_external_compress_output_directory", ""),
         integrated_data_values=settings.get("integrated_data_values", {}),
         change_log_date_thresholds=settings.get("change_log_date_thresholds", {}),
         change_log_numeric_thresholds=settings.get("change_log_numeric_thresholds", {}),

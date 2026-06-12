@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from os import cpu_count
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
@@ -826,6 +828,34 @@ def _compact_document_options(selects: list[dict[str, Any]]) -> list[dict[str, A
     return documents
 
 
+def _compress_external_html_file(args: tuple[int, str, Path]) -> tuple[int, str, str, dict[str, Any]]:
+    index, year, html_path = args
+    parsed = _compact_external_viewer_html(html_path.read_bytes())
+    acpt_no = str(parsed.get("acpt_no") or html_path.stem).strip()
+    record = {
+        "acpt_no": acpt_no,
+        "title": parsed.get("title") or parsed.get("header") or "",
+        "header": parsed.get("header") or "",
+        "selected_main_doc_no": parsed.get("selected_main_doc_no"),
+        "metadata": {},
+        "docs": _compact_document_options(parsed.get("selects") or []),
+        "source_sha256": parsed.get("source_sha256") or "",
+        "source_size_bytes": parsed.get("source_size_bytes") or 0,
+    }
+    return index, year, acpt_no, record
+
+
+def _external_html_compress_workers(body: dict[str, Any], total_files: int) -> int:
+    raw_workers = body.get("parallel_workers", body.get("workers"))
+    if raw_workers is not None:
+        try:
+            requested_workers = int(raw_workers)
+        except (TypeError, ValueError):
+            requested_workers = 1
+        return max(1, min(requested_workers, total_files))
+    return max(1, min(total_files, cpu_count() or 1))
+
+
 def _verify_compressed_external_html_files(
     *,
     written_files: list[str],
@@ -917,31 +947,44 @@ def compress_disclosure_external_html_payload(
         manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     metadata = _collect_disclosure_metadata_from_json(manifest_payload)
 
+    worker_count = _external_html_compress_workers(body, len(html_files))
+
     emit(f"외부 HTML 압축 대상 {len(html_files)}건을 찾았습니다.")
     emit(f"입력 경로: {input_directory}")
     emit(f"입력 분할저장: {'예' if input_split_by_year else '아니오'}")
     emit(f"출력 분할저장: {'예' if output_split_by_year else '아니오'}")
+    emit(f"병렬 처리: {worker_count}개 워커")
+
+    indexed_records: list[tuple[str, str, dict[str, Any]] | None] = [None] * len(html_files)
+    if worker_count == 1:
+        for args in ((index, year, html_path) for index, (year, html_path) in enumerate(html_files)):
+            index, year, acpt_no, record = _compress_external_html_file(args)
+            record["metadata"] = metadata.get(acpt_no) or {}
+            indexed_records[index] = (year, acpt_no, record)
+            completed_count = index + 1
+            if completed_count % 100 == 0:
+                emit(f"외부 HTML 압축 중간 확인: {completed_count}/{len(html_files)}건 처리.")
+    else:
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            futures = [
+                executor.submit(_compress_external_html_file, (index, year, html_path))
+                for index, (year, html_path) in enumerate(html_files)
+            ]
+            for completed_count, future in enumerate(as_completed(futures), start=1):
+                index, year, acpt_no, record = future.result()
+                record["metadata"] = metadata.get(acpt_no) or {}
+                indexed_records[index] = (year, acpt_no, record)
+                if completed_count % 100 == 0:
+                    emit(f"외부 HTML 압축 중간 확인: {completed_count}/{len(html_files)}건 처리.")
 
     records: list[dict[str, Any]] = []
     record_years: dict[str, str] = {}
-    for index, (year, html_path) in enumerate(html_files, start=1):
-        parsed = _compact_external_viewer_html(html_path.read_bytes())
-        acpt_no = str(parsed.get("acpt_no") or html_path.stem).strip()
+    for indexed_record in indexed_records:
+        if indexed_record is None:
+            continue
+        year, acpt_no, record = indexed_record
         record_years[acpt_no] = year
-        records.append(
-            {
-                "acpt_no": acpt_no,
-                "title": parsed.get("title") or parsed.get("header") or "",
-                "header": parsed.get("header") or "",
-                "selected_main_doc_no": parsed.get("selected_main_doc_no"),
-                "metadata": metadata.get(acpt_no) or {},
-                "docs": _compact_document_options(parsed.get("selects") or []),
-                "source_sha256": parsed.get("source_sha256") or "",
-                "source_size_bytes": parsed.get("source_size_bytes") or 0,
-            }
-        )
-        if index % 100 == 0:
-            emit(f"외부 HTML 압축 중간 확인: {index}/{len(html_files)}건 처리.")
+        records.append(record)
 
     written_files: list[str] = []
     if output_split_by_year:

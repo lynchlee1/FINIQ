@@ -246,7 +246,7 @@ export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string 
         activityContent={<div className="text-sm dark:text-slate-300">노드 {formatInteger(visibleGraph.nodes.length)}개, 엣지 {formatInteger(visibleGraph.edges.length)}개</div>}
         notificationActive={selectedNodeIds.size > 0}
         notificationContent={<div className="text-sm dark:text-slate-300">{selectedNodeIds.size ? `선택 노드 ${formatInteger(selectedNodeIds.size)}개` : "알림 없음"}</div>}
-        settingsTitle="그래프 설정"
+        settingsTitle="시스템 설정"
         settingsContent={
           <SettingsPanel
             style={style}

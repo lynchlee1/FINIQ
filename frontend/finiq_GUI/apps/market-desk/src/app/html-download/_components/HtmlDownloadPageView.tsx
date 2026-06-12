@@ -19,8 +19,8 @@ import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 
 type DownloadVariant = "external" | "content";
-type PartitionMode = "split" | "flatten";
 type ContentSourceInputMode = "folder" | "file";
+type ExternalTaskMode = "download" | "compress";
 type SplitByYearButtonProps = {
   checked: boolean;
   onChange: () => void;
@@ -77,7 +77,7 @@ function SplitByYearButton({ checked, onChange }: SplitByYearButtonProps) {
 
 export function HtmlDownloadPageView({ variant = "external" }: { variant?: DownloadVariant }) {
   const variantConfig = DOWNLOAD_VARIANTS[variant];
-  
+
   const {
     fetchSettings,
     saveSetting,
@@ -125,22 +125,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         lines.push("결과 파일", ...res.written_files);
       }
     }
-    if (res.mode === "split" || res.mode === "flatten") {
-      lines.push(res.mode === "split" ? "분할저장 전환 완료" : "분할저장 해제 완료");
-      lines.push(`입력 파일: ${formatInteger(res.input_files)}개`);
-      lines.push(`복사 파일: ${formatInteger(res.copied_files || 0)}개`);
-      if (res.moved_files) {
-        lines.push(`이동 파일: ${formatInteger(res.moved_files)}개`);
-      }
-      lines.push(`기존 파일 건너뜀: ${formatInteger(res.skipped_existing_files)}개`);
-      if (res.skipped_invalid_year_files) {
-        lines.push(`연도 판별 불가: ${formatInteger(res.skipped_invalid_year_files)}개`);
-      }
-      if (Array.isArray(res.years) && res.years.length) {
-        lines.push(`대상 연도: ${res.years.join(", ")}`);
-      }
-      lines.push(`저장 경로: ${res.output_directory || ""}`);
-    }
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
       lines.push("", "최근 로그", ...data.progress_log);
     }
@@ -155,17 +139,19 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [existingData, setExistingData] = useState<any>(null);
   const [checkingExisting, setCheckingExisting] = useState(false);
   const [existingCheckRefreshKey, setExistingCheckRefreshKey] = useState(0);
-  const [pendingPartitionResult, setPendingPartitionResult] = useState<any>(null);
   const checkExistingRequestRef = useRef({ id: 0, key: "" });
-  const partitionRetryRef = useRef(false);
   const checkExistingAbortControllerRef = useRef<AbortController | null>(null);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
   // Form State
   const [outputDirectory, setOutputDirectory] = useState("");
   const [sourcePath, setSourcePath] = useState("");
+  const [externalTaskMode, setExternalTaskMode] = useState<ExternalTaskMode>("download");
   const [contentSourceInputMode, setContentSourceInputMode] = useState<ContentSourceInputMode>("folder");
   const [contentSourceFilePath, setContentSourceFilePath] = useState("");
+  const [compressInputDirectory, setCompressInputDirectory] = useState("");
+  const [compressOutputDirectory, setCompressOutputDirectory] = useState("");
+  const [compressWorkers, setCompressWorkers] = useState("");
   const [timeout, setTimeoutVal] = useState("20");
   const [maxRequestsPerMinute, setMaxRequestsPerMinute] = useState("90");
   const [waitSeconds, setWaitSeconds] = useState("0");
@@ -175,9 +161,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [contentSourceSplitByYear, setContentSourceSplitByYear] = useState(false);
   const [compressSplitByYear, setCompressSplitByYear] = useState(false);
   const [mergeSplitByYear, setMergeSplitByYear] = useState(false);
-  const [partitionMode, setPartitionMode] = useState<PartitionMode>("split");
-  const [partitionInputDirectory, setPartitionInputDirectory] = useState("");
-  const [partitionOutputDirectory, setPartitionOutputDirectory] = useState("");
   const [progressInterval, setProgressInterval] = useState("10");
   const [mergeOutputPath, setMergeOutputPath] = useState("");
 
@@ -196,14 +179,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   } = useJobPolling({
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     formatStatus,
-    onSuccess: (data) => {
-      setResult(data);
-      if (data?.mode === "split" || data?.mode === "flatten") {
-        setPendingPartitionResult(data);
-        return;
-      }
-      setPendingPartitionResult(null);
-    },
+    onSuccess: setResult,
   });
 
   const isJobActive = !!activeJobId;
@@ -231,8 +207,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     fetchSettings().then((config) => {
       const nextOutputDirectory = config[variantConfig.defaultDirectoryKey] || (config.output_root ? `${config.output_root}/${variantConfig.defaultDirectorySuffix}` : "");
       setOutputDirectory(nextOutputDirectory);
-      setPartitionInputDirectory(nextOutputDirectory);
-      
+      setCompressInputDirectory(config.html_external_compress_input_directory || nextOutputDirectory);
+      setCompressOutputDirectory(config.html_external_compress_output_directory || nextOutputDirectory);
+
       const transferredPayload = variant === "external" ? sessionStorage.getItem("finiq.kind.filteredDisclosures") : null;
       if (transferredPayload) {
         const transferReference = JSON.parse(transferredPayload);
@@ -567,60 +544,29 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
   const handleCompressExternalHtml = async () => {
     if (variant !== "external") return;
-    if (!outputDirectory) {
-      setStatus("공시원문 외부 저장 경로를 선택하세요.");
+    if (!compressInputDirectory) {
+      setStatus("외부 HTML 입력 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!compressOutputDirectory) {
+      setStatus("압축 JSON 저장 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
     const payload = {
-      input_directory: outputDirectory,
-      output_directory: outputDirectory,
+      input_directory: compressInputDirectory,
+      output_directory: compressOutputDirectory,
       split_by_year: compressSplitByYear,
       input_split_by_year: compressSplitByYear,
       output_split_by_year: compressSplitByYear,
-      limit: limit ? Number(limit) : null,
+      parallel_workers: compressWorkers ? Number(compressWorkers) : null,
     };
     startJob("/api/disclosures/html/download/compress/start", payload);
   };
 
-  const buildPartitionJobPayload = useCallback((mode = partitionMode, sourceDirectory = partitionInputDirectory, outputDir = partitionOutputDirectory) => ({
-    mode,
-    source_directory: sourceDirectory,
-    output_directory: outputDir,
-    overwrite: false,
-    move: false,
-  }), [partitionInputDirectory, partitionMode, partitionOutputDirectory]);
-
-  const handlePartitionStorage = async () => {
-    if (variant === "content" && !sourcePath) {
-      setStatus(variantConfig.sourceRequiredMessage);
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!partitionInputDirectory) {
-      setStatus("분할저장 입력 경로를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!partitionOutputDirectory) {
-      setStatus("분할저장 출력 경로를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (partitionInputDirectory.trim() === partitionOutputDirectory.trim()) {
-      setStatus("분할저장 입력 경로와 출력 경로는 달라야 합니다.");
-      setIsErrorStatus(true);
-      return;
-    }
-    partitionRetryRef.current = false;
-    setStatus("분할저장 구조 전환 작업을 시작하는 중입니다...");
-    setIsErrorStatus(false);
-    startJob("/api/utility/partition-storage/start", buildPartitionJobPayload());
-  };
-
   const saveOutputDirectory = (val: string) => {
     setOutputDirectory(val);
-    setPartitionInputDirectory(val);
     saveSetting(variantConfig.defaultDirectoryKey, val);
     if (variant === "content") {
       setMergeOutputPath(mergeSplitByYear ? val : (val ? `${val}/merged-content-html.json` : ""));
@@ -636,158 +582,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     setContentSourceFilePath(val);
     saveSetting("html_content_compressed_json_path", val);
   };
-
-  useEffect(() => {
-    if (!pendingPartitionResult) return;
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const verifyPartitionOutput = async () => {
-      const completedMode = pendingPartitionResult.mode as PartitionMode;
-      const changedFileCount = Number(pendingPartitionResult.copied_files || 0) + Number(pendingPartitionResult.moved_files || 0);
-      const reusedFileCount = Number(pendingPartitionResult.skipped_existing_files || 0);
-      if (changedFileCount + reusedFileCount === 0) {
-        const sourceYearDirectoryCount = Number(pendingPartitionResult.source_year_directory_count || 0);
-        setPendingPartitionResult(null);
-        if (completedMode === "split" && sourceYearDirectoryCount > 0) {
-          setStatus("입력 경로가 이미 연도별 폴더 구조입니다. 일반 폴더로 만들려면 출력 구조를 일반 폴더로 선택하세요.");
-        } else {
-          setStatus(completedMode === "split"
-            ? "연도별 폴더 출력 대상 파일이 없습니다. 입력 경로에 HTML 파일이 있는지 확인하세요."
-            : "일반 폴더 출력 대상 파일이 없습니다. 입력 경로에 연도별 폴더와 HTML 파일이 있는지 확인하세요.");
-        }
-        setIsErrorStatus(true);
-        return;
-      }
-      const targetSplitByYear = completedMode === "split";
-      const verifiedOutputDirectory = String(pendingPartitionResult.output_directory || partitionOutputDirectory || "").trim();
-      const verifiedInputDirectory = String(pendingPartitionResult.source_directory || partitionInputDirectory || "").trim();
-      const sourcePayload = variant === "external"
-        ? { source_directory: verifiedInputDirectory }
-        : (contentSourceInputMode === "file" ? { source_compressed_json_path: contentSourceFilePath } : { [variantConfig.sourcePayloadKey]: sourcePath });
-      const integrityPayload = {
-        output_directory: verifiedOutputDirectory,
-        ...sourcePayload,
-        limit: limit ? Number(limit) : null,
-        split_by_year: targetSplitByYear,
-        source_split_by_year: variant === "content" ? contentSourceSplitByYear : targetSplitByYear,
-        output_split_by_year: targetSplitByYear,
-      };
-
-      try {
-        setStatus("분할저장 출력 경로 무결성을 검사하는 중입니다...");
-        setIsErrorStatus(false);
-        const response = await fetch(variantConfig.checkExistingEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(integrityPayload),
-          signal: controller.signal,
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Partition integrity check failed");
-        if (cancelled) return;
-
-        const requestedCount = Number(data.requested_count || 0);
-        const existingCount = Number(data.existing_target_html_count || 0);
-        const missingCount = Number(data.missing_target_html_count || 0);
-        const deletionCount = Number(data.deletion_candidate_count || 0);
-        const detectedSplit = data.detected_output_split_by_year;
-        const splitMatches = typeof detectedSplit === "boolean" ? detectedSplit === targetSplitByYear : data.output_split_by_year === targetSplitByYear;
-        const passed = requestedCount > 0 && existingCount === requestedCount && missingCount === 0 && deletionCount === 0 && splitMatches;
-
-        if (passed) {
-          const manifestSourceSplitByYear = variant === "content"
-            ? (typeof data.detected_source_split_by_year === "boolean" ? data.detected_source_split_by_year : Boolean(data.source_split_by_year))
-            : targetSplitByYear;
-          const manifestPayload = {
-            output_directory: verifiedOutputDirectory,
-            ...sourcePayload,
-            limit: limit ? Number(limit) : null,
-            source_split_by_year: manifestSourceSplitByYear,
-          };
-          const manifestResponse = await fetch("/api/disclosures/html/manifest/write", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(manifestPayload),
-            signal: controller.signal,
-          });
-          const manifestData = await manifestResponse.json();
-          if (!manifestResponse.ok) throw new Error(manifestData.detail || "HTML manifest write failed");
-          if (cancelled) return;
-
-          setDownloadSplitByYear(targetSplitByYear);
-          setExistingData(data.has_existing ? data : null);
-          setExistingCheckRefreshKey((value) => value + 1);
-          saveOutputDirectory(verifiedOutputDirectory);
-          setPendingPartitionResult(null);
-          setResult({
-            partition: pendingPartitionResult,
-            verification: data,
-            manifest: manifestData,
-          });
-          setStatus([
-            "분할저장 출력 경로 무결성 검사 통과",
-            `이번 대상 ${formatInteger(requestedCount)}건이 모두 저장되어 있습니다.`,
-            `설정 JSON: ${manifestData.manifest_path || ""}`,
-            `저장 경로: ${verifiedOutputDirectory}`,
-          ].join("\n"));
-          setIsErrorStatus(false);
-          return;
-        }
-
-        if (missingCount > 0 && !partitionRetryRef.current) {
-          partitionRetryRef.current = true;
-          setPendingPartitionResult(null);
-          setStatus(`무결성 검사에서 누락 ${formatInteger(missingCount)}건이 발견되어 출력 경로를 한 번 더 보정합니다.`);
-          startJob(
-            "/api/utility/partition-storage/start",
-            buildPartitionJobPayload(completedMode, verifiedInputDirectory, verifiedOutputDirectory),
-          );
-          return;
-        }
-
-        const details = [
-          "분할저장 출력 경로 무결성 검사 실패",
-          `대상: ${formatInteger(requestedCount)}건`,
-          `저장됨: ${formatInteger(existingCount)}건`,
-          `누락: ${formatInteger(missingCount)}건`,
-          `대상 외 파일: ${formatInteger(deletionCount)}개`,
-          `분할저장 구조: ${splitMatches ? "일치" : "불일치"}`,
-        ];
-        setPendingPartitionResult(null);
-        setStatus(details.join("\n"));
-        setIsErrorStatus(true);
-      } catch (err: any) {
-        if (cancelled) return;
-        if (err.name === 'AbortError') return;
-        setPendingPartitionResult(null);
-        setStatus(err.message);
-        setIsErrorStatus(true);
-      }
-    };
-
-    verifyPartitionOutput();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [
-    pendingPartitionResult,
-    partitionOutputDirectory,
-    partitionInputDirectory,
-    sourcePath,
-    contentSourceFilePath,
-    contentSourceInputMode,
-    limit,
-    variant,
-    contentSourceSplitByYear,
-    variantConfig.sourcePayloadKey,
-    variantConfig.checkExistingEndpoint,
-    setStatus,
-    setIsErrorStatus,
-    startJob,
-    buildPartitionJobPayload,
-  ]);
 
   const baseFields: HtmlWorkflowField[] = [
     {
@@ -837,12 +631,16 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
   const compressionFields: HtmlWorkflowField[] = [
     {
-      id: "compressOutputDirectory",
+      id: "compressInputDirectory",
       kind: "path",
-      label: "공시원문 외부 저장 경로",
+      label: "외부 HTML 입력 경로",
+      help: "공시원문 외부 저장으로 만든 KIND 뷰어 HTML 폴더를 선택하세요.",
       mode: "folder",
-      value: outputDirectory,
-      onChange: saveOutputDirectory,
+      value: compressInputDirectory,
+      onChange: (val) => {
+        setCompressInputDirectory(val);
+        saveSetting("html_external_compress_input_directory", val);
+      },
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
       trailing: (
@@ -852,8 +650,33 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         />
       ),
     },
+    {
+      id: "compressOutputDirectory",
+      kind: "path",
+      label: "압축 JSON 저장 경로",
+      mode: "folder",
+      value: compressOutputDirectory,
+      onChange: (val) => {
+        setCompressOutputDirectory(val);
+        saveSetting("html_external_compress_output_directory", val);
+      },
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 4,
+    },
   ];
-
+  const compressionSettingFields: HtmlWorkflowField[] = [
+    {
+      id: "compressWorkers",
+      kind: "input",
+      type: "number",
+      label: "병렬 워커 수",
+      help: "비워 두면 파일 수와 CPU 수를 기준으로 자동 선택합니다.",
+      placeholder: "자동",
+      value: compressWorkers,
+      onChange: setCompressWorkers,
+      span: 2,
+    },
+  ];
   const mergeFields: HtmlWorkflowField[] = [
     {
       id: "mergeOutputPath",
@@ -878,41 +701,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           })}
         />
       ),
-    },
-  ];
-
-  const partitionFields: HtmlWorkflowField[] = [
-    {
-      id: "partitionInputDirectory",
-      kind: "path",
-      label: "입력 경로",
-      mode: "folder",
-      value: partitionInputDirectory,
-      onChange: setPartitionInputDirectory,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
-    },
-    {
-      id: "partitionOutputDirectory",
-      kind: "path",
-      label: "출력 경로",
-      mode: "folder",
-      value: partitionOutputDirectory,
-      onChange: setPartitionOutputDirectory,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
-    },
-    {
-      id: "partitionMode",
-      kind: "select",
-      label: "출력 구조",
-      value: partitionMode,
-      onChange: (value) => setPartitionMode(value as PartitionMode),
-      options: [
-        { value: "split", label: "연도별 폴더" },
-        { value: "flatten", label: "일반 폴더" },
-      ],
-      span: 2,
     },
   ];
 
@@ -956,43 +744,72 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
+  const showSaveWorkflow = variant === "content" || externalTaskMode === "download";
+
   return (
     <HtmlWorkflowPage
       eyebrow={variant === "external" ? "External HTML Save" : "Content HTML Save"}
-      title={variantConfig.settingsTitle}
-      description={variantConfig.description}
+      title={variant === "external" && externalTaskMode === "compress" ? "외부 HTML 문서 JSON 압축" : variantConfig.settingsTitle}
+      description={variant === "external" && externalTaskMode === "compress"
+        ? "저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
+        : variantConfig.description}
+      actions={variant === "external" ? (
+        <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+          <Button
+            type="button"
+            variant={externalTaskMode === "download" ? "default" : "ghost"}
+            size="sm"
+            className="h-8"
+            onClick={() => setExternalTaskMode("download")}
+          >
+            <FolderOpen className="mr-2 h-4 w-4" />
+            외부 HTML 저장
+          </Button>
+          <Button
+            type="button"
+            variant={externalTaskMode === "compress" ? "default" : "ghost"}
+            size="sm"
+            className="h-8"
+            onClick={() => setExternalTaskMode("compress")}
+          >
+            <FileJson className="mr-2 h-4 w-4" />
+            문서 JSON 압축
+          </Button>
+        </div>
+      ) : null}
     >
       <div className="relative space-y-6">
         <section className="min-w-0 space-y-6">
-          <HtmlWorkflowCard
-            title="저장 경로"
-            description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
-            actions={variant === "content" ? (
-              <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
-                <Button
-                  type="button"
-                  variant={contentSourceInputMode === "folder" ? "default" : "ghost"}
-                  size="sm"
-                  className="h-8"
-                  onClick={() => setContentSourceInputMode("folder")}
-                >
-                  <FolderOpen className="mr-2 h-4 w-4" />
-                  폴더 입력
-                </Button>
-                <Button
-                  type="button"
-                  variant={contentSourceInputMode === "file" ? "default" : "ghost"}
-                  size="sm"
-                  className="h-8"
-                  onClick={() => setContentSourceInputMode("file")}
-                >
-                  <FileJson className="mr-2 h-4 w-4" />
-                  파일 입력
-                </Button>
-              </div>
-            ) : null}
-          >
-            <HtmlWorkflowForm fields={basePathFields} />
+          {showSaveWorkflow && (
+            <HtmlWorkflowCard
+              title="저장 경로"
+              description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
+              actions={variant === "content" ? (
+                <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+                  <Button
+                    type="button"
+                    variant={contentSourceInputMode === "folder" ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setContentSourceInputMode("folder")}
+                  >
+                    <FolderOpen className="mr-2 h-4 w-4" />
+                    폴더 입력
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={contentSourceInputMode === "file" ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setContentSourceInputMode("file")}
+                  >
+                    <FileJson className="mr-2 h-4 w-4" />
+                    파일 입력
+                  </Button>
+                </div>
+              ) : null}
+            >
+              <HtmlWorkflowForm fields={basePathFields} />
             {checkingExisting && !existingData && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-[#30363d] dark:bg-[#161b22]">
                 <div className="flex items-start gap-3">
@@ -1050,19 +867,36 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 </div>
               </div>
             )}
-          </HtmlWorkflowCard>
+            </HtmlWorkflowCard>
+          )}
 
-          {variant === "external" && (
+          {variant === "external" && externalTaskMode === "compress" && (
             <HtmlWorkflowCard
               title="외부 HTML 문서 JSON 압축"
-              description="저장된 KIND 공시 뷰어 HTML에서 본문/첨부 문서 선택 정보와 무결성 정보만 추출해 작은 JSON으로 저장합니다. 로컬 파일 처리이므로 최대 요청/분은 적용되지 않습니다."
+              description="저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
             >
                 <HtmlWorkflowForm fields={compressionFields} />
-                <Button variant="outline" className="h-10 w-full" onClick={handleCompressExternalHtml} disabled={isJobActive}>
-                  <FileJson className="mr-2 h-4 w-4" />
-                  외부 HTML 문서 JSON 압축
-                </Button>
             </HtmlWorkflowCard>
+          )}
+
+          {variant === "external" && externalTaskMode === "compress" && (
+            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+              <CardHeader>
+                <CardTitle className="dark:text-white">작업 실행</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Button className="h-10 w-full" onClick={handleCompressExternalHtml} disabled={isJobActive}>
+                    <Play className="mr-2 h-4 w-4" />
+                    실행
+                  </Button>
+                  <Button type="button" variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken && !activeJobId}>
+                    <Square className="mr-2 h-4 w-4" />
+                    {UI_TEXT.actions.cancelJob}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {variant === "content" && (
@@ -1078,44 +912,29 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             </HtmlWorkflowCard>
           )}
 
-          <HtmlWorkflowCard
-            title="분할저장 구조 전환"
-            description="입력 경로의 기존 HTML 파일을 재다운로드 없이 별도 출력 경로에 새로 저장한 뒤 무결성 검사를 통과하면 완료합니다."
-          >
-              <HtmlWorkflowForm fields={partitionFields} />
-              <div className="grid gap-3 md:grid-cols-2">
-                <Button type="button" className="h-10 w-full" onClick={handlePartitionStorage} disabled={isJobActive}>
-                  {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                  {isJobActive ? "실행 중" : "실행"}
-                </Button>
-                <Button type="button" variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken && !activeJobId}>
-                  <Square className="mr-2 h-4 w-4" />
-                  {UI_TEXT.actions.cancelJob}
-                </Button>
-              </div>
-          </HtmlWorkflowCard>
-
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">작업 실행</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-3">
-                <Button variant="outline" className="h-10 w-full" onClick={handleInspectFolder} disabled={isJobActive || inspectRunning}>
-                  {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
-                  폴더 검사하기
-                </Button>
-                <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive || existingSplitMismatch}>
-                  <Play className="mr-2 h-4 w-4" />
-                  실행
-                </Button>
-                <Button type="button" variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken && !activeJobId}>
-                  <Square className="mr-2 h-4 w-4" />
-                  {UI_TEXT.actions.cancelJob}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {showSaveWorkflow && (
+            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+              <CardHeader>
+                <CardTitle className="dark:text-white">작업 실행</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Button variant="outline" className="h-10 w-full" onClick={handleInspectFolder} disabled={isJobActive || inspectRunning}>
+                    {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
+                    폴더 검사하기
+                  </Button>
+                  <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive || existingSplitMismatch}>
+                    <Play className="mr-2 h-4 w-4" />
+                    실행
+                  </Button>
+                  <Button type="button" variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken && !activeJobId}>
+                    <Square className="mr-2 h-4 w-4" />
+                    {UI_TEXT.actions.cancelJob}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         <ActionDock
@@ -1163,28 +982,37 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
               {!lastInspectionCandidateCount && !result && <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
             </>
           }
-          settingsTitle="저장 설정"
+          settingsTitle="시스템 설정"
           settingsContent={
-            <div className="space-y-5">
+            variant === "external" && externalTaskMode === "compress" ? (
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">압축 처리</p>
                 </div>
-                <HtmlWorkflowForm fields={requestOptionFields} />
+                <HtmlWorkflowForm fields={compressionSettingFields} />
               </div>
-              <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+            ) : (
+              <div className="space-y-5">
+                <div className="space-y-3">
+                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
+                  </div>
+                  <HtmlWorkflowForm fields={requestOptionFields} />
                 </div>
-                <HtmlWorkflowForm fields={executionOptionFields} />
-              </div>
-              <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
+                <div className="space-y-3">
+                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+                  </div>
+                  <HtmlWorkflowForm fields={executionOptionFields} />
                 </div>
-                <HtmlWorkflowForm fields={testOptionFields} />
+                <div className="space-y-3">
+                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
+                  </div>
+                  <HtmlWorkflowForm fields={testOptionFields} />
+                </div>
               </div>
-            </div>
+            )
           }
         />
       </div>

@@ -101,6 +101,7 @@ export default function UtilityPage() {
           source_directory: sourceDirectory,
           output_directory: outputDirectory,
           overwrite: false,
+          move: false,
         }),
       });
       if (!response.ok) {
@@ -125,8 +126,8 @@ export default function UtilityPage() {
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Storage Utility</p>
-              <CardTitle className="text-xl dark:text-white">분할저장</CardTitle>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">External Data Transform</p>
+              <CardTitle className="text-xl dark:text-white">분할저장 구조 전환</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -177,7 +178,7 @@ export default function UtilityPage() {
           }
           notificationActive={isErrorStatus}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
-          settingsTitle="분할저장 설정"
+          settingsTitle="시스템 설정"
           settingsContent={
             <>
               <div className="space-y-2">

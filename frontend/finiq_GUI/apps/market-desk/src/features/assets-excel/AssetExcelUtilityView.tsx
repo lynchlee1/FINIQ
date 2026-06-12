@@ -756,7 +756,7 @@ export default function AssetExcelUtilityPage() {
           }
           notificationActive={isErrorStatus || !!previewData || !!lastResult}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
-          settingsTitle="자산 엑셀 설정"
+          settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
               <p>저장 방식, 충돌 정책, 저장 폴더, 파일 선택, Sheet 미리보기 옵션은 본문에서 바로 조작합니다.</p>

@@ -212,7 +212,7 @@ export default function Home() {
         activityContent={<div className="text-sm dark:text-slate-300">{loading ? "회사 목록을 불러오는 중입니다." : `회사 ${formatNumber(companies.length)}개를 불러왔습니다.`}</div>}
         notificationActive={!!error}
         notificationContent={<div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm dark:text-slate-300"}>{error || "알림 없음"}</div>}
-        settingsTitle="조회 설정"
+        settingsTitle="시스템 설정"
         settingsContent={
           <>
             <div className="grid gap-6">

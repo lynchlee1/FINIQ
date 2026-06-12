@@ -44,6 +44,10 @@ class SettingsUpdate(BaseModel):
     integrated_history_item_registry_path: Optional[str] = None
     integrated_history_output_path: Optional[str] = None
     html_download_source_path: Optional[str] = None
+    html_merge_output_path: Optional[str] = None
+    html_content_compressed_json_path: Optional[str] = None
+    html_external_compress_input_directory: Optional[str] = None
+    html_external_compress_output_directory: Optional[str] = None
     integrated_data_values: Optional[dict[str, str]] = None
     change_log_date_thresholds: Optional[dict[str, float]] = None
     change_log_numeric_thresholds: Optional[dict[str, float]] = None
@@ -146,6 +150,10 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "integrated_history_item_registry_path": config.integrated_history_item_registry_path,
             "integrated_history_output_path": config.integrated_history_output_path,
             "html_download_source_path": config.html_download_source_path,
+            "html_merge_output_path": config.html_merge_output_path,
+            "html_content_compressed_json_path": config.html_content_compressed_json_path,
+            "html_external_compress_input_directory": config.html_external_compress_input_directory,
+            "html_external_compress_output_directory": config.html_external_compress_output_directory,
             "integrated_data_values": config.integrated_data_values,
             "change_log_date_thresholds": config.change_log_date_thresholds,
             "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
