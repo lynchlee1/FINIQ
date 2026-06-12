@@ -892,7 +892,13 @@ def _verify_compressed_external_html_files(
     duplicate_acpt_numbers = sorted(acpt_no for acpt_no, count in verified_counts.items() if count > 1)
     missing_acpt_numbers = sorted(expected - verified)
     unexpected_acpt_numbers = sorted(verified - expected)
-    passed = not missing_files and not invalid_files and not missing_acpt_numbers and not unexpected_acpt_numbers
+    passed = (
+        not missing_files
+        and not invalid_files
+        and not missing_acpt_numbers
+        and not unexpected_acpt_numbers
+        and not duplicate_acpt_numbers
+    )
 
     return {
         "passed": passed,
@@ -920,7 +926,6 @@ def compress_disclosure_external_html_payload(
         raise ValueError(msg)
     input_directory = Path(input_directory_raw).expanduser().resolve()
     input_split_by_year = _as_input_split_by_year(body)
-    output_split_by_year = _as_output_split_by_year(body)
     limit = _parse_merge_limit(body.get("limit"))
     output_directory = _resolve_external_compress_output_directory(
         str(body.get("output_directory") or body.get("output_path") or "").strip(),
@@ -952,7 +957,7 @@ def compress_disclosure_external_html_payload(
     emit(f"외부 HTML 압축 대상 {len(html_files)}건을 찾았습니다.")
     emit(f"입력 경로: {input_directory}")
     emit(f"입력 분할저장: {'예' if input_split_by_year else '아니오'}")
-    emit(f"출력 분할저장: {'예' if output_split_by_year else '아니오'}")
+    emit("출력 분할저장: 아니오 (압축 JSON은 단일 파일로 저장)")
     emit(f"병렬 처리: {worker_count}개 워커")
 
     indexed_records: list[tuple[str, str, dict[str, Any]] | None] = [None] * len(html_files)
@@ -977,57 +982,45 @@ def compress_disclosure_external_html_payload(
                 if completed_count % 100 == 0:
                     emit(f"외부 HTML 압축 중간 확인: {completed_count}/{len(html_files)}건 처리.")
 
+    missing_worker_indexes = [index for index, indexed_record in enumerate(indexed_records) if indexed_record is None]
+    processing_verification = {
+        "passed": not missing_worker_indexes,
+        "expected_files": len(html_files),
+        "processed_files": len(html_files) - len(missing_worker_indexes),
+        "missing_files": len(missing_worker_indexes),
+        "missing_indexes": missing_worker_indexes,
+    }
+    if missing_worker_indexes:
+        msg = f"External HTML compression worker results are incomplete: missing indexes {missing_worker_indexes[:10]}"
+        raise ValueError(msg)
+    emit(
+        "외부 HTML 압축 병렬 결과 확인: "
+        f"{processing_verification['processed_files']}/{processing_verification['expected_files']}건 처리."
+    )
+
     records: list[dict[str, Any]] = []
-    record_years: dict[str, str] = {}
     for indexed_record in indexed_records:
-        if indexed_record is None:
-            continue
-        year, acpt_no, record = indexed_record
-        record_years[acpt_no] = year
+        assert indexed_record is not None
+        _year, _acpt_no, record = indexed_record
         records.append(record)
 
     written_files: list[str] = []
-    if output_split_by_year:
-        records_by_year: dict[str, list[dict[str, Any]]] = {}
-        for record in records:
-            acpt_no = str(record.get("acpt_no") or "").strip()
-            records_by_year.setdefault(record_years.get(acpt_no) or "unknown", []).append(record)
-        for year, year_records in sorted(records_by_year.items()):
-            year_output_directory = output_directory / year
-            year_output_path = year_output_directory / "compressed-external-html.json"
-            payload = {
-                "format": "finiq_disclosure_external_html_docs_v1",
-                "input_directory": str(input_directory),
-                "output_directory": str(output_directory),
-                "output_path": str(year_output_path),
-                "split_by_year": True,
-                "input_split_by_year": input_split_by_year,
-                "output_split_by_year": True,
-                "year": year,
-                "summary": {"found_files": len(year_records), "compressed_files": len(year_records)},
-                "records": year_records,
-            }
-            year_output_directory.mkdir(parents=True, exist_ok=True)
-            year_output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            written_files.append(str(year_output_path))
-            emit(f"연도별 외부 HTML 압축 JSON 저장 완료: {year_output_path}")
-    else:
-        output_path = output_directory / "compressed-external-html.json"
-        payload = {
-            "format": "finiq_disclosure_external_html_docs_v1",
-            "input_directory": str(input_directory),
-            "output_directory": str(output_directory),
-            "output_path": str(output_path),
-            "split_by_year": False,
-            "input_split_by_year": input_split_by_year,
-            "output_split_by_year": False,
-            "summary": {"found_files": len(html_files), "compressed_files": len(records)},
-            "records": records,
-        }
-        output_directory.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        written_files.append(str(output_path))
-        emit(f"외부 HTML 압축 JSON 저장 완료: {output_path}")
+    output_path = output_directory / "compressed-external-html.json"
+    payload = {
+        "format": "finiq_disclosure_external_html_docs_v1",
+        "input_directory": str(input_directory),
+        "output_directory": str(output_directory),
+        "output_path": str(output_path),
+        "split_by_year": False,
+        "input_split_by_year": input_split_by_year,
+        "output_split_by_year": False,
+        "summary": {"found_files": len(html_files), "compressed_files": len(records)},
+        "records": records,
+    }
+    output_directory.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    written_files.append(str(output_path))
+    emit(f"외부 HTML 압축 JSON 저장 완료: {output_path}")
 
     verification = _verify_compressed_external_html_files(
         written_files=written_files,
@@ -1043,15 +1036,16 @@ def compress_disclosure_external_html_payload(
         "format": "finiq_disclosure_external_html_compress_result_v1",
         "input_directory": str(input_directory),
         "output_directory": str(output_directory),
-        "split_by_year": output_split_by_year,
+        "split_by_year": False,
         "input_split_by_year": input_split_by_year,
-        "output_split_by_year": output_split_by_year,
+        "output_split_by_year": False,
         "summary": {
             "found_files": len(html_files),
             "compressed_files": len(records),
             "written_files": len(written_files),
         },
         "written_files": written_files,
+        "processing_verification": processing_verification,
         "verification": verification,
         "progress_log": progress_log[-100:],
     }

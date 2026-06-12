@@ -2454,7 +2454,19 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
 
 def test_compress_disclosure_external_html_payload_reads_split_input(tmp_path: Path) -> None:
     input_directory = tmp_path / "viewer_html"
+    (input_directory / "2024").mkdir(parents=True)
     (input_directory / "2025").mkdir(parents=True)
+    (input_directory / "2024" / "20240101000001.html").write_text(
+        """
+        <html><body>
+          <input type="hidden" name="acptNo" value="20240101000001" />
+          <select id="mainDoc">
+            <option value="20240101000999|Y" selected="selected">본문</option>
+          </select>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
     (input_directory / "2025" / "20250101000001.html").write_text(
         """
         <html><body>
@@ -2472,19 +2484,33 @@ def test_compress_disclosure_external_html_payload_reads_split_input(tmp_path: P
             "input_directory": str(input_directory),
             "output_directory": str(tmp_path / "compressed"),
             "split_by_year": True,
+            "output_split_by_year": True,
         }
     )
 
-    assert payload["split_by_year"] is True
-    assert payload["summary"]["compressed_files"] == 1
+    assert payload["split_by_year"] is False
+    assert payload["input_split_by_year"] is True
+    assert payload["output_split_by_year"] is False
+    assert payload["summary"] == {"found_files": 2, "compressed_files": 2, "written_files": 1}
+    assert payload["processing_verification"] == {
+        "passed": True,
+        "expected_files": 2,
+        "processed_files": 2,
+        "missing_files": 0,
+        "missing_indexes": [],
+    }
     assert payload["verification"]["passed"] is True
     assert payload["verification"]["missing_records"] == 0
-    output_path = tmp_path / "compressed" / "2025" / "compressed-external-html.json"
+    output_path = tmp_path / "compressed" / "compressed-external-html.json"
     assert payload["written_files"] == [str(output_path)]
     saved = json.loads(output_path.read_text(encoding="utf-8"))
-    assert saved["year"] == "2025"
+    assert saved["split_by_year"] is False
+    assert saved["input_split_by_year"] is True
+    assert saved["output_split_by_year"] is False
+    assert "year" not in saved
+    assert [record["acpt_no"] for record in saved["records"]] == ["20240101000001", "20250101000001"]
     assert "year" not in saved["records"][0]
-    assert saved["records"][0]["docs"][0]["doc_no"] == "20250101000999"
+    assert saved["records"][1]["docs"][0]["doc_no"] == "20250101000999"
 
 
 def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_path: Path) -> None:
@@ -2514,6 +2540,7 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
     output_path = tmp_path / "compressed" / "compressed-external-html.json"
     saved = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["summary"] == {"found_files": 2, "compressed_files": 2, "written_files": 1}
+    assert payload["processing_verification"]["passed"] is True
     assert payload["verification"]["passed"] is True
     assert "병렬 처리: 2개 워커" in payload["progress_log"]
     assert [record["acpt_no"] for record in saved["records"]] == ["20250101000001", "20250101000002"]
