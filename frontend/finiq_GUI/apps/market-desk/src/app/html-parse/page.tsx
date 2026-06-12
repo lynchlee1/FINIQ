@@ -474,7 +474,7 @@ export default function HtmlParsePage() {
           }
           notificationActive={isErrorStatus || !!result?.warnings?.length}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
-          settingsTitle="설정"
+          settingsTitle="시스템 설정"
           settingsContent={
             <>
               <div className="space-y-3">

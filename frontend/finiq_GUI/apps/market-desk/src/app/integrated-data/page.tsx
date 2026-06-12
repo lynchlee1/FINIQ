@@ -162,8 +162,8 @@ export default function IntegratedDataPage() {
           }
           notificationActive={isErrorStatus}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
-          settingsTitle="원천 데이터 설정"
-          settingsContent={<div className="text-sm text-slate-500 dark:text-slate-400">추가 원천 데이터 설정이 없습니다. 데이터 소스와 입력 필드는 메인 화면에서 조정합니다.</div>}
+          settingsTitle="시스템 설정"
+          settingsContent={<div className="text-sm text-slate-500 dark:text-slate-400">추가 시스템 설정이 없습니다. 데이터 소스와 입력 필드는 메인 화면에서 조정합니다.</div>}
         />
       </div>
     </WorkflowPageShell>

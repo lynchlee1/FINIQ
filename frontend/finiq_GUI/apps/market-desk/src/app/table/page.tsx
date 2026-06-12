@@ -230,7 +230,7 @@ export default function TablePage() {
               <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />
             </div>
           }
-          settingsTitle="설정"
+          settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">
               <div className="space-y-3">

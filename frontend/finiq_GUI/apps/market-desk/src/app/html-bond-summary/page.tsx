@@ -451,7 +451,7 @@ export default function HtmlBondSummaryPage() {
           activityContent={<JobStatusLogger status={status || "조회 전"} isErrorStatus={isErrorStatus} />}
           notificationActive={isErrorStatus}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
-          settingsTitle="조회 설정"
+          settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-3">
               <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">

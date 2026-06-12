@@ -30,6 +30,7 @@ export function ActionDock({
   settingsActive = true,
 }: ActionDockProps) {
   const [openPanel, setOpenPanel] = useState<DockPanel>(null);
+  const hasSettingsContent = settingsContent !== undefined && settingsContent !== null;
 
   const togglePanel = (panel: DockPanel) => {
     setOpenPanel((current) => current === panel ? null : panel);
@@ -96,20 +97,22 @@ export function ActionDock({
           {notificationActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-300" />}
         </Button>
 
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => togglePanel("settings")}
-          className={iconClass(settingsActive, openPanel === "settings", "slate")}
-          title={openPanel === "settings" ? `${settingsTitle} 닫기` : `${settingsTitle} 열기`}
-        >
-          <Settings className="h-5 w-5" />
-        </Button>
+        {hasSettingsContent && (
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => togglePanel("settings")}
+            className={iconClass(settingsActive, openPanel === "settings", "slate")}
+            title={openPanel === "settings" ? `${settingsTitle} 닫기` : `${settingsTitle} 열기`}
+          >
+            <Settings className="h-5 w-5" />
+          </Button>
+        )}
       </div>
 
       {renderPanel("activity", activityTitle, activityContent)}
       {renderPanel("notification", notificationTitle, notificationContent)}
-      {renderPanel("settings", settingsTitle, settingsContent)}
+      {hasSettingsContent && renderPanel("settings", settingsTitle, settingsContent)}
     </div>
   );
 }

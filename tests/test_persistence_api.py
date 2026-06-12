@@ -30,3 +30,29 @@ def test_persistence(tmp_path: Path):
     assert resp.status_code == 200
     verified_config = resp.json()
     assert verified_config.get("html_parse_result_path") == str(test_path.resolve())
+
+
+def test_html_download_settings_persist(tmp_path: Path):
+    config.settings_path = str(tmp_path / "settings.json")
+    client = TestClient(app)
+
+    payload = {
+        "html_merge_output_path": str(tmp_path / "merged-content-html.json"),
+        "html_content_compressed_json_path": str(tmp_path / "compressed.json"),
+        "html_external_compress_input_directory": str(tmp_path / "html"),
+        "html_external_compress_output_directory": str(tmp_path / "compressed"),
+    }
+
+    resp = client.post("/api/settings", json=payload)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    for key, value in payload.items():
+        assert data[key] == str(Path(value).resolve())
+
+    resp = client.get("/api/config")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    for key, value in payload.items():
+        assert data[key] == str(Path(value).resolve())
