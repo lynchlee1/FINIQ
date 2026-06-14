@@ -6,7 +6,7 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from finiq.config import ASSETS_DIR, init_config
+from finiq.config import QUANTIWISE_EXCEL_DIR, init_config
 from finiq.data.assets_excel import DEFAULT_ASSET_PARQUET_DIR, convert_asset_excels_to_wide_parquet
 from finiq.market_desk.web.discovery import list_classification_files, list_price_source_files
 from finiq.market_desk.web.disclosure_html import (
@@ -62,10 +62,9 @@ def _run_asset_excel_convert_job(
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     return convert_asset_excels_to_wide_parquet(
-        ASSETS_DIR,
+        payload.get("source_directory") or QUANTIWISE_EXCEL_DIR,
         payload.get("output_directory") or DEFAULT_ASSET_PARQUET_DIR,
         selected_files=payload.get("selected_files") or None,
-        conflict_policy=str(payload.get("conflict_policy") or "error"),
         write_mode=str(payload.get("write_mode") or "update"),
         progress_callback=progress_callback,
         cancel_check=cancel_check,
@@ -128,7 +127,7 @@ def _filter_disclosures_payload(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 app.include_router(create_config_router(config, choose_finder_path=lambda **kwargs: _choose_finder_path(**kwargs)))
 app.include_router(create_market_data_router(config))
-app.include_router(create_assets_excel_router(get_assets_dir=lambda: ASSETS_DIR, run_job_worker=_run_job_worker))
+app.include_router(create_assets_excel_router(get_assets_dir=lambda: QUANTIWISE_EXCEL_DIR, run_job_worker=_run_job_worker))
 app.include_router(create_download_router(config))
 app.include_router(
     create_workflows_router(

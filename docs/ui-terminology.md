@@ -24,3 +24,13 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Output split storage | 분할저장 | Keep this spelling. |
 | Align with existing metadata | 기존 메타데이터 기준으로 설정 맞추기 | Button label. |
 
+## Utility Workflow
+
+| Concept | Preferred UI Term | Notes |
+| --- | --- | --- |
+| Quantiwise sidebar group | Quantiwise | Use as a peer sidebar group to `외부 데이터 변환`. |
+| Quantiwise preview sidebar item | 미리보기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel`. |
+| Quantiwise save sidebar item | 저장하기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel/save`. |
+| Quantiwise Excel preview workflow | Quantiwise - 미리보기 | Use for the `/utility/assets-excel` navigation label and page title. |
+| Quantiwise Excel save workflow | Quantiwise - 저장하기 | Use for the `/utility/assets-excel/save` navigation label and page title. |
+| Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |

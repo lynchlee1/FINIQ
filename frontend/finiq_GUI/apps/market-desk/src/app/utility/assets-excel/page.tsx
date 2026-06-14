@@ -1,5 +1,5 @@
 import AssetExcelUtilityView from "@/features/assets-excel/AssetExcelUtilityView";
 
 export default function AssetExcelUtilityPage() {
-  return <AssetExcelUtilityView />;
+  return <AssetExcelUtilityView mode="preview" />;
 }

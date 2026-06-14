@@ -47,12 +47,12 @@ const DOWNLOAD_VARIANTS = {
   },
   content: {
     settingsTitle: "공시원문 내부 저장 설정",
-    description: "공시원문 외부 저장 폴더를 바탕으로 KIND 공시 본문 HTML을 대량 저장합니다.",
-    sourceLabel: "공시원문 외부 저장 경로",
+    description: "공시원문 외부 데이터 경로를 바탕으로 KIND 공시 본문 HTML을 대량 저장합니다.",
+    sourceLabel: "공시원문 외부 데이터 경로",
     sourceHelp: "공시원문 외부 저장으로 만든 뷰어 HTML 폴더를 선택하세요.",
     sourcePickMode: "folder",
     sourceSettingKey: "html_output_directory",
-    sourceRequiredMessage: "공시원문 외부 저장 경로를 선택하세요.",
+    sourceRequiredMessage: "공시원문 외부 데이터 경로를 선택하세요.",
     sourcePayloadKey: "source_directory",
     defaultDirectoryKey: "html_content_output_directory",
     defaultDirectorySuffix: "viewer_html_contents",
@@ -116,7 +116,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       lines.push(`요청 접수번호: ${formatInteger(res.requested_count)}`);
       lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       lines.push(`저장 파일: ${formatInteger(res.saved_count)}`);
-      lines.push(`저장 경로: ${res.output_directory || ""}`);
+      lines.push(`데이터 경로: ${res.output_directory || ""}`);
     }
     if (res.summary?.merged_files !== undefined) {
       lines.push(`병합 HTML: ${formatInteger(res.summary.merged_files)}`);
@@ -388,7 +388,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         checkExistingRequestRef.current.id === requestId &&
         checkExistingRequestRef.current.key === requestKey
       ) {
-        setExistingCheckError(err.message || "기존 원문 저장 폴더 재확인에 실패했습니다.");
+        setExistingCheckError(err.message || "기존 원문 데이터 경로 재확인에 실패했습니다.");
       }
     } finally {
       if (
@@ -427,7 +427,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       return;
     }
     if (!outputDirectory) {
-      setStatus("저장 경로를 선택하세요.");
+      setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -460,7 +460,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         `대상 접수번호: ${formatInteger(data.requested_count)}`,
         `분할저장: ${data.split_by_year ? "On" : "Off"}`,
         `삭제 예정 파일: ${formatInteger(data.deletion_candidate_count)}`,
-        `저장 경로: ${data.output_directory || ""}`,
+        `데이터 경로: ${data.output_directory || ""}`,
       ];
       if (deleteCandidates.length) {
         lines.push("", "삭제 예정 파일", ...deleteCandidates.map((file: any) => `- ${file.name} (${file.reason})`));
@@ -513,7 +513,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         `대상 접수번호: ${formatInteger(data.requested_count)}`,
         `분할저장: ${data.split_by_year ? "On" : "Off"}`,
         `삭제 파일: ${formatInteger(data.deleted_count)}`,
-        `저장 경로: ${data.output_directory || ""}`,
+        `데이터 경로: ${data.output_directory || ""}`,
       ];
       if (deletedFiles.length) {
         lines.push("", "삭제한 파일", ...deletedFiles.map((file: any) => `- ${file.name} (${file.reason})`));
@@ -548,7 +548,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const handleMergeContentHtml = async () => {
     if (variant !== "content") return;
     if (!outputDirectory) {
-      setStatus("내부 HTML 저장 경로를 선택하세요.");
+      setStatus("내부 HTML 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -572,7 +572,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       return;
     }
     if (!compressOutputDirectory) {
-      setStatus("압축 JSON 저장 경로를 선택하세요.");
+      setStatus("압축 JSON 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -626,7 +626,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "outputDirectory",
       kind: "path",
-      label: "저장 경로",
+      label: "데이터 경로",
       mode: "folder",
       value: outputDirectory,
       onChange: saveOutputDirectory,
@@ -675,7 +675,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "compressOutputDirectory",
       kind: "path",
-      label: "압축 JSON 저장 경로",
+      label: "압축 JSON 데이터 경로",
       mode: "folder",
       value: compressOutputDirectory,
       onChange: (val) => {
@@ -703,7 +703,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "mergeOutputPath",
       kind: "path",
-      label: "병합 파일 저장 경로",
+      label: "병합 파일 데이터 경로",
       mode: mergeSplitByYear ? "folder" : "save",
       value: mergeOutputPath || (mergeSplitByYear ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : "")),
       onChange: (val) => {
@@ -849,7 +849,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         <section className="min-w-0 space-y-6">
           {showSaveWorkflow && (
             <HtmlWorkflowCard
-              title="저장 경로"
+              title="데이터 경로"
               description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
               actions={variant === "content" ? (
                 <div className="inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
@@ -882,7 +882,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 <div className="flex items-start gap-3">
                   <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
                   <div className="space-y-1">
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">기존 원문 저장 폴더 자동 병렬 확인 중...</p>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">기존 원문 데이터 경로 자동 병렬 확인 중...</p>
                     <p className="break-all text-xs text-slate-500 dark:text-slate-400">{outputDirectory}</p>
                   </div>
                 </div>
@@ -890,7 +890,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             )}
             {existingCheckError && !existingData && !checkingExisting && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
-                <p className="font-semibold">기존 원문 저장 폴더 재확인 실패</p>
+                <p className="font-semibold">기존 원문 데이터 경로 재확인 실패</p>
                 <p className="mt-1 break-words text-xs">{existingCheckError}</p>
               </div>
             )}
@@ -946,7 +946,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
                 {existingSplitMismatch && (
                   <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                    <strong>⚠ 오류:</strong> 분할저장 설정이 기존 폴더 구조와 다릅니다. 폴더 내 데이터가 섞이지 않도록 저장 경로의 분할저장 On/Off를 맞춘 뒤 실행하세요.
+                    <strong>⚠ 오류:</strong> 분할저장 설정이 기존 폴더 구조와 다릅니다. 폴더 내 데이터가 섞이지 않도록 데이터 경로의 분할저장 On/Off를 맞춘 뒤 실행하세요.
                   </div>
                 )}
 

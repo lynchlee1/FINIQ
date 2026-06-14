@@ -1,4 +1,4 @@
-"""Excel readers for files stored under the project assets directory."""
+"""Excel readers for Quantiwise Excel files stored under project resources."""
 
 from __future__ import annotations
 
@@ -12,13 +12,15 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from finiq.config import ASSETS_DIR, RESOURCES_DIR
+from finiq.config import QUANTIWISE_EXCEL_DIR, RESOURCES_DIR
 
 EXCEL_SUFFIXES = {".xlsx", ".xlsm"}
 ASSET_PARQUET_FORMAT = "finiq_asset_wide_parquet_v1"
 DEFAULT_ASSET_PARQUET_DIR = RESOURCES_DIR / "assets_merged"
+CODE_NAME_MAPPING_FILE = "code_name_mapping.parquet"
 ProgressCallback = Callable[[str], None]
 SourceInfo = dict[str, Any]
+CodeNameMapping = dict[str, str]
 
 SHEET_ACCOUNT_NAMES = {
     "종가": "stock_price",
@@ -53,13 +55,13 @@ SHEET_ACCOUNT_NAMES = {
 }
 
 
-def _resolve_asset_excel_path(file_name: str | Path, root_directory: str | Path = ASSETS_DIR) -> Path:
+def _resolve_asset_excel_path(file_name: str | Path, root_directory: str | Path = QUANTIWISE_EXCEL_DIR) -> Path:
     root = Path(root_directory).expanduser().resolve()
     requested = Path(file_name)
     target = (root / requested).resolve() if not requested.is_absolute() else requested.resolve()
 
     if target != root and root not in target.parents:
-        msg = f"Excel file must be under assets directory: {file_name}"
+        msg = f"Excel file must be under Quantiwise directory: {file_name}"
         raise ValueError(msg)
     if target.suffix.lower() not in EXCEL_SUFFIXES:
         msg = f"Unsupported Excel file type: {target.suffix}"
@@ -88,7 +90,7 @@ def _account_name_for_sheet(sheet_name: str) -> str | None:
     return SHEET_ACCOUNT_NAMES.get(_normalize_label(sheet_name))
 
 
-def list_asset_excel_files(root_directory: str | Path = ASSETS_DIR) -> list[dict[str, Any]]:
+def list_asset_excel_files(root_directory: str | Path = QUANTIWISE_EXCEL_DIR) -> list[dict[str, Any]]:
     """Return Excel files found below *root_directory*."""
     root = Path(root_directory).expanduser().resolve()
     if not root.is_dir():
@@ -129,7 +131,11 @@ def _selected_asset_excel_paths(
 def inspect_asset_excel_output(output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR) -> dict[str, Any]:
     output = Path(output_directory).expanduser().resolve()
     manifest_path = output / "manifest.json"
-    parquet_files = sorted(output.glob("*.parquet")) if output.is_dir() else []
+    parquet_files = [
+        path
+        for path in sorted(output.glob("*.parquet")) if path.name != CODE_NAME_MAPPING_FILE
+    ] if output.is_dir() else []
+    code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
     manifest: dict[str, Any] | None = None
     if manifest_path.exists():
         try:
@@ -143,6 +149,9 @@ def inspect_asset_excel_output(output_directory: str | Path = DEFAULT_ASSET_PARQ
         "manifest_exists": manifest_path.exists(),
         "parquet_files": [path.name for path in parquet_files],
         "account_count": len(parquet_files),
+        "code_name_mapping_path": str(code_name_mapping_path),
+        "code_name_mapping_exists": code_name_mapping_path.exists(),
+        "code_name_mapping_rows": manifest.get("code_name_mapping", {}).get("rows", 0) if manifest else 0,
         "format": manifest.get("format") if manifest else "",
         "accounts": manifest.get("accounts", {}) if manifest else {},
     }
@@ -163,6 +172,14 @@ def _json_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
     ]
 
 
+def _preview_cell_text(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 def _values_match(left: Any, right: Any) -> bool:
     if pd.isna(left) and pd.isna(right):
         return True
@@ -178,16 +195,26 @@ def read_asset_excel(
     *,
     sheet_name: str | int | None = None,
     row_limit: int | None = 100,
-    root_directory: str | Path = ASSETS_DIR,
+    root_directory: str | Path = QUANTIWISE_EXCEL_DIR,
 ) -> dict[str, Any]:
     """Read one Excel sheet from an assets Excel file as JSON-friendly rows."""
     target = _resolve_asset_excel_path(file_name, root_directory=root_directory)
     excel = pd.ExcelFile(target)
     selected_sheet: str | int = excel.sheet_names[0] if sheet_name is None else sheet_name
+    selected_sheet_name = excel.sheet_names[selected_sheet] if isinstance(selected_sheet, int) else str(selected_sheet)
 
-    frame = pd.read_excel(target, sheet_name=selected_sheet, dtype=object)
-    if row_limit is not None:
-        frame = frame.head(max(0, int(row_limit)))
+    nrows = max(0, int(row_limit)) if row_limit is not None else None
+    quanti_preview = _read_quanti_preview_sheet(
+        target,
+        selected_sheet_name,
+        row_limit=nrows,
+        source_directory=Path(root_directory).expanduser().resolve(),
+        sheet_names=excel.sheet_names,
+    )
+    if quanti_preview is not None:
+        return quanti_preview
+
+    frame = pd.read_excel(target, sheet_name=selected_sheet, dtype=object, nrows=nrows)
 
     columns = [str(column) for column in frame.columns]
     frame.columns = columns
@@ -196,11 +223,28 @@ def read_asset_excel(
     return {
         "file_name": target.name,
         "relative_path": str(target.relative_to(Path(root_directory).expanduser().resolve())),
-        "sheet_name": str(selected_sheet),
+        "sheet_name": selected_sheet_name,
         "sheet_names": list(excel.sheet_names),
         "columns": columns,
         "rows": rows,
         "row_count": len(rows),
+    }
+
+
+def read_asset_excel_sheets(
+    file_name: str | Path,
+    *,
+    root_directory: str | Path = QUANTIWISE_EXCEL_DIR,
+) -> dict[str, Any]:
+    """Read workbook sheet names without loading any sheet body rows."""
+    target = _resolve_asset_excel_path(file_name, root_directory=root_directory)
+    excel = pd.ExcelFile(target)
+    sheet_names = list(excel.sheet_names)
+    return {
+        "file_name": target.name,
+        "relative_path": str(target.relative_to(Path(root_directory).expanduser().resolve())),
+        "sheet_names": sheet_names,
+        "sheet_count": len(sheet_names),
     }
 
 
@@ -258,13 +302,41 @@ def _sheet_preview_summary(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
     return _sheet_summary_payload(xlsx_path, sheet_name, account_name=account_name, frame=frame)
 
 
+def _code_name_mappings_from_sheet(
+    raw_frame: pd.DataFrame,
+    xlsx_path: Path | pd.ExcelFile,
+    sheet_name: str,
+    code_row: int,
+    name_row: int | None,
+    code_count: int,
+) -> list[CodeNameMapping]:
+    excel_source = getattr(xlsx_path, "io", None) or getattr(xlsx_path, "_io", None)
+    excel_name = Path(str(excel_source)).name if isinstance(xlsx_path, pd.ExcelFile) else xlsx_path.name
+    codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1 : code_count + 1].tolist()]
+    names = (
+        [_normalize_label(value) for value in raw_frame.iloc[name_row, 1 : code_count + 1].tolist()]
+        if name_row is not None
+        else [""] * len(codes)
+    )
+    return [
+        {
+            "code": code,
+            "name": name,
+            "file_name": excel_name,
+            "sheet_name": sheet_name,
+        }
+        for code, name in zip(codes, names, strict=False)
+        if code
+    ]
+
+
 def read_asset_excel_interpreted(
     file_name: str | Path,
     *,
     sheet_name: str,
     row_limit: int | None = 20,
     column_limit: int | None = 12,
-    root_directory: str | Path = ASSETS_DIR,
+    root_directory: str | Path = QUANTIWISE_EXCEL_DIR,
 ) -> dict[str, Any]:
     """Read one supported assets sheet using the conversion parser."""
     target = _resolve_asset_excel_path(file_name, root_directory=root_directory)
@@ -306,9 +378,102 @@ def _find_marker_row(frame: pd.DataFrame, marker: str) -> int | None:
     return None
 
 
-def _read_quanti_wide_sheet(xlsx_path: Path | pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
+def _metadata_value(raw_frame: pd.DataFrame, marker: str) -> str:
+    row_index = _find_marker_row(raw_frame, marker)
+    if row_index is None:
+        return ""
+    for value in raw_frame.iloc[row_index, 1:].tolist():
+        text = _preview_cell_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _read_quanti_preview_sheet(
+    xlsx_path: Path,
+    sheet_name: str,
+    *,
+    row_limit: int | None,
+    source_directory: Path,
+    sheet_names: list[str],
+    column_limit: int = 12,
+) -> dict[str, Any] | None:
+    raw_row_limit = None if row_limit is None else max(30, int(row_limit) + 20)
+    raw_frame = pd.read_excel(
+        xlsx_path,
+        sheet_name=sheet_name,
+        header=None,
+        dtype=object,
+        nrows=raw_row_limit,
+    )
+    code_row = _find_marker_row(raw_frame, "Code")
+    name_row = _find_marker_row(raw_frame, "Name")
+    date_header_row = _find_marker_row(raw_frame, "D A T E")
+    if code_row is None or date_header_row is None:
+        return None
+
+    codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1:].tolist()]
+    valid_positions = [index for index, code in enumerate(codes) if code]
+    if not valid_positions:
+        return None
+
+    account_name = _account_name_for_sheet(sheet_name)
+    names = (
+        [_normalize_label(value) for value in raw_frame.iloc[name_row, 1:].tolist()]
+        if name_row is not None
+        else []
+    )
+    data_columns = [0, *[position + 1 for position in valid_positions]]
+    data = raw_frame.iloc[date_header_row + 1 :, data_columns].copy()
+    dates = pd.to_datetime(data.iloc[:, 0], errors="coerce").dt.date
+    preview_codes = [codes[position] for position in valid_positions]
+    values = data.iloc[:, 1:].copy()
+    values.columns = preview_codes
+    values.insert(0, "date", dates)
+    values = values.dropna(subset=["date"])
+    if row_limit is not None:
+        values = values.head(max(0, int(row_limit)))
+    values = values.where(pd.notna(values), None)
+
+    columns = ["date", *preview_codes]
+    preview_columns = columns[: max(1, int(column_limit))]
+    preview_frame = values.loc[:, [column for column in preview_columns if column in values.columns]]
+    code_name_rows = [
+        {
+            "code": codes[position],
+            "name": names[position] if position < len(names) else "",
+        }
+        for position in valid_positions
+    ]
+
+    return {
+        "file_name": xlsx_path.name,
+        "relative_path": str(xlsx_path.relative_to(source_directory)),
+        "sheet_name": sheet_name,
+        "sheet_names": list(sheet_names),
+        "preview_type": "quanti_matrix",
+        "account_name": account_name,
+        "status": "mapped" if account_name else "unmapped",
+        "metadata": {
+            "period_from": _metadata_value(raw_frame, "Period(From)"),
+            "period_to": _metadata_value(raw_frame, "Period(To)"),
+        },
+        "columns": columns,
+        "preview_columns": list(preview_frame.columns),
+        "rows": _json_rows(preview_frame),
+        "row_count": len(values),
+        "preview_row_count": len(preview_frame),
+        "code_name_rows": code_name_rows,
+    }
+
+
+def _read_quanti_wide_sheet_with_mapping(
+    xlsx_path: Path | pd.ExcelFile,
+    sheet_name: str,
+) -> tuple[pd.DataFrame, list[CodeNameMapping]]:
     raw_frame = pd.read_excel(xlsx_path, sheet_name=sheet_name, header=None, dtype=object)
     code_row = _find_marker_row(raw_frame, "Code")
+    name_row = _find_marker_row(raw_frame, "Name")
     date_header_row = _find_marker_row(raw_frame, "D A T E")
     if code_row is None or date_header_row is None:
         excel_source = getattr(xlsx_path, "io", None) or getattr(xlsx_path, "_io", None)
@@ -331,7 +496,13 @@ def _read_quanti_wide_sheet(xlsx_path: Path | pd.ExcelFile, sheet_name: str) -> 
         values = values.T.groupby(level=0).last().T
     if values.index.duplicated().any():
         values = values.groupby(level=0).last()
-    return values
+    mappings = _code_name_mappings_from_sheet(raw_frame, xlsx_path, sheet_name, code_row, name_row, len(codes))
+    return values, mappings
+
+
+def _read_quanti_wide_sheet(xlsx_path: Path | pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
+    frame, _ = _read_quanti_wide_sheet_with_mapping(xlsx_path, sheet_name)
+    return frame
 
 
 def _find_conflicts(
@@ -394,14 +565,7 @@ def _account_quality_payload(frame: pd.DataFrame, sample_limit: int = 3) -> dict
 def _merge_account_frames(
     account_name: str,
     frames: list[tuple[pd.DataFrame, SourceInfo]],
-    *,
-    conflict_policy: str,
 ) -> tuple[pd.DataFrame, list[dict[str, str]]]:
-    normalized_policy = str(conflict_policy or "error").strip().lower()
-    if normalized_policy not in {"error", "prefer_latest"}:
-        msg = f"Unsupported conflict policy: {conflict_policy}"
-        raise ValueError(msg)
-
     merged = pd.DataFrame()
     conflicts: list[dict[str, str]] = []
     def sort_key(item: tuple[pd.DataFrame, SourceInfo]) -> Any:
@@ -417,19 +581,77 @@ def _merge_account_frames(
         frame_conflicts = _find_conflicts(merged, frame, incoming_source=source)
         if frame_conflicts:
             conflicts.extend(frame_conflicts)
-            if normalized_policy == "error":
-                sample = frame_conflicts[0]
-                msg = (
-                    f"Conflicting overlapping values for {account_name}: "
-                    f"{sample['code']} on {sample['date']} "
-                    f"({sample['existing_value']} != {sample['incoming_value']})"
-                )
-                raise ValueError(msg)
-            merged = frame.combine_first(merged)
+            sample = frame_conflicts[0]
+            msg = (
+                f"Conflicting overlapping values for {account_name}: "
+                f"{sample['code']} on {sample['date']} "
+                f"({sample['existing_value']} != {sample['incoming_value']})"
+            )
+            raise ValueError(msg)
         else:
             merged = merged.combine_first(frame)
 
     return merged.sort_index(), conflicts
+
+
+def _code_name_mapping_frame(mappings: list[CodeNameMapping]) -> pd.DataFrame:
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for mapping in mappings:
+        code = _normalize_label(mapping.get("code"))
+        name = _normalize_label(mapping.get("name"))
+        if not code:
+            continue
+        key = (code, name)
+        row = rows.setdefault(
+            key,
+            {
+                "code": code,
+                "name": name,
+                "source_files": set(),
+                "source_sheets": set(),
+            },
+        )
+        if mapping.get("file_name"):
+            row["source_files"].add(str(mapping["file_name"]))
+        if mapping.get("sheet_name"):
+            row["source_sheets"].add(str(mapping["sheet_name"]))
+
+    payload = [
+        {
+            "code": row["code"],
+            "name": row["name"],
+            "source_files": ", ".join(sorted(row["source_files"])),
+            "source_sheets": ", ".join(sorted(row["source_sheets"])),
+        }
+        for row in rows.values()
+    ]
+    return pd.DataFrame(payload, columns=["code", "name", "source_files", "source_sheets"]).sort_values(
+        ["code", "name"],
+        ignore_index=True,
+    )
+
+
+def _existing_code_name_mappings(output_directory: Path) -> list[CodeNameMapping]:
+    mapping_path = output_directory / CODE_NAME_MAPPING_FILE
+    if not mapping_path.exists():
+        return []
+    frame = pd.read_parquet(mapping_path)
+    if "code" not in frame.columns:
+        return []
+    mappings: list[CodeNameMapping] = []
+    for row in frame.to_dict("records"):
+        code = _normalize_label(row.get("code"))
+        if not code:
+            continue
+        mappings.append(
+            {
+                "code": code,
+                "name": _normalize_label(row.get("name")),
+                "file_name": CODE_NAME_MAPPING_FILE,
+                "sheet_name": "__existing_mapping__",
+            }
+        )
+    return mappings
 
 
 def _existing_account_frame(
@@ -466,7 +688,13 @@ def _scan_asset_excel_frames(
     selected_files: list[str] | None = None,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
-) -> tuple[dict[str, list[tuple[pd.DataFrame, SourceInfo]]], dict[str, list[SourceInfo]], list[dict[str, str]], list[dict[str, Any]]]:
+) -> tuple[
+    dict[str, list[tuple[pd.DataFrame, SourceInfo]]],
+    dict[str, list[SourceInfo]],
+    list[dict[str, str]],
+    list[dict[str, Any]],
+    list[CodeNameMapping],
+]:
     source = Path(source_directory).expanduser().resolve()
     xlsx_files = _selected_asset_excel_paths(source, selected_files)
     if not xlsx_files:
@@ -477,6 +705,7 @@ def _scan_asset_excel_frames(
     sources_by_account: dict[str, list[SourceInfo]] = {}
     skipped: list[dict[str, str]] = []
     sheet_summaries: list[dict[str, Any]] = []
+    code_name_mappings: list[CodeNameMapping] = []
 
     for file_index, xlsx_path in enumerate(xlsx_files, start=1):
         if cancel_check and cancel_check():
@@ -507,7 +736,7 @@ def _scan_asset_excel_frames(
                 sheet_summaries.append(summary)
                 continue
             try:
-                frame = _read_quanti_wide_sheet(excel, sheet_name)
+                frame, mappings = _read_quanti_wide_sheet_with_mapping(excel, sheet_name)
             except ValueError as exc:
                 summary = _sheet_summary_payload(
                     xlsx_path,
@@ -527,6 +756,7 @@ def _scan_asset_excel_frames(
                 )
                 sheet_summaries.append(summary)
                 continue
+            code_name_mappings.extend(mappings)
             source_info = {
                 "file_name": xlsx_path.name,
                 "relative_path": str(xlsx_path.relative_to(source)),
@@ -549,7 +779,7 @@ def _scan_asset_excel_frames(
                     frame=frame,
                 )
             )
-    return frames_by_account, sources_by_account, skipped, sheet_summaries
+    return frames_by_account, sources_by_account, skipped, sheet_summaries, code_name_mappings
 
 
 def _date_index_payload(index: pd.Index) -> list[str]:
@@ -618,11 +848,10 @@ def _merged_date_segments_payload(index: pd.Index, sources: list[SourceInfo]) ->
 
 
 def convert_asset_excels_to_wide_parquet(
-    source_directory: str | Path = ASSETS_DIR,
+    source_directory: str | Path = QUANTIWISE_EXCEL_DIR,
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
     selected_files: list[str] | None = None,
-    conflict_policy: str = "error",
     write_mode: str = "update",
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
@@ -637,7 +866,7 @@ def convert_asset_excels_to_wide_parquet(
         msg = f"Unsupported write mode: {write_mode}"
         raise ValueError(msg)
 
-    frames_by_account, sources_by_account, skipped, sheet_summaries = _scan_asset_excel_frames(
+    frames_by_account, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
         source,
         selected_files=selected_files,
         progress_callback=progress_callback,
@@ -646,6 +875,7 @@ def convert_asset_excels_to_wide_parquet(
     output_info = inspect_asset_excel_output(output)
     updated_accounts: list[str] = []
     if normalized_mode == "update" and output_info["parquet_files"]:
+        code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
         for account_name in sorted(set(frames_by_account) | set(output_info.get("accounts", {}))):
             existing = _existing_account_frame(account_name, output, output_info)
             if existing is None:
@@ -661,11 +891,7 @@ def convert_asset_excels_to_wide_parquet(
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
         _emit(progress_callback, f"Merging {account_name}...")
-        merged, conflicts = _merge_account_frames(
-            account_name,
-            frames,
-            conflict_policy=conflict_policy,
-        )
+        merged, conflicts = _merge_account_frames(account_name, frames)
         merged_by_account[account_name] = merged
         if conflicts:
             conflicts_by_account[account_name] = conflicts
@@ -692,13 +918,21 @@ def convert_asset_excels_to_wide_parquet(
             "quality": _account_quality_payload(merged),
         }
 
+    code_name_mapping = _code_name_mapping_frame(code_name_mappings)
+    code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
+    code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
+
     manifest = {
         "format": ASSET_PARQUET_FORMAT,
         "source_directory": str(source),
         "output_directory": str(output),
         "write_mode": normalized_mode,
-        "conflict_policy": conflict_policy,
+        "conflict_policy": "error",
         "selected_files": selected_files or [],
+        "code_name_mapping": {
+            "path": str(code_name_mapping_path),
+            "rows": len(code_name_mapping),
+        },
         "accounts": accounts,
         "conflicts": conflicts_by_account,
         "skipped": skipped,
@@ -713,6 +947,11 @@ def convert_asset_excels_to_wide_parquet(
         "manifest_path": str(manifest_path),
         "accounts_processed": len(accounts),
         "write_mode": normalized_mode,
+        "conflict_policy": "error",
+        "code_name_mapping": {
+            "path": str(code_name_mapping_path),
+            "rows": len(code_name_mapping),
+        },
         "updated_accounts": updated_accounts,
         "accounts": accounts,
         "conflicts": conflicts_by_account,
@@ -722,16 +961,15 @@ def convert_asset_excels_to_wide_parquet(
 
 
 def inspect_asset_excel_conversion(
-    source_directory: str | Path = ASSETS_DIR,
+    source_directory: str | Path = QUANTIWISE_EXCEL_DIR,
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
     selected_files: list[str] | None = None,
-    conflict_policy: str = "error",
     write_mode: str = "update",
 ) -> dict[str, Any]:
     source = Path(source_directory).expanduser().resolve()
     output = Path(output_directory).expanduser().resolve()
-    frames_by_account, sources_by_account, skipped, sheet_summaries = _scan_asset_excel_frames(
+    frames_by_account, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
         source,
         selected_files=selected_files,
     )
@@ -739,6 +977,7 @@ def inspect_asset_excel_conversion(
     normalized_mode = str(write_mode or "update").strip().lower()
 
     if normalized_mode == "update" and output_info["parquet_files"]:
+        code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
         for account_name in sorted(set(frames_by_account) | set(output_info.get("accounts", {}))):
             existing = _existing_account_frame(account_name, output, output_info)
             if existing is None:
@@ -751,11 +990,7 @@ def inspect_asset_excel_conversion(
     conflicts_by_account: dict[str, list[dict[str, str]]] = {}
     for account_name, frames in sorted(frames_by_account.items()):
         try:
-            merged, conflicts = _merge_account_frames(
-                account_name,
-                frames,
-                conflict_policy=conflict_policy,
-            )
+            merged, conflicts = _merge_account_frames(account_name, frames)
         except ValueError as exc:
             merged, conflicts = pd.DataFrame(), [{"message": str(exc)}]
         if conflicts:
@@ -781,8 +1016,12 @@ def inspect_asset_excel_conversion(
         "source_directory": str(source),
         "output_directory": str(output),
         "write_mode": normalized_mode,
-        "conflict_policy": conflict_policy,
+        "conflict_policy": "error",
         "selected_files": selected_files or [],
+        "code_name_mapping": {
+            "path": str(output / CODE_NAME_MAPPING_FILE),
+            "rows": len(_code_name_mapping_frame(code_name_mappings)),
+        },
         "files": list_asset_excel_files(source),
         "sheets": sheet_summaries,
         "accounts": accounts,
@@ -801,4 +1040,5 @@ __all__ = [
     "list_asset_excel_files",
     "read_asset_excel",
     "read_asset_excel_interpreted",
+    "read_asset_excel_sheets",
 ]

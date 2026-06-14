@@ -171,7 +171,7 @@ export default function TablePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">저장 경로 (SQLite)</Label>
+                  <Label className="dark:text-slate-300">데이터 경로 (SQLite)</Label>
                   <PathPickerInput 
                     value={outputPath} 
                     onChange={(val) => {
@@ -179,7 +179,7 @@ export default function TablePage() {
                       saveSetting("sqlite_output_directory", val);
                     }}
                     mode="folder"
-                    placeholder="저장 경로를 선택하세요"
+                    placeholder="데이터 경로를 선택하세요"
                     onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                   />
                 </div>

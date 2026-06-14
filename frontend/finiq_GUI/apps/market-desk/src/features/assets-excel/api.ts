@@ -1,13 +1,16 @@
 import { apiGet, apiPost } from "@/api/client";
 import type { JobStartResponse } from "@/types/api";
-import type { AssetExcelConvertPayload, AssetExcelFilesResponse, PreviewData, SheetPayload } from "./types";
+import type { AssetExcelConvertPayload, AssetExcelFilesResponse, PreviewData, SheetListPayload, SheetPayload } from "./types";
 
 function encodePath(value: string): string {
   return value.split("/").map((part) => encodeURIComponent(part)).join("/");
 }
 
-export function fetchAssetExcelFiles() {
-  return apiGet<AssetExcelFilesResponse>("/api/assets/excels");
+export function fetchAssetExcelFiles(sourceDirectory?: string) {
+  const query = new URLSearchParams();
+  if (sourceDirectory) query.set("source_directory", sourceDirectory);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiGet<AssetExcelFilesResponse>(`/api/assets/excels${suffix}`);
 }
 
 export function fetchAssetExcelOutput(outputDirectory: string) {
@@ -15,15 +18,22 @@ export function fetchAssetExcelOutput(outputDirectory: string) {
   return apiGet<any>(`/api/assets/excels/output?${params.toString()}`);
 }
 
+export function fetchAssetExcelSheets(fileName: string, sourceDirectory?: string) {
+  const query = new URLSearchParams();
+  if (sourceDirectory) query.set("source_directory", sourceDirectory);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiGet<SheetListPayload>(`/api/assets/excels/${encodePath(fileName)}/sheets${suffix}`);
+}
+
 export function fetchAssetExcelSheet(params: {
   fileName: string;
+  sourceDirectory?: string;
   sheetName?: string;
-  interpreted?: boolean;
   rowLimit?: number;
 }) {
   const query = new URLSearchParams({ row_limit: String(params.rowLimit ?? 20) });
+  if (params.sourceDirectory) query.set("source_directory", params.sourceDirectory);
   if (params.sheetName) query.set("sheet_name", params.sheetName);
-  if (params.interpreted) query.set("interpreted", "true");
   return apiGet<SheetPayload>(`/api/assets/excels/${encodePath(params.fileName)}?${query.toString()}`);
 }
 

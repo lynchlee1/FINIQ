@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Eye, FileSpreadsheet, Loader2, Play, RefreshCw } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
+import { AlertTriangle, CheckCircle2, Eye, Loader2, Play, RefreshCw } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
@@ -13,6 +13,7 @@ import { formatInteger } from "@/lib/format";
 import {
   fetchAssetExcelFiles,
   fetchAssetExcelOutput,
+  fetchAssetExcelSheets,
   fetchAssetExcelSheet,
   previewAssetExcelConversion,
   startAssetExcelConversion,
@@ -48,7 +49,7 @@ function jobStatusLines(data: any): string[] {
       `계정 파일: ${formatInteger(data.result.accounts_processed)}개`,
       `업데이트 계정: ${formatInteger(data.result.updated_accounts?.length)}개`,
       `건너뛴 Sheet: ${formatInteger(data.result.skipped?.length)}개`,
-      `저장 경로: ${data.result.output_directory || ""}`,
+      `데이터 경로: ${data.result.output_directory || ""}`,
     );
   }
   return lines;
@@ -66,12 +67,13 @@ function sheetStatusLabel(status: string | undefined): string {
   return "-";
 }
 
-export default function AssetExcelUtilityPage() {
-  const [assetsRoot, setAssetsRoot] = useState("");
+export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "preview" | "save" }) {
+  const isSaveMode = mode === "save";
+  const pageTitle = isSaveMode ? "Quantiwise - 저장하기" : "Quantiwise - 미리보기";
+  const pageDescription = isSaveMode ? "Quantiwise 엑셀 데이터 파싱해서 저장하기 기능" : "Quantiwise 엑셀 미리보기 기능";
   const [excelFiles, setExcelFiles] = useState<AssetExcelFile[]>([]);
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [conflictPolicy, setConflictPolicy] = useState("error");
   const [writeMode, setWriteMode] = useState("update");
   const [loading, setLoading] = useState(true);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -81,10 +83,12 @@ export default function AssetExcelUtilityPage() {
   const [lastResult, setLastResult] = useState<any>(null);
   const [selectedPreviewFile, setSelectedPreviewFile] = useState("");
   const [selectedSheet, setSelectedSheet] = useState("");
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [sheetsLoading, setSheetsLoading] = useState(false);
+  const [sheetBodyLoading, setSheetBodyLoading] = useState(false);
   const [sheetPayload, setSheetPayload] = useState<SheetPayload | null>(null);
-  const [sheetPreviewMode, setSheetPreviewMode] = useState<"raw" | "interpreted">("raw");
   const sheetPreviewCache = useRef<Record<string, SheetPayload>>({});
-  const [filterText, setFilterText] = useState("");
+  const sheetBodyRequestToken = useRef(0);
 
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/assets/excels/jobs/{jobId}",
@@ -98,15 +102,14 @@ export default function AssetExcelUtilityPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchAssetExcelFiles()
+    fetchAssetExcelFiles(sourceDirectory || undefined)
       .then((data) => {
         if (cancelled) return;
         const files = data.excel_files || [];
-        setAssetsRoot(data.root_directory || "");
+        setSourceDirectory((current) => current || data.root_directory || "");
         setExcelFiles(files);
-        setSelectedFiles(files.map((file: AssetExcelFile) => file.relative_path));
-        setSelectedPreviewFile(files[0]?.relative_path || "");
-        setOutputDirectory((current) => current || `${data.root_directory || ""}/../resources/assets_merged`);
+        setSelectedPreviewFile((current) => current && files.some((file: AssetExcelFile) => file.relative_path === current) ? current : files[0]?.relative_path || "");
+        setOutputDirectory((current) => current || data.default_output_directory || "");
       })
       .catch((err) => {
         if (cancelled) return;
@@ -119,7 +122,7 @@ export default function AssetExcelUtilityPage() {
     return () => {
       cancelled = true;
     };
-  }, [setIsErrorStatus, setStatus]);
+  }, [sourceDirectory, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     if (!outputDirectory.trim()) return;
@@ -138,57 +141,83 @@ export default function AssetExcelUtilityPage() {
 
   useEffect(() => {
     if (!selectedPreviewFile) return;
-    if (sheetPreviewMode === "interpreted" && !selectedSheet) return;
     let cancelled = false;
-    const cacheKey = JSON.stringify({ selectedPreviewFile, selectedSheet, sheetPreviewMode });
-    const cached = sheetPreviewCache.current[cacheKey];
-    if (cached) {
-      setSheetPayload(cached);
-      if (!selectedSheet) setSelectedSheet(cached.sheet_name || cached.sheet_names?.[0] || "");
-      return;
-    }
-    fetchAssetExcelSheet({
-      fileName: selectedPreviewFile,
-      sheetName: selectedSheet || undefined,
-      interpreted: sheetPreviewMode === "interpreted",
-      rowLimit: 20,
-    })
+    setSelectedSheet("");
+    setSheetNames([]);
+    setSheetPayload(null);
+    setSheetsLoading(true);
+    fetchAssetExcelSheets(selectedPreviewFile, sourceDirectory)
       .then((data) => {
         if (cancelled) return;
-        setSheetPayload(data);
-        sheetPreviewCache.current[cacheKey] = data;
-        if (!selectedSheet) setSelectedSheet(data.sheet_name || data.sheet_names?.[0] || "");
+        setSheetNames(data.sheet_names || []);
       })
       .catch((err) => {
         if (cancelled) return;
         setSheetPayload({ error: err.message, rows: [], columns: [], sheet_names: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setSheetsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedPreviewFile, selectedSheet, sheetPreviewMode]);
+  }, [selectedPreviewFile, sourceDirectory]);
 
-  const selectedSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
-  const visibleFiles = useMemo(
-    () => excelFiles.filter((file) => file.relative_path.toLowerCase().includes(filterText.toLowerCase())),
-    [excelFiles, filterText],
-  );
-  const totalSize = useMemo(
-    () => excelFiles.reduce((sum, file) => sum + (file.size_bytes || 0), 0),
-    [excelFiles],
-  );
-  const selectedSize = useMemo(
-    () => excelFiles.filter((file) => selectedSet.has(file.relative_path)).reduce((sum, file) => sum + (file.size_bytes || 0), 0),
-    [excelFiles, selectedSet],
-  );
+  useEffect(() => {
+    if (!selectedPreviewFile || !selectedSheet) {
+      sheetBodyRequestToken.current += 1;
+      setSheetBodyLoading(false);
+      return;
+    }
+    if (sheetNames.length && !sheetNames.includes(selectedSheet)) {
+      sheetBodyRequestToken.current += 1;
+      setSheetPayload(null);
+      setSheetBodyLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const cacheKey = JSON.stringify({ selectedPreviewFile, selectedSheet });
+    const requestToken = sheetBodyRequestToken.current + 1;
+    sheetBodyRequestToken.current = requestToken;
+    const cached = sheetPreviewCache.current[cacheKey];
+    if (cached) {
+      setSheetPayload(cached);
+      setSheetBodyLoading(false);
+      return;
+    }
+    setSheetPayload(null);
+    setSheetBodyLoading(true);
+    fetchAssetExcelSheet({
+      fileName: selectedPreviewFile,
+      sourceDirectory,
+      sheetName: selectedSheet,
+      rowLimit: 20,
+    })
+      .then((data) => {
+        if (cancelled || sheetBodyRequestToken.current !== requestToken) return;
+        setSheetPayload(data);
+        sheetPreviewCache.current[cacheKey] = data;
+      })
+      .catch((err) => {
+        if (cancelled || sheetBodyRequestToken.current !== requestToken) return;
+        setSheetPayload({ error: err.message, rows: [], columns: [], sheet_names: [] });
+      })
+      .finally(() => {
+        if (!cancelled && sheetBodyRequestToken.current === requestToken) setSheetBodyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPreviewFile, selectedSheet, sheetNames]);
+
   const conflictCount = useMemo(
     () => Object.values(previewData?.conflicts || {}).reduce((sum, items: any) => sum + (Array.isArray(items) ? items.length : 0), 0),
     [previewData],
   );
   const accountRows = useMemo(() => Object.entries(previewData?.accounts || lastResult?.accounts || {}), [previewData, lastResult]);
   const currentPreviewSignature = useMemo(
-    () => JSON.stringify({ outputDirectory, selectedFiles, conflictPolicy, writeMode }),
-    [outputDirectory, selectedFiles, conflictPolicy, writeMode],
+    () => JSON.stringify({ sourceDirectory, outputDirectory, writeMode }),
+    [sourceDirectory, outputDirectory, writeMode],
   );
   const previewIsCurrent = Boolean(previewData && previewSignature === currentPreviewSignature);
   const skippedRows = previewData?.skipped || [];
@@ -202,32 +231,30 @@ export default function AssetExcelUtilityPage() {
     () => accountRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
     [accountRows],
   );
-  const sheetStatusCounts = useMemo(() => {
-    const counts = { mapped: 0, unmapped: 0, format_error: 0, conflict_accounts: 0 };
-    (previewData?.sheets || []).forEach((sheet: any) => {
-      if (sheet.status === "mapped") counts.mapped += 1;
-      else if (sheet.status === "format_error") counts.format_error += 1;
-      else counts.unmapped += 1;
-    });
-    counts.conflict_accounts = Object.keys(previewData?.conflicts || {}).length;
-    return counts;
-  }, [previewData]);
-  const selectedPreviewFileIsSelected = selectedPreviewFile ? selectedSet.has(selectedPreviewFile) : true;
   const previewColumns = sheetPayload?.preview_columns || sheetPayload?.columns || [];
   const sheetRows = sheetPayload?.rows || [];
 
-  const toggleFile = (relativePath: string) => {
-    setSelectedFiles((current) => current.includes(relativePath) ? current.filter((item) => item !== relativePath) : [...current, relativePath]);
+  const handlePreviewFileChange = (value: string) => {
+    setSelectedPreviewFile(value);
+    setSelectedSheet("");
+    setSheetNames([]);
+    setSheetPayload(null);
+    setSheetBodyLoading(false);
   };
 
   const handlePreview = async () => {
-    if (!outputDirectory.trim()) {
-      setStatus("저장 폴더를 선택하세요.");
+    if (!sourceDirectory.trim()) {
+      setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
-    if (!selectedFiles.length) {
-      setStatus("변환할 파일을 하나 이상 선택하세요.");
+    if (!outputDirectory.trim()) {
+      setStatus("데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!excelFiles.length) {
+      setStatus("데이터 경로 아래에 변환할 Excel 파일이 없습니다.");
       setIsErrorStatus(true);
       return;
     }
@@ -236,9 +263,8 @@ export default function AssetExcelUtilityPage() {
     setIsErrorStatus(false);
     try {
       const data = await previewAssetExcelConversion({
+        source_directory: sourceDirectory,
         output_directory: outputDirectory,
-        selected_files: selectedFiles,
-        conflict_policy: conflictPolicy,
         write_mode: writeMode,
       });
       setPreviewData(data);
@@ -254,13 +280,13 @@ export default function AssetExcelUtilityPage() {
 
   const handleStart = async () => {
     if (activeJobId) return;
-    if (!outputDirectory.trim()) {
-      setStatus("저장 폴더를 선택하세요.");
+    if (!sourceDirectory.trim() || !outputDirectory.trim()) {
+      setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
-    if (!selectedFiles.length) {
-      setStatus("변환할 파일을 하나 이상 선택하세요.");
+    if (!excelFiles.length) {
+      setStatus("데이터 경로 아래에 변환할 Excel 파일이 없습니다.");
       setIsErrorStatus(true);
       return;
     }
@@ -275,9 +301,8 @@ export default function AssetExcelUtilityPage() {
 
     try {
       const data = await startAssetExcelConversion({
+        source_directory: sourceDirectory,
         output_directory: outputDirectory,
-        selected_files: selectedFiles,
-        conflict_policy: conflictPolicy,
         write_mode: writeMode,
       });
       startPolling(data.job_id);
@@ -296,134 +321,75 @@ export default function AssetExcelUtilityPage() {
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Assets Excel</p>
-              <CardTitle className="text-xl dark:text-white">자산 엑셀 변환</CardTitle>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Quantiwise</p>
+              <CardTitle className="text-xl dark:text-white">{pageTitle}</CardTitle>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{pageDescription}</p>
             </CardHeader>
             <CardContent className="pt-6 space-y-5">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">저장 방식</Label>
-                  <Select value={writeMode} onValueChange={setWriteMode}>
-                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectItem value="update">기존 결과와 병합 업데이트</SelectItem>
-                      <SelectItem value="replace">선택 파일만 저장(기존 미병합)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">값 충돌 정책</Label>
-                  <Select value={conflictPolicy} onValueChange={setConflictPolicy}>
-                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectItem value="error">충돌 시 중단</SelectItem>
-                      <SelectItem value="prefer_latest">뒤쪽 파일 우선</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
               <div className="space-y-2">
-                <Label className="dark:text-slate-300">저장 폴더</Label>
+                <Label className="dark:text-slate-300">원본 데이터 경로</Label>
                 <PathPickerInput
                   mode="folder"
-                  value={outputDirectory}
-                  onChange={setOutputDirectory}
-                  placeholder="/path/to/resources/assets_merged"
+                  value={sourceDirectory}
+                  onChange={(value) => {
+                    setSourceDirectory(value);
+                    setPreviewData(null);
+                    setLastResult(null);
+                    sheetPreviewCache.current = {};
+                  }}
+                  placeholder="/path/to/resources/Quantiwise"
                   onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                 />
+                {isSaveMode ? (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">이 경로 아래의 모든 Excel 파일을 실행 대상으로 사용합니다. 대상 파일: {formatInteger(excelFiles.length)}개</p>
+                ) : null}
               </div>
 
-              {outputExists ? (
-                <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>
-                    <p className="font-medium">기존 결과가 감지되었습니다.</p>
-                    <p>{writeMode === "update" ? "기존 Parquet를 읽어 새 Excel 데이터와 병합합니다." : "기존 Parquet는 병합에 쓰지 않고 선택 파일에서 나온 계정 파일만 저장합니다."}</p>
-                    <p>{writeMode === "update" ? "선택 파일에 없는 기존 계정도 기존 출력에서 함께 유지됩니다." : "선택 파일에서 다시 생성된 계정 파일만 덮어쓰며, 선택 파일에 없는 기존 Parquet는 삭제하지 않습니다."}</p>
-                    <p>기존 계정 파일: {formatInteger(activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length)}개</p>
+              {isSaveMode ? (
+                <>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="dark:text-slate-300">저장 방식</Label>
+                      <Select value={writeMode} onValueChange={setWriteMode}>
+                        <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
+                          <SelectItem value="update">기존 결과와 병합</SelectItem>
+                          <SelectItem value="replace">전체 파일 다시 저장(기존 미병합)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                </div>
+
+                  <div className="space-y-2">
+                    <Label className="dark:text-slate-300">데이터 경로</Label>
+                    <PathPickerInput
+                      mode="folder"
+                      value={outputDirectory}
+                      onChange={setOutputDirectory}
+                      placeholder="/path/to/resources/assets_merged"
+                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                    />
+                  </div>
+
+                  {outputExists ? (
+                    <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div>
+                        <p className="font-medium">기존 결과가 감지되었습니다.</p>
+                        <p>{writeMode === "update" ? "기존 Parquet를 읽어 새 Excel 데이터와 병합합니다." : "기존 Parquet는 병합에 쓰지 않고 원본 데이터 경로 아래 전체 Excel에서 나온 계정 파일만 저장합니다."}</p>
+                        <p>{writeMode === "update" ? "원본 데이터 경로에 없는 기존 계정도 기존 출력에서 함께 유지됩니다." : "다시 생성된 계정 파일만 덮어쓰며, 원본 데이터 경로에 없는 기존 Parquet는 삭제하지 않습니다."}</p>
+                        <p>기존 계정 파일: {formatInteger(activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length)}개</p>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
             </CardContent>
           </Card>
 
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base dark:text-white">
-                <FileSpreadsheet className="h-4 w-4" />
-                파일 선택
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-4 gap-3 text-sm">
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">Assets</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100 break-all">{assetsRoot || "-"}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">전체 파일</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{loading ? "-" : formatInteger(excelFiles.length)}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">선택 파일</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(selectedFiles.length)}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">선택 크기</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{formatBytes(selectedSize)} / {formatBytes(totalSize)}</p>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 md:flex-row md:items-center">
-                <Input value={filterText} onChange={(event) => setFilterText(event.target.value)} placeholder="파일명 필터" className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => setSelectedFiles(excelFiles.map((file) => file.relative_path))}>전체 선택</Button>
-                  <Button variant="outline" onClick={() => setSelectedFiles([])}>전체 해제</Button>
-                  {filterText.trim() ? (
-                    <>
-                      <Button variant="outline" onClick={() => setSelectedFiles(Array.from(new Set([...selectedFiles, ...visibleFiles.map((file) => file.relative_path)])))}>필터 선택</Button>
-                      <Button variant="outline" onClick={() => setSelectedFiles(selectedFiles.filter((path) => !visibleFiles.some((file) => file.relative_path === path)))}>필터 해제</Button>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="max-h-72 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
-                    <tr className="text-left text-slate-500 dark:text-slate-400">
-                      <th className="w-10 px-3 py-2 font-medium"></th>
-                      <th className="px-3 py-2 font-medium">파일</th>
-                      <th className="px-3 py-2 font-medium text-right">크기</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
-                    {visibleFiles.map((file) => (
-                      <tr key={file.relative_path} className="dark:text-slate-300">
-                        <td className="px-3 py-2">
-                          <Checkbox checked={selectedSet.has(file.relative_path)} onCheckedChange={() => toggleFile(file.relative_path)} />
-                        </td>
-                        <td className="px-3 py-2 break-all">{file.relative_path}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatBytes(file.size_bytes)}</td>
-                      </tr>
-                    ))}
-                    {!loading && visibleFiles.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">표시할 엑셀 파일 없음</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-
+          {!isSaveMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base dark:text-white">
@@ -435,7 +401,7 @@ export default function AssetExcelUtilityPage() {
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">파일</Label>
-                  <Select value={selectedPreviewFile} onValueChange={(value) => { setSelectedPreviewFile(value); setSelectedSheet(""); }}>
+                  <Select value={selectedPreviewFile} onValueChange={handlePreviewFileChange}>
                     <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
                       <SelectValue placeholder="파일 선택" />
                     </SelectTrigger>
@@ -443,32 +409,34 @@ export default function AssetExcelUtilityPage() {
                       {excelFiles.map((file) => <SelectItem key={file.relative_path} value={file.relative_path}>{file.relative_path}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  {!selectedPreviewFileIsSelected ? (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">이 파일은 현재 변환 선택에서 제외되어 있습니다.</p>
-                  ) : null}
                 </div>
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">Sheet</Label>
-                  <Select value={selectedSheet} onValueChange={setSelectedSheet}>
+                  <Select value={selectedSheet} onValueChange={setSelectedSheet} disabled={!selectedPreviewFile || sheetsLoading || sheetNames.length === 0}>
                     <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectValue placeholder="Sheet 선택" />
+                      <SelectValue placeholder={sheetsLoading ? "Sheet 목록 로딩 중" : "Sheet 선택"} />
                     </SelectTrigger>
                     <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                      {(sheetPayload?.sheet_names || []).map((name: string) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                      {sheetNames.map((name: string) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button variant={sheetPreviewMode === "raw" ? "default" : "outline"} size="sm" onClick={() => setSheetPreviewMode("raw")}>원본</Button>
-                <Button variant={sheetPreviewMode === "interpreted" ? "default" : "outline"} size="sm" onClick={() => setSheetPreviewMode("interpreted")} disabled={!selectedSheet}>변환 해석</Button>
                 {sheetPayload?.account_name ? (
                   <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
                     <span>계정: {sheetPayload.account_name}</span>
                     <span>상태: {sheetStatusLabel(sheetPayload.status)}</span>
                     <span>행: {formatInteger(sheetPayload.row_count ?? sheetPayload.preview_row_count)}</span>
                     {sheetPayload.date_start && sheetPayload.date_end ? <span>{sheetPayload.date_start} ~ {sheetPayload.date_end}</span> : null}
+                  </div>
+                ) : null}
+                {sheetPayload?.metadata?.period_from || sheetPayload?.metadata?.period_to ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <span>Period(From): {sheetPayload.metadata.period_from || "-"}</span>
+                    <span>Period(To): {sheetPayload.metadata.period_to || "-"}</span>
+                    <span>행: {formatInteger(sheetPayload.row_count ?? sheetPayload.preview_row_count)}</span>
                   </div>
                 ) : null}
               </div>
@@ -493,7 +461,13 @@ export default function AssetExcelUtilityPage() {
                     {sheetPayload?.error ? (
                       <tr><td colSpan={Math.max(1, previewColumns.length)} className="px-3 py-6 text-red-600 dark:text-red-300">{sheetPayload.error}</td></tr>
                     ) : null}
-                    {!sheetPayload?.error && !sheetRows.length ? (
+                    {!sheetPayload?.error && sheetBodyLoading ? (
+                      <tr><td colSpan={Math.max(1, previewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">본문을 불러오는 중...</td></tr>
+                    ) : null}
+                    {!sheetPayload?.error && !sheetBodyLoading && !selectedSheet ? (
+                      <tr><td colSpan={Math.max(1, previewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">Sheet를 선택하세요.</td></tr>
+                    ) : null}
+                    {!sheetPayload?.error && !sheetBodyLoading && selectedSheet && !sheetRows.length ? (
                       <tr><td colSpan={Math.max(1, previewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">표시할 행 없음</td></tr>
                     ) : null}
                   </tbody>
@@ -501,16 +475,25 @@ export default function AssetExcelUtilityPage() {
               </div>
             </CardContent>
           </Card>
+          ) : null}
 
+          {isSaveMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle className="text-base dark:text-white">Sheet/계정 매핑 미리보기</CardTitle>
+              <CardTitle className="text-base dark:text-white">Quantiwise - 저장하기</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={handlePreview} disabled={previewLoading || !!activeJobId}>
                   {previewLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                   사전 점검
+                </Button>
+                <Button onClick={handleStart} disabled={!!activeJobId || loading || !excelFiles.length || !previewIsCurrent}>
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  Quantiwise 변환
+                </Button>
+                <Button variant="outline" onClick={cancelJob} disabled={!activeJobId}>
+                  {UI_TEXT.actions.cancelJob}
                 </Button>
                 {previewIsCurrent ? (
                   <div className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
@@ -525,55 +508,34 @@ export default function AssetExcelUtilityPage() {
                 ) : null}
               </div>
 
-              <div className="grid md:grid-cols-5 gap-3 text-sm">
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">계정</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(Object.keys(previewData?.accounts || {}).length)}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">정상 Sheet</p>
-                  <p className="font-medium text-emerald-700 dark:text-emerald-300">{sheetStatusCounts.mapped}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">미매핑</p>
-                  <p className="font-medium text-amber-700 dark:text-amber-300">{sheetStatusCounts.unmapped}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">형식 오류</p>
-                  <p className="font-medium text-red-700 dark:text-red-300">{sheetStatusCounts.format_error}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-3 dark:border-[#30363d]">
-                  <p className="text-slate-500 dark:text-slate-400">충돌 샘플</p>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{conflictCount}</p>
-                </div>
-              </div>
-
-              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
-                    <tr className="text-left text-slate-500 dark:text-slate-400">
-                      <th className="px-3 py-2 font-medium">파일</th>
-                      <th className="px-3 py-2 font-medium">Sheet</th>
-                      <th className="px-3 py-2 font-medium">상태</th>
-                      <th className="px-3 py-2 font-medium">계정</th>
-                      <th className="px-3 py-2 font-medium">날짜</th>
-                      <th className="px-3 py-2 font-medium text-right">코드</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
-                    {(previewData?.sheets || []).map((sheet: any, index: number) => (
-                      <tr key={`${sheet.file_name}-${sheet.sheet_name}-${index}`} className="dark:text-slate-300">
-                        <td className="px-3 py-2 break-all">{sheet.relative_path || sheet.file_name}</td>
-                        <td className="px-3 py-2">{sheet.sheet_name}</td>
-                        <td className="px-3 py-2">{sheetStatusLabel(sheet.status)}</td>
-                        <td className="px-3 py-2">{sheet.account_name || sheet.reason || "-"}</td>
-                        <td className="px-3 py-2 tabular-nums">{sheet.date_start && sheet.date_end ? `${sheet.date_start} ~ ${sheet.date_end}` : "-"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatInteger(sheet.columns)}</td>
+              {previewData?.sheets?.length ? (
+                <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
+                      <tr className="text-left text-slate-500 dark:text-slate-400">
+                        <th className="px-3 py-2 font-medium">파일</th>
+                        <th className="px-3 py-2 font-medium">Sheet</th>
+                        <th className="px-3 py-2 font-medium">상태</th>
+                        <th className="px-3 py-2 font-medium">계정</th>
+                        <th className="px-3 py-2 font-medium">날짜</th>
+                        <th className="px-3 py-2 font-medium text-right">코드</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
+                      {(previewData?.sheets || []).map((sheet: any, index: number) => (
+                        <tr key={`${sheet.file_name}-${sheet.sheet_name}-${index}`} className="dark:text-slate-300">
+                          <td className="px-3 py-2 break-all">{sheet.relative_path || sheet.file_name}</td>
+                          <td className="px-3 py-2">{sheet.sheet_name}</td>
+                          <td className="px-3 py-2">{sheetStatusLabel(sheet.status)}</td>
+                          <td className="px-3 py-2">{sheet.account_name || sheet.reason || "-"}</td>
+                          <td className="px-3 py-2 tabular-nums">{sheet.date_start && sheet.date_end ? `${sheet.date_start} ~ ${sheet.date_end}` : "-"}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatInteger(sheet.columns)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
 
               {skippedRows.length ? (
                 <div className="space-y-2">
@@ -640,7 +602,9 @@ export default function AssetExcelUtilityPage() {
               ) : null}
             </CardContent>
           </Card>
+          ) : null}
 
+          {accountRows.length ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="text-base dark:text-white">결과 탐색</CardTitle>
@@ -669,54 +633,36 @@ export default function AssetExcelUtilityPage() {
                         <td className="px-3 py-2">{(item.date_segments || []).map((segment: any) => `${segment.start}~${segment.end}`).join(", ") || "-"}</td>
                       </tr>
                     ))}
-                    {!accountRows.length ? (
-                      <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">사전 점검 또는 변환 완료 후 결과가 표시됩니다.</td></tr>
-                    ) : null}
                   </tbody>
                 </table>
               </div>
-              {accountRows.length ? (
-                <div className="rounded-md border border-slate-200 p-3 text-xs dark:border-[#30363d] dark:text-slate-300">
-                  <p className="mb-2 font-medium text-slate-900 dark:text-slate-100">최근 샘플</p>
-                  <div className="space-y-2">
-                    {accountRows.slice(0, 3).map(([name, item]: [string, any]) => (
-                      <div key={name} className="break-all">
-                        <span className="font-medium">{name}</span>
-                        <span className="ml-2 text-slate-500 dark:text-slate-400">
-                          {(item.quality?.sample_rows || []).map((row: any) => JSON.stringify(row)).join(" / ") || "샘플 없음"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+              <div className="rounded-md border border-slate-200 p-3 text-xs dark:border-[#30363d] dark:text-slate-300">
+                <p className="mb-2 font-medium text-slate-900 dark:text-slate-100">최근 샘플</p>
+                <div className="space-y-2">
+                  {accountRows.slice(0, 3).map(([name, item]: [string, any]) => (
+                    <div key={name} className="break-all">
+                      <span className="font-medium">{name}</span>
+                      <span className="ml-2 text-slate-500 dark:text-slate-400">
+                        {(item.quality?.sample_rows || []).map((row: any) => JSON.stringify(row)).join(" / ") || "샘플 없음"}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ) : null}
+              </div>
             </CardContent>
           </Card>
-
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">작업 실행</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3">
-              <Button onClick={handleStart} disabled={!!activeJobId || loading || !selectedFiles.length || !previewIsCurrent} className="w-full md:w-auto">
-                {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                자산 엑셀 변환
-              </Button>
-              <Button variant="outline" onClick={cancelJob} disabled={!activeJobId} className="w-full md:w-auto">
-                {UI_TEXT.actions.cancelJob}
-              </Button>
-            </CardContent>
-          </Card>
+          ) : null}
         </section>
 
+        {isSaveMode ? (
         <ActionDock
           activityActive={!!activeJobId}
           activityContent={
             <>
               <div className="space-y-3 rounded-md border border-slate-200 p-3 text-sm dark:border-[#30363d]">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500 dark:text-slate-400">선택 파일</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(selectedFiles.length)}개</span>
+                  <span className="text-slate-500 dark:text-slate-400">대상 파일</span>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(excelFiles.length)}개</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">예상 계정</span>
@@ -734,11 +680,6 @@ export default function AssetExcelUtilityPage() {
                   <span className="text-slate-500 dark:text-slate-400">실행 영향</span>
                   <span className="text-right font-medium text-slate-900 dark:text-slate-100">{writeMode === "update" ? "기존 포함 병합" : "선택 계정 재저장"}</span>
                 </div>
-                {conflictPolicy === "prefer_latest" ? (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                    충돌 시 날짜 시작이 뒤쪽인 파일 값이 우선 적용됩니다.
-                  </div>
-                ) : null}
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-500 dark:text-slate-400">점검 상태</span>
                   <span className={previewIsCurrent ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-700 dark:text-amber-300"}>
@@ -759,10 +700,11 @@ export default function AssetExcelUtilityPage() {
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
-              <p>저장 방식, 충돌 정책, 저장 폴더, 파일 선택, Sheet 미리보기 옵션은 본문에서 바로 조작합니다.</p>
+              <p>원본 데이터 경로, 데이터 경로, 저장 방식은 본문에서 바로 조작합니다.</p>
             </div>
           }
         />
+        ) : null}
       </div>
     </WorkflowPageShell>
   );

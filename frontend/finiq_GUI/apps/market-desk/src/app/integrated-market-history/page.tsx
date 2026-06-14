@@ -81,7 +81,7 @@ export default function IntegratedMarketHistoryPage() {
                 <PathPickerInput mode="file" value={itemRegistryPath || sqlite_manifest_path || ""} onChange={(val) => saveSetting("integrated_history_item_registry_path", val)} onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
               </div>
               <div className="space-y-2 md:col-span-2">
-                <Label className="dark:text-slate-300">시장 구분 이력 저장 경로</Label>
+                <Label className="dark:text-slate-300">시장 구분 이력 데이터 경로</Label>
                 <PathPickerInput mode="save" value={outputPath || ""} onChange={(val) => saveSetting("integrated_history_output_path", val)} onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
               </div>
             </div>
@@ -112,7 +112,7 @@ export default function IntegratedMarketHistoryPage() {
           notificationActive={isErrorStatus}
           notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
           settingsTitle="시스템 설정"
-          settingsContent={<div className="text-sm text-slate-500 dark:text-slate-400">추가 시스템 설정이 없습니다. 입력/저장 경로는 메인 화면에서 조정합니다.</div>}
+          settingsContent={<div className="text-sm text-slate-500 dark:text-slate-400">추가 시스템 설정이 없습니다. 입력/데이터 경로는 메인 화면에서 조정합니다.</div>}
         />
       </div>
     </WorkflowPageShell>

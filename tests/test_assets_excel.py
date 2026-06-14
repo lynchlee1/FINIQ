@@ -11,10 +11,22 @@ from finiq.data.assets_excel import (
     list_asset_excel_files,
     read_asset_excel,
     read_asset_excel_interpreted,
+    read_asset_excel_sheets,
 )
 
 
-def _write_quanti_sheet(writer, sheet_name: str, rows: list[list[object]]):
+def _write_quanti_sheet(
+    writer,
+    sheet_name: str,
+    rows: list[list[object]],
+    *,
+    codes: list[str] | None = None,
+    names: list[str] | None = None,
+    item_labels: list[str] | None = None,
+):
+    resolved_codes = codes or ["A005930", "A000660"]
+    resolved_names = names or ["삼성전자", "SK하이닉스"]
+    labels = item_labels or [sheet_name, sheet_name]
     prefix = [
         ["     Refresh     ", "Last Update : 2026-04-30"],
         [0],
@@ -23,13 +35,13 @@ def _write_quanti_sheet(writer, sheet_name: str, rows: list[list[object]]):
         ["Period(From)", 20200101],
         ["Period(To)", 20200102],
         [],
-        ["Code", "A005930", "A000660"],
-        ["Name", "삼성전자", "SK하이닉스"],
-        ["Item Code", "SAMPLE", "SAMPLE"],
-        ["Unit", "Local", "Local"],
+        ["Code", *resolved_codes],
+        ["Name", *resolved_names],
+        ["Item Code", *["SAMPLE" for _ in resolved_codes]],
+        ["Unit", *["Local" for _ in resolved_codes]],
         ["Base Date"],
         [],
-        ["D A T E", sheet_name, sheet_name],
+        ["D A T E", *labels],
     ]
     pd.DataFrame(prefix + rows).to_excel(writer, sheet_name=sheet_name, header=False, index=False)
 
@@ -65,6 +77,50 @@ def test_list_and_read_asset_excel(tmp_path):
     ]
 
 
+def test_read_asset_excel_sheets_does_not_load_rows(tmp_path):
+    excel_path = tmp_path / "sample.xlsx"
+    with pd.ExcelWriter(excel_path) as writer:
+        pd.DataFrame([{"value": 1}]).to_excel(writer, index=False, sheet_name="first")
+        pd.DataFrame([{"value": 2}]).to_excel(writer, index=False, sheet_name="second")
+
+    payload = read_asset_excel_sheets("sample.xlsx", root_directory=tmp_path)
+
+    assert payload == {
+        "file_name": "sample.xlsx",
+        "relative_path": "sample.xlsx",
+        "sheet_names": ["first", "second"],
+        "sheet_count": 2,
+    }
+    assert "rows" not in payload
+
+
+def test_read_asset_excel_quanti_preview_uses_date_code_matrix(tmp_path):
+    excel_path = tmp_path / "quanti.xlsx"
+    with pd.ExcelWriter(excel_path) as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [
+                [pd.Timestamp("2020-01-01"), 100, 200],
+                [pd.Timestamp("2020-01-02"), 101, 201],
+            ],
+        )
+
+    payload = read_asset_excel("quanti.xlsx", sheet_name="종가", row_limit=20, root_directory=tmp_path)
+
+    assert payload["preview_type"] == "quanti_matrix"
+    assert payload["account_name"] == "stock_price"
+    assert payload["status"] == "mapped"
+    assert payload["metadata"] == {"period_from": "20200101", "period_to": "20200102"}
+    assert payload["columns"] == ["date", "A005930", "A000660"]
+    assert payload["preview_columns"] == ["date", "A005930", "A000660"]
+    assert payload["rows"] == [
+        {"date": "2020-01-01", "A005930": 100, "A000660": 200},
+        {"date": "2020-01-02", "A005930": 101, "A000660": 201},
+    ]
+    assert "     Refresh     " not in payload["columns"]
+
+
 def test_read_asset_excel_rejects_path_outside_assets(tmp_path):
     outside_path = tmp_path.parent / "outside.xlsx"
     pd.DataFrame([{"value": 1}]).to_excel(outside_path, index=False)
@@ -72,25 +128,38 @@ def test_read_asset_excel_rejects_path_outside_assets(tmp_path):
     try:
         read_asset_excel(outside_path, root_directory=tmp_path)
     except ValueError as exc:
-        assert "under assets directory" in str(exc)
+        assert "under Quantiwise directory" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
 
 
 def test_asset_excel_api(tmp_path, monkeypatch):
     excel_path = tmp_path / "api.xlsx"
-    pd.DataFrame([{"name": "FINIQ"}]).to_excel(excel_path, index=False, sheet_name="data")
-    monkeypatch.setattr(app_module, "ASSETS_DIR", tmp_path)
+    with pd.ExcelWriter(excel_path) as writer:
+        pd.DataFrame([{"name": "FINIQ"}]).to_excel(writer, index=False, sheet_name="data")
+        pd.DataFrame([{"name": "ALT"}]).to_excel(writer, index=False, sheet_name="other")
+    monkeypatch.setattr(app_module, "QUANTIWISE_EXCEL_DIR", tmp_path)
 
     client = TestClient(app_module.app)
 
     list_response = client.get("/api/assets/excels")
     assert list_response.status_code == 200
+    assert list_response.json()["root_directory"] == str(tmp_path.resolve())
+    assert list_response.json()["default_output_directory"]
     assert list_response.json()["excel_files"][0]["relative_path"] == "api.xlsx"
+
+    sheets_response = client.get("/api/assets/excels/api.xlsx/sheets")
+    assert sheets_response.status_code == 200
+    assert sheets_response.json()["sheet_names"] == ["data", "other"]
+    assert "rows" not in sheets_response.json()
 
     read_response = client.get("/api/assets/excels/api.xlsx", params={"sheet_name": "data"})
     assert read_response.status_code == 200
     assert read_response.json()["rows"] == [{"name": "FINIQ"}]
+
+    stale_sheet_response = client.get("/api/assets/excels/api.xlsx", params={"sheet_name": "Sheet1"})
+    assert stale_sheet_response.status_code == 400
+    assert "Worksheet named 'Sheet1' not found" in stale_sheet_response.json()["detail"]
 
 
 def test_asset_excel_interpreted_preview_api(tmp_path, monkeypatch):
@@ -104,7 +173,7 @@ def test_asset_excel_interpreted_preview_api(tmp_path, monkeypatch):
                 [pd.Timestamp("2020-01-02"), None, 201],
             ],
         )
-    monkeypatch.setattr(app_module, "ASSETS_DIR", tmp_path)
+    monkeypatch.setattr(app_module, "QUANTIWISE_EXCEL_DIR", tmp_path)
 
     payload = read_asset_excel_interpreted("api.xlsx", sheet_name="종가", root_directory=tmp_path)
 
@@ -151,6 +220,8 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     assert payload["accounts_processed"] == 2
     assert (output_dir / "stock_price.parquet").exists()
     assert (output_dir / "volume.parquet").exists()
+    assert (output_dir / "code_name_mapping.parquet").exists()
+    assert payload["code_name_mapping"]["rows"] == 2
     assert payload["accounts"]["stock_price"]["date_index"] == ["2020-01-01", "2020-01-02"]
     assert payload["accounts"]["stock_price"]["date_segments"] == [
         {"start": "2020-01-01", "end": "2020-01-02", "count": 2}
@@ -167,6 +238,12 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     assert volume.columns.tolist() == ["date", "A005930", "A000660"]
     assert stock_price["A005930"].tolist() == [100, 101]
     assert volume["A000660"].tolist() == [2000, 2001]
+
+    mapping = pd.read_parquet(output_dir / "code_name_mapping.parquet")
+    assert mapping[["code", "name"]].to_dict("records") == [
+        {"code": "A000660", "name": "SK하이닉스"},
+        {"code": "A005930", "name": "삼성전자"},
+    ]
 
 
 def test_convert_asset_excels_uses_selected_files(tmp_path):
@@ -215,6 +292,8 @@ def test_convert_asset_excels_updates_existing_output(tmp_path):
             writer,
             "종가",
             [[pd.Timestamp("2020-01-06"), 101, 201]],
+            codes=["A035420", "A051910"],
+            names=["NAVER", "LG화학"],
         )
 
     payload = convert_asset_excels_to_wide_parquet(
@@ -229,6 +308,13 @@ def test_convert_asset_excels_updates_existing_output(tmp_path):
     assert payload["updated_accounts"] == ["stock_price"]
     assert payload["accounts"]["stock_price"]["date_segments"] == [
         {"start": "2020-01-03", "end": "2020-01-06", "count": 2},
+    ]
+    mapping = pd.read_parquet(output_dir / "code_name_mapping.parquet")
+    assert mapping[["code", "name"]].to_dict("records") == [
+        {"code": "A000660", "name": "SK하이닉스"},
+        {"code": "A005930", "name": "삼성전자"},
+        {"code": "A035420", "name": "NAVER"},
+        {"code": "A051910", "name": "LG화학"},
     ]
 
 
@@ -255,7 +341,9 @@ def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_
     assert preview["sheets"][0]["status"] == "mapped"
     assert preview["accounts"]["stock_price"]["will_update_existing"] is True
     assert preview["accounts"]["stock_price"]["quality"]["sample_rows"]
+    assert preview["code_name_mapping"]["rows"] == 2
     assert output["manifest_exists"] is True
+    assert output["code_name_mapping_exists"] is True
     assert output["parquet_files"] == ["stock_price.parquet"]
 
 
@@ -305,7 +393,7 @@ def test_convert_asset_excels_rejects_conflicting_overlaps(tmp_path):
         raise AssertionError("Expected ValueError")
 
 
-def test_convert_asset_excels_can_prefer_latest_for_conflicting_overlaps(tmp_path):
+def test_convert_asset_excels_always_rejects_conflicts_even_if_policy_is_requested(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
     source_dir.mkdir()
@@ -322,15 +410,55 @@ def test_convert_asset_excels_can_prefer_latest_for_conflicting_overlaps(tmp_pat
             [[pd.Timestamp("2020-01-01"), 999, 200]],
         )
 
-    payload = convert_asset_excels_to_wide_parquet(
-        source_dir,
-        output_dir,
-        conflict_policy="prefer_latest",
-    )
+    try:
+        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+    except ValueError as exc:
+        assert "Conflicting overlapping values" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
 
-    stock_price = pd.read_parquet(output_dir / "stock_price.parquet")
-    assert payload["conflicts"]["stock_price"][0]["code"] == "A005930"
-    assert stock_price["A005930"].tolist() == [999]
+
+def test_trading_halt_flag_like_sheet_reads_three_times(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    excel_path = source_dir / "halt.xlsx"
+    with pd.ExcelWriter(excel_path) as writer:
+        _write_quanti_sheet(
+            writer,
+            "거래정지여부",
+            [
+                [pd.Timestamp("2020-01-01"), "정상", "정지"],
+                [pd.Timestamp("2020-01-02"), "정지", "정상"],
+            ],
+            item_labels=["거래정지여부(정지/정상)", "거래정지여부(정지/정상)"],
+        )
+
+    for _ in range(3):
+        payload = read_asset_excel_interpreted(
+            "halt.xlsx",
+            sheet_name="거래정지여부",
+            root_directory=source_dir,
+        )
+        assert payload["account_name"] == "trading_halt_flag"
+        assert payload["status"] == "mapped"
+        assert payload["columns"] == ["date", "A005930", "A000660"]
+        assert payload["rows"][0] == {
+            "date": "2020-01-01",
+            "A005930": "정상",
+            "A000660": "정지",
+        }
+
+    result = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+    halt = pd.read_parquet(output_dir / "trading_halt_flag.parquet")
+    mapping = pd.read_parquet(output_dir / "code_name_mapping.parquet")
+
+    assert result["accounts"]["trading_halt_flag"]["rows"] == 2
+    assert halt["A005930"].tolist() == ["정상", "정지"]
+    assert mapping[["code", "name"]].to_dict("records") == [
+        {"code": "A000660", "name": "SK하이닉스"},
+        {"code": "A005930", "name": "삼성전자"},
+    ]
 
 
 def test_convert_asset_excels_allows_one_day_adjacent_ranges(tmp_path):

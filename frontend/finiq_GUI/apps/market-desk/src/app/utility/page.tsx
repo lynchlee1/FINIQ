@@ -31,7 +31,7 @@ function formatResult(result: any): string[] {
   if (result.years?.length) {
     lines.push(`대상 연도: ${result.years.join(", ")}`);
   }
-  lines.push(`저장 경로: ${result.output_directory || ""}`);
+  lines.push(`데이터 경로: ${result.output_directory || ""}`);
   return lines;
 }
 
@@ -84,7 +84,7 @@ export default function UtilityPage() {
       return;
     }
     if (!outputDirectory.trim()) {
-      setStatus("저장 폴더를 선택하세요.");
+      setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -136,7 +136,7 @@ export default function UtilityPage() {
                   <PathPickerInput mode="folder" value={sourceDirectory} onChange={setSourceDirectory} placeholder="/path/to/source" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">저장 폴더</Label>
+                  <Label className="dark:text-slate-300">데이터 경로</Label>
                   <PathPickerInput mode="folder" value={outputDirectory} onChange={setOutputDirectory} placeholder="/path/to/output" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
               </div>
