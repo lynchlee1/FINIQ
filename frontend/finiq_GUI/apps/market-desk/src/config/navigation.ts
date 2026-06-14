@@ -92,7 +92,8 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     layout: "job",
     steps: [
       { href: "/utility", step: 1, label: "분할저장" },
-      { href: "/utility/assets-excel", step: 2, label: "자산 엑셀 변환" },
+      { href: "/utility/assets-excel", step: 2, label: "Quantiwise - 미리보기" },
+      { href: "/utility/assets-excel/save", step: 3, label: "Quantiwise - 저장하기" },
     ],
   },
 };
@@ -130,6 +131,12 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
     };
   }
 
+  const partitionStorageStep = WORKFLOWS.utility.steps[0];
+  const quantiwiseSteps = [
+    { ...WORKFLOWS.utility.steps[1], label: "미리보기" },
+    { ...WORKFLOWS.utility.steps[2], label: "저장하기" },
+  ];
+
   return {
     title: WORKFLOWS["disclosure-build"].label,
     groups: [
@@ -144,9 +151,13 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
       {
         label: "외부 데이터 변환",
         steps: [
-          ...WORKFLOWS.utility.steps,
+          partitionStorageStep,
           ...WORKFLOWS["integrated-data"].steps,
         ],
+      },
+      {
+        label: "Quantiwise",
+        steps: quantiwiseSteps,
       },
     ],
   };

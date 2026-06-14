@@ -6,13 +6,13 @@ export type AssetExcelFile = {
 
 export type AssetExcelFilesResponse = {
   root_directory: string;
+  default_output_directory: string;
   excel_files: AssetExcelFile[];
 };
 
 export type AssetExcelConvertPayload = {
+  source_directory: string;
   output_directory: string;
-  selected_files: string[];
-  conflict_policy: string;
   write_mode: string;
 };
 
@@ -31,10 +31,26 @@ export type SheetPayload = {
   rows?: any[];
   sheet_names?: string[];
   sheet_name?: string;
+  preview_type?: string;
+  metadata?: {
+    period_from?: string;
+    period_to?: string;
+  };
+  code_name_rows?: Array<{
+    code: string;
+    name: string;
+  }>;
   account_name?: string;
   status?: string;
   date_start?: string;
   date_end?: string;
   row_count?: number;
   preview_row_count?: number;
+};
+
+export type SheetListPayload = {
+  file_name: string;
+  relative_path: string;
+  sheet_names: string[];
+  sheet_count: number;
 };

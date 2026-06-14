@@ -73,7 +73,7 @@ export default function IntegratedMergePage() {
                   <PathPickerInput mode="folder" value={inputDir || ""} onChange={(val) => saveSetting("integrated_merge_input_path", val)} placeholder="Parquet 파일들이 있는 폴더 경로" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">결과 저장 폴더</Label>
+                  <Label className="dark:text-slate-300">결과 데이터 경로</Label>
                   <PathPickerInput mode="folder" value={outputDir || ""} onChange={(val) => saveSetting("integrated_merge_output_path", val)} placeholder="병합된 데이터가 저장될 폴더 경로" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
               </div>

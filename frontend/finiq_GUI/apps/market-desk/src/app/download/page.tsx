@@ -498,7 +498,7 @@ export default function DownloadPage() {
       `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${formatInteger(deleted ? data.deleted_count : data.deletion_candidate_count)}`,
       `추가 다운로드 필요: ${formatInteger(data.download_needed_count)}건`,
       `최신 상태: 성공 ${formatInteger(data.summary?.success)}/${formatInteger(data.summary?.total)}건`,
-      `저장 경로: ${data.output_directory || ""}`,
+      `데이터 경로: ${data.output_directory || ""}`,
     ];
     if (files.length) {
       lines.push("", deleted ? "삭제한 파일" : "삭제 예정 파일", ...files.map((file: any) => `- ${file.name} (${file.reason})`));
@@ -508,7 +508,7 @@ export default function DownloadPage() {
 
   const handleInspectFolder = async () => {
     if (!outputDirectory) {
-      setStatus("저장 경로를 선택하세요.");
+      setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -651,11 +651,11 @@ export default function DownloadPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label className="dark:text-slate-300">저장 경로</Label>
+                <Label className="dark:text-slate-300">데이터 경로</Label>
                 <PathPickerInput
                   value={outputDirectory}
                   onChange={(val) => saveSetting("download_output_directory", val)}
-                  placeholder="저장 경로를 선택하세요"
+                  placeholder="데이터 경로를 선택하세요"
                   mode="folder"
                   onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                 />
@@ -668,7 +668,7 @@ export default function DownloadPage() {
                     <div className="space-y-1">
                       <p className="font-semibold text-slate-900 dark:text-slate-100">기존 다운로드 폴더 확인 중...</p>
                       <p className="break-all text-xs text-slate-500 dark:text-slate-400">
-                        선택한 저장 경로의 폴더와 메타데이터 상태만 빠르게 확인하고 있습니다: {outputDirectory}
+                        선택한 데이터 경로의 폴더와 메타데이터 상태만 빠르게 확인하고 있습니다: {outputDirectory}
                       </p>
                     </div>
                   </div>

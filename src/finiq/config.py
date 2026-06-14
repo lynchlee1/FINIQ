@@ -23,6 +23,7 @@ def _resolve_workspace_root() -> Path:
 PROJECT_ROOT = _resolve_workspace_root()
 ASSETS_DIR = PROJECT_ROOT / "assets"
 RESOURCES_DIR = PROJECT_ROOT / "resources"
+QUANTIWISE_EXCEL_DIR = RESOURCES_DIR / "Quantiwise"
 KIND_DATA_DIR = RESOURCES_DIR / "kind"
 DATABASE_DIR = RESOURCES_DIR / "database"
 QUANTI_DIR = DATABASE_DIR / "by_item"

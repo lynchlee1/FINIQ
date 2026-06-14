@@ -16,14 +16,15 @@ from finiq.data.assets_excel import (
     list_asset_excel_files,
     read_asset_excel,
     read_asset_excel_interpreted,
+    read_asset_excel_sheets,
 )
 from finiq.market_desk.web.jobs import job_manager
 
 
 class AssetExcelConvertRequest(BaseModel):
+    source_directory: Optional[str] = None
     output_directory: Optional[str] = None
     selected_files: list[str] = []
-    conflict_policy: str = "error"
     write_mode: str = "update"
 
 
@@ -34,11 +35,15 @@ def create_assets_excel_router(
 ) -> APIRouter:
     router = APIRouter()
 
+    def _assets_dir(source_directory: Optional[str] = None) -> Path:
+        return Path(source_directory).expanduser().resolve() if source_directory else get_assets_dir()
+
     @router.get("/api/assets/excels")
-    async def get_asset_excels():
-        assets_dir = get_assets_dir()
+    async def get_asset_excels(source_directory: Optional[str] = None):
+        assets_dir = _assets_dir(source_directory)
         return {
             "root_directory": str(assets_dir.resolve()),
+            "default_output_directory": str(DEFAULT_ASSET_PARQUET_DIR.resolve()),
             "excel_files": list_asset_excel_files(assets_dir),
         }
 
@@ -51,10 +56,9 @@ def create_assets_excel_router(
         try:
             return await asyncio.to_thread(
                 inspect_asset_excel_conversion,
-                get_assets_dir(),
+                _assets_dir(request.source_directory),
                 request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
                 selected_files=request.selected_files or None,
-                conflict_policy=request.conflict_policy,
                 write_mode=request.write_mode,
             )
         except ValueError as exc:
@@ -65,10 +69,9 @@ def create_assets_excel_router(
         try:
             return await asyncio.to_thread(
                 convert_asset_excels_to_wide_parquet,
-                get_assets_dir(),
+                _assets_dir(request.source_directory),
                 request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
                 selected_files=request.selected_files or None,
-                conflict_policy=request.conflict_policy,
                 write_mode=request.write_mode,
             )
         except ValueError as exc:
@@ -103,10 +106,24 @@ def create_assets_excel_router(
         return snapshot
 
 
+    @router.get("/api/assets/excels/{file_name:path}/sheets")
+    async def get_asset_excel_sheets(file_name: str, source_directory: Optional[str] = None):
+        try:
+            return read_asset_excel_sheets(
+                file_name,
+                root_directory=_assets_dir(source_directory),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except (IsADirectoryError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+
     @router.get("/api/assets/excels/{file_name:path}")
     async def get_asset_excel(
         file_name: str,
         sheet_name: Optional[str] = None,
+        source_directory: Optional[str] = None,
         row_limit: Optional[int] = 100,
         interpreted: bool = False,
     ):
@@ -118,13 +135,13 @@ def create_assets_excel_router(
                     file_name,
                     sheet_name=sheet_name,
                     row_limit=row_limit,
-                    root_directory=get_assets_dir(),
+                    root_directory=_assets_dir(source_directory),
                 )
             return read_asset_excel(
                 file_name,
                 sheet_name=sheet_name,
                 row_limit=row_limit,
-                root_directory=get_assets_dir(),
+                root_directory=_assets_dir(source_directory),
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
