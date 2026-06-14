@@ -23,6 +23,7 @@ export type AssetParquetMergePayload = {
 };
 
 export type PreviewData = {
+  outputs?: Record<string, any>;
   accounts?: Record<string, any>;
   sheets?: any[];
   skipped?: any[];

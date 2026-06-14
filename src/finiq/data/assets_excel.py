@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import shutil
+import tempfile
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from numbers import Number
 import unicodedata
 from datetime import date, datetime, timedelta
@@ -18,9 +22,11 @@ EXCEL_SUFFIXES = {".xlsx", ".xlsm"}
 ASSET_PARQUET_FORMAT = "finiq_asset_wide_parquet_v1"
 DEFAULT_ASSET_PARQUET_DIR = RESOURCES_DIR / "assets_merged"
 CODE_NAME_MAPPING_FILE = "code_name_mapping.parquet"
+ACCOUNT_MAPPING_FILE = "account_mapping.parquet"
 ProgressCallback = Callable[[str], None]
 SourceInfo = dict[str, Any]
 CodeNameMapping = dict[str, str]
+AccountMapping = dict[str, str]
 
 SHEET_ACCOUNT_NAMES = {
     "종가": "stock_price",
@@ -54,6 +60,48 @@ SHEET_ACCOUNT_NAMES = {
     "차입공매도수량": "borrowed_short_selling_volume",
 }
 
+SHEET_ACCOUNT_KEYS = {
+    "종가": "close",
+    "시가": "open",
+    "고가": "high",
+    "저가": "low",
+    "수정종가": "adjustedClose",
+    "수정시가": "adjustedOpen",
+    "수정고가": "adjustedHigh",
+    "수정저가": "adjustedLow",
+    "거래량": "volume",
+    "거래량(NXT)": "nxtVolume",
+    "거래대금": "tradingValue",
+    "거래대금(NXT)": "nxtTradingValue",
+    "저가(NXT)": "nxtLow",
+    "고가(NXT)": "nxtHigh",
+    "시가(NXT)": "nxtOpen",
+    "종가(NXT)": "nxtClose",
+    "거래정지사유": "tradingHaltReason",
+    "거래정지여부": "tradingHaltFlag",
+    "거래정지구분": "tradingHaltCategory",
+    "관리감리구분": "managementSupervisionCategory",
+    "지수산정주식수": "indexConstituentShares",
+    "최대주주명": "majorShareholderName",
+    "최대주주보유보통주주식수": "majorShareholderCommonShares",
+    "최대주주보유보통주지분율": "majorShareholderCommonOwnershipRatio",
+    "대차거래잔고수량": "stockLendingBalanceVolume",
+    "대차거래상환량": "stockLendingRepaymentVolume",
+    "대차거래체결량": "stockLendingTransactionVolume",
+    "차입공매도잔고수량": "borrowedShortSellingBalanceVolume",
+    "차입공매도수량": "borrowedShortSellingVolume",
+}
+
+ACCOUNT_REGISTRY = {
+    account_name: {
+        "account_id": f"S{index:05d}",
+        "account_name": account_name,
+        "legacy_account_name": SHEET_ACCOUNT_NAMES[sheet_name],
+        "sheet_name": sheet_name,
+    }
+    for index, (sheet_name, account_name) in enumerate(SHEET_ACCOUNT_KEYS.items(), start=1)
+}
+
 
 def _resolve_asset_excel_path(file_name: str | Path, root_directory: str | Path = QUANTIWISE_EXCEL_DIR) -> Path:
     root = Path(root_directory).expanduser().resolve()
@@ -80,6 +128,36 @@ def _emit(callback: ProgressCallback | None, message: str) -> None:
         callback(message)
 
 
+def _date_range_label(index: pd.Index) -> str:
+    if len(index) == 0:
+        return "-"
+    return f"{index.min().isoformat()}~{index.max().isoformat()}"
+
+
+def _safe_output_token(value: str) -> str:
+    normalized = unicodedata.normalize("NFC", value).strip()
+    chars = [
+        char if char.isalnum() or char in {"-", "_", "."} else "_"
+        for char in normalized
+    ]
+    token = "_".join("".join(chars).split("_"))
+    return token or "sheet"
+
+
+def _compact_date(value: str) -> str:
+    return str(value or "").replace("-", "") or "nodate"
+
+
+def _sheet_output_stem(account_name: str, date_start: str, date_end: str) -> str:
+    return "_".join(
+        [
+            _safe_output_token(account_name),
+            _compact_date(date_start),
+            _compact_date(date_end),
+        ]
+    )
+
+
 def _normalize_label(value: object) -> str:
     if value is None or pd.isna(value):
         return ""
@@ -87,7 +165,19 @@ def _normalize_label(value: object) -> str:
 
 
 def _account_name_for_sheet(sheet_name: str) -> str | None:
-    return SHEET_ACCOUNT_NAMES.get(_normalize_label(sheet_name))
+    return SHEET_ACCOUNT_KEYS.get(_normalize_label(sheet_name))
+
+
+def _account_mapping_for_name(account_name: str) -> AccountMapping:
+    return ACCOUNT_REGISTRY.get(
+        account_name,
+        {
+            "account_id": "",
+            "account_name": account_name,
+            "legacy_account_name": "",
+            "sheet_name": "",
+        },
+    )
 
 
 def list_asset_excel_files(root_directory: str | Path = QUANTIWISE_EXCEL_DIR) -> list[dict[str, Any]]:
@@ -133,9 +223,10 @@ def inspect_asset_excel_output(output_directory: str | Path = DEFAULT_ASSET_PARQ
     manifest_path = output / "manifest.json"
     parquet_files = [
         path
-        for path in sorted(output.glob("*.parquet")) if path.name != CODE_NAME_MAPPING_FILE
+        for path in sorted(output.glob("*.parquet")) if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
     ] if output.is_dir() else []
     code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
+    account_mapping_path = output / ACCOUNT_MAPPING_FILE
     manifest: dict[str, Any] | None = None
     if manifest_path.exists():
         try:
@@ -152,8 +243,12 @@ def inspect_asset_excel_output(output_directory: str | Path = DEFAULT_ASSET_PARQ
         "code_name_mapping_path": str(code_name_mapping_path),
         "code_name_mapping_exists": code_name_mapping_path.exists(),
         "code_name_mapping_rows": manifest.get("code_name_mapping", {}).get("rows", 0) if manifest else 0,
+        "account_mapping_path": str(account_mapping_path),
+        "account_mapping_exists": account_mapping_path.exists(),
+        "account_mapping_rows": manifest.get("account_mapping", {}).get("rows", 0) if manifest else 0,
         "format": manifest.get("format") if manifest else "",
         "accounts": manifest.get("accounts", {}) if manifest else {},
+        "account_mapping": manifest.get("account_mapping", {}) if manifest else {},
     }
 
 
@@ -518,27 +613,26 @@ def _find_conflicts(
     if common_dates.empty or common_columns.empty:
         return conflicts
 
-    for column in common_columns:
-        existing_series = existing.loc[common_dates, column]
-        incoming_series = incoming.loc[common_dates, column]
-        candidate_dates = common_dates[existing_series.notna() & incoming_series.notna()]
-        for row_date in candidate_dates:
-            existing_value = existing_series.loc[row_date]
-            incoming_value = incoming_series.loc[row_date]
-            if _values_match(existing_value, incoming_value):
-                continue
-            conflicts.append(
-                {
-                    "date": row_date.isoformat() if hasattr(row_date, "isoformat") else str(row_date),
-                    "code": str(column),
-                    "existing_value": str(existing_value),
-                    "incoming_value": str(incoming_value),
-                    "incoming_file": incoming_source["file_name"],
-                    "incoming_sheet": incoming_source["sheet_name"],
-                }
-            )
-            if len(conflicts) >= max_conflicts:
-                return conflicts
+    existing_values = existing.loc[common_dates, common_columns]
+    incoming_values = incoming.loc[common_dates, common_columns]
+    candidate_mask = existing_values.notna() & incoming_values.notna() & ~existing_values.eq(incoming_values)
+    for row_date, column in candidate_mask.stack()[lambda series: series].index:
+        existing_value = existing_values.at[row_date, column]
+        incoming_value = incoming_values.at[row_date, column]
+        if _values_match(existing_value, incoming_value):
+            continue
+        conflicts.append(
+            {
+                "date": row_date.isoformat() if hasattr(row_date, "isoformat") else str(row_date),
+                "code": str(column),
+                "existing_value": str(existing_value),
+                "incoming_value": str(incoming_value),
+                "incoming_file": incoming_source["file_name"],
+                "incoming_sheet": incoming_source["sheet_name"],
+            }
+        )
+        if len(conflicts) >= max_conflicts:
+            return conflicts
     return conflicts
 
 
@@ -631,6 +725,17 @@ def _code_name_mapping_frame(mappings: list[CodeNameMapping]) -> pd.DataFrame:
     )
 
 
+def _account_mapping_frame(account_names: list[str]) -> pd.DataFrame:
+    rows = [
+        _account_mapping_for_name(account_name)
+        for account_name in sorted(set(account_names))
+    ]
+    return pd.DataFrame(
+        rows,
+        columns=["account_id", "account_name", "legacy_account_name", "sheet_name"],
+    ).sort_values(["account_id", "account_name"], ignore_index=True)
+
+
 def _existing_code_name_mappings(output_directory: Path) -> list[CodeNameMapping]:
     mapping_path = output_directory / CODE_NAME_MAPPING_FILE
     if not mapping_path.exists():
@@ -661,8 +766,14 @@ def _existing_account_frame(
     *,
     source_type: str = "existing_output",
 ) -> tuple[pd.DataFrame, SourceInfo] | None:
-    parquet_path = output_directory / f"{account_name}.parquet"
-    if not parquet_path.exists():
+    parquet_paths = [output_directory / f"{account_name}.parquet"]
+    parquet_paths.extend(
+        path
+        for path in sorted(output_directory.glob(f"{account_name}_*.parquet"))
+        if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+    )
+    parquet_path = next((path for path in parquet_paths if path.exists()), None)
+    if parquet_path is None:
         return None
     frame = pd.read_parquet(parquet_path)
     if "date" not in frame.columns:
@@ -670,6 +781,8 @@ def _existing_account_frame(
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date
     frame = frame.dropna(subset=["date"]).set_index("date")
     account_meta = output_info.get("accounts", {}).get(account_name, {})
+    if not isinstance(account_meta, dict):
+        account_meta = {}
     source_info = {
         "file_name": parquet_path.name,
         "sheet_name": "__existing_parquet__",
@@ -688,11 +801,28 @@ def _existing_account_frame(
 def _parquet_account_names(directory: Path) -> list[str]:
     if not directory.is_dir():
         return []
-    return [
-        path.stem
-        for path in sorted(directory.glob("*.parquet"))
-        if path.name != CODE_NAME_MAPPING_FILE
-    ]
+    return sorted(
+        {
+            _account_name_from_output_stem(path.stem)
+            for path in sorted(directory.glob("*.parquet"))
+            if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+        }
+    )
+
+
+def _account_name_from_output_stem(stem: str) -> str:
+    parts = stem.split("_")
+    if len(parts) >= 3 and parts[-1].isdigit() and len(parts[-1]) == 8 and parts[-2].isdigit() and len(parts[-2]) == 8:
+        return "_".join(parts[:-2])
+    if len(parts) >= 4 and parts[-2].isdigit() and len(parts[-2]) == 8 and parts[-3].isdigit() and len(parts[-3]) == 8:
+        return "_".join(parts[:-3])
+    return stem
+
+
+def _asset_excel_scan_workers(file_count: int) -> int:
+    if file_count <= 1:
+        return 1
+    return max(1, min(4, file_count, os.cpu_count() or 1))
 
 
 def _scan_asset_excel_frames(
@@ -702,7 +832,7 @@ def _scan_asset_excel_frames(
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[
-    dict[str, list[tuple[pd.DataFrame, SourceInfo]]],
+    list[tuple[str, pd.DataFrame, SourceInfo]],
     dict[str, list[SourceInfo]],
     list[dict[str, str]],
     list[dict[str, Any]],
@@ -714,17 +844,29 @@ def _scan_asset_excel_frames(
         msg = f"No Excel files found in {source}"
         raise ValueError(msg)
 
-    frames_by_account: dict[str, list[tuple[pd.DataFrame, SourceInfo]]] = {}
     sources_by_account: dict[str, list[SourceInfo]] = {}
+    scanned_sheets: list[tuple[str, pd.DataFrame, SourceInfo]] = []
     skipped: list[dict[str, str]] = []
     sheet_summaries: list[dict[str, Any]] = []
     code_name_mappings: list[CodeNameMapping] = []
 
-    for file_index, xlsx_path in enumerate(xlsx_files, start=1):
+    def scan_file(file_index: int, xlsx_path: Path) -> tuple[
+        list[tuple[str, pd.DataFrame, SourceInfo]],
+        dict[str, list[SourceInfo]],
+        list[dict[str, str]],
+        list[dict[str, Any]],
+        list[CodeNameMapping],
+    ]:
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
+        file_sheets: list[tuple[str, pd.DataFrame, SourceInfo]] = []
+        file_sources_by_account: dict[str, list[SourceInfo]] = {}
+        file_skipped: list[dict[str, str]] = []
+        file_sheet_summaries: list[dict[str, Any]] = []
+        file_code_name_mappings: list[CodeNameMapping] = []
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] {xlsx_path.name} 스캔 중...")
         excel = pd.ExcelFile(xlsx_path)
+        _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] Sheet {len(excel.sheet_names)}개 발견")
         for sheet_index, sheet_name in enumerate(excel.sheet_names, start=1):
             if cancel_check and cancel_check():
                 raise RuntimeError("Job cancelled")
@@ -737,7 +879,7 @@ def _scan_asset_excel_frames(
                     source_directory=source,
                     account_name=account_name,
                 )
-                skipped.append(
+                file_skipped.append(
                     {
                         "file_name": xlsx_path.name,
                         "relative_path": str(xlsx_path.relative_to(source)),
@@ -746,7 +888,8 @@ def _scan_asset_excel_frames(
                         "status": summary["status"],
                     }
                 )
-                sheet_summaries.append(summary)
+                file_sheet_summaries.append(summary)
+                _emit(progress_callback, f"  건너뜀: {summary['reason']}")
                 continue
             try:
                 frame, mappings = _read_quanti_wide_sheet_with_mapping(excel, sheet_name)
@@ -758,7 +901,7 @@ def _scan_asset_excel_frames(
                     account_name=account_name,
                     reason=str(exc),
                 )
-                skipped.append(
+                file_skipped.append(
                     {
                         "file_name": xlsx_path.name,
                         "relative_path": str(xlsx_path.relative_to(source)),
@@ -767,32 +910,85 @@ def _scan_asset_excel_frames(
                         "status": summary["status"],
                     }
                 )
-                sheet_summaries.append(summary)
+                file_sheet_summaries.append(summary)
+                _emit(progress_callback, f"  건너뜀: {summary['reason']}")
                 continue
-            code_name_mappings.extend(mappings)
+            file_code_name_mappings.extend(mappings)
+            relative_path = str(xlsx_path.relative_to(source))
+            date_start = frame.index.min().isoformat() if len(frame.index) else ""
+            date_end = frame.index.max().isoformat() if len(frame.index) else ""
+            output_stem = _sheet_output_stem(account_name, date_start, date_end)
+            account_mapping = _account_mapping_for_name(account_name)
             source_info = {
                 "file_name": xlsx_path.name,
-                "relative_path": str(xlsx_path.relative_to(source)),
+                "relative_path": relative_path,
                 "sheet_name": sheet_name,
-                "date_start": frame.index.min().isoformat() if len(frame.index) else "",
-                "date_end": frame.index.max().isoformat() if len(frame.index) else "",
+                "account_name": account_name,
+                "account_id": account_mapping["account_id"],
+                "legacy_account_name": account_mapping["legacy_account_name"],
+                "output_stem": output_stem,
+                "date_start": date_start,
+                "date_end": date_end,
                 "date_index": _date_index_payload(frame.index),
                 "date_segments": _single_date_segment_payload(frame.index),
                 "rows": len(frame),
                 "columns": len(frame.columns),
             }
-            frames_by_account.setdefault(account_name, []).append((frame, source_info))
-            sources_by_account.setdefault(account_name, []).append(source_info)
-            sheet_summaries.append(
-                _sheet_summary_payload(
-                    xlsx_path,
-                    sheet_name,
-                    source_directory=source,
-                    account_name=account_name,
-                    frame=frame,
-                )
+            file_sheets.append((output_stem, frame, source_info))
+            file_sources_by_account.setdefault(account_name, []).append(source_info)
+            summary = _sheet_summary_payload(
+                xlsx_path,
+                sheet_name,
+                source_directory=source,
+                account_name=account_name,
+                frame=frame,
             )
-    return frames_by_account, sources_by_account, skipped, sheet_summaries, code_name_mappings
+            summary["output_file"] = f"{output_stem}.parquet"
+            file_sheet_summaries.append(summary)
+            _emit(
+                progress_callback,
+                (
+                    f"  매핑 완료: 계정={account_name}, "
+                    f"행={len(frame)}, 코드={len(frame.columns)}, 날짜={_date_range_label(frame.index)}"
+                ),
+            )
+        return file_sheets, file_sources_by_account, file_skipped, file_sheet_summaries, file_code_name_mappings
+
+    scan_workers = _asset_excel_scan_workers(len(xlsx_files))
+    _emit(progress_callback, f"Excel 스캔 워커: {scan_workers}개")
+    if scan_workers == 1:
+        file_results = [scan_file(file_index, xlsx_path) for file_index, xlsx_path in enumerate(xlsx_files, start=1)]
+    else:
+        file_results = []
+        with ThreadPoolExecutor(max_workers=scan_workers, thread_name_prefix="quanti-excel-scan") as executor:
+            futures = [
+                executor.submit(scan_file, file_index, xlsx_path)
+                for file_index, xlsx_path in enumerate(xlsx_files, start=1)
+            ]
+            for future in futures:
+                file_results.append(future.result())
+
+    used_stems: dict[str, int] = {}
+    for file_sheets, file_sources_by_account, file_skipped, file_sheet_summaries, file_code_name_mappings in file_results:
+        for output_stem, frame, source_info in file_sheets:
+            duplicate_index = used_stems.get(output_stem, 0)
+            used_stems[output_stem] = duplicate_index + 1
+            resolved_stem = output_stem if duplicate_index == 0 else f"{output_stem}__{duplicate_index + 1}"
+            source_info["output_stem"] = resolved_stem
+            source_info["output_file"] = f"{resolved_stem}.parquet"
+            scanned_sheets.append((resolved_stem, frame, source_info))
+            account_name = str(source_info["account_name"])
+            sources_by_account.setdefault(account_name, []).append(source_info)
+            for summary in file_sheet_summaries:
+                if (
+                    summary.get("relative_path") == source_info.get("relative_path")
+                    and summary.get("sheet_name") == source_info.get("sheet_name")
+                ):
+                    summary["output_file"] = source_info["output_file"]
+        skipped.extend(file_skipped)
+        sheet_summaries.extend(file_sheet_summaries)
+        code_name_mappings.extend(file_code_name_mappings)
+    return scanned_sheets, sources_by_account, skipped, sheet_summaries, code_name_mappings
 
 
 def _date_index_payload(index: pd.Index) -> list[str]:
@@ -860,6 +1056,46 @@ def _merged_date_segments_payload(index: pd.Index, sources: list[SourceInfo]) ->
     ]
 
 
+def _asset_parquet_write_workers(account_count: int) -> int:
+    if account_count <= 1:
+        return 1
+    return max(1, min(4, account_count, os.cpu_count() or 1))
+
+
+def _write_account_parquet(
+    output_stem: str,
+    merged: pd.DataFrame,
+    write_output: Path,
+    final_output: Path,
+    sources: list[SourceInfo],
+) -> tuple[str, Path, dict[str, Any]]:
+    parquet_path = write_output / f"{output_stem}.parquet"
+    final_path = final_output / f"{output_stem}.parquet"
+    merged.reset_index().to_parquet(parquet_path, index=False, compression="snappy")
+    source = sources[0] if sources else {}
+    return output_stem, parquet_path, {
+        "path": str(final_path),
+        "output_file": final_path.name,
+        "account_id": source.get("account_id", ""),
+        "account_name": source.get("account_name", ""),
+        "legacy_account_name": source.get("legacy_account_name", ""),
+        "file_name": source.get("file_name", ""),
+        "relative_path": source.get("relative_path", ""),
+        "sheet_name": source.get("sheet_name", ""),
+        "rows": len(merged),
+        "columns": len(merged.columns),
+        "date_start": merged.index.min().isoformat() if len(merged.index) else "",
+        "date_end": merged.index.max().isoformat() if len(merged.index) else "",
+        "date_index": _date_index_payload(merged.index),
+        "date_segments": _merged_date_segments_payload(
+            merged.index,
+            sources,
+        ),
+        "sources": sources,
+        "quality": _account_quality_payload(merged),
+    }
+
+
 def convert_asset_excels_to_wide_parquet(
     source_directory: str | Path = QUANTIWISE_EXCEL_DIR,
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
@@ -879,61 +1115,120 @@ def convert_asset_excels_to_wide_parquet(
         msg = f"Unsupported write mode: {write_mode}"
         raise ValueError(msg)
 
-    frames_by_account, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
+    _emit(progress_callback, "Quantiwise 변환 시작")
+    _emit(progress_callback, f"원본 데이터 경로: {source}")
+    _emit(progress_callback, f"데이터 경로: {output}")
+    _emit(progress_callback, f"저장 방식: {normalized_mode}")
+    if selected_files:
+        _emit(progress_callback, f"선택 파일: {len(selected_files)}개")
+    else:
+        _emit(progress_callback, "선택 파일: 전체 Excel")
+
+    scanned_sheets, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
         source,
         selected_files=selected_files,
         progress_callback=progress_callback,
         cancel_check=cancel_check,
     )
+    mapped_sheet_count = sum(1 for sheet in sheet_summaries if sheet.get("status") == "mapped")
+    _emit(
+        progress_callback,
+        (
+            "스캔 완료: "
+            f"Sheet {len(sheet_summaries)}개, 정상 {mapped_sheet_count}개, "
+            f"건너뜀 {len(skipped)}개, 계정 {len(sources_by_account)}개"
+        ),
+    )
     output_info = inspect_asset_excel_output(output)
+    existing_account_count = int(output_info.get("account_count") or len(output_info.get("parquet_files") or []))
+    if existing_account_count:
+        _emit(progress_callback, f"기존 출력 감지: Parquet {existing_account_count}개")
+    else:
+        _emit(progress_callback, "기존 출력 감지: 없음")
     updated_accounts: list[str] = []
-    if normalized_mode == "update" and output_info["parquet_files"]:
-        code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
-        for account_name in sorted(set(frames_by_account) | set(output_info.get("accounts", {}))):
-            existing = _existing_account_frame(account_name, output, output_info)
-            if existing is None:
-                continue
-            frame, source_info = existing
-            frames_by_account.setdefault(account_name, []).insert(0, (frame, source_info))
-            sources_by_account.setdefault(account_name, []).insert(0, source_info)
-            updated_accounts.append(account_name)
+    _emit(progress_callback, "Sheet 단위 생성: Excel 변환 단계에서는 기존 Parquet와 병합하지 않음")
 
-    merged_by_account: dict[str, pd.DataFrame] = {}
-    conflicts_by_account: dict[str, list[dict[str, str]]] = {}
-    for account_name, frames in sorted(frames_by_account.items()):
+    sheet_items = sorted(scanned_sheets, key=lambda item: item[0])
+    write_workers = _asset_parquet_write_workers(len(sheet_items))
+    _emit(progress_callback, f"Parquet 저장 워커: {write_workers}개")
+    for sheet_index, (output_stem, frame, source_info) in enumerate(sheet_items, start=1):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
-        _emit(progress_callback, f"Merging {account_name}...")
-        merged, conflicts = _merge_account_frames(account_name, frames)
-        merged_by_account[account_name] = merged
-        if conflicts:
-            conflicts_by_account[account_name] = conflicts
-
-    accounts: dict[str, Any] = {}
-    for account_name, merged in sorted(merged_by_account.items()):
-        if cancel_check and cancel_check():
-            raise RuntimeError("Job cancelled")
-        _emit(progress_callback, f"Saving {account_name}.parquet...")
-        parquet_path = output / f"{account_name}.parquet"
-        merged.reset_index().to_parquet(parquet_path, index=False, compression="snappy")
-        accounts[account_name] = {
-            "path": str(parquet_path),
-            "rows": len(merged),
-            "columns": len(merged.columns),
-            "date_start": merged.index.min().isoformat() if len(merged.index) else "",
-            "date_end": merged.index.max().isoformat() if len(merged.index) else "",
-            "date_index": _date_index_payload(merged.index),
-            "date_segments": _merged_date_segments_payload(
-                merged.index,
-                sources_by_account.get(account_name, []),
+        parquet_path = output / f"{output_stem}.parquet"
+        _emit(
+            progress_callback,
+            (
+                f"[저장 {sheet_index}/{len(sheet_items)}] {parquet_path.name}: "
+                f"계정={source_info.get('account_name')}, Sheet={source_info.get('sheet_name')}, "
+                f"행={len(frame)}, 코드={len(frame.columns)}, 날짜={_date_range_label(frame.index)}"
             ),
-            "sources": sources_by_account.get(account_name, []),
-            "quality": _account_quality_payload(merged),
-        }
+        )
+    with tempfile.TemporaryDirectory(prefix=".quanti_parquet_write_", dir=output) as temp_output_name:
+        temp_output = Path(temp_output_name)
+        outputs: dict[str, Any] = {}
+        written_paths: dict[str, Path] = {}
+
+        def submit_next(
+            executor: ThreadPoolExecutor,
+            iterator: Any,
+            pending: set[Future],
+        ) -> None:
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
+            try:
+                output_stem, frame, source_info = next(iterator)
+            except StopIteration:
+                return
+            pending.add(
+                executor.submit(
+                    _write_account_parquet,
+                    output_stem,
+                    frame,
+                    temp_output,
+                    output,
+                    [source_info],
+                )
+            )
+
+        with ThreadPoolExecutor(max_workers=write_workers, thread_name_prefix="quanti-parquet-write") as executor:
+            iterator = iter(sheet_items)
+            pending: set[Future] = set()
+            try:
+                for _ in range(write_workers):
+                    submit_next(executor, iterator, pending)
+
+                while pending:
+                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        output_stem, parquet_path, output_payload = future.result()
+                        outputs[output_stem] = output_payload
+                        written_paths[output_stem] = parquet_path
+                    if cancel_check and cancel_check():
+                        raise RuntimeError("Job cancelled")
+                    while len(pending) < write_workers:
+                        before_count = len(pending)
+                        submit_next(executor, iterator, pending)
+                        if len(pending) == before_count:
+                            break
+            except RuntimeError:
+                for future in pending:
+                    future.cancel()
+                raise
+
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
+        for output_stem, temp_path in sorted(written_paths.items()):
+            shutil.move(str(temp_path), output / f"{output_stem}.parquet")
+        outputs = dict(sorted(outputs.items()))
 
     code_name_mapping = _code_name_mapping_frame(code_name_mappings)
     code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
     code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
+    _emit(progress_callback, f"코드-종목명 매핑 저장: {code_name_mapping_path.name} ({len(code_name_mapping)}행)")
+    account_mapping = _account_mapping_frame(list(sources_by_account))
+    account_mapping_path = output / ACCOUNT_MAPPING_FILE
+    account_mapping.to_parquet(account_mapping_path, index=False, compression="snappy")
+    _emit(progress_callback, f"계정-ID 매핑 저장: {account_mapping_path.name} ({len(account_mapping)}행)")
 
     manifest = {
         "format": ASSET_PARQUET_FORMAT,
@@ -946,28 +1241,46 @@ def convert_asset_excels_to_wide_parquet(
             "path": str(code_name_mapping_path),
             "rows": len(code_name_mapping),
         },
-        "accounts": accounts,
-        "conflicts": conflicts_by_account,
+        "account_mapping": {
+            "path": str(account_mapping_path),
+            "rows": len(account_mapping),
+            "items": account_mapping.to_dict("records"),
+        },
+        "outputs": outputs,
+        "accounts": sources_by_account,
+        "conflicts": {},
         "skipped": skipped,
         "sheets": sheet_summaries,
     }
     manifest_path = output / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    _emit(progress_callback, f"manifest 저장: {manifest_path}")
+    _emit(
+        progress_callback,
+        f"Quantiwise 변환 완료: Sheet Parquet {len(outputs)}개, 건너뛴 Sheet {len(skipped)}개, 데이터 경로 {output}",
+    )
 
     return {
         "status": "completed",
         "output_directory": str(output),
         "manifest_path": str(manifest_path),
-        "accounts_processed": len(accounts),
+        "sheets_processed": len(outputs),
+        "accounts_processed": len(sources_by_account),
         "write_mode": normalized_mode,
         "conflict_policy": "error",
         "code_name_mapping": {
             "path": str(code_name_mapping_path),
             "rows": len(code_name_mapping),
         },
+        "account_mapping": {
+            "path": str(account_mapping_path),
+            "rows": len(account_mapping),
+            "items": account_mapping.to_dict("records"),
+        },
         "updated_accounts": updated_accounts,
-        "accounts": accounts,
-        "conflicts": conflicts_by_account,
+        "outputs": outputs,
+        "accounts": sources_by_account,
+        "conflicts": {},
         "skipped": skipped,
         "sheets": sheet_summaries,
     }
@@ -1097,47 +1410,32 @@ def inspect_asset_excel_conversion(
 ) -> dict[str, Any]:
     source = Path(source_directory).expanduser().resolve()
     output = Path(output_directory).expanduser().resolve()
-    frames_by_account, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
+    scanned_sheets, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
         source,
         selected_files=selected_files,
     )
     output_info = inspect_asset_excel_output(output)
     normalized_mode = str(write_mode or "replace").strip().lower()
 
-    if normalized_mode == "update" and output_info["parquet_files"]:
-        code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
-        for account_name in sorted(set(frames_by_account) | set(output_info.get("accounts", {}))):
-            existing = _existing_account_frame(account_name, output, output_info)
-            if existing is None:
-                continue
-            frame, source_info = existing
-            frames_by_account.setdefault(account_name, []).insert(0, (frame, source_info))
-            sources_by_account.setdefault(account_name, []).insert(0, source_info)
-
-    accounts: dict[str, Any] = {}
-    conflicts_by_account: dict[str, list[dict[str, str]]] = {}
-    for account_name, frames in sorted(frames_by_account.items()):
-        try:
-            merged, conflicts = _merge_account_frames(account_name, frames)
-        except ValueError as exc:
-            merged, conflicts = pd.DataFrame(), [{"message": str(exc)}]
-        if conflicts:
-            conflicts_by_account[account_name] = conflicts
-        accounts[account_name] = {
-            "output_file": f"{account_name}.parquet",
-            "rows": len(merged) if not merged.empty else sum(len(frame) for frame, _ in frames),
-            "columns": len(merged.columns) if not merged.empty else max((len(frame.columns) for frame, _ in frames), default=0),
-            "source_count": len(frames),
-            "date_segments": _merged_date_segments_payload(
-                merged.index if not merged.empty else pd.Index([]),
-                sources_by_account.get(account_name, []),
-            ),
-            "will_update_existing": any(
-                source.get("source_type") == "existing_output"
-                for _, source in frames
-            ),
-            "quality": _account_quality_payload(merged),
+    outputs = {
+        output_stem: {
+            "output_file": f"{output_stem}.parquet",
+            "account_id": source_info.get("account_id", ""),
+            "account_name": source_info.get("account_name", ""),
+            "legacy_account_name": source_info.get("legacy_account_name", ""),
+            "file_name": source_info.get("file_name", ""),
+            "relative_path": source_info.get("relative_path", ""),
+            "sheet_name": source_info.get("sheet_name", ""),
+            "rows": len(frame),
+            "columns": len(frame.columns),
+            "source_count": 1,
+            "date_segments": source_info.get("date_segments", []),
+            "will_update_existing": False,
+            "quality": _account_quality_payload(frame),
         }
+        for output_stem, frame, source_info in sorted(scanned_sheets, key=lambda item: item[0])
+    }
+    account_mapping = _account_mapping_frame(list(sources_by_account))
 
     return {
         "status": "preview",
@@ -1150,11 +1448,17 @@ def inspect_asset_excel_conversion(
             "path": str(output / CODE_NAME_MAPPING_FILE),
             "rows": len(_code_name_mapping_frame(code_name_mappings)),
         },
+        "account_mapping": {
+            "path": str(output / ACCOUNT_MAPPING_FILE),
+            "rows": len(account_mapping),
+            "items": account_mapping.to_dict("records"),
+        },
         "files": list_asset_excel_files(source),
         "sheets": sheet_summaries,
-        "accounts": accounts,
+        "outputs": outputs,
+        "accounts": sources_by_account,
         "skipped": skipped,
-        "conflicts": conflicts_by_account,
+        "conflicts": {},
         "output": output_info,
     }
 
