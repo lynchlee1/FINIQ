@@ -1075,7 +1075,17 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   </pre>
                 </div>
               )}
-              {!lastInspectionCandidateCount && !lastInspectionResult && <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+              {!lastInspectionCandidateCount && !lastInspectionResult && isErrorStatus && (
+                <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+              )}
+              {!lastInspectionCandidateCount && !lastInspectionResult && !isErrorStatus && existingCheckError && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                  {existingCheckError}
+                </div>
+              )}
+              {!lastInspectionCandidateCount && !lastInspectionResult && !isErrorStatus && !existingCheckError && (
+                <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
+              )}
             </>
           }
           settingsTitle="시스템 설정"

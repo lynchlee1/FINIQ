@@ -30,7 +30,18 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | --- | --- | --- |
 | Quantiwise sidebar group | Quantiwise | Use as a peer sidebar group to `외부 데이터 변환`. |
 | Quantiwise preview sidebar item | 미리보기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel`. |
-| Quantiwise save sidebar item | 저장하기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel/save`. |
+| Quantiwise convert sidebar item | 변환하기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel/convert`. |
+| Quantiwise merge sidebar item | 병합하기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel/merge`. |
 | Quantiwise Excel preview workflow | Quantiwise - 미리보기 | Use for the `/utility/assets-excel` navigation label and page title. |
-| Quantiwise Excel save workflow | Quantiwise - 저장하기 | Use for the `/utility/assets-excel/save` navigation label and page title. |
+| Quantiwise Excel convert workflow | Quantiwise - 변환하기 | Use for the `/utility/assets-excel/convert` navigation label and page title. |
+| Quantiwise Parquet merge workflow | Quantiwise - 병합하기 | Use for the `/utility/assets-excel/merge` navigation label and page title. |
 | Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |
+| Quantiwise conversion pre-run check | 변환 전 확인 | Use for the automatic check that scans Excel files without saving before `Quantiwise 변환`. |
+
+## Right Dock Panels
+
+| Concept | Preferred UI Term | Notes |
+| --- | --- | --- |
+| Activity panel | 실행 현황 | Use for the right dock activity button and panel title across pages. |
+| Notification panel | 알림 | Use only for errors, warnings, confirmations, or user action required. |
+| Settings panel | 설정 | Use as the generic right dock settings title unless a page-specific settings title is already established. |

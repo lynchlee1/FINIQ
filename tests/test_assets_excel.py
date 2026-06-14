@@ -9,6 +9,7 @@ from finiq.data.assets_excel import (
     inspect_asset_excel_conversion,
     inspect_asset_excel_output,
     list_asset_excel_files,
+    merge_asset_parquet_outputs,
     read_asset_excel,
     read_asset_excel_interpreted,
     read_asset_excel_sheets,
@@ -318,6 +319,80 @@ def test_convert_asset_excels_updates_existing_output(tmp_path):
     ]
 
 
+def test_convert_asset_excels_defaults_to_replace_without_existing_merge(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-03"), 100, 200]],
+        )
+    convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    with pd.ExcelWriter(source_dir / "source-b.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-06"), 101, 201]],
+            codes=["A035420", "A051910"],
+            names=["NAVER", "LG화학"],
+        )
+
+    payload = convert_asset_excels_to_wide_parquet(
+        source_dir,
+        output_dir,
+        selected_files=["source-b.xlsx"],
+    )
+
+    stock_price = pd.read_parquet(output_dir / "stock_price.parquet")
+    assert stock_price["date"].astype(str).tolist() == ["2020-01-06"]
+    assert payload["write_mode"] == "replace"
+    assert payload["updated_accounts"] == []
+
+
+def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
+    first_source = tmp_path / "first-assets"
+    second_source = tmp_path / "second-assets"
+    first_output = tmp_path / "first-parquet"
+    second_output = tmp_path / "second-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    first_source.mkdir()
+    second_source.mkdir()
+    with pd.ExcelWriter(first_source / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-03"), 100, 200]],
+        )
+    with pd.ExcelWriter(second_source / "source-b.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-06"), 101, 201]],
+            codes=["A035420", "A051910"],
+            names=["NAVER", "LG화학"],
+        )
+    convert_asset_excels_to_wide_parquet(first_source, first_output)
+    convert_asset_excels_to_wide_parquet(second_source, second_output)
+
+    payload = merge_asset_parquet_outputs(first_output, second_output, merged_output)
+
+    stock_price = pd.read_parquet(merged_output / "stock_price.parquet")
+    assert payload["operation"] == "merge_parquet"
+    assert payload["accounts_processed"] == 1
+    assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-06"]
+    assert stock_price.columns.tolist() == ["date", "A005930", "A000660", "A035420", "A051910"]
+    mapping = pd.read_parquet(merged_output / "code_name_mapping.parquet")
+    assert mapping[["code", "name"]].to_dict("records") == [
+        {"code": "A000660", "name": "SK하이닉스"},
+        {"code": "A005930", "name": "삼성전자"},
+        {"code": "A035420", "name": "NAVER"},
+        {"code": "A051910", "name": "LG화학"},
+    ]
+
+
 def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
@@ -339,7 +414,7 @@ def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_
 
     assert preview["sheets"][0]["account_name"] == "stock_price"
     assert preview["sheets"][0]["status"] == "mapped"
-    assert preview["accounts"]["stock_price"]["will_update_existing"] is True
+    assert preview["accounts"]["stock_price"]["will_update_existing"] is False
     assert preview["accounts"]["stock_price"]["quality"]["sample_rows"]
     assert preview["code_name_mapping"]["rows"] == 2
     assert output["manifest_exists"] is True

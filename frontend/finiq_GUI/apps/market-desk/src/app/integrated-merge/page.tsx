@@ -102,7 +102,7 @@ export default function IntegratedMergePage() {
             />
           }
           notificationActive={isErrorStatus}
-          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-500 dark:text-slate-400"}>{isErrorStatus ? status : "알림 없음"}</div>}
           settingsTitle="시스템 설정"
           settingsContent={<div className="text-sm text-slate-500 dark:text-slate-400">추가 시스템 설정이 없습니다. 입출력 경로는 메인 화면에서 조정합니다.</div>}
         />

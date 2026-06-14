@@ -12,6 +12,7 @@ import Link from "next/link";
 import { pickPath, type PathDialogMode } from "@/lib/fileDialog";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 
 interface ConfigFile {
   path: string;
@@ -207,9 +208,8 @@ export default function Home() {
       </section>
 
       <ActionDock
-        activityTitle="조회 현황"
         activityActive={loading}
-        activityContent={<div className="text-sm dark:text-slate-300">{loading ? "회사 목록을 불러오는 중입니다." : `회사 ${formatNumber(companies.length)}개를 불러왔습니다.`}</div>}
+        activityContent={<JobStatusLogger status={loading ? "회사 목록을 불러오는 중입니다." : `회사 ${formatNumber(companies.length)}개를 불러왔습니다.`} isErrorStatus={false} />}
         notificationActive={!!error}
         notificationContent={<div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm dark:text-slate-300"}>{error || "알림 없음"}</div>}
         settingsTitle="시스템 설정"

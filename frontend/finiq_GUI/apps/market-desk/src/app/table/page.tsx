@@ -213,22 +213,16 @@ export default function TablePage() {
         <ActionDock
           activityActive={!!activeJobId}
           activityContent={
-            <div className="space-y-2">
-              <Label className="dark:text-slate-300">작업 상태</Label>
-              <JobStatusLogger
-                status={status}
-                isErrorStatus={isErrorStatus}
-                isCancellable={!!activeJobId}
-                onCancel={cancelJob}
-              />
-            </div>
+            <JobStatusLogger
+              status={status}
+              isErrorStatus={isErrorStatus}
+              isCancellable={!!activeJobId}
+              onCancel={cancelJob}
+            />
           }
           notificationActive={isErrorStatus}
           notificationContent={
-            <div className="space-y-2">
-              <Label className="dark:text-slate-300">알림</Label>
-              <JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />
-            </div>
+            <div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-500 dark:text-slate-400"}>{isErrorStatus ? status : "알림 없음"}</div>
           }
           settingsTitle="시스템 설정"
           settingsContent={

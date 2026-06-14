@@ -1,6 +1,6 @@
 import { apiGet, apiPost } from "@/api/client";
 import type { JobStartResponse } from "@/types/api";
-import type { AssetExcelConvertPayload, AssetExcelFilesResponse, PreviewData, SheetListPayload, SheetPayload } from "./types";
+import type { AssetExcelConvertPayload, AssetExcelFilesResponse, AssetParquetMergePayload, PreviewData, SheetListPayload, SheetPayload } from "./types";
 
 function encodePath(value: string): string {
   return value.split("/").map((part) => encodeURIComponent(part)).join("/");
@@ -43,4 +43,8 @@ export function previewAssetExcelConversion(payload: AssetExcelConvertPayload) {
 
 export function startAssetExcelConversion(payload: AssetExcelConvertPayload) {
   return apiPost<JobStartResponse>("/api/assets/excels/convert-wide-parquet/start", payload);
+}
+
+export function startAssetParquetMerge(payload: AssetParquetMergePayload) {
+  return apiPost<JobStartResponse>("/api/assets/parquet/merge/start", payload);
 }

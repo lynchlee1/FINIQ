@@ -16,6 +16,12 @@ export type AssetExcelConvertPayload = {
   write_mode: string;
 };
 
+export type AssetParquetMergePayload = {
+  base_directory: string;
+  incoming_directory: string;
+  output_directory: string;
+};
+
 export type PreviewData = {
   accounts?: Record<string, any>;
   sheets?: any[];

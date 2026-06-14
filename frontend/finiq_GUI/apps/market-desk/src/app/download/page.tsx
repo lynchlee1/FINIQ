@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Activity, Bell, X, Play, Search, Loader2, Trash2, FolderOpen, Square, Settings, ChevronDown, ChevronRight } from "lucide-react";
+import { Activity, Bell, X, Play, Search, Loader2, Trash2, FolderOpen, Settings, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
 import { Input } from "@finiq/ui";
@@ -981,14 +981,14 @@ export default function DownloadPage() {
                 setSettingsPanelOpen(false);
               }}
               className={
-                lastInspectionCandidateCount > 0 || deleteConfirmed || !!result || isErrorStatus
+                lastInspectionCandidateCount > 0 || isErrorStatus
                   ? "relative h-10 w-10 border-amber-300 bg-amber-50 text-amber-700 shadow-sm dark:border-amber-500/60 dark:bg-amber-500/15 dark:text-amber-200"
                   : "relative h-10 w-10 border-slate-200 bg-white shadow-sm dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300"
               }
               title={notificationPanelOpen ? "알림 닫기" : "알림 열기"}
             >
               <Bell className="h-5 w-5" />
-              {(lastInspectionCandidateCount > 0 || !!result || isErrorStatus) && (
+              {(lastInspectionCandidateCount > 0 || isErrorStatus) && (
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-300" />
               )}
             </Button>
@@ -1029,10 +1029,12 @@ export default function DownloadPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">작업 알림</Label>
-                  <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
-                </div>
+                {isErrorStatus ? (
+                  <div className="space-y-2">
+                    <Label className="dark:text-slate-300">작업 알림</Label>
+                    <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
+                  </div>
+                ) : null}
 
                 {lastInspectionCandidateCount > 0 && (
                   <div className="space-y-4 border-t border-slate-200 pt-4 dark:border-[#30363d]">
@@ -1069,13 +1071,8 @@ export default function DownloadPage() {
                   </div>
                 )}
 
-                {result && (
-                  <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#30363d]">
-                    <Label className="dark:text-slate-300">결과</Label>
-                    <pre className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#090d12] dark:text-blue-100">
-                      {JSON.stringify(result, null, 2)}
-                    </pre>
-                  </div>
+                {!isErrorStatus && lastInspectionCandidateCount === 0 && (
+                  <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
                 )}
               </CardContent>
             </Card>
@@ -1174,34 +1171,19 @@ export default function DownloadPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <Label className="dark:text-slate-300">작업 상태</Label>
-                  <Button
-                    variant="outline"
-                    onClick={handleCancelDownload}
-                    disabled={!activeJobId}
-                    className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300"
-                  >
-                    <Square className="mr-2 h-4 w-4" />
-                    {UI_TEXT.actions.cancelJob}
-                  </Button>
-                </div>
-                <JobStatusLogger
-                  status={status}
-                  isErrorStatus={isErrorStatus}
-                />
-              </div>
+              <JobStatusLogger
+                status={status}
+                isErrorStatus={isErrorStatus}
+                isCancellable={!!activeJobId}
+                onCancel={handleCancelDownload}
+              />
 
-              {result && result.format !== "kind_download_folder_cleanup_v1" && (
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">실행 결과 요약</Label>
-                  <div className="grid grid-cols-1 gap-2 mt-2">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공 / 전체</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{formatInteger(result.summary?.success || result.success_count)}/{formatInteger(result.summary?.total || result.total_count || result.summary?.success)}</strong>
-                    </div>
-                  </div>
+              {result && (
+                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#30363d]">
+                  <Label className="dark:text-slate-300">실행 결과</Label>
+                  <pre className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#090d12] dark:text-blue-100">
+                    {JSON.stringify(result, null, 2)}
+                  </pre>
                 </div>
               )}
             </CardContent>

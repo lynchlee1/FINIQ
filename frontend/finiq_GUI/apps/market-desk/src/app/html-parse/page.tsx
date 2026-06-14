@@ -448,32 +448,30 @@ export default function HtmlParsePage() {
         <ActionDock
           activityActive={isJobActive}
           activityContent={
-            <>
-              <JobStatusLogger
-                status={status}
-                isErrorStatus={isErrorStatus}
-                isCancellable={!!activeCancelToken}
-                onCancel={handleCancel}
-              />
-              {result?.summary && (
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">실행 결과 요약</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">성공</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{formatInteger(result.summary.parsed_files)}</strong>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">실패</span>
-                      <strong className="mt-1 block text-xl font-bold text-slate-950 dark:text-slate-100">{formatInteger(result.summary.failed_files)}</strong>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
+            <JobStatusLogger
+              status={status}
+              isErrorStatus={isErrorStatus}
+              isCancellable={!!activeCancelToken}
+              onCancel={handleCancel}
+            />
           }
           notificationActive={isErrorStatus || !!result?.warnings?.length}
-          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          notificationContent={
+            <div className="space-y-3">
+              {isErrorStatus ? (
+                <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+              ) : result?.warnings?.length ? (
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">파싱 경고</Label>
+                  <pre className="max-h-72 overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                    {JSON.stringify(result.warnings, null, 2)}
+                  </pre>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
+              )}
+            </div>
+          }
           settingsTitle="시스템 설정"
           settingsContent={
             <>
