@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import threading
+
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
+import finiq.data.assets_excel as assets_excel_module
 import finiq.market_desk.web.app as app_module
 from finiq.data.assets_excel import (
     convert_asset_excels_to_wide_parquet,
@@ -45,6 +49,21 @@ def _write_quanti_sheet(
         ["D A T E", *labels],
     ]
     pd.DataFrame(prefix + rows).to_excel(writer, sheet_name=sheet_name, header=False, index=False)
+
+
+def _output_for_sheet(payload: dict, sheet_name: str, relative_path: str | None = None) -> dict:
+    matches = [
+        item
+        for item in payload["outputs"].values()
+        if item["sheet_name"] == sheet_name and (relative_path is None or item["relative_path"] == relative_path)
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _read_output_sheet(payload: dict, output_dir, sheet_name: str, relative_path: str | None = None) -> pd.DataFrame:
+    item = _output_for_sheet(payload, sheet_name, relative_path)
+    return pd.read_parquet(output_dir / item["output_file"])
 
 
 def test_list_and_read_asset_excel(tmp_path):
@@ -110,7 +129,7 @@ def test_read_asset_excel_quanti_preview_uses_date_code_matrix(tmp_path):
     payload = read_asset_excel("quanti.xlsx", sheet_name="종가", row_limit=20, root_directory=tmp_path)
 
     assert payload["preview_type"] == "quanti_matrix"
-    assert payload["account_name"] == "stock_price"
+    assert payload["account_name"] == "close"
     assert payload["status"] == "mapped"
     assert payload["metadata"] == {"period_from": "20200101", "period_to": "20200102"}
     assert payload["columns"] == ["date", "A005930", "A000660"]
@@ -178,7 +197,7 @@ def test_asset_excel_interpreted_preview_api(tmp_path, monkeypatch):
 
     payload = read_asset_excel_interpreted("api.xlsx", sheet_name="종가", root_directory=tmp_path)
 
-    assert payload["account_name"] == "stock_price"
+    assert payload["account_name"] == "close"
     assert payload["status"] == "mapped"
     assert payload["columns"] == ["date", "A005930", "A000660"]
     assert payload["rows"][0]["date"] == "2020-01-01"
@@ -190,7 +209,7 @@ def test_asset_excel_interpreted_preview_api(tmp_path, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["account_name"] == "stock_price"
+    assert response.json()["account_name"] == "close"
 
 
 def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
@@ -219,21 +238,36 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
     assert payload["accounts_processed"] == 2
-    assert (output_dir / "stock_price.parquet").exists()
-    assert (output_dir / "volume.parquet").exists()
+    assert payload["sheets_processed"] == 2
+    stock_output = _output_for_sheet(payload, "종가")
+    volume_output = _output_for_sheet(payload, "거래량")
+    assert stock_output["output_file"] == "close_20200101_20200102.parquet"
+    assert volume_output["output_file"] == "volume_20200101_20200102.parquet"
+    assert stock_output["account_id"] == "S00001"
+    assert stock_output["account_name"] == "close"
+    assert stock_output["legacy_account_name"] == "stock_price"
+    assert (output_dir / stock_output["output_file"]).exists()
+    assert (output_dir / volume_output["output_file"]).exists()
     assert (output_dir / "code_name_mapping.parquet").exists()
+    assert (output_dir / "account_mapping.parquet").exists()
     assert payload["code_name_mapping"]["rows"] == 2
-    assert payload["accounts"]["stock_price"]["date_index"] == ["2020-01-01", "2020-01-02"]
-    assert payload["accounts"]["stock_price"]["date_segments"] == [
+    assert payload["account_mapping"]["items"][0] == {
+        "account_id": "S00001",
+        "account_name": "close",
+        "legacy_account_name": "stock_price",
+        "sheet_name": "종가",
+    }
+    assert stock_output["date_index"] == ["2020-01-01", "2020-01-02"]
+    assert stock_output["date_segments"] == [
         {"start": "2020-01-01", "end": "2020-01-02", "count": 2}
     ]
-    assert payload["accounts"]["stock_price"]["sources"][0]["date_index"] == [
+    assert stock_output["sources"][0]["date_index"] == [
         "2020-01-01",
         "2020-01-02",
     ]
 
-    stock_price = pd.read_parquet(output_dir / "stock_price.parquet")
-    volume = pd.read_parquet(output_dir / "volume.parquet")
+    stock_price = _read_output_sheet(payload, output_dir, "종가")
+    volume = _read_output_sheet(payload, output_dir, "거래량")
 
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
     assert volume.columns.tolist() == ["date", "A005930", "A000660"]
@@ -245,6 +279,86 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
         {"code": "A000660", "name": "SK하이닉스"},
         {"code": "A005930", "name": "삼성전자"},
     ]
+
+
+def test_convert_asset_excels_reports_detailed_progress_log(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [
+                [pd.Timestamp("2020-01-01"), 100, 200],
+                [pd.Timestamp("2020-01-02"), 101, 201],
+            ],
+        )
+
+    progress_log: list[str] = []
+
+    convert_asset_excels_to_wide_parquet(
+        source_dir,
+        output_dir,
+        progress_callback=progress_log.append,
+    )
+
+    assert "Quantiwise 변환 시작" in progress_log
+    assert any("원본 데이터 경로:" in line for line in progress_log)
+    assert any("매핑 완료: 계정=close, 행=2, 코드=2, 날짜=2020-01-01~2020-01-02" in line for line in progress_log)
+    assert any("스캔 완료: Sheet 1개, 정상 1개, 건너뜀 0개, 계정 1개" in line for line in progress_log)
+    assert any("Sheet 단위 생성:" in line for line in progress_log)
+    assert any("[저장 1/1]" in line and "계정=close" in line and "Sheet=종가" in line for line in progress_log)
+    assert any("코드-종목명 매핑 저장: code_name_mapping.parquet (2행)" in line for line in progress_log)
+    assert any("manifest 저장:" in line for line in progress_log)
+    assert any("Quantiwise 변환 완료: Sheet Parquet 1개, 건너뛴 Sheet 0개" in line for line in progress_log)
+
+
+def test_convert_asset_excels_cancel_during_parallel_save_leaves_no_final_outputs(tmp_path, monkeypatch):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+        )
+        _write_quanti_sheet(
+            writer,
+            "거래량",
+            [[pd.Timestamp("2020-01-01"), 1000, 2000]],
+        )
+
+    should_cancel = False
+    lock = threading.Lock()
+    real_write_account_parquet = assets_excel_module._write_account_parquet
+
+    def cancelling_write(*args, **kwargs):
+        nonlocal should_cancel
+        result = real_write_account_parquet(*args, **kwargs)
+        with lock:
+            should_cancel = True
+        return result
+
+    def cancel_check() -> bool:
+        with lock:
+            return should_cancel
+
+    monkeypatch.setattr(assets_excel_module, "_asset_parquet_write_workers", lambda account_count: 2)
+    monkeypatch.setattr(assets_excel_module, "_write_account_parquet", cancelling_write)
+
+    with pytest.raises(RuntimeError, match="Job cancelled"):
+        convert_asset_excels_to_wide_parquet(
+            source_dir,
+            output_dir,
+            progress_callback=lambda message: None,
+            cancel_check=cancel_check,
+        )
+
+    assert not list(output_dir.glob("*.parquet"))
+    assert not (output_dir / "manifest.json").exists()
+    assert not any(path.name.startswith(".quanti_parquet_write_") for path in output_dir.iterdir())
 
 
 def test_convert_asset_excels_uses_selected_files(tmp_path):
@@ -272,7 +386,7 @@ def test_convert_asset_excels_uses_selected_files(tmp_path):
 
     assert payload["accounts_processed"] == 1
     assert "volume" in payload["accounts"]
-    assert "stock_price" not in payload["accounts"]
+    assert "close" not in payload["accounts"]
     assert not (output_dir / "stock_price.parquet").exists()
 
 
@@ -304,16 +418,15 @@ def test_convert_asset_excels_updates_existing_output(tmp_path):
         write_mode="update",
     )
 
-    stock_price = pd.read_parquet(output_dir / "stock_price.parquet")
-    assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-06"]
-    assert payload["updated_accounts"] == ["stock_price"]
-    assert payload["accounts"]["stock_price"]["date_segments"] == [
-        {"start": "2020-01-03", "end": "2020-01-06", "count": 2},
+    stock_price = _read_output_sheet(payload, output_dir, "종가", "source-b.xlsx")
+    assert stock_price["date"].astype(str).tolist() == ["2020-01-06"]
+    assert payload["updated_accounts"] == []
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_segments"] == [
+        {"start": "2020-01-06", "end": "2020-01-06", "count": 1},
     ]
+    assert any(path.name.startswith("close_20200103_20200103") for path in output_dir.glob("*.parquet"))
     mapping = pd.read_parquet(output_dir / "code_name_mapping.parquet")
     assert mapping[["code", "name"]].to_dict("records") == [
-        {"code": "A000660", "name": "SK하이닉스"},
-        {"code": "A005930", "name": "삼성전자"},
         {"code": "A035420", "name": "NAVER"},
         {"code": "A051910", "name": "LG화학"},
     ]
@@ -346,7 +459,7 @@ def test_convert_asset_excels_defaults_to_replace_without_existing_merge(tmp_pat
         selected_files=["source-b.xlsx"],
     )
 
-    stock_price = pd.read_parquet(output_dir / "stock_price.parquet")
+    stock_price = _read_output_sheet(payload, output_dir, "종가", "source-b.xlsx")
     assert stock_price["date"].astype(str).tolist() == ["2020-01-06"]
     assert payload["write_mode"] == "replace"
     assert payload["updated_accounts"] == []
@@ -366,7 +479,7 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
             "종가",
             [[pd.Timestamp("2020-01-03"), 100, 200]],
         )
-    with pd.ExcelWriter(second_source / "source-b.xlsx") as writer:
+    with pd.ExcelWriter(second_source / "source-a.xlsx") as writer:
         _write_quanti_sheet(
             writer,
             "종가",
@@ -379,7 +492,8 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
 
     payload = merge_asset_parquet_outputs(first_output, second_output, merged_output)
 
-    stock_price = pd.read_parquet(merged_output / "stock_price.parquet")
+    merged_file = next(path for path in merged_output.glob("*.parquet") if path.name != "code_name_mapping.parquet")
+    stock_price = pd.read_parquet(merged_file)
     assert payload["operation"] == "merge_parquet"
     assert payload["accounts_processed"] == 1
     assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-06"]
@@ -412,14 +526,15 @@ def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_
     )
     output = inspect_asset_excel_output(output_dir)
 
-    assert preview["sheets"][0]["account_name"] == "stock_price"
+    assert preview["sheets"][0]["account_name"] == "close"
     assert preview["sheets"][0]["status"] == "mapped"
-    assert preview["accounts"]["stock_price"]["will_update_existing"] is False
-    assert preview["accounts"]["stock_price"]["quality"]["sample_rows"]
+    preview_output = _output_for_sheet(preview, "종가")
+    assert preview_output["will_update_existing"] is False
+    assert preview_output["quality"]["sample_rows"]
     assert preview["code_name_mapping"]["rows"] == 2
     assert output["manifest_exists"] is True
     assert output["code_name_mapping_exists"] is True
-    assert output["parquet_files"] == ["stock_price.parquet"]
+    assert output["parquet_files"] == [preview_output["output_file"]]
 
 
 def test_inspect_asset_excel_conversion_skips_bad_quanti_sheet(tmp_path):
@@ -443,7 +558,7 @@ def test_inspect_asset_excel_conversion_skips_bad_quanti_sheet(tmp_path):
     assert preview["sheets"][0]["status"] == "format_error"
 
 
-def test_convert_asset_excels_rejects_conflicting_overlaps(tmp_path):
+def test_convert_asset_excels_keeps_overlapping_sheets_separate(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
     source_dir.mkdir()
@@ -460,15 +575,16 @@ def test_convert_asset_excels_rejects_conflicting_overlaps(tmp_path):
             [[pd.Timestamp("2020-01-01"), 999, 200]],
         )
 
-    try:
-        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
-    except ValueError as exc:
-        assert "Conflicting overlapping values" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError")
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    first = _read_output_sheet(payload, output_dir, "종가", "source-a.xlsx")
+    second = _read_output_sheet(payload, output_dir, "종가", "source-b.xlsx")
+    assert first["A005930"].tolist() == [100]
+    assert second["A005930"].tolist() == [999]
+    assert payload["conflicts"] == {}
 
 
-def test_convert_asset_excels_always_rejects_conflicts_even_if_policy_is_requested(tmp_path):
+def test_convert_asset_excels_does_not_merge_conflicts_even_if_policy_is_requested(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
     source_dir.mkdir()
@@ -485,12 +601,11 @@ def test_convert_asset_excels_always_rejects_conflicts_even_if_policy_is_request
             [[pd.Timestamp("2020-01-01"), 999, 200]],
         )
 
-    try:
-        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
-    except ValueError as exc:
-        assert "Conflicting overlapping values" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError")
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    assert len(payload["outputs"]) == 2
+    assert _read_output_sheet(payload, output_dir, "종가", "source-a.xlsx")["A005930"].tolist() == [100]
+    assert _read_output_sheet(payload, output_dir, "종가", "source-b.xlsx")["A005930"].tolist() == [999]
 
 
 def test_trading_halt_flag_like_sheet_reads_three_times(tmp_path):
@@ -515,7 +630,7 @@ def test_trading_halt_flag_like_sheet_reads_three_times(tmp_path):
             sheet_name="거래정지여부",
             root_directory=source_dir,
         )
-        assert payload["account_name"] == "trading_halt_flag"
+        assert payload["account_name"] == "tradingHaltFlag"
         assert payload["status"] == "mapped"
         assert payload["columns"] == ["date", "A005930", "A000660"]
         assert payload["rows"][0] == {
@@ -525,10 +640,10 @@ def test_trading_halt_flag_like_sheet_reads_three_times(tmp_path):
         }
 
     result = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
-    halt = pd.read_parquet(output_dir / "trading_halt_flag.parquet")
+    halt = _read_output_sheet(result, output_dir, "거래정지여부")
     mapping = pd.read_parquet(output_dir / "code_name_mapping.parquet")
 
-    assert result["accounts"]["trading_halt_flag"]["rows"] == 2
+    assert _output_for_sheet(result, "거래정지여부")["rows"] == 2
     assert halt["A005930"].tolist() == ["정상", "정지"]
     assert mapping[["code", "name"]].to_dict("records") == [
         {"code": "A000660", "name": "SK하이닉스"},
@@ -555,7 +670,8 @@ def test_convert_asset_excels_allows_one_day_adjacent_ranges(tmp_path):
 
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert payload["accounts"]["stock_price"]["date_index"] == ["2020-01-01", "2020-01-02"]
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_index"] == ["2020-01-01"]
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_index"] == ["2020-01-02"]
 
 
 def test_convert_asset_excels_treats_weekend_gap_as_continuous(tmp_path):
@@ -577,10 +693,8 @@ def test_convert_asset_excels_treats_weekend_gap_as_continuous(tmp_path):
 
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert payload["accounts"]["stock_price"]["date_index"] == ["2020-01-03", "2020-01-06"]
-    assert payload["accounts"]["stock_price"]["date_segments"] == [
-        {"start": "2020-01-03", "end": "2020-01-06", "count": 2},
-    ]
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_index"] == ["2020-01-03"]
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_index"] == ["2020-01-06"]
 
 
 def test_convert_asset_excels_stores_multiple_date_segments(tmp_path):
@@ -602,9 +716,10 @@ def test_convert_asset_excels_stores_multiple_date_segments(tmp_path):
 
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert payload["accounts"]["stock_price"]["date_index"] == ["2020-01-01", "2020-01-04"]
-    assert payload["accounts"]["stock_price"]["date_segments"] == [
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_segments"] == [
         {"start": "2020-01-01", "end": "2020-01-01", "count": 1},
+    ]
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_segments"] == [
         {"start": "2020-01-04", "end": "2020-01-04", "count": 1},
     ]
 
@@ -625,10 +740,11 @@ def test_convert_asset_excels_keeps_one_sheet_as_one_date_segment(tmp_path):
 
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert payload["accounts"]["stock_price"]["date_index"] == ["2020-01-03", "2020-01-06"]
-    assert payload["accounts"]["stock_price"]["date_segments"] == [
+    output = _output_for_sheet(payload, "종가")
+    assert output["date_index"] == ["2020-01-03", "2020-01-06"]
+    assert output["date_segments"] == [
         {"start": "2020-01-03", "end": "2020-01-06", "count": 2},
     ]
-    assert payload["accounts"]["stock_price"]["sources"][0]["date_segments"] == [
+    assert output["sources"][0]["date_segments"] == [
         {"start": "2020-01-03", "end": "2020-01-06", "count": 2},
     ]

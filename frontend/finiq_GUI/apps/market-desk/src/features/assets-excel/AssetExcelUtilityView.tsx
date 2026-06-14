@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Eye, Loader2, Play } from "lucide-react";
+import { AlertTriangle, Eye, Loader2, Play } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -15,7 +15,6 @@ import {
   fetchAssetExcelOutput,
   fetchAssetExcelSheets,
   fetchAssetExcelSheet,
-  previewAssetExcelConversion,
   startAssetExcelConversion,
   startAssetParquetMerge,
 } from "./api";
@@ -42,13 +41,13 @@ function jobStatusLines(data: any): string[] {
     "대기 중";
   const lines = [`작업 상태: ${statusLabel}`];
   if (data.error) lines.push(`오류: ${data.error}`);
-  if (data.progress_log?.length) lines.push("", "최근 로그:", ...data.progress_log.slice(-12));
+  if (data.progress_log?.length) lines.push("", "최근 로그:", ...data.progress_log.slice(-30));
   if (data.status === "completed" && data.result) {
     lines.push(
       "",
       "변환 완료",
-      `계정 파일: ${formatInteger(data.result.accounts_processed)}개`,
-      `업데이트 계정: ${formatInteger(data.result.updated_accounts?.length)}개`,
+      `Sheet Parquet: ${formatInteger(data.result.sheets_processed ?? Object.keys(data.result.outputs || {}).length)}개`,
+      `계정: ${formatInteger(data.result.accounts_processed)}개`,
       `건너뛴 Sheet: ${formatInteger(data.result.skipped?.length)}개`,
       `데이터 경로: ${data.result.output_directory || ""}`,
     );
@@ -80,9 +79,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [mergeIncomingDirectory, setMergeIncomingDirectory] = useState("");
   const writeMode = "replace";
   const [loading, setLoading] = useState(true);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
-  const [previewSignature, setPreviewSignature] = useState("");
   const [outputInfo, setOutputInfo] = useState<any>(null);
   const [lastResult, setLastResult] = useState<any>(null);
   const [selectedPreviewFile, setSelectedPreviewFile] = useState("");
@@ -222,12 +219,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => Object.values(previewData?.conflicts || {}).reduce((sum, items: any) => sum + (Array.isArray(items) ? items.length : 0), 0),
     [previewData],
   );
-  const accountRows = useMemo(() => Object.entries(previewData?.accounts || lastResult?.accounts || {}), [previewData, lastResult]);
-  const currentPreviewSignature = useMemo(
-    () => JSON.stringify({ sourceDirectory, outputDirectory, writeMode }),
-    [sourceDirectory, outputDirectory, writeMode],
-  );
-  const previewIsCurrent = Boolean(previewData && previewSignature === currentPreviewSignature);
+  const outputRows = useMemo(() => Object.entries(previewData?.outputs || lastResult?.outputs || {}), [previewData, lastResult]);
   const skippedRows = previewData?.skipped || [];
   const conflictRows = useMemo(
     () => Object.entries(previewData?.conflicts || {}).flatMap(([accountName, items]: [string, any]) =>
@@ -236,16 +228,16 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     [previewData],
   );
   const updatingAccountCount = useMemo(
-    () => accountRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
-    [accountRows],
+    () => outputRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
+    [outputRows],
   );
   const activityStatus = [
     `작업: ${isMergeMode ? "Parquet 병합" : "Excel에서 Parquet 변환"}`,
     isMergeMode ? null : `대상 파일: ${formatInteger(excelFiles.length)}개`,
-    `예상 계정: ${formatInteger(Object.keys(previewData?.accounts || {}).length)}개`,
-    `업데이트 계정: ${formatInteger(updatingAccountCount)}개`,
+    `예상 Sheet Parquet: ${formatInteger(Object.keys(previewData?.outputs || {}).length)}개`,
+    `기존 출력 업데이트: ${formatInteger(updatingAccountCount)}개`,
     `Skipped / 충돌: ${formatInteger(skippedRows.length)} / ${formatInteger(conflictCount)}`,
-    `확인 상태: ${previewIsCurrent ? "완료" : "필요"}`,
+    "확인 상태: 실행 시 자동 확인",
     "",
     status || "실행 전",
   ].filter(Boolean).join("\n");
@@ -258,25 +250,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setSheetNames([]);
     setSheetPayload(null);
     setSheetBodyLoading(false);
-  };
-
-  const runConversionCheck = async (): Promise<PreviewData> => {
-    setPreviewLoading(true);
-    setStatus("변환 전 확인 중...");
-    setIsErrorStatus(false);
-    try {
-      const data = await previewAssetExcelConversion({
-        source_directory: sourceDirectory,
-        output_directory: outputDirectory,
-        write_mode: writeMode,
-      });
-      setPreviewData(data);
-      setPreviewSignature(currentPreviewSignature);
-      setStatus(`변환 전 확인 완료\n계정: ${formatInteger(Object.keys(data.accounts || {}).length)}개\n정상 Sheet: ${formatInteger((data.sheets || []).filter((sheet: any) => sheet.status === "mapped").length)}개\n충돌: ${formatInteger(Object.keys(data.conflicts || {}).length)}개 계정`);
-      return data;
-    } finally {
-      setPreviewLoading(false);
-    }
   };
 
   const handleStart = async () => {
@@ -316,14 +289,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       return;
     }
     try {
-      const checkedData = previewIsCurrent && previewData ? previewData : await runConversionCheck();
-      const checkedConflictCount = Object.keys(checkedData.conflicts || {}).length;
-      if (checkedConflictCount > 0) {
-        setStatus(`변환 전 확인에서 값 충돌 ${formatInteger(checkedConflictCount)}개 계정을 발견했습니다. 충돌 내용을 확인한 뒤 다시 실행하세요.`);
-        setIsErrorStatus(true);
-        return;
-      }
-
       setStatus("작업을 시작하는 중...");
       setIsErrorStatus(false);
 
@@ -392,9 +357,9 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                       <div>
                         <p className="font-medium">기존 결과가 감지되었습니다.</p>
-                        <p>변환하기는 기존 Parquet를 병합에 쓰지 않고 원본 데이터 경로 아래 전체 Excel에서 나온 계정 파일만 저장합니다.</p>
+                        <p>변환하기는 기존 Parquet를 병합에 쓰지 않고 원본 데이터 경로 아래 전체 Excel에서 나온 Sheet Parquet만 저장합니다.</p>
                         <p>기존 결과와 합치려면 `Quantiwise - 병합하기`를 사용하세요.</p>
-                        <p>기존 계정 파일: {formatInteger(activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length)}개</p>
+                        <p>기존 Parquet: {formatInteger(activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length)}개</p>
                       </div>
                     </div>
                   ) : null}
@@ -534,28 +499,14 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || previewLoading || !excelFiles.length}>
-                  {activeJobId || previewLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || !excelFiles.length}>
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
                 <Button variant="outline" className="w-full" onClick={cancelJob} disabled={!activeJobId}>
                   {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
-              <div className="min-h-5">
-                {previewIsCurrent ? (
-                  <div className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
-                    <CheckCircle2 className="h-4 w-4" />
-                    현재 선택/옵션 확인 완료
-                  </div>
-                ) : previewData ? (
-                  <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
-                    <AlertTriangle className="h-4 w-4" />
-                    선택 또는 옵션이 바뀌었습니다. 실행 시 다시 확인합니다.
-                  </div>
-                ) : null}
-              </div>
-
               {previewData?.sheets?.length ? (
                 <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
                   <table className="w-full text-sm">
@@ -672,7 +623,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           </Card>
           ) : null}
 
-          {accountRows.length ? (
+          {outputRows.length ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="text-base dark:text-white">결과 탐색</CardTitle>
@@ -682,6 +633,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
+                      <th className="px-3 py-2 font-medium">Sheet</th>
+                      <th className="px-3 py-2 font-medium">ID</th>
                       <th className="px-3 py-2 font-medium">계정</th>
                       <th className="px-3 py-2 font-medium">파일</th>
                       <th className="px-3 py-2 font-medium text-right">행</th>
@@ -691,9 +644,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
-                    {accountRows.map(([name, item]: [string, any]) => (
+                    {outputRows.map(([name, item]: [string, any]) => (
                       <tr key={name} className="dark:text-slate-300">
-                        <td className="px-3 py-2 font-medium">{name}</td>
+                        <td className="px-3 py-2 font-medium">{item.sheet_name || name}</td>
+                        <td className="px-3 py-2">{item.account_id || "-"}</td>
+                        <td className="px-3 py-2">{item.account_name || "-"}</td>
                         <td className="px-3 py-2 break-all">{item.path || item.output_file || `${name}.parquet`}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.rows)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.columns)}</td>
@@ -707,9 +662,9 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               <div className="rounded-md border border-slate-200 p-3 text-xs dark:border-[#30363d] dark:text-slate-300">
                 <p className="mb-2 font-medium text-slate-900 dark:text-slate-100">최근 샘플</p>
                 <div className="space-y-2">
-                  {accountRows.slice(0, 3).map(([name, item]: [string, any]) => (
+                  {outputRows.slice(0, 3).map(([name, item]: [string, any]) => (
                     <div key={name} className="break-all">
-                      <span className="font-medium">{name}</span>
+                      <span className="font-medium">{item.sheet_name || name}</span>
                       <span className="ml-2 text-slate-500 dark:text-slate-400">
                         {(item.quality?.sample_rows || []).map((row: any) => JSON.stringify(row)).join(" / ") || "샘플 없음"}
                       </span>

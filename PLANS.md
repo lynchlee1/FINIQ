@@ -1,3 +1,82 @@
+# 2026-06-14 Quantiwise 계정명 파일명 및 계정 ID 매핑
+
+## Purpose
+- Sheet Parquet 출력 파일명을 `<계정명>_<시작일>_<종료일>` 형식으로 바꾼다.
+- 계정명은 언더바 없는 lower camel case로 사용한다.
+- 계정명과 `S00001` 형식 ID를 연결하는 매핑 산출물을 만든다.
+
+## Implementation Summary
+- Sheet 계정명을 `stock_price` 같은 snake_case에서 `close`, `nxtHigh`, `tradingHaltFlag` 같은 lower camel case로 바꿨다.
+- 기존 snake_case 계정명은 `legacy_account_name` metadata로 보존했다.
+- 출력 파일명을 `close_20200101_20200102.parquet`처럼 계정명과 Sheet 날짜 구간으로 만들게 했다.
+- 계정명과 ID를 연결하는 `account_mapping.parquet`를 생성하고 manifest/payload에도 `account_mapping`을 포함했다.
+- 결과 탐색 표에 계정 ID 컬럼을 추가했다.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -q`.
+- Passed: `python3 -m pytest tests/market_desk/test_job_cancellation.py -q`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-14 Quantiwise Sheet 단위 Parquet 전환 및 파일 병렬 스캔
+
+## Purpose
+- `Quantiwise - 변환하기`에서 계정 단위 병합 Parquet를 만들지 않고, 원본 Sheet 하나당 Parquet 하나를 생성한다.
+- Excel 파일 단위 병렬 스캔을 도입해 대용량 원본 경로 처리 시간을 줄인다.
+
+## Implementation Summary
+- Excel 스캔 결과를 계정별 frame 묶음이 아니라 Sheet별 출력 항목으로 모으게 바꿨다.
+- 출력 파일명을 `<원본상대경로>__<계정명>__<Sheet명>.parquet` 형태로 만들어 같은 Sheet명이 여러 파일에 있어도 덮어쓰지 않게 했다.
+- `Quantiwise - 변환하기`의 계정 병합/충돌 판정 루프를 제거하고, 각 Sheet frame을 그대로 Parquet로 저장하게 했다.
+- Excel 파일 단위 스캔을 `ThreadPoolExecutor`로 병렬 처리하되 워커 수를 최대 4개로 제한했다.
+- 프론트 결과 탐색과 실행 현황 문구를 계정 파일 기준에서 Sheet Parquet 기준으로 바꿨다.
+- `docs/assets-excel-conversion.md`와 테스트를 Sheet 단위 저장 계약에 맞췄다.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -q`.
+- Passed: `python3 -m pytest tests/market_desk/test_job_cancellation.py -q`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-14 Quantiwise 변환 속도 병목 개선
+
+## Purpose
+- `Quantiwise - 변환하기`의 대용량 Excel 변환에서 해결 가능한 주요 병목을 줄인다.
+- 실행 전 전체 Excel 스캔과 실제 변환 스캔이 중복되는 구조를 제거하고, 저장/충돌 확인 단계의 반복 비용을 낮춘다.
+
+## Deep Inspection
+- 현재 Quantiwise 변환 자체에는 파일/Sheet 읽기 병렬화가 없고, FastAPI background job은 UI 비차단 실행일 뿐 변환 작업 병렬화가 아니다.
+- 원본 데이터 경로에는 Excel 10개가 있지만 총 2.1GB이며, 큰 파일은 648MB, 485MB, 386MB, 239MB로 확인됐다.
+- 실행 버튼은 `preview-conversion`으로 전체 Excel을 먼저 읽고, 이어서 background job이 같은 Excel을 다시 읽어 실제 변환하는 중복 병목이 있었다.
+- 변환 함수의 계정 병합/저장 루프는 순차 실행이었고, 충돌 탐지는 공통 컬럼/날짜를 중첩 루프로 검사했다.
+
+## Implementation Summary
+- 변환 실행 버튼에서 실행 전 `preview-conversion` 호출을 제거하고, background job 내부 스캔/병합 단계에서 저장 전 확인을 수행하게 했다.
+- 충돌 탐지는 pandas 마스크로 후보 mismatch만 먼저 좁힌 뒤 기존 값 비교를 적용하게 바꿨다.
+- 계정별 Parquet 저장을 독립 파일 단위로 병렬화하고, 워커 수는 CPU/계정 수 기준 최대 4개로 제한했다.
+- 병렬 저장은 임시 폴더에 먼저 쓴 뒤 모든 계정 저장이 성공하고 취소 신호가 없을 때만 최종 Parquet로 승격하게 했다.
+- 병렬 저장 도중 작업 중단이 요청되면 최종 Parquet와 manifest를 남기지 않고 임시 폴더를 정리하게 했다.
+- `docs/assets-excel-conversion.md`에 중복 전체 스캔 제거와 Parquet 저장 병렬 처리 계약을 반영했다.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -q`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py::test_convert_asset_excels_cancel_during_parallel_save_leaves_no_final_outputs -q`.
+- Passed: `python3 -m pytest tests/market_desk/test_job_cancellation.py -q`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-14 Quantiwise 변환 실행 로그 상세화
+
+## Purpose
+- `Quantiwise - 변환하기` 실행 중 어떤 경로, 파일, Sheet, 계정, 저장물이 처리되는지 실행 로그에서 더 명확하게 확인할 수 있게 한다.
+
+## Implementation Summary
+- Quantiwise 변환 시작 시 원본 데이터 경로, 데이터 경로, 저장 방식, 선택 파일 범위를 로그에 남기게 했다.
+- Excel 스캔 로그에 파일별 Sheet 수, Sheet별 매핑/건너뜀 사유, 계정/행/코드/날짜 범위를 추가했다.
+- 계정 병합, Parquet 저장, 코드-종목명 매핑 저장, manifest 저장, 최종 완료 요약을 단계별 로그로 남기게 했다.
+- 화면의 `최근 로그` 표시 범위를 12줄에서 30줄로 늘려 상세 단계가 덜 잘리게 했다.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -q`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
 # 2026-06-14 Quantiwise 작업 실행 버튼 표준화
 
 ## Purpose
