@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Eye, Loader2, Play, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, Loader2, Play } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -17,6 +17,7 @@ import {
   fetchAssetExcelSheet,
   previewAssetExcelConversion,
   startAssetExcelConversion,
+  startAssetParquetMerge,
 } from "./api";
 import type { AssetExcelFile, PreviewData, SheetPayload } from "./types";
 
@@ -67,14 +68,17 @@ function sheetStatusLabel(status: string | undefined): string {
   return "-";
 }
 
-export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "preview" | "save" }) {
-  const isSaveMode = mode === "save";
-  const pageTitle = isSaveMode ? "Quantiwise - 저장하기" : "Quantiwise - 미리보기";
-  const pageDescription = isSaveMode ? "Quantiwise 엑셀 데이터 파싱해서 저장하기 기능" : "Quantiwise 엑셀 미리보기 기능";
+export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "preview" | "convert" | "merge" }) {
+  const isConvertMode = mode === "convert";
+  const isMergeMode = mode === "merge";
+  const pageTitle = isConvertMode ? "Quantiwise - 변환하기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - 미리보기";
+  const pageDescription = isConvertMode ? "Quantiwise 엑셀 데이터를 Parquet으로 변환하는 기능" : isMergeMode ? "생성된 Quantiwise Parquet을 병합하는 기능" : "Quantiwise 엑셀 미리보기 기능";
   const [excelFiles, setExcelFiles] = useState<AssetExcelFile[]>([]);
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [writeMode, setWriteMode] = useState("update");
+  const [mergeBaseDirectory, setMergeBaseDirectory] = useState("");
+  const [mergeIncomingDirectory, setMergeIncomingDirectory] = useState("");
+  const writeMode = "replace";
   const [loading, setLoading] = useState(true);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
@@ -101,6 +105,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   });
 
   useEffect(() => {
+    if (isMergeMode) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     fetchAssetExcelFiles(sourceDirectory || undefined)
       .then((data) => {
@@ -122,7 +130,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     return () => {
       cancelled = true;
     };
-  }, [sourceDirectory, setIsErrorStatus, setStatus]);
+  }, [isMergeMode, sourceDirectory, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     if (!outputDirectory.trim()) return;
@@ -231,6 +239,16 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => accountRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
     [accountRows],
   );
+  const activityStatus = [
+    `작업: ${isMergeMode ? "Parquet 병합" : "Excel에서 Parquet 변환"}`,
+    isMergeMode ? null : `대상 파일: ${formatInteger(excelFiles.length)}개`,
+    `예상 계정: ${formatInteger(Object.keys(previewData?.accounts || {}).length)}개`,
+    `업데이트 계정: ${formatInteger(updatingAccountCount)}개`,
+    `Skipped / 충돌: ${formatInteger(skippedRows.length)} / ${formatInteger(conflictCount)}`,
+    `확인 상태: ${previewIsCurrent ? "완료" : "필요"}`,
+    "",
+    status || "실행 전",
+  ].filter(Boolean).join("\n");
   const previewColumns = sheetPayload?.preview_columns || sheetPayload?.columns || [];
   const sheetRows = sheetPayload?.rows || [];
 
@@ -242,24 +260,9 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setSheetBodyLoading(false);
   };
 
-  const handlePreview = async () => {
-    if (!sourceDirectory.trim()) {
-      setStatus("데이터 경로를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!outputDirectory.trim()) {
-      setStatus("데이터 경로를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!excelFiles.length) {
-      setStatus("데이터 경로 아래에 변환할 Excel 파일이 없습니다.");
-      setIsErrorStatus(true);
-      return;
-    }
+  const runConversionCheck = async (): Promise<PreviewData> => {
     setPreviewLoading(true);
-    setStatus("사전 점검 중...");
+    setStatus("변환 전 확인 중...");
     setIsErrorStatus(false);
     try {
       const data = await previewAssetExcelConversion({
@@ -269,10 +272,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       });
       setPreviewData(data);
       setPreviewSignature(currentPreviewSignature);
-      setStatus(`사전 점검 완료\n계정: ${formatInteger(Object.keys(data.accounts || {}).length)}개\n정상 Sheet: ${formatInteger((data.sheets || []).filter((sheet: any) => sheet.status === "mapped").length)}개\n충돌: ${formatInteger(Object.keys(data.conflicts || {}).length)}개 계정`);
-    } catch (err: any) {
-      setStatus(err.message);
-      setIsErrorStatus(true);
+      setStatus(`변환 전 확인 완료\n계정: ${formatInteger(Object.keys(data.accounts || {}).length)}개\n정상 Sheet: ${formatInteger((data.sheets || []).filter((sheet: any) => sheet.status === "mapped").length)}개\n충돌: ${formatInteger(Object.keys(data.conflicts || {}).length)}개 계정`);
+      return data;
     } finally {
       setPreviewLoading(false);
     }
@@ -280,6 +281,30 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
 
   const handleStart = async () => {
     if (activeJobId) return;
+    if (isMergeMode) {
+      if (!mergeBaseDirectory.trim() || !mergeIncomingDirectory.trim() || !outputDirectory.trim()) {
+        setStatus("데이터 경로를 선택하세요.");
+        setIsErrorStatus(true);
+        return;
+      }
+
+      setStatus("병합 작업을 시작하는 중...");
+      setIsErrorStatus(false);
+
+      try {
+        const data = await startAssetParquetMerge({
+          base_directory: mergeBaseDirectory,
+          incoming_directory: mergeIncomingDirectory,
+          output_directory: outputDirectory,
+        });
+        startPolling(data.job_id);
+      } catch (err: any) {
+        setStatus(err.message);
+        setIsErrorStatus(true);
+      }
+      return;
+    }
+
     if (!sourceDirectory.trim() || !outputDirectory.trim()) {
       setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
@@ -290,16 +315,18 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       setIsErrorStatus(true);
       return;
     }
-    if (!previewIsCurrent) {
-      setStatus("현재 선택/옵션으로 사전 점검을 먼저 실행하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-
-    setStatus("작업을 시작하는 중...");
-    setIsErrorStatus(false);
-
     try {
+      const checkedData = previewIsCurrent && previewData ? previewData : await runConversionCheck();
+      const checkedConflictCount = Object.keys(checkedData.conflicts || {}).length;
+      if (checkedConflictCount > 0) {
+        setStatus(`변환 전 확인에서 값 충돌 ${formatInteger(checkedConflictCount)}개 계정을 발견했습니다. 충돌 내용을 확인한 뒤 다시 실행하세요.`);
+        setIsErrorStatus(true);
+        return;
+      }
+
+      setStatus("작업을 시작하는 중...");
+      setIsErrorStatus(false);
+
       const data = await startAssetExcelConversion({
         source_directory: sourceDirectory,
         output_directory: outputDirectory,
@@ -326,42 +353,29 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               <p className="text-sm text-slate-500 dark:text-slate-400">{pageDescription}</p>
             </CardHeader>
             <CardContent className="pt-6 space-y-5">
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">원본 데이터 경로</Label>
-                <PathPickerInput
-                  mode="folder"
-                  value={sourceDirectory}
-                  onChange={(value) => {
-                    setSourceDirectory(value);
-                    setPreviewData(null);
-                    setLastResult(null);
-                    sheetPreviewCache.current = {};
-                  }}
-                  placeholder="/path/to/resources/Quantiwise"
-                  onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                />
-                {isSaveMode ? (
-                  <p className="text-xs text-slate-500 dark:text-slate-400">이 경로 아래의 모든 Excel 파일을 실행 대상으로 사용합니다. 대상 파일: {formatInteger(excelFiles.length)}개</p>
-                ) : null}
-              </div>
+              {!isMergeMode ? (
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">원본 데이터 경로</Label>
+                  <PathPickerInput
+                    mode="folder"
+                    value={sourceDirectory}
+                    onChange={(value) => {
+                      setSourceDirectory(value);
+                      setPreviewData(null);
+                      setLastResult(null);
+                      sheetPreviewCache.current = {};
+                    }}
+                    placeholder="/path/to/resources/Quantiwise"
+                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                  />
+                  {isConvertMode ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">이 경로 아래의 모든 Excel 파일을 실행 대상으로 사용합니다. 대상 파일: {formatInteger(excelFiles.length)}개</p>
+                  ) : null}
+                </div>
+              ) : null}
 
-              {isSaveMode ? (
+              {isConvertMode ? (
                 <>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="dark:text-slate-300">저장 방식</Label>
-                      <Select value={writeMode} onValueChange={setWriteMode}>
-                        <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                          <SelectItem value="update">기존 결과와 병합</SelectItem>
-                          <SelectItem value="replace">전체 파일 다시 저장(기존 미병합)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">데이터 경로</Label>
                     <PathPickerInput
@@ -378,18 +392,53 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                       <div>
                         <p className="font-medium">기존 결과가 감지되었습니다.</p>
-                        <p>{writeMode === "update" ? "기존 Parquet를 읽어 새 Excel 데이터와 병합합니다." : "기존 Parquet는 병합에 쓰지 않고 원본 데이터 경로 아래 전체 Excel에서 나온 계정 파일만 저장합니다."}</p>
-                        <p>{writeMode === "update" ? "원본 데이터 경로에 없는 기존 계정도 기존 출력에서 함께 유지됩니다." : "다시 생성된 계정 파일만 덮어쓰며, 원본 데이터 경로에 없는 기존 Parquet는 삭제하지 않습니다."}</p>
+                        <p>변환하기는 기존 Parquet를 병합에 쓰지 않고 원본 데이터 경로 아래 전체 Excel에서 나온 계정 파일만 저장합니다.</p>
+                        <p>기존 결과와 합치려면 `Quantiwise - 병합하기`를 사용하세요.</p>
                         <p>기존 계정 파일: {formatInteger(activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length)}개</p>
                       </div>
                     </div>
                   ) : null}
                 </>
               ) : null}
+
+              {isMergeMode ? (
+                <>
+                  <div className="space-y-2">
+                    <Label className="dark:text-slate-300">기존 Parquet 경로</Label>
+                    <PathPickerInput
+                      mode="folder"
+                      value={mergeBaseDirectory}
+                      onChange={setMergeBaseDirectory}
+                      placeholder="/path/to/existing/assets_parquet"
+                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="dark:text-slate-300">병합할 Parquet 경로</Label>
+                    <PathPickerInput
+                      mode="folder"
+                      value={mergeIncomingDirectory}
+                      onChange={setMergeIncomingDirectory}
+                      placeholder="/path/to/new/assets_parquet"
+                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="dark:text-slate-300">데이터 경로</Label>
+                    <PathPickerInput
+                      mode="folder"
+                      value={outputDirectory}
+                      onChange={setOutputDirectory}
+                      placeholder="/path/to/resources/assets_merged"
+                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                    />
+                  </div>
+                </>
+              ) : null}
             </CardContent>
           </Card>
 
-          {!isSaveMode ? (
+          {!isConvertMode && !isMergeMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base dark:text-white">
@@ -477,33 +526,32 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           </Card>
           ) : null}
 
-          {isSaveMode ? (
+          {isConvertMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle className="text-base dark:text-white">Quantiwise - 저장하기</CardTitle>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
+              <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={handlePreview} disabled={previewLoading || !!activeJobId}>
-                  {previewLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  사전 점검
+              <div className="grid gap-3 md:grid-cols-2">
+                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || previewLoading || !excelFiles.length}>
+                  {activeJobId || previewLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  실행
                 </Button>
-                <Button onClick={handleStart} disabled={!!activeJobId || loading || !excelFiles.length || !previewIsCurrent}>
-                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                  Quantiwise 변환
-                </Button>
-                <Button variant="outline" onClick={cancelJob} disabled={!activeJobId}>
+                <Button variant="outline" className="w-full" onClick={cancelJob} disabled={!activeJobId}>
                   {UI_TEXT.actions.cancelJob}
                 </Button>
+              </div>
+              <div className="min-h-5">
                 {previewIsCurrent ? (
                   <div className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
                     <CheckCircle2 className="h-4 w-4" />
-                    현재 선택/옵션 점검 완료
+                    현재 선택/옵션 확인 완료
                   </div>
                 ) : previewData ? (
                   <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
                     <AlertTriangle className="h-4 w-4" />
-                    선택 또는 옵션이 바뀌었습니다. 다시 점검하세요.
+                    선택 또는 옵션이 바뀌었습니다. 실행 시 다시 확인합니다.
                   </div>
                 ) : null}
               </div>
@@ -604,6 +652,26 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           </Card>
           ) : null}
 
+          {isMergeMode ? (
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
+              <CardTitle className="dark:text-white">작업 실행</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading}>
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  실행
+                </Button>
+                <Button variant="outline" className="w-full" onClick={cancelJob} disabled={!activeJobId}>
+                  {UI_TEXT.actions.cancelJob}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          ) : null}
+
           {accountRows.length ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
@@ -654,53 +722,36 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           ) : null}
         </section>
 
-        {isSaveMode ? (
+        {isConvertMode || isMergeMode ? (
         <ActionDock
           activityActive={!!activeJobId}
           activityContent={
-            <>
-              <div className="space-y-3 rounded-md border border-slate-200 p-3 text-sm dark:border-[#30363d]">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500 dark:text-slate-400">대상 파일</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(excelFiles.length)}개</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500 dark:text-slate-400">예상 계정</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(Object.keys(previewData?.accounts || {}).length)}개</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500 dark:text-slate-400">업데이트 계정</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(updatingAccountCount)}개</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500 dark:text-slate-400">Skipped / 충돌</span>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(skippedRows.length)} / {formatInteger(conflictCount)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500 dark:text-slate-400">실행 영향</span>
-                  <span className="text-right font-medium text-slate-900 dark:text-slate-100">{writeMode === "update" ? "기존 포함 병합" : "선택 계정 재저장"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500 dark:text-slate-400">점검 상태</span>
-                  <span className={previewIsCurrent ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-700 dark:text-amber-300"}>
-                    {previewIsCurrent ? "완료" : "필요"}
-                  </span>
-                </div>
-              </div>
-              <JobStatusLogger
-                status={status}
-                isErrorStatus={isErrorStatus}
-                isCancellable={!!activeJobId}
-                onCancel={cancelJob}
-              />
-            </>
+            <JobStatusLogger
+              status={activityStatus}
+              isErrorStatus={isErrorStatus}
+              isCancellable={!!activeJobId}
+              onCancel={cancelJob}
+            />
           }
-          notificationActive={isErrorStatus || !!previewData || !!lastResult}
-          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          notificationActive={isErrorStatus || skippedRows.length > 0 || conflictCount > 0}
+          notificationContent={
+            <div className="space-y-3">
+              {isErrorStatus ? (
+                <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+              ) : skippedRows.length > 0 || conflictCount > 0 ? (
+                <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                  <div className="font-medium">확인 필요</div>
+                  <div>건너뛴 Sheet {formatInteger(skippedRows.length)}개, 값 충돌 {formatInteger(conflictCount)}개가 있습니다.</div>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
+              )}
+            </div>
+          }
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
-              <p>원본 데이터 경로, 데이터 경로, 저장 방식은 본문에서 바로 조작합니다.</p>
+              <p>{isMergeMode ? "병합은 두 Parquet 경로를 읽어 데이터 경로에 새 결과를 저장합니다." : "변환하기는 Excel을 Parquet으로 생성합니다. 기존 Parquet와 합치는 작업은 병합하기에서 실행합니다."}</p>
             </div>
           }
         />

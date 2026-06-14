@@ -93,7 +93,8 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     steps: [
       { href: "/utility", step: 1, label: "분할저장" },
       { href: "/utility/assets-excel", step: 2, label: "Quantiwise - 미리보기" },
-      { href: "/utility/assets-excel/save", step: 3, label: "Quantiwise - 저장하기" },
+      { href: "/utility/assets-excel/convert", step: 3, label: "Quantiwise - 변환하기" },
+      { href: "/utility/assets-excel/merge", step: 4, label: "Quantiwise - 병합하기" },
     ],
   },
 };
@@ -134,7 +135,8 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
   const partitionStorageStep = WORKFLOWS.utility.steps[0];
   const quantiwiseSteps = [
     { ...WORKFLOWS.utility.steps[1], label: "미리보기" },
-    { ...WORKFLOWS.utility.steps[2], label: "저장하기" },
+    { ...WORKFLOWS.utility.steps[2], label: "변환하기" },
+    { ...WORKFLOWS.utility.steps[3], label: "병합하기" },
   ];
 
   return {

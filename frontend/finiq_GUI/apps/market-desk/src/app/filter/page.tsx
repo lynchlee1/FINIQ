@@ -521,8 +521,8 @@ export default function FilterPage() {
               onCancel={abortJob} 
             />
           }
-          notificationActive={isErrorStatus || !!result?.html_download_transfer}
-          notificationContent={<JobStatusLogger status={status || "알림 없음"} isErrorStatus={isErrorStatus} />}
+          notificationActive={isErrorStatus}
+          notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-500 dark:text-slate-400"}>{isErrorStatus ? status : "알림 없음"}</div>}
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">

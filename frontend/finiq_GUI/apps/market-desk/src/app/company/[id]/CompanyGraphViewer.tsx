@@ -7,6 +7,7 @@ import { fetchCompanyGraphData } from './exampleGraphData'
 import { PageLoadingSpinner } from '@/components/ui/PageLoadingSpinner'
 import { Search, X, Save, Download, Unlock } from 'lucide-react'
 import { ActionDock } from '@/components/ui/ActionDock'
+import { JobStatusLogger } from '@/components/ui/JobStatusLogger'
 import { formatInteger } from '@/lib/format'
 
 export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string }) {
@@ -241,11 +242,10 @@ export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string 
       </CardContent>
       </Card>
       <ActionDock
-        activityTitle="그래프 현황"
         activityActive={simulationRunning}
-        activityContent={<div className="text-sm dark:text-slate-300">노드 {formatInteger(visibleGraph.nodes.length)}개, 엣지 {formatInteger(visibleGraph.edges.length)}개</div>}
-        notificationActive={selectedNodeIds.size > 0}
-        notificationContent={<div className="text-sm dark:text-slate-300">{selectedNodeIds.size ? `선택 노드 ${formatInteger(selectedNodeIds.size)}개` : "알림 없음"}</div>}
+        activityContent={<JobStatusLogger status={`노드: ${formatInteger(visibleGraph.nodes.length)}개\n엣지: ${formatInteger(visibleGraph.edges.length)}개\n선택 노드: ${formatInteger(selectedNodeIds.size)}개`} isErrorStatus={false} />}
+        notificationActive={false}
+        notificationContent={<div className="text-sm dark:text-slate-300">알림 없음</div>}
         settingsTitle="시스템 설정"
         settingsContent={
           <SettingsPanel

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from finiq.config import QUANTIWISE_EXCEL_DIR, init_config
-from finiq.data.assets_excel import DEFAULT_ASSET_PARQUET_DIR, convert_asset_excels_to_wide_parquet
+from finiq.data.assets_excel import DEFAULT_ASSET_PARQUET_DIR, convert_asset_excels_to_wide_parquet, merge_asset_parquet_outputs
 from finiq.market_desk.web.discovery import list_classification_files, list_price_source_files
 from finiq.market_desk.web.disclosure_html import (
     compress_disclosure_external_html_payload,
@@ -71,6 +71,20 @@ def _run_asset_excel_convert_job(
     )
 
 
+def _run_asset_excel_merge_job(
+    payload: dict[str, Any],
+    progress_callback: JobProgressCallback,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    return merge_asset_parquet_outputs(
+        payload.get("base_directory") or "",
+        payload.get("incoming_directory") or "",
+        payload.get("output_directory") or DEFAULT_ASSET_PARQUET_DIR,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
+
+
 JOB_HANDLERS: dict[str, JobHandler] = {
     "download": download_disclosure_html_payload,
     "external_compress": compress_disclosure_external_html_payload,
@@ -83,6 +97,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "table_build": build_disclosure_table_payload,
     "utility_partition": run_partition_storage_payload,
     "asset_excel_convert": _run_asset_excel_convert_job,
+    "asset_excel_merge": _run_asset_excel_merge_job,
 }
 
 

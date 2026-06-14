@@ -658,6 +658,8 @@ def _existing_account_frame(
     account_name: str,
     output_directory: Path,
     output_info: dict[str, Any],
+    *,
+    source_type: str = "existing_output",
 ) -> tuple[pd.DataFrame, SourceInfo] | None:
     parquet_path = output_directory / f"{account_name}.parquet"
     if not parquet_path.exists():
@@ -677,9 +679,20 @@ def _existing_account_frame(
         "date_segments": account_meta.get("date_segments") or _single_date_segment_payload(frame.index),
         "rows": len(frame),
         "columns": len(frame.columns),
-        "source_type": "existing_output",
+        "source_directory": str(output_directory),
+        "source_type": source_type,
     }
     return frame, source_info
+
+
+def _parquet_account_names(directory: Path) -> list[str]:
+    if not directory.is_dir():
+        return []
+    return [
+        path.stem
+        for path in sorted(directory.glob("*.parquet"))
+        if path.name != CODE_NAME_MAPPING_FILE
+    ]
 
 
 def _scan_asset_excel_frames(
@@ -852,7 +865,7 @@ def convert_asset_excels_to_wide_parquet(
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
     selected_files: list[str] | None = None,
-    write_mode: str = "update",
+    write_mode: str = "replace",
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -861,7 +874,7 @@ def convert_asset_excels_to_wide_parquet(
     output = Path(output_directory).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
 
-    normalized_mode = str(write_mode or "update").strip().lower()
+    normalized_mode = str(write_mode or "replace").strip().lower()
     if normalized_mode not in {"update", "replace"}:
         msg = f"Unsupported write mode: {write_mode}"
         raise ValueError(msg)
@@ -960,12 +973,127 @@ def convert_asset_excels_to_wide_parquet(
     }
 
 
+def merge_asset_parquet_outputs(
+    base_directory: str | Path,
+    incoming_directory: str | Path,
+    output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Merge two generated Quantiwise Parquet output directories."""
+    base = Path(base_directory).expanduser().resolve()
+    incoming = Path(incoming_directory).expanduser().resolve()
+    output = Path(output_directory).expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=True)
+
+    base_info = inspect_asset_excel_output(base)
+    incoming_info = inspect_asset_excel_output(incoming)
+    base_accounts = _parquet_account_names(base)
+    incoming_accounts = _parquet_account_names(incoming)
+    if not base_accounts:
+        msg = f"No account Parquet files found in {base}"
+        raise ValueError(msg)
+    if not incoming_accounts:
+        msg = f"No account Parquet files found in {incoming}"
+        raise ValueError(msg)
+
+    frames_by_account: dict[str, list[tuple[pd.DataFrame, SourceInfo]]] = {}
+    sources_by_account: dict[str, list[SourceInfo]] = {}
+    for source_dir, output_info, account_names, source_type in (
+        (base, base_info, base_accounts, "base_parquet"),
+        (incoming, incoming_info, incoming_accounts, "incoming_parquet"),
+    ):
+        for account_name in sorted(account_names):
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
+            _emit(progress_callback, f"Reading {source_dir.name}/{account_name}.parquet...")
+            loaded = _existing_account_frame(
+                account_name,
+                source_dir,
+                output_info,
+                source_type=source_type,
+            )
+            if loaded is None:
+                continue
+            frame, source_info = loaded
+            frames_by_account.setdefault(account_name, []).append((frame, source_info))
+            sources_by_account.setdefault(account_name, []).append(source_info)
+
+    code_name_mapping = _code_name_mapping_frame([
+        *_existing_code_name_mappings(base),
+        *_existing_code_name_mappings(incoming),
+    ])
+    code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
+    code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
+
+    accounts: dict[str, Any] = {}
+    conflicts_by_account: dict[str, list[dict[str, str]]] = {}
+    for account_name, frames in sorted(frames_by_account.items()):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
+        _emit(progress_callback, f"Merging {account_name}...")
+        merged, conflicts = _merge_account_frames(account_name, frames)
+        if conflicts:
+            conflicts_by_account[account_name] = conflicts
+        parquet_path = output / f"{account_name}.parquet"
+        merged.reset_index().to_parquet(parquet_path, index=False, compression="snappy")
+        accounts[account_name] = {
+            "path": str(parquet_path),
+            "rows": len(merged),
+            "columns": len(merged.columns),
+            "date_start": merged.index.min().isoformat() if len(merged.index) else "",
+            "date_end": merged.index.max().isoformat() if len(merged.index) else "",
+            "date_index": _date_index_payload(merged.index),
+            "date_segments": _merged_date_segments_payload(
+                merged.index,
+                sources_by_account.get(account_name, []),
+            ),
+            "sources": sources_by_account.get(account_name, []),
+            "quality": _account_quality_payload(merged),
+        }
+
+    manifest = {
+        "format": ASSET_PARQUET_FORMAT,
+        "operation": "merge_parquet",
+        "base_directory": str(base),
+        "incoming_directory": str(incoming),
+        "output_directory": str(output),
+        "conflict_policy": "error",
+        "code_name_mapping": {
+            "path": str(code_name_mapping_path),
+            "rows": len(code_name_mapping),
+        },
+        "accounts": accounts,
+        "conflicts": conflicts_by_account,
+    }
+    manifest_path = output / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return {
+        "status": "completed",
+        "operation": "merge_parquet",
+        "base_directory": str(base),
+        "incoming_directory": str(incoming),
+        "output_directory": str(output),
+        "manifest_path": str(manifest_path),
+        "accounts_processed": len(accounts),
+        "conflict_policy": "error",
+        "code_name_mapping": {
+            "path": str(code_name_mapping_path),
+            "rows": len(code_name_mapping),
+        },
+        "accounts": accounts,
+        "conflicts": conflicts_by_account,
+    }
+
+
 def inspect_asset_excel_conversion(
     source_directory: str | Path = QUANTIWISE_EXCEL_DIR,
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
     selected_files: list[str] | None = None,
-    write_mode: str = "update",
+    write_mode: str = "replace",
 ) -> dict[str, Any]:
     source = Path(source_directory).expanduser().resolve()
     output = Path(output_directory).expanduser().resolve()
@@ -974,7 +1102,7 @@ def inspect_asset_excel_conversion(
         selected_files=selected_files,
     )
     output_info = inspect_asset_excel_output(output)
-    normalized_mode = str(write_mode or "update").strip().lower()
+    normalized_mode = str(write_mode or "replace").strip().lower()
 
     if normalized_mode == "update" and output_info["parquet_files"]:
         code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
@@ -1038,6 +1166,7 @@ __all__ = [
     "inspect_asset_excel_conversion",
     "inspect_asset_excel_output",
     "list_asset_excel_files",
+    "merge_asset_parquet_outputs",
     "read_asset_excel",
     "read_asset_excel_interpreted",
     "read_asset_excel_sheets",

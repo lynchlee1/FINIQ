@@ -14,6 +14,7 @@ from finiq.data.assets_excel import (
     inspect_asset_excel_conversion,
     inspect_asset_excel_output,
     list_asset_excel_files,
+    merge_asset_parquet_outputs,
     read_asset_excel,
     read_asset_excel_interpreted,
     read_asset_excel_sheets,
@@ -25,7 +26,13 @@ class AssetExcelConvertRequest(BaseModel):
     source_directory: Optional[str] = None
     output_directory: Optional[str] = None
     selected_files: list[str] = []
-    write_mode: str = "update"
+    write_mode: str = "replace"
+
+
+class AssetParquetMergeRequest(BaseModel):
+    base_directory: str
+    incoming_directory: str
+    output_directory: Optional[str] = None
 
 
 def create_assets_excel_router(
@@ -85,6 +92,30 @@ def create_assets_excel_router(
             run_job_worker,
             job_id,
             "asset_excel_convert",
+            request.model_dump(),
+        )
+        return job_manager.get_snapshot(job_id)
+
+    @router.post("/api/assets/parquet/merge")
+    async def merge_asset_parquet_outputs_route(request: AssetParquetMergeRequest):
+        try:
+            return await asyncio.to_thread(
+                merge_asset_parquet_outputs,
+                request.base_directory,
+                request.incoming_directory,
+                request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/assets/parquet/merge/start")
+    async def start_merge_asset_parquet_outputs(request: AssetParquetMergeRequest, background_tasks: BackgroundTasks):
+        job_id = uuid.uuid4().hex
+        job_manager.create_job(job_id, "asset_excel_merge")
+        background_tasks.add_task(
+            run_job_worker,
+            job_id,
+            "asset_excel_merge",
             request.model_dump(),
         )
         return job_manager.get_snapshot(job_id)
