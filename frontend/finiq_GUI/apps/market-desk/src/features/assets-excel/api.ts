@@ -20,6 +20,10 @@ export function fetchAssetExcelAccountMappings() {
   return apiGet<AssetAccountMappingsResponse>("/api/assets/excels/account-mappings");
 }
 
+export function saveAssetExcelAccountMappings(items: AssetAccountMappingsResponse["items"]) {
+  return apiPost<any>("/api/settings", { asset_excel_account_mappings: items });
+}
+
 export function fetchAssetExcelSheets(fileName: string, sourceDirectory: string) {
   const query = new URLSearchParams({ source_directory: sourceDirectory });
   const suffix = query.toString() ? `?${query.toString()}` : "";

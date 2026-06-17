@@ -16,6 +16,7 @@ from finiq.market_desk.web.disclosure_html import (
     merge_disclosure_content_html_payload,
 )
 from finiq.market_desk.web.disclosure_html_parse import parse_disclosure_html_payload
+from finiq.market_desk.web.disclosure_html_sections import save_disclosure_html_sections_payload
 from finiq.market_desk.web.jobs import job_manager
 from finiq.market_desk.web.routers.assets_excel import create_assets_excel_router
 from finiq.market_desk.web.routers.config import (
@@ -74,6 +75,7 @@ def _run_asset_excel_convert_job(
         selected_files=payload.get("selected_files") or None,
         account_mappings=payload.get("account_mappings") if "account_mappings" in payload else None,
         write_mode=str(payload.get("write_mode") or "update"),
+        resume_failed_only=bool(payload.get("resume_failed_only")),
         progress_callback=progress_callback,
         cancel_check=cancel_check,
     )
@@ -99,6 +101,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "content_download": download_disclosure_html_contents_payload,
     "content_merge": merge_disclosure_content_html_payload,
     "parse": parse_disclosure_html_payload,
+    "section_save": save_disclosure_html_sections_payload,
     "integrated_convert": run_integrated_convert_payload,
     "integrated_merge": run_integrated_merge_payload,
     "integrated_market_history": run_integrated_market_history_payload,
@@ -150,7 +153,7 @@ def _filter_disclosures_payload(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 app.include_router(create_config_router(config, choose_finder_path=lambda **kwargs: _choose_finder_path(**kwargs)))
 app.include_router(create_market_data_router(config))
-app.include_router(create_assets_excel_router(get_assets_dir=lambda: QUANTIWISE_EXCEL_DIR, run_job_worker=_run_job_worker))
+app.include_router(create_assets_excel_router(config=config, get_assets_dir=lambda: QUANTIWISE_EXCEL_DIR, run_job_worker=_run_job_worker))
 app.include_router(create_download_router(config))
 app.include_router(
     create_workflows_router(

@@ -18,6 +18,7 @@ import {
   fetchAssetParquetPreview,
   fetchAssetExcelSheets,
   fetchAssetExcelSheet,
+  saveAssetExcelAccountMappings,
   startAssetExcelConversion,
   startAssetParquetMerge,
 } from "./api";
@@ -47,12 +48,14 @@ function jobStatusLines(data: any): string[] {
   if (data.progress_log?.length) lines.push("", "최근 로그:", ...data.progress_log.slice(-30));
   if (data.status === "completed" && data.result) {
     const skipped = data.result.skipped || [];
+    const resumeSkipped = data.result.resume_skipped || [];
     lines.push(
       "",
       "변환 완료",
       `Sheet Parquet: ${formatInteger(data.result.sheets_processed ?? Object.keys(data.result.outputs || {}).length)}개`,
       `계정: ${formatInteger(data.result.accounts_processed)}개`,
       `건너뛴 Sheet: ${formatInteger(skipped.length)}개`,
+      `이어하기 건너뜀: ${formatInteger(resumeSkipped.length)}개`,
       `데이터 경로: ${data.result.output_directory || ""}`,
     );
     if (skipped.length) {
@@ -97,7 +100,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const isParquetPreviewMode = mode === "parquet";
   const isMergeMode = mode === "merge";
   const pageTitle = isConvertMode ? "Parquet 변환하기" : isParquetPreviewMode ? "Quantiwise - Parquet 미리보기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - Excel 미리보기";
-  const pageDescription = isConvertMode ? "Quantiwise 엑셀 데이터를 Parquet으로 변환하는 기능" : isParquetPreviewMode ? "생성된 Quantiwise Parquet을 미리보는 기능" : isMergeMode ? "생성된 Quantiwise Parquet을 병합하는 기능" : "Quantiwise Excel 미리보기 기능";
   const [excelFiles, setExcelFiles] = useState<AssetExcelFile[]>([]);
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -120,6 +122,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [accountMappings, setAccountMappings] = useState<AssetAccountMapping[]>([]);
   const [isAccountMappingEditing, setIsAccountMappingEditing] = useState(false);
   const [mappingsLoading, setMappingsLoading] = useState(false);
+  const [mappingsSaving, setMappingsSaving] = useState(false);
   const sheetPreviewCache = useRef<Record<string, SheetPayload>>({});
   const sheetBodyRequestToken = useRef(0);
   const { fetchSettings, saveSetting } = useSettingsStore();
@@ -364,6 +367,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     const issues: string[] = [];
     const sheetNames = new Set<string>();
     const accountIds = new Set<string>();
+    const accountNames = new Set<string>();
     normalizedAccountMappings.forEach((mapping, index) => {
       const rowLabel = `${index + 1}행`;
       if (!mapping.sheet_name || !mapping.account_id || !mapping.account_name) {
@@ -382,6 +386,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       if (mapping.account_id) {
         if (accountIds.has(mapping.account_id)) issues.push(`${rowLabel}: 중복 ID입니다.`);
         accountIds.add(mapping.account_id);
+      }
+      if (mapping.account_name) {
+        if (accountNames.has(mapping.account_name)) issues.push(`${rowLabel}: 중복 계정입니다.`);
+        accountNames.add(mapping.account_name);
       }
     });
     return issues;
@@ -476,7 +484,32 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setAccountMappings((current) => current.filter((_, itemIndex) => itemIndex !== index));
   };
 
-  const handleStart = async () => {
+  const handleAccountMappingEditToggle = async () => {
+    if (!isAccountMappingEditing) {
+      setIsAccountMappingEditing(true);
+      return;
+    }
+    if (accountMappingIssues.length) {
+      setStatus(accountMappingIssues.join("\n"));
+      setIsErrorStatus(true);
+      return;
+    }
+    setMappingsSaving(true);
+    try {
+      await saveAssetExcelAccountMappings(normalizedAccountMappings);
+      setAccountMappings(normalizedAccountMappings);
+      setIsAccountMappingEditing(false);
+      setStatus("계정-ID 매핑을 저장했습니다.");
+      setIsErrorStatus(false);
+    } catch (err: any) {
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    } finally {
+      setMappingsSaving(false);
+    }
+  };
+
+  const handleStart = async (resumeFailedOnly = false) => {
     if (activeJobId) return;
     if (isMergeMode) {
       if (!mergeBaseDirectory.trim() || !mergeIncomingDirectory.trim() || !outputDirectory.trim()) {
@@ -531,6 +564,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         output_directory: outputDirectory,
         write_mode: writeMode,
         account_mappings: normalizedAccountMappings,
+        resume_failed_only: resumeFailedOnly,
       });
       startPolling(data.job_id);
     } catch (err: any) {
@@ -547,7 +581,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Quantiwise</p>
               <CardTitle className="text-xl dark:text-white">{pageTitle}</CardTitle>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{pageDescription}</p>
             </CardHeader>
             <CardContent className="pt-6 space-y-5">
               {!isMergeMode && !isParquetPreviewMode ? (
@@ -629,7 +662,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 </div>
                 <div className="flex items-center gap-2">
                   {isAccountMappingEditing ? (
-                    <Button variant="outline" size="sm" onClick={addAccountMapping} disabled={mappingsLoading || !!activeJobId}>
+                    <Button variant="outline" size="sm" onClick={addAccountMapping} disabled={mappingsLoading || mappingsSaving || !!activeJobId}>
                       <Plus className="mr-2 h-4 w-4" />
                       추가
                     </Button>
@@ -637,11 +670,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   <Button
                     variant={isAccountMappingEditing ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setIsAccountMappingEditing((current) => !current)}
-                    disabled={mappingsLoading || !!activeJobId}
+                    onClick={handleAccountMappingEditToggle}
+                    disabled={mappingsLoading || mappingsSaving || !!activeJobId}
                   >
-                    {isAccountMappingEditing ? <Check className="mr-2 h-4 w-4" /> : <Pencil className="mr-2 h-4 w-4" />}
-                    {isAccountMappingEditing ? "완료" : "편집"}
+                    {mappingsSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : isAccountMappingEditing ? <Check className="mr-2 h-4 w-4" /> : <Pencil className="mr-2 h-4 w-4" />}
+                    {mappingsSaving ? "저장 중" : isAccountMappingEditing ? "완료" : "편집"}
                   </Button>
                 </div>
               </div>
@@ -659,7 +692,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
                     {accountMappings.map((mapping, index) => (
-                      <tr key={`${mapping.sheet_name}-${mapping.account_id}-${index}`} className="dark:text-slate-300">
+                      <tr key={index} className="dark:text-slate-300">
                         <td className="px-3 py-2">
                           {isAccountMappingEditing ? (
                             <Input
@@ -823,10 +856,14 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length}>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
+                </Button>
+                <Button variant="outline" className="w-full" onClick={() => handleStart(true)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length}>
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  실패분 이어서 실행
                 </Button>
                 <Button variant="outline" className="w-full" onClick={cancelJob} disabled={!activeJobId}>
                   {UI_TEXT.actions.cancelJob}
@@ -1006,7 +1043,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                       <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">본문을 불러오는 중...</td></tr>
                     ) : null}
                     {!parquetPayload?.error && !parquetLoading && !selectedParquetSheet ? (
-                      <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">Sheet를 선택하세요.</td></tr>
+                      <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">Parquet 파일을 선택하세요.</td></tr>
                     ) : null}
                     {!parquetPayload?.error && !parquetLoading && selectedParquetSheet && !parquetRows.length ? (
                       <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">표시할 행 없음</td></tr>
@@ -1026,7 +1063,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || !mergeIncomingDirectory.trim() || !outputDirectory.trim()}>
+                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || !mergeIncomingDirectory.trim() || !outputDirectory.trim()}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
@@ -1106,11 +1143,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </div>
           }
           settingsTitle="시스템 설정"
-          settingsContent={
-            <div className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
-              <p>{isMergeMode ? "병합은 두 Parquet 경로를 읽어 데이터 경로에 새 결과를 저장합니다." : "변환하기는 Excel을 Parquet으로 생성합니다. 기존 Parquet와 합치는 작업은 병합하기에서 실행합니다."}</p>
-            </div>
-          }
+          settingsContent={<div />}
         />
         ) : null}
       </div>

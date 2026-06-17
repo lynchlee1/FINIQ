@@ -42,6 +42,12 @@ from finiq.market_desk.web.disclosure_html_parse import (
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
+from finiq.market_desk.web.disclosure_html_sections import (
+    inspect_disclosure_html_sections_payload,
+    list_disclosure_html_sections_payload,
+    render_disclosure_html_section_payload,
+    save_disclosure_html_sections_payload,
+)
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance
 from finiq.market_desk.web.html_parsers.common import expand_table, parse_html_document
 from finiq.market_desk.web.table_export import build_disclosure_table_payload
@@ -55,6 +61,7 @@ GUI_APP_DIR = REPO_ROOT / "frontend" / "finiq_GUI" / "apps" / "market-desk" / "s
 GUI_HTML_DOWNLOAD_PAGE = GUI_APP_DIR / "html-download" / "page.tsx"
 GUI_HTML_DOWNLOAD_COMPONENT = GUI_APP_DIR / "html-download" / "_components" / "HtmlDownloadPageView.tsx"
 GUI_HTML_CONTENT_DOWNLOAD_PAGE = GUI_APP_DIR / "html-content-download" / "page.tsx"
+GUI_HTML_SECTION_SPLIT_PAGE = GUI_APP_DIR / "html-section-split" / "page.tsx"
 GUI_HTML_PARSE_PAGE = GUI_APP_DIR / "html-parse" / "page.tsx"
 GUI_HTML_CHANGE_LOG_PAGE = GUI_APP_DIR / "html-change-log" / "page.tsx"
 GUI_UTILITY_PAGE = GUI_APP_DIR / "utility" / "page.tsx"
@@ -2352,6 +2359,104 @@ def test_merge_disclosure_content_html_payload_writes_single_json(tmp_path: Path
     assert saved["records"][0]["html"] == "<html>one</html>"
 
 
+def test_render_disclosure_html_section_payload_selects_requested_toc(tmp_path: Path) -> None:
+    source_file = tmp_path / "20260422000832.html"
+    source_file.write_text(
+        """
+        <html>
+          <head><style>body { width:600px; }</style></head>
+          <body bgcolor="#FFFFFF">
+            <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+            <table><tr><td>표지 내용</td></tr></table>
+            <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
+            <table><tr><td>발행금액</td><td>250,000,000</td></tr></table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+
+    list_payload = list_disclosure_html_sections_payload({"source_file": str(source_file)})
+    render_payload = render_disclosure_html_section_payload({"source_file": str(source_file), "section": "toc_2"})
+
+    assert [section["toc_id"] for section in list_payload["sections"]] == ["toc_1", "toc_2"]
+    assert render_payload["section"]["title"] == "전환사채권 발행결정"
+    assert "전환사채권 발행결정" in render_payload["html"]
+    assert "발행금액" in render_payload["html"]
+    assert "주요사항보고서" not in render_payload["html"]
+    assert "표지 내용" not in render_payload["html"]
+
+
+def test_save_disclosure_html_sections_payload_writes_selected_toc_only(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    (input_directory / "20260422000832.html").write_text(
+        """
+        <html><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+          <p>표지 내용</p>
+          <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section": "전환사채권",
+        }
+    )
+    saved_html = (output_directory / "20260422000832.html").read_text(encoding="utf-8")
+
+    assert payload["summary"] == {"found_files": 1, "saved_files": 1, "skipped_files": 0}
+    assert "전환사채권 발행결정" in saved_html
+    assert "발행금액 250,000,000" in saved_html
+    assert "주요사항보고서" not in saved_html
+
+
+def test_inspect_disclosure_html_sections_payload_counts_folder_coverage(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    (input_directory / "20260422000832.html").write_text(
+        """
+        <html><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+          <p>표지 내용</p>
+          <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    (input_directory / "20260423000533.html").write_text(
+        """
+        <html><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+          <p>표지 내용</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = inspect_disclosure_html_sections_payload({"input_directory": str(input_directory)})
+    sections = {section["toc_id"]: section for section in payload["sections"]}
+
+    assert payload["summary"] == {
+        "found_files": 2,
+        "section_types": 2,
+        "files_without_sections": 0,
+        "failed_files": 0,
+    }
+    assert sections["toc_1"]["file_count"] == 2
+    assert sections["toc_1"]["coverage_percent"] == 100
+    assert sections["toc_2"]["file_count"] == 1
+    assert sections["toc_2"]["coverage_percent"] == 50
+
+
 def test_merge_disclosure_content_html_payload_writes_split_json(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     (input_directory / "2024").mkdir(parents=True)
@@ -3372,6 +3477,7 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     download_ui_html = GUI_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     download_component_html = GUI_HTML_DOWNLOAD_COMPONENT.read_text(encoding="utf-8")
     content_download_ui_html = GUI_HTML_CONTENT_DOWNLOAD_PAGE.read_text(encoding="utf-8")
+    section_split_ui_html = GUI_HTML_SECTION_SPLIT_PAGE.read_text(encoding="utf-8")
     parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
     change_log_ui_html = GUI_HTML_CHANGE_LOG_PAGE.read_text(encoding="utf-8")
     utility_ui_html = GUI_UTILITY_PAGE.read_text(encoding="utf-8")
@@ -3382,6 +3488,13 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
         assert mode in parse_ui_html
     assert "/html-parse" in parse_ui_html
     assert "/html-content-download" in parse_ui_html
+    assert "공시원문 목차 분리" in section_split_ui_html
+    assert "/api/disclosures/html/sections/inspect" in section_split_ui_html
+    assert "/api/disclosures/html/sections/save/start" in section_split_ui_html
+    assert "/api/disclosures/html/sections/render" in section_split_ui_html
+    assert "목차 스캔" in section_split_ui_html
+    assert "목차 저장" in section_split_ui_html
+    assert "목차 렌더링" in section_split_ui_html
     assert "공시원문 외부 저장" in download_component_html
     assert "공시원문 내부 저장" in download_component_html
     assert "content" in content_download_ui_html
@@ -3395,7 +3508,7 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "외부 HTML 압축" in download_component_html
     assert "내부 HTML 병합" in download_component_html
     assert "외부 HTML 입력 경로" in download_component_html
-    assert "압축 JSON 저장 경로" in download_component_html
+    assert "압축 JSON 데이터 경로" in download_component_html
     assert "압축 설정" not in download_component_html
     assert "압축 처리" in download_component_html
     assert "병렬 워커 수" in download_component_html

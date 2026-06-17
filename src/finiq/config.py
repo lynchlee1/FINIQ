@@ -48,6 +48,7 @@ SAVED_SETTINGS_KEYS = (
     "integrated_history_output_path",
     "asset_excel_source_directory",
     "asset_excel_output_directory",
+    "asset_excel_account_mappings",
     "html_download_source_path",
     "html_merge_output_path",
     "html_content_compressed_json_path",
@@ -83,6 +84,7 @@ class AppConfig:
     integrated_history_output_path: str = ""
     asset_excel_source_directory: str = ""
     asset_excel_output_directory: str = ""
+    asset_excel_account_mappings: list[dict[str, Any]] = field(default_factory=list)
     html_download_source_path: str = ""
     html_merge_output_path: str = ""
     html_content_compressed_json_path: str = ""
@@ -177,6 +179,7 @@ def init_config() -> AppConfig:
         integrated_history_output_path=settings.get("integrated_history_output_path", ""),
         asset_excel_source_directory=settings.get("asset_excel_source_directory", ""),
         asset_excel_output_directory=settings.get("asset_excel_output_directory", ""),
+        asset_excel_account_mappings=settings.get("asset_excel_account_mappings", []),
         html_download_source_path=settings.get("html_download_source_path", ""),
         html_merge_output_path=settings.get("html_merge_output_path", ""),
         html_content_compressed_json_path=settings.get("html_content_compressed_json_path", ""),

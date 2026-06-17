@@ -36,6 +36,7 @@ class AssetExcelConvertRequest(BaseModel):
     selected_files: list[str] = []
     account_mappings: Optional[list[AssetAccountMappingRequest]] = None
     write_mode: str = "replace"
+    resume_failed_only: bool = False
 
 
 class AssetParquetMergeRequest(BaseModel):
@@ -46,6 +47,7 @@ class AssetParquetMergeRequest(BaseModel):
 
 def create_assets_excel_router(
     *,
+    config: Any,
     get_assets_dir: Callable[[], Path],
     run_job_worker: Callable[[str, str, dict], None],
 ) -> APIRouter:
@@ -74,7 +76,8 @@ def create_assets_excel_router(
 
     @router.get("/api/assets/excels/account-mappings")
     async def get_asset_excel_account_mappings():
-        return {"items": default_account_mappings()}
+        items = config.asset_excel_account_mappings or default_account_mappings()
+        return {"items": items}
 
     @router.get("/api/assets/parquet/preview")
     async def get_asset_parquet_preview(
@@ -107,6 +110,7 @@ def create_assets_excel_router(
                     for mapping in request.account_mappings
                 ] if request.account_mappings is not None else None,
                 write_mode=request.write_mode,
+                resume_failed_only=request.resume_failed_only,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -124,6 +128,7 @@ def create_assets_excel_router(
                     for mapping in request.account_mappings
                 ] if request.account_mappings is not None else None,
                 write_mode=request.write_mode,
+                resume_failed_only=request.resume_failed_only,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
