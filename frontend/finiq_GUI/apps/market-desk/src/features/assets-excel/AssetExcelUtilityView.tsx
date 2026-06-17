@@ -580,7 +580,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     if (activeJobId) return;
     if (isMergeMode) {
       if (!mergeBaseDirectory.trim() || !mergeIncomingDirectory.trim() || !outputDirectory.trim()) {
-        setStatus("데이터 경로를 선택하세요.");
+        setStatus("기존 변환 결과, 데이터 경로, 결과 경로를 선택하세요.");
         setIsErrorStatus(true);
         return;
       }
@@ -685,7 +685,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               {isMergeMode ? (
                 <>
                   <div className="space-y-2">
-                    <Label className="dark:text-slate-300">기존 Parquet 경로</Label>
+                    <Label className="dark:text-slate-300">기존 변환 결과</Label>
                     <PathPickerInput
                       mode="folder"
                       value={mergeBaseDirectory}
@@ -695,17 +695,17 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="dark:text-slate-300">병합할 Parquet 경로</Label>
+                    <Label className="dark:text-slate-300">데이터 경로</Label>
                     <PathPickerInput
                       mode="folder"
                       value={mergeIncomingDirectory}
                       onChange={setMergeIncomingDirectory}
-                      placeholder="/path/to/new/assets_parquet"
+                      placeholder="/path/to/converted/assets_parquet"
                       onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="dark:text-slate-300">데이터 경로</Label>
+                    <Label className="dark:text-slate-300">결과 경로</Label>
                     <PathPickerInput
                       mode="folder"
                       value={outputDirectory}
@@ -1142,10 +1142,13 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           </Card>
           ) : null}
 
-          {outputRows.length ? (
+          {isParquetPreviewMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle className="text-base dark:text-white">결과 탐색</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-base dark:text-white">
+                <Eye className="h-4 w-4" />
+                Parquet 모아보기
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
@@ -1179,6 +1182,13 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                         <td className="whitespace-nowrap px-3 py-2">{outputDateSegmentsText(item) || "-"}</td>
                       </tr>
                     ))}
+                    {!sortedOutputRows.length ? (
+                      <tr>
+                        <td colSpan={10} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
+                          표시할 Parquet 결과가 없습니다.
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

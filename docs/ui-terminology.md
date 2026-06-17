@@ -16,16 +16,11 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Viewer HTML save workflow | 공시원문 외부 저장 | Navigation/page workflow name. |
 | Content HTML save workflow | 공시원문 내부 저장 | Navigation/page workflow name. |
 | Content HTML section workflow | 공시원문 목차 분리 | Navigation/page workflow name. |
-| Content HTML section scan action | 목차 스캔 | Button/action that scans section coverage in a folder. |
-| Content HTML first document TOC action | 첫 문서 목차 | Button/action that previews the first HTML file's TOC before full folder scan. |
-| Content HTML section save action | 목차 저장 | Button/action that saves one selected section from each HTML file. |
-| Content HTML section render action | 목차 렌더링 | Button/action that renders one selected section for review. |
-| Content HTML sample shortcut | 2026 샘플 | Button that fills the bundled 2026 bond issuance HTML content folder. |
-| Content HTML section catalog | 전체 목차 목록 | Panel listing section coverage across the folder. |
-| Content HTML document catalog | 문서 목록 | Panel listing per-file section lists. |
-| Content HTML render review | 렌더링 검토 | Panel for selected document section preview. |
-| Selected section input | 저장 대상 목차 | Input containing the section used by save/render actions. |
-| Render source document input | 렌더링 문서 | Input containing the source HTML file used for preview. |
+| Content HTML section scan action | 목차 스캔 | Button/action that scans per-document TOC lists in a folder. |
+| Content HTML section save action | 목차 저장 | Button/action that splits each HTML file into TOC-specific output folders. |
+| Content HTML document TOC table | 문서별 목차 | Table listing per-file section lists. |
+| Content HTML problem file table | 문제 파일 | Table listing files without TOC sections and files that failed to read. |
+| Content HTML problem file setting | 문제 파일 표시 수 | Setting for the maximum combined problem-file rows returned by scan. |
 | Content HTML scan summary row | 스캔 결과 | Row box showing folder scan counts. |
 | Content HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | Viewer HTML save mode/button | 외부 HTML 저장 | Top mode button in 공시원문 외부 저장. |
@@ -52,6 +47,9 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Quantiwise Parquet preview workflow | Quantiwise - Parquet 미리보기 | Use for the `/utility/assets-excel/parquet` navigation label and page title. |
 | Quantiwise Parquet merge workflow | Quantiwise - 병합하기 | Use for the `/utility/assets-excel/merge` navigation label and page title. |
 | Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |
+| Quantiwise Parquet grouped result table | Parquet 모아보기 | Use for the table that lists generated Parquet outputs on `Quantiwise - Parquet 미리보기`. |
+| Quantiwise merge base result path | 기존 변환 결과 | Use for the existing converted Parquet result path on `Quantiwise - 병합하기`. |
+| Quantiwise merge output path | 결과 경로 | Use for the path where `Quantiwise - 병합하기` writes the merged Parquet result. |
 | Quantiwise conversion pre-run check | 변환 전 확인 | Use for the automatic check that scans Excel files without saving before `Quantiwise 변환`. |
 | Quantiwise account ID mapping | 계정-ID 매핑 | Use for the editable Sheet/account_id/account_name mapping in `Parquet 변환하기`. |
 | Quantiwise failed-only resume button | 실패분 이어서 실행 | Use for rerunning `Parquet 변환하기` while skipping Sheet Parquet outputs already completed in the data path. |

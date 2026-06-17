@@ -1,3 +1,39 @@
+# 2026-06-18 Quantiwise Parquet 화면 정리
+
+## Purpose
+- `Parquet 변환하기` 화면에서 `Quantiwise - Parquet 미리보기`에 속한 결과 목록을 제거한다.
+- `Quantiwise - Parquet 미리보기`의 결과 목록 명칭과 아이콘을 `Parquet 모아보기`로 맞춘다.
+- `Quantiwise - 병합하기`의 경로 입력 의미를 기존 변환 결과, 변환된 데이터 경로, 결과 경로로 명확히 한다.
+
+## Implementation Summary
+- 결과 목록 카드를 `Quantiwise - Parquet 미리보기`에서만 렌더링하게 하고 제목을 `Parquet 모아보기`로 바꿨다. 결과가 없어도 빈 상태로 카드를 표시한다.
+- `Parquet 모아보기` 제목에 `Parquet 미리보기`와 같은 눈 아이콘을 붙였다.
+- 병합 화면 라벨을 `기존 변환 결과`, `데이터 경로`, `결과 경로`로 정리하고 누락 상태 문구를 맞췄다.
+- `docs/ui-terminology.md`와 `docs/assets-excel-conversion.md`를 새 UI 용어와 병합 경로 의미에 맞게 갱신했다.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py -k "asset_excel_apis_require_explicit_output_directory or asset_parquet_preview_api or merge_asset_parquet_outputs"`.
+
+# 2026-06-18 공시원문 목차 분리 단순화
+
+## Purpose
+- KIND 내부 HTML 목차 분리를 특정 목차 선택/렌더링 흐름이 아니라 파일별 전체 목차 분리 흐름으로 정리한다.
+- 불필요한 preview/list/render API와 샘플/렌더링 UI를 제거하고, 문서별 목차 스캔과 저장 job 상태만 남긴다.
+
+## Implementation Summary
+- `/api/disclosures/html/sections/list`, `/preview`, `/render` 라우트와 관련 프론트 호출을 제거했다.
+- 스캔 결과는 문서별 목차 목록, 목차 없음 수, 읽기 실패 수, 통합 문제 파일 목록만 반환하게 했다.
+- 문제 파일 표시 수와 최대 처리 건수는 우측 설정 버튼에서 조정하게 했다.
+- 목차 저장 job은 선택 목차 없이 각 HTML의 모든 `toc_N` 섹션을 `결과 경로/<toc_id>/<원본 파일명>.html` 구조로 저장하게 했다.
+- `h2 id="toc_N"`가 없는 옛 KIND 내부 HTML은 `body` 직계 `P.SECTION-1`을 fallback 목차로 사용해 `toc_1`, `toc_2`처럼 분리하게 했다.
+
+## Verification
+- Passed: `python3 -m py_compile src/finiq/market_desk/web/disclosure_html_sections.py src/finiq/market_desk/web/routers/workflows.py`.
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_service.py -k "html_sections or html_parse_modes"`.
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_app.py -k "html_section"`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
 # 2026-06-17 페이지 이동 후 실행 로그 복구
 
 ## Purpose
