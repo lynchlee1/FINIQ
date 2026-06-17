@@ -68,9 +68,10 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     steps: [
       { href: "/html-download", step: 1, label: "공시원문 외부 저장" },
       { href: "/html-content-download", step: 2, label: "공시원문 내부 저장" },
-      { href: "/html-parse", step: 3, label: "공시원문 변환" },
-      { href: "/html-change-log", step: 4, label: "공시 정정내역 한눈에" },
-      { href: "/html-bond-summary", step: 5, label: "발행내역 한눈에" },
+      { href: "/html-section-split", step: 3, label: "공시원문 목차 분리" },
+      { href: "/html-parse", step: 4, label: "공시원문 변환" },
+      { href: "/html-change-log", step: 5, label: "공시 정정내역 한눈에" },
+      { href: "/html-bond-summary", step: 6, label: "발행내역 한눈에" },
     ],
   },
   utility: {
@@ -140,7 +141,7 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
         steps: WORKFLOWS["html-processing"].steps,
       },
       {
-        label: "외부 데이터 변환",
+        label: "유틸리티",
         steps: [partitionStorageStep],
       },
       {

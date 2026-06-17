@@ -15,6 +15,10 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | --- | --- | --- |
 | Viewer HTML save workflow | 공시원문 외부 저장 | Navigation/page workflow name. |
 | Content HTML save workflow | 공시원문 내부 저장 | Navigation/page workflow name. |
+| Content HTML section workflow | 공시원문 목차 분리 | Navigation/page workflow name. |
+| Content HTML section scan action | 목차 스캔 | Button/action that scans section coverage in a folder. |
+| Content HTML section save action | 목차 저장 | Button/action that saves one selected section from each HTML file. |
+| Content HTML section render action | 목차 렌더링 | Button/action that renders one selected section for review. |
 | Viewer HTML save mode/button | 외부 HTML 저장 | Top mode button in 공시원문 외부 저장. |
 | Viewer HTML compression mode/button | 외부 HTML 압축 | Use for the compact JSON creation from saved viewer HTML. |
 | Content HTML save mode/button | 내부 HTML 저장 | Top mode button in 공시원문 내부 저장. |
@@ -28,7 +32,8 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
-| Quantiwise sidebar group | Quantiwise | Use as a peer sidebar group to `외부 데이터 변환`. |
+| Utility sidebar group | 유틸리티 | Use for the sidebar group containing `분할저장`. |
+| Quantiwise sidebar group | Quantiwise | Use as a peer sidebar group to `유틸리티`. |
 | Quantiwise Excel preview sidebar item | Excel 미리보기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel`. |
 | Quantiwise convert sidebar item | Parquet 변환하기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel/convert`. |
 | Quantiwise Parquet preview sidebar item | Parquet 미리보기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel/parquet`. |
@@ -40,6 +45,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |
 | Quantiwise conversion pre-run check | 변환 전 확인 | Use for the automatic check that scans Excel files without saving before `Quantiwise 변환`. |
 | Quantiwise account ID mapping | 계정-ID 매핑 | Use for the editable Sheet/account_id/account_name mapping in `Parquet 변환하기`. |
+| Quantiwise failed-only resume button | 실패분 이어서 실행 | Use for rerunning `Parquet 변환하기` while skipping Sheet Parquet outputs already completed in the data path. |
 
 ## Ontology Workflow
 

@@ -45,6 +45,7 @@ class SettingsUpdate(BaseModel):
     integrated_history_output_path: Optional[str] = None
     asset_excel_source_directory: Optional[str] = None
     asset_excel_output_directory: Optional[str] = None
+    asset_excel_account_mappings: Optional[list[dict[str, Any]]] = None
     html_download_source_path: Optional[str] = None
     html_merge_output_path: Optional[str] = None
     html_content_compressed_json_path: Optional[str] = None
@@ -153,6 +154,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "integrated_history_output_path": config.integrated_history_output_path,
             "asset_excel_source_directory": config.asset_excel_source_directory,
             "asset_excel_output_directory": config.asset_excel_output_directory,
+            "asset_excel_account_mappings": config.asset_excel_account_mappings,
             "html_download_source_path": config.html_download_source_path,
             "html_merge_output_path": config.html_merge_output_path,
             "html_content_compressed_json_path": config.html_content_compressed_json_path,
@@ -199,7 +201,13 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 continue
             if key == "html_parse_mode":
                 normalized = str(value)
-            elif key in ("integrated_data_values", "change_log_date_thresholds", "change_log_numeric_thresholds", "condition_presets") and isinstance(value, (dict, list)):
+            elif key in (
+                "integrated_data_values",
+                "change_log_date_thresholds",
+                "change_log_numeric_thresholds",
+                "condition_presets",
+                "asset_excel_account_mappings",
+            ) and isinstance(value, (dict, list)):
                 normalized = value
             else:
                 normalized = normalize_path(str(value))

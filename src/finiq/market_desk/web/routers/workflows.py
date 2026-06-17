@@ -24,6 +24,11 @@ from finiq.market_desk.web.disclosure_html_parse import (
     build_parse_export_xlsx,
     cancel_disclosure_html_parse,
 )
+from finiq.market_desk.web.disclosure_html_sections import (
+    inspect_disclosure_html_sections_payload,
+    list_disclosure_html_sections_payload,
+    render_disclosure_html_section_payload,
+)
 from finiq.market_desk.web.jobs import job_manager
 from finiq.market_desk.web.table_export import build_disclosure_table_payload
 
@@ -274,6 +279,36 @@ def create_workflows_router(
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
         )
+
+    @router.post("/api/disclosures/html/sections/save/start")
+    async def start_html_section_save(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="section_save",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/html/sections/list")
+    async def list_html_sections(payload: dict[str, Any]):
+        try:
+            return list_disclosure_html_sections_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/sections/inspect")
+    async def inspect_html_sections(payload: dict[str, Any]):
+        try:
+            return inspect_disclosure_html_sections_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/sections/render")
+    async def render_html_section(payload: dict[str, Any]):
+        try:
+            return render_disclosure_html_section_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/parse/cancel")
     async def cancel_html_parse_route(payload: dict[str, Any]):

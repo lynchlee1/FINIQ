@@ -80,6 +80,45 @@ def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
     assert data["asset_excel_output_directory"] == str(output_directory.resolve())
 
 
+def test_api_settings_persists_asset_excel_account_mappings(tmp_path: Path, monkeypatch):
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(config, "settings_path", str(settings_path))
+    monkeypatch.setattr(config, "asset_excel_account_mappings", [])
+    mappings = [
+        {
+            "account_id": "A90001",
+            "account_name": "customClose",
+            "legacy_account_name": "stock_price",
+            "sheet_name": "종가",
+        },
+        {
+            "account_id": "A90002",
+            "account_name": "customOpen",
+            "legacy_account_name": "stock_open",
+            "sheet_name": "시가",
+        },
+    ]
+
+    client = TestClient(app)
+    response = client.post("/api/settings", json={
+        "asset_excel_account_mappings": mappings,
+    })
+
+    assert response.status_code == 200
+    assert response.json()["asset_excel_account_mappings"] == mappings
+
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    assert response.json()["asset_excel_account_mappings"] == mappings
+
+    response = client.get("/api/assets/excels/account-mappings")
+    assert response.status_code == 200
+    assert response.json()["items"] == mappings
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["asset_excel_account_mappings"] == mappings
+
+
 def test_api_settings_does_not_discover_files(tmp_path: Path, monkeypatch):
     def fail_discovery(*args, **kwargs):
         raise AssertionError("settings save should not scan source directories")
