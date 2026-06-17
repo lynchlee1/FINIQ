@@ -68,6 +68,12 @@ def _read_output_sheet(payload: dict, output_dir, sheet_name: str, relative_path
     return pd.read_parquet(output_dir / item["output_file"])
 
 
+def _write_account_parquet(output_dir, file_name: str, dates: list[str], values_by_code: dict[str, list[object]]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows = {"date": [pd.Timestamp(value) for value in dates], **values_by_code}
+    pd.DataFrame(rows).to_parquet(output_dir / file_name, index=False)
+
+
 def test_list_and_read_asset_excel(tmp_path):
     excel_path = tmp_path / "sample.xlsx"
     pd.DataFrame(
@@ -854,9 +860,7 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
         _write_quanti_sheet(
             writer,
             "종가",
-            [[pd.Timestamp("2020-01-06"), 101, 201]],
-            codes=["A035420", "A051910"],
-            names=["NAVER", "LG화학"],
+            [[pd.Timestamp("2020-01-04"), 101, 201]],
         )
     convert_asset_excels_to_wide_parquet(first_source, first_output)
     convert_asset_excels_to_wide_parquet(second_source, second_output)
@@ -867,15 +871,111 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
     stock_price = pd.read_parquet(merged_file)
     assert payload["operation"] == "merge_parquet"
     assert payload["accounts_processed"] == 1
-    assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-06"]
-    assert stock_price.columns.tolist() == ["date", "A005930", "A000660", "A035420", "A051910"]
+    assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04"]
+    assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
     mapping = pd.read_parquet(merged_output / "code_name_mapping.parquet")
     assert mapping[["code", "name"]].to_dict("records") == [
         {"code": "A000660", "name": "SK하이닉스"},
         {"code": "A005930", "name": "삼성전자"},
-        {"code": "A035420", "name": "NAVER"},
-        {"code": "A051910", "name": "LG화학"},
     ]
+
+
+def test_merge_asset_parquet_outputs_allows_same_dates_extending_codes(tmp_path):
+    first_output = tmp_path / "first-parquet"
+    second_output = tmp_path / "second-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        first_output,
+        "close_20200103_20200104.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101]},
+    )
+    _write_account_parquet(
+        second_output,
+        "close_20200103_20200104.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A000660": [200, 201]},
+    )
+
+    payload = merge_asset_parquet_outputs(first_output, second_output, merged_output)
+
+    stock_price = pd.read_parquet(merged_output / "close.parquet")
+    assert payload["accounts_processed"] == 1
+    assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
+    assert stock_price["A005930"].tolist() == [100, 101]
+    assert stock_price["A000660"].tolist() == [200, 201]
+
+
+def test_merge_asset_parquet_outputs_rejects_partial_rectangle(tmp_path):
+    first_output = tmp_path / "first-parquet"
+    second_output = tmp_path / "second-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        first_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        second_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A000660": [201]},
+    )
+
+    with pytest.raises(ValueError, match="partially filled table"):
+        merge_asset_parquet_outputs(first_output, second_output, merged_output)
+
+
+def test_merge_asset_parquet_outputs_rejects_disconnected_date_ranges(tmp_path):
+    first_output = tmp_path / "first-parquet"
+    second_output = tmp_path / "second-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        first_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        second_output,
+        "close_20200105_20200105.parquet",
+        ["2020-01-05"],
+        {"A005930": [102]},
+    )
+
+    with pytest.raises(ValueError, match="date ranges are not connected"):
+        merge_asset_parquet_outputs(first_output, second_output, merged_output)
+
+
+def test_merge_asset_parquet_outputs_reads_all_files_for_same_account(tmp_path):
+    first_output = tmp_path / "first-parquet"
+    second_output = tmp_path / "second-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        first_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        first_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+    _write_account_parquet(
+        second_output,
+        "close_20200105_20200105.parquet",
+        ["2020-01-05"],
+        {"A005930": [102]},
+    )
+
+    merge_asset_parquet_outputs(first_output, second_output, merged_output)
+
+    stock_price = pd.read_parquet(merged_output / "close.parquet")
+    assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04", "2020-01-05"]
+    assert stock_price["A005930"].tolist() == [100, 101, 102]
 
 
 def test_merge_asset_parquet_outputs_rejects_blank_inputs_before_output_created(tmp_path):

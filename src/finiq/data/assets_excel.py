@@ -820,6 +820,7 @@ def _merge_account_frames(
     account_name: str,
     frames: list[tuple[pd.DataFrame, SourceInfo]],
 ) -> tuple[pd.DataFrame, list[dict[str, str]]]:
+    _validate_rectangular_merge(account_name, frames)
     merged = pd.DataFrame()
     conflicts: list[dict[str, str]] = []
     def sort_key(item: tuple[pd.DataFrame, SourceInfo]) -> Any:
@@ -846,6 +847,67 @@ def _merge_account_frames(
             merged = merged.combine_first(frame)
 
     return merged.sort_index(), conflicts
+
+
+def _frame_date_range(frame: pd.DataFrame) -> tuple[date, date] | None:
+    if frame.empty or len(frame.index) == 0:
+        return None
+    start = frame.index.min()
+    end = frame.index.max()
+    if pd.isna(start) or pd.isna(end):
+        return None
+    return start, end
+
+
+def _date_ranges_are_connected(ranges: list[tuple[date, date]]) -> bool:
+    if not ranges:
+        return True
+    current_start, current_end = sorted(ranges)[0]
+    for next_start, next_end in sorted(ranges)[1:]:
+        if next_start > current_end + timedelta(days=1):
+            return False
+        current_end = max(current_end, next_end)
+    return True
+
+
+def _validate_rectangular_merge(
+    account_name: str,
+    frames: list[tuple[pd.DataFrame, SourceInfo]],
+) -> None:
+    active_frames = [(frame, source) for frame, source in frames if len(frame.index) and len(frame.columns)]
+    if len(active_frames) <= 1:
+        return
+
+    date_ranges = [
+        date_range
+        for frame, _source in active_frames
+        if (date_range := _frame_date_range(frame)) is not None
+    ]
+    if not _date_ranges_are_connected(date_ranges):
+        msg = (
+            f"Cannot merge {account_name}: date ranges are not connected. "
+            "Date ranges must overlap or touch with a one-day boundary."
+        )
+        raise ValueError(msg)
+
+    all_codes: set[str] = set()
+    codes_by_date: dict[date, set[str]] = {}
+    for frame, _source in active_frames:
+        frame_codes = {str(column) for column in frame.columns}
+        all_codes.update(frame_codes)
+        for row_date in set(frame.index):
+            codes_by_date.setdefault(row_date, set()).update(frame_codes)
+
+    for row_date in sorted(codes_by_date):
+        missing_codes = sorted(all_codes - codes_by_date[row_date])
+        if missing_codes:
+            sample = ", ".join(missing_codes[:3])
+            suffix = "..." if len(missing_codes) > 3 else ""
+            msg = (
+                f"Cannot merge {account_name}: merge would create a partially filled table. "
+                f"Missing structural cells on {row_date.isoformat()} for codes {sample}{suffix}."
+            )
+            raise ValueError(msg)
 
 
 def _code_name_mapping_frame(mappings: list[CodeNameMapping]) -> pd.DataFrame:
@@ -922,43 +984,43 @@ def _existing_code_name_mappings(output_directory: Path) -> list[CodeNameMapping
     return mappings
 
 
-def _existing_account_frame(
+def _existing_account_frames(
     account_name: str,
     output_directory: Path,
     output_info: dict[str, Any],
     *,
     source_type: str = "existing_output",
-) -> tuple[pd.DataFrame, SourceInfo] | None:
+) -> list[tuple[pd.DataFrame, SourceInfo]]:
     parquet_paths = [output_directory / f"{account_name}.parquet"]
     parquet_paths.extend(
         path
         for path in sorted(output_directory.glob(f"{account_name}_*.parquet"))
         if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
     )
-    parquet_path = next((path for path in parquet_paths if path.exists()), None)
-    if parquet_path is None:
-        return None
-    frame = pd.read_parquet(parquet_path)
-    if "date" not in frame.columns:
-        return None
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date
-    frame = frame.dropna(subset=["date"]).set_index("date")
+    frames: list[tuple[pd.DataFrame, SourceInfo]] = []
     account_meta = output_info.get("accounts", {}).get(account_name, {})
     if not isinstance(account_meta, dict):
         account_meta = {}
-    date_segments = _compact_date_segments(account_meta.get("date_segments")) or _single_date_segment_payload(frame.index)
-    source_info = {
-        "file_name": parquet_path.name,
-        "sheet_name": "__existing_parquet__",
-        "date_start": frame.index.min().isoformat() if len(frame.index) else "",
-        "date_end": frame.index.max().isoformat() if len(frame.index) else "",
-        "date_segments": date_segments,
-        "rows": len(frame),
-        "columns": len(frame.columns),
-        "source_directory": str(output_directory),
-        "source_type": source_type,
-    }
-    return frame, source_info
+    for parquet_path in [path for path in parquet_paths if path.exists()]:
+        frame = pd.read_parquet(parquet_path)
+        if "date" not in frame.columns:
+            continue
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date
+        frame = frame.dropna(subset=["date"]).set_index("date")
+        date_segments = _compact_date_segments(account_meta.get("date_segments")) or _single_date_segment_payload(frame.index)
+        source_info = {
+            "file_name": parquet_path.name,
+            "sheet_name": "__existing_parquet__",
+            "date_start": frame.index.min().isoformat() if len(frame.index) else "",
+            "date_end": frame.index.max().isoformat() if len(frame.index) else "",
+            "date_segments": date_segments,
+            "rows": len(frame),
+            "columns": len(frame.columns),
+            "source_directory": str(output_directory),
+            "source_type": source_type,
+        }
+        frames.append((frame, source_info))
+    return frames
 
 
 def _parquet_account_names(directory: Path) -> list[str]:
@@ -1776,17 +1838,15 @@ def merge_asset_parquet_outputs(
             if cancel_check and cancel_check():
                 raise RuntimeError("Job cancelled")
             _emit(progress_callback, f"Reading {source_dir.name}/{account_name}.parquet...")
-            loaded = _existing_account_frame(
+            loaded_frames = _existing_account_frames(
                 account_name,
                 source_dir,
                 output_info,
                 source_type=source_type,
             )
-            if loaded is None:
-                continue
-            frame, source_info = loaded
-            frames_by_account.setdefault(account_name, []).append((frame, source_info))
-            sources_by_account.setdefault(account_name, []).append(source_info)
+            for frame, source_info in loaded_frames:
+                frames_by_account.setdefault(account_name, []).append((frame, source_info))
+                sources_by_account.setdefault(account_name, []).append(source_info)
 
     code_name_mapping = _code_name_mapping_frame([
         *_existing_code_name_mappings(base),
