@@ -9,8 +9,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from finiq.data.assets_excel import (
-    DEFAULT_ASSET_PARQUET_DIR,
     convert_asset_excels_to_wide_parquet,
+    default_account_mappings,
     inspect_asset_excel_conversion,
     inspect_asset_excel_output,
     list_asset_excel_files,
@@ -23,10 +23,18 @@ from finiq.data.assets_excel import (
 from finiq.market_desk.web.jobs import job_manager
 
 
+class AssetAccountMappingRequest(BaseModel):
+    account_id: str = ""
+    account_name: str = ""
+    legacy_account_name: str = ""
+    sheet_name: str = ""
+
+
 class AssetExcelConvertRequest(BaseModel):
     source_directory: Optional[str] = None
     output_directory: Optional[str] = None
     selected_files: list[str] = []
+    account_mappings: Optional[list[AssetAccountMappingRequest]] = None
     write_mode: str = "replace"
 
 
@@ -43,21 +51,30 @@ def create_assets_excel_router(
 ) -> APIRouter:
     router = APIRouter()
 
+    def _required_path(value: Optional[str], field_name: str) -> str:
+        resolved = str(value or "").strip()
+        if not resolved:
+            raise HTTPException(status_code=400, detail=f"{field_name} is required")
+        return resolved
+
     def _assets_dir(source_directory: Optional[str] = None) -> Path:
-        return Path(source_directory).expanduser().resolve() if source_directory else get_assets_dir()
+        return Path(_required_path(source_directory, "source_directory")).expanduser().resolve()
 
     @router.get("/api/assets/excels")
     async def get_asset_excels(source_directory: Optional[str] = None):
         assets_dir = _assets_dir(source_directory)
         return {
             "root_directory": str(assets_dir.resolve()),
-            "default_output_directory": str(DEFAULT_ASSET_PARQUET_DIR.resolve()),
             "excel_files": list_asset_excel_files(assets_dir),
         }
 
     @router.get("/api/assets/excels/output")
     async def get_asset_excel_output(output_directory: Optional[str] = None):
-        return inspect_asset_excel_output(output_directory or DEFAULT_ASSET_PARQUET_DIR)
+        return inspect_asset_excel_output(_required_path(output_directory, "output_directory"))
+
+    @router.get("/api/assets/excels/account-mappings")
+    async def get_asset_excel_account_mappings():
+        return {"items": default_account_mappings()}
 
     @router.get("/api/assets/parquet/preview")
     async def get_asset_parquet_preview(
@@ -69,7 +86,7 @@ def create_assets_excel_router(
             return await asyncio.to_thread(
                 read_asset_parquet_preview,
                 file_name,
-                output_directory=output_directory or DEFAULT_ASSET_PARQUET_DIR,
+                output_directory=_required_path(output_directory, "output_directory"),
                 row_limit=row_limit,
             )
         except FileNotFoundError as exc:
@@ -83,8 +100,12 @@ def create_assets_excel_router(
             return await asyncio.to_thread(
                 inspect_asset_excel_conversion,
                 _assets_dir(request.source_directory),
-                request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
+                _required_path(request.output_directory, "output_directory"),
                 selected_files=request.selected_files or None,
+                account_mappings=[
+                    mapping.model_dump()
+                    for mapping in request.account_mappings
+                ] if request.account_mappings is not None else None,
                 write_mode=request.write_mode,
             )
         except ValueError as exc:
@@ -96,8 +117,12 @@ def create_assets_excel_router(
             return await asyncio.to_thread(
                 convert_asset_excels_to_wide_parquet,
                 _assets_dir(request.source_directory),
-                request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
+                _required_path(request.output_directory, "output_directory"),
                 selected_files=request.selected_files or None,
+                account_mappings=[
+                    mapping.model_dump()
+                    for mapping in request.account_mappings
+                ] if request.account_mappings is not None else None,
                 write_mode=request.write_mode,
             )
         except ValueError as exc:
@@ -105,6 +130,8 @@ def create_assets_excel_router(
 
     @router.post("/api/assets/excels/convert-wide-parquet/start")
     async def start_convert_asset_excels(request: AssetExcelConvertRequest, background_tasks: BackgroundTasks):
+        _assets_dir(request.source_directory)
+        _required_path(request.output_directory, "output_directory")
         job_id = uuid.uuid4().hex
         job_manager.create_job(job_id, "asset_excel_convert")
         background_tasks.add_task(
@@ -120,15 +147,18 @@ def create_assets_excel_router(
         try:
             return await asyncio.to_thread(
                 merge_asset_parquet_outputs,
-                request.base_directory,
-                request.incoming_directory,
-                request.output_directory or DEFAULT_ASSET_PARQUET_DIR,
+                _required_path(request.base_directory, "base_directory"),
+                _required_path(request.incoming_directory, "incoming_directory"),
+                _required_path(request.output_directory, "output_directory"),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/assets/parquet/merge/start")
     async def start_merge_asset_parquet_outputs(request: AssetParquetMergeRequest, background_tasks: BackgroundTasks):
+        _required_path(request.base_directory, "base_directory")
+        _required_path(request.incoming_directory, "incoming_directory")
+        _required_path(request.output_directory, "output_directory")
         job_id = uuid.uuid4().hex
         job_manager.create_job(job_id, "asset_excel_merge")
         background_tasks.add_task(

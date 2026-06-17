@@ -12,7 +12,7 @@ from numbers import Number
 import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import pandas as pd
 
@@ -27,6 +27,7 @@ ProgressCallback = Callable[[str], None]
 SourceInfo = dict[str, Any]
 CodeNameMapping = dict[str, str]
 AccountMapping = dict[str, str]
+AccountMappingInput = Mapping[str, Any]
 
 SHEET_ACCOUNT_NAMES = {
     "종가": "stock_price",
@@ -103,6 +104,63 @@ ACCOUNT_REGISTRY = {
 }
 
 
+def default_account_mappings() -> list[AccountMapping]:
+    return [dict(mapping) for mapping in ACCOUNT_REGISTRY.values()]
+
+
+def _normalize_account_mappings(account_mappings: list[AccountMappingInput] | None = None) -> list[AccountMapping]:
+    if account_mappings is None:
+        return default_account_mappings()
+
+    rows: list[AccountMapping] = []
+    seen_sheets: set[str] = set()
+    seen_ids: set[str] = set()
+    for index, mapping in enumerate(account_mappings, start=1):
+        sheet_name = _normalize_label(mapping.get("sheet_name"))
+        account_name = _normalize_label(mapping.get("account_name"))
+        account_id = _normalize_label(mapping.get("account_id"))
+        legacy_account_name = _normalize_label(mapping.get("legacy_account_name"))
+        if not sheet_name:
+            raise ValueError(f"account_mappings[{index}].sheet_name is required")
+        if not account_id:
+            raise ValueError(f"account_mappings[{index}].account_id is required")
+        if not account_name:
+            raise ValueError(f"account_mappings[{index}].account_name is required")
+        if "_" in account_id:
+            raise ValueError(f"account_mappings[{index}].account_id cannot contain underscore")
+        if "_" in account_name:
+            raise ValueError(f"account_mappings[{index}].account_name cannot contain underscore")
+        if sheet_name in seen_sheets:
+            raise ValueError(f"Duplicate account mapping sheet_name: {sheet_name}")
+        if account_id in seen_ids:
+            raise ValueError(f"Duplicate account mapping account_id: {account_id}")
+        seen_sheets.add(sheet_name)
+        seen_ids.add(account_id)
+        rows.append(
+            {
+                "account_id": account_id,
+                "account_name": account_name,
+                "legacy_account_name": legacy_account_name,
+                "sheet_name": sheet_name,
+            }
+        )
+    return rows
+
+
+def _account_mapping_by_sheet(account_mappings: list[AccountMappingInput] | None = None) -> dict[str, AccountMapping]:
+    return {
+        mapping["sheet_name"]: mapping
+        for mapping in _normalize_account_mappings(account_mappings)
+    }
+
+
+def _account_mapping_by_name(account_mappings: list[AccountMappingInput] | None = None) -> dict[str, AccountMapping]:
+    return {
+        mapping["account_name"]: mapping
+        for mapping in _normalize_account_mappings(account_mappings)
+    }
+
+
 def _resolve_asset_excel_path(file_name: str | Path, root_directory: str | Path = QUANTIWISE_EXCEL_DIR) -> Path:
     root = Path(root_directory).expanduser().resolve()
     requested = Path(file_name)
@@ -164,12 +222,16 @@ def _normalize_label(value: object) -> str:
     return unicodedata.normalize("NFC", str(value or "")).strip()
 
 
-def _account_name_for_sheet(sheet_name: str) -> str | None:
-    return SHEET_ACCOUNT_KEYS.get(_normalize_label(sheet_name))
+def _account_name_for_sheet(sheet_name: str, account_mappings: list[AccountMappingInput] | None = None) -> str | None:
+    mapping = _account_mapping_by_sheet(account_mappings).get(_normalize_label(sheet_name))
+    return mapping["account_name"] if mapping else None
 
 
-def _account_mapping_for_name(account_name: str) -> AccountMapping:
-    return ACCOUNT_REGISTRY.get(
+def _account_mapping_for_name(
+    account_name: str,
+    account_mappings: list[AccountMappingInput] | None = None,
+) -> AccountMapping:
+    return _account_mapping_by_name(account_mappings).get(
         account_name,
         {
             "account_id": "",
@@ -438,14 +500,15 @@ def _sheet_summary_payload(
     *,
     source_directory: Path | None = None,
     account_name: str | None = None,
+    account_mappings: list[AccountMappingInput] | None = None,
     frame: pd.DataFrame | None = None,
     reason: str = "",
 ) -> dict[str, Any]:
-    resolved_account_name = _account_name_for_sheet(sheet_name) if account_name is None else account_name
+    resolved_account_name = _account_name_for_sheet(sheet_name, account_mappings) if account_name is None else account_name
     status = "mapped"
     if resolved_account_name is None:
         status = "unmapped"
-        reason = reason or "No account-name mapping"
+        reason = reason or ("No account-name mapping" if account_mappings is not None else "Unmapped sheet name")
     elif frame is None:
         status = "format_error"
     payload = {
@@ -725,23 +788,19 @@ def _find_conflicts(
     return conflicts
 
 
-def _account_quality_payload(frame: pd.DataFrame, sample_limit: int = 3) -> dict[str, Any]:
+def _account_quality_payload(frame: pd.DataFrame) -> dict[str, Any]:
     if frame.empty:
         return {
             "non_null_cells": 0,
             "total_cells": 0,
             "missing_ratio": 0,
-            "sample_rows": [],
         }
     total_cells = int(frame.shape[0] * frame.shape[1])
     non_null_cells = int(frame.notna().sum().sum())
-    preview = frame.tail(max(0, int(sample_limit))).reset_index()
-    preview.columns = [str(column) for column in preview.columns]
     return {
         "non_null_cells": non_null_cells,
         "total_cells": total_cells,
         "missing_ratio": round(1 - (non_null_cells / total_cells), 6) if total_cells else 0,
-        "sample_rows": _json_rows(preview),
     }
 
 
@@ -814,9 +873,12 @@ def _code_name_mapping_frame(mappings: list[CodeNameMapping]) -> pd.DataFrame:
     )
 
 
-def _account_mapping_frame(account_names: list[str]) -> pd.DataFrame:
+def _account_mapping_frame(
+    account_names: list[str],
+    account_mappings: list[AccountMappingInput] | None = None,
+) -> pd.DataFrame:
     rows = [
-        _account_mapping_for_name(account_name)
+        _account_mapping_for_name(account_name, account_mappings)
         for account_name in sorted(set(account_names))
     ]
     return pd.DataFrame(
@@ -872,13 +934,13 @@ def _existing_account_frame(
     account_meta = output_info.get("accounts", {}).get(account_name, {})
     if not isinstance(account_meta, dict):
         account_meta = {}
+    date_segments = _compact_date_segments(account_meta.get("date_segments")) or _single_date_segment_payload(frame.index)
     source_info = {
         "file_name": parquet_path.name,
         "sheet_name": "__existing_parquet__",
         "date_start": frame.index.min().isoformat() if len(frame.index) else "",
         "date_end": frame.index.max().isoformat() if len(frame.index) else "",
-        "date_index": _date_index_payload(frame.index),
-        "date_segments": account_meta.get("date_segments") or _single_date_segment_payload(frame.index),
+        "date_segments": date_segments,
         "rows": len(frame),
         "columns": len(frame.columns),
         "source_directory": str(output_directory),
@@ -918,6 +980,7 @@ def _scan_asset_excel_frames(
     source_directory: str | Path,
     *,
     selected_files: list[str] | None = None,
+    account_mappings: list[AccountMappingInput] | None = None,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[
@@ -960,13 +1023,14 @@ def _scan_asset_excel_frames(
             if cancel_check and cancel_check():
                 raise RuntimeError("Job cancelled")
             _emit(progress_callback, f"[Sheet {sheet_index}/{len(excel.sheet_names)}] {xlsx_path.name} / {sheet_name}")
-            account_name = _account_name_for_sheet(sheet_name)
+            account_name = _account_name_for_sheet(sheet_name, account_mappings)
             if account_name is None:
                 summary = _sheet_summary_payload(
                     xlsx_path,
                     sheet_name,
                     source_directory=source,
                     account_name=account_name,
+                    account_mappings=account_mappings,
                 )
                 file_skipped.append(
                     {
@@ -988,6 +1052,7 @@ def _scan_asset_excel_frames(
                     sheet_name,
                     source_directory=source,
                     account_name=account_name,
+                    account_mappings=account_mappings,
                     reason=str(exc),
                 )
                 file_skipped.append(
@@ -1007,7 +1072,7 @@ def _scan_asset_excel_frames(
             date_start = frame.index.min().isoformat() if len(frame.index) else ""
             date_end = frame.index.max().isoformat() if len(frame.index) else ""
             output_stem = _sheet_output_stem(account_name, date_start, date_end)
-            account_mapping = _account_mapping_for_name(account_name)
+            account_mapping = _account_mapping_for_name(account_name, account_mappings)
             source_info = {
                 "file_name": xlsx_path.name,
                 "relative_path": relative_path,
@@ -1018,7 +1083,6 @@ def _scan_asset_excel_frames(
                 "output_stem": output_stem,
                 "date_start": date_start,
                 "date_end": date_end,
-                "date_index": _date_index_payload(frame.index),
                 "date_segments": _single_date_segment_payload(frame.index),
                 "rows": len(frame),
                 "columns": len(frame.columns),
@@ -1030,6 +1094,7 @@ def _scan_asset_excel_frames(
                 sheet_name,
                 source_directory=source,
                 account_name=account_name,
+                account_mappings=account_mappings,
                 frame=frame,
             )
             summary["output_file"] = f"{output_stem}.parquet"
@@ -1080,13 +1145,6 @@ def _scan_asset_excel_frames(
     return scanned_sheets, sources_by_account, skipped, sheet_summaries, code_name_mappings
 
 
-def _date_index_payload(index: pd.Index) -> list[str]:
-    return [
-        value.isoformat() if hasattr(value, "isoformat") else str(value)
-        for value in index
-    ]
-
-
 def _single_date_segment_payload(index: pd.Index) -> list[dict[str, Any]]:
     values = sorted(index)
     if not values:
@@ -1095,9 +1153,22 @@ def _single_date_segment_payload(index: pd.Index) -> list[dict[str, Any]]:
         {
             "start": values[0].isoformat(),
             "end": values[-1].isoformat(),
-            "count": len(values),
         }
     ]
+
+
+def _compact_date_segments(segments: Any) -> list[dict[str, str]]:
+    compact: list[dict[str, str]] = []
+    if not isinstance(segments, list):
+        return compact
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        start = str(segment.get("start") or "")
+        end = str(segment.get("end") or "")
+        if start and end:
+            compact.append({"start": start, "end": end})
+    return compact
 
 
 def _ranges_are_continuous(previous_end: date, next_start: date) -> bool:
@@ -1110,7 +1181,7 @@ def _ranges_are_continuous(previous_end: date, next_start: date) -> bool:
     return bool(missing_dates) and all(value.weekday() >= 5 for value in missing_dates)
 
 
-def _merged_date_segments_payload(index: pd.Index, sources: list[SourceInfo]) -> list[dict[str, Any]]:
+def _merged_date_segments_payload(sources: list[SourceInfo]) -> list[dict[str, Any]]:
     ranges: list[tuple[date, date]] = []
     for source in sources:
         for segment in source.get("date_segments", []):
@@ -1134,12 +1205,10 @@ def _merged_date_segments_payload(index: pd.Index, sources: list[SourceInfo]) ->
         else:
             merged_ranges.append((start, end))
 
-    date_values = set(index)
     return [
         {
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "count": sum(1 for value in date_values if start <= value <= end),
         }
         for start, end in merged_ranges
     ]
@@ -1156,6 +1225,7 @@ def _scan_and_write_asset_excel_parquet(
     final_output: Path,
     *,
     selected_files: list[str] | None = None,
+    account_mappings: list[AccountMappingInput] | None = None,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[
@@ -1190,13 +1260,14 @@ def _scan_and_write_asset_excel_parquet(
             if cancel_check and cancel_check():
                 raise RuntimeError("Job cancelled")
             _emit(progress_callback, f"[Sheet {sheet_index}/{len(excel.sheet_names)}] {xlsx_path.name} / {sheet_name}")
-            account_name = _account_name_for_sheet(sheet_name)
+            account_name = _account_name_for_sheet(sheet_name, account_mappings)
             if account_name is None:
                 summary = _sheet_summary_payload(
                     xlsx_path,
                     sheet_name,
                     source_directory=source,
                     account_name=account_name,
+                    account_mappings=account_mappings,
                 )
                 file_skipped.append(
                     {
@@ -1218,6 +1289,7 @@ def _scan_and_write_asset_excel_parquet(
                     sheet_name,
                     source_directory=source,
                     account_name=account_name,
+                    account_mappings=account_mappings,
                     reason=str(exc),
                 )
                 file_skipped.append(
@@ -1238,7 +1310,7 @@ def _scan_and_write_asset_excel_parquet(
             date_start = frame.index.min().isoformat() if len(frame.index) else ""
             date_end = frame.index.max().isoformat() if len(frame.index) else ""
             output_stem = _sheet_output_stem(account_name, date_start, date_end)
-            account_mapping = _account_mapping_for_name(account_name)
+            account_mapping = _account_mapping_for_name(account_name, account_mappings)
             source_info = {
                 "file_name": xlsx_path.name,
                 "relative_path": relative_path,
@@ -1249,7 +1321,6 @@ def _scan_and_write_asset_excel_parquet(
                 "output_stem": output_stem,
                 "date_start": date_start,
                 "date_end": date_end,
-                "date_index": _date_index_payload(frame.index),
                 "date_segments": _single_date_segment_payload(frame.index),
                 "rows": len(frame),
                 "columns": len(frame.columns),
@@ -1261,6 +1332,7 @@ def _scan_and_write_asset_excel_parquet(
                 sheet_name,
                 source_directory=source,
                 account_name=account_name,
+                account_mappings=account_mappings,
                 frame=frame,
             )
             summary["output_file"] = f"{output_stem}.parquet"
@@ -1370,7 +1442,6 @@ def _scan_and_write_asset_excel_parquet(
             "columns": source_info.get("columns", 0),
             "date_start": source_info.get("date_start", ""),
             "date_end": source_info.get("date_end", ""),
-            "date_index": source_info.get("date_index", []),
             "date_segments": source_info.get("date_segments", []),
             "sources": [source_info],
             "quality": output_item["quality"],
@@ -1384,6 +1455,7 @@ def convert_asset_excels_to_wide_parquet(
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
     selected_files: list[str] | None = None,
+    account_mappings: list[AccountMappingInput] | None = None,
     write_mode: str = "replace",
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
@@ -1423,6 +1495,7 @@ def convert_asset_excels_to_wide_parquet(
             temp_output,
             output,
             selected_files=selected_files,
+            account_mappings=account_mappings,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
@@ -1431,7 +1504,7 @@ def convert_asset_excels_to_wide_parquet(
     code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
     code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
     _emit(progress_callback, f"코드-종목명 매핑 저장: {code_name_mapping_path.name} ({len(code_name_mapping)}행)")
-    account_mapping = _account_mapping_frame(list(sources_by_account))
+    account_mapping = _account_mapping_frame(list(sources_by_account), account_mappings)
     account_mapping_path = output / ACCOUNT_MAPPING_FILE
     account_mapping.to_parquet(account_mapping_path, index=False, compression="snappy")
     _emit(progress_callback, f"계정-ID 매핑 저장: {account_mapping_path.name} ({len(account_mapping)}행)")
@@ -1465,6 +1538,12 @@ def convert_asset_excels_to_wide_parquet(
         progress_callback,
         f"Quantiwise 변환 완료: Sheet Parquet {len(outputs)}개, 건너뛴 Sheet {len(skipped)}개, 데이터 경로 {output}",
     )
+    for item in skipped:
+        _emit(
+            progress_callback,
+            "건너뛴 Sheet 상세: "
+            f"{item.get('relative_path') or item.get('file_name')} / {item.get('sheet_name')} - {item.get('reason')}",
+        )
 
     return {
         "status": "completed",
@@ -1501,9 +1580,15 @@ def merge_asset_parquet_outputs(
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Merge two generated Quantiwise Parquet output directories."""
-    base = Path(base_directory).expanduser().resolve()
-    incoming = Path(incoming_directory).expanduser().resolve()
-    output = Path(output_directory).expanduser().resolve()
+    def required_path(value: str | Path, field_name: str) -> Path:
+        resolved = str(value or "").strip()
+        if not resolved:
+            raise ValueError(f"{field_name} is required")
+        return Path(resolved).expanduser().resolve()
+
+    base = required_path(base_directory, "base_directory")
+    incoming = required_path(incoming_directory, "incoming_directory")
+    output = required_path(output_directory, "output_directory")
     output.mkdir(parents=True, exist_ok=True)
 
     base_info = inspect_asset_excel_output(base)
@@ -1563,9 +1648,7 @@ def merge_asset_parquet_outputs(
             "columns": len(merged.columns),
             "date_start": merged.index.min().isoformat() if len(merged.index) else "",
             "date_end": merged.index.max().isoformat() if len(merged.index) else "",
-            "date_index": _date_index_payload(merged.index),
             "date_segments": _merged_date_segments_payload(
-                merged.index,
                 sources_by_account.get(account_name, []),
             ),
             "sources": sources_by_account.get(account_name, []),
@@ -1612,6 +1695,7 @@ def inspect_asset_excel_conversion(
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
     selected_files: list[str] | None = None,
+    account_mappings: list[AccountMappingInput] | None = None,
     write_mode: str = "replace",
 ) -> dict[str, Any]:
     source = Path(source_directory).expanduser().resolve()
@@ -1619,6 +1703,7 @@ def inspect_asset_excel_conversion(
     scanned_sheets, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
         source,
         selected_files=selected_files,
+        account_mappings=account_mappings,
     )
     output_info = inspect_asset_excel_output(output)
     normalized_mode = str(write_mode or "replace").strip().lower()
@@ -1641,7 +1726,7 @@ def inspect_asset_excel_conversion(
         }
         for output_stem, frame, source_info in sorted(scanned_sheets, key=lambda item: item[0])
     }
-    account_mapping = _account_mapping_frame(list(sources_by_account))
+    account_mapping = _account_mapping_frame(list(sources_by_account), account_mappings)
 
     return {
         "status": "preview",
@@ -1673,6 +1758,7 @@ __all__ = [
     "DEFAULT_ASSET_PARQUET_DIR",
     "SHEET_ACCOUNT_NAMES",
     "convert_asset_excels_to_wide_parquet",
+    "default_account_mappings",
     "inspect_asset_excel_conversion",
     "inspect_asset_excel_output",
     "list_asset_excel_files",

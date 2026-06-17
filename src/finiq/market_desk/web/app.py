@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from finiq.config import QUANTIWISE_EXCEL_DIR, init_config
-from finiq.data.assets_excel import DEFAULT_ASSET_PARQUET_DIR, convert_asset_excels_to_wide_parquet, merge_asset_parquet_outputs
+from finiq.data.assets_excel import convert_asset_excels_to_wide_parquet, merge_asset_parquet_outputs
 from finiq.market_desk.web.discovery import list_classification_files, list_price_source_files
 from finiq.market_desk.web.disclosure_html import (
     compress_disclosure_external_html_payload,
@@ -56,15 +56,23 @@ JobProgressCallback = Callable[[str], None]
 JobHandler = Callable[[dict[str, Any], JobProgressCallback], Any]
 
 
+def _required_payload_path(payload: dict[str, Any], key: str) -> str:
+    value = str(payload.get(key) or "").strip()
+    if not value:
+        raise ValueError(f"{key} is required")
+    return value
+
+
 def _run_asset_excel_convert_job(
     payload: dict[str, Any],
     progress_callback: JobProgressCallback,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     return convert_asset_excels_to_wide_parquet(
-        payload.get("source_directory") or QUANTIWISE_EXCEL_DIR,
-        payload.get("output_directory") or DEFAULT_ASSET_PARQUET_DIR,
+        _required_payload_path(payload, "source_directory"),
+        _required_payload_path(payload, "output_directory"),
         selected_files=payload.get("selected_files") or None,
+        account_mappings=payload.get("account_mappings") if "account_mappings" in payload else None,
         write_mode=str(payload.get("write_mode") or "update"),
         progress_callback=progress_callback,
         cancel_check=cancel_check,
@@ -77,9 +85,9 @@ def _run_asset_excel_merge_job(
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     return merge_asset_parquet_outputs(
-        payload.get("base_directory") or "",
-        payload.get("incoming_directory") or "",
-        payload.get("output_directory") or DEFAULT_ASSET_PARQUET_DIR,
+        _required_payload_path(payload, "base_directory"),
+        _required_payload_path(payload, "incoming_directory"),
+        _required_payload_path(payload, "output_directory"),
         progress_callback=progress_callback,
         cancel_check=cancel_check,
     )
