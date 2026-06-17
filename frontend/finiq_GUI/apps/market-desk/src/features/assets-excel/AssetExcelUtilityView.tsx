@@ -87,7 +87,7 @@ function fileNameFromPath(value: string | undefined): string {
   return String(value || "").split(/[\\/]/).filter(Boolean).pop() || "";
 }
 
-type OutputSortKey = "sheet" | "account_id" | "account_name" | "file" | "rows" | "columns" | "missing_ratio" | "date_segments";
+type OutputSortKey = "sheet" | "account_id" | "account_name" | "file" | "rows" | "columns" | "missing_ratio" | "non_null_cells" | "total_cells" | "date_segments";
 type SortDirection = "asc" | "desc";
 
 function outputDateSegmentsText(item: any): string {
@@ -112,6 +112,8 @@ function outputSortValue(name: string, item: any, key: OutputSortKey): string | 
   if (key === "rows") return Number(item?.rows) || 0;
   if (key === "columns") return Number(item?.columns) || 0;
   if (key === "missing_ratio") return Number(item?.quality?.missing_ratio) || 0;
+  if (key === "non_null_cells") return Number(item?.quality?.non_null_cells) || 0;
+  if (key === "total_cells") return Number(item?.quality?.total_cells) || 0;
   return outputDateSegmentsText(item);
 }
 
@@ -410,8 +412,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     });
   };
   const outputSortMarker = (key: OutputSortKey) => outputSort?.key === key ? (outputSort.direction === "asc" ? "↑" : "↓") : "↕";
-  const renderOutputHeader = (key: OutputSortKey, label: string, align: "left" | "right" = "left", widthClass = "") => (
-    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : ""} ${widthClass}`} aria-sort={outputSort?.key === key ? (outputSort.direction === "asc" ? "ascending" : "descending") : "none"}>
+  const renderOutputHeader = (key: OutputSortKey, label: string, align: "left" | "right" = "left") => (
+    <th className={`whitespace-nowrap px-3 py-2 font-medium ${align === "right" ? "text-right" : ""}`} aria-sort={outputSort?.key === key ? (outputSort.direction === "asc" ? "ascending" : "descending") : "none"}>
       <button type="button" className={`inline-flex w-full items-center gap-1 hover:text-slate-900 dark:hover:text-slate-100 ${align === "right" ? "justify-end" : ""}`} onClick={() => handleOutputSort(key)}>
         <span>{label}</span>
         <span className="text-[10px] text-slate-400 dark:text-slate-500">{outputSortMarker(key)}</span>
@@ -1147,30 +1149,34 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-                <table className="w-full min-w-[960px] table-fixed text-sm">
+                <table className="w-max min-w-full text-sm">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
-                      {renderOutputHeader("sheet", "Sheet", "left", "w-[13%]")}
-                      {renderOutputHeader("account_id", "ID", "left", "w-[10%]")}
-                      {renderOutputHeader("account_name", "계정", "left", "w-[14%]")}
-                      {renderOutputHeader("file", "파일", "left", "w-[18%]")}
-                      {renderOutputHeader("rows", "행", "right", "w-[9%]")}
-                      {renderOutputHeader("columns", "코드", "right", "w-[9%]")}
-                      {renderOutputHeader("missing_ratio", "결측률", "right", "w-[9%]")}
-                      {renderOutputHeader("date_segments", "구간", "left", "w-[18%]")}
+                      {renderOutputHeader("sheet", "Sheet")}
+                      {renderOutputHeader("account_id", "ID")}
+                      {renderOutputHeader("account_name", "계정")}
+                      {renderOutputHeader("file", "파일")}
+                      {renderOutputHeader("rows", "행", "right")}
+                      {renderOutputHeader("columns", "코드", "right")}
+                      {renderOutputHeader("missing_ratio", "결측률", "right")}
+                      {renderOutputHeader("non_null_cells", "값 있음", "right")}
+                      {renderOutputHeader("total_cells", "전체 셀", "right")}
+                      {renderOutputHeader("date_segments", "구간")}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
                     {sortedOutputRows.map(([name, item]: [string, any]) => (
                       <tr key={name} className="dark:text-slate-300">
-                        <td className="truncate px-3 py-2 font-medium" title={item.sheet_name || name}>{item.sheet_name || name}</td>
-                        <td className="truncate px-3 py-2" title={item.account_id || "-"}>{item.account_id || "-"}</td>
-                        <td className="truncate px-3 py-2" title={item.account_name || "-"}>{item.account_name || "-"}</td>
-                        <td className="truncate px-3 py-2" title={outputExcelTitleText(name, item)}>{outputExcelTitleText(name, item)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.rows)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.columns)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatPercent(item.quality?.missing_ratio)}</td>
-                        <td className="truncate px-3 py-2" title={outputDateSegmentsText(item) || "-"}>{outputDateSegmentsText(item) || "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-medium">{item.sheet_name || name}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{item.account_id || "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{item.account_name || "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{outputExcelTitleText(name, item)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.rows)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.columns)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatPercent(item.quality?.missing_ratio)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.quality?.non_null_cells)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.quality?.total_cells)}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{outputDateSegmentsText(item) || "-"}</td>
                       </tr>
                     ))}
                   </tbody>
