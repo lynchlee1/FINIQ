@@ -8,7 +8,6 @@ export type WorkflowId =
   | "ontology"
   | "disclosure-build"
   | "html-processing"
-  | "integrated-data"
   | "utility";
 
 export type PageLayoutKind = "search" | "job" | "review" | "canvas";
@@ -74,17 +73,6 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
       { href: "/html-bond-summary", step: 5, label: "발행내역 한눈에" },
     ],
   },
-  "integrated-data": {
-    id: "integrated-data",
-    label: "종합데이터 구축",
-    basePath: "/integrated-data",
-    layout: "job",
-    steps: [
-      { href: "/integrated-data", step: 1, label: "원천 데이터 변환" },
-      { href: "/integrated-merge", step: 2, label: "Parquet 병합" },
-      { href: "/integrated-market-history", step: 3, label: "시장 구분 이력 구축" },
-    ],
-  },
   utility: {
     id: "utility",
     label: "유틸리티",
@@ -92,9 +80,10 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     layout: "job",
     steps: [
       { href: "/utility", step: 1, label: "분할저장" },
-      { href: "/utility/assets-excel", step: 2, label: "Quantiwise - 미리보기" },
-      { href: "/utility/assets-excel/convert", step: 3, label: "Quantiwise - 변환하기" },
-      { href: "/utility/assets-excel/merge", step: 4, label: "Quantiwise - 병합하기" },
+      { href: "/utility/assets-excel", step: 2, label: "Quantiwise - Excel 미리보기" },
+      { href: "/utility/assets-excel/convert", step: 3, label: "Parquet 변환하기" },
+      { href: "/utility/assets-excel/parquet", step: 4, label: "Quantiwise - Parquet 미리보기" },
+      { href: "/utility/assets-excel/merge", step: 5, label: "Quantiwise - 병합하기" },
     ],
   },
 };
@@ -108,7 +97,6 @@ export const NAV_ITEMS: NavItem[] = [
       ...WORKFLOWS["disclosure-build"].steps.map((tab) => tab.href),
       ...WORKFLOWS["html-processing"].steps.map((tab) => tab.href),
       ...WORKFLOWS.utility.steps.map((tab) => tab.href),
-      ...WORKFLOWS["integrated-data"].steps.map((tab) => tab.href),
     ],
     layout: WORKFLOWS["disclosure-build"].layout,
     workflowId: "disclosure-build",
@@ -134,9 +122,10 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
 
   const partitionStorageStep = WORKFLOWS.utility.steps[0];
   const quantiwiseSteps = [
-    { ...WORKFLOWS.utility.steps[1], label: "미리보기" },
-    { ...WORKFLOWS.utility.steps[2], label: "변환하기" },
-    { ...WORKFLOWS.utility.steps[3], label: "병합하기" },
+    { ...WORKFLOWS.utility.steps[1], label: "Excel 미리보기" },
+    { ...WORKFLOWS.utility.steps[2], label: "Parquet 변환하기" },
+    { ...WORKFLOWS.utility.steps[3], label: "Parquet 미리보기" },
+    { ...WORKFLOWS.utility.steps[4], label: "병합하기" },
   ];
 
   return {
@@ -152,10 +141,7 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
       },
       {
         label: "외부 데이터 변환",
-        steps: [
-          partitionStorageStep,
-          ...WORKFLOWS["integrated-data"].steps,
-        ],
+        steps: [partitionStorageStep],
       },
       {
         label: "Quantiwise",
@@ -175,5 +161,4 @@ export function getActiveNavItem(pathname: string): NavItem | undefined {
 export const ONTOLOGY_TABS = WORKFLOWS.ontology.steps;
 export const BUILD_TABS = WORKFLOWS["disclosure-build"].steps;
 export const HTML_PROCESS_TABS = WORKFLOWS["html-processing"].steps;
-export const INTEGRATED_TABS = WORKFLOWS["integrated-data"].steps;
 export const UTILITY_TABS = WORKFLOWS.utility.steps;
