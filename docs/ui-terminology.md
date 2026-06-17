@@ -37,6 +37,19 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Quantiwise Parquet merge workflow | Quantiwise - 병합하기 | Use for the `/utility/assets-excel/merge` navigation label and page title. |
 | Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |
 | Quantiwise conversion pre-run check | 변환 전 확인 | Use for the automatic check that scans Excel files without saving before `Quantiwise 변환`. |
+| Quantiwise converted result preview | 실행 결과 | Use for the converted Parquet preview selector under the `Quantiwise - 변환하기` run card. |
+
+## Ontology Workflow
+
+| Concept | Preferred UI Term | Notes |
+| --- | --- | --- |
+| Quant platform feature workspace | Quant Platform Workspace | Use on the Ontology page for the professional quant feature surface. |
+| Canonical research data feature | Research Data Store | Feature name for versioned datasets, lineage, and quality checks. |
+| Factor research feature | Factor & Signal Research | Feature name for signal definition and factor diagnostics. |
+| Backtesting feature | Point-in-Time Backtesting | Feature name for no-lookahead strategy tests. |
+| Portfolio and risk feature | Portfolio Construction & Risk | Feature name for optimizer, constraints, and risk views. |
+| Reproducibility feature | Research Runs & Reports | Feature name for saved experiments and reports. |
+| Frontend-only sample data | TEST DATA | Badge and data scope label for synthetic Ontology samples. |
 
 ## Right Dock Panels
 

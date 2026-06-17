@@ -252,6 +252,95 @@ def inspect_asset_excel_output(output_directory: str | Path = DEFAULT_ASSET_PARQ
     }
 
 
+def _resolve_asset_parquet_path(file_name: str | Path, output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR) -> Path:
+    root = Path(output_directory).expanduser().resolve()
+    requested = Path(file_name)
+    target = (root / requested).resolve() if not requested.is_absolute() else requested.resolve()
+
+    if target != root and root not in target.parents:
+        msg = f"Parquet file must be under data path: {file_name}"
+        raise ValueError(msg)
+    if target.suffix.lower() != ".parquet":
+        msg = f"Unsupported Parquet file type: {target.suffix}"
+        raise ValueError(msg)
+    if target.name in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}:
+        msg = f"Unsupported Quantiwise result preview file: {target.name}"
+        raise ValueError(msg)
+    if not target.exists():
+        msg = f"Parquet file not found: {target}"
+        raise FileNotFoundError(msg)
+    if not target.is_file():
+        msg = f"Parquet path is not a file: {target}"
+        raise IsADirectoryError(msg)
+    return target
+
+
+def read_asset_parquet_preview(
+    file_name: str | Path,
+    *,
+    output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
+    row_limit: int | None = 20,
+    column_limit: int | None = 12,
+) -> dict[str, Any]:
+    """Read one generated Quantiwise Sheet Parquet as JSON-friendly preview rows."""
+    target = _resolve_asset_parquet_path(file_name, output_directory=output_directory)
+    output = Path(output_directory).expanduser().resolve()
+    frame = pd.read_parquet(target)
+    columns = [str(column) for column in frame.columns]
+    frame.columns = columns
+
+    preview_columns = columns[: max(1, int(column_limit))] if column_limit is not None else columns
+    preview = frame.loc[:, [column for column in preview_columns if column in frame.columns]]
+    if row_limit is not None:
+        preview = preview.head(max(0, int(row_limit)))
+
+    output_meta: dict[str, Any] = {}
+    manifest_path = output / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            manifest = {}
+        output_meta = next(
+            (
+                item
+                for item in manifest.get("outputs", {}).values()
+                if isinstance(item, dict) and item.get("output_file") == target.name
+            ),
+            {},
+        )
+        if not output_meta:
+            output_meta = next(
+                (
+                    item
+                    for item in manifest.get("outputs", {}).values()
+                    if isinstance(item, dict) and item.get("path") == str(target)
+                ),
+                {},
+            )
+
+    return {
+        "file_name": target.name,
+        "relative_path": str(target.relative_to(output)),
+        "sheet_name": output_meta.get("sheet_name") or target.stem,
+        "preview_type": "quanti_parquet",
+        "account_id": output_meta.get("account_id") or "",
+        "account_name": output_meta.get("account_name") or _account_name_from_output_stem(target.stem),
+        "status": "mapped",
+        "metadata": {
+            "period_from": _compact_date(output_meta.get("date_start") or ""),
+            "period_to": _compact_date(output_meta.get("date_end") or ""),
+        },
+        "columns": columns,
+        "preview_columns": list(preview.columns),
+        "rows": _json_rows(preview),
+        "date_start": output_meta.get("date_start") or "",
+        "date_end": output_meta.get("date_end") or "",
+        "row_count": len(frame),
+        "preview_row_count": len(preview),
+    }
+
+
 def _json_value(value: Any) -> Any:
     if pd.isna(value):
         return None
@@ -1473,5 +1562,6 @@ __all__ = [
     "merge_asset_parquet_outputs",
     "read_asset_excel",
     "read_asset_excel_interpreted",
+    "read_asset_parquet_preview",
     "read_asset_excel_sheets",
 ]

@@ -9,8 +9,21 @@ import { Search, X, Save, Download, Unlock } from 'lucide-react'
 import { ActionDock } from '@/components/ui/ActionDock'
 import { JobStatusLogger } from '@/components/ui/JobStatusLogger'
 import { formatInteger } from '@/lib/format'
+import { cn } from '@finiq/ui/utils'
 
-export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string }) {
+type CompanyGraphViewerProps = {
+  companyId?: string;
+  dataScopeLabel?: string;
+  dataSourceLabel?: string;
+  heightClassName?: string;
+};
+
+export function CompanyGraphViewer({
+  companyId = 'demo',
+  dataScopeLabel,
+  dataSourceLabel,
+  heightClassName,
+}: CompanyGraphViewerProps) {
   const [loading, setLoading] = useState(true)
   const [simulationRunning, setSimulationRunning] = useState(true)
   const [searchValue, setSearchValue] = useState('')
@@ -115,13 +128,25 @@ export function CompanyGraphViewer({ companyId = 'demo' }: { companyId?: string 
   }
 
   return (
-    <div className="relative flex h-[700px] flex-col gap-4">
+    <div className={cn("relative flex flex-col gap-4", heightClassName ?? "h-[700px]")}>
       <Card className="flex-1 dark:bg-[#161b22] dark:border-[#30363d] flex flex-col h-full">
         <CardHeader className="flex flex-row items-center justify-between pb-2 border-b dark:border-[#30363d]">
         <div>
-          <CardTitle className="text-lg dark:text-white">Graph View</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2 text-lg dark:text-white">
+            <span>Graph View</span>
+            {dataScopeLabel ? (
+              <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-700/70 dark:bg-amber-950/40 dark:text-amber-200">
+                {dataScopeLabel}
+              </span>
+            ) : null}
+          </CardTitle>
           <CardDescription className="dark:text-slate-400">
             기업의 지배구조, 주요 안건 결의 행위, 증권 발행 내역 등을 시각화합니다.
+            {dataSourceLabel ? (
+              <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-300">
+                {dataSourceLabel}
+              </span>
+            ) : null}
           </CardDescription>
         </div>
         

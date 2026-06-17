@@ -37,6 +37,19 @@ export function fetchAssetExcelSheet(params: {
   return apiGet<SheetPayload>(`/api/assets/excels/${encodePath(params.fileName)}?${query.toString()}`);
 }
 
+export function fetchAssetParquetPreview(params: {
+  fileName: string;
+  outputDirectory: string;
+  rowLimit?: number;
+}) {
+  const query = new URLSearchParams({
+    file_name: params.fileName,
+    output_directory: params.outputDirectory,
+    row_limit: String(params.rowLimit ?? 20),
+  });
+  return apiGet<SheetPayload>(`/api/assets/parquet/preview?${query.toString()}`);
+}
+
 export function previewAssetExcelConversion(payload: AssetExcelConvertPayload) {
   return apiPost<PreviewData>("/api/assets/excels/preview-conversion", payload);
 }

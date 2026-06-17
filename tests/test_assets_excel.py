@@ -16,6 +16,7 @@ from finiq.data.assets_excel import (
     merge_asset_parquet_outputs,
     read_asset_excel,
     read_asset_excel_interpreted,
+    read_asset_parquet_preview,
     read_asset_excel_sheets,
 )
 
@@ -279,6 +280,62 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
         {"code": "A000660", "name": "SK하이닉스"},
         {"code": "A005930", "name": "삼성전자"},
     ]
+
+
+def test_read_asset_parquet_preview_matches_quanti_preview_shape(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [
+                [pd.Timestamp("2020-01-01"), 100, 200],
+                [pd.Timestamp("2020-01-02"), 101, 201],
+            ],
+        )
+
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+    output = _output_for_sheet(payload, "종가")
+    preview = read_asset_parquet_preview(output["output_file"], output_directory=output_dir)
+
+    assert preview["preview_type"] == "quanti_parquet"
+    assert preview["sheet_name"] == "종가"
+    assert preview["account_name"] == "close"
+    assert preview["metadata"] == {"period_from": "20200101", "period_to": "20200102"}
+    assert preview["columns"] == ["date", "A005930", "A000660"]
+    assert preview["preview_columns"] == ["date", "A005930", "A000660"]
+    assert preview["rows"] == [
+        {"date": "2020-01-01", "A005930": 100, "A000660": 200},
+        {"date": "2020-01-02", "A005930": 101, "A000660": 201},
+    ]
+
+
+def test_asset_parquet_preview_api(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+        )
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+    output = _output_for_sheet(payload, "종가")
+
+    client = TestClient(app_module.app)
+    response = client.get(
+        "/api/assets/parquet/preview",
+        params={
+            "output_directory": str(output_dir),
+            "file_name": output["output_file"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["rows"] == [{"date": "2020-01-01", "A005930": 100, "A000660": 200}]
 
 
 def test_convert_asset_excels_reports_detailed_progress_log(tmp_path):

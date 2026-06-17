@@ -20,6 +20,7 @@
 - Sheet 미리보기는 먼저 Sheet 목록만 읽고, 사용자가 Sheet를 선택한 뒤에 본문 rows를 읽는다.
 - 변환 전 확인 UI는 정상 매핑, 미매핑, 형식 오류를 분리해서 보여준다.
 - 변환 결과 UI는 Sheet Parquet별 원본 Sheet, 계정, 행/코드/구간, 결측률과 최근 샘플 행을 함께 보여준다.
+- `Quantiwise - 변환하기`는 변환 완료 후 생성된 Sheet Parquet를 다시 읽어 `Quantiwise - 미리보기`와 같은 표 형식으로 실행 결과를 보여준다.
 - 같은 파일/Sheet 미리보기 요청은 프론트엔드에서 캐시해 반복 조회 체감 속도를 낮춘다.
 - 스캔 중 Sheet 요약은 이미 읽은 변환 frame을 재사용해 같은 Sheet를 다시 읽지 않는다.
 - 실제 변환 실행은 실행 전 preview API로 전체 Excel을 다시 읽지 않고, background job의 파일 단위 병렬 스캔 결과를 바로 Sheet Parquet로 저장한다.
