@@ -362,7 +362,9 @@ def test_convert_asset_excels_reports_detailed_progress_log(tmp_path):
 
     assert "Quantiwise 변환 시작" in progress_log
     assert any("원본 데이터 경로:" in line for line in progress_log)
+    assert any("임시 데이터 경로:" in line for line in progress_log)
     assert any("매핑 완료: 계정=close, 행=2, 코드=2, 날짜=2020-01-01~2020-01-02" in line for line in progress_log)
+    assert any("임시 저장:" in line and "close_20200101_20200102" in line for line in progress_log)
     assert any("스캔 완료: Sheet 1개, 정상 1개, 건너뜀 0개, 계정 1개" in line for line in progress_log)
     assert any("Sheet 단위 생성:" in line for line in progress_log)
     assert any("[저장 1/1]" in line and "계정=close" in line and "Sheet=종가" in line for line in progress_log)
@@ -371,7 +373,7 @@ def test_convert_asset_excels_reports_detailed_progress_log(tmp_path):
     assert any("Quantiwise 변환 완료: Sheet Parquet 1개, 건너뛴 Sheet 0개" in line for line in progress_log)
 
 
-def test_convert_asset_excels_cancel_during_parallel_save_leaves_no_final_outputs(tmp_path, monkeypatch):
+def test_convert_asset_excels_cancel_during_streaming_save_leaves_no_final_outputs(tmp_path, monkeypatch):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
     source_dir.mkdir()
@@ -389,11 +391,11 @@ def test_convert_asset_excels_cancel_during_parallel_save_leaves_no_final_output
 
     should_cancel = False
     lock = threading.Lock()
-    real_write_account_parquet = assets_excel_module._write_account_parquet
+    real_write_sheet_parquet_temp = assets_excel_module._write_sheet_parquet_temp
 
     def cancelling_write(*args, **kwargs):
         nonlocal should_cancel
-        result = real_write_account_parquet(*args, **kwargs)
+        result = real_write_sheet_parquet_temp(*args, **kwargs)
         with lock:
             should_cancel = True
         return result
@@ -402,8 +404,8 @@ def test_convert_asset_excels_cancel_during_parallel_save_leaves_no_final_output
         with lock:
             return should_cancel
 
-    monkeypatch.setattr(assets_excel_module, "_asset_parquet_write_workers", lambda account_count: 2)
-    monkeypatch.setattr(assets_excel_module, "_write_account_parquet", cancelling_write)
+    monkeypatch.setattr(assets_excel_module, "_asset_excel_scan_workers", lambda file_count: 1)
+    monkeypatch.setattr(assets_excel_module, "_write_sheet_parquet_temp", cancelling_write)
 
     with pytest.raises(RuntimeError, match="Job cancelled"):
         convert_asset_excels_to_wide_parquet(

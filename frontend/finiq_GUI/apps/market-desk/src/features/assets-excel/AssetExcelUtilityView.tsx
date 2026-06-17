@@ -240,17 +240,28 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     [previewData],
   );
   const parquetOptions = useMemo(
-    () => outputRows
-      .map(([name, item]: [string, any]) => {
+    () => {
+      const seen = new Set<string>();
+      const resultOptions = outputRows.map(([name, item]: [string, any]) => {
         const fileName = item?.output_file || fileNameFromPath(item?.path) || `${name}.parquet`;
         return {
           key: name,
           fileName,
           label: item?.sheet_name || item?.account_name || name,
         };
-      })
-      .filter((item) => item.fileName && item.fileName.endsWith(".parquet")),
-    [outputRows],
+      });
+      const existingOptions = (outputInfo?.parquet_files || []).map((fileName: string) => ({
+        key: fileName,
+        fileName,
+        label: fileName,
+      }));
+      return [...resultOptions, ...existingOptions].filter((item) => {
+        if (!item.fileName || !item.fileName.endsWith(".parquet") || seen.has(item.fileName)) return false;
+        seen.add(item.fileName);
+        return true;
+      });
+    },
+    [outputRows, outputInfo],
   );
   const updatingAccountCount = useMemo(
     () => outputRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
@@ -270,6 +281,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const sheetRows = sheetPayload?.rows || [];
   const parquetPreviewColumns = parquetPayload?.preview_columns || parquetPayload?.columns || [];
   const parquetRows = parquetPayload?.rows || [];
+  const selectedParquetSheet = parquetPayload?.sheet_name || "";
 
   useEffect(() => {
     if (!isConvertMode) return;
@@ -582,75 +594,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
-              {parquetOptions.length ? (
-                <div className="space-y-4 border-t border-slate-200 pt-4 dark:border-[#30363d]">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="dark:text-slate-300">실행 결과</Label>
-                      <Select value={selectedParquetFile} onValueChange={setSelectedParquetFile}>
-                        <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                          <SelectValue placeholder="Parquet 선택" />
-                        </SelectTrigger>
-                        <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                          {parquetOptions.map((item) => (
-                            <SelectItem key={`${item.key}-${item.fileName}`} value={item.fileName}>
-                              {item.label} · {item.fileName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {parquetPayload?.account_name ? (
-                      <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                        <span>계정: {parquetPayload.account_name}</span>
-                        <span>상태: {sheetStatusLabel(parquetPayload.status)}</span>
-                        <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
-                        {parquetPayload.date_start && parquetPayload.date_end ? <span>{parquetPayload.date_start} ~ {parquetPayload.date_end}</span> : null}
-                      </div>
-                    ) : null}
-                    {parquetPayload?.metadata?.period_from || parquetPayload?.metadata?.period_to ? (
-                      <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                        <span>Period(From): {parquetPayload.metadata.period_from || "-"}</span>
-                        <span>Period(To): {parquetPayload.metadata.period_to || "-"}</span>
-                        <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {(parquetPayload?.columns || []).length > 12 ? (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {formatInteger(parquetPayload?.columns?.length)}개</p>
-                  ) : null}
-
-                  <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
-                        <tr className="text-left text-slate-500 dark:text-slate-400">
-                          {parquetPreviewColumns.slice(0, 12).map((column: string) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
-                        {parquetRows.map((row: any, index: number) => (
-                          <tr key={index} className="dark:text-slate-300">
-                            {parquetPreviewColumns.slice(0, 12).map((column: string) => <td key={column} className="px-3 py-2 whitespace-nowrap">{String(row[column] ?? "")}</td>)}
-                          </tr>
-                        ))}
-                        {parquetPayload?.error ? (
-                          <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-red-600 dark:text-red-300">{parquetPayload.error}</td></tr>
-                        ) : null}
-                        {!parquetPayload?.error && parquetLoading ? (
-                          <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">본문을 불러오는 중...</td></tr>
-                        ) : null}
-                        {!parquetPayload?.error && !parquetLoading && selectedParquetFile && !parquetRows.length ? (
-                          <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">표시할 행 없음</td></tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : null}
               {previewData?.sheets?.length ? (
                 <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
                   <table className="w-full text-sm">
@@ -743,6 +686,96 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   </div>
                 </div>
               ) : null}
+            </CardContent>
+          </Card>
+          ) : null}
+
+          {isConvertMode ? (
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base dark:text-white">
+                <Eye className="h-4 w-4" />
+                Sheet 읽기/미리보기
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">파일</Label>
+                  <Select value={selectedParquetFile} onValueChange={setSelectedParquetFile} disabled={!parquetOptions.length}>
+                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
+                      <SelectValue placeholder="파일 선택" />
+                    </SelectTrigger>
+                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
+                      {parquetOptions.map((item) => (
+                        <SelectItem key={`${item.key}-${item.fileName}`} value={item.fileName}>{item.fileName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">Sheet</Label>
+                  <Select value={selectedParquetSheet} onValueChange={() => {}} disabled={!selectedParquetSheet}>
+                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
+                      <SelectValue placeholder={parquetLoading ? "Sheet 목록 로딩 중" : "Sheet 선택"} />
+                    </SelectTrigger>
+                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
+                      {selectedParquetSheet ? <SelectItem value={selectedParquetSheet}>{selectedParquetSheet}</SelectItem> : null}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {parquetPayload?.account_name ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <span>계정: {parquetPayload.account_name}</span>
+                    <span>상태: {sheetStatusLabel(parquetPayload.status)}</span>
+                    <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
+                    {parquetPayload.date_start && parquetPayload.date_end ? <span>{parquetPayload.date_start} ~ {parquetPayload.date_end}</span> : null}
+                  </div>
+                ) : null}
+                {parquetPayload?.metadata?.period_from || parquetPayload?.metadata?.period_to ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <span>Period(From): {parquetPayload.metadata.period_from || "-"}</span>
+                    <span>Period(To): {parquetPayload.metadata.period_to || "-"}</span>
+                    <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
+                  </div>
+                ) : null}
+              </div>
+
+              {(parquetPayload?.columns || []).length > 12 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {formatInteger(parquetPayload?.columns?.length)}개</p>
+              ) : null}
+
+              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
+                    <tr className="text-left text-slate-500 dark:text-slate-400">
+                      {parquetPreviewColumns.slice(0, 12).map((column: string) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
+                    {parquetRows.map((row: any, index: number) => (
+                      <tr key={index} className="dark:text-slate-300">
+                        {parquetPreviewColumns.slice(0, 12).map((column: string) => <td key={column} className="px-3 py-2 whitespace-nowrap">{String(row[column] ?? "")}</td>)}
+                      </tr>
+                    ))}
+                    {parquetPayload?.error ? (
+                      <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-red-600 dark:text-red-300">{parquetPayload.error}</td></tr>
+                    ) : null}
+                    {!parquetPayload?.error && parquetLoading ? (
+                      <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">본문을 불러오는 중...</td></tr>
+                    ) : null}
+                    {!parquetPayload?.error && !parquetLoading && !selectedParquetSheet ? (
+                      <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">Sheet를 선택하세요.</td></tr>
+                    ) : null}
+                    {!parquetPayload?.error && !parquetLoading && selectedParquetSheet && !parquetRows.length ? (
+                      <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">표시할 행 없음</td></tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
           ) : null}
