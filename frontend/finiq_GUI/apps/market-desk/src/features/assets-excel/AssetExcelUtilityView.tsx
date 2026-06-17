@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Eye, Loader2, Play, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Eye, Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -92,11 +92,12 @@ function nextAccountId(mappings: AssetAccountMapping[]): string {
   return `S${String(maxIndex + 1).padStart(5, "0")}`;
 }
 
-export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "preview" | "convert" | "merge" }) {
+export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "preview" | "convert" | "parquet" | "merge" }) {
   const isConvertMode = mode === "convert";
+  const isParquetPreviewMode = mode === "parquet";
   const isMergeMode = mode === "merge";
-  const pageTitle = isConvertMode ? "Quantiwise - 변환하기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - 미리보기";
-  const pageDescription = isConvertMode ? "Quantiwise 엑셀 데이터를 Parquet으로 변환하는 기능" : isMergeMode ? "생성된 Quantiwise Parquet을 병합하는 기능" : "Quantiwise 엑셀 미리보기 기능";
+  const pageTitle = isConvertMode ? "Parquet 변환하기" : isParquetPreviewMode ? "Quantiwise - Parquet 미리보기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - Excel 미리보기";
+  const pageDescription = isConvertMode ? "Quantiwise 엑셀 데이터를 Parquet으로 변환하는 기능" : isParquetPreviewMode ? "생성된 Quantiwise Parquet을 미리보는 기능" : isMergeMode ? "생성된 Quantiwise Parquet을 병합하는 기능" : "Quantiwise Excel 미리보기 기능";
   const [excelFiles, setExcelFiles] = useState<AssetExcelFile[]>([]);
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -117,6 +118,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [parquetPayload, setParquetPayload] = useState<SheetPayload | null>(null);
   const [parquetLoading, setParquetLoading] = useState(false);
   const [accountMappings, setAccountMappings] = useState<AssetAccountMapping[]>([]);
+  const [isAccountMappingEditing, setIsAccountMappingEditing] = useState(false);
   const [mappingsLoading, setMappingsLoading] = useState(false);
   const sheetPreviewCache = useRef<Record<string, SheetPayload>>({});
   const sheetBodyRequestToken = useRef(0);
@@ -139,14 +141,14 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   useEffect(() => {
     fetchSettings().then((config) => {
       if (!config) return;
-      if (!isMergeMode && config.asset_excel_source_directory) {
+      if (!isMergeMode && !isParquetPreviewMode && config.asset_excel_source_directory) {
         setSourceDirectory((current) => current || config.asset_excel_source_directory);
       }
-      if (isConvertMode && config.asset_excel_output_directory) {
+      if ((isConvertMode || isParquetPreviewMode) && config.asset_excel_output_directory) {
         setOutputDirectory((current) => current || config.asset_excel_output_directory);
       }
     });
-  }, [fetchSettings, isConvertMode, isMergeMode]);
+  }, [fetchSettings, isConvertMode, isMergeMode, isParquetPreviewMode]);
 
   useEffect(() => {
     if (!isConvertMode) return;
@@ -170,7 +172,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   }, [isConvertMode, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
-    if (isMergeMode) {
+    if (isMergeMode || isParquetPreviewMode) {
       setLoading(false);
       return;
     }
@@ -203,7 +205,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     return () => {
       cancelled = true;
     };
-  }, [isMergeMode, sourceDirectory, setIsErrorStatus, setStatus]);
+  }, [isMergeMode, isParquetPreviewMode, sourceDirectory, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     if (!outputDirectory.trim()) {
@@ -353,7 +355,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => accountMappings.map((mapping) => ({
       account_id: mapping.account_id.trim(),
       account_name: mapping.account_name.trim(),
-      legacy_account_name: mapping.legacy_account_name.trim(),
+      legacy_account_name: "",
       sheet_name: mapping.sheet_name.trim(),
     })),
     [accountMappings],
@@ -386,7 +388,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   }, [normalizedAccountMappings]);
 
   useEffect(() => {
-    if (!isConvertMode) return;
+    if (!isParquetPreviewMode) return;
     if (!parquetOptions.length) {
       setSelectedParquetFile("");
       setParquetPayload(null);
@@ -395,10 +397,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     if (!selectedParquetFile || !parquetOptions.some((item) => item.fileName === selectedParquetFile)) {
       setSelectedParquetFile(parquetOptions[0].fileName);
     }
-  }, [isConvertMode, parquetOptions, selectedParquetFile]);
+  }, [isParquetPreviewMode, parquetOptions, selectedParquetFile]);
 
   useEffect(() => {
-    if (!isConvertMode || !selectedParquetFile || !outputDirectory.trim()) {
+    if (!isParquetPreviewMode || !selectedParquetFile || !outputDirectory.trim()) {
       setParquetPayload(null);
       setParquetLoading(false);
       return;
@@ -423,7 +425,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     return () => {
       cancelled = true;
     };
-  }, [isConvertMode, selectedParquetFile, outputDirectory]);
+  }, [isParquetPreviewMode, selectedParquetFile, outputDirectory]);
 
   const handlePreviewFileChange = (value: string) => {
     setSelectedPreviewFile(value);
@@ -548,7 +550,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               <p className="text-sm text-slate-500 dark:text-slate-400">{pageDescription}</p>
             </CardHeader>
             <CardContent className="pt-6 space-y-5">
-              {!isMergeMode ? (
+              {!isMergeMode && !isParquetPreviewMode ? (
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">원본 데이터 경로</Label>
                   <PathPickerInput
@@ -564,7 +566,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 </div>
               ) : null}
 
-              {isConvertMode ? (
+              {isConvertMode || isParquetPreviewMode ? (
                 <>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">데이터 경로</Label>
@@ -625,73 +627,90 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   <CardTitle className="text-base dark:text-white">계정-ID 매핑</CardTitle>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">변환 실행 시 Sheet 이름을 account_id와 account_name으로 연결합니다.</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={addAccountMapping} disabled={mappingsLoading || !!activeJobId}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  추가
-                </Button>
+                <div className="flex items-center gap-2">
+                  {isAccountMappingEditing ? (
+                    <Button variant="outline" size="sm" onClick={addAccountMapping} disabled={mappingsLoading || !!activeJobId}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      추가
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant={isAccountMappingEditing ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setIsAccountMappingEditing((current) => !current)}
+                    disabled={mappingsLoading || !!activeJobId}
+                  >
+                    {isAccountMappingEditing ? <Check className="mr-2 h-4 w-4" /> : <Pencil className="mr-2 h-4 w-4" />}
+                    {isAccountMappingEditing ? "완료" : "편집"}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-                <table className="w-full min-w-[760px] text-sm">
+                <table className="w-full min-w-[620px] table-fixed text-sm">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
                       <th className="px-3 py-2 font-medium">Sheet</th>
                       <th className="px-3 py-2 font-medium">ID</th>
                       <th className="px-3 py-2 font-medium">계정</th>
-                      <th className="px-3 py-2 font-medium">기존 계정</th>
-                      <th className="px-3 py-2 font-medium text-right">삭제</th>
+                      {isAccountMappingEditing ? <th className="px-3 py-2 font-medium text-right">삭제</th> : null}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
                     {accountMappings.map((mapping, index) => (
                       <tr key={`${mapping.sheet_name}-${mapping.account_id}-${index}`} className="dark:text-slate-300">
                         <td className="px-3 py-2">
-                          <Input
-                            value={mapping.sheet_name}
-                            onChange={(event) => updateAccountMapping(index, "sheet_name", event.target.value)}
-                            aria-label="Sheet"
-                            disabled={!!activeJobId}
-                            className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-                          />
+                          {isAccountMappingEditing ? (
+                            <Input
+                              value={mapping.sheet_name}
+                              onChange={(event) => updateAccountMapping(index, "sheet_name", event.target.value)}
+                              aria-label="Sheet"
+                              disabled={!!activeJobId}
+                              className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                            />
+                          ) : (
+                            <span className="block py-2">{mapping.sheet_name || "-"}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
-                          <Input
-                            value={mapping.account_id}
-                            onChange={(event) => updateAccountMapping(index, "account_id", event.target.value)}
-                            aria-label="ID"
-                            disabled={!!activeJobId}
-                            className="h-9 font-mono dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-                          />
+                          {isAccountMappingEditing ? (
+                            <Input
+                              value={mapping.account_id}
+                              onChange={(event) => updateAccountMapping(index, "account_id", event.target.value)}
+                              aria-label="ID"
+                              disabled={!!activeJobId}
+                              className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                            />
+                          ) : (
+                            <span className="block py-2">{mapping.account_id || "-"}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
-                          <Input
-                            value={mapping.account_name}
-                            onChange={(event) => updateAccountMapping(index, "account_name", event.target.value)}
-                            aria-label="계정"
-                            disabled={!!activeJobId}
-                            className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-                          />
+                          {isAccountMappingEditing ? (
+                            <Input
+                              value={mapping.account_name}
+                              onChange={(event) => updateAccountMapping(index, "account_name", event.target.value)}
+                              aria-label="계정"
+                              disabled={!!activeJobId}
+                              className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                            />
+                          ) : (
+                            <span className="block py-2">{mapping.account_name || "-"}</span>
+                          )}
                         </td>
-                        <td className="px-3 py-2">
-                          <Input
-                            value={mapping.legacy_account_name}
-                            onChange={(event) => updateAccountMapping(index, "legacy_account_name", event.target.value)}
-                            aria-label="기존 계정"
-                            disabled={!!activeJobId}
-                            className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <Button variant="ghost" size="icon" onClick={() => deleteAccountMapping(index)} disabled={!!activeJobId} title="삭제">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </td>
+                        {isAccountMappingEditing ? (
+                          <td className="px-3 py-2 text-right">
+                            <Button variant="ghost" size="icon" onClick={() => deleteAccountMapping(index)} disabled={!!activeJobId} title="삭제">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
                     {!accountMappings.length ? (
                       <tr>
-                        <td colSpan={5} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
+                        <td colSpan={isAccountMappingEditing ? 4 : 3} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
                           {mappingsLoading ? "매핑을 불러오는 중..." : "매핑 없음"}
                         </td>
                       </tr>
@@ -709,7 +728,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           </Card>
           ) : null}
 
-          {!isConvertMode && !isMergeMode ? (
+          {!isConvertMode && !isParquetPreviewMode && !isMergeMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base dark:text-white">
@@ -909,12 +928,12 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           </Card>
           ) : null}
 
-          {isConvertMode ? (
+          {isParquetPreviewMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base dark:text-white">
                 <Eye className="h-4 w-4" />
-                Sheet 읽기/미리보기
+                Parquet 미리보기
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
