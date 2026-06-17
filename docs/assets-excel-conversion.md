@@ -15,6 +15,7 @@
 - 변환 메타데이터는 `manifest.json`에 저장한다. 원천 파일/Sheet, 명시적 날짜 구간, 충돌, skipped Sheet, 출력 파일 정보를 포함한다.
 - 변환하기의 저장 방식은 기존 Parquet/manifest 병합 없이 Excel을 Parquet로 생성하는 `replace`다.
 - 병합하기는 생성된 Parquet 경로를 별도로 받아 같은 Parquet 이름의 날짜/종목코드 값을 병합한다.
+- 병합하기는 계정별 결과가 완전한 날짜/종목코드 직사각형이 되는 경우만 허용한다. 실제 값 결측은 허용하지만, 어느 입력에도 존재하지 않는 날짜/종목코드 조합이 생기는 partial table은 병합하지 않는다.
 - 변환 전 확인 API는 저장 없이 Sheet/계정 매핑, 기존 출력 감지, skipped Sheet를 반환한다.
 - `Quantiwise 변환`은 변환 job 내부에서 저장 전 확인을 자동 수행한다. 별도 확인 버튼이나 실행 전 중복 전체 스캔을 두지 않는다.
 - Sheet 미리보기는 Quantiwise 형식을 자동 해석해 실제 Wide Parquet 변환 기준의 날짜/코드/계정명을 보여준다.
@@ -49,6 +50,7 @@
 - 원천 Sheet의 `date_segments`는 항상 1개이며 `start`, `end`를 기록한다.
 - 같은 계정/날짜/종목코드가 여러 Sheet에 있더라도 변환하기에서는 병합하거나 충돌 판단하지 않는다. 각 Sheet를 별도 Parquet로 저장한다.
 - 계정명은 파일명과 metadata에서 언더바 없는 lower camel case를 사용한다. 기존 snake_case 계정명은 `legacy_account_name`으로만 보관한다.
+- 병합하기에서 날짜축으로 두 구간을 이어 붙일 때는 구간이 겹치거나 한 구간의 종료일과 다음 구간의 시작일이 하루 차이인 경우만 허용한다. 그보다 큰 외부 날짜 공백은 같은 종목코드 집합이어도 병합하지 않는다.
 
 ## 저장 계약
 

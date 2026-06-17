@@ -30,3 +30,18 @@
 - Passed: `python3 -m py_compile src/finiq/data/assets_excel.py`.
 - Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
 - Not run: 실제 Quantiwise 리소스 변환 실행은 사용자가 금지했으므로 수행하지 않았다.
+
+# 2026-06-18 Quantiwise 병합 직사각형 검증
+
+## Purpose
+- `Quantiwise - 병합하기`에서 두 Parquet 경로를 합칠 때 결과가 구조적으로 완전한 날짜/종목코드 직사각형인 경우만 허용한다.
+- 날짜축 병합은 구간이 겹치거나 종료일/시작일이 하루 차이로 붙는 경우만 허용한다.
+
+## Implementation Summary
+- 계정별 병합 전에 입력 Parquet들의 날짜별 종목코드 coverage를 검사해 partial table이 생기면 병합을 중단하게 했다.
+- 날짜 구간들이 겹치거나 하루 차이로 이어지지 않으면 같은 종목코드 집합이어도 병합을 거절하게 했다.
+- 같은 계정의 Parquet 파일이 한 입력 경로에 여러 개 있을 때 첫 파일만 읽던 문제를 고쳐 모두 병합 후보에 포함하게 했다.
+- 병합 규칙을 `docs/assets-excel-conversion.md`에 기록했다.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py`.
