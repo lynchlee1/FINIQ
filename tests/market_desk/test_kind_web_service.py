@@ -45,6 +45,7 @@ from finiq.market_desk.web.disclosure_html_parse import (
 from finiq.market_desk.web.disclosure_html_sections import (
     inspect_disclosure_html_sections_payload,
     list_disclosure_html_sections_payload,
+    preview_disclosure_html_sections_payload,
     render_disclosure_html_section_payload,
     save_disclosure_html_sections_payload,
 )
@@ -2455,6 +2456,34 @@ def test_inspect_disclosure_html_sections_payload_counts_folder_coverage(tmp_pat
     assert sections["toc_1"]["coverage_percent"] == 100
     assert sections["toc_2"]["file_count"] == 1
     assert sections["toc_2"]["coverage_percent"] == 50
+    assert sections["toc_2"]["title_variants"] == [{"title": "전환사채권 발행결정", "file_count": 1}]
+    assert [document["source_name"] for document in payload["documents"]] == [
+        "20260422000832.html",
+        "20260423000533.html",
+    ]
+    assert [section["toc_id"] for section in payload["documents"][0]["sections"]] == ["toc_1", "toc_2"]
+    assert [section["toc_id"] for section in payload["documents"][1]["sections"]] == ["toc_1"]
+
+
+def test_preview_disclosure_html_sections_payload_reads_first_document_toc(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    (input_directory / "20260422000832.html").write_text(
+        """
+        <html><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+          <p>표지 내용</p>
+          <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = preview_disclosure_html_sections_payload({"input_directory": str(input_directory)})
+
+    assert payload["source_name"] == "20260422000832.html"
+    assert [section["toc_id"] for section in payload["sections"]] == ["toc_1", "toc_2"]
 
 
 def test_merge_disclosure_content_html_payload_writes_split_json(tmp_path: Path) -> None:
@@ -3490,11 +3519,18 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/html-content-download" in parse_ui_html
     assert "공시원문 목차 분리" in section_split_ui_html
     assert "/api/disclosures/html/sections/inspect" in section_split_ui_html
+    assert "/api/disclosures/html/sections/preview" in section_split_ui_html
     assert "/api/disclosures/html/sections/save/start" in section_split_ui_html
     assert "/api/disclosures/html/sections/render" in section_split_ui_html
     assert "목차 스캔" in section_split_ui_html
+    assert "첫 문서 목차" in section_split_ui_html
     assert "목차 저장" in section_split_ui_html
     assert "목차 렌더링" in section_split_ui_html
+    assert "2026 샘플" in section_split_ui_html
+    assert "전체 목차 목록" in section_split_ui_html
+    assert "문서 목록" in section_split_ui_html
+    assert "저장 대상 목차" in section_split_ui_html
+    assert "렌더링 문서" in section_split_ui_html
     assert "공시원문 외부 저장" in download_component_html
     assert "공시원문 내부 저장" in download_component_html
     assert "content" in content_download_ui_html

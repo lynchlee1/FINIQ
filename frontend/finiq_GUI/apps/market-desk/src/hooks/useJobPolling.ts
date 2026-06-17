@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { apiGet, apiPost } from "@/api/client";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { ApiError, apiGet, apiPost } from "@/api/client";
 import type { JobSnapshot } from "@/types/api";
 
 interface UseJobPollingOptions {
@@ -13,16 +13,64 @@ interface UseJobPollingOptions {
 }
 
 export function useJobPolling(options: UseJobPollingOptions) {
-  const { pollingEndpoint, cancelEndpoint, onSuccess, onError, onCancel, pollInterval = 1000, formatStatus } = options;
+  const { cancelEndpoint } = options;
   const [status, setStatus] = useState<string>("작업을 실행할 준비가 되었습니다.");
   const [isErrorStatus, setIsErrorStatus] = useState<boolean>(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const optionsRef = useRef<UseJobPollingOptions>(options);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const getStorageKey = useCallback(() => {
+    if (typeof window === "undefined") return null;
+
+    const { pollingEndpoint } = optionsRef.current;
+    return `finiq.jobPolling:${window.location.pathname}:${pollingEndpoint}`;
+  }, []);
+
+  const rememberJobId = useCallback((jobId: string) => {
+    const storageKey = getStorageKey();
+    if (!storageKey) return;
+    try {
+      window.sessionStorage.setItem(storageKey, jobId);
+    } catch {
+      // Ignore storage failures; polling still works during the current mount.
+    }
+  }, [getStorageKey]);
+
+  const forgetJobId = useCallback(() => {
+    const storageKey = getStorageKey();
+    if (!storageKey) return;
+    try {
+      window.sessionStorage.removeItem(storageKey);
+    } catch {
+      // Ignore storage failures; the backend job state remains authoritative.
+    }
+  }, [getStorageKey]);
 
   const pollJob = useCallback(
     async (jobId: string) => {
       try {
+        const { pollingEndpoint, onSuccess, onError, onCancel, pollInterval = 1000, formatStatus } = optionsRef.current;
         const url = pollingEndpoint.replace("{jobId}", encodeURIComponent(jobId));
         const data = await apiGet<JobSnapshot<any>>(url);
+
+        if (!mountedRef.current) return;
 
         if (formatStatus) {
           const lines = formatStatus(data);
@@ -47,42 +95,75 @@ export function useJobPolling(options: UseJobPollingOptions) {
 
           setStatus(lines.join("\n"));
         }
-        
+
         setIsErrorStatus(data.status === "failed");
 
         if (data.status === "completed") {
           setActiveJobId(null);
+          forgetJobId();
           if (onSuccess) onSuccess(data.result || data);
           return;
         } else if (data.status === "cancelled") {
           setActiveJobId(null);
+          forgetJobId();
           if (onCancel) onCancel();
           return;
         } else if (data.status === "failed") {
           setActiveJobId(null);
+          forgetJobId();
           if (onError) onError(new Error(data.error || "Job failed"));
           return;
         }
 
-        setTimeout(() => pollJob(jobId), pollInterval);
+        timeoutRef.current = setTimeout(() => {
+          timeoutRef.current = null;
+          pollJob(jobId);
+        }, pollInterval);
       } catch (err: any) {
+        if (!mountedRef.current) return;
         setStatus(err.message);
         setIsErrorStatus(true);
         setActiveJobId(null);
+        if (err instanceof ApiError && err.status === 404) {
+          forgetJobId();
+        }
+        const { onError } = optionsRef.current;
         if (onError) onError(err);
       }
     },
-    [pollingEndpoint, onSuccess, onError, onCancel, pollInterval, formatStatus]
+    [forgetJobId]
   );
+
+  useEffect(() => {
+    const storageKey = getStorageKey();
+    if (!storageKey) return;
+
+    let storedJobId = "";
+    try {
+      storedJobId = window.sessionStorage.getItem(storageKey) || "";
+    } catch {
+      storedJobId = "";
+    }
+
+    if (!storedJobId) return;
+    setActiveJobId(storedJobId);
+    setIsErrorStatus(false);
+    pollJob(storedJobId);
+  }, [getStorageKey, pollJob]);
 
   const startPolling = useCallback(
     (jobId: string) => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      rememberJobId(jobId);
       setActiveJobId(jobId);
       setIsErrorStatus(false);
       setStatus("작업을 시작하는 중...");
       pollJob(jobId);
     },
-    [pollJob]
+    [pollJob, rememberJobId]
   );
 
   const cancelJob = useCallback(async () => {
@@ -108,7 +189,8 @@ export function useJobPolling(options: UseJobPollingOptions) {
     setStatus(initialMessage);
     setIsErrorStatus(false);
     setActiveJobId(null);
-  }, []);
+    forgetJobId();
+  }, [forgetJobId]);
 
   return {
     status,
@@ -123,4 +205,3 @@ export function useJobPolling(options: UseJobPollingOptions) {
     cancelJob,
   };
 }
-

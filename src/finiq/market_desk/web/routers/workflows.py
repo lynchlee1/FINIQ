@@ -27,6 +27,7 @@ from finiq.market_desk.web.disclosure_html_parse import (
 from finiq.market_desk.web.disclosure_html_sections import (
     inspect_disclosure_html_sections_payload,
     list_disclosure_html_sections_payload,
+    preview_disclosure_html_sections_payload,
     render_disclosure_html_section_payload,
 )
 from finiq.market_desk.web.jobs import job_manager
@@ -300,6 +301,13 @@ def create_workflows_router(
     async def inspect_html_sections(payload: dict[str, Any]):
         try:
             return inspect_disclosure_html_sections_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/sections/preview")
+    async def preview_html_sections(payload: dict[str, Any]):
+        try:
+            return preview_disclosure_html_sections_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
