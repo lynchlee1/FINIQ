@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
+import { OntologyQuantPlatformPanel } from "./OntologyQuantPlatformPanel";
 
 const CompanyGraphViewer = dynamic(
   () => import("@/app/company/[id]/CompanyGraphViewer").then((mod) => mod.CompanyGraphViewer),
@@ -12,8 +13,13 @@ const CompanyGraphViewer = dynamic(
 export default function GraphPage() {
   return (
     <WorkflowPageShell workflowId="ontology">
-      <div className="flex flex-col gap-6 w-full h-[calc(100vh-140px)]">
-        <CompanyGraphViewer companyId="demo" />
+      <div className="flex w-full flex-col gap-6">
+        <OntologyQuantPlatformPanel />
+        <CompanyGraphViewer
+          companyId="demo"
+          dataScopeLabel="TEST DATA"
+          dataSourceLabel="Synthetic graph fixture stored in frontend source, separate from resources/"
+        />
       </div>
     </WorkflowPageShell>
   );

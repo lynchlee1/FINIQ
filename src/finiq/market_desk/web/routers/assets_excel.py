@@ -17,6 +17,7 @@ from finiq.data.assets_excel import (
     merge_asset_parquet_outputs,
     read_asset_excel,
     read_asset_excel_interpreted,
+    read_asset_parquet_preview,
     read_asset_excel_sheets,
 )
 from finiq.market_desk.web.jobs import job_manager
@@ -57,6 +58,24 @@ def create_assets_excel_router(
     @router.get("/api/assets/excels/output")
     async def get_asset_excel_output(output_directory: Optional[str] = None):
         return inspect_asset_excel_output(output_directory or DEFAULT_ASSET_PARQUET_DIR)
+
+    @router.get("/api/assets/parquet/preview")
+    async def get_asset_parquet_preview(
+        file_name: str,
+        output_directory: Optional[str] = None,
+        row_limit: Optional[int] = 20,
+    ):
+        try:
+            return await asyncio.to_thread(
+                read_asset_parquet_preview,
+                file_name,
+                output_directory=output_directory or DEFAULT_ASSET_PARQUET_DIR,
+                row_limit=row_limit,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except (IsADirectoryError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/assets/excels/preview-conversion")
     async def preview_asset_excel_conversion(request: AssetExcelConvertRequest):

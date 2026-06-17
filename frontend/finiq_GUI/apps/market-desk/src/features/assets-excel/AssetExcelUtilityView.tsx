@@ -13,6 +13,7 @@ import { formatInteger } from "@/lib/format";
 import {
   fetchAssetExcelFiles,
   fetchAssetExcelOutput,
+  fetchAssetParquetPreview,
   fetchAssetExcelSheets,
   fetchAssetExcelSheet,
   startAssetExcelConversion,
@@ -67,6 +68,10 @@ function sheetStatusLabel(status: string | undefined): string {
   return "-";
 }
 
+function fileNameFromPath(value: string | undefined): string {
+  return String(value || "").split(/[\\/]/).filter(Boolean).pop() || "";
+}
+
 export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "preview" | "convert" | "merge" }) {
   const isConvertMode = mode === "convert";
   const isMergeMode = mode === "merge";
@@ -88,6 +93,9 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [sheetsLoading, setSheetsLoading] = useState(false);
   const [sheetBodyLoading, setSheetBodyLoading] = useState(false);
   const [sheetPayload, setSheetPayload] = useState<SheetPayload | null>(null);
+  const [selectedParquetFile, setSelectedParquetFile] = useState("");
+  const [parquetPayload, setParquetPayload] = useState<SheetPayload | null>(null);
+  const [parquetLoading, setParquetLoading] = useState(false);
   const sheetPreviewCache = useRef<Record<string, SheetPayload>>({});
   const sheetBodyRequestToken = useRef(0);
 
@@ -98,6 +106,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     onSuccess: (result) => {
       setLastResult(result);
       setPreviewData(null);
+      setParquetPayload(null);
+      if (result?.output_directory) setOutputDirectory(result.output_directory);
+      const firstOutput = Object.values(result?.outputs || {}).find((item: any) => item?.output_file || item?.path) as any;
+      setSelectedParquetFile(firstOutput?.output_file || fileNameFromPath(firstOutput?.path));
     },
   });
 
@@ -227,6 +239,19 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     ),
     [previewData],
   );
+  const parquetOptions = useMemo(
+    () => outputRows
+      .map(([name, item]: [string, any]) => {
+        const fileName = item?.output_file || fileNameFromPath(item?.path) || `${name}.parquet`;
+        return {
+          key: name,
+          fileName,
+          label: item?.sheet_name || item?.account_name || name,
+        };
+      })
+      .filter((item) => item.fileName && item.fileName.endsWith(".parquet")),
+    [outputRows],
+  );
   const updatingAccountCount = useMemo(
     () => outputRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
     [outputRows],
@@ -243,6 +268,48 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   ].filter(Boolean).join("\n");
   const previewColumns = sheetPayload?.preview_columns || sheetPayload?.columns || [];
   const sheetRows = sheetPayload?.rows || [];
+  const parquetPreviewColumns = parquetPayload?.preview_columns || parquetPayload?.columns || [];
+  const parquetRows = parquetPayload?.rows || [];
+
+  useEffect(() => {
+    if (!isConvertMode) return;
+    if (!parquetOptions.length) {
+      setSelectedParquetFile("");
+      setParquetPayload(null);
+      return;
+    }
+    if (!selectedParquetFile || !parquetOptions.some((item) => item.fileName === selectedParquetFile)) {
+      setSelectedParquetFile(parquetOptions[0].fileName);
+    }
+  }, [isConvertMode, parquetOptions, selectedParquetFile]);
+
+  useEffect(() => {
+    if (!isConvertMode || !selectedParquetFile || !outputDirectory.trim()) {
+      setParquetPayload(null);
+      setParquetLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setParquetPayload(null);
+    setParquetLoading(true);
+    fetchAssetParquetPreview({
+      fileName: selectedParquetFile,
+      outputDirectory,
+      rowLimit: 20,
+    })
+      .then((data) => {
+        if (!cancelled) setParquetPayload(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setParquetPayload({ error: err.message, rows: [], columns: [], sheet_names: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setParquetLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isConvertMode, selectedParquetFile, outputDirectory]);
 
   const handlePreviewFileChange = (value: string) => {
     setSelectedPreviewFile(value);
@@ -328,6 +395,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                       setSourceDirectory(value);
                       setPreviewData(null);
                       setLastResult(null);
+                      setSelectedParquetFile("");
+                      setParquetPayload(null);
                       sheetPreviewCache.current = {};
                     }}
                     placeholder="/path/to/resources/Quantiwise"
@@ -346,7 +415,13 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     <PathPickerInput
                       mode="folder"
                       value={outputDirectory}
-                      onChange={setOutputDirectory}
+                      onChange={(value) => {
+                        setOutputDirectory(value);
+                        setPreviewData(null);
+                        setLastResult(null);
+                        setSelectedParquetFile("");
+                        setParquetPayload(null);
+                      }}
                       placeholder="/path/to/resources/assets_merged"
                       onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                     />
@@ -507,6 +582,75 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
+              {parquetOptions.length ? (
+                <div className="space-y-4 border-t border-slate-200 pt-4 dark:border-[#30363d]">
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="dark:text-slate-300">실행 결과</Label>
+                      <Select value={selectedParquetFile} onValueChange={setSelectedParquetFile}>
+                        <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
+                          <SelectValue placeholder="Parquet 선택" />
+                        </SelectTrigger>
+                        <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
+                          {parquetOptions.map((item) => (
+                            <SelectItem key={`${item.key}-${item.fileName}`} value={item.fileName}>
+                              {item.label} · {item.fileName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {parquetPayload?.account_name ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                        <span>계정: {parquetPayload.account_name}</span>
+                        <span>상태: {sheetStatusLabel(parquetPayload.status)}</span>
+                        <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
+                        {parquetPayload.date_start && parquetPayload.date_end ? <span>{parquetPayload.date_start} ~ {parquetPayload.date_end}</span> : null}
+                      </div>
+                    ) : null}
+                    {parquetPayload?.metadata?.period_from || parquetPayload?.metadata?.period_to ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                        <span>Period(From): {parquetPayload.metadata.period_from || "-"}</span>
+                        <span>Period(To): {parquetPayload.metadata.period_to || "-"}</span>
+                        <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {(parquetPayload?.columns || []).length > 12 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {formatInteger(parquetPayload?.columns?.length)}개</p>
+                  ) : null}
+
+                  <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
+                        <tr className="text-left text-slate-500 dark:text-slate-400">
+                          {parquetPreviewColumns.slice(0, 12).map((column: string) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
+                        {parquetRows.map((row: any, index: number) => (
+                          <tr key={index} className="dark:text-slate-300">
+                            {parquetPreviewColumns.slice(0, 12).map((column: string) => <td key={column} className="px-3 py-2 whitespace-nowrap">{String(row[column] ?? "")}</td>)}
+                          </tr>
+                        ))}
+                        {parquetPayload?.error ? (
+                          <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-red-600 dark:text-red-300">{parquetPayload.error}</td></tr>
+                        ) : null}
+                        {!parquetPayload?.error && parquetLoading ? (
+                          <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">본문을 불러오는 중...</td></tr>
+                        ) : null}
+                        {!parquetPayload?.error && !parquetLoading && selectedParquetFile && !parquetRows.length ? (
+                          <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">표시할 행 없음</td></tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
               {previewData?.sheets?.length ? (
                 <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
                   <table className="w-full text-sm">
