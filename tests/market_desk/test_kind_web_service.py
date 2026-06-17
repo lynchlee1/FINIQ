@@ -44,10 +44,8 @@ from finiq.market_desk.web.disclosure_html_parse import (
 )
 from finiq.market_desk.web.disclosure_html_sections import (
     inspect_disclosure_html_sections_payload,
-    list_disclosure_html_sections_payload,
-    preview_disclosure_html_sections_payload,
-    render_disclosure_html_section_payload,
     save_disclosure_html_sections_payload,
+    split_content_html_sections,
 )
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance
 from finiq.market_desk.web.html_parsers.common import expand_table, parse_html_document
@@ -2360,7 +2358,7 @@ def test_merge_disclosure_content_html_payload_writes_single_json(tmp_path: Path
     assert saved["records"][0]["html"] == "<html>one</html>"
 
 
-def test_render_disclosure_html_section_payload_selects_requested_toc(tmp_path: Path) -> None:
+def test_split_content_html_sections_uses_toc_boundaries(tmp_path: Path) -> None:
     source_file = tmp_path / "20260422000832.html"
     source_file.write_text(
         """
@@ -2377,18 +2375,59 @@ def test_render_disclosure_html_section_payload_selects_requested_toc(tmp_path: 
         encoding="utf-8",
     )
 
-    list_payload = list_disclosure_html_sections_payload({"source_file": str(source_file)})
-    render_payload = render_disclosure_html_section_payload({"source_file": str(source_file), "section": "toc_2"})
+    sections = split_content_html_sections(source_file.read_bytes())
+    section_payload = {section.toc_id: section for section in sections}
 
-    assert [section["toc_id"] for section in list_payload["sections"]] == ["toc_1", "toc_2"]
-    assert render_payload["section"]["title"] == "전환사채권 발행결정"
-    assert "전환사채권 발행결정" in render_payload["html"]
-    assert "발행금액" in render_payload["html"]
-    assert "주요사항보고서" not in render_payload["html"]
-    assert "표지 내용" not in render_payload["html"]
+    assert [section.toc_id for section in sections] == ["toc_1", "toc_2"]
+    assert section_payload["toc_2"].title == "전환사채권 발행결정"
+    assert "전환사채권 발행결정" in section_payload["toc_2"].html
+    assert "발행금액" in section_payload["toc_2"].html
+    assert "주요사항보고서" not in section_payload["toc_2"].html
+    assert "표지 내용" not in section_payload["toc_2"].html
 
 
-def test_save_disclosure_html_sections_payload_writes_selected_toc_only(tmp_path: Path) -> None:
+def test_split_content_html_sections_ignores_nested_and_non_numeric_toc_headings() -> None:
+    sections = split_content_html_sections(
+        """
+        <html><body>
+          <div><h2 id="toc_1"><p>중첩 목차</p></h2><p>중첩 내용</p></div>
+          <h2 id="toc_appendix"><p>비정규 목차</p></h2>
+          <p>비정규 내용</p>
+          <h2 id="toc_2"><p>정규 목차</p></h2>
+          <p>정규 내용</p>
+        </body></html>
+        """
+    )
+
+    assert [section.toc_id for section in sections] == ["toc_2"]
+    assert sections[0].title == "정규 목차"
+    assert "정규 내용" in sections[0].html
+    assert "중첩 내용" not in sections[0].html
+
+
+def test_split_content_html_sections_supports_legacy_section_one_paragraphs() -> None:
+    sections = split_content_html_sections(
+        """
+        <html><body>
+          <p class="SECTION-1"><a name="#10">주요경영사항 신고</a></p>
+          <table><tr><td>표지 내용</td></tr></table>
+          <p class="PGBRK"></p>
+          <p class="SECTION-1"><a name="#87">신주인수권부사채 발행결정</a></p>
+          <table><tr><td>발행금액 16,000,000,000</td></tr></table>
+        </body></html>
+        """
+    )
+
+    assert [(section.toc_id, section.index, section.title) for section in sections] == [
+        ("toc_1", 1, "주요경영사항 신고"),
+        ("toc_2", 2, "신주인수권부사채 발행결정"),
+    ]
+    assert "표지 내용" in sections[0].html
+    assert "신주인수권부사채 발행결정" not in sections[0].html
+    assert "발행금액 16,000,000,000" in sections[1].html
+
+
+def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     input_directory.mkdir()
@@ -2408,18 +2447,56 @@ def test_save_disclosure_html_sections_payload_writes_selected_toc_only(tmp_path
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
-            "section": "전환사채권",
         }
     )
-    saved_html = (output_directory / "20260422000832.html").read_text(encoding="utf-8")
+    toc_1_html = (output_directory / "toc_1" / "20260422000832.html").read_text(encoding="utf-8")
+    toc_2_html = (output_directory / "toc_2" / "20260422000832.html").read_text(encoding="utf-8")
 
-    assert payload["summary"] == {"found_files": 1, "saved_files": 1, "skipped_files": 0}
-    assert "전환사채권 발행결정" in saved_html
-    assert "발행금액 250,000,000" in saved_html
-    assert "주요사항보고서" not in saved_html
+    assert payload["summary"] == {"found_files": 1, "saved_files": 2, "skipped_files": 0}
+    assert "주요사항보고서" in toc_1_html
+    assert "표지 내용" in toc_1_html
+    assert "전환사채권 발행결정" not in toc_1_html
+    assert "전환사채권 발행결정" in toc_2_html
+    assert "발행금액 250,000,000" in toc_2_html
+    assert "주요사항보고서" not in toc_2_html
 
 
-def test_inspect_disclosure_html_sections_payload_counts_folder_coverage(tmp_path: Path) -> None:
+def test_save_disclosure_html_sections_payload_continues_after_files_without_toc(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    (input_directory / "20260421000111.html").write_text(
+        "<html><body><p>목차 없는 문서</p></body></html>",
+        encoding="utf-8",
+    )
+    (input_directory / "20260422000832.html").write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+          <p>표지 내용</p>
+          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+        }
+    )
+
+    assert payload["summary"] == {"found_files": 2, "saved_files": 2, "skipped_files": 1}
+    assert (output_directory / "toc_1" / "20260422000832.html").is_file()
+    assert (output_directory / "toc_2" / "20260422000832.html").is_file()
+    assert payload["skipped_files"] == [
+        {"source_file": str(input_directory / "20260421000111.html"), "error": "no sections found"}
+    ]
+
+
+def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problems(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     (input_directory / "20260422000832.html").write_text(
@@ -2442,48 +2519,30 @@ def test_inspect_disclosure_html_sections_payload_counts_folder_coverage(tmp_pat
         """,
         encoding="utf-8",
     )
+    (input_directory / "20260424000211.html").write_text("<html><body><p>목차 없음</p></body></html>", encoding="utf-8")
 
-    payload = inspect_disclosure_html_sections_payload({"input_directory": str(input_directory)})
-    sections = {section["toc_id"]: section for section in payload["sections"]}
+    payload = inspect_disclosure_html_sections_payload({"input_directory": str(input_directory), "report_limit": 1})
 
     assert payload["summary"] == {
-        "found_files": 2,
-        "section_types": 2,
-        "files_without_sections": 0,
+        "found_files": 3,
+        "documents_with_sections": 2,
+        "files_without_sections": 1,
         "failed_files": 0,
+        "reported_problem_files": 1,
     }
-    assert sections["toc_1"]["file_count"] == 2
-    assert sections["toc_1"]["coverage_percent"] == 100
-    assert sections["toc_2"]["file_count"] == 1
-    assert sections["toc_2"]["coverage_percent"] == 50
-    assert sections["toc_2"]["title_variants"] == [{"title": "전환사채권 발행결정", "file_count": 1}]
     assert [document["source_name"] for document in payload["documents"]] == [
         "20260422000832.html",
         "20260423000533.html",
     ]
     assert [section["toc_id"] for section in payload["documents"][0]["sections"]] == ["toc_1", "toc_2"]
     assert [section["toc_id"] for section in payload["documents"][1]["sections"]] == ["toc_1"]
-
-
-def test_preview_disclosure_html_sections_payload_reads_first_document_toc(tmp_path: Path) -> None:
-    input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    (input_directory / "20260422000832.html").write_text(
-        """
-        <html><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
-          <p>표지 내용</p>
-          <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
-          <p>발행금액 250,000,000</p>
-        </body></html>
-        """,
-        encoding="utf-8",
-    )
-
-    payload = preview_disclosure_html_sections_payload({"input_directory": str(input_directory)})
-
-    assert payload["source_name"] == "20260422000832.html"
-    assert [section["toc_id"] for section in payload["sections"]] == ["toc_1", "toc_2"]
+    assert payload["problem_files"] == [
+        {
+            "kind": "no_sections",
+            "source_file": str(input_directory / "20260424000211.html"),
+            "error": "",
+        }
+    ]
 
 
 def test_merge_disclosure_content_html_payload_writes_split_json(tmp_path: Path) -> None:
@@ -3519,18 +3578,19 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/html-content-download" in parse_ui_html
     assert "공시원문 목차 분리" in section_split_ui_html
     assert "/api/disclosures/html/sections/inspect" in section_split_ui_html
-    assert "/api/disclosures/html/sections/preview" in section_split_ui_html
     assert "/api/disclosures/html/sections/save/start" in section_split_ui_html
-    assert "/api/disclosures/html/sections/render" in section_split_ui_html
     assert "목차 스캔" in section_split_ui_html
-    assert "첫 문서 목차" in section_split_ui_html
     assert "목차 저장" in section_split_ui_html
-    assert "목차 렌더링" in section_split_ui_html
-    assert "2026 샘플" in section_split_ui_html
-    assert "전체 목차 목록" in section_split_ui_html
-    assert "문서 목록" in section_split_ui_html
-    assert "저장 대상 목차" in section_split_ui_html
-    assert "렌더링 문서" in section_split_ui_html
+    assert "문서별 목차" in section_split_ui_html
+    assert "문제 파일 표시 수" in section_split_ui_html
+    assert "/api/disclosures/html/sections/preview" not in section_split_ui_html
+    assert "/api/disclosures/html/sections/render" not in section_split_ui_html
+    assert "첫 문서 목차" not in section_split_ui_html
+    assert "목차 렌더링" not in section_split_ui_html
+    assert "2026 샘플" not in section_split_ui_html
+    assert "전체 목차 목록" not in section_split_ui_html
+    assert "저장 대상 목차" not in section_split_ui_html
+    assert "렌더링 문서" not in section_split_ui_html
     assert "공시원문 외부 저장" in download_component_html
     assert "공시원문 내부 저장" in download_component_html
     assert "content" in content_download_ui_html
