@@ -53,6 +53,33 @@ def test_api_settings_persists_sqlite_output_directory(tmp_path: Path):
     assert response.status_code == 200
     assert response.json()["sqlite_output_directory"] == str((tmp_path / "sqlite_output").resolve())
 
+
+def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
+    settings_path = tmp_path / "settings.json"
+    config.settings_path = str(settings_path)
+
+    source_directory = tmp_path / "quantiwise"
+    output_directory = tmp_path / "quantiwise_parquet"
+
+    client = TestClient(app)
+    response = client.post("/api/settings", json={
+        "asset_excel_source_directory": str(source_directory),
+        "asset_excel_output_directory": str(output_directory),
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["asset_excel_source_directory"] == str(source_directory.resolve())
+    assert data["asset_excel_output_directory"] == str(output_directory.resolve())
+
+    response = client.get("/api/config")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["asset_excel_source_directory"] == str(source_directory.resolve())
+    assert data["asset_excel_output_directory"] == str(output_directory.resolve())
+
+
 def test_api_settings_does_not_discover_files(tmp_path: Path, monkeypatch):
     def fail_discovery(*args, **kwargs):
         raise AssertionError("settings save should not scan source directories")

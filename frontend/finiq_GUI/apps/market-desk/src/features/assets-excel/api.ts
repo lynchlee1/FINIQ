@@ -1,16 +1,14 @@
 import { apiGet, apiPost } from "@/api/client";
 import type { JobStartResponse } from "@/types/api";
-import type { AssetExcelConvertPayload, AssetExcelFilesResponse, AssetParquetMergePayload, PreviewData, SheetListPayload, SheetPayload } from "./types";
+import type { AssetAccountMappingsResponse, AssetExcelConvertPayload, AssetExcelFilesResponse, AssetParquetMergePayload, PreviewData, SheetListPayload, SheetPayload } from "./types";
 
 function encodePath(value: string): string {
   return value.split("/").map((part) => encodeURIComponent(part)).join("/");
 }
 
-export function fetchAssetExcelFiles(sourceDirectory?: string) {
-  const query = new URLSearchParams();
-  if (sourceDirectory) query.set("source_directory", sourceDirectory);
-  const suffix = query.toString() ? `?${query.toString()}` : "";
-  return apiGet<AssetExcelFilesResponse>(`/api/assets/excels${suffix}`);
+export function fetchAssetExcelFiles(sourceDirectory: string) {
+  const query = new URLSearchParams({ source_directory: sourceDirectory });
+  return apiGet<AssetExcelFilesResponse>(`/api/assets/excels?${query.toString()}`);
 }
 
 export function fetchAssetExcelOutput(outputDirectory: string) {
@@ -18,21 +16,24 @@ export function fetchAssetExcelOutput(outputDirectory: string) {
   return apiGet<any>(`/api/assets/excels/output?${params.toString()}`);
 }
 
-export function fetchAssetExcelSheets(fileName: string, sourceDirectory?: string) {
-  const query = new URLSearchParams();
-  if (sourceDirectory) query.set("source_directory", sourceDirectory);
+export function fetchAssetExcelAccountMappings() {
+  return apiGet<AssetAccountMappingsResponse>("/api/assets/excels/account-mappings");
+}
+
+export function fetchAssetExcelSheets(fileName: string, sourceDirectory: string) {
+  const query = new URLSearchParams({ source_directory: sourceDirectory });
   const suffix = query.toString() ? `?${query.toString()}` : "";
   return apiGet<SheetListPayload>(`/api/assets/excels/${encodePath(fileName)}/sheets${suffix}`);
 }
 
 export function fetchAssetExcelSheet(params: {
   fileName: string;
-  sourceDirectory?: string;
+  sourceDirectory: string;
   sheetName?: string;
   rowLimit?: number;
 }) {
   const query = new URLSearchParams({ row_limit: String(params.rowLimit ?? 20) });
-  if (params.sourceDirectory) query.set("source_directory", params.sourceDirectory);
+  query.set("source_directory", params.sourceDirectory);
   if (params.sheetName) query.set("sheet_name", params.sheetName);
   return apiGet<SheetPayload>(`/api/assets/excels/${encodePath(params.fileName)}?${query.toString()}`);
 }

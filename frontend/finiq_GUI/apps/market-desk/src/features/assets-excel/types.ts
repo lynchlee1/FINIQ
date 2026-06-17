@@ -1,3 +1,14 @@
+export type AssetAccountMapping = {
+  account_id: string;
+  account_name: string;
+  legacy_account_name: string;
+  sheet_name: string;
+};
+
+export type AssetAccountMappingsResponse = {
+  items: AssetAccountMapping[];
+};
+
 export type AssetExcelFile = {
   file_name: string;
   relative_path: string;
@@ -6,7 +17,6 @@ export type AssetExcelFile = {
 
 export type AssetExcelFilesResponse = {
   root_directory: string;
-  default_output_directory: string;
   excel_files: AssetExcelFile[];
 };
 
@@ -14,6 +24,7 @@ export type AssetExcelConvertPayload = {
   source_directory: string;
   output_directory: string;
   write_mode: string;
+  account_mappings?: AssetAccountMapping[];
 };
 
 export type AssetParquetMergePayload = {

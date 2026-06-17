@@ -1,14 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { FolderTree, Loader2, Play } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { useSettingsStore } from "@/store/useSettingsStore";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -39,9 +37,7 @@ export default function UtilityPage() {
   const [mode, setMode] = useState<PartitionMode>("split");
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [loading, setLoading] = useState(true);
 
-  const { output_root, fetchSettings } = useSettingsStore();
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/utility/jobs/{jobId}",
     cancelEndpoint: "/api/utility/cancel",
@@ -59,17 +55,6 @@ export default function UtilityPage() {
       return lines;
     },
   });
-
-  useEffect(() => {
-    fetchSettings().then((config) => {
-      const root = config?.output_root || output_root || "";
-      if (root) {
-        setSourceDirectory((current) => current || root);
-        setOutputDirectory((current) => current || root);
-      }
-      setLoading(false);
-    });
-  }, [fetchSettings, output_root]);
 
   const actionLabel = useMemo(
     () => mode === "flatten" ? "분할저장 해제 실행" : "분할저장 실행",
@@ -116,10 +101,6 @@ export default function UtilityPage() {
     }
   };
 
-  if (loading) {
-    return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
-  }
-
   return (
     <WorkflowPageShell workflowId="utility">
       <div className="relative space-y-6">
@@ -141,7 +122,7 @@ export default function UtilityPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button onClick={handleStart} disabled={!!activeJobId} className="w-full md:w-auto">
+                <Button onClick={handleStart} disabled={!!activeJobId || !sourceDirectory.trim() || !outputDirectory.trim()} className="w-full md:w-auto">
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   {actionLabel}
                 </Button>

@@ -1,17 +1,19 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Eye, Loader2, Play } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
+import { AlertTriangle, Eye, Loader2, Play, Plus, Trash2 } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import {
   fetchAssetExcelFiles,
+  fetchAssetExcelAccountMappings,
   fetchAssetExcelOutput,
   fetchAssetParquetPreview,
   fetchAssetExcelSheets,
@@ -19,7 +21,7 @@ import {
   startAssetExcelConversion,
   startAssetParquetMerge,
 } from "./api";
-import type { AssetExcelFile, PreviewData, SheetPayload } from "./types";
+import type { AssetAccountMapping, AssetExcelFile, PreviewData, SheetPayload } from "./types";
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -44,14 +46,24 @@ function jobStatusLines(data: any): string[] {
   if (data.error) lines.push(`오류: ${data.error}`);
   if (data.progress_log?.length) lines.push("", "최근 로그:", ...data.progress_log.slice(-30));
   if (data.status === "completed" && data.result) {
+    const skipped = data.result.skipped || [];
     lines.push(
       "",
       "변환 완료",
       `Sheet Parquet: ${formatInteger(data.result.sheets_processed ?? Object.keys(data.result.outputs || {}).length)}개`,
       `계정: ${formatInteger(data.result.accounts_processed)}개`,
-      `건너뛴 Sheet: ${formatInteger(data.result.skipped?.length)}개`,
+      `건너뛴 Sheet: ${formatInteger(skipped.length)}개`,
       `데이터 경로: ${data.result.output_directory || ""}`,
     );
+    if (skipped.length) {
+      lines.push(
+        "건너뛴 Sheet 상세:",
+        ...skipped.map((item: any) => {
+          const source = item.relative_path || item.file_name || "-";
+          return `${source} / ${item.sheet_name || "-"} - ${item.reason || "-"}`;
+        }),
+      );
+    }
   }
   return lines;
 }
@@ -70,6 +82,14 @@ function sheetStatusLabel(status: string | undefined): string {
 
 function fileNameFromPath(value: string | undefined): string {
   return String(value || "").split(/[\\/]/).filter(Boolean).pop() || "";
+}
+
+function nextAccountId(mappings: AssetAccountMapping[]): string {
+  const maxIndex = mappings.reduce((max, mapping) => {
+    const match = String(mapping.account_id || "").match(/^S(\d+)$/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `S${String(maxIndex + 1).padStart(5, "0")}`;
 }
 
 export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "preview" | "convert" | "merge" }) {
@@ -96,8 +116,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [selectedParquetFile, setSelectedParquetFile] = useState("");
   const [parquetPayload, setParquetPayload] = useState<SheetPayload | null>(null);
   const [parquetLoading, setParquetLoading] = useState(false);
+  const [accountMappings, setAccountMappings] = useState<AssetAccountMapping[]>([]);
+  const [mappingsLoading, setMappingsLoading] = useState(false);
   const sheetPreviewCache = useRef<Record<string, SheetPayload>>({});
   const sheetBodyRequestToken = useRef(0);
+  const { fetchSettings, saveSetting } = useSettingsStore();
 
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/assets/excels/jobs/{jobId}",
@@ -114,19 +137,60 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   });
 
   useEffect(() => {
+    fetchSettings().then((config) => {
+      if (!config) return;
+      if (!isMergeMode && config.asset_excel_source_directory) {
+        setSourceDirectory((current) => current || config.asset_excel_source_directory);
+      }
+      if (isConvertMode && config.asset_excel_output_directory) {
+        setOutputDirectory((current) => current || config.asset_excel_output_directory);
+      }
+    });
+  }, [fetchSettings, isConvertMode, isMergeMode]);
+
+  useEffect(() => {
+    if (!isConvertMode) return;
+    let cancelled = false;
+    setMappingsLoading(true);
+    fetchAssetExcelAccountMappings()
+      .then((data) => {
+        if (!cancelled) setAccountMappings(data.items || []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setStatus(err.message);
+        setIsErrorStatus(true);
+      })
+      .finally(() => {
+        if (!cancelled) setMappingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isConvertMode, setIsErrorStatus, setStatus]);
+
+  useEffect(() => {
     if (isMergeMode) {
       setLoading(false);
       return;
     }
+    if (!sourceDirectory.trim()) {
+      setExcelFiles([]);
+      setSelectedPreviewFile("");
+      setSelectedSheet("");
+      setSheetNames([]);
+      setSheetPayload(null);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
-    fetchAssetExcelFiles(sourceDirectory || undefined)
+    setLoading(true);
+    fetchAssetExcelFiles(sourceDirectory)
       .then((data) => {
         if (cancelled) return;
         const files = data.excel_files || [];
-        setSourceDirectory((current) => current || data.root_directory || "");
         setExcelFiles(files);
         setSelectedPreviewFile((current) => current && files.some((file: AssetExcelFile) => file.relative_path === current) ? current : files[0]?.relative_path || "");
-        setOutputDirectory((current) => current || data.default_output_directory || "");
       })
       .catch((err) => {
         if (cancelled) return;
@@ -142,7 +206,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   }, [isMergeMode, sourceDirectory, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
-    if (!outputDirectory.trim()) return;
+    if (!outputDirectory.trim()) {
+      setOutputInfo(null);
+      return;
+    }
     let cancelled = false;
     fetchAssetExcelOutput(outputDirectory)
       .then((data) => {
@@ -157,7 +224,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   }, [outputDirectory]);
 
   useEffect(() => {
-    if (!selectedPreviewFile) return;
+    if (!selectedPreviewFile || !sourceDirectory.trim()) return;
     let cancelled = false;
     setSelectedSheet("");
     setSheetNames([]);
@@ -181,7 +248,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   }, [selectedPreviewFile, sourceDirectory]);
 
   useEffect(() => {
-    if (!selectedPreviewFile || !selectedSheet) {
+    if (!selectedPreviewFile || !selectedSheet || !sourceDirectory.trim()) {
       sheetBodyRequestToken.current += 1;
       setSheetBodyLoading(false);
       return;
@@ -193,7 +260,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       return;
     }
     let cancelled = false;
-    const cacheKey = JSON.stringify({ selectedPreviewFile, selectedSheet });
+    const cacheKey = JSON.stringify({ sourceDirectory, selectedPreviewFile, selectedSheet });
     const requestToken = sheetBodyRequestToken.current + 1;
     sheetBodyRequestToken.current = requestToken;
     const cached = sheetPreviewCache.current[cacheKey];
@@ -225,14 +292,14 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     return () => {
       cancelled = true;
     };
-  }, [selectedPreviewFile, selectedSheet, sheetNames]);
+  }, [sourceDirectory, selectedPreviewFile, selectedSheet, sheetNames]);
 
   const conflictCount = useMemo(
     () => Object.values(previewData?.conflicts || {}).reduce((sum, items: any) => sum + (Array.isArray(items) ? items.length : 0), 0),
     [previewData],
   );
   const outputRows = useMemo(() => Object.entries(previewData?.outputs || lastResult?.outputs || {}), [previewData, lastResult]);
-  const skippedRows = previewData?.skipped || [];
+  const skippedRows = previewData?.skipped || lastResult?.skipped || [];
   const conflictRows = useMemo(
     () => Object.entries(previewData?.conflicts || {}).flatMap(([accountName, items]: [string, any]) =>
       (Array.isArray(items) ? items : []).map((item: any) => ({ accountName, ...item })),
@@ -282,6 +349,41 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const parquetPreviewColumns = parquetPayload?.preview_columns || parquetPayload?.columns || [];
   const parquetRows = parquetPayload?.rows || [];
   const selectedParquetSheet = parquetPayload?.sheet_name || "";
+  const normalizedAccountMappings = useMemo(
+    () => accountMappings.map((mapping) => ({
+      account_id: mapping.account_id.trim(),
+      account_name: mapping.account_name.trim(),
+      legacy_account_name: mapping.legacy_account_name.trim(),
+      sheet_name: mapping.sheet_name.trim(),
+    })),
+    [accountMappings],
+  );
+  const accountMappingIssues = useMemo(() => {
+    const issues: string[] = [];
+    const sheetNames = new Set<string>();
+    const accountIds = new Set<string>();
+    normalizedAccountMappings.forEach((mapping, index) => {
+      const rowLabel = `${index + 1}행`;
+      if (!mapping.sheet_name || !mapping.account_id || !mapping.account_name) {
+        issues.push(`${rowLabel}: Sheet, ID, 계정을 입력하세요.`);
+      }
+      if (mapping.account_id.includes("_")) {
+        issues.push(`${rowLabel}: ID에는 _를 사용할 수 없습니다.`);
+      }
+      if (mapping.account_name.includes("_")) {
+        issues.push(`${rowLabel}: 계정에는 _를 사용할 수 없습니다.`);
+      }
+      if (mapping.sheet_name) {
+        if (sheetNames.has(mapping.sheet_name)) issues.push(`${rowLabel}: 중복 Sheet입니다.`);
+        sheetNames.add(mapping.sheet_name);
+      }
+      if (mapping.account_id) {
+        if (accountIds.has(mapping.account_id)) issues.push(`${rowLabel}: 중복 ID입니다.`);
+        accountIds.add(mapping.account_id);
+      }
+    });
+    return issues;
+  }, [normalizedAccountMappings]);
 
   useEffect(() => {
     if (!isConvertMode) return;
@@ -331,6 +433,47 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setSheetBodyLoading(false);
   };
 
+  const handleSourceDirectoryChange = (value: string) => {
+    setSourceDirectory(value);
+    saveSetting("asset_excel_source_directory", value);
+    setPreviewData(null);
+    setLastResult(null);
+    setSelectedParquetFile("");
+    setParquetPayload(null);
+    sheetPreviewCache.current = {};
+  };
+
+  const handleConvertOutputDirectoryChange = (value: string) => {
+    setOutputDirectory(value);
+    saveSetting("asset_excel_output_directory", value);
+    setPreviewData(null);
+    setLastResult(null);
+    setSelectedParquetFile("");
+    setParquetPayload(null);
+  };
+
+  const updateAccountMapping = (index: number, key: keyof AssetAccountMapping, value: string) => {
+    setAccountMappings((current) => current.map((mapping, itemIndex) => (
+      itemIndex === index ? { ...mapping, [key]: value } : mapping
+    )));
+  };
+
+  const addAccountMapping = () => {
+    setAccountMappings((current) => [
+      ...current,
+      {
+        account_id: nextAccountId(current),
+        account_name: "",
+        legacy_account_name: "",
+        sheet_name: "",
+      },
+    ]);
+  };
+
+  const deleteAccountMapping = (index: number) => {
+    setAccountMappings((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  };
+
   const handleStart = async () => {
     if (activeJobId) return;
     if (isMergeMode) {
@@ -367,6 +510,16 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       setIsErrorStatus(true);
       return;
     }
+    if (mappingsLoading) {
+      setStatus("계정-ID 매핑을 불러오는 중입니다.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (accountMappingIssues.length) {
+      setStatus(accountMappingIssues.join("\n"));
+      setIsErrorStatus(true);
+      return;
+    }
     try {
       setStatus("작업을 시작하는 중...");
       setIsErrorStatus(false);
@@ -375,6 +528,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         source_directory: sourceDirectory,
         output_directory: outputDirectory,
         write_mode: writeMode,
+        account_mappings: normalizedAccountMappings,
       });
       startPolling(data.job_id);
     } catch (err: any) {
@@ -382,9 +536,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       setIsErrorStatus(true);
     }
   };
-
-  const activeOutputInfo = previewData?.output || outputInfo;
-  const outputExists = Boolean(activeOutputInfo?.manifest_exists || activeOutputInfo?.parquet_files?.length);
 
   return (
     <WorkflowPageShell workflowId="utility">
@@ -403,14 +554,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   <PathPickerInput
                     mode="folder"
                     value={sourceDirectory}
-                    onChange={(value) => {
-                      setSourceDirectory(value);
-                      setPreviewData(null);
-                      setLastResult(null);
-                      setSelectedParquetFile("");
-                      setParquetPayload(null);
-                      sheetPreviewCache.current = {};
-                    }}
+                    onChange={handleSourceDirectoryChange}
                     placeholder="/path/to/resources/Quantiwise"
                     onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                   />
@@ -427,29 +571,12 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     <PathPickerInput
                       mode="folder"
                       value={outputDirectory}
-                      onChange={(value) => {
-                        setOutputDirectory(value);
-                        setPreviewData(null);
-                        setLastResult(null);
-                        setSelectedParquetFile("");
-                        setParquetPayload(null);
-                      }}
+                      onChange={handleConvertOutputDirectoryChange}
                       placeholder="/path/to/resources/assets_merged"
                       onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                     />
                   </div>
 
-                  {outputExists ? (
-                    <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <div>
-                        <p className="font-medium">기존 결과가 감지되었습니다.</p>
-                        <p>변환하기는 기존 Parquet를 병합에 쓰지 않고 원본 데이터 경로 아래 전체 Excel에서 나온 Sheet Parquet만 저장합니다.</p>
-                        <p>기존 결과와 합치려면 `Quantiwise - 병합하기`를 사용하세요.</p>
-                        <p>기존 Parquet: {formatInteger(activeOutputInfo?.account_count || activeOutputInfo?.parquet_files?.length)}개</p>
-                      </div>
-                    </div>
-                  ) : null}
                 </>
               ) : null}
 
@@ -489,6 +616,98 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               ) : null}
             </CardContent>
           </Card>
+
+          {isConvertMode ? (
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base dark:text-white">계정-ID 매핑</CardTitle>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">변환 실행 시 Sheet 이름을 account_id와 account_name으로 연결합니다.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={addAccountMapping} disabled={mappingsLoading || !!activeJobId}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  추가
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
+                    <tr className="text-left text-slate-500 dark:text-slate-400">
+                      <th className="px-3 py-2 font-medium">Sheet</th>
+                      <th className="px-3 py-2 font-medium">ID</th>
+                      <th className="px-3 py-2 font-medium">계정</th>
+                      <th className="px-3 py-2 font-medium">기존 계정</th>
+                      <th className="px-3 py-2 font-medium text-right">삭제</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
+                    {accountMappings.map((mapping, index) => (
+                      <tr key={`${mapping.sheet_name}-${mapping.account_id}-${index}`} className="dark:text-slate-300">
+                        <td className="px-3 py-2">
+                          <Input
+                            value={mapping.sheet_name}
+                            onChange={(event) => updateAccountMapping(index, "sheet_name", event.target.value)}
+                            aria-label="Sheet"
+                            disabled={!!activeJobId}
+                            className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            value={mapping.account_id}
+                            onChange={(event) => updateAccountMapping(index, "account_id", event.target.value)}
+                            aria-label="ID"
+                            disabled={!!activeJobId}
+                            className="h-9 font-mono dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            value={mapping.account_name}
+                            onChange={(event) => updateAccountMapping(index, "account_name", event.target.value)}
+                            aria-label="계정"
+                            disabled={!!activeJobId}
+                            className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            value={mapping.legacy_account_name}
+                            onChange={(event) => updateAccountMapping(index, "legacy_account_name", event.target.value)}
+                            aria-label="기존 계정"
+                            disabled={!!activeJobId}
+                            className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <Button variant="ghost" size="icon" onClick={() => deleteAccountMapping(index)} disabled={!!activeJobId} title="삭제">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!accountMappings.length ? (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
+                          {mappingsLoading ? "매핑을 불러오는 중..." : "매핑 없음"}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+              {accountMappingIssues.length ? (
+                <div className="whitespace-pre-wrap rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                  {accountMappingIssues.slice(0, 5).join("\n")}
+                  {accountMappingIssues.length > 5 ? `\n외 ${accountMappingIssues.length - 5}개` : ""}
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+          ) : null}
 
           {!isConvertMode && !isMergeMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
@@ -586,7 +805,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || !excelFiles.length}>
+                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
@@ -788,7 +1007,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading}>
+                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || !mergeIncomingDirectory.trim() || !outputDirectory.trim()}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
@@ -835,19 +1054,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     ))}
                   </tbody>
                 </table>
-              </div>
-              <div className="rounded-md border border-slate-200 p-3 text-xs dark:border-[#30363d] dark:text-slate-300">
-                <p className="mb-2 font-medium text-slate-900 dark:text-slate-100">최근 샘플</p>
-                <div className="space-y-2">
-                  {outputRows.slice(0, 3).map(([name, item]: [string, any]) => (
-                    <div key={name} className="break-all">
-                      <span className="font-medium">{item.sheet_name || name}</span>
-                      <span className="ml-2 text-slate-500 dark:text-slate-400">
-                        {(item.quality?.sample_rows || []).map((row: any) => JSON.stringify(row)).join(" / ") || "샘플 없음"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
               </div>
             </CardContent>
           </Card>

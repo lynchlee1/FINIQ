@@ -46,6 +46,8 @@ SAVED_SETTINGS_KEYS = (
     "integrated_merge_output_path",
     "integrated_history_item_registry_path",
     "integrated_history_output_path",
+    "asset_excel_source_directory",
+    "asset_excel_output_directory",
     "html_download_source_path",
     "html_merge_output_path",
     "html_content_compressed_json_path",
@@ -79,6 +81,8 @@ class AppConfig:
     integrated_merge_output_path: str = ""
     integrated_history_item_registry_path: str = ""
     integrated_history_output_path: str = ""
+    asset_excel_source_directory: str = ""
+    asset_excel_output_directory: str = ""
     html_download_source_path: str = ""
     html_merge_output_path: str = ""
     html_content_compressed_json_path: str = ""
@@ -171,6 +175,8 @@ def init_config() -> AppConfig:
         integrated_merge_output_path=settings.get("integrated_merge_output_path", ""),
         integrated_history_item_registry_path=settings.get("integrated_history_item_registry_path", ""),
         integrated_history_output_path=settings.get("integrated_history_output_path", ""),
+        asset_excel_source_directory=settings.get("asset_excel_source_directory", ""),
+        asset_excel_output_directory=settings.get("asset_excel_output_directory", ""),
         html_download_source_path=settings.get("html_download_source_path", ""),
         html_merge_output_path=settings.get("html_merge_output_path", ""),
         html_content_compressed_json_path=settings.get("html_content_compressed_json_path", ""),

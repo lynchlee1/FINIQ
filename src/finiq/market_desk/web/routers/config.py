@@ -43,6 +43,8 @@ class SettingsUpdate(BaseModel):
     integrated_merge_output_path: Optional[str] = None
     integrated_history_item_registry_path: Optional[str] = None
     integrated_history_output_path: Optional[str] = None
+    asset_excel_source_directory: Optional[str] = None
+    asset_excel_output_directory: Optional[str] = None
     html_download_source_path: Optional[str] = None
     html_merge_output_path: Optional[str] = None
     html_content_compressed_json_path: Optional[str] = None
@@ -149,6 +151,8 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "integrated_merge_output_path": config.integrated_merge_output_path,
             "integrated_history_item_registry_path": config.integrated_history_item_registry_path,
             "integrated_history_output_path": config.integrated_history_output_path,
+            "asset_excel_source_directory": config.asset_excel_source_directory,
+            "asset_excel_output_directory": config.asset_excel_output_directory,
             "html_download_source_path": config.html_download_source_path,
             "html_merge_output_path": config.html_merge_output_path,
             "html_content_compressed_json_path": config.html_content_compressed_json_path,
