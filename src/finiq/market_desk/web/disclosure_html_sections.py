@@ -164,6 +164,33 @@ def list_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, Any
     }
 
 
+def preview_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, Any]:
+    input_directory_raw = str(body.get("input_directory") or "").strip()
+    if not input_directory_raw:
+        msg = "input_directory is required"
+        raise ValueError(msg)
+    input_directory = Path(input_directory_raw).expanduser().resolve()
+    if not input_directory.is_dir():
+        msg = f"input_directory does not exist: {input_directory}"
+        raise ValueError(msg)
+    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    if not html_files:
+        msg = f"input_directory has no HTML files: {input_directory}"
+        raise ValueError(msg)
+    source_file = html_files[0]
+    sections = split_content_html_sections(source_file.read_bytes())
+    return {
+        "format": "finiq_disclosure_html_section_preview_v1",
+        "input_directory": str(input_directory),
+        "source_file": str(source_file),
+        "source_name": source_file.name,
+        "sections": [
+            {"toc_id": section.toc_id, "index": section.index, "title": section.title}
+            for section in sections
+        ],
+    }
+
+
 def render_disclosure_html_section_payload(body: dict[str, Any]) -> dict[str, Any]:
     source_file_raw = str(body.get("source_file") or "").strip()
     selector = str(body.get("section") or body.get("selector") or "").strip()
@@ -199,6 +226,7 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
 
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     section_index: dict[str, dict[str, Any]] = {}
+    documents: list[dict[str, Any]] = []
     files_without_sections: list[str] = []
     failed_files: list[dict[str, str]] = []
     for source_file in html_files:
@@ -210,6 +238,17 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
         if not sections:
             files_without_sections.append(str(source_file))
             continue
+        documents.append(
+            {
+                "source_file": str(source_file),
+                "source_name": source_file.name,
+                "section_count": len(sections),
+                "sections": [
+                    {"toc_id": section.toc_id, "index": section.index, "title": section.title}
+                    for section in sections
+                ],
+            }
+        )
         seen_in_file: set[str] = set()
         for section in sections:
             key = section.toc_id or str(section.index)
@@ -224,9 +263,11 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
                     "title": section.title,
                     "file_count": 0,
                     "sample_file": str(source_file),
+                    "title_variants": {},
                 },
             )
             item["file_count"] += 1
+            item["title_variants"][section.title] = item["title_variants"].get(section.title, 0) + 1
             if not item.get("title") and section.title:
                 item["title"] = section.title
 
@@ -234,10 +275,19 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
     sections_payload = []
     for item in section_index.values():
         file_count = int(item["file_count"])
+        title_variants = [
+            {"title": title, "file_count": count}
+            for title, count in sorted(
+                item.pop("title_variants").items(),
+                key=lambda value: (-value[1], value[0]),
+            )
+            if title
+        ]
         sections_payload.append(
             {
                 **item,
                 "coverage_percent": round((file_count / total_files * 100), 2) if total_files else 0,
+                "title_variants": title_variants,
             }
         )
     sections_payload.sort(key=lambda item: (int(item.get("index") or 0), str(item.get("toc_id") or "")))
@@ -252,6 +302,7 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
             "failed_files": len(failed_files),
         },
         "sections": sections_payload,
+        "documents": documents,
         "files_without_sections": files_without_sections[:50],
         "failed_files": failed_files[:50],
     }

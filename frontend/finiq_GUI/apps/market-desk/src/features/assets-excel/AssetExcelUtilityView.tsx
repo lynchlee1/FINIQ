@@ -87,6 +87,34 @@ function fileNameFromPath(value: string | undefined): string {
   return String(value || "").split(/[\\/]/).filter(Boolean).pop() || "";
 }
 
+type OutputSortKey = "sheet" | "account_id" | "account_name" | "file" | "rows" | "columns" | "missing_ratio" | "date_segments";
+type SortDirection = "asc" | "desc";
+
+function outputDateSegmentsText(item: any): string {
+  return (item?.date_segments || []).map((segment: any) => `${segment.start || ""}~${segment.end || ""}`).join(", ");
+}
+
+function outputExcelTitleText(name: string, item: any): string {
+  const sourceItems = Array.isArray(item?.sources) && item.sources.length ? item.sources : [item];
+  const titles = sourceItems
+    .map((source: any) => fileNameFromPath(source?.relative_path || source?.file_name || ""))
+    .map((fileName: string) => fileName.replace(/\.[^.]+$/, ""))
+    .filter(Boolean);
+  const uniqueTitles = Array.from(new Set(titles));
+  return uniqueTitles.join(", ") || name;
+}
+
+function outputSortValue(name: string, item: any, key: OutputSortKey): string | number {
+  if (key === "sheet") return item?.sheet_name || name;
+  if (key === "account_id") return item?.account_id || "";
+  if (key === "account_name") return item?.account_name || "";
+  if (key === "file") return outputExcelTitleText(name, item);
+  if (key === "rows") return Number(item?.rows) || 0;
+  if (key === "columns") return Number(item?.columns) || 0;
+  if (key === "missing_ratio") return Number(item?.quality?.missing_ratio) || 0;
+  return outputDateSegmentsText(item);
+}
+
 function nextAccountId(mappings: AssetAccountMapping[]): string {
   const maxIndex = mappings.reduce((max, mapping) => {
     const match = String(mapping.account_id || "").match(/^S(\d+)$/);
@@ -123,6 +151,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [isAccountMappingEditing, setIsAccountMappingEditing] = useState(false);
   const [mappingsLoading, setMappingsLoading] = useState(false);
   const [mappingsSaving, setMappingsSaving] = useState(false);
+  const [outputSort, setOutputSort] = useState<{ key: OutputSortKey; direction: SortDirection } | null>(null);
   const sheetPreviewCache = useRef<Record<string, SheetPayload>>({});
   const sheetBodyRequestToken = useRef(0);
   const { fetchSettings, saveSetting } = useSettingsStore();
@@ -216,6 +245,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       return;
     }
     let cancelled = false;
+    setOutputInfo(null);
     fetchAssetExcelOutput(outputDirectory)
       .then((data) => {
         if (!cancelled) setOutputInfo(data);
@@ -303,7 +333,26 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => Object.values(previewData?.conflicts || {}).reduce((sum, items: any) => sum + (Array.isArray(items) ? items.length : 0), 0),
     [previewData],
   );
-  const outputRows = useMemo(() => Object.entries(previewData?.outputs || lastResult?.outputs || {}), [previewData, lastResult]);
+  const outputRows = useMemo(() => Object.entries(previewData?.outputs || lastResult?.outputs || outputInfo?.outputs || {}), [previewData, lastResult, outputInfo]);
+  const sortedOutputRows = useMemo(() => {
+    if (!outputSort) return outputRows;
+    const direction = outputSort.direction === "asc" ? 1 : -1;
+    return outputRows
+      .map((row, index) => ({ row, index }))
+      .sort((left, right) => {
+        const [leftName, leftItem] = left.row as [string, any];
+        const [rightName, rightItem] = right.row as [string, any];
+        const leftValue = outputSortValue(leftName, leftItem, outputSort.key);
+        const rightValue = outputSortValue(rightName, rightItem, outputSort.key);
+        if (typeof leftValue === "number" && typeof rightValue === "number") {
+          const diff = leftValue - rightValue;
+          return diff === 0 ? left.index - right.index : diff * direction;
+        }
+        const diff = String(leftValue).localeCompare(String(rightValue), "ko", { numeric: true });
+        return diff === 0 ? left.index - right.index : diff * direction;
+      })
+      .map(({ row }) => row);
+  }, [outputRows, outputSort]);
   const skippedRows = previewData?.skipped || lastResult?.skipped || [];
   const conflictRows = useMemo(
     () => Object.entries(previewData?.conflicts || {}).flatMap(([accountName, items]: [string, any]) =>
@@ -354,6 +403,21 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const parquetPreviewColumns = parquetPayload?.preview_columns || parquetPayload?.columns || [];
   const parquetRows = parquetPayload?.rows || [];
   const selectedParquetSheet = parquetPayload?.sheet_name || "";
+  const handleOutputSort = (key: OutputSortKey) => {
+    setOutputSort((current) => {
+      if (!current || current.key !== key) return { key, direction: "asc" };
+      return { key, direction: current.direction === "asc" ? "desc" : "asc" };
+    });
+  };
+  const outputSortMarker = (key: OutputSortKey) => outputSort?.key === key ? (outputSort.direction === "asc" ? "↑" : "↓") : "↕";
+  const renderOutputHeader = (key: OutputSortKey, label: string, align: "left" | "right" = "left", widthClass = "") => (
+    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : ""} ${widthClass}`} aria-sort={outputSort?.key === key ? (outputSort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" className={`inline-flex w-full items-center gap-1 hover:text-slate-900 dark:hover:text-slate-100 ${align === "right" ? "justify-end" : ""}`} onClick={() => handleOutputSort(key)}>
+        <span>{label}</span>
+        <span className="text-[10px] text-slate-400 dark:text-slate-500">{outputSortMarker(key)}</span>
+      </button>
+    </th>
+  );
   const normalizedAccountMappings = useMemo(
     () => accountMappings.map((mapping) => ({
       account_id: mapping.account_id.trim(),
@@ -458,6 +522,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     saveSetting("asset_excel_output_directory", value);
     setPreviewData(null);
     setLastResult(null);
+    setOutputInfo(null);
     setSelectedParquetFile("");
     setParquetPayload(null);
   };
@@ -1082,30 +1147,30 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[960px] table-fixed text-sm">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
-                      <th className="px-3 py-2 font-medium">Sheet</th>
-                      <th className="px-3 py-2 font-medium">ID</th>
-                      <th className="px-3 py-2 font-medium">계정</th>
-                      <th className="px-3 py-2 font-medium">파일</th>
-                      <th className="px-3 py-2 font-medium text-right">행</th>
-                      <th className="px-3 py-2 font-medium text-right">코드</th>
-                      <th className="px-3 py-2 font-medium text-right">결측률</th>
-                      <th className="px-3 py-2 font-medium">구간</th>
+                      {renderOutputHeader("sheet", "Sheet", "left", "w-[13%]")}
+                      {renderOutputHeader("account_id", "ID", "left", "w-[10%]")}
+                      {renderOutputHeader("account_name", "계정", "left", "w-[14%]")}
+                      {renderOutputHeader("file", "파일", "left", "w-[18%]")}
+                      {renderOutputHeader("rows", "행", "right", "w-[9%]")}
+                      {renderOutputHeader("columns", "코드", "right", "w-[9%]")}
+                      {renderOutputHeader("missing_ratio", "결측률", "right", "w-[9%]")}
+                      {renderOutputHeader("date_segments", "구간", "left", "w-[18%]")}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
-                    {outputRows.map(([name, item]: [string, any]) => (
+                    {sortedOutputRows.map(([name, item]: [string, any]) => (
                       <tr key={name} className="dark:text-slate-300">
-                        <td className="px-3 py-2 font-medium">{item.sheet_name || name}</td>
-                        <td className="px-3 py-2">{item.account_id || "-"}</td>
-                        <td className="px-3 py-2">{item.account_name || "-"}</td>
-                        <td className="px-3 py-2 break-all">{item.path || item.output_file || `${name}.parquet`}</td>
+                        <td className="truncate px-3 py-2 font-medium" title={item.sheet_name || name}>{item.sheet_name || name}</td>
+                        <td className="truncate px-3 py-2" title={item.account_id || "-"}>{item.account_id || "-"}</td>
+                        <td className="truncate px-3 py-2" title={item.account_name || "-"}>{item.account_name || "-"}</td>
+                        <td className="truncate px-3 py-2" title={outputExcelTitleText(name, item)}>{outputExcelTitleText(name, item)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.rows)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatInteger(item.columns)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatPercent(item.quality?.missing_ratio)}</td>
-                        <td className="px-3 py-2">{(item.date_segments || []).map((segment: any) => `${segment.start}~${segment.end}`).join(", ") || "-"}</td>
+                        <td className="truncate px-3 py-2" title={outputDateSegmentsText(item) || "-"}>{outputDateSegmentsText(item) || "-"}</td>
                       </tr>
                     ))}
                   </tbody>

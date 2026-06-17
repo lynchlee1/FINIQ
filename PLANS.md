@@ -1,3 +1,77 @@
+# 2026-06-17 결과 탐색 파일명 및 컬럼 폭 정리
+
+## Purpose
+- `결과 탐색`의 `파일` 컬럼이 Parquet 경로나 저장 경로가 아니라 원본 Excel 제목을 보여주게 한다.
+- 결과 테이블 컬럼 폭이 내용 길이에 따라 흔들리지 않게 한다.
+
+## Implementation Summary
+- `파일` 컬럼 표시값과 정렬값을 output path 대신 `file_name`/`relative_path`/`sources`에서 가져온 원본 Excel 제목으로 바꿨다.
+- `결과 탐색` 테이블에 `table-fixed`와 컬럼별 비율 폭을 적용했다.
+- 긴 Sheet, ID, 계정, 파일, 구간 값은 컬럼 폭 안에서 말줄임 처리하고 전체 값은 title로 확인할 수 있게 했다.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-17 기존 데이터 경로 결과 탐색 표시
+
+## Purpose
+- `결과 탐색`에서 새 변환 job을 실행하지 않아도 선택한 `데이터 경로`의 기존 변환 결과를 볼 수 있게 한다.
+
+## Implementation Summary
+- 데이터 경로 검사 API가 반환하는 manifest `outputs`를 `결과 탐색` 표시 소스에 추가했다.
+- 데이터 경로 변경 시 이전 경로의 검사 결과를 즉시 비워 다른 경로 결과가 잠깐 남지 않게 했다.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-17 결과 탐색 컬럼 정렬
+
+## Purpose
+- `결과 탐색` 테이블에서 컬럼 헤더를 눌러 결과를 정렬할 수 있게 한다.
+- 특히 `구간` 기준 정렬로 같은 날짜 구간의 Sheet Parquet 결과가 인접하게 보이도록 한다.
+
+## Implementation Summary
+- `결과 탐색` 표시 배열에만 적용되는 정렬 상태를 추가했다.
+- Sheet, ID, 계정, 파일, 행, 코드, 결측률, 구간 헤더를 클릭 가능한 정렬 헤더로 바꿨다.
+- 숫자 컬럼은 숫자값으로, `구간`은 화면에 표시되는 `start~end` 구간 문자열로 안정 정렬하게 했다.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-17 공시원문 목차 분리 작업 기준 Row Box 재정리
+
+## Purpose
+- `공시원문 목차 분리` 화면의 `작업 기준` 영역이 하나의 큰 카드처럼 보여 `1 Row = 1 Box` 원칙을 어기는 문제를 고친다.
+- 입력, 실행, 상태 row가 각각 독립 박스로 인식되게 해 공시 데이터 처리자가 화면 구조를 바로 판단할 수 있게 한다.
+
+## Implementation Summary
+- `html-section-split` 화면에서 `HtmlWorkflowCard`/`HtmlWorkflowForm` 래핑을 제거했다.
+- `입력 경로`, `결과 경로`, `저장 대상 목차`, `최대 처리 건수`, `렌더링 문서`, 각 실행 액션, `작업 상태`를 `작업 기준` 섹션의 독립 row box로 배치했다.
+- 액션 버튼 묶음 컨테이너도 제거해 `2026 샘플`, `첫 문서 목차`, `목차 스캔`, `목차 렌더링`, `목차 저장`이 모두 직계 row box가 되게 했다.
+- `스캔 결과`, `작업 상태` 용어를 glossary에 추가했다.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Passed: `python3 -m py_compile src/finiq/market_desk/web/disclosure_html_sections.py src/finiq/market_desk/web/routers/workflows.py src/finiq/market_desk/web/app.py`.
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_service.py -q` (149 tests).
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_app.py -q` (23 tests).
+- Checked: `resources/KIND/bond_issuance/kind_html_contents_grouped/2026` preview/inspect returns 369 documents, 2 section types, 0 failures.
+- Checked: 브라우저 DOM에서 `작업 기준` 제목 줄을 제외한 11개 직계 children이 모두 border/rounded row box로 렌더링됨.
+- Checked: 브라우저 스크린샷 `/tmp/finiq-html-section-split-row-box.png`에서 상단 큰 작업 카드가 제거됨.
+
+# 2026-06-17 페이지 이동 후 실행 로그 복구
+
+## Purpose
+- 실행 중인 백엔드 job이 있는데도 다른 페이지로 이동했다가 돌아오면 실행 로그가 사라지는 문제를 해결한다.
+
+## Implementation Summary
+- `useJobPolling`이 시작한 job id를 페이지 경로와 polling endpoint 기준으로 `sessionStorage`에 저장하게 했다.
+- 페이지 재진입 시 저장된 job id로 polling을 재개해 백엔드의 `progress_log`를 다시 표시하게 했다.
+- 페이지 언마운트 시 pending timeout을 정리하고, 완료/실패/중단 또는 stale job 404에서는 저장된 job id를 제거하게 했다.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
 # 2026-06-17 계정-ID 매핑 입력 포커스 유지
 
 ## Purpose
@@ -9,6 +83,48 @@
 
 ## Verification
 - Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-17 공시원문 목차 분리 엄격 1 Row Box 보완
+
+## Purpose
+- `공시원문 목차 분리` 화면에서 카드 안 카드처럼 보이는 구조를 줄이고, 스캔 전에도 실제 목차를 볼 수 있게 한다.
+- 사용자가 전체 스캔 전에 첫 HTML 문서의 목차를 확인하고 바로 렌더링 대상을 잡을 수 있게 한다.
+
+## Implementation Summary
+- 첫 HTML 파일의 목차를 반환하는 `preview_disclosure_html_sections_payload`와 `/api/disclosures/html/sections/preview` API를 추가했다.
+- 데이터 영역의 `HtmlWorkflowCard` 래핑을 제거하고, `전체 목차 목록`, `문서 목록`, `렌더링 검토`를 unframed section + row box stack으로 바꿨다.
+- 스캔 전 `첫 문서 목차` 버튼을 추가하고, 결과를 전체 목차/문서/렌더링 검토 영역에 바로 반영하게 했다.
+- 작업 기준의 요약 수치를 별도 카드가 아닌 한 줄 상태 정보로 바꿨다.
+- `첫 문서 목차` 용어를 glossary에 추가하고 UI/tests와 맞췄다.
+
+## Verification
+- Passed: `python3 -m py_compile src/finiq/market_desk/web/disclosure_html_sections.py src/finiq/market_desk/web/routers/workflows.py src/finiq/market_desk/web/app.py`.
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_service.py -q` (149 tests).
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_app.py -q` (23 tests).
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Checked: `resources/KIND/bond_issuance/kind_html_contents_grouped/2026` 첫 문서 목차가 `toc_1`, `toc_2`로 반환됨.
+- Checked: 브라우저 DOM에서 `첫 문서 목차`, `전체 목차 목록`, `문서 목록`, `렌더링 검토`가 표시됨.
+
+# 2026-06-17 공시원문 목차 분리 1 Row 1 Box 재설계
+
+## Purpose
+- `1 Row = 1 Box` 원칙으로 `공시원문 목차 분리` 화면을 다시 설계한다.
+- 공시 데이터 처리 전문가가 폴더 전체 목차 목록, 문서별 목차, 목차 변형, 렌더링 대상 문서를 한 화면에서 판단할 수 있게 한다.
+
+## Implementation Summary
+- 목차 스캔 응답에 문서별 목차 목록(`documents`)과 목차 제목 변형(`title_variants`)을 추가했다.
+- `전체 목차 목록`, `문서 목록`, `렌더링 검토` 세 패널로 화면을 재구성했다.
+- 전체 목차, 문서, 선택 문서의 목차를 모두 독립 row box로 표시하게 했다.
+- `2026 샘플` 바로가기, `저장 대상 목차`, `렌더링 문서` 입력을 추가해 스캔-선택-미리보기-저장 흐름을 줄였다.
+- 같은 `toc_2` 안에 섞인 전환사채권/교환사채권/신주인수권부사채권 제목 변형을 box 내부에서 바로 확인하게 했다.
+
+## Verification
+- Passed: `python3 -m py_compile src/finiq/market_desk/web/disclosure_html_sections.py src/finiq/market_desk/web/routers/workflows.py src/finiq/market_desk/web/app.py`.
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_service.py -q` (148 tests).
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_app.py -q` (23 tests).
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Checked: `resources/KIND/bond_issuance/kind_html_contents_grouped/2026`에서 369개 문서, `toc_1`/`toc_2` 100% coverage, `toc_2` 제목 변형 3종이 스캔됨.
+- Checked: 브라우저 DOM에서 `2026 샘플`, `전체 목차 목록`, `문서 목록`, `렌더링 검토`, `저장 대상 목차`, `렌더링 문서`가 표시됨.
 
 # 2026-06-17 공시원문 목차 분리 전문가 워크스페이스
 

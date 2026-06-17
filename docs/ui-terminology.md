@@ -17,8 +17,17 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Content HTML save workflow | 공시원문 내부 저장 | Navigation/page workflow name. |
 | Content HTML section workflow | 공시원문 목차 분리 | Navigation/page workflow name. |
 | Content HTML section scan action | 목차 스캔 | Button/action that scans section coverage in a folder. |
+| Content HTML first document TOC action | 첫 문서 목차 | Button/action that previews the first HTML file's TOC before full folder scan. |
 | Content HTML section save action | 목차 저장 | Button/action that saves one selected section from each HTML file. |
 | Content HTML section render action | 목차 렌더링 | Button/action that renders one selected section for review. |
+| Content HTML sample shortcut | 2026 샘플 | Button that fills the bundled 2026 bond issuance HTML content folder. |
+| Content HTML section catalog | 전체 목차 목록 | Panel listing section coverage across the folder. |
+| Content HTML document catalog | 문서 목록 | Panel listing per-file section lists. |
+| Content HTML render review | 렌더링 검토 | Panel for selected document section preview. |
+| Selected section input | 저장 대상 목차 | Input containing the section used by save/render actions. |
+| Render source document input | 렌더링 문서 | Input containing the source HTML file used for preview. |
+| Content HTML scan summary row | 스캔 결과 | Row box showing folder scan counts. |
+| Content HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | Viewer HTML save mode/button | 외부 HTML 저장 | Top mode button in 공시원문 외부 저장. |
 | Viewer HTML compression mode/button | 외부 HTML 압축 | Use for the compact JSON creation from saved viewer HTML. |
 | Content HTML save mode/button | 내부 HTML 저장 | Top mode button in 공시원문 내부 저장. |
