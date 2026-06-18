@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from finiq.data.assets_excel import (
+    cleanup_duplicate_asset_parquet_outputs,
     convert_asset_excels_to_wide_parquet,
     default_account_mappings,
     inspect_asset_excel_conversion,
@@ -45,6 +46,13 @@ class AssetParquetMergeRequest(BaseModel):
     output_directory: Optional[str] = None
     same_directory: bool = False
     cleanup_merged_items: bool = True
+
+
+class AssetParquetDuplicateCleanupRequest(BaseModel):
+    target_directory: str
+    dry_run: bool = True
+    delete_confirmed: bool = False
+    delete_confirmation_text: str = ""
 
 
 def create_assets_excel_router(
@@ -184,6 +192,35 @@ def create_assets_excel_router(
             request.model_dump(),
         )
         return job_manager.get_snapshot(job_id)
+
+    @router.post("/api/assets/parquet/duplicates/start")
+    async def start_cleanup_duplicate_asset_parquet_outputs(
+        request: AssetParquetDuplicateCleanupRequest,
+        background_tasks: BackgroundTasks,
+    ):
+        _required_path(request.target_directory, "target_directory")
+        job_id = uuid.uuid4().hex
+        job_manager.create_job(job_id, "asset_parquet_duplicate_cleanup")
+        background_tasks.add_task(
+            run_job_worker,
+            job_id,
+            "asset_parquet_duplicate_cleanup",
+            request.model_dump(),
+        )
+        return job_manager.get_snapshot(job_id)
+
+    @router.post("/api/assets/parquet/duplicates")
+    async def cleanup_duplicate_asset_parquet_outputs_route(request: AssetParquetDuplicateCleanupRequest):
+        try:
+            return await asyncio.to_thread(
+                cleanup_duplicate_asset_parquet_outputs,
+                _required_path(request.target_directory, "target_directory"),
+                dry_run=request.dry_run,
+                delete_confirmed=request.delete_confirmed,
+                delete_confirmation_text=request.delete_confirmation_text,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/assets/excels/cancel")
     async def cancel_asset_excel_job(payload: dict[str, Any]):

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, Eye, Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Eye, Loader2, Pencil, Play, Plus, Search, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -20,6 +20,7 @@ import {
   fetchAssetExcelSheet,
   saveAssetExcelAccountMappings,
   startAssetExcelConversion,
+  startAssetParquetDuplicateCleanup,
   startAssetParquetMerge,
 } from "./api";
 import type { AssetAccountMapping, AssetExcelFile, PreviewData, SheetPayload } from "./types";
@@ -47,6 +48,17 @@ function jobStatusLines(data: any): string[] {
   if (data.error) lines.push(`오류: ${data.error}`);
   if (data.progress_log?.length) lines.push("", "최근 로그:", ...data.progress_log.slice(-30));
   if (data.status === "completed" && data.result) {
+    if (data.result.operation === "parquet_duplicate_cleanup") {
+      lines.push(
+        "",
+        data.result.dry_run ? "중복 검사 완료" : "중복 삭제 완료",
+        `중복 묶음: ${formatInteger(data.result.duplicate_group_count)}개`,
+        `삭제 후보: ${formatInteger(data.result.deletion_candidate_count)}개`,
+        `삭제 파일: ${formatInteger(data.result.deleted_count)}개`,
+        `병합 대상 경로: ${data.result.target_directory || ""}`,
+      );
+      return lines;
+    }
     if (data.result.operation === "merge_parquet") {
       lines.push(
         "",
@@ -104,27 +116,20 @@ function accountNameFromParquetFile(fileName: string): string {
   return stem;
 }
 
-type OutputSortKey = "account_id" | "account_name" | "file" | "rows" | "columns" | "missing_ratio" | "non_null_cells" | "total_cells" | "date_range";
+type OutputSortKey = "account_id" | "account_name" | "rows" | "columns" | "missing_ratio" | "non_null_cells" | "total_cells" | "date_start" | "date_end" | "sha256";
 type SortDirection = "asc" | "desc";
-
-function outputDateRangeText(item: any): string {
-  return item?.date_start && item?.date_end ? `${item.date_start}~${item.date_end}` : "";
-}
-
-function outputExcelTitleText(name: string, item: any): string {
-  return outputFileNameFromRow(name, item);
-}
 
 function outputSortValue(name: string, item: any, key: OutputSortKey): string | number {
   if (key === "account_id") return item?.account_id || "";
   if (key === "account_name") return item?.account_name || "";
-  if (key === "file") return outputExcelTitleText(name, item);
   if (key === "rows") return Number(item?.rows) || 0;
   if (key === "columns") return Number(item?.columns) || 0;
   if (key === "missing_ratio") return Number(item?.quality?.missing_ratio) || 0;
   if (key === "non_null_cells") return Number(item?.quality?.non_null_cells) || 0;
   if (key === "total_cells") return Number(item?.quality?.total_cells) || 0;
-  return outputDateRangeText(item);
+  if (key === "date_start") return outputDateStartText(name, item);
+  if (key === "date_end") return outputDateEndText(name, item);
+  return outputSha256Text(name, item);
 }
 
 function outputRowsFromInfo(info: any): [string, any][] {
@@ -138,6 +143,29 @@ function outputFileNameFromRow(name: string, item: any): string {
 
 function outputAccountNameFromRow(name: string, item: any): string {
   return item?.account_name || accountNameFromParquetFile(outputFileNameFromRow(name, item));
+}
+
+function formatCompactOutputDate(value: string | undefined): string {
+  return value && value.length === 8 ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : "";
+}
+
+function outputDateStartText(name: string, item: any): string {
+  if (item?.date_start) return String(item.date_start);
+  const match = outputFileNameFromRow(name, item).match(/^.+_(\d{8})_\d{8}(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?\.parquet$/i);
+  return formatCompactOutputDate(match?.[1]);
+}
+
+function outputDateEndText(name: string, item: any): string {
+  if (item?.date_end) return String(item.date_end);
+  const match = outputFileNameFromRow(name, item).match(/^.+_\d{8}_(\d{8})(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?\.parquet$/i);
+  return formatCompactOutputDate(match?.[1]);
+}
+
+function outputSha256Text(name: string, item: any): string {
+  const explicitValue = item?.companies_hash || item?.companiesHash || item?.sha256;
+  if (explicitValue) return String(explicitValue);
+  const match = outputFileNameFromRow(name, item).match(/_([0-9a-f]{64})(?:(?:__|_)\d+)?\.parquet$/i);
+  return match?.[1] || "";
 }
 
 function formatOutputInteger(value: unknown): string {
@@ -187,7 +215,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const isConvertMode = mode === "convert";
   const isParquetPreviewMode = mode === "parquet";
   const isMergeMode = mode === "merge";
-  const pageTitle = isConvertMode ? "Parquet 변환하기" : isParquetPreviewMode ? "Quantiwise - Parquet 미리보기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - Excel 미리보기";
+  const pageTitle = isConvertMode ? "Quantiwise - Parquet 변환하기" : isParquetPreviewMode ? "Quantiwise - Parquet 미리보기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - Excel 미리보기";
   const [excelFiles, setExcelFiles] = useState<AssetExcelFile[]>([]);
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -195,6 +223,9 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [mergeSameDirectory, setMergeSameDirectory] = useState(false);
   const [cleanupMergedItems, setCleanupMergedItems] = useState(true);
   const [selectedMergeFiles, setSelectedMergeFiles] = useState<string[]>([]);
+  const [duplicateInspectionResult, setDuplicateInspectionResult] = useState<any>(null);
+  const [duplicateDeleteConfirmed, setDuplicateDeleteConfirmed] = useState(false);
+  const [duplicateDeleteConfirmationText, setDuplicateDeleteConfirmationText] = useState("");
   const writeMode = "replace";
   const [loading, setLoading] = useState(true);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
@@ -224,6 +255,17 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     cancelEndpoint: "/api/assets/excels/cancel",
     formatStatus: jobStatusLines,
     onSuccess: (result) => {
+      if (result?.operation === "parquet_duplicate_cleanup") {
+        setDuplicateInspectionResult(result);
+        if (!result.dry_run && mergeBaseDirectory.trim()) {
+          setDuplicateDeleteConfirmed(false);
+          setDuplicateDeleteConfirmationText("");
+          fetchAssetExcelOutput(mergeBaseDirectory)
+            .then((data) => setMergeBaseInfo(data))
+            .catch(() => setMergeBaseInfo(null));
+        }
+        return;
+      }
       setLastResult(result);
       setPreviewData(null);
       setParquetPayload(null);
@@ -459,6 +501,12 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setSelectedMergeFiles((current) => current.filter((fileName) => availableFiles.has(fileName)));
   }, [isMergeMode, mergeBaseOutputRows]);
   const skippedRows = previewData?.skipped || lastResult?.skipped || [];
+  const duplicateDeletionCandidates = Array.isArray(duplicateInspectionResult?.deletion_candidates) ? duplicateInspectionResult.deletion_candidates : [];
+  const duplicateDeletedFiles = Array.isArray(duplicateInspectionResult?.deleted_files) ? duplicateInspectionResult.deleted_files : [];
+  const duplicateMismatchedRows = Array.isArray(duplicateInspectionResult?.mismatched_duplicates) ? duplicateInspectionResult.mismatched_duplicates : [];
+  const duplicateDeletionCandidateCount = duplicateInspectionResult?.dry_run ? Number(duplicateInspectionResult?.deletion_candidate_count || duplicateDeletionCandidates.length) : 0;
+  const duplicateDeletedCount = !duplicateInspectionResult?.dry_run ? Number(duplicateInspectionResult?.deleted_count || duplicateDeletedFiles.length) : 0;
+  const duplicateNotificationActive = isMergeMode && !!duplicateInspectionResult;
   const conflictRows = useMemo(
     () => Object.entries(previewData?.conflicts || {}).flatMap(([accountName, items]: [string, any]) =>
       (Array.isArray(items) ? items : []).map((item: any) => ({ accountName, ...item })),
@@ -556,13 +604,14 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             {selectable ? <th className="w-12 px-3 py-2 font-medium">선택</th> : null}
             {renderOutputHeader("account_id", "ID")}
             {renderOutputHeader("account_name", "계정")}
-            {renderOutputHeader("file", "파일")}
             {renderOutputHeader("rows", "행", "right")}
             {renderOutputHeader("columns", "코드", "right")}
             {renderOutputHeader("missing_ratio", "결측률", "right")}
             {renderOutputHeader("non_null_cells", "값 있음", "right")}
             {renderOutputHeader("total_cells", "전체 셀", "right")}
-            {renderOutputHeader("date_range", "구간")}
+            {renderOutputHeader("date_start", "구간 시작")}
+            {renderOutputHeader("date_end", "구간 종료")}
+            {renderOutputHeader("sha256", "SHA256")}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
@@ -586,19 +635,20 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 ) : null}
                 <td className="whitespace-nowrap px-3 py-2">{item.account_id || "-"}</td>
                 <td className="whitespace-nowrap px-3 py-2">{outputAccountNameFromRow(name, item) || "-"}</td>
-                <td className="whitespace-nowrap px-3 py-2">{outputExcelTitleText(name, item)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.rows)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.columns)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatPercent(item.quality?.missing_ratio)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.quality?.non_null_cells)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.quality?.total_cells)}</td>
-                <td className="whitespace-nowrap px-3 py-2">{outputDateRangeText(item) || "-"}</td>
+                <td className="whitespace-nowrap px-3 py-2 tabular-nums">{outputDateStartText(name, item) || "-"}</td>
+                <td className="whitespace-nowrap px-3 py-2 tabular-nums">{outputDateEndText(name, item) || "-"}</td>
+                <td className="max-w-96 break-all px-3 py-2 font-mono text-xs">{outputSha256Text(name, item) || "-"}</td>
               </tr>
             );
           })}
           {!rows.length ? (
             <tr>
-              <td colSpan={selectable ? 10 : 9} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
+              <td colSpan={selectable ? 11 : 10} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
                 {emptyMessage}
               </td>
             </tr>
@@ -721,6 +771,9 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setPreviewData(null);
     setLastResult(null);
     setSelectedMergeFiles([]);
+    setDuplicateInspectionResult(null);
+    setDuplicateDeleteConfirmed(false);
+    setDuplicateDeleteConfirmationText("");
   };
 
   const handleMergeOutputDirectoryChange = (value: string) => {
@@ -738,6 +791,51 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const handleCleanupMergedItemsChange = (value: boolean) => {
     setCleanupMergedItems(value);
     saveSetting("asset_excel_cleanup_merged_items", value);
+  };
+
+  const handleInspectDuplicates = async () => {
+    if (activeJobId) return;
+    if (!mergeBaseDirectory.trim()) {
+      setStatus("병합 대상 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      setStatus("중복 검사 작업을 시작하는 중...");
+      setIsErrorStatus(false);
+      setDuplicateInspectionResult(null);
+      const data = await startAssetParquetDuplicateCleanup({
+        target_directory: mergeBaseDirectory,
+        dry_run: true,
+      });
+      startPolling(data.job_id);
+    } catch (err: any) {
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    }
+  };
+
+  const handleDeleteDuplicateFiles = async () => {
+    if (activeJobId) return;
+    if (!duplicateDeleteConfirmed || duplicateDeleteConfirmationText.trim() !== "확인했습니다.") {
+      setStatus('삭제하려면 삭제 허가를 체크하고 "확인했습니다."를 입력하세요.');
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      setStatus("중복 파일 삭제 작업을 시작하는 중...");
+      setIsErrorStatus(false);
+      const data = await startAssetParquetDuplicateCleanup({
+        target_directory: mergeBaseDirectory,
+        dry_run: false,
+        delete_confirmed: duplicateDeleteConfirmed,
+        delete_confirmation_text: duplicateDeleteConfirmationText,
+      });
+      startPolling(data.job_id);
+    } catch (err: any) {
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    }
   };
 
   const updateAccountMapping = (index: number, key: keyof AssetAccountMapping, value: string) => {
@@ -1270,24 +1368,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {parquetPayload?.account_name ? (
-                  <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                    <span>계정: {parquetPayload.account_name}</span>
-                    <span>상태: {sheetStatusLabel(parquetPayload.status)}</span>
-                    <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
-                    {parquetPayload.date_start && parquetPayload.date_end ? <span>{parquetPayload.date_start} ~ {parquetPayload.date_end}</span> : null}
-                  </div>
-                ) : null}
-                {parquetPayload?.metadata?.period_from || parquetPayload?.metadata?.period_to ? (
-                  <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                    <span>Period(From): {parquetPayload.metadata.period_from || "-"}</span>
-                    <span>Period(To): {parquetPayload.metadata.period_to || "-"}</span>
-                    <span>행: {formatInteger(parquetPayload.row_count ?? parquetPayload.preview_row_count)}</span>
-                  </div>
-                ) : null}
-              </div>
-
               {(parquetPayload?.columns || []).length > 12 ? (
                 <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {formatInteger(parquetPayload?.columns?.length)}개</p>
               ) : null}
@@ -1355,7 +1435,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
+                <Button variant="outline" className="w-full" onClick={handleInspectDuplicates} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim()}>
+                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                  중복 검사하기
+                </Button>
                 <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || (!mergeSameDirectory && !outputDirectory.trim()) || !mergeSelectionReady}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
@@ -1394,11 +1478,89 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               onCancel={cancelJob}
             />
           }
-          notificationActive={isErrorStatus || skippedRows.length > 0 || conflictCount > 0}
+          notificationActive={isErrorStatus || skippedRows.length > 0 || conflictCount > 0 || duplicateNotificationActive}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (
                 <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+              ) : duplicateNotificationActive ? (
+                <div className="space-y-4">
+                  {duplicateDeletionCandidateCount > 0 ? (
+                    <div className="space-y-3 border-b border-slate-200 pb-4 dark:border-[#30363d]">
+                      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                        삭제 예정 파일 {formatInteger(duplicateDeletionCandidateCount)}개
+                      </div>
+                      <div className="max-h-40 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
+                            <tr className="text-left text-slate-500 dark:text-slate-400">
+                              <th className="px-3 py-2 font-medium">삭제 예정 파일</th>
+                              <th className="px-3 py-2 font-medium">기준 파일</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
+                            {duplicateDeletionCandidates.slice(0, 20).map((item: any, index: number) => (
+                              <tr key={`${item.path}-${index}`} className="dark:text-slate-300">
+                                <td className="break-all px-3 py-2">{item.file_name || "-"}</td>
+                                <td className="break-all px-3 py-2">{item.canonical_file || "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox id="assetDuplicateDeleteConfirmed" checked={duplicateDeleteConfirmed} onCheckedChange={(value) => setDuplicateDeleteConfirmed(!!value)} className="dark:border-[#30363d]" />
+                        <Label htmlFor="assetDuplicateDeleteConfirmed" className="cursor-pointer text-sm dark:text-slate-300">삭제 허가</Label>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="dark:text-slate-300">확인 문구</Label>
+                        <Input
+                          value={duplicateDeleteConfirmationText}
+                          onChange={(event) => setDuplicateDeleteConfirmationText(event.target.value)}
+                          placeholder="확인했습니다."
+                          className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                        />
+                      </div>
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={handleDeleteDuplicateFiles}
+                        disabled={
+                          !!activeJobId ||
+                          !duplicateDeleteConfirmed ||
+                          duplicateDeleteConfirmationText.trim() !== "확인했습니다."
+                        }
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        삭제 예정 파일 {formatInteger(duplicateDeletionCandidateCount)}개 삭제
+                      </Button>
+                    </div>
+                  ) : null}
+                  {duplicateDeletedCount > 0 ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+                      중복 파일 {formatInteger(duplicateDeletedCount)}개를 삭제했습니다.
+                    </div>
+                  ) : null}
+                  {duplicateDeletionCandidateCount === 0 && duplicateDeletedCount === 0 && duplicateMismatchedRows.length === 0 ? (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300">
+                      삭제 후보 없음
+                    </div>
+                  ) : null}
+                  {duplicateMismatchedRows.length > 0 ? (
+                    <div className="space-y-2 rounded-md border border-slate-200 p-3 text-sm text-slate-700 dark:border-[#30363d] dark:text-slate-300">
+                      <div className="font-medium">내용이 달라 삭제하지 않은 파일 {formatInteger(duplicateMismatchedRows.length)}개</div>
+                      <div className="max-h-32 overflow-auto whitespace-pre-wrap text-xs">
+                        {duplicateMismatchedRows.slice(0, 20).map((item: any) => `${item.file_name} - ${item.reason}`).join("\n")}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#30363d]">
+                    <Label className="dark:text-slate-300">중복 검사 결과</Label>
+                    <pre className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#090d12] dark:text-blue-100">
+                      {JSON.stringify(duplicateInspectionResult, null, 2)}
+                    </pre>
+                  </div>
+                </div>
               ) : skippedRows.length > 0 || conflictCount > 0 ? (
                 <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
                   <div className="font-medium">확인 필요</div>

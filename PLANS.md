@@ -1,19 +1,68 @@
-# 2026-06-18 Quantiwise Parquet 기업목록 hash 파일명
+# 2026-06-18 MarketDesk page title alignment
 
 ## Purpose
-- 같은 계정과 날짜 범위를 가진 Sheet가 종목코드 목록만 다를 때 같은 Parquet 파일명으로 충돌하지 않게 한다.
-- 파일명 생성이 재현 가능하도록 wide 컬럼 순서의 종목코드 목록을 SHA256 hash 입력으로 고정한다.
+- Make the top MarketDesk title match the active page title instead of broad workflow labels like `공시데이터 구축`.
+- Keep Quantiwise page titles consistent with the `Quantiwise - ...` pattern.
 
 ## Implementation Summary
-- 계정 Parquet 파일명을 `<accountName>_<date_start>_<date_end>_<companiesHash>.parquet` 형식으로 바꿨다.
-- `companiesHash`는 Parquet wide 컬럼 순서의 종목코드를 순서대로 이어붙인 문자열의 SHA256 hex 값이다.
-- 변환 preview, 실제 변환, 병합 결과 파일명 생성에 같은 hash 알고리즘을 적용했다.
-- 백엔드와 프론트엔드의 account-name fallback parser가 새 hash 파일명과 기존 legacy 파일명을 모두 인식하게 했다.
-- 같은 계정/날짜지만 종목코드 목록이 다른 Sheet가 서로 다른 Parquet로 저장되는 regression test를 추가했다.
+- Added a route-title helper that resolves the current page from existing workflow step labels.
+- Updated the Topbar to render that resolved page title and mirror it into `document.title`.
+- Renamed the Quantiwise conversion workflow/page title to `Quantiwise - Parquet 변환하기` and recorded the term in `docs/ui-terminology.md`.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-18 Quantiwise duplicate Parquet cleanup
+
+## Purpose
+- Add a `중복 검사하기` action to `Quantiwise - 병합하기` for same-account Parquet files covered by a more complete same-account Parquet.
+- Delete only files whose date/code/value cells are losslessly included in the file kept as canonical.
+
+## Implementation Summary
+- Added backend duplicate cleanup logic for `병합 대상 경로` and its immediate `merged` folder.
+- Compared same-account Parquet files by ordered date rows, stock-code columns, and non-null cell values instead of relying on filename equality.
+- Added metadata-based date/row/column prefilters so impossible subset directions skip full cell comparison.
+- Treated exact duplicates and strict supersets as deletion-safe, keeping the more complete file and deleting the covered file after confirmation.
+- Added dry-run and confirmed-delete job APIs under `/api/assets/parquet/duplicates`.
+- Added merge-page UI for `중복 검사하기`, delete confirmation, candidate display, deleted summary, mismatched reporting, and raw inspection result display in the right alert dock.
+- Updated UI terminology and Quantiwise conversion docs.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -q` including date-range subset, stock-code subset, exact duplicate, and overlapping conflict cases.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Passed: `python3 -m py_compile src/finiq/data/assets_excel.py src/finiq/market_desk/web/routers/assets_excel.py src/finiq/market_desk/web/app.py`.
+- Passed: `python3 -m pytest tests/market_desk/test_server.py -q`.
+- Passed: `npm run build -w @finiq/app-market-desk --` from `frontend/`.
+- Dry-run on `resources/Quantiwise/parquetCalamine`: deletion candidates `1`, mismatched duplicates `0`; the less complete `close_20091230_20260417_...de0d.parquet` is covered by `...de0d__2.parquet`.
+
+# 2026-06-18 Quantiwise merge cleanup archive collision
+
+## Purpose
+- Fix merge jobs failing when `병합된 요소 정리하기` tries to move a selected Parquet file into `merged/` and a previous archive with the same filename already exists.
+- Preserve existing archived Parquet files instead of overwriting them.
+
+## Implementation Summary
+- Added cleanup archive destination selection that keeps the original archive name when free and otherwise uses `__2`, `__3`, etc.
+- Kept cleanup scoped to successful merges only; validation failures still leave selected source files in place.
+- Added a regression test for an existing `merged/` archive with the same source filename.
+- Documented the archive suffix behavior in `docs/assets-excel-conversion.md`.
 
 ## Verification
 - Passed: `python3 -m pytest tests/test_assets_excel.py -q`.
-- Passed: `python3 -m py_compile src/finiq/data/assets_excel.py`.
 - Passed: `python3 -m pytest tests/market_desk/test_server.py -q`.
-- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
 - Passed: `npm run build -w @finiq/app-market-desk --` from `frontend/`.
+
+# 2026-06-18 Quantiwise Parquet preview UI cleanup
+
+## Purpose
+- Remove redundant file-selection helper text from `Quantiwise - Parquet 미리보기`.
+- Stop showing generated Parquet filenames in grouped Parquet tables when account, date interval, and SHA256 identify the same output.
+
+## Implementation Summary
+- Removed the metadata summary strip directly below the Parquet preview file selector.
+- Replaced the visible filename column in `Parquet 모아보기` and `병합대상 모아보기` with `구간 시작`, `구간 종료`, and `SHA256`.
+- Kept filenames as internal values for preview selection and merge checkbox behavior.
+- Used filename parsing only as a fallback when existing Parquet rows do not include footer metadata fields in the API payload.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.

@@ -82,7 +82,7 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     steps: [
       { href: "/utility", step: 1, label: "분할저장" },
       { href: "/utility/assets-excel", step: 2, label: "Quantiwise - Excel 미리보기" },
-      { href: "/utility/assets-excel/convert", step: 3, label: "Parquet 변환하기" },
+      { href: "/utility/assets-excel/convert", step: 3, label: "Quantiwise - Parquet 변환하기" },
       { href: "/utility/assets-excel/parquet", step: 4, label: "Quantiwise - Parquet 미리보기" },
       { href: "/utility/assets-excel/merge", step: 5, label: "Quantiwise - 병합하기" },
     ],
@@ -157,6 +157,14 @@ export function getActiveNavItem(pathname: string): NavItem | undefined {
     return NAV_ITEMS.find((item) => item.workflowId === "ontology");
   }
   return NAV_ITEMS.find((item) => item.paths.includes(pathname));
+}
+
+export function getPageTitle(pathname: string): string | undefined {
+  for (const workflow of Object.values(WORKFLOWS)) {
+    const activeStep = workflow.steps.find((step) => step.href === pathname);
+    if (activeStep) return activeStep.label;
+  }
+  return getActiveNavItem(pathname)?.label;
 }
 
 export const ONTOLOGY_TABS = WORKFLOWS.ontology.steps;

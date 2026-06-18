@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import finiq.data.assets_excel as assets_excel_module
 import finiq.market_desk.web.app as app_module
 from finiq.data.assets_excel import (
+    cleanup_duplicate_asset_parquet_outputs,
     convert_asset_excels_to_wide_parquet,
     inspect_asset_excel_conversion,
     inspect_asset_excel_output,
@@ -147,6 +148,18 @@ def test_read_asset_excel_sheets_does_not_load_rows(tmp_path):
         "sheet_count": 2,
     }
     assert "rows" not in payload
+
+
+def test_asset_excel_reader_uses_calamine_engine(tmp_path):
+    excel_path = tmp_path / "sample.xlsx"
+    pd.DataFrame([{"value": 1}]).to_excel(excel_path, index=False, sheet_name="data")
+
+    excel = assets_excel_module._excel_file(excel_path)
+    payload = read_asset_excel("sample.xlsx", sheet_name="data", root_directory=tmp_path)
+
+    assert assets_excel_module.EXCEL_ENGINE == "calamine"
+    assert excel.engine == "calamine"
+    assert payload["rows"] == [{"value": 1}]
 
 
 def test_read_asset_excel_quanti_preview_uses_date_code_matrix(tmp_path):
@@ -1335,6 +1348,206 @@ def test_merge_asset_parquet_outputs_same_directory_and_cleanup_after_success(tm
     assert archived_second.exists()
     assert not (target_output / "close_20200103_20200103.parquet").exists()
     assert not (target_output / "close_20200104_20200104.parquet").exists()
+
+
+def test_merge_asset_parquet_outputs_cleanup_keeps_existing_archives(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    ignored_output = tmp_path / "ignored-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+    _write_account_parquet(
+        target_output / "merged",
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [90]},
+    )
+
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        ignored_output,
+        selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+        same_directory=True,
+        cleanup_merged_items=True,
+    )
+
+    archived_first = target_output / "merged" / "close_20200103_20200103.parquet"
+    archived_first_retry = target_output / "merged" / "close_20200103_20200103__2.parquet"
+    archived_second = target_output / "merged" / "close_20200104_20200104.parquet"
+    assert archived_first.exists()
+    assert pd.read_parquet(archived_first)["A005930"].tolist() == [90]
+    assert archived_first_retry.exists()
+    assert archived_second.exists()
+    assert payload["moved_files"][0]["to"] == str(archived_first_retry)
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_deletes_identical_suffix_files(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    canonical_file = "close_20200103_20200103.parquet"
+    duplicate_file = "close_20200103_20200103__2.parquet"
+    mismatched_file = "close_20200103_20200103__3.parquet"
+    _write_account_parquet(
+        target_output / "merged",
+        canonical_file,
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output / "merged",
+        duplicate_file,
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output / "merged",
+        mismatched_file,
+        ["2020-01-03"],
+        {"A005930": [101]},
+    )
+
+    dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+    assert dry_run["deletion_candidate_count"] == 1
+    assert dry_run["deletion_candidates"][0]["file_name"] == duplicate_file
+    assert any(item["file_name"] == mismatched_file for item in dry_run["mismatched_duplicates"])
+    assert (target_output / "merged" / duplicate_file).exists()
+
+    payload = cleanup_duplicate_asset_parquet_outputs(
+        target_output,
+        dry_run=False,
+        delete_confirmed=True,
+        delete_confirmation_text="확인했습니다.",
+    )
+
+    assert payload["deleted_count"] == 1
+    assert not (target_output / "merged" / duplicate_file).exists()
+    assert (target_output / "merged" / canonical_file).exists()
+    assert (target_output / "merged" / mismatched_file).exists()
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_deletes_strict_subset_across_date_ranges(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    subset_file = "close_20200103_20200103.parquet"
+    superset_file = "close_20200103_20200104.parquet"
+    other_account_file = "open_20200103_20200104.parquet"
+    _write_account_parquet(
+        target_output,
+        subset_file,
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        superset_file,
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101], "A000660": [200, 201]},
+    )
+    _write_account_parquet(
+        target_output,
+        other_account_file,
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101], "A000660": [200, 201]},
+    )
+
+    dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+    assert dry_run["deletion_candidate_count"] == 1
+    assert dry_run["deletion_candidates"][0]["file_name"] == subset_file
+    assert dry_run["deletion_candidates"][0]["canonical_file"] == superset_file
+    assert dry_run["deletion_candidates"][0]["reason"] == "더 완전한 같은 계정 Parquet에 포함됨"
+    assert dry_run["deletion_candidates"][0]["account_name"] == "close"
+
+    payload = cleanup_duplicate_asset_parquet_outputs(
+        target_output,
+        dry_run=False,
+        delete_confirmed=True,
+        delete_confirmation_text="확인했습니다.",
+    )
+
+    assert payload["deleted_count"] == 1
+    assert not (target_output / subset_file).exists()
+    assert (target_output / superset_file).exists()
+    assert (target_output / other_account_file).exists()
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_deletes_strict_subset_across_codes(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    subset_file = f"close_20200103_20200104_{'a' * 64}.parquet"
+    superset_file = f"close_20200103_20200104_{'b' * 64}.parquet"
+    _write_account_parquet(
+        target_output,
+        subset_file,
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101]},
+    )
+    _write_account_parquet(
+        target_output,
+        superset_file,
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101], "A000660": [200, 201]},
+    )
+
+    dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+    assert dry_run["deletion_candidate_count"] == 1
+    assert dry_run["deletion_candidates"][0]["file_name"] == subset_file
+    assert dry_run["deletion_candidates"][0]["canonical_file"] == superset_file
+    assert dry_run["deletion_candidates"][0]["extra_columns"] == "1"
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_keeps_overlapping_conflicts(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    first_file = "close_20200103_20200103.parquet"
+    second_file = "close_20200103_20200104.parquet"
+    _write_account_parquet(
+        target_output,
+        first_file,
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        second_file,
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [999, 101]},
+    )
+
+    dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+    assert dry_run["deletion_candidate_count"] == 0
+    assert any(int(item["conflicting_values"]) == 1 for item in dry_run["mismatched_duplicates"])
+    assert (target_output / first_file).exists()
+    assert (target_output / second_file).exists()
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_requires_delete_confirmation(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103__2.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+
+    with pytest.raises(ValueError, match='"확인했습니다." 입력과 삭제 허가가 필요합니다'):
+        cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=False)
+
+    assert (target_output / "close_20200103_20200103__2.parquet").exists()
 
 
 def test_merge_asset_parquet_outputs_same_directory_keeps_result_when_name_matches_source(tmp_path):

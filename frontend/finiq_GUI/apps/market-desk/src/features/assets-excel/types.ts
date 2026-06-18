@@ -35,6 +35,13 @@ export type AssetParquetMergePayload = {
   cleanup_merged_items?: boolean;
 };
 
+export type AssetParquetDuplicateCleanupPayload = {
+  target_directory: string;
+  dry_run?: boolean;
+  delete_confirmed?: boolean;
+  delete_confirmation_text?: string;
+};
+
 export type PreviewData = {
   outputs?: Record<string, any>;
   accounts?: Record<string, any>;
