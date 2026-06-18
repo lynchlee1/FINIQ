@@ -8,11 +8,12 @@ import re
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 from numbers import Number
 import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 import pandas as pd
 import pyarrow as pa
@@ -188,12 +189,23 @@ def _compact_date(value: str) -> str:
     return str(value or "").replace("-", "") or "nodate"
 
 
-def _sheet_output_stem(account_name: str, date_start: str, date_end: str) -> str:
+def _company_list_hash(company_codes: Iterable[object]) -> str:
+    company_text = "".join(_normalize_label(company_code) for company_code in company_codes)
+    return hashlib.sha256(company_text.encode("utf-8")).hexdigest()
+
+
+def _sheet_output_stem(
+    account_name: str,
+    date_start: str,
+    date_end: str,
+    company_codes: Iterable[object],
+) -> str:
     return "_".join(
         [
             _safe_output_token(account_name),
             _compact_date(date_start),
             _compact_date(date_end),
+            _company_list_hash(company_codes),
         ]
     )
 
@@ -1015,7 +1027,7 @@ def _parquet_account_names(directory: Path) -> list[str]:
 
 
 def _account_name_from_output_stem(stem: str) -> str:
-    match = re.match(r"^(?P<account>.+)_\d{8}_\d{8}(?:(?:__|_)\d+)?$", stem)
+    match = re.match(r"^(?P<account>.+)_\d{8}_\d{8}(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?$", stem)
     if match:
         return match.group("account")
     return stem
@@ -1165,7 +1177,7 @@ def _scan_asset_excel_frames(
             relative_path = str(xlsx_path.relative_to(source))
             date_start = frame.index.min().isoformat() if len(frame.index) else ""
             date_end = frame.index.max().isoformat() if len(frame.index) else ""
-            output_stem = _sheet_output_stem(account_name, date_start, date_end)
+            output_stem = _sheet_output_stem(account_name, date_start, date_end, frame.columns)
             account_mapping = _account_mapping_for_name(account_name, account_mappings)
             source_info = {
                 "file_name": xlsx_path.name,
@@ -1376,7 +1388,7 @@ def _scan_and_write_asset_excel_parquet(
             relative_path = str(xlsx_path.relative_to(source))
             date_start = frame.index.min().isoformat() if len(frame.index) else ""
             date_end = frame.index.max().isoformat() if len(frame.index) else ""
-            output_stem = _sheet_output_stem(account_name, date_start, date_end)
+            output_stem = _sheet_output_stem(account_name, date_start, date_end, frame.columns)
             account_mapping = _account_mapping_for_name(account_name, account_mappings)
             source_info = {
                 "file_name": xlsx_path.name,
@@ -1713,7 +1725,7 @@ def merge_asset_parquet_outputs(
             conflicts_by_account[account_name] = conflicts
         date_start = merged.index.min().isoformat() if len(merged.index) else ""
         date_end = merged.index.max().isoformat() if len(merged.index) else ""
-        parquet_path = output / f"{_sheet_output_stem(account_name, date_start, date_end)}.parquet"
+        parquet_path = output / f"{_sheet_output_stem(account_name, date_start, date_end, merged.columns)}.parquet"
         account_sources = sources_by_account.get(account_name, [])
         source_meta = account_sources[0] if account_sources else {}
         account_id = str(source_meta.get("account_id") or "")

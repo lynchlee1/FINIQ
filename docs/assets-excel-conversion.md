@@ -8,7 +8,8 @@
 - `Parquet 변환하기`는 원본 데이터 경로 아래 모든 Excel 파일을 변환 전 확인 및 Wide Parquet 변환 대상으로 사용한다.
 - `Quantiwise - 병합하기`는 사용자가 고른 `병합 대상 경로` 안에서 같은 계정 Parquet 파일을 2개씩 하나 이상 선택해 `병합 결과 경로`에 결과를 저장한다.
 - 원본 데이터 경로와 데이터 경로는 UI/API 호출자가 명시적으로 지정한다. Quantiwise UI/API는 기본 경로나 출력 경로를 자동 생성하지 않는다.
-- 변환 결과는 Sheet 하나당 Parquet 하나로 저장한다. 파일명은 `<accountName>_<YYYYMMDD>_<YYYYMMDD>.parquet` 형식이다. 예: `nxtHigh_20001231_20251223.parquet`.
+- 변환 결과는 Sheet 하나당 Parquet 하나로 저장한다. 파일명은 `<accountName>_<YYYYMMDD>_<YYYYMMDD>_<companiesHash>.parquet` 형식이다. 예: `nxtHigh_20001231_20251223_<sha256>.parquet`.
+- `companiesHash`는 Wide Parquet 컬럼 순서의 종목코드 목록을 순서대로 이어붙인 문자열의 SHA256 hex 값이다.
 - Code-Name 매핑은 Sheet Parquet와 별도인 `code_name_mapping.parquet`에 저장한다.
 - 계정명과 계정 ID 매핑의 원본은 앱 설정의 `asset_excel_account_mappings`다. `account_mapping.parquet`는 생성하지 않는다. 계정명은 언더바 없는 lower camel case를 사용하고, ID는 `S00001` 형식으로 고정한다. `account_id`와 `account_name`에는 `_`를 사용할 수 없다.
 - `Parquet 변환하기`는 실행 전 `계정-ID 매핑`을 편집, 추가, 삭제할 수 있고, 변환/미리보기 스캔은 요청 payload의 매핑 목록을 기본 매핑 대신 사용한다.
@@ -57,7 +58,7 @@
 
 ## 저장 계약
 
-- Parquet: `<output_directory>/<accountName>_<date_start_yyyymmdd>_<date_end_yyyymmdd>.parquet`
+- Parquet: `<output_directory>/<accountName>_<date_start_yyyymmdd>_<date_end_yyyymmdd>_<companiesHash>.parquet`
 - Parquet 구조: `date` 컬럼 + 종목코드별 wide 컬럼
 - Code-Name mapping Parquet: `<output_directory>/code_name_mapping.parquet`
 - Code-Name mapping 구조: `code`, `name`
