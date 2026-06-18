@@ -21,6 +21,8 @@ interface SettingsState {
   integrated_history_output_path: string;
   asset_excel_source_directory: string;
   asset_excel_output_directory: string;
+  asset_excel_merge_input_directory: string;
+  asset_excel_merge_output_directory: string;
   asset_excel_account_mappings: any[];
   html_download_source_path: string;
   html_merge_output_path: string;
@@ -59,6 +61,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   integrated_history_output_path: "",
   asset_excel_source_directory: "",
   asset_excel_output_directory: "",
+  asset_excel_merge_input_directory: "",
+  asset_excel_merge_output_directory: "",
   asset_excel_account_mappings: [],
   html_download_source_path: "",
   html_merge_output_path: "",

@@ -87,9 +87,9 @@ def _run_asset_excel_merge_job(
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     return merge_asset_parquet_outputs(
-        _required_payload_path(payload, "base_directory"),
-        _required_payload_path(payload, "incoming_directory"),
+        _required_payload_path(payload, "target_directory"),
         _required_payload_path(payload, "output_directory"),
+        selected_files=payload.get("selected_files") or [],
         progress_callback=progress_callback,
         cancel_check=cancel_check,
     )

@@ -990,13 +990,17 @@ def _existing_account_frames(
     output_info: dict[str, Any],
     *,
     source_type: str = "existing_output",
+    selected_paths: list[Path] | None = None,
 ) -> list[tuple[pd.DataFrame, SourceInfo]]:
-    parquet_paths = [output_directory / f"{account_name}.parquet"]
-    parquet_paths.extend(
-        path
-        for path in sorted(output_directory.glob(f"{account_name}_*.parquet"))
-        if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
-    )
+    if selected_paths is None:
+        parquet_paths = [output_directory / f"{account_name}.parquet"]
+        parquet_paths.extend(
+            path
+            for path in sorted(output_directory.glob(f"{account_name}_*.parquet"))
+            if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+        )
+    else:
+        parquet_paths = selected_paths
     frames: list[tuple[pd.DataFrame, SourceInfo]] = []
     account_meta = output_info.get("accounts", {}).get(account_name, {})
     if not isinstance(account_meta, dict):
@@ -1042,6 +1046,26 @@ def _account_name_from_output_stem(stem: str) -> str:
     if len(parts) >= 4 and parts[-2].isdigit() and len(parts[-2]) == 8 and parts[-3].isdigit() and len(parts[-3]) == 8:
         return "_".join(parts[:-3])
     return stem
+
+
+def _selected_asset_parquet_paths(directory: Path, selected_files: list[str] | None) -> list[Path]:
+    selected = [str(item or "").strip() for item in (selected_files or []) if str(item or "").strip()]
+    if len(selected) != 2:
+        raise ValueError("selected_files must contain exactly 2 files")
+    if len(set(selected)) != 2:
+        raise ValueError("selected_files must contain 2 different files")
+
+    paths: list[Path] = []
+    for file_name in selected:
+        path = (directory / file_name).expanduser().resolve()
+        if directory not in path.parents:
+            raise ValueError(f"Selected file must be under target_directory: {file_name}")
+        if path.name in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE} or path.suffix != ".parquet":
+            raise ValueError(f"Selected file must be an account Parquet file: {file_name}")
+        if not path.is_file():
+            raise ValueError(f"Selected file not found: {file_name}")
+        paths.append(path)
+    return paths
 
 
 def _asset_excel_scan_workers(file_count: int) -> int:
@@ -1798,60 +1822,53 @@ def convert_asset_excels_to_wide_parquet(
 
 
 def merge_asset_parquet_outputs(
-    base_directory: str | Path,
-    incoming_directory: str | Path,
+    target_directory: str | Path,
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
+    selected_files: list[str] | None = None,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Merge two generated Quantiwise Parquet output directories."""
+    """Merge exactly two generated Quantiwise Parquet files in one target directory."""
     def required_path(value: str | Path, field_name: str) -> Path:
         resolved = str(value or "").strip()
         if not resolved:
             raise ValueError(f"{field_name} is required")
         return Path(resolved).expanduser().resolve()
 
-    base = required_path(base_directory, "base_directory")
-    incoming = required_path(incoming_directory, "incoming_directory")
+    target = required_path(target_directory, "target_directory")
     output = required_path(output_directory, "output_directory")
+    selected_paths = _selected_asset_parquet_paths(target, selected_files)
     output.mkdir(parents=True, exist_ok=True)
 
-    base_info = inspect_asset_excel_output(base)
-    incoming_info = inspect_asset_excel_output(incoming)
-    base_accounts = _parquet_account_names(base)
-    incoming_accounts = _parquet_account_names(incoming)
-    if not base_accounts:
-        msg = f"No account Parquet files found in {base}"
-        raise ValueError(msg)
-    if not incoming_accounts:
-        msg = f"No account Parquet files found in {incoming}"
+    target_info = inspect_asset_excel_output(target)
+    target_accounts = sorted({_account_name_from_output_stem(path.stem) for path in selected_paths})
+    if not target_accounts:
+        msg = f"No account Parquet files found in {target}"
         raise ValueError(msg)
 
     frames_by_account: dict[str, list[tuple[pd.DataFrame, SourceInfo]]] = {}
     sources_by_account: dict[str, list[SourceInfo]] = {}
-    for source_dir, output_info, account_names, source_type in (
-        (base, base_info, base_accounts, "base_parquet"),
-        (incoming, incoming_info, incoming_accounts, "incoming_parquet"),
-    ):
-        for account_name in sorted(account_names):
-            if cancel_check and cancel_check():
-                raise RuntimeError("Job cancelled")
-            _emit(progress_callback, f"Reading {source_dir.name}/{account_name}.parquet...")
-            loaded_frames = _existing_account_frames(
-                account_name,
-                source_dir,
-                output_info,
-                source_type=source_type,
-            )
-            for frame, source_info in loaded_frames:
-                frames_by_account.setdefault(account_name, []).append((frame, source_info))
-                sources_by_account.setdefault(account_name, []).append(source_info)
+    for account_name in sorted(target_accounts):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
+        _emit(progress_callback, f"Reading {target.name}/{account_name}.parquet...")
+        loaded_frames = _existing_account_frames(
+            account_name,
+            target,
+            target_info,
+            source_type="target_parquet",
+            selected_paths=[
+                path
+                for path in selected_paths
+                if _account_name_from_output_stem(path.stem) == account_name
+            ],
+        )
+        for frame, source_info in loaded_frames:
+            frames_by_account.setdefault(account_name, []).append((frame, source_info))
+            sources_by_account.setdefault(account_name, []).append(source_info)
 
-    code_name_mapping = _code_name_mapping_frame([
-        *_existing_code_name_mappings(base),
-        *_existing_code_name_mappings(incoming),
-    ])
+    code_name_mapping = _code_name_mapping_frame(_existing_code_name_mappings(target))
     code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
     code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
 
@@ -1882,8 +1899,8 @@ def merge_asset_parquet_outputs(
     manifest = {
         "format": ASSET_PARQUET_FORMAT,
         "operation": "merge_parquet",
-        "base_directory": str(base),
-        "incoming_directory": str(incoming),
+        "target_directory": str(target),
+        "selected_files": [path.name for path in selected_paths],
         "output_directory": str(output),
         "conflict_policy": "error",
         "code_name_mapping": {
@@ -1899,8 +1916,8 @@ def merge_asset_parquet_outputs(
     return {
         "status": "completed",
         "operation": "merge_parquet",
-        "base_directory": str(base),
-        "incoming_directory": str(incoming),
+        "target_directory": str(target),
+        "selected_files": [path.name for path in selected_paths],
         "output_directory": str(output),
         "manifest_path": str(manifest_path),
         "accounts_processed": len(accounts),

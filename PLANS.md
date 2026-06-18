@@ -1,19 +1,23 @@
-# 2026-06-18 Quantiwise Parquet 화면 정리
+# 2026-06-18 Quantiwise 병합 2개 파일 선택
 
 ## Purpose
-- `Parquet 변환하기` 화면에서 `Quantiwise - Parquet 미리보기`에 속한 결과 목록을 제거한다.
-- `Quantiwise - Parquet 미리보기`의 결과 목록 명칭과 아이콘을 `Parquet 모아보기`로 맞춘다.
-- `Quantiwise - 병합하기`의 경로 입력 의미를 기존 변환 결과, 변환된 데이터 경로, 결과 경로로 명확히 한다.
+- `Quantiwise - 병합하기`를 경로 안의 여러 파일 일괄 병합이 아니라 Parquet 파일 2개 선택 병합으로 제한한다.
+- UI에서 선택 수를 명확히 보여주고, 2개를 선택하지 않으면 실행하지 않게 한다.
 
 ## Implementation Summary
-- 결과 목록 카드를 `Quantiwise - Parquet 미리보기`에서만 렌더링하게 하고 제목을 `Parquet 모아보기`로 바꿨다. 결과가 없어도 빈 상태로 카드를 표시한다.
-- `Parquet 모아보기` 제목에 `Parquet 미리보기`와 같은 눈 아이콘을 붙였다.
-- 병합 화면 라벨을 `기존 변환 결과`, `데이터 경로`, `결과 경로`로 정리하고 누락 상태 문구를 맞췄다.
-- `docs/ui-terminology.md`와 `docs/assets-excel-conversion.md`를 새 UI 용어와 병합 경로 의미에 맞게 갱신했다.
+- 병합 화면의 `Parquet 모아보기` 표에 선택 체크박스를 추가하고 최대 2개까지만 선택되게 했다.
+- 병합 실행 payload에 `selected_files`를 추가하고, 프론트엔드와 백엔드 모두 정확히 2개 선택을 검증하게 했다.
+- 백엔드 병합 로직은 `병합 대상 경로` 전체가 아니라 선택된 2개 Parquet 파일만 읽어 결과를 생성하게 했다.
+- 병합 완료 로그는 변환 완료가 아니라 병합 완료로 표시되게 분기했다.
+- `docs/assets-excel-conversion.md`에 2개 파일 선택 병합 계약을 기록했다.
 
 ## Verification
+- Passed: `python3 -m py_compile src/finiq/data/assets_excel.py src/finiq/market_desk/web/routers/assets_excel.py src/finiq/market_desk/web/app.py`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py`.
+- Passed: `python3 -m pytest tests/market_desk/test_kind_web_app.py -k "asset_excel_directories"`.
 - Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
-- Passed: `python3 -m pytest tests/test_assets_excel.py -k "asset_excel_apis_require_explicit_output_directory or asset_parquet_preview_api or merge_asset_parquet_outputs"`.
+- Passed: `npm run build -w @finiq/app-market-desk --`.
+- Checked: existing dev server at `http://127.0.0.1:3000/utility/assets-excel/merge` rendered the page title, target/output path fields, two-file selection guidance, selected-file count, Parquet table, and disabled run button with zero selected files.
 
 # 2026-06-18 공시원문 목차 분리 단순화
 

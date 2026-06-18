@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 
 import pandas as pd
@@ -536,8 +537,7 @@ def test_asset_excel_apis_require_explicit_output_directory(tmp_path):
     merge_start_response = client.post(
         "/api/assets/parquet/merge/start",
         json={
-            "base_directory": str(tmp_path / "base"),
-            "incoming_directory": str(tmp_path / "incoming"),
+            "target_directory": str(tmp_path / "target"),
             "output_directory": "",
         },
     )
@@ -548,25 +548,12 @@ def test_asset_excel_apis_require_explicit_output_directory(tmp_path):
     merge_response = client.post(
         "/api/assets/parquet/merge",
         json={
-            "base_directory": "",
-            "incoming_directory": str(tmp_path / "incoming"),
+            "target_directory": "",
             "output_directory": str(direct_merge_output),
         },
     )
     assert merge_response.status_code == 400
-    assert merge_response.json()["detail"] == "base_directory is required"
-    assert not direct_merge_output.exists()
-
-    merge_response = client.post(
-        "/api/assets/parquet/merge",
-        json={
-            "base_directory": str(tmp_path / "base"),
-            "incoming_directory": "",
-            "output_directory": str(direct_merge_output),
-        },
-    )
-    assert merge_response.status_code == 400
-    assert merge_response.json()["detail"] == "incoming_directory is required"
+    assert merge_response.json()["detail"] == "target_directory is required"
     assert not direct_merge_output.exists()
 
 
@@ -845,7 +832,7 @@ def test_convert_asset_excels_defaults_to_replace_without_existing_merge(tmp_pat
 def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
     first_source = tmp_path / "first-assets"
     second_source = tmp_path / "second-assets"
-    first_output = tmp_path / "first-parquet"
+    target_output = tmp_path / "target-parquet"
     second_output = tmp_path / "second-parquet"
     merged_output = tmp_path / "merged-parquet"
     first_source.mkdir()
@@ -862,10 +849,17 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
             "종가",
             [[pd.Timestamp("2020-01-04"), 101, 201]],
         )
-    convert_asset_excels_to_wide_parquet(first_source, first_output)
+    convert_asset_excels_to_wide_parquet(first_source, target_output)
     convert_asset_excels_to_wide_parquet(second_source, second_output)
+    for path in second_output.glob("*.parquet"):
+        if path.name not in {"code_name_mapping.parquet", "account_mapping.parquet"}:
+            shutil.copy2(path, target_output / path.name)
 
-    payload = merge_asset_parquet_outputs(first_output, second_output, merged_output)
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+    )
 
     merged_file = next(path for path in merged_output.glob("*.parquet") if path.name != "code_name_mapping.parquet")
     stock_price = pd.read_parquet(merged_file)
@@ -881,23 +875,26 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
 
 
 def test_merge_asset_parquet_outputs_allows_same_dates_extending_codes(tmp_path):
-    first_output = tmp_path / "first-parquet"
-    second_output = tmp_path / "second-parquet"
+    target_output = tmp_path / "target-parquet"
     merged_output = tmp_path / "merged-parquet"
     _write_account_parquet(
-        first_output,
+        target_output,
         "close_20200103_20200104.parquet",
         ["2020-01-03", "2020-01-04"],
         {"A005930": [100, 101]},
     )
     _write_account_parquet(
-        second_output,
-        "close_20200103_20200104.parquet",
+        target_output,
+        "close_20200103_20200104_2.parquet",
         ["2020-01-03", "2020-01-04"],
         {"A000660": [200, 201]},
     )
 
-    payload = merge_asset_parquet_outputs(first_output, second_output, merged_output)
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=["close_20200103_20200104.parquet", "close_20200103_20200104_2.parquet"],
+    )
 
     stock_price = pd.read_parquet(merged_output / "close.parquet")
     assert payload["accounts_processed"] == 1
@@ -907,86 +904,91 @@ def test_merge_asset_parquet_outputs_allows_same_dates_extending_codes(tmp_path)
 
 
 def test_merge_asset_parquet_outputs_rejects_partial_rectangle(tmp_path):
-    first_output = tmp_path / "first-parquet"
-    second_output = tmp_path / "second-parquet"
+    target_output = tmp_path / "target-parquet"
     merged_output = tmp_path / "merged-parquet"
     _write_account_parquet(
-        first_output,
+        target_output,
         "close_20200103_20200103.parquet",
         ["2020-01-03"],
         {"A005930": [100]},
     )
     _write_account_parquet(
-        second_output,
+        target_output,
         "close_20200104_20200104.parquet",
         ["2020-01-04"],
         {"A000660": [201]},
     )
 
     with pytest.raises(ValueError, match="partially filled table"):
-        merge_asset_parquet_outputs(first_output, second_output, merged_output)
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+        )
 
 
 def test_merge_asset_parquet_outputs_rejects_disconnected_date_ranges(tmp_path):
-    first_output = tmp_path / "first-parquet"
-    second_output = tmp_path / "second-parquet"
+    target_output = tmp_path / "target-parquet"
     merged_output = tmp_path / "merged-parquet"
     _write_account_parquet(
-        first_output,
+        target_output,
         "close_20200103_20200103.parquet",
         ["2020-01-03"],
         {"A005930": [100]},
     )
     _write_account_parquet(
-        second_output,
+        target_output,
         "close_20200105_20200105.parquet",
         ["2020-01-05"],
         {"A005930": [102]},
     )
 
     with pytest.raises(ValueError, match="date ranges are not connected"):
-        merge_asset_parquet_outputs(first_output, second_output, merged_output)
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=["close_20200103_20200103.parquet", "close_20200105_20200105.parquet"],
+        )
 
 
-def test_merge_asset_parquet_outputs_reads_all_files_for_same_account(tmp_path):
-    first_output = tmp_path / "first-parquet"
-    second_output = tmp_path / "second-parquet"
+def test_merge_asset_parquet_outputs_reads_only_selected_files_for_same_account(tmp_path):
+    target_output = tmp_path / "target-parquet"
     merged_output = tmp_path / "merged-parquet"
     _write_account_parquet(
-        first_output,
+        target_output,
         "close_20200103_20200103.parquet",
         ["2020-01-03"],
         {"A005930": [100]},
     )
     _write_account_parquet(
-        first_output,
+        target_output,
         "close_20200104_20200104.parquet",
         ["2020-01-04"],
         {"A005930": [101]},
     )
     _write_account_parquet(
-        second_output,
+        target_output,
         "close_20200105_20200105.parquet",
         ["2020-01-05"],
         {"A005930": [102]},
     )
 
-    merge_asset_parquet_outputs(first_output, second_output, merged_output)
+    merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+    )
 
     stock_price = pd.read_parquet(merged_output / "close.parquet")
-    assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04", "2020-01-05"]
-    assert stock_price["A005930"].tolist() == [100, 101, 102]
+    assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04"]
+    assert stock_price["A005930"].tolist() == [100, 101]
 
 
 def test_merge_asset_parquet_outputs_rejects_blank_inputs_before_output_created(tmp_path):
     output_dir = tmp_path / "merged"
 
-    with pytest.raises(ValueError, match="base_directory is required"):
-        merge_asset_parquet_outputs("", tmp_path / "incoming", output_dir)
-    assert not output_dir.exists()
-
-    with pytest.raises(ValueError, match="incoming_directory is required"):
-        merge_asset_parquet_outputs(tmp_path / "base", "", output_dir)
+    with pytest.raises(ValueError, match="target_directory is required"):
+        merge_asset_parquet_outputs("", output_dir)
     assert not output_dir.exists()
 
 
