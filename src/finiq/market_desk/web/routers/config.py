@@ -49,6 +49,7 @@ class SettingsUpdate(BaseModel):
     asset_excel_merge_output_directory: Optional[str] = None
     asset_excel_merge_same_directory: Optional[bool] = None
     asset_excel_cleanup_merged_items: Optional[bool] = None
+    asset_excel_duplicate_scan_recursive: Optional[bool] = None
     asset_excel_account_mappings: Optional[list[dict[str, Any]]] = None
     html_download_source_path: Optional[str] = None
     html_merge_output_path: Optional[str] = None
@@ -162,6 +163,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "asset_excel_merge_output_directory": config.asset_excel_merge_output_directory,
             "asset_excel_merge_same_directory": config.asset_excel_merge_same_directory,
             "asset_excel_cleanup_merged_items": config.asset_excel_cleanup_merged_items,
+            "asset_excel_duplicate_scan_recursive": config.asset_excel_duplicate_scan_recursive,
             "asset_excel_account_mappings": config.asset_excel_account_mappings,
             "html_download_source_path": config.html_download_source_path,
             "html_merge_output_path": config.html_merge_output_path,

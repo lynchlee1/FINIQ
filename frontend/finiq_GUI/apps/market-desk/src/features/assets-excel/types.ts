@@ -40,6 +40,7 @@ export type AssetParquetDuplicateCleanupPayload = {
   dry_run?: boolean;
   delete_confirmed?: boolean;
   delete_confirmation_text?: string;
+  scan_recursive?: boolean;
 };
 
 export type PreviewData = {

@@ -1414,7 +1414,7 @@ def test_cleanup_duplicate_asset_parquet_outputs_deletes_identical_suffix_files(
         {"A005930": [101]},
     )
 
-    dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+    dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True, scan_recursive=True)
 
     assert dry_run["deletion_candidate_count"] == 1
     assert dry_run["deletion_candidates"][0]["file_name"] == duplicate_file
@@ -1426,12 +1426,38 @@ def test_cleanup_duplicate_asset_parquet_outputs_deletes_identical_suffix_files(
         dry_run=False,
         delete_confirmed=True,
         delete_confirmation_text="확인했습니다.",
+        scan_recursive=True,
     )
 
     assert payload["deleted_count"] == 1
     assert not (target_output / "merged" / duplicate_file).exists()
     assert (target_output / "merged" / canonical_file).exists()
     assert (target_output / "merged" / mismatched_file).exists()
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_does_not_scan_subfolders_by_default(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    _write_account_parquet(
+        target_output / "nested" / "merged",
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output / "nested" / "merged",
+        "close_20200103_20200103__2.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+
+    dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+    assert dry_run["scan_recursive"] is False
+    assert dry_run["deletion_candidate_count"] == 0
+
+    recursive_dry_run = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True, scan_recursive=True)
+    assert recursive_dry_run["scan_recursive"] is True
+    assert recursive_dry_run["deletion_candidate_count"] == 1
 
 
 def test_cleanup_duplicate_asset_parquet_outputs_deletes_strict_subset_across_date_ranges(tmp_path):

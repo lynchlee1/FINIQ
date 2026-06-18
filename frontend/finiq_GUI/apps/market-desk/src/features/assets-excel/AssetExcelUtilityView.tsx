@@ -222,6 +222,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [mergeBaseDirectory, setMergeBaseDirectory] = useState("");
   const [mergeSameDirectory, setMergeSameDirectory] = useState(false);
   const [cleanupMergedItems, setCleanupMergedItems] = useState(true);
+  const [duplicateScanRecursive, setDuplicateScanRecursive] = useState(false);
   const [selectedMergeFiles, setSelectedMergeFiles] = useState<string[]>([]);
   const [duplicateInspectionResult, setDuplicateInspectionResult] = useState<any>(null);
   const [duplicateDeleteConfirmed, setDuplicateDeleteConfirmed] = useState(false);
@@ -293,6 +294,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       if (isMergeMode) {
         setMergeSameDirectory(!!config.asset_excel_merge_same_directory);
         setCleanupMergedItems(config.asset_excel_cleanup_merged_items !== false);
+        setDuplicateScanRecursive(!!config.asset_excel_duplicate_scan_recursive);
       }
     });
   }, [fetchSettings, isConvertMode, isMergeMode, isParquetPreviewMode]);
@@ -793,6 +795,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     saveSetting("asset_excel_cleanup_merged_items", value);
   };
 
+  const handleDuplicateScanRecursiveChange = (value: boolean) => {
+    setDuplicateScanRecursive(value);
+    saveSetting("asset_excel_duplicate_scan_recursive", value);
+  };
+
   const handleInspectDuplicates = async () => {
     if (activeJobId) return;
     if (!mergeBaseDirectory.trim()) {
@@ -807,6 +814,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       const data = await startAssetParquetDuplicateCleanup({
         target_directory: mergeBaseDirectory,
         dry_run: true,
+        scan_recursive: duplicateScanRecursive,
       });
       startPolling(data.job_id);
     } catch (err: any) {
@@ -830,6 +838,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         dry_run: false,
         delete_confirmed: duplicateDeleteConfirmed,
         delete_confirmation_text: duplicateDeleteConfirmationText,
+        scan_recursive: duplicateScanRecursive,
       });
       startPolling(data.job_id);
     } catch (err: any) {
@@ -1590,6 +1599,14 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     className="dark:border-[#30363d]"
                   />
                   병합된 요소 정리하기
+                </label>
+                <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
+                  <Checkbox
+                    checked={duplicateScanRecursive}
+                    onCheckedChange={(value) => handleDuplicateScanRecursiveChange(!!value)}
+                    className="dark:border-[#30363d]"
+                  />
+                  내부까지 검사
                 </label>
               </div>
             ) : <div />

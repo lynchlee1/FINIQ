@@ -72,6 +72,7 @@ def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
         "asset_excel_merge_output_directory": str(merge_output_directory),
         "asset_excel_merge_same_directory": True,
         "asset_excel_cleanup_merged_items": False,
+        "asset_excel_duplicate_scan_recursive": True,
     })
 
     assert response.status_code == 200
@@ -82,6 +83,7 @@ def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
     assert data["asset_excel_merge_output_directory"] == str(merge_output_directory.resolve())
     assert data["asset_excel_merge_same_directory"] is True
     assert data["asset_excel_cleanup_merged_items"] is False
+    assert data["asset_excel_duplicate_scan_recursive"] is True
 
     response = client.get("/api/config")
 
@@ -93,6 +95,7 @@ def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
     assert data["asset_excel_merge_output_directory"] == str(merge_output_directory.resolve())
     assert data["asset_excel_merge_same_directory"] is True
     assert data["asset_excel_cleanup_merged_items"] is False
+    assert data["asset_excel_duplicate_scan_recursive"] is True
 
 
 def test_api_settings_persists_asset_excel_account_mappings(tmp_path: Path, monkeypatch):

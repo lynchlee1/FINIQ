@@ -22,6 +22,7 @@
 - Added backend duplicate cleanup logic for `병합 대상 경로` and its immediate `merged` folder.
 - Compared same-account Parquet files by ordered date rows, stock-code columns, and non-null cell values instead of relying on filename equality.
 - Added metadata-based date/row/column prefilters so impossible subset directions skip full cell comparison.
+- Changed duplicate scanning to inspect only direct Parquet files by default, with `내부까지 검사` enabling recursive subfolder scanning.
 - Treated exact duplicates and strict supersets as deletion-safe, keeping the more complete file and deleting the covered file after confirmation.
 - Added dry-run and confirmed-delete job APIs under `/api/assets/parquet/duplicates`.
 - Added merge-page UI for `중복 검사하기`, delete confirmation, candidate display, deleted summary, mismatched reporting, and raw inspection result display in the right alert dock.
