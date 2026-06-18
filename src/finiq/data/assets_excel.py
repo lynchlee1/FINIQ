@@ -1099,6 +1099,12 @@ def _available_archive_path(path: Path) -> Path:
         index += 1
 
 
+def _move_file_replacing_destination(source_path: Path, destination_path: Path) -> None:
+    if destination_path.exists():
+        destination_path.unlink()
+    shutil.move(str(source_path), str(destination_path))
+
+
 def _asset_parquet_delete_confirmed(delete_confirmed: bool, delete_confirmation_text: str) -> bool:
     return delete_confirmed and str(delete_confirmation_text or "").strip() == ASSET_PARQUET_DELETE_CONFIRMATION_TEXT
 
@@ -2024,70 +2030,67 @@ def merge_asset_parquet_outputs(
             frames_by_account.setdefault(account_name, []).append((frame, source_info))
             sources_by_account.setdefault(account_name, []).append(source_info)
 
-    code_name_mapping = _code_name_mapping_frame(_existing_code_name_mappings(target))
-    code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
-    code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
-
     accounts: dict[str, Any] = {}
     conflicts_by_account: dict[str, list[dict[str, str]]] = {}
     final_output_replacements: list[tuple[Path, Path]] = []
-    for account_name, frames in sorted(frames_by_account.items()):
-        if cancel_check and cancel_check():
-            raise RuntimeError("Job cancelled")
-        _emit(progress_callback, f"Merging {account_name}...")
-        merged, conflicts = _merge_account_frames(account_name, frames)
-        if conflicts:
-            conflicts_by_account[account_name] = conflicts
-        date_start = merged.index.min().isoformat() if len(merged.index) else ""
-        date_end = merged.index.max().isoformat() if len(merged.index) else ""
-        parquet_path = output / f"{_sheet_output_stem(account_name, date_start, date_end, merged.columns)}.parquet"
-        account_sources = sources_by_account.get(account_name, [])
-        source_meta = account_sources[0] if account_sources else {}
-        account_id = str(source_meta.get("account_id") or "")
-        quality = _account_quality_payload(merged)
-        write_path = parquet_path
-        if parquet_path in selected_paths:
-            with tempfile.NamedTemporaryFile(
-                prefix=f".{parquet_path.stem}.",
-                suffix=".parquet",
-                dir=output,
-                delete=False,
-            ) as temporary_file:
-                write_path = Path(temporary_file.name)
-            final_output_replacements.append((write_path, parquet_path))
-        _write_parquet_with_metadata(
-            merged.reset_index(),
-            write_path,
-            _account_footer_metadata(
-                account_id=account_id,
-                account_name=account_name,
-                date_start=date_start,
-                date_end=date_end,
-                rows=len(merged),
-                columns=len(merged.columns),
-                quality=quality,
-            ),
-        )
-        accounts[account_name] = {
-            "path": str(parquet_path),
-            "output_file": parquet_path.name,
-            "account_id": account_id,
-            "account_name": account_name,
-            "rows": len(merged),
-            "columns": len(merged.columns),
-            "date_start": date_start,
-            "date_end": date_end,
-            "quality": quality,
-        }
-
+    code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
     moved_files: list[dict[str, str]] = []
-    if cleanup_destinations:
-        cleanup_destinations[0][1].parent.mkdir(parents=True, exist_ok=True)
-        for path, destination in cleanup_destinations:
-            shutil.move(str(path), str(destination))
-            moved_files.append({"from": str(path), "to": str(destination)})
-    for source_path, destination_path in final_output_replacements:
-        shutil.move(str(source_path), str(destination_path))
+
+    with tempfile.TemporaryDirectory(prefix=".quanti_parquet_merge_", dir=output) as temp_output_name:
+        temp_output = Path(temp_output_name)
+        code_name_mapping = _code_name_mapping_frame(_existing_code_name_mappings(target))
+        temp_code_name_mapping_path = temp_output / CODE_NAME_MAPPING_FILE
+        code_name_mapping.to_parquet(temp_code_name_mapping_path, index=False, compression="snappy")
+        final_output_replacements.append((temp_code_name_mapping_path, code_name_mapping_path))
+
+        for account_index, (account_name, frames) in enumerate(sorted(frames_by_account.items()), start=1):
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
+            _emit(progress_callback, f"Merging {account_name}...")
+            merged, conflicts = _merge_account_frames(account_name, frames)
+            if conflicts:
+                conflicts_by_account[account_name] = conflicts
+            date_start = merged.index.min().isoformat() if len(merged.index) else ""
+            date_end = merged.index.max().isoformat() if len(merged.index) else ""
+            parquet_path = output / f"{_sheet_output_stem(account_name, date_start, date_end, merged.columns)}.parquet"
+            account_sources = sources_by_account.get(account_name, [])
+            source_meta = account_sources[0] if account_sources else {}
+            account_id = str(source_meta.get("account_id") or "")
+            quality = _account_quality_payload(merged)
+            write_path = temp_output / f"pending_{account_index}_{_safe_output_token(parquet_path.stem)}.parquet"
+            final_output_replacements.append((write_path, parquet_path))
+            _write_parquet_with_metadata(
+                merged.reset_index(),
+                write_path,
+                _account_footer_metadata(
+                    account_id=account_id,
+                    account_name=account_name,
+                    date_start=date_start,
+                    date_end=date_end,
+                    rows=len(merged),
+                    columns=len(merged.columns),
+                    quality=quality,
+                ),
+            )
+            accounts[account_name] = {
+                "path": str(parquet_path),
+                "output_file": parquet_path.name,
+                "account_id": account_id,
+                "account_name": account_name,
+                "rows": len(merged),
+                "columns": len(merged.columns),
+                "date_start": date_start,
+                "date_end": date_end,
+                "quality": quality,
+            }
+
+        if cleanup_destinations:
+            cleanup_destinations[0][1].parent.mkdir(parents=True, exist_ok=True)
+            for path, destination in cleanup_destinations:
+                shutil.move(str(path), str(destination))
+                moved_files.append({"from": str(path), "to": str(destination)})
+        for source_path, destination_path in final_output_replacements:
+            _move_file_replacing_destination(source_path, destination_path)
 
     return {
         "status": "completed",

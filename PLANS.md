@@ -67,3 +67,19 @@
 
 ## Verification
 - Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
+# 2026-06-19 Quantiwise merge temporary output writes
+
+## Purpose
+- Make `Quantiwise - 병합하기` write intermediate merge outputs inside a temporary folder before saving final files, matching `Quantiwise - Parquet 변환하기`.
+- Avoid long final Parquet filenames appearing one by one during an in-progress merge.
+
+## Implementation Summary
+- Changed merge output writes to create a hidden temporary folder under `병합 결과 경로`.
+- Wrote merged account Parquet files and `code_name_mapping.parquet` into that temporary folder first.
+- Moved temporary files to their final names only after all account merges succeeded and selected source cleanup completed.
+- Preserved existing cleanup behavior for `병합된 요소 정리하기`, including archive suffix handling.
+- Documented the merge temporary-write contract in `docs/assets-excel-conversion.md`.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -q`.

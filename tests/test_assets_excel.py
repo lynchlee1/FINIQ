@@ -1637,6 +1637,61 @@ def test_merge_asset_parquet_outputs_cleanup_waits_for_success(tmp_path):
     assert (target_output / "close_20200104_20200104.parquet").exists()
 
 
+def test_merge_asset_parquet_outputs_cleans_temp_outputs_on_cancel(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+    _write_account_parquet(
+        target_output,
+        "volume_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [1000]},
+    )
+    _write_account_parquet(
+        target_output,
+        "volume_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [1001]},
+    )
+    should_cancel = False
+
+    def progress_callback(message: str) -> None:
+        nonlocal should_cancel
+        if message == "Merging close...":
+            should_cancel = True
+
+    with pytest.raises(RuntimeError, match="Job cancelled"):
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=[
+                "close_20200103_20200103.parquet",
+                "close_20200104_20200104.parquet",
+                "volume_20200103_20200103.parquet",
+                "volume_20200104_20200104.parquet",
+            ],
+            progress_callback=progress_callback,
+            cancel_check=lambda: should_cancel,
+        )
+
+    assert not list(merged_output.glob("*.parquet"))
+    assert not any(path.name.startswith(".quanti_parquet_merge_") for path in merged_output.iterdir())
+    assert not (target_output / "merged").exists()
+    assert (target_output / "close_20200103_20200103.parquet").exists()
+    assert (target_output / "close_20200104_20200104.parquet").exists()
+
+
 def test_merge_asset_parquet_outputs_rejects_blank_inputs_before_output_created(tmp_path):
     output_dir = tmp_path / "merged"
 
