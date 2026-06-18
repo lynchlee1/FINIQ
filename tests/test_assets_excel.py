@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -865,6 +866,8 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
     stock_price = pd.read_parquet(merged_file)
     assert payload["operation"] == "merge_parquet"
     assert payload["accounts_processed"] == 1
+    assert merged_file.name == "close_20200103_20200104.parquet"
+    assert payload["accounts"]["close"]["output_file"] == "close_20200103_20200104.parquet"
     assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04"]
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
     mapping = pd.read_parquet(merged_output / "code_name_mapping.parquet")
@@ -896,11 +899,82 @@ def test_merge_asset_parquet_outputs_allows_same_dates_extending_codes(tmp_path)
         selected_files=["close_20200103_20200104.parquet", "close_20200103_20200104_2.parquet"],
     )
 
-    stock_price = pd.read_parquet(merged_output / "close.parquet")
+    stock_price = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
     assert payload["accounts_processed"] == 1
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
     assert stock_price["A005930"].tolist() == [100, 101]
     assert stock_price["A000660"].tolist() == [200, 201]
+
+
+def test_merge_asset_parquet_outputs_accepts_multiple_two_file_account_groups(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+    _write_account_parquet(
+        target_output,
+        "adjHigh_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [120]},
+    )
+    _write_account_parquet(
+        target_output,
+        "adjHigh_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [121]},
+    )
+
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=[
+            "close_20200103_20200103.parquet",
+            "close_20200104_20200104.parquet",
+            "adjHigh_20200103_20200103.parquet",
+            "adjHigh_20200104_20200104.parquet",
+        ],
+    )
+
+    close = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
+    adj_high = pd.read_parquet(merged_output / "adjHigh_20200103_20200104.parquet")
+    assert payload["accounts_processed"] == 2
+    assert sorted(payload["accounts"]) == ["adjHigh", "close"]
+    assert close["A005930"].tolist() == [100, 101]
+    assert adj_high["A005930"].tolist() == [120, 121]
+
+
+def test_merge_asset_parquet_outputs_rejects_cross_account_pair(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "adjHigh_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [121]},
+    )
+
+    with pytest.raises(ValueError, match="exactly 2 files for each account"):
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=["close_20200103_20200103.parquet", "adjHigh_20200104_20200104.parquet"],
+        )
 
 
 def test_merge_asset_parquet_outputs_rejects_partial_rectangle(tmp_path):
@@ -979,9 +1053,155 @@ def test_merge_asset_parquet_outputs_reads_only_selected_files_for_same_account(
         selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
     )
 
-    stock_price = pd.read_parquet(merged_output / "close.parquet")
+    stock_price = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
     assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04"]
     assert stock_price["A005930"].tolist() == [100, 101]
+
+
+def test_merge_asset_parquet_outputs_reads_only_selected_parquet_files(tmp_path, monkeypatch):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+    _write_account_parquet(
+        target_output,
+        "adjHigh_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [120]},
+    )
+    progress_log: list[str] = []
+    read_paths: list[str] = []
+    real_read_parquet = pd.read_parquet
+
+    def tracked_read_parquet(path, *args, **kwargs):
+        read_paths.append(Path(path).name)
+        return real_read_parquet(path, *args, **kwargs)
+
+    monkeypatch.setattr(pd, "read_parquet", tracked_read_parquet)
+
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+        progress_callback=progress_log.append,
+    )
+
+    assert payload["selected_files"] == ["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"]
+    assert payload["accounts_processed"] == 1
+    assert "adjHigh_20200103_20200103.parquet" not in read_paths
+    assert read_paths == [
+        "close_20200103_20200103.parquet",
+        "close_20200104_20200104.parquet",
+    ]
+    assert progress_log == [
+        "Selected merge files: close_20200103_20200103.parquet, close_20200104_20200104.parquet",
+        "Merging close...",
+    ]
+
+
+def test_merge_asset_parquet_outputs_same_directory_and_cleanup_after_success(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    ignored_output = tmp_path / "ignored-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        ignored_output,
+        selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+        same_directory=True,
+        cleanup_merged_items=True,
+    )
+
+    merged_file = target_output / "close_20200103_20200104.parquet"
+    archived_first = target_output / "merged" / "close_20200103_20200103.parquet"
+    archived_second = target_output / "merged" / "close_20200104_20200104.parquet"
+    assert payload["output_directory"] == str(target_output.resolve())
+    assert not ignored_output.exists()
+    assert merged_file.exists()
+    assert archived_first.exists()
+    assert archived_second.exists()
+    assert not (target_output / "close_20200103_20200103.parquet").exists()
+    assert not (target_output / "close_20200104_20200104.parquet").exists()
+
+
+def test_merge_asset_parquet_outputs_same_directory_keeps_result_when_name_matches_source(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    ignored_output = tmp_path / "ignored-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200104.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200104_2.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A000660": [200, 201]},
+    )
+
+    merge_asset_parquet_outputs(
+        target_output,
+        ignored_output,
+        selected_files=["close_20200103_20200104.parquet", "close_20200103_20200104_2.parquet"],
+        same_directory=True,
+        cleanup_merged_items=True,
+    )
+
+    stock_price = pd.read_parquet(target_output / "close_20200103_20200104.parquet")
+    assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
+    assert (target_output / "merged" / "close_20200103_20200104.parquet").exists()
+    assert (target_output / "merged" / "close_20200103_20200104_2.parquet").exists()
+
+
+def test_merge_asset_parquet_outputs_cleanup_waits_for_success(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A000660": [201]},
+    )
+
+    with pytest.raises(ValueError, match="partially filled table"):
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+            cleanup_merged_items=True,
+        )
+
+    assert not (target_output / "merged").exists()
+    assert (target_output / "close_20200103_20200103.parquet").exists()
+    assert (target_output / "close_20200104_20200104.parquet").exists()
 
 
 def test_merge_asset_parquet_outputs_rejects_blank_inputs_before_output_created(tmp_path):

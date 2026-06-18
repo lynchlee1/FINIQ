@@ -97,6 +97,18 @@ function fileNameFromPath(value: string | undefined): string {
   return String(value || "").split(/[\\/]/).filter(Boolean).pop() || "";
 }
 
+function accountNameFromParquetFile(fileName: string): string {
+  const stem = String(fileName || "").replace(/\.parquet$/i, "");
+  const parts = stem.split("_");
+  if (parts.length >= 3 && /^\d{8}$/.test(parts[parts.length - 1]) && /^\d{8}$/.test(parts[parts.length - 2])) {
+    return parts.slice(0, -2).join("_");
+  }
+  if (parts.length >= 4 && /^\d{8}$/.test(parts[parts.length - 2]) && /^\d{8}$/.test(parts[parts.length - 3])) {
+    return parts.slice(0, -3).join("_");
+  }
+  return stem;
+}
+
 type OutputSortKey = "sheet" | "account_id" | "account_name" | "file" | "rows" | "columns" | "missing_ratio" | "non_null_cells" | "total_cells" | "date_segments";
 type SortDirection = "asc" | "desc";
 
@@ -133,6 +145,20 @@ function outputRowsFromInfo(info: any): [string, any][] {
   return (info?.parquet_files || []).map((fileName: string) => [fileName, { file_name: fileName }]);
 }
 
+function mergeCandidateRowsFromInfo(info: any): [string, any][] {
+  const rows = outputRowsFromInfo(info);
+  const counts: Record<string, number> = {};
+  rows.forEach(([name, item]) => {
+    const fileName = item?.output_file || fileNameFromPath(item?.path) || item?.file_name || `${name}.parquet`;
+    const accountName = accountNameFromParquetFile(fileName);
+    counts[accountName] = (counts[accountName] || 0) + 1;
+  });
+  return rows.filter(([name, item]) => {
+    const fileName = item?.output_file || fileNameFromPath(item?.path) || item?.file_name || `${name}.parquet`;
+    return (counts[accountNameFromParquetFile(fileName)] || 0) >= 2;
+  });
+}
+
 function nextAccountId(mappings: AssetAccountMapping[]): string {
   const maxIndex = mappings.reduce((max, mapping) => {
     const match = String(mapping.account_id || "").match(/^S(\d+)$/);
@@ -150,6 +176,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
   const [mergeBaseDirectory, setMergeBaseDirectory] = useState("");
+  const [mergeSameDirectory, setMergeSameDirectory] = useState(false);
+  const [cleanupMergedItems, setCleanupMergedItems] = useState(true);
   const [selectedMergeFiles, setSelectedMergeFiles] = useState<string[]>([]);
   const writeMode = "replace";
   const [loading, setLoading] = useState(true);
@@ -203,6 +231,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       }
       if (isMergeMode && config.asset_excel_merge_output_directory) {
         setOutputDirectory((current) => current || config.asset_excel_merge_output_directory);
+      }
+      if (isMergeMode) {
+        setMergeSameDirectory(!!config.asset_excel_merge_same_directory);
+        setCleanupMergedItems(config.asset_excel_cleanup_merged_items !== false);
       }
     });
   }, [fetchSettings, isConvertMode, isMergeMode, isParquetPreviewMode]);
@@ -381,7 +413,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     const resultRows = Object.entries(previewData?.outputs || lastResult?.outputs || {}) as [string, any][];
     return resultRows.length ? resultRows : outputRowsFromInfo(outputInfo);
   }, [previewData, lastResult, outputInfo]);
-  const mergeBaseOutputRows = useMemo(() => outputRowsFromInfo(mergeBaseInfo), [mergeBaseInfo]);
+  const mergeBaseOutputRows = useMemo(() => mergeCandidateRowsFromInfo(mergeBaseInfo), [mergeBaseInfo]);
   const sortOutputRows = (rows: [string, any][]) => {
     if (!outputSort) return rows;
     const direction = outputSort.direction === "asc" ? 1 : -1;
@@ -475,10 +507,26 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       </button>
     </th>
   );
+  const selectedMergeCountsByAccount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    selectedMergeFiles.forEach((fileName) => {
+      const accountName = accountNameFromParquetFile(fileName);
+      counts[accountName] = (counts[accountName] || 0) + 1;
+    });
+    return counts;
+  }, [selectedMergeFiles]);
+  const incompleteMergeGroups = useMemo(
+    () => Object.entries(selectedMergeCountsByAccount).filter(([, count]) => count !== 2),
+    [selectedMergeCountsByAccount],
+  );
+  const mergePairCount = Object.values(selectedMergeCountsByAccount).filter((count) => count === 2).length;
+  const mergeSelectionReady = selectedMergeFiles.length > 0 && incompleteMergeGroups.length === 0;
   const toggleMergeFile = (fileName: string, checked: boolean) => {
     setSelectedMergeFiles((current) => {
       if (checked) {
-        if (current.includes(fileName) || current.length >= 2) return current;
+        const accountName = accountNameFromParquetFile(fileName);
+        const accountCount = current.filter((item) => accountNameFromParquetFile(item) === accountName).length;
+        if (current.includes(fileName) || accountCount >= 2) return current;
         return [...current, fileName];
       }
       return current.filter((item) => item !== fileName);
@@ -507,7 +555,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           {rows.map(([name, item]: [string, any]) => {
             const fileName = item?.output_file || fileNameFromPath(item?.path) || item?.file_name || `${name}.parquet`;
             const selected = selectedMergeFiles.includes(fileName);
-            const disabled = selectable && !selected && selectedMergeFiles.length >= 2;
+            const accountName = item?.account_name || accountNameFromParquetFile(fileName);
+            const disabled = selectable && !selected && (selectedMergeCountsByAccount[accountName] || 0) >= 2;
             return (
               <tr key={name} className="dark:text-slate-300">
                 {selectable ? (
@@ -669,6 +718,16 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setLastResult(null);
   };
 
+  const handleMergeSameDirectoryChange = (value: boolean) => {
+    setMergeSameDirectory(value);
+    saveSetting("asset_excel_merge_same_directory", value);
+  };
+
+  const handleCleanupMergedItemsChange = (value: boolean) => {
+    setCleanupMergedItems(value);
+    saveSetting("asset_excel_cleanup_merged_items", value);
+  };
+
   const updateAccountMapping = (index: number, key: keyof AssetAccountMapping, value: string) => {
     setAccountMappings((current) => current.map((mapping, itemIndex) => (
       itemIndex === index ? { ...mapping, [key]: value } : mapping
@@ -719,13 +778,18 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const handleStart = async (resumeFailedOnly = false) => {
     if (activeJobId) return;
     if (isMergeMode) {
-      if (!mergeBaseDirectory.trim() || !outputDirectory.trim()) {
-        setStatus("병합 대상 경로와 병합 결과 경로를 선택하세요.");
+      if (!mergeBaseDirectory.trim()) {
+        setStatus("병합 대상 경로를 선택하세요.");
         setIsErrorStatus(true);
         return;
       }
-      if (selectedMergeFiles.length !== 2) {
-        setStatus("병합 대상 경로에서 Parquet 파일 2개를 선택하세요.");
+      if (!mergeSameDirectory && !outputDirectory.trim()) {
+        setStatus("병합 결과 경로를 선택하세요.");
+        setIsErrorStatus(true);
+        return;
+      }
+      if (!mergeSelectionReady) {
+        setStatus("병합 대상 경로에서 같은 계정 Parquet 파일을 2개씩 선택하세요.");
         setIsErrorStatus(true);
         return;
       }
@@ -738,6 +802,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           target_directory: mergeBaseDirectory,
           selected_files: selectedMergeFiles,
           output_directory: outputDirectory,
+          same_directory: mergeSameDirectory,
+          cleanup_merged_items: cleanupMergedItems,
         });
         startPolling(data.job_id);
       } catch (err: any) {
@@ -838,7 +904,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                       placeholder="/path/to/existing/assets_parquet"
                       onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                     />
-                    <p className="text-xs text-slate-500 dark:text-slate-400">이 경로 안에서 병합할 Parquet 파일 2개를 선택합니다.</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">병합 결과 경로</Label>
@@ -847,6 +912,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                       value={outputDirectory}
                       onChange={handleMergeOutputDirectoryChange}
                       placeholder="/path/to/resources/assets_merged"
+                      disabled={mergeSameDirectory}
                       onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                     />
                   </div>
@@ -1263,15 +1329,20 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base dark:text-white">
                 <Eye className="h-4 w-4" />
-                Parquet 모아보기
+                병합대상 모아보기
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <p className={`text-sm ${mergeSelectedCount === 2 ? "text-emerald-600 dark:text-emerald-300" : "text-slate-500 dark:text-slate-400"}`}>
-                선택한 파일: {formatInteger(mergeSelectedCount)} / 2
+              <p className={`text-sm ${mergeSelectionReady ? "text-emerald-600 dark:text-emerald-300" : "text-slate-500 dark:text-slate-400"}`}>
+                선택한 파일: {formatInteger(mergeSelectedCount)}개 / 묶음: {formatInteger(mergePairCount)}개
               </p>
+              {incompleteMergeGroups.length ? (
+                <p className="text-xs text-amber-600 dark:text-amber-300">
+                  1개만 선택된 계정: {incompleteMergeGroups.map(([accountName]) => accountName).join(", ")}
+                </p>
+              ) : null}
               <div className="space-y-2">
-                {renderOutputRowsTable(sortedMergeBaseOutputRows, "병합 대상 경로에 표시할 Parquet 결과가 없습니다.", true)}
+                {renderOutputRowsTable(sortedMergeBaseOutputRows, "병합 대상 경로에 표시할 병합 대상이 없습니다.", true)}
               </div>
             </CardContent>
           </Card>
@@ -1285,7 +1356,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || !outputDirectory.trim() || selectedMergeFiles.length !== 2}>
+                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || (!mergeSameDirectory && !outputDirectory.trim()) || !mergeSelectionReady}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
@@ -1339,7 +1410,28 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </div>
           }
           settingsTitle="시스템 설정"
-          settingsContent={<div />}
+          settingsContent={
+            isMergeMode ? (
+              <div className="space-y-4">
+                <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
+                  <Checkbox
+                    checked={mergeSameDirectory}
+                    onCheckedChange={(value) => handleMergeSameDirectoryChange(!!value)}
+                    className="dark:border-[#30363d]"
+                  />
+                  동일 폴더에서 작업하기
+                </label>
+                <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
+                  <Checkbox
+                    checked={cleanupMergedItems}
+                    onCheckedChange={(value) => handleCleanupMergedItemsChange(!!value)}
+                    className="dark:border-[#30363d]"
+                  />
+                  병합된 요소 정리하기
+                </label>
+              </div>
+            ) : <div />
+          }
         />
         ) : null}
       </div>

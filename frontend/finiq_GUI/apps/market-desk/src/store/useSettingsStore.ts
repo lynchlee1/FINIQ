@@ -23,6 +23,8 @@ interface SettingsState {
   asset_excel_output_directory: string;
   asset_excel_merge_input_directory: string;
   asset_excel_merge_output_directory: string;
+  asset_excel_merge_same_directory: boolean;
+  asset_excel_cleanup_merged_items: boolean;
   asset_excel_account_mappings: any[];
   html_download_source_path: string;
   html_merge_output_path: string;
@@ -63,6 +65,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   asset_excel_output_directory: "",
   asset_excel_merge_input_directory: "",
   asset_excel_merge_output_directory: "",
+  asset_excel_merge_same_directory: false,
+  asset_excel_cleanup_merged_items: true,
   asset_excel_account_mappings: [],
   html_download_source_path: "",
   html_merge_output_path: "",

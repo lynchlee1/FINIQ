@@ -6,7 +6,7 @@
 - Market Desk Web UI의 `/utility/assets-excel`은 `Quantiwise - Excel 미리보기`, `/utility/assets-excel/convert`는 `Parquet 변환하기`, `/utility/assets-excel/parquet`은 `Quantiwise - Parquet 미리보기`, `/utility/assets-excel/merge`는 `Quantiwise - 병합하기`로 분리한다.
 - `Quantiwise - Excel 미리보기`는 원본 데이터 경로 아래 Excel 파일 하나와 Sheet 하나를 선택해 Sheet preview를 보여준다.
 - `Parquet 변환하기`는 원본 데이터 경로 아래 모든 Excel 파일을 변환 전 확인 및 Wide Parquet 변환 대상으로 사용한다.
-- `Quantiwise - 병합하기`는 사용자가 고른 `병합 대상 경로` 안에서 Parquet 파일 2개를 선택해 `병합 결과 경로`에 결과를 저장한다.
+- `Quantiwise - 병합하기`는 사용자가 고른 `병합 대상 경로` 안에서 같은 계정 Parquet 파일을 2개씩 하나 이상 선택해 `병합 결과 경로`에 결과를 저장한다.
 - 원본 데이터 경로와 데이터 경로는 UI/API 호출자가 명시적으로 지정한다. Quantiwise UI/API는 기본 경로나 출력 경로를 자동 생성하지 않는다.
 - 변환 결과는 Sheet 하나당 Parquet 하나로 저장한다. 파일명은 `<accountName>_<YYYYMMDD>_<YYYYMMDD>.parquet` 형식이다. 예: `nxtHigh_20001231_20251223.parquet`.
 - Code-Name 매핑은 Sheet Parquet와 별도인 `code_name_mapping.parquet`에 저장한다.
@@ -14,7 +14,10 @@
 - `Parquet 변환하기`는 실행 전 `계정-ID 매핑`을 편집, 추가, 삭제할 수 있고, 변환/미리보기 스캔은 요청 payload의 매핑 목록을 기본 매핑 대신 사용한다.
 - 변환 메타데이터는 `manifest.json`에 저장한다. 원천 파일/Sheet, 명시적 날짜 구간, 충돌, skipped Sheet, 출력 파일 정보를 포함한다.
 - 변환하기의 저장 방식은 기존 Parquet/manifest 병합 없이 Excel을 Parquet로 생성하는 `replace`다.
-- 병합하기는 `병합 대상 경로` 하나를 입력으로 사용하고, 그 안에서 선택한 Parquet 파일 2개의 날짜/종목코드 값을 `병합 결과 경로`에 병합한다.
+- 병합하기는 `병합 대상 경로` 하나를 입력으로 사용하고, 그 안에서 선택한 같은 계정 Parquet 파일 2개 묶음들의 날짜/종목코드 값을 `병합 결과 경로`에 병합한다.
+- `Quantiwise - 병합하기`의 `병합대상 모아보기`는 같은 계정 Parquet 파일이 2개 이상 있는 항목만 표시한다.
+- `동일 폴더에서 작업하기`가 활성화되면 `병합 결과 경로` 값과 관계없이 `병합 대상 경로`에 병합 결과를 저장한다. 기본값은 비활성화다.
+- `병합된 요소 정리하기`가 활성화되면 병합 성공 후에만 선택된 원본 Parquet 파일을 `병합 대상 경로/merged`로 옮긴다. 기본값은 활성화다.
 - 병합하기는 계정별 결과가 완전한 날짜/종목코드 직사각형이 되는 경우만 허용한다. 실제 값 결측은 허용하지만, 어느 입력에도 존재하지 않는 날짜/종목코드 조합이 생기는 partial table은 병합하지 않는다.
 - 변환 전 확인 API는 저장 없이 Sheet/계정 매핑, 기존 출력 감지, skipped Sheet를 반환한다.
 - `Quantiwise 변환`은 변환 job 내부에서 저장 전 확인을 자동 수행한다. 별도 확인 버튼이나 실행 전 중복 전체 스캔을 두지 않는다.
@@ -39,7 +42,7 @@
 - Code-Name 매핑을 별도로 보관해 종목코드 wide table을 기업명 기준으로 해석할 수 있어야 한다.
 - 실제 대용량 변환은 사용자가 명시적으로 지시하기 전까지 실행하지 않는다.
 - Quantiwise 경로 입력은 모두 명시 지정한다. 빈 원본 데이터 경로, 데이터 경로, 병합 대상, 병합 결과 경로를 기본값으로 대체하지 않는다.
-- 병합하기는 `병합 대상 경로` 안의 account Parquet 파일을 정확히 2개 선택한 경우만 실행한다. 경로 안의 모든 파일을 한 번에 병합하지 않는다.
+- 병합하기는 `병합 대상 경로` 안의 account Parquet 파일을 같은 계정별로 정확히 2개 선택한 경우만 실행한다. 경로 안의 모든 파일을 한 번에 병합하지 않는다.
 - 기존 관리 DB와 합치는 작업은 변환하기가 아니라 병합하기에서 처리한다.
 - 변환 대상 파일은 원본 데이터 경로 아래 전체 Excel 파일로 고정한다. 개별 파일 체크박스나 필터 선택 UI를 두지 않는다.
 - 변환 실행 시 Sheet/계정 매핑과 skipped Sheet를 job 로그와 결과 payload에서 자동 확인할 수 있어야 한다.

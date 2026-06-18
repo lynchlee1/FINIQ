@@ -88,8 +88,10 @@ def _run_asset_excel_merge_job(
 ) -> dict[str, Any]:
     return merge_asset_parquet_outputs(
         _required_payload_path(payload, "target_directory"),
-        _required_payload_path(payload, "output_directory"),
+        _required_payload_path(payload, "output_directory") if not payload.get("same_directory") else _required_payload_path(payload, "target_directory"),
         selected_files=payload.get("selected_files") or [],
+        same_directory=bool(payload.get("same_directory")),
+        cleanup_merged_items=bool(payload.get("cleanup_merged_items", True)),
         progress_callback=progress_callback,
         cancel_check=cancel_check,
     )

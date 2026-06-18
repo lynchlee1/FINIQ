@@ -32,6 +32,8 @@ export type AssetParquetMergePayload = {
   target_directory: string;
   selected_files: string[];
   output_directory: string;
+  same_directory?: boolean;
+  cleanup_merged_items?: boolean;
 };
 
 export type PreviewData = {
