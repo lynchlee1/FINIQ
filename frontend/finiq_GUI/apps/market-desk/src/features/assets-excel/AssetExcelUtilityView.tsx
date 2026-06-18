@@ -99,13 +99,8 @@ function fileNameFromPath(value: string | undefined): string {
 
 function accountNameFromParquetFile(fileName: string): string {
   const stem = String(fileName || "").replace(/\.parquet$/i, "");
-  const parts = stem.split("_");
-  if (parts.length >= 3 && /^\d{8}$/.test(parts[parts.length - 1]) && /^\d{8}$/.test(parts[parts.length - 2])) {
-    return parts.slice(0, -2).join("_");
-  }
-  if (parts.length >= 4 && /^\d{8}$/.test(parts[parts.length - 2]) && /^\d{8}$/.test(parts[parts.length - 3])) {
-    return parts.slice(0, -3).join("_");
-  }
+  const match = stem.match(/^(?<account>.+)_\d{8}_\d{8}(?:(?:__|_)\d+)?$/);
+  if (match?.groups?.account) return match.groups.account;
   return stem;
 }
 
@@ -140,21 +135,53 @@ function outputSortValue(name: string, item: any, key: OutputSortKey): string | 
 }
 
 function outputRowsFromInfo(info: any): [string, any][] {
-  const outputRows = Object.entries(info?.outputs || {}) as [string, any][];
-  if (outputRows.length) return outputRows;
-  return (info?.parquet_files || []).map((fileName: string) => [fileName, { file_name: fileName }]);
+  return mergeCandidateSourceRowsFromInfo(info);
+}
+
+function outputFileNameFromRow(name: string, item: any): string {
+  const fallbackName = String(name || "");
+  return item?.output_file || fileNameFromPath(item?.path) || item?.file_name || (fallbackName.endsWith(".parquet") ? fallbackName : `${fallbackName}.parquet`);
+}
+
+function outputAccountNameFromRow(name: string, item: any): string {
+  return item?.account_name || accountNameFromParquetFile(outputFileNameFromRow(name, item));
+}
+
+function outputSheetNameFromRow(name: string, item: any): string {
+  return item?.sheet_name || outputAccountNameFromRow(name, item);
+}
+
+function formatOutputInteger(value: unknown): string {
+  return value === undefined || value === null || value === "" ? "-" : formatInteger(value);
+}
+
+function mergeCandidateSourceRowsFromInfo(info: any): [string, any][] {
+  const rows: [string, any][] = [];
+  const seen = new Set<string>();
+  Object.entries(info?.outputs || {}).forEach(([name, item]: [string, any]) => {
+    const fileName = outputFileNameFromRow(name, item);
+    if (!fileName || seen.has(fileName)) return;
+    seen.add(fileName);
+    rows.push([name, item]);
+  });
+  (info?.parquet_files || []).forEach((fileName: string) => {
+    if (!fileName || seen.has(fileName)) return;
+    seen.add(fileName);
+    rows.push([fileName, { file_name: fileName }]);
+  });
+  return rows;
 }
 
 function mergeCandidateRowsFromInfo(info: any): [string, any][] {
-  const rows = outputRowsFromInfo(info);
+  const rows = mergeCandidateSourceRowsFromInfo(info);
   const counts: Record<string, number> = {};
   rows.forEach(([name, item]) => {
-    const fileName = item?.output_file || fileNameFromPath(item?.path) || item?.file_name || `${name}.parquet`;
+    const fileName = outputFileNameFromRow(name, item);
     const accountName = accountNameFromParquetFile(fileName);
     counts[accountName] = (counts[accountName] || 0) + 1;
   });
   return rows.filter(([name, item]) => {
-    const fileName = item?.output_file || fileNameFromPath(item?.path) || item?.file_name || `${name}.parquet`;
+    const fileName = outputFileNameFromRow(name, item);
     return (counts[accountNameFromParquetFile(fileName)] || 0) >= 2;
   });
 }
@@ -438,7 +465,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   useEffect(() => {
     if (!isMergeMode) return;
     const availableFiles = new Set(
-      mergeBaseOutputRows.map(([name, item]: [string, any]) => item?.output_file || fileNameFromPath(item?.path) || item?.file_name || `${name}.parquet`),
+      mergeBaseOutputRows.map(([name, item]: [string, any]) => outputFileNameFromRow(name, item)),
     );
     setSelectedMergeFiles((current) => current.filter((fileName) => availableFiles.has(fileName)));
   }, [isMergeMode, mergeBaseOutputRows]);
@@ -453,7 +480,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => {
       const seen = new Set<string>();
       const resultOptions = outputRows.map(([name, item]: [string, any]) => {
-        const fileName = item?.output_file || fileNameFromPath(item?.path) || `${name}.parquet`;
+        const fileName = outputFileNameFromRow(name, item);
         return {
           key: name,
           fileName,
@@ -553,7 +580,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         </thead>
         <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
           {rows.map(([name, item]: [string, any]) => {
-            const fileName = item?.output_file || fileNameFromPath(item?.path) || item?.file_name || `${name}.parquet`;
+            const fileName = outputFileNameFromRow(name, item);
             const selected = selectedMergeFiles.includes(fileName);
             const accountName = item?.account_name || accountNameFromParquetFile(fileName);
             const disabled = selectable && !selected && (selectedMergeCountsByAccount[accountName] || 0) >= 2;
@@ -570,15 +597,15 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     />
                   </td>
                 ) : null}
-                <td className="whitespace-nowrap px-3 py-2 font-medium">{item.sheet_name || name}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-medium">{outputSheetNameFromRow(name, item)}</td>
                 <td className="whitespace-nowrap px-3 py-2">{item.account_id || "-"}</td>
-                <td className="whitespace-nowrap px-3 py-2">{item.account_name || "-"}</td>
+                <td className="whitespace-nowrap px-3 py-2">{outputAccountNameFromRow(name, item) || "-"}</td>
                 <td className="whitespace-nowrap px-3 py-2">{outputExcelTitleText(name, item)}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.rows)}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.columns)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.rows)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.columns)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatPercent(item.quality?.missing_ratio)}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.quality?.non_null_cells)}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatInteger(item.quality?.total_cells)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.quality?.non_null_cells)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.quality?.total_cells)}</td>
                 <td className="whitespace-nowrap px-3 py-2">{outputDateSegmentsText(item) || "-"}</td>
               </tr>
             );

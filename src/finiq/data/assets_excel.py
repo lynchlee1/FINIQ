@@ -1040,11 +1040,9 @@ def _parquet_account_names(directory: Path) -> list[str]:
 
 
 def _account_name_from_output_stem(stem: str) -> str:
-    parts = stem.split("_")
-    if len(parts) >= 3 and parts[-1].isdigit() and len(parts[-1]) == 8 and parts[-2].isdigit() and len(parts[-2]) == 8:
-        return "_".join(parts[:-2])
-    if len(parts) >= 4 and parts[-2].isdigit() and len(parts[-2]) == 8 and parts[-3].isdigit() and len(parts[-3]) == 8:
-        return "_".join(parts[:-3])
+    match = re.match(r"^(?P<account>.+)_\d{8}_\d{8}(?:(?:__|_)\d+)?$", stem)
+    if match:
+        return match.group("account")
     return stem
 
 
