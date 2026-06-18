@@ -99,7 +99,7 @@ function fileNameFromPath(value: string | undefined): string {
 
 function accountNameFromParquetFile(fileName: string): string {
   const stem = String(fileName || "").replace(/\.parquet$/i, "");
-  const match = stem.match(/^(?<account>.+)_\d{8}_\d{8}(?:(?:__|_)\d+)?$/);
+  const match = stem.match(/^(?<account>.+)_\d{8}_\d{8}(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?$/);
   if (match?.groups?.account) return match.groups.account;
   return stem;
 }

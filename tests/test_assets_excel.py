@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shutil
 import threading
 from pathlib import Path
@@ -65,6 +66,11 @@ def _output_for_sheet(payload: dict, sheet_name: str, relative_path: str | None 
     matches = [item for item in payload["outputs"].values() if item["output_file"] == output_file]
     assert len(matches) == 1
     return matches[0]
+
+
+def _expected_output_file(account_name: str, date_start: str, date_end: str, codes: list[str]) -> str:
+    companies_hash = hashlib.sha256("".join(codes).encode("utf-8")).hexdigest()
+    return f"{account_name}_{date_start.replace('-', '')}_{date_end.replace('-', '')}_{companies_hash}.parquet"
 
 
 def _read_output_sheet(payload: dict, output_dir, sheet_name: str, relative_path: str | None = None) -> pd.DataFrame:
@@ -289,8 +295,8 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     assert payload["sheets_processed"] == 2
     stock_output = _output_for_sheet(payload, "종가")
     volume_output = _output_for_sheet(payload, "거래량")
-    assert stock_output["output_file"] == "close_20200101_20200102.parquet"
-    assert volume_output["output_file"] == "volume_20200101_20200102.parquet"
+    assert stock_output["output_file"] == _expected_output_file("close", "2020-01-01", "2020-01-02", ["A005930", "A000660"])
+    assert volume_output["output_file"] == _expected_output_file("volume", "2020-01-01", "2020-01-02", ["A005930", "A000660"])
     assert stock_output["account_id"] == "S00001"
     assert stock_output["account_name"] == "close"
     assert stock_output["date_start"] == "2020-01-01"
@@ -329,6 +335,37 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     ]
 
 
+def test_convert_asset_excels_hashes_ordered_company_list_in_output_name(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+            codes=["A005930", "A000660"],
+            names=["삼성전자", "SK하이닉스"],
+        )
+    with pd.ExcelWriter(source_dir / "source-b.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 300, 400]],
+            codes=["A035420", "A051910"],
+            names=["NAVER", "LG화학"],
+        )
+
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    first_file = _expected_output_file("close", "2020-01-01", "2020-01-01", ["A005930", "A000660"])
+    second_file = _expected_output_file("close", "2020-01-01", "2020-01-01", ["A035420", "A051910"])
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["output_file"] == first_file
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["output_file"] == second_file
+    assert first_file != second_file
+    assert not any(output["output_file"].endswith("__2.parquet") for output in payload["outputs"].values())
+
+
 def test_convert_asset_excels_uses_custom_account_mappings(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
@@ -354,7 +391,7 @@ def test_convert_asset_excels_uses_custom_account_mappings(tmp_path):
     output = _output_for_sheet(payload, "종가")
     assert preview_output["account_id"] == "A90001"
     assert preview_output["account_name"] == "customClose"
-    assert output["output_file"] == "customClose_20200101_20200101.parquet"
+    assert output["output_file"] == _expected_output_file("customClose", "2020-01-01", "2020-01-01", ["A005930", "A000660"])
     assert output["account_id"] == "A90001"
     assert output["account_name"] == "customClose"
     assert "account_mapping" not in payload
@@ -760,7 +797,7 @@ def test_convert_asset_excels_resume_failed_only_skips_completed_outputs(tmp_pat
         }
     ]
     assert payload["sheets_processed"] == 1
-    assert _output_for_sheet(payload, "거래량")["output_file"] == "volume_20200102_20200102.parquet"
+    assert _output_for_sheet(payload, "거래량")["output_file"] == _expected_output_file("volume", "2020-01-02", "2020-01-02", ["A005930", "A000660"])
     assert pd.read_parquet(output_dir / completed_output)["A005930"].tolist() == [100]
     assert _read_output_sheet(payload, output_dir, "거래량")["A000660"].tolist() == [2000]
 
@@ -859,24 +896,27 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
             "종가",
             [[pd.Timestamp("2020-01-04"), 101, 201]],
         )
-    convert_asset_excels_to_wide_parquet(first_source, target_output)
-    convert_asset_excels_to_wide_parquet(second_source, second_output)
+    first_payload = convert_asset_excels_to_wide_parquet(first_source, target_output)
+    second_payload = convert_asset_excels_to_wide_parquet(second_source, second_output)
     for path in second_output.glob("*.parquet"):
         if path.name != "code_name_mapping.parquet":
             shutil.copy2(path, target_output / path.name)
+    first_file = _output_for_sheet(first_payload, "종가")["output_file"]
+    second_file = _output_for_sheet(second_payload, "종가")["output_file"]
+    expected_merged_file = _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930", "A000660"])
 
     payload = merge_asset_parquet_outputs(
         target_output,
         merged_output,
-        selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+        selected_files=[first_file, second_file],
     )
 
     merged_file = next(path for path in merged_output.glob("*.parquet") if path.name != "code_name_mapping.parquet")
     stock_price = pd.read_parquet(merged_file)
     assert payload["operation"] == "merge_parquet"
     assert payload["accounts_processed"] == 1
-    assert merged_file.name == "close_20200103_20200104.parquet"
-    assert payload["accounts"]["close"]["output_file"] == "close_20200103_20200104.parquet"
+    assert merged_file.name == expected_merged_file
+    assert payload["accounts"]["close"]["output_file"] == expected_merged_file
     assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04"]
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
     mapping = pd.read_parquet(merged_output / "code_name_mapping.parquet")
@@ -971,9 +1011,11 @@ def test_inspect_merged_parquet_output_reports_table_metadata(tmp_path):
     )
 
     output = inspect_asset_excel_output(merged_output)
-    row = output["outputs"]["close_20200103_20200104"]
+    expected_file = _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930"])
+    expected_stem = Path(expected_file).stem
+    row = output["outputs"][expected_stem]
 
-    assert row["output_file"] == "close_20200103_20200104.parquet"
+    assert row["output_file"] == expected_file
     assert row["account_id"] == "S00001"
     assert row["account_name"] == "close"
     assert row["rows"] == 2
@@ -985,7 +1027,7 @@ def test_inspect_merged_parquet_output_reports_table_metadata(tmp_path):
     assert row["date_end"] == "2020-01-04"
 
     preview = read_asset_parquet_preview(
-        "close_20200103_20200104.parquet",
+        expected_file,
         output_directory=merged_output,
     )
     assert preview["account_id"] == "S00001"
@@ -1016,7 +1058,8 @@ def test_merge_asset_parquet_outputs_allows_same_dates_extending_codes(tmp_path)
         selected_files=["close_20200103_20200104.parquet", "close_20200103_20200104_2.parquet"],
     )
 
-    stock_price = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
+    expected_file = _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930", "A000660"])
+    stock_price = pd.read_parquet(merged_output / expected_file)
     assert payload["accounts_processed"] == 1
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
     assert stock_price["A005930"].tolist() == [100, 101]
@@ -1045,7 +1088,8 @@ def test_merge_asset_parquet_outputs_groups_duplicate_suffix_files(tmp_path):
         selected_files=["close_20200103_20200104.parquet", "close_20200103_20200104__2.parquet"],
     )
 
-    stock_price = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
+    expected_file = _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930", "A000660"])
+    stock_price = pd.read_parquet(merged_output / expected_file)
     assert payload["accounts_processed"] == 1
     assert sorted(payload["accounts"]) == ["close"]
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
@@ -1090,8 +1134,10 @@ def test_merge_asset_parquet_outputs_accepts_multiple_two_file_account_groups(tm
         ],
     )
 
-    close = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
-    adj_high = pd.read_parquet(merged_output / "adjHigh_20200103_20200104.parquet")
+    close_file = _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930"])
+    adj_high_file = _expected_output_file("adjHigh", "2020-01-03", "2020-01-04", ["A005930"])
+    close = pd.read_parquet(merged_output / close_file)
+    adj_high = pd.read_parquet(merged_output / adj_high_file)
     assert payload["accounts_processed"] == 2
     assert sorted(payload["accounts"]) == ["adjHigh", "close"]
     assert close["A005930"].tolist() == [100, 101]
@@ -1198,7 +1244,8 @@ def test_merge_asset_parquet_outputs_reads_only_selected_files_for_same_account(
         selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
     )
 
-    stock_price = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
+    expected_file = _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930"])
+    stock_price = pd.read_parquet(merged_output / expected_file)
     assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04"]
     assert stock_price["A005930"].tolist() == [100, 101]
 
@@ -1278,7 +1325,7 @@ def test_merge_asset_parquet_outputs_same_directory_and_cleanup_after_success(tm
         cleanup_merged_items=True,
     )
 
-    merged_file = target_output / "close_20200103_20200104.parquet"
+    merged_file = target_output / _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930"])
     archived_first = target_output / "merged" / "close_20200103_20200103.parquet"
     archived_second = target_output / "merged" / "close_20200104_20200104.parquet"
     assert payload["output_directory"] == str(target_output.resolve())
@@ -1293,31 +1340,33 @@ def test_merge_asset_parquet_outputs_same_directory_and_cleanup_after_success(tm
 def test_merge_asset_parquet_outputs_same_directory_keeps_result_when_name_matches_source(tmp_path):
     target_output = tmp_path / "target-parquet"
     ignored_output = tmp_path / "ignored-parquet"
+    expected_file = _expected_output_file("close", "2020-01-03", "2020-01-04", ["A005930", "A000660"])
+    duplicate_file = f"{Path(expected_file).stem}__2.parquet"
     _write_account_parquet(
         target_output,
-        "close_20200103_20200104.parquet",
+        expected_file,
         ["2020-01-03", "2020-01-04"],
-        {"A005930": [100, 101]},
+        {"A005930": [100, 101], "A000660": [200, 201]},
     )
     _write_account_parquet(
         target_output,
-        "close_20200103_20200104_2.parquet",
+        duplicate_file,
         ["2020-01-03", "2020-01-04"],
-        {"A000660": [200, 201]},
+        {"A005930": [None, None], "A000660": [None, None]},
     )
 
     merge_asset_parquet_outputs(
         target_output,
         ignored_output,
-        selected_files=["close_20200103_20200104.parquet", "close_20200103_20200104_2.parquet"],
+        selected_files=[expected_file, duplicate_file],
         same_directory=True,
         cleanup_merged_items=True,
     )
 
-    stock_price = pd.read_parquet(target_output / "close_20200103_20200104.parquet")
+    stock_price = pd.read_parquet(target_output / expected_file)
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
-    assert (target_output / "merged" / "close_20200103_20200104.parquet").exists()
-    assert (target_output / "merged" / "close_20200103_20200104_2.parquet").exists()
+    assert (target_output / "merged" / expected_file).exists()
+    assert (target_output / "merged" / duplicate_file).exists()
 
 
 def test_merge_asset_parquet_outputs_cleanup_waits_for_success(tmp_path):
