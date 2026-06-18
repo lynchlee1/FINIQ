@@ -1,3 +1,20 @@
+# 2026-06-18 Quantiwise Parquet 모아보기 누락 수정
+
+## Purpose
+- `Quantiwise - Parquet 미리보기`의 `Parquet 모아보기`에서 manifest에 없는 실제 Parquet 파일이 누락되지 않게 한다.
+- `Quantiwise - 병합하기`에서 duplicate suffix가 붙은 같은 계정 Parquet 파일도 같은 병합 후보로 묶이게 한다.
+
+## Implementation Summary
+- `Parquet 모아보기` row 생성도 manifest `outputs`와 실제 폴더 `parquet_files`를 합쳐 표시하게 했다.
+- 프론트엔드와 백엔드의 계정명 추출 규칙을 `<account>_<YYYYMMDD>_<YYYYMMDD>`, `_2`, `__2` suffix 모두 처리하도록 맞췄다.
+- `close_20200103_20200104__2.parquet` 같은 duplicate output을 병합 선택과 Parquet preview fallback에서 같은 계정으로 인식하는 regression test를 추가했다.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -k "duplicate_suffix or groups_duplicate_suffix" -vv`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py -vv`.
+- Passed: `python3 -m pytest tests/market_desk/test_server.py -vv`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
 # 2026-06-18 Quantiwise 병합 대상 필터 및 명칭
 
 ## Purpose
@@ -6,12 +23,17 @@
 
 ## Implementation Summary
 - 병합 화면 전용 row 생성 함수에서 파일명 기반 계정별 개수를 계산하고, 계정별 2개 이상인 row만 표시하도록 했다.
+- `manifest.outputs`와 실제 폴더의 `parquet_files`를 합쳐 후보를 계산하게 복구했다. manifest에 없는 같은 계정 Parquet가 폴더에 추가된 경우도 `병합대상 모아보기`에 표시된다.
+- 파일명이 이미 `.parquet`로 끝나는 fallback row에서 미리보기 선택값이 `.parquet.parquet`가 되지 않도록 파일명 계산을 공통 helper로 통일했다.
+- 메타데이터가 없는 실제 Parquet row는 파일명에서 계정명을 표시하고, 없는 숫자 메타데이터는 `0` 대신 `-`로 표시하게 했다.
 - `Quantiwise - Parquet 미리보기`의 `Parquet 모아보기` 명칭은 그대로 유지했다.
 - UI 용어 문서와 assets Excel 변환 계약 문서를 갱신했다.
 
 ## Verification
 - Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
 - Passed: `rg -n "병합대상 모아보기|Parquet 모아보기|mergeCandidateRowsFromInfo|병합 대상 경로에 표시할 병합 대상" frontend/finiq_GUI/apps/market-desk/src/features/assets-excel/AssetExcelUtilityView.tsx docs PLANS.md`.
+- Passed after restore: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Passed after screenshot fix: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
 
 # 2026-06-18 Quantiwise 병합 동일 폴더 및 정리 설정
 

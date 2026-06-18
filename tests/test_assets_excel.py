@@ -906,6 +906,34 @@ def test_merge_asset_parquet_outputs_allows_same_dates_extending_codes(tmp_path)
     assert stock_price["A000660"].tolist() == [200, 201]
 
 
+def test_merge_asset_parquet_outputs_groups_duplicate_suffix_files(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200104.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200104__2.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A000660": [200, 201]},
+    )
+
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=["close_20200103_20200104.parquet", "close_20200103_20200104__2.parquet"],
+    )
+
+    stock_price = pd.read_parquet(merged_output / "close_20200103_20200104.parquet")
+    assert payload["accounts_processed"] == 1
+    assert sorted(payload["accounts"]) == ["close"]
+    assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
+
+
 def test_merge_asset_parquet_outputs_accepts_multiple_two_file_account_groups(tmp_path):
     target_output = tmp_path / "target-parquet"
     merged_output = tmp_path / "merged-parquet"
@@ -1240,6 +1268,24 @@ def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_
     assert output["manifest_exists"] is True
     assert output["code_name_mapping_exists"] is True
     assert output["parquet_files"] == [preview_output["output_file"]]
+
+
+def test_read_asset_parquet_preview_derives_account_from_duplicate_suffix(tmp_path):
+    output_dir = tmp_path / "merged"
+    _write_account_parquet(
+        output_dir,
+        "close_20200103_20200104__2.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101]},
+    )
+
+    payload = read_asset_parquet_preview(
+        "close_20200103_20200104__2.parquet",
+        output_directory=output_dir,
+    )
+
+    assert payload["account_name"] == "close"
+    assert payload["sheet_name"] == "close_20200103_20200104__2"
 
 
 def test_inspect_asset_excel_conversion_skips_bad_quanti_sheet(tmp_path):
