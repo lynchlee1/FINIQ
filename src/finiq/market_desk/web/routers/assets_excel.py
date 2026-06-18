@@ -53,6 +53,7 @@ class AssetParquetDuplicateCleanupRequest(BaseModel):
     dry_run: bool = True
     delete_confirmed: bool = False
     delete_confirmation_text: str = ""
+    scan_recursive: bool = False
 
 
 def create_assets_excel_router(
@@ -218,6 +219,7 @@ def create_assets_excel_router(
                 dry_run=request.dry_run,
                 delete_confirmed=request.delete_confirmed,
                 delete_confirmation_text=request.delete_confirmation_text,
+                scan_recursive=request.scan_recursive,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

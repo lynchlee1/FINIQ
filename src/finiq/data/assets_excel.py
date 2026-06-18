@@ -1213,6 +1213,7 @@ def cleanup_duplicate_asset_parquet_outputs(
     dry_run: bool = True,
     delete_confirmed: bool = False,
     delete_confirmation_text: str = "",
+    scan_recursive: bool = False,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -1224,12 +1225,12 @@ def cleanup_duplicate_asset_parquet_outputs(
         raise ValueError(f"target_directory is not a directory: {target}")
 
     scan_directories = [target]
-    merged_dir = target / "merged"
-    if merged_dir.is_dir():
-        scan_directories.append(merged_dir)
+    if scan_recursive:
+        scan_directories.extend(path for path in sorted(target.rglob("*")) if path.is_dir())
 
     _emit(progress_callback, "중복 검사 시작")
     _emit(progress_callback, f"병합 대상 경로: {target}")
+    _emit(progress_callback, f"내부까지 검사: {'On' if scan_recursive else 'Off'}")
     _emit(progress_callback, f"검사 폴더: {len(scan_directories)}개")
 
     items_by_account: dict[str, list[dict[str, Any]]] = {}
@@ -1380,6 +1381,7 @@ def cleanup_duplicate_asset_parquet_outputs(
         "operation": "parquet_duplicate_cleanup",
         "target_directory": str(target),
         "dry_run": dry_run,
+        "scan_recursive": scan_recursive,
         "duplicate_group_count": duplicate_group_count,
         "deletion_candidate_count": len(deletion_candidates),
         "deleted_count": len(deleted_files),

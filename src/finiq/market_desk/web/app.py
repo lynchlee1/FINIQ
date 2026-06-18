@@ -111,6 +111,7 @@ def _run_asset_parquet_duplicate_cleanup_job(
         dry_run=bool(payload.get("dry_run", True)),
         delete_confirmed=bool(payload.get("delete_confirmed")),
         delete_confirmation_text=str(payload.get("delete_confirmation_text") or ""),
+        scan_recursive=bool(payload.get("scan_recursive")),
         progress_callback=progress_callback,
         cancel_check=cancel_check,
     )

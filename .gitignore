@@ -35,3 +35,6 @@ logs/
 *.local
 Archive.zip
 assets/quantiwise-xlsx/
+
+# Skills
+.understand-anything/
