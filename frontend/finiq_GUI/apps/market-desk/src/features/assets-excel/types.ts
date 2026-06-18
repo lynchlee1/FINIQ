@@ -1,7 +1,6 @@
 export type AssetAccountMapping = {
   account_id: string;
   account_name: string;
-  legacy_account_name: string;
   sheet_name: string;
 };
 

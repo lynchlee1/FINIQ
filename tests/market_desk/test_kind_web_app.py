@@ -103,13 +103,11 @@ def test_api_settings_persists_asset_excel_account_mappings(tmp_path: Path, monk
         {
             "account_id": "A90001",
             "account_name": "customClose",
-            "legacy_account_name": "stock_price",
             "sheet_name": "종가",
         },
         {
             "account_id": "A90002",
             "account_name": "customOpen",
-            "legacy_account_name": "stock_open",
             "sheet_name": "시가",
         },
     ]

@@ -1,13 +1,54 @@
+# 2026-06-18 Quantiwise legacy account mapping 제외
+
+## Purpose
+- 출력 폴더에 이전 버전이 남긴 `account_mapping.parquet`가 있어도 `Parquet 모아보기`, 미리보기, 병합 후보 스캔이 계정 데이터로 오인하지 않게 한다.
+- footer metadata가 없는 실제 계정 Parquet는 계속 에러로 처리한다.
+
+## Implementation Summary
+- `account_mapping.parquet`를 생성/읽기 계약으로 복구하지 않고, `code_name_mapping.parquet`와 함께 비계정 Parquet 제외 목록에만 추가했다.
+- 출력 스캔, 미리보기 파일 검증, 병합 후보 탐색, 선택 파일 검증, 실패분 이어서 실행의 기존 출력 감지에서 같은 제외 목록을 사용하게 했다.
+- stale `account_mapping.parquet`가 있어도 출력 스캔이 성공하고 실제 계정 Parquet만 반환하는 regression test를 추가했다.
+- `docs/assets-excel-conversion.md`에 legacy `account_mapping.parquet` 제외 동작을 기록했다.
+
+## Verification
+- Passed: `python3 -m pytest tests/test_assets_excel.py -q`.
+- Passed: `python3 -m py_compile src/finiq/data/assets_excel.py src/finiq/market_desk/web/routers/assets_excel.py`.
+
+# 2026-06-18 Quantiwise manifest/account mapping 제거
+
+## Purpose
+- Quantiwise 기능이 `manifest.json`과 `account_mapping.parquet`에 의존하지 않게 한다.
+- 계정-ID 매핑 원본은 앱 설정에 두고, 생성된 계정 Parquet는 footer metadata만으로 식별하게 한다.
+- `Parquet 모아보기`, `Quantiwise - Parquet 미리보기`, `Quantiwise - 병합하기`에서 footer metadata가 없으면 fallback 계산 없이 에러로 처리한다.
+
+## Implementation Summary
+- 계정 Parquet 저장 시 footer metadata에 `account_id`, `account_name`, `date_start`, `date_end`, `rows`, `columns`, `non_null_cells`, `total_cells`, `missing_ratio`만 기록하게 했다.
+- `manifest.json`과 `account_mapping.parquet` 생성/읽기 경로를 제거했고, `실패분 이어서 실행`은 예상 output filename이 이미 있으면 건너뛰게 했다.
+- Code-Name mapping Parquet는 `code`, `name`만 저장하게 했다.
+- 출력/미리보기/병합 UI에서 원본 Sheet/source 기반 표시를 제거하고, Sheet 정렬 key와 Parquet preview의 Sheet 선택 UI를 없앴다.
+- 변환/미리보기/병합 테스트를 footer metadata 계약 기준으로 갱신하고, footer metadata 누락 시 에러가 나는 regression test를 추가했다.
+- `docs/assets-excel-conversion.md`를 manifest 없는 저장 계약으로 갱신했다.
+
+## Verification
+- `python3 -m pytest tests/test_assets_excel.py -q`
+- `python3 -m pytest tests/market_desk/test_server.py -q`
+- `python3 -m pytest tests/market_desk/test_kind_web_app.py -q`
+- `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`
+
 # 2026-06-18 Quantiwise Parquet 모아보기 누락 수정
 
 ## Purpose
 - `Quantiwise - Parquet 미리보기`의 `Parquet 모아보기`에서 manifest에 없는 실제 Parquet 파일이 누락되지 않게 한다.
 - `Quantiwise - 병합하기`에서 duplicate suffix가 붙은 같은 계정 Parquet 파일도 같은 병합 후보로 묶이게 한다.
+- 두 화면에서 `ID`, `행`, `코드`, `결측률`, `값 있음`, `전체 셀`, `구간`이 누락되지 않게 한다.
 
 ## Implementation Summary
 - `Parquet 모아보기` row 생성도 manifest `outputs`와 실제 폴더 `parquet_files`를 합쳐 표시하게 했다.
 - 프론트엔드와 백엔드의 계정명 추출 규칙을 `<account>_<YYYYMMDD>_<YYYYMMDD>`, `_2`, `__2` suffix 모두 처리하도록 맞췄다.
+- 병합 결과처럼 manifest metadata가 `accounts`에만 있는 경우도 `outputs` row로 노출하게 했다.
+- manifest에 없는 실제 Parquet 파일은 inspect 단계에서 Parquet를 읽어 `ID`, row/code count, missing ratio, non-null/total cell count, date segment를 계산하게 했다.
 - `close_20200103_20200104__2.parquet` 같은 duplicate output을 병합 선택과 Parquet preview fallback에서 같은 계정으로 인식하는 regression test를 추가했다.
+- `Parquet 모아보기`와 `병합대상 모아보기` formatter 기준으로 직접 API 결과를 검증해 두 표 모두 누락 셀이 없음을 확인했다.
 
 ## Verification
 - Passed: `python3 -m pytest tests/test_assets_excel.py -k "duplicate_suffix or groups_duplicate_suffix" -vv`.
