@@ -1050,10 +1050,10 @@ def _account_name_from_output_stem(stem: str) -> str:
 
 def _selected_asset_parquet_paths(directory: Path, selected_files: list[str] | None) -> list[Path]:
     selected = [str(item or "").strip() for item in (selected_files or []) if str(item or "").strip()]
-    if len(selected) != 2:
-        raise ValueError("selected_files must contain exactly 2 files")
-    if len(set(selected)) != 2:
-        raise ValueError("selected_files must contain 2 different files")
+    if len(selected) < 2 or len(selected) % 2:
+        raise ValueError("selected_files must contain 2 files per account")
+    if len(set(selected)) != len(selected):
+        raise ValueError("selected_files must contain different files")
 
     paths: list[Path] = []
     for file_name in selected:
@@ -1065,7 +1065,30 @@ def _selected_asset_parquet_paths(directory: Path, selected_files: list[str] | N
         if not path.is_file():
             raise ValueError(f"Selected file not found: {file_name}")
         paths.append(path)
+
+    files_by_account: dict[str, list[str]] = {}
+    for path in paths:
+        files_by_account.setdefault(_account_name_from_output_stem(path.stem), []).append(path.name)
+    invalid_accounts = {
+        account_name: file_names
+        for account_name, file_names in files_by_account.items()
+        if len(file_names) != 2
+    }
+    if invalid_accounts:
+        details = ", ".join(
+            f"{account_name}={len(file_names)}"
+            for account_name, file_names in sorted(invalid_accounts.items())
+        )
+        raise ValueError(f"selected_files must contain exactly 2 files for each account: {details}")
     return paths
+
+
+def validate_asset_parquet_merge_selection(
+    target_directory: str | Path,
+    selected_files: list[str] | None,
+) -> list[str]:
+    target = Path(str(target_directory or "").strip()).expanduser().resolve()
+    return [path.name for path in _selected_asset_parquet_paths(target, selected_files)]
 
 
 def _asset_excel_scan_workers(file_count: int) -> int:
@@ -1826,10 +1849,12 @@ def merge_asset_parquet_outputs(
     output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR,
     *,
     selected_files: list[str] | None = None,
+    same_directory: bool = False,
+    cleanup_merged_items: bool = True,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Merge exactly two generated Quantiwise Parquet files in one target directory."""
+    """Merge selected generated Quantiwise Parquet files in two-file account groups."""
     def required_path(value: str | Path, field_name: str) -> Path:
         resolved = str(value or "").strip()
         if not resolved:
@@ -1837,11 +1862,19 @@ def merge_asset_parquet_outputs(
         return Path(resolved).expanduser().resolve()
 
     target = required_path(target_directory, "target_directory")
-    output = required_path(output_directory, "output_directory")
+    output = target if same_directory else required_path(output_directory, "output_directory")
     selected_paths = _selected_asset_parquet_paths(target, selected_files)
+    cleanup_destinations: list[tuple[Path, Path]] = []
+    if cleanup_merged_items:
+        merged_dir = target / "merged"
+        cleanup_destinations = [(path, merged_dir / path.name) for path in selected_paths]
+        existing_destinations = [destination for _, destination in cleanup_destinations if destination.exists()]
+        if existing_destinations:
+            raise ValueError(f"Cleanup destination already exists: {existing_destinations[0]}")
     output.mkdir(parents=True, exist_ok=True)
 
-    target_info = inspect_asset_excel_output(target)
+    target_manifest = _load_asset_manifest(target)
+    target_info = {"accounts": target_manifest.get("accounts", {}) if target_manifest else {}}
     target_accounts = sorted({_account_name_from_output_stem(path.stem) for path in selected_paths})
     if not target_accounts:
         msg = f"No account Parquet files found in {target}"
@@ -1849,20 +1882,21 @@ def merge_asset_parquet_outputs(
 
     frames_by_account: dict[str, list[tuple[pd.DataFrame, SourceInfo]]] = {}
     sources_by_account: dict[str, list[SourceInfo]] = {}
+    _emit(progress_callback, f"Selected merge files: {', '.join(path.name for path in selected_paths)}")
     for account_name in sorted(target_accounts):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
-        _emit(progress_callback, f"Reading {target.name}/{account_name}.parquet...")
+        account_paths = [
+            path
+            for path in selected_paths
+            if _account_name_from_output_stem(path.stem) == account_name
+        ]
         loaded_frames = _existing_account_frames(
             account_name,
             target,
             target_info,
             source_type="target_parquet",
-            selected_paths=[
-                path
-                for path in selected_paths
-                if _account_name_from_output_stem(path.stem) == account_name
-            ],
+            selected_paths=account_paths,
         )
         for frame, source_info in loaded_frames:
             frames_by_account.setdefault(account_name, []).append((frame, source_info))
@@ -1874,6 +1908,7 @@ def merge_asset_parquet_outputs(
 
     accounts: dict[str, Any] = {}
     conflicts_by_account: dict[str, list[dict[str, str]]] = {}
+    final_output_replacements: list[tuple[Path, Path]] = []
     for account_name, frames in sorted(frames_by_account.items()):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
@@ -1881,14 +1916,27 @@ def merge_asset_parquet_outputs(
         merged, conflicts = _merge_account_frames(account_name, frames)
         if conflicts:
             conflicts_by_account[account_name] = conflicts
-        parquet_path = output / f"{account_name}.parquet"
-        merged.reset_index().to_parquet(parquet_path, index=False, compression="snappy")
+        date_start = merged.index.min().isoformat() if len(merged.index) else ""
+        date_end = merged.index.max().isoformat() if len(merged.index) else ""
+        parquet_path = output / f"{_sheet_output_stem(account_name, date_start, date_end)}.parquet"
+        write_path = parquet_path
+        if parquet_path in selected_paths:
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{parquet_path.stem}.",
+                suffix=".parquet",
+                dir=output,
+                delete=False,
+            ) as temporary_file:
+                write_path = Path(temporary_file.name)
+            final_output_replacements.append((write_path, parquet_path))
+        merged.reset_index().to_parquet(write_path, index=False, compression="snappy")
         accounts[account_name] = {
             "path": str(parquet_path),
+            "output_file": parquet_path.name,
             "rows": len(merged),
             "columns": len(merged.columns),
-            "date_start": merged.index.min().isoformat() if len(merged.index) else "",
-            "date_end": merged.index.max().isoformat() if len(merged.index) else "",
+            "date_start": date_start,
+            "date_end": date_end,
             "date_segments": _merged_date_segments_payload(
                 sources_by_account.get(account_name, []),
             ),
@@ -1902,6 +1950,8 @@ def merge_asset_parquet_outputs(
         "target_directory": str(target),
         "selected_files": [path.name for path in selected_paths],
         "output_directory": str(output),
+        "same_directory": same_directory,
+        "cleanup_merged_items": cleanup_merged_items,
         "conflict_policy": "error",
         "code_name_mapping": {
             "path": str(code_name_mapping_path),
@@ -1913,12 +1963,24 @@ def merge_asset_parquet_outputs(
     manifest_path = output / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    moved_files: list[dict[str, str]] = []
+    if cleanup_destinations:
+        cleanup_destinations[0][1].parent.mkdir(parents=True, exist_ok=True)
+        for path, destination in cleanup_destinations:
+            shutil.move(str(path), str(destination))
+            moved_files.append({"from": str(path), "to": str(destination)})
+    for source_path, destination_path in final_output_replacements:
+        shutil.move(str(source_path), str(destination_path))
+
     return {
         "status": "completed",
         "operation": "merge_parquet",
         "target_directory": str(target),
         "selected_files": [path.name for path in selected_paths],
         "output_directory": str(output),
+        "same_directory": same_directory,
+        "cleanup_merged_items": cleanup_merged_items,
+        "moved_files": moved_files,
         "manifest_path": str(manifest_path),
         "accounts_processed": len(accounts),
         "conflict_policy": "error",
@@ -2004,6 +2066,7 @@ __all__ = [
     "inspect_asset_excel_output",
     "list_asset_excel_files",
     "merge_asset_parquet_outputs",
+    "validate_asset_parquet_merge_selection",
     "read_asset_excel",
     "read_asset_excel_interpreted",
     "read_asset_parquet_preview",

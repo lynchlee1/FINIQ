@@ -19,6 +19,7 @@ from finiq.data.assets_excel import (
     read_asset_excel_interpreted,
     read_asset_parquet_preview,
     read_asset_excel_sheets,
+    validate_asset_parquet_merge_selection,
 )
 from finiq.market_desk.web.jobs import job_manager
 
@@ -43,6 +44,8 @@ class AssetParquetMergeRequest(BaseModel):
     target_directory: str
     selected_files: list[str] = []
     output_directory: Optional[str] = None
+    same_directory: bool = False
+    cleanup_merged_items: bool = True
 
 
 def create_assets_excel_router(
@@ -153,18 +156,26 @@ def create_assets_excel_router(
             return await asyncio.to_thread(
                 merge_asset_parquet_outputs,
                 _required_path(request.target_directory, "target_directory"),
-                _required_path(request.output_directory, "output_directory"),
+                _required_path(request.output_directory, "output_directory") if not request.same_directory else _required_path(request.target_directory, "target_directory"),
                 selected_files=request.selected_files,
+                same_directory=request.same_directory,
+                cleanup_merged_items=request.cleanup_merged_items,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/assets/parquet/merge/start")
     async def start_merge_asset_parquet_outputs(request: AssetParquetMergeRequest, background_tasks: BackgroundTasks):
-        _required_path(request.target_directory, "target_directory")
-        _required_path(request.output_directory, "output_directory")
-        if len([item for item in request.selected_files if str(item).strip()]) != 2:
-            raise HTTPException(status_code=400, detail="selected_files must contain exactly 2 files")
+        target_directory = _required_path(request.target_directory, "target_directory")
+        if not request.same_directory:
+            _required_path(request.output_directory, "output_directory")
+        try:
+            validate_asset_parquet_merge_selection(
+                target_directory,
+                request.selected_files,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         job_id = uuid.uuid4().hex
         job_manager.create_job(job_id, "asset_excel_merge")
         background_tasks.add_task(

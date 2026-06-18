@@ -48,8 +48,11 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Quantiwise Parquet merge workflow | Quantiwise - 병합하기 | Use for the `/utility/assets-excel/merge` navigation label and page title. |
 | Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |
 | Quantiwise Parquet grouped result table | Parquet 모아보기 | Use for the table that lists generated Parquet outputs on `Quantiwise - Parquet 미리보기`. |
+| Quantiwise merge candidate table | 병합대상 모아보기 | Use for the selectable merge-candidate table on `Quantiwise - 병합하기`. |
 | Quantiwise merge target path | 병합 대상 경로 | Use for the single input path on `Quantiwise - 병합하기`. |
 | Quantiwise merge output path | 병합 결과 경로 | Use for the path where `Quantiwise - 병합하기` writes the merged Parquet result. |
+| Quantiwise same-folder merge setting | 동일 폴더에서 작업하기 | System setting for forcing merge output work into `병합 대상 경로`. |
+| Quantiwise cleanup merged items setting | 병합된 요소 정리하기 | System setting for moving successfully merged input Parquet files into `merged`. |
 | Quantiwise conversion pre-run check | 변환 전 확인 | Use for the automatic check that scans Excel files without saving before `Quantiwise 변환`. |
 | Quantiwise account ID mapping | 계정-ID 매핑 | Use for the editable Sheet/account_id/account_name mapping in `Parquet 변환하기`. |
 | Quantiwise failed-only resume button | 실패분 이어서 실행 | Use for rerunning `Parquet 변환하기` while skipping Sheet Parquet outputs already completed in the data path. |

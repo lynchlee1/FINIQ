@@ -11,6 +11,7 @@ interface PathPickerInputProps {
   title?: string;
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
   onError?: (err: Error) => void;
 }
 
@@ -22,6 +23,7 @@ export function PathPickerInput({
   title = "경로 선택",
   placeholder,
   className,
+  disabled = false,
   onError,
 }: PathPickerInputProps) {
   const handlePickPath = async () => {
@@ -47,12 +49,14 @@ export function PathPickerInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={placeholder}
+        disabled={disabled}
         className="h-10 flex-1 text-sm dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:placeholder:text-slate-600"
       />
       <Button
         variant="outline"
         size="icon-lg"
         onClick={handlePickPath}
+        disabled={disabled}
         className="dark:border-[#30363d] dark:hover:bg-[#21262d]"
       >
         {mode === "folder" ? (

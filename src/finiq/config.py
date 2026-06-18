@@ -50,6 +50,8 @@ SAVED_SETTINGS_KEYS = (
     "asset_excel_output_directory",
     "asset_excel_merge_input_directory",
     "asset_excel_merge_output_directory",
+    "asset_excel_merge_same_directory",
+    "asset_excel_cleanup_merged_items",
     "asset_excel_account_mappings",
     "html_download_source_path",
     "html_merge_output_path",
@@ -88,6 +90,8 @@ class AppConfig:
     asset_excel_output_directory: str = ""
     asset_excel_merge_input_directory: str = ""
     asset_excel_merge_output_directory: str = ""
+    asset_excel_merge_same_directory: bool = False
+    asset_excel_cleanup_merged_items: bool = True
     asset_excel_account_mappings: list[dict[str, Any]] = field(default_factory=list)
     html_download_source_path: str = ""
     html_merge_output_path: str = ""
@@ -185,6 +189,8 @@ def init_config() -> AppConfig:
         asset_excel_output_directory=settings.get("asset_excel_output_directory", ""),
         asset_excel_merge_input_directory=settings.get("asset_excel_merge_input_directory", ""),
         asset_excel_merge_output_directory=settings.get("asset_excel_merge_output_directory", ""),
+        asset_excel_merge_same_directory=bool(settings.get("asset_excel_merge_same_directory", False)),
+        asset_excel_cleanup_merged_items=bool(settings.get("asset_excel_cleanup_merged_items", True)),
         asset_excel_account_mappings=settings.get("asset_excel_account_mappings", []),
         html_download_source_path=settings.get("html_download_source_path", ""),
         html_merge_output_path=settings.get("html_merge_output_path", ""),

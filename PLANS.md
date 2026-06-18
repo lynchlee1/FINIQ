@@ -1,3 +1,78 @@
+# 2026-06-18 Quantiwise 병합 대상 필터 및 명칭
+
+## Purpose
+- `Quantiwise - 병합하기`의 후보 목록에서 같은 계정 파일이 1개뿐인 Parquet는 숨긴다.
+- 병합 화면의 `Parquet 모아보기` 제목을 `병합대상 모아보기`로 바꾼다.
+
+## Implementation Summary
+- 병합 화면 전용 row 생성 함수에서 파일명 기반 계정별 개수를 계산하고, 계정별 2개 이상인 row만 표시하도록 했다.
+- `Quantiwise - Parquet 미리보기`의 `Parquet 모아보기` 명칭은 그대로 유지했다.
+- UI 용어 문서와 assets Excel 변환 계약 문서를 갱신했다.
+
+## Verification
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Passed: `rg -n "병합대상 모아보기|Parquet 모아보기|mergeCandidateRowsFromInfo|병합 대상 경로에 표시할 병합 대상" frontend/finiq_GUI/apps/market-desk/src/features/assets-excel/AssetExcelUtilityView.tsx docs PLANS.md`.
+
+# 2026-06-18 Quantiwise 병합 동일 폴더 및 정리 설정
+
+## Purpose
+- `Quantiwise - 병합하기`의 병합 대상 경로 설명 문구를 제거한다.
+- 시스템 설정에 `동일 폴더에서 작업하기`와 `병합된 요소 정리하기`를 추가해 병합 위치와 성공 후 정리 동작을 제어한다.
+
+## Implementation Summary
+- `동일 폴더에서 작업하기` 기본값은 `false`, `병합된 요소 정리하기` 기본값은 `true`로 설정 저장/로드 경로에 추가했다.
+- 병합 요청 payload와 job worker가 두 옵션을 백엔드 병합 함수로 전달하도록 확장했다.
+- `동일 폴더에서 작업하기`가 켜지면 실제 출력 경로를 `병합 대상 경로`로 강제하고, `병합된 요소 정리하기`가 켜지면 병합 성공 후 선택된 원본 Parquet 파일을 `병합 대상 경로/merged`로 이동한다.
+- 병합 실패 시 원본 파일을 이동하지 않는 regression test를 추가했다.
+- 병합 대상 경로 아래 안내 문구를 제거했다.
+
+## Verification
+- Passed: `python3 -m py_compile src/finiq/data/assets_excel.py src/finiq/market_desk/web/routers/assets_excel.py src/finiq/market_desk/web/routers/config.py src/finiq/market_desk/web/app.py src/finiq/config.py`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Passed: `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m pytest tests/test_assets_excel.py -k "merge_asset_parquet_outputs" -vv`.
+- Passed: `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m pytest tests/market_desk/test_kind_web_app.py -k "asset_excel_directories" -vv`.
+- Deep inspection 1회 completed: 요구사항 연결을 diff/검색으로 점검했고, 동일 폴더에서 결과 파일명이 원본과 같은 경우 결과가 정리 폴더로 이동될 수 있는 문제를 발견해 임시 파일 승격 방식으로 수정했다.
+
+# 2026-06-18 Quantiwise 병합 다중 2파일 묶음
+
+## Purpose
+- `Quantiwise - 병합하기`에서 같은 계정 Parquet 파일을 2개씩 여러 묶음으로 선택해 한 번에 병합할 수 있게 한다.
+- 병합 결과 Parquet 파일명에도 실제 시작일과 종료일을 포함한다.
+
+## Implementation Summary
+- 병합 선택 검증을 `정확히 2개`에서 `계정별 정확히 2개`로 확장했다.
+- 서로 다른 계정 파일 1개씩만 고른 교차 선택은 API와 UI에서 실행되지 않게 했다.
+- 병합 결과 파일을 `<accountName>_<YYYYMMDD>_<YYYYMMDD>.parquet` 형식으로 저장하고 manifest 계정 payload에 `output_file`을 추가했다.
+- 병합 화면은 같은 계정당 최대 2개까지 선택할 수 있고, 모든 선택 계정이 2개씩 갖춰졌을 때만 실행 버튼을 활성화한다.
+- `docs/assets-excel-conversion.md`의 병합 계약을 계정별 2개 묶음 선택으로 갱신했다.
+
+## Verification
+- Passed: `python3 -m py_compile src/finiq/data/assets_excel.py src/finiq/market_desk/web/routers/assets_excel.py src/finiq/market_desk/web/app.py`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py -k "merge_asset_parquet_outputs"`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py`.
+- Passed: `python3 -m pytest tests/market_desk/test_server.py`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+- Passed: `npm run build -w @finiq/app-market-desk --` from `frontend/`.
+- Failed then corrected: `npm run build -w @finiq/app-market-desk --` from repo root failed because the root has no `package.json`.
+
+# 2026-06-18 Quantiwise 병합 선택 파일만 읽기
+
+## Purpose
+- `Quantiwise - 병합하기`에서 `close` 2개만 선택하면 선택하지 않은 account Parquet는 스캔하거나 읽지 않게 한다.
+- 병합 로그도 경로 전체 read처럼 보이지 않게 실제 병합 대상만 표시한다.
+
+## Implementation Summary
+- 병합 실행 중 `inspect_asset_excel_output(target)`를 호출하지 않게 해 target 경로 전체 Parquet 목록 스캔을 제거했다.
+- 선택 파일 2개만 `_existing_account_frames`에 전달하고, account metadata는 manifest에서 필요한 부분만 읽게 했다.
+- 선택하지 않은 `adjHigh` 파일이 target 경로에 있어도 `pd.read_parquet` 호출 대상에 포함되지 않는 regression test를 추가했다.
+- progress log는 선택 파일 목록과 `Merging close...`만 남기게 했다.
+
+## Verification
+- Passed: `python3 -m py_compile src/finiq/data/assets_excel.py src/finiq/market_desk/web/app.py src/finiq/market_desk/web/routers/assets_excel.py`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py -k "merge_asset_parquet_outputs"`.
+- Passed: `python3 -m pytest tests/test_assets_excel.py`.
+- Passed: `frontend/node_modules/.bin/tsc --noEmit -p frontend/finiq_GUI/apps/market-desk/tsconfig.json`.
+
 # 2026-06-18 Quantiwise 병합 2개 파일 선택
 
 ## Purpose
