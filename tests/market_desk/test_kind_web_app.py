@@ -61,17 +61,23 @@ def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
 
     source_directory = tmp_path / "quantiwise"
     output_directory = tmp_path / "quantiwise_parquet"
+    merge_input_directory = tmp_path / "merge_input"
+    merge_output_directory = tmp_path / "merge_output"
 
     client = TestClient(app)
     response = client.post("/api/settings", json={
         "asset_excel_source_directory": str(source_directory),
         "asset_excel_output_directory": str(output_directory),
+        "asset_excel_merge_input_directory": str(merge_input_directory),
+        "asset_excel_merge_output_directory": str(merge_output_directory),
     })
 
     assert response.status_code == 200
     data = response.json()
     assert data["asset_excel_source_directory"] == str(source_directory.resolve())
     assert data["asset_excel_output_directory"] == str(output_directory.resolve())
+    assert data["asset_excel_merge_input_directory"] == str(merge_input_directory.resolve())
+    assert data["asset_excel_merge_output_directory"] == str(merge_output_directory.resolve())
 
     response = client.get("/api/config")
 
@@ -79,6 +85,8 @@ def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
     data = response.json()
     assert data["asset_excel_source_directory"] == str(source_directory.resolve())
     assert data["asset_excel_output_directory"] == str(output_directory.resolve())
+    assert data["asset_excel_merge_input_directory"] == str(merge_input_directory.resolve())
+    assert data["asset_excel_merge_output_directory"] == str(merge_output_directory.resolve())
 
 
 def test_api_settings_persists_asset_excel_account_mappings(tmp_path: Path, monkeypatch):

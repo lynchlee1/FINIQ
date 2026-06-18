@@ -29,8 +29,8 @@ export type AssetExcelConvertPayload = {
 };
 
 export type AssetParquetMergePayload = {
-  base_directory: string;
-  incoming_directory: string;
+  target_directory: string;
+  selected_files: string[];
   output_directory: string;
 };
 

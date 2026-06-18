@@ -40,8 +40,8 @@ class AssetExcelConvertRequest(BaseModel):
 
 
 class AssetParquetMergeRequest(BaseModel):
-    base_directory: str
-    incoming_directory: str
+    target_directory: str
+    selected_files: list[str] = []
     output_directory: Optional[str] = None
 
 
@@ -152,18 +152,19 @@ def create_assets_excel_router(
         try:
             return await asyncio.to_thread(
                 merge_asset_parquet_outputs,
-                _required_path(request.base_directory, "base_directory"),
-                _required_path(request.incoming_directory, "incoming_directory"),
+                _required_path(request.target_directory, "target_directory"),
                 _required_path(request.output_directory, "output_directory"),
+                selected_files=request.selected_files,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/assets/parquet/merge/start")
     async def start_merge_asset_parquet_outputs(request: AssetParquetMergeRequest, background_tasks: BackgroundTasks):
-        _required_path(request.base_directory, "base_directory")
-        _required_path(request.incoming_directory, "incoming_directory")
+        _required_path(request.target_directory, "target_directory")
         _required_path(request.output_directory, "output_directory")
+        if len([item for item in request.selected_files if str(item).strip()]) != 2:
+            raise HTTPException(status_code=400, detail="selected_files must contain exactly 2 files")
         job_id = uuid.uuid4().hex
         job_manager.create_job(job_id, "asset_excel_merge")
         background_tasks.add_task(
