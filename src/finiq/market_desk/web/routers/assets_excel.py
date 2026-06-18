@@ -27,7 +27,6 @@ from finiq.market_desk.web.jobs import job_manager
 class AssetAccountMappingRequest(BaseModel):
     account_id: str = ""
     account_name: str = ""
-    legacy_account_name: str = ""
     sheet_name: str = ""
 
 

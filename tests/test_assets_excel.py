@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import threading
 from pathlib import Path
@@ -56,11 +55,14 @@ def _write_quanti_sheet(
 
 
 def _output_for_sheet(payload: dict, sheet_name: str, relative_path: str | None = None) -> dict:
-    matches = [
+    summaries = [
         item
-        for item in payload["outputs"].values()
-        if item["sheet_name"] == sheet_name and (relative_path is None or item["relative_path"] == relative_path)
+        for item in payload["sheets"]
+        if item["sheet_name"] == sheet_name and (relative_path is None or item.get("relative_path") == relative_path)
     ]
+    assert len(summaries) == 1
+    output_file = summaries[0]["output_file"]
+    matches = [item for item in payload["outputs"].values() if item["output_file"] == output_file]
     assert len(matches) == 1
     return matches[0]
 
@@ -73,7 +75,24 @@ def _read_output_sheet(payload: dict, output_dir, sheet_name: str, relative_path
 def _write_account_parquet(output_dir, file_name: str, dates: list[str], values_by_code: dict[str, list[object]]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = {"date": [pd.Timestamp(value) for value in dates], **values_by_code}
-    pd.DataFrame(rows).to_parquet(output_dir / file_name, index=False)
+    frame = pd.DataFrame(rows)
+    account_name = assets_excel_module._account_name_from_output_stem(Path(file_name).stem)
+    account_mapping = assets_excel_module._account_mapping_for_name(account_name)
+    value_frame = frame.loc[:, [column for column in frame.columns if column != "date"]]
+    quality = assets_excel_module._account_quality_payload(value_frame)
+    assets_excel_module._write_parquet_with_metadata(
+        frame,
+        output_dir / file_name,
+        assets_excel_module._account_footer_metadata(
+            account_id=account_mapping["account_id"],
+            account_name=account_name,
+            date_start=dates[0],
+            date_end=dates[-1],
+            rows=len(frame),
+            columns=len(value_frame.columns),
+            quality=quality,
+        ),
+    )
 
 
 def test_list_and_read_asset_excel(tmp_path):
@@ -188,7 +207,6 @@ def test_asset_excel_api(tmp_path, monkeypatch):
     assert mappings_response.json()["items"][0] == {
         "account_id": "S00001",
         "account_name": "close",
-        "legacy_account_name": "stock_price",
         "sheet_name": "종가",
     }
 
@@ -275,23 +293,19 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     assert volume_output["output_file"] == "volume_20200101_20200102.parquet"
     assert stock_output["account_id"] == "S00001"
     assert stock_output["account_name"] == "close"
-    assert stock_output["legacy_account_name"] == "stock_price"
+    assert stock_output["date_start"] == "2020-01-01"
+    assert stock_output["date_end"] == "2020-01-02"
     assert (output_dir / stock_output["output_file"]).exists()
     assert (output_dir / volume_output["output_file"]).exists()
     assert (output_dir / "code_name_mapping.parquet").exists()
-    assert (output_dir / "account_mapping.parquet").exists()
+    assert not (output_dir / "account_mapping.parquet").exists()
+    assert not (output_dir / "manifest.json").exists()
     assert payload["code_name_mapping"]["rows"] == 2
-    assert payload["account_mapping"]["items"][0] == {
-        "account_id": "S00001",
-        "account_name": "close",
-        "legacy_account_name": "stock_price",
-        "sheet_name": "종가",
-    }
-    assert stock_output["date_segments"] == [
-        {"start": "2020-01-01", "end": "2020-01-02"}
-    ]
-    assert "date_index" not in stock_output
-    assert "date_index" not in stock_output["sources"][0]
+    assert set(stock_output) >= {"account_id", "account_name", "date_start", "date_end", "quality"}
+    assert "legacy_account_name" not in stock_output
+    assert "sheet_name" not in stock_output
+    assert "sources" not in stock_output
+    assert "date_segments" not in stock_output
     assert "sample_rows" not in stock_output["quality"]
 
     stock_price = _read_output_sheet(payload, output_dir, "종가")
@@ -301,13 +315,14 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     assert volume.columns.tolist() == ["date", "A005930", "A000660"]
     assert stock_price["A005930"].tolist() == [100, 101]
     assert volume["A000660"].tolist() == [2000, 2001]
-    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
-    manifest_output = next(item for item in manifest["outputs"].values() if item["sheet_name"] == "종가")
-    assert "date_index" not in manifest_output
-    assert "date_index" not in manifest_output["sources"][0]
-    assert "sample_rows" not in manifest_output["quality"]
-
+    footer = assets_excel_module._read_account_footer_metadata(output_dir / stock_output["output_file"])
+    assert set(footer) == assets_excel_module.REQUIRED_ACCOUNT_METADATA_KEYS
+    assert footer["account_id"] == "S00001"
+    assert footer["account_name"] == "close"
+    assert footer["date_start"] == "2020-01-01"
+    assert footer["date_end"] == "2020-01-02"
     mapping = pd.read_parquet(output_dir / "code_name_mapping.parquet")
+    assert mapping.columns.tolist() == ["code", "name"]
     assert mapping[["code", "name"]].to_dict("records") == [
         {"code": "A000660", "name": "SK하이닉스"},
         {"code": "A005930", "name": "삼성전자"},
@@ -329,7 +344,6 @@ def test_convert_asset_excels_uses_custom_account_mappings(tmp_path):
         {
             "account_id": "A90001",
             "account_name": "customClose",
-            "legacy_account_name": "stock_price",
             "sheet_name": "종가",
         }
     ]
@@ -343,7 +357,8 @@ def test_convert_asset_excels_uses_custom_account_mappings(tmp_path):
     assert output["output_file"] == "customClose_20200101_20200101.parquet"
     assert output["account_id"] == "A90001"
     assert output["account_name"] == "customClose"
-    assert payload["account_mapping"]["items"] == mappings
+    assert "account_mapping" not in payload
+    assert not (output_dir / "account_mapping.parquet").exists()
 
 
 def test_custom_account_mappings_reject_underscores_in_id_and_name(tmp_path):
@@ -365,7 +380,6 @@ def test_custom_account_mappings_reject_underscores_in_id_and_name(tmp_path):
                 {
                     "account_id": "A_90001",
                     "account_name": "customClose",
-                    "legacy_account_name": "stock_price",
                     "sheet_name": "종가",
                 }
             ],
@@ -379,7 +393,6 @@ def test_custom_account_mappings_reject_underscores_in_id_and_name(tmp_path):
                 {
                     "account_id": "A90001",
                     "account_name": "custom_close",
-                    "legacy_account_name": "stock_price",
                     "sheet_name": "종가",
                 }
             ],
@@ -410,13 +423,11 @@ def test_custom_account_mappings_reject_duplicate_account_names(tmp_path):
                 {
                     "account_id": "A90001",
                     "account_name": "customClose",
-                    "legacy_account_name": "stock_price",
                     "sheet_name": "종가",
                 },
                 {
                     "account_id": "A90002",
                     "account_name": "customClose",
-                    "legacy_account_name": "stock_open",
                     "sheet_name": "시가",
                 },
             ],
@@ -468,7 +479,8 @@ def test_read_asset_parquet_preview_matches_quanti_preview_shape(tmp_path):
     preview = read_asset_parquet_preview(output["output_file"], output_directory=output_dir)
 
     assert preview["preview_type"] == "quanti_parquet"
-    assert preview["sheet_name"] == "종가"
+    assert "sheet_name" not in preview
+    assert preview["account_id"] == "S00001"
     assert preview["account_name"] == "close"
     assert preview["metadata"] == {"period_from": "20200101", "period_to": "20200102"}
     assert preview["columns"] == ["date", "A005930", "A000660"]
@@ -587,9 +599,9 @@ def test_convert_asset_excels_reports_detailed_progress_log(tmp_path):
     assert any("임시 저장:" in line and "close_20200101_20200102" in line for line in progress_log)
     assert any("스캔 완료: Sheet 1개, 정상 1개, 건너뜀 0개, 계정 1개" in line for line in progress_log)
     assert any("Sheet 단위 생성:" in line for line in progress_log)
-    assert any("[저장 1/1]" in line and "계정=close" in line and "Sheet=종가" in line for line in progress_log)
+    assert any("[저장 1/1]" in line and "계정=close" in line for line in progress_log)
     assert any("코드-종목명 매핑 저장: code_name_mapping.parquet (2행)" in line for line in progress_log)
-    assert any("manifest 저장:" in line for line in progress_log)
+    assert not any("manifest 저장:" in line for line in progress_log)
     assert any("Quantiwise 변환 완료: Sheet Parquet 1개, 건너뛴 Sheet 0개" in line for line in progress_log)
 
 
@@ -703,8 +715,7 @@ def test_convert_asset_excels_uses_selected_files(tmp_path):
     )
 
     assert payload["accounts_processed"] == 1
-    assert "volume" in payload["accounts"]
-    assert "close" not in payload["accounts"]
+    assert [item["account_name"] for item in payload["outputs"].values()] == ["volume"]
     assert not (output_dir / "stock_price.parquet").exists()
 
 
@@ -748,10 +759,9 @@ def test_convert_asset_excels_resume_failed_only_skips_completed_outputs(tmp_pat
             "reason": "이미 변환 완료",
         }
     ]
-    assert payload["sheets_processed"] == 2
-    assert _output_for_sheet(payload, "종가")["output_file"] == completed_output
+    assert payload["sheets_processed"] == 1
     assert _output_for_sheet(payload, "거래량")["output_file"] == "volume_20200102_20200102.parquet"
-    assert _read_output_sheet(payload, output_dir, "종가")["A005930"].tolist() == [100]
+    assert pd.read_parquet(output_dir / completed_output)["A005930"].tolist() == [100]
     assert _read_output_sheet(payload, output_dir, "거래량")["A000660"].tolist() == [2000]
 
 
@@ -785,10 +795,9 @@ def test_convert_asset_excels_updates_existing_output(tmp_path):
 
     stock_price = _read_output_sheet(payload, output_dir, "종가", "source-b.xlsx")
     assert stock_price["date"].astype(str).tolist() == ["2020-01-06"]
-    assert payload["updated_accounts"] == []
-    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_segments"] == [
-        {"start": "2020-01-06", "end": "2020-01-06"},
-    ]
+    assert "updated_accounts" not in payload
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_start"] == "2020-01-06"
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_end"] == "2020-01-06"
     assert any(path.name.startswith("close_20200103_20200103") for path in output_dir.glob("*.parquet"))
     mapping = pd.read_parquet(output_dir / "code_name_mapping.parquet")
     assert mapping[["code", "name"]].to_dict("records") == [
@@ -827,7 +836,7 @@ def test_convert_asset_excels_defaults_to_replace_without_existing_merge(tmp_pat
     stock_price = _read_output_sheet(payload, output_dir, "종가", "source-b.xlsx")
     assert stock_price["date"].astype(str).tolist() == ["2020-01-06"]
     assert payload["write_mode"] == "replace"
-    assert payload["updated_accounts"] == []
+    assert "updated_accounts" not in payload
 
 
 def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
@@ -853,7 +862,7 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
     convert_asset_excels_to_wide_parquet(first_source, target_output)
     convert_asset_excels_to_wide_parquet(second_source, second_output)
     for path in second_output.glob("*.parquet"):
-        if path.name not in {"code_name_mapping.parquet", "account_mapping.parquet"}:
+        if path.name != "code_name_mapping.parquet":
             shutil.copy2(path, target_output / path.name)
 
     payload = merge_asset_parquet_outputs(
@@ -875,6 +884,114 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
         {"code": "A000660", "name": "SK하이닉스"},
         {"code": "A005930", "name": "삼성전자"},
     ]
+
+
+def test_inspect_parquet_output_reads_footer_metadata(tmp_path):
+    output_dir = tmp_path / "parquet"
+    _write_account_parquet(
+        output_dir,
+        "close_20200103_20200104.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, None], "A000660": [200, 201]},
+    )
+
+    output = inspect_asset_excel_output(output_dir)
+    row = output["outputs"]["close_20200103_20200104"]
+
+    assert row["account_id"] == "S00001"
+    assert row["account_name"] == "close"
+    assert row["rows"] == 2
+    assert row["columns"] == 2
+    assert row["quality"]["missing_ratio"] == 0.25
+    assert row["quality"]["non_null_cells"] == 3
+    assert row["quality"]["total_cells"] == 4
+    assert row["date_start"] == "2020-01-03"
+    assert row["date_end"] == "2020-01-04"
+
+
+def test_inspect_parquet_output_ignores_legacy_account_mapping_file(tmp_path):
+    output_dir = tmp_path / "parquet"
+    _write_account_parquet(
+        output_dir,
+        "close_20200103_20200104.parquet",
+        ["2020-01-03", "2020-01-04"],
+        {"A005930": [100, 101]},
+    )
+    pd.DataFrame(
+        [
+            {
+                "account_id": "S00001",
+                "account_name": "close",
+                "sheet_name": "종가",
+            }
+        ]
+    ).to_parquet(output_dir / "account_mapping.parquet", index=False)
+
+    output = inspect_asset_excel_output(output_dir)
+
+    assert output["parquet_files"] == ["close_20200103_20200104.parquet"]
+    assert output["account_count"] == 1
+    assert list(output["outputs"]) == ["close_20200103_20200104"]
+
+
+def test_inspect_parquet_output_rejects_missing_footer_metadata(tmp_path):
+    output_dir = tmp_path / "parquet"
+    output_dir.mkdir()
+    pd.DataFrame(
+        {
+            "date": [pd.Timestamp("2020-01-03")],
+            "A005930": [100],
+        }
+    ).to_parquet(output_dir / "close_20200103_20200103.parquet", index=False)
+
+    with pytest.raises(ValueError, match="Missing Quantiwise Parquet footer metadata"):
+        inspect_asset_excel_output(output_dir)
+
+
+def test_inspect_merged_parquet_output_reports_table_metadata(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+
+    merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=["close_20200103_20200103.parquet", "close_20200104_20200104.parquet"],
+    )
+
+    output = inspect_asset_excel_output(merged_output)
+    row = output["outputs"]["close_20200103_20200104"]
+
+    assert row["output_file"] == "close_20200103_20200104.parquet"
+    assert row["account_id"] == "S00001"
+    assert row["account_name"] == "close"
+    assert row["rows"] == 2
+    assert row["columns"] == 1
+    assert row["quality"]["missing_ratio"] == 0
+    assert row["quality"]["non_null_cells"] == 2
+    assert row["quality"]["total_cells"] == 2
+    assert row["date_start"] == "2020-01-03"
+    assert row["date_end"] == "2020-01-04"
+
+    preview = read_asset_parquet_preview(
+        "close_20200103_20200104.parquet",
+        output_directory=merged_output,
+    )
+    assert preview["account_id"] == "S00001"
+    assert preview["account_name"] == "close"
+    assert preview["date_start"] == "2020-01-03"
+    assert preview["date_end"] == "2020-01-04"
 
 
 def test_merge_asset_parquet_outputs_allows_same_dates_extending_codes(tmp_path):
@@ -1265,7 +1382,6 @@ def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_
     assert preview_output["will_update_existing"] is False
     assert "sample_rows" not in preview_output["quality"]
     assert preview["code_name_mapping"]["rows"] == 2
-    assert output["manifest_exists"] is True
     assert output["code_name_mapping_exists"] is True
     assert output["parquet_files"] == [preview_output["output_file"]]
 
@@ -1285,7 +1401,8 @@ def test_read_asset_parquet_preview_derives_account_from_duplicate_suffix(tmp_pa
     )
 
     assert payload["account_name"] == "close"
-    assert payload["sheet_name"] == "close_20200103_20200104__2"
+    assert payload["account_id"] == "S00001"
+    assert "sheet_name" not in payload
 
 
 def test_inspect_asset_excel_conversion_skips_bad_quanti_sheet(tmp_path):
@@ -1421,12 +1538,10 @@ def test_convert_asset_excels_allows_one_day_adjacent_ranges(tmp_path):
 
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_segments"] == [
-        {"start": "2020-01-01", "end": "2020-01-01"},
-    ]
-    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_segments"] == [
-        {"start": "2020-01-02", "end": "2020-01-02"},
-    ]
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_start"] == "2020-01-01"
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_end"] == "2020-01-01"
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_start"] == "2020-01-02"
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_end"] == "2020-01-02"
 
 
 def test_convert_asset_excels_treats_weekend_gap_as_continuous(tmp_path):
@@ -1448,15 +1563,13 @@ def test_convert_asset_excels_treats_weekend_gap_as_continuous(tmp_path):
 
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_segments"] == [
-        {"start": "2020-01-03", "end": "2020-01-03"},
-    ]
-    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_segments"] == [
-        {"start": "2020-01-06", "end": "2020-01-06"},
-    ]
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_start"] == "2020-01-03"
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_end"] == "2020-01-03"
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_start"] == "2020-01-06"
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_end"] == "2020-01-06"
 
 
-def test_convert_asset_excels_stores_multiple_date_segments(tmp_path):
+def test_convert_asset_excels_stores_date_range_for_disjoint_outputs(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
     source_dir.mkdir()
@@ -1475,12 +1588,10 @@ def test_convert_asset_excels_stores_multiple_date_segments(tmp_path):
 
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_segments"] == [
-        {"start": "2020-01-01", "end": "2020-01-01"},
-    ]
-    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_segments"] == [
-        {"start": "2020-01-04", "end": "2020-01-04"},
-    ]
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_start"] == "2020-01-01"
+    assert _output_for_sheet(payload, "종가", "source-a.xlsx")["date_end"] == "2020-01-01"
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_start"] == "2020-01-04"
+    assert _output_for_sheet(payload, "종가", "source-b.xlsx")["date_end"] == "2020-01-04"
 
 
 def test_convert_asset_excels_keeps_one_sheet_as_one_date_segment(tmp_path):
@@ -1500,9 +1611,7 @@ def test_convert_asset_excels_keeps_one_sheet_as_one_date_segment(tmp_path):
     payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
     output = _output_for_sheet(payload, "종가")
-    assert output["date_segments"] == [
-        {"start": "2020-01-03", "end": "2020-01-06"},
-    ]
-    assert output["sources"][0]["date_segments"] == [
-        {"start": "2020-01-03", "end": "2020-01-06"},
-    ]
+    assert output["date_start"] == "2020-01-03"
+    assert output["date_end"] == "2020-01-06"
+    assert "date_segments" not in output
+    assert "sources" not in output

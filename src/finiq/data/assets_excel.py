@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import re
@@ -16,51 +15,32 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from finiq.config import QUANTIWISE_EXCEL_DIR, RESOURCES_DIR
 
 EXCEL_SUFFIXES = {".xlsx", ".xlsm"}
-ASSET_PARQUET_FORMAT = "finiq_asset_wide_parquet_v1"
 DEFAULT_ASSET_PARQUET_DIR = RESOURCES_DIR / "assets_merged"
 CODE_NAME_MAPPING_FILE = "code_name_mapping.parquet"
 ACCOUNT_MAPPING_FILE = "account_mapping.parquet"
+NON_ACCOUNT_PARQUET_FILES = {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+REQUIRED_ACCOUNT_METADATA_KEYS = {
+    "account_id",
+    "account_name",
+    "date_start",
+    "date_end",
+    "rows",
+    "columns",
+    "non_null_cells",
+    "total_cells",
+    "missing_ratio",
+}
 ProgressCallback = Callable[[str], None]
 SourceInfo = dict[str, Any]
 CodeNameMapping = dict[str, str]
 AccountMapping = dict[str, str]
 AccountMappingInput = Mapping[str, Any]
-
-SHEET_ACCOUNT_NAMES = {
-    "종가": "stock_price",
-    "시가": "open_price",
-    "고가": "high_price",
-    "저가": "low_price",
-    "수정종가": "adjusted_stock_price",
-    "수정시가": "adjusted_open_price",
-    "수정고가": "adjusted_high_price",
-    "수정저가": "adjusted_low_price",
-    "거래량": "volume",
-    "거래량(NXT)": "nxt_volume",
-    "거래대금": "trading_value",
-    "거래대금(NXT)": "nxt_trading_value",
-    "저가(NXT)": "nxt_low_price",
-    "고가(NXT)": "nxt_high_price",
-    "시가(NXT)": "nxt_open_price",
-    "종가(NXT)": "nxt_stock_price",
-    "거래정지사유": "trading_halt_reason",
-    "거래정지여부": "trading_halt_flag",
-    "거래정지구분": "trading_halt_category",
-    "관리감리구분": "management_supervision_category",
-    "지수산정주식수": "index_constituent_shares",
-    "최대주주명": "major_shareholder_name",
-    "최대주주보유보통주주식수": "major_shareholder_common_shares",
-    "최대주주보유보통주지분율": "major_shareholder_common_ownership_ratio",
-    "대차거래잔고수량": "stock_lending_balance_volume",
-    "대차거래상환량": "stock_lending_repayment_volume",
-    "대차거래체결량": "stock_lending_transaction_volume",
-    "차입공매도잔고수량": "borrowed_short_selling_balance_volume",
-    "차입공매도수량": "borrowed_short_selling_volume",
-}
 
 SHEET_ACCOUNT_KEYS = {
     "종가": "close",
@@ -98,7 +78,6 @@ ACCOUNT_REGISTRY = {
     account_name: {
         "account_id": f"S{index:05d}",
         "account_name": account_name,
-        "legacy_account_name": SHEET_ACCOUNT_NAMES[sheet_name],
         "sheet_name": sheet_name,
     }
     for index, (sheet_name, account_name) in enumerate(SHEET_ACCOUNT_KEYS.items(), start=1)
@@ -121,7 +100,6 @@ def _normalize_account_mappings(account_mappings: list[AccountMappingInput] | No
         sheet_name = _normalize_label(mapping.get("sheet_name"))
         account_name = _normalize_label(mapping.get("account_name"))
         account_id = _normalize_label(mapping.get("account_id"))
-        legacy_account_name = _normalize_label(mapping.get("legacy_account_name"))
         if not sheet_name:
             raise ValueError(f"account_mappings[{index}].sheet_name is required")
         if not account_id:
@@ -145,7 +123,6 @@ def _normalize_account_mappings(account_mappings: list[AccountMappingInput] | No
             {
                 "account_id": account_id,
                 "account_name": account_name,
-                "legacy_account_name": legacy_account_name,
                 "sheet_name": sheet_name,
             }
         )
@@ -241,7 +218,6 @@ def _account_mapping_for_name(
         {
             "account_id": "",
             "account_name": account_name,
-            "legacy_account_name": "",
             "sheet_name": "",
         },
     )
@@ -285,44 +261,95 @@ def _selected_asset_excel_paths(
     ]
 
 
-def _load_asset_manifest(output_directory: Path) -> dict[str, Any] | None:
-    manifest_path = output_directory / "manifest.json"
-    if not manifest_path.exists():
-        return None
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    return manifest if isinstance(manifest, dict) else None
+def _string_metadata(metadata: Mapping[str, Any]) -> dict[bytes, bytes]:
+    return {
+        str(key).encode("utf-8"): str(value).encode("utf-8")
+        for key, value in metadata.items()
+    }
+
+
+def _write_parquet_with_metadata(frame: pd.DataFrame, path: Path, metadata: Mapping[str, Any]) -> None:
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    existing_metadata = dict(table.schema.metadata or {})
+    table = table.replace_schema_metadata({**existing_metadata, **_string_metadata(metadata)})
+    pq.write_table(table, path, compression="snappy")
+
+
+def _account_footer_metadata(
+    *,
+    account_id: str,
+    account_name: str,
+    date_start: str,
+    date_end: str,
+    rows: int,
+    columns: int,
+    quality: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "account_id": account_id,
+        "account_name": account_name,
+        "date_start": date_start,
+        "date_end": date_end,
+        "rows": int(rows),
+        "columns": int(columns),
+        "non_null_cells": int(quality.get("non_null_cells") or 0),
+        "total_cells": int(quality.get("total_cells") or 0),
+        "missing_ratio": float(quality.get("missing_ratio") or 0),
+    }
+
+
+def _read_account_footer_metadata(path: Path) -> dict[str, str]:
+    raw_metadata = pq.read_metadata(path).metadata or {}
+    metadata = {
+        key.decode("utf-8"): value.decode("utf-8")
+        for key, value in raw_metadata.items()
+        if key.decode("utf-8") in REQUIRED_ACCOUNT_METADATA_KEYS
+    }
+    missing = sorted(REQUIRED_ACCOUNT_METADATA_KEYS - set(metadata))
+    if missing:
+        raise ValueError(f"Missing Quantiwise Parquet footer metadata in {path.name}: {', '.join(missing)}")
+    return metadata
+
+
+def _account_output_payload(path: Path) -> dict[str, Any]:
+    metadata = _read_account_footer_metadata(path)
+    return {
+        "path": str(path),
+        "output_file": path.name,
+        "account_id": metadata["account_id"],
+        "account_name": metadata["account_name"],
+        "rows": int(metadata["rows"]),
+        "columns": int(metadata["columns"]),
+        "date_start": metadata["date_start"],
+        "date_end": metadata["date_end"],
+        "quality": {
+            "non_null_cells": int(metadata["non_null_cells"]),
+            "total_cells": int(metadata["total_cells"]),
+            "missing_ratio": float(metadata["missing_ratio"]),
+        },
+    }
 
 
 def inspect_asset_excel_output(output_directory: str | Path = DEFAULT_ASSET_PARQUET_DIR) -> dict[str, Any]:
     output = Path(output_directory).expanduser().resolve()
-    manifest_path = output / "manifest.json"
     parquet_files = [
         path
-        for path in sorted(output.glob("*.parquet")) if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+        for path in sorted(output.glob("*.parquet")) if path.name not in NON_ACCOUNT_PARQUET_FILES
     ] if output.is_dir() else []
     code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
-    account_mapping_path = output / ACCOUNT_MAPPING_FILE
-    manifest = _load_asset_manifest(output)
+    output_rows = {
+        path.stem: _account_output_payload(path)
+        for path in parquet_files
+    }
     return {
         "output_directory": str(output),
         "exists": output.exists(),
-        "manifest_path": str(manifest_path),
-        "manifest_exists": manifest_path.exists(),
         "parquet_files": [path.name for path in parquet_files],
         "account_count": len(parquet_files),
         "code_name_mapping_path": str(code_name_mapping_path),
         "code_name_mapping_exists": code_name_mapping_path.exists(),
-        "code_name_mapping_rows": manifest.get("code_name_mapping", {}).get("rows", 0) if manifest else 0,
-        "account_mapping_path": str(account_mapping_path),
-        "account_mapping_exists": account_mapping_path.exists(),
-        "account_mapping_rows": manifest.get("account_mapping", {}).get("rows", 0) if manifest else 0,
-        "format": manifest.get("format") if manifest else "",
-        "accounts": manifest.get("accounts", {}) if manifest else {},
-        "account_mapping": manifest.get("account_mapping", {}) if manifest else {},
-        "outputs": manifest.get("outputs", {}) if manifest else {},
+        "code_name_mapping_rows": len(pd.read_parquet(code_name_mapping_path)) if code_name_mapping_path.exists() else 0,
+        "outputs": output_rows,
     }
 
 
@@ -337,7 +364,7 @@ def _resolve_asset_parquet_path(file_name: str | Path, output_directory: str | P
     if target.suffix.lower() != ".parquet":
         msg = f"Unsupported Parquet file type: {target.suffix}"
         raise ValueError(msg)
-    if target.name in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}:
+    if target.name in NON_ACCOUNT_PARQUET_FILES:
         msg = f"Unsupported Quantiwise result preview file: {target.name}"
         raise ValueError(msg)
     if not target.exists():
@@ -368,48 +395,23 @@ def read_asset_parquet_preview(
     if row_limit is not None:
         preview = preview.head(max(0, int(row_limit)))
 
-    output_meta: dict[str, Any] = {}
-    manifest_path = output / "manifest.json"
-    if manifest_path.exists():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            manifest = {}
-        output_meta = next(
-            (
-                item
-                for item in manifest.get("outputs", {}).values()
-                if isinstance(item, dict) and item.get("output_file") == target.name
-            ),
-            {},
-        )
-        if not output_meta:
-            output_meta = next(
-                (
-                    item
-                    for item in manifest.get("outputs", {}).values()
-                    if isinstance(item, dict) and item.get("path") == str(target)
-                ),
-                {},
-            )
-
+    output_meta = _account_output_payload(target)
     return {
         "file_name": target.name,
         "relative_path": str(target.relative_to(output)),
-        "sheet_name": output_meta.get("sheet_name") or target.stem,
         "preview_type": "quanti_parquet",
-        "account_id": output_meta.get("account_id") or "",
-        "account_name": output_meta.get("account_name") or _account_name_from_output_stem(target.stem),
+        "account_id": output_meta["account_id"],
+        "account_name": output_meta["account_name"],
         "status": "mapped",
         "metadata": {
-            "period_from": _compact_date(output_meta.get("date_start") or ""),
-            "period_to": _compact_date(output_meta.get("date_end") or ""),
+            "period_from": _compact_date(output_meta["date_start"]),
+            "period_to": _compact_date(output_meta["date_end"]),
         },
         "columns": columns,
         "preview_columns": list(preview.columns),
         "rows": _json_rows(preview),
-        "date_start": output_meta.get("date_start") or "",
-        "date_end": output_meta.get("date_end") or "",
+        "date_start": output_meta["date_start"],
+        "date_end": output_meta["date_end"],
         "row_count": len(frame),
         "preview_row_count": len(preview),
     }
@@ -911,7 +913,7 @@ def _validate_rectangular_merge(
 
 
 def _code_name_mapping_frame(mappings: list[CodeNameMapping]) -> pd.DataFrame:
-    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    rows: dict[tuple[str, str], dict[str, str]] = {}
     for mapping in mappings:
         code = _normalize_label(mapping.get("code"))
         name = _normalize_label(mapping.get("name"))
@@ -923,42 +925,20 @@ def _code_name_mapping_frame(mappings: list[CodeNameMapping]) -> pd.DataFrame:
             {
                 "code": code,
                 "name": name,
-                "source_files": set(),
-                "source_sheets": set(),
             },
         )
-        if mapping.get("file_name"):
-            row["source_files"].add(str(mapping["file_name"]))
-        if mapping.get("sheet_name"):
-            row["source_sheets"].add(str(mapping["sheet_name"]))
 
     payload = [
         {
             "code": row["code"],
             "name": row["name"],
-            "source_files": ", ".join(sorted(row["source_files"])),
-            "source_sheets": ", ".join(sorted(row["source_sheets"])),
         }
         for row in rows.values()
     ]
-    return pd.DataFrame(payload, columns=["code", "name", "source_files", "source_sheets"]).sort_values(
+    return pd.DataFrame(payload, columns=["code", "name"]).sort_values(
         ["code", "name"],
         ignore_index=True,
     )
-
-
-def _account_mapping_frame(
-    account_names: list[str],
-    account_mappings: list[AccountMappingInput] | None = None,
-) -> pd.DataFrame:
-    rows = [
-        _account_mapping_for_name(account_name, account_mappings)
-        for account_name in sorted(set(account_names))
-    ]
-    return pd.DataFrame(
-        rows,
-        columns=["account_id", "account_name", "legacy_account_name", "sheet_name"],
-    ).sort_values(["account_id", "account_name"], ignore_index=True)
 
 
 def _existing_code_name_mappings(output_directory: Path) -> list[CodeNameMapping]:
@@ -977,8 +957,6 @@ def _existing_code_name_mappings(output_directory: Path) -> list[CodeNameMapping
             {
                 "code": code,
                 "name": _normalize_label(row.get("name")),
-                "file_name": CODE_NAME_MAPPING_FILE,
-                "sheet_name": "__existing_mapping__",
             }
         )
     return mappings
@@ -987,7 +965,7 @@ def _existing_code_name_mappings(output_directory: Path) -> list[CodeNameMapping
 def _existing_account_frames(
     account_name: str,
     output_directory: Path,
-    output_info: dict[str, Any],
+    output_info: dict[str, Any] | None = None,
     *,
     source_type: str = "existing_output",
     selected_paths: list[Path] | None = None,
@@ -997,29 +975,26 @@ def _existing_account_frames(
         parquet_paths.extend(
             path
             for path in sorted(output_directory.glob(f"{account_name}_*.parquet"))
-            if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+            if path.name not in NON_ACCOUNT_PARQUET_FILES
         )
     else:
         parquet_paths = selected_paths
     frames: list[tuple[pd.DataFrame, SourceInfo]] = []
-    account_meta = output_info.get("accounts", {}).get(account_name, {})
-    if not isinstance(account_meta, dict):
-        account_meta = {}
     for parquet_path in [path for path in parquet_paths if path.exists()]:
+        file_meta = _account_output_payload(parquet_path)
         frame = pd.read_parquet(parquet_path)
         if "date" not in frame.columns:
             continue
         frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date
         frame = frame.dropna(subset=["date"]).set_index("date")
-        date_segments = _compact_date_segments(account_meta.get("date_segments")) or _single_date_segment_payload(frame.index)
         source_info = {
             "file_name": parquet_path.name,
-            "sheet_name": "__existing_parquet__",
-            "date_start": frame.index.min().isoformat() if len(frame.index) else "",
-            "date_end": frame.index.max().isoformat() if len(frame.index) else "",
-            "date_segments": date_segments,
-            "rows": len(frame),
-            "columns": len(frame.columns),
+            "account_id": file_meta["account_id"],
+            "account_name": file_meta["account_name"],
+            "date_start": file_meta["date_start"],
+            "date_end": file_meta["date_end"],
+            "rows": file_meta["rows"],
+            "columns": file_meta["columns"],
             "source_directory": str(output_directory),
             "source_type": source_type,
         }
@@ -1034,7 +1009,7 @@ def _parquet_account_names(directory: Path) -> list[str]:
         {
             _account_name_from_output_stem(path.stem)
             for path in sorted(directory.glob("*.parquet"))
-            if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+            if path.name not in NON_ACCOUNT_PARQUET_FILES
         }
     )
 
@@ -1058,7 +1033,7 @@ def _selected_asset_parquet_paths(directory: Path, selected_files: list[str] | N
         path = (directory / file_name).expanduser().resolve()
         if directory not in path.parents:
             raise ValueError(f"Selected file must be under target_directory: {file_name}")
-        if path.name in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE} or path.suffix != ".parquet":
+        if path.name in NON_ACCOUNT_PARQUET_FILES or path.suffix != ".parquet":
             raise ValueError(f"Selected file must be an account Parquet file: {file_name}")
         if not path.is_file():
             raise ValueError(f"Selected file not found: {file_name}")
@@ -1198,11 +1173,9 @@ def _scan_asset_excel_frames(
                 "sheet_name": sheet_name,
                 "account_name": account_name,
                 "account_id": account_mapping["account_id"],
-                "legacy_account_name": account_mapping["legacy_account_name"],
                 "output_stem": output_stem,
                 "date_start": date_start,
                 "date_end": date_end,
-                "date_segments": _single_date_segment_payload(frame.index),
                 "rows": len(frame),
                 "columns": len(frame.columns),
             }
@@ -1264,120 +1237,27 @@ def _scan_asset_excel_frames(
     return scanned_sheets, sources_by_account, skipped, sheet_summaries, code_name_mappings
 
 
-def _single_date_segment_payload(index: pd.Index) -> list[dict[str, Any]]:
-    values = sorted(index)
-    if not values:
-        return []
-    return [
+def _write_sheet_parquet_temp(
+    frame: pd.DataFrame,
+    parquet_path: Path,
+    *,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    save_frame = frame.reset_index()
+    quality = _account_quality_payload(frame)
+    _write_parquet_with_metadata(
+        save_frame,
+        parquet_path,
         {
-            "start": values[0].isoformat(),
-            "end": values[-1].isoformat(),
-        }
-    ]
-
-
-def _compact_date_segments(segments: Any) -> list[dict[str, str]]:
-    compact: list[dict[str, str]] = []
-    if not isinstance(segments, list):
-        return compact
-    for segment in segments:
-        if not isinstance(segment, dict):
-            continue
-        start = str(segment.get("start") or "")
-        end = str(segment.get("end") or "")
-        if start and end:
-            compact.append({"start": start, "end": end})
-    return compact
-
-
-def _ranges_are_continuous(previous_end: date, next_start: date) -> bool:
-    if next_start <= previous_end + timedelta(days=1):
-        return True
-    missing_dates = [
-        previous_end + timedelta(days=offset)
-        for offset in range(1, (next_start - previous_end).days)
-    ]
-    return bool(missing_dates) and all(value.weekday() >= 5 for value in missing_dates)
-
-
-def _merged_date_segments_payload(sources: list[SourceInfo]) -> list[dict[str, Any]]:
-    ranges: list[tuple[date, date]] = []
-    for source in sources:
-        for segment in source.get("date_segments", []):
-            ranges.append(
-                (
-                    date.fromisoformat(str(segment["start"])),
-                    date.fromisoformat(str(segment["end"])),
-                )
-            )
-    if not ranges:
-        return []
-
-    merged_ranges: list[tuple[date, date]] = []
-    for start, end in sorted(ranges):
-        if not merged_ranges:
-            merged_ranges.append((start, end))
-            continue
-        previous_start, previous_end = merged_ranges[-1]
-        if _ranges_are_continuous(previous_end, start):
-            merged_ranges[-1] = (previous_start, max(previous_end, end))
-        else:
-            merged_ranges.append((start, end))
-
-    return [
-        {
-            "start": start.isoformat(),
-            "end": end.isoformat(),
-        }
-        for start, end in merged_ranges
-    ]
-
-
-def _write_sheet_parquet_temp(frame: pd.DataFrame, parquet_path: Path) -> dict[str, Any]:
-    frame.reset_index().to_parquet(parquet_path, index=False, compression="snappy")
-    return _account_quality_payload(frame)
-
-
-def _existing_resume_outputs(output_directory: Path) -> dict[str, Any]:
-    manifest = _load_asset_manifest(output_directory)
-    if not manifest:
-        return {}
-    outputs = manifest.get("outputs")
-    if not isinstance(outputs, dict):
-        return {}
-    completed: dict[str, Any] = {}
-    for key, item in outputs.items():
-        if not isinstance(item, dict):
-            continue
-        output_file = str(item.get("output_file") or "")
-        if not output_file:
-            output_file = Path(str(item.get("path") or "")).name
-        if not output_file or not (output_directory / output_file).exists():
-            continue
-        completed[str(key)] = item
-    return completed
-
-
-def _resume_source_key(source: Mapping[str, Any]) -> tuple[str, str]:
-    return (
-        str(source.get("relative_path") or source.get("file_name") or ""),
-        str(source.get("sheet_name") or ""),
+            **metadata,
+            "rows": len(frame),
+            "columns": len(frame.columns),
+            "non_null_cells": quality["non_null_cells"],
+            "total_cells": quality["total_cells"],
+            "missing_ratio": quality["missing_ratio"],
+        },
     )
-
-
-def _resume_completed_sources(output_directory: Path) -> dict[tuple[str, str], dict[str, Any]]:
-    completed: dict[tuple[str, str], dict[str, Any]] = {}
-    for item in _existing_resume_outputs(output_directory).values():
-        sources = item.get("sources")
-        if not isinstance(sources, list) or not sources:
-            sources = [item]
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            key = _resume_source_key(source)
-            if key[0] and key[1]:
-                completed[key] = item
-    return completed
+    return quality
 
 
 def _existing_output_stem_counts(output_directory: Path) -> dict[str, int]:
@@ -1385,7 +1265,7 @@ def _existing_output_stem_counts(output_directory: Path) -> dict[str, int]:
     if not output_directory.is_dir():
         return counts
     for path in output_directory.glob("*.parquet"):
-        if path.name in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}:
+        if path.name in NON_ACCOUNT_PARQUET_FILES:
             continue
         match = re.match(r"^(?P<base>.+?)(?:__(?P<index>\d+))?$", path.stem)
         if not match:
@@ -1394,33 +1274,6 @@ def _existing_output_stem_counts(output_directory: Path) -> dict[str, int]:
         count = int(match.group("index") or "1")
         counts[base] = max(counts.get(base, 0), count)
     return counts
-
-
-def _sources_by_account_from_outputs(outputs: Mapping[str, Any]) -> dict[str, list[SourceInfo]]:
-    sources_by_account: dict[str, list[SourceInfo]] = {}
-    for item in outputs.values():
-        if not isinstance(item, dict):
-            continue
-        account_name = str(item.get("account_name") or "")
-        if not account_name:
-            continue
-        sources = item.get("sources")
-        if isinstance(sources, list) and sources:
-            source_items = [dict(source) for source in sources if isinstance(source, dict)]
-        else:
-            source_items = [dict(item)]
-        for source in source_items:
-            source.setdefault("account_name", account_name)
-            source.setdefault("account_id", item.get("account_id", ""))
-            source.setdefault("legacy_account_name", item.get("legacy_account_name", ""))
-            source.setdefault("output_file", item.get("output_file", ""))
-            source.setdefault("date_start", item.get("date_start", ""))
-            source.setdefault("date_end", item.get("date_end", ""))
-            source.setdefault("date_segments", item.get("date_segments", []))
-            source.setdefault("rows", item.get("rows", 0))
-            source.setdefault("columns", item.get("columns", 0))
-            sources_by_account.setdefault(account_name, []).append(source)
-    return sources_by_account
 
 
 def _scan_and_write_asset_excel_parquet(
@@ -1447,17 +1300,11 @@ def _scan_and_write_asset_excel_parquet(
         msg = f"No Excel files found in {source}"
         raise ValueError(msg)
 
-    completed_sources = _resume_completed_sources(final_output) if resume_failed_only else {}
     completed_output_files = {
-        str(item.get("output_file") or Path(str(item.get("path") or "")).name)
-        for item in completed_sources.values()
-    }
-    if resume_failed_only and final_output.is_dir():
-        completed_output_files.update(
-            path.name
-            for path in final_output.glob("*.parquet")
-            if path.name not in {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
-        )
+        path.name
+        for path in final_output.glob("*.parquet")
+        if resume_failed_only and path.name not in NON_ACCOUNT_PARQUET_FILES
+    } if final_output.is_dir() else set()
 
     def scan_file(file_index: int, xlsx_path: Path) -> tuple[
         list[dict[str, Any]],
@@ -1537,21 +1384,14 @@ def _scan_and_write_asset_excel_parquet(
                 "sheet_name": sheet_name,
                 "account_name": account_name,
                 "account_id": account_mapping["account_id"],
-                "legacy_account_name": account_mapping["legacy_account_name"],
                 "output_stem": output_stem,
                 "date_start": date_start,
                 "date_end": date_end,
-                "date_segments": _single_date_segment_payload(frame.index),
                 "rows": len(frame),
                 "columns": len(frame.columns),
             }
-            completed_item = completed_sources.get((relative_path, sheet_name))
             completed_output_file = ""
-            if completed_item is not None:
-                completed_output_file = str(
-                    completed_item.get("output_file") or Path(str(completed_item.get("path") or "")).name
-                )
-            elif resume_failed_only and f"{output_stem}.parquet" in completed_output_files:
+            if resume_failed_only and f"{output_stem}.parquet" in completed_output_files:
                 completed_output_file = f"{output_stem}.parquet"
             if completed_output_file:
                 summary = _sheet_summary_payload(
@@ -1578,7 +1418,16 @@ def _scan_and_write_asset_excel_parquet(
                 continue
 
             temp_path = temp_output / f"pending_{file_index}_{sheet_index}_{_safe_output_token(output_stem)}.parquet"
-            quality = _write_sheet_parquet_temp(frame, temp_path)
+            quality = _write_sheet_parquet_temp(
+                frame,
+                temp_path,
+                metadata={
+                    "account_id": account_mapping["account_id"],
+                    "account_name": account_name,
+                    "date_start": date_start,
+                    "date_end": date_end,
+                },
+            )
             summary = _sheet_summary_payload(
                 xlsx_path,
                 sheet_name,
@@ -1679,7 +1528,7 @@ def _scan_and_write_asset_excel_parquet(
             progress_callback,
             (
                 f"[저장 {sheet_index}/{total_outputs}] {final_path.name}: "
-                f"계정={source_info.get('account_name')}, Sheet={source_info.get('sheet_name')}, "
+                f"계정={source_info.get('account_name')}, "
                 f"행={source_info.get('rows')}, 코드={source_info.get('columns')}, "
                 f"날짜={source_info.get('date_start')}~{source_info.get('date_end')}"
             ),
@@ -1690,16 +1539,10 @@ def _scan_and_write_asset_excel_parquet(
             "output_file": final_path.name,
             "account_id": source_info.get("account_id", ""),
             "account_name": source_info.get("account_name", ""),
-            "legacy_account_name": source_info.get("legacy_account_name", ""),
-            "file_name": source_info.get("file_name", ""),
-            "relative_path": source_info.get("relative_path", ""),
-            "sheet_name": source_info.get("sheet_name", ""),
             "rows": source_info.get("rows", 0),
             "columns": source_info.get("columns", 0),
             "date_start": source_info.get("date_start", ""),
             "date_end": source_info.get("date_end", ""),
-            "date_segments": source_info.get("date_segments", []),
-            "sources": [source_info],
             "quality": output_item["quality"],
         }
 
@@ -1743,8 +1586,6 @@ def convert_asset_excels_to_wide_parquet(
         _emit(progress_callback, f"기존 출력 감지: Parquet {existing_account_count}개")
     else:
         _emit(progress_callback, "기존 출력 감지: 없음")
-    updated_accounts: list[str] = []
-    existing_outputs = _existing_resume_outputs(output) if resume_failed_only else {}
     with tempfile.TemporaryDirectory(prefix=".quanti_parquet_write_", dir=output) as temp_output_name:
         temp_output = Path(temp_output_name)
         _emit(progress_callback, f"임시 데이터 경로: {temp_output}")
@@ -1760,47 +1601,13 @@ def convert_asset_excels_to_wide_parquet(
             cancel_check=cancel_check,
         )
 
-    if resume_failed_only and existing_outputs:
-        outputs = dict(sorted({**existing_outputs, **outputs}.items()))
-        sources_by_account = _sources_by_account_from_outputs(outputs)
+    if resume_failed_only:
         code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
 
     code_name_mapping = _code_name_mapping_frame(code_name_mappings)
     code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
     code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
     _emit(progress_callback, f"코드-종목명 매핑 저장: {code_name_mapping_path.name} ({len(code_name_mapping)}행)")
-    account_mapping = _account_mapping_frame(list(sources_by_account), account_mappings)
-    account_mapping_path = output / ACCOUNT_MAPPING_FILE
-    account_mapping.to_parquet(account_mapping_path, index=False, compression="snappy")
-    _emit(progress_callback, f"계정-ID 매핑 저장: {account_mapping_path.name} ({len(account_mapping)}행)")
-
-    manifest = {
-        "format": ASSET_PARQUET_FORMAT,
-        "source_directory": str(source),
-        "output_directory": str(output),
-        "write_mode": normalized_mode,
-        "conflict_policy": "error",
-        "selected_files": selected_files or [],
-        "resume_failed_only": resume_failed_only,
-        "code_name_mapping": {
-            "path": str(code_name_mapping_path),
-            "rows": len(code_name_mapping),
-        },
-        "account_mapping": {
-            "path": str(account_mapping_path),
-            "rows": len(account_mapping),
-            "items": account_mapping.to_dict("records"),
-        },
-        "outputs": outputs,
-        "accounts": sources_by_account,
-        "conflicts": {},
-        "skipped": skipped,
-        "resume_skipped": resume_skipped,
-        "sheets": sheet_summaries,
-    }
-    manifest_path = output / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    _emit(progress_callback, f"manifest 저장: {manifest_path}")
     _emit(
         progress_callback,
         f"Quantiwise 변환 완료: Sheet Parquet {len(outputs)}개, 건너뛴 Sheet {len(skipped)}개, 데이터 경로 {output}",
@@ -1817,7 +1624,6 @@ def convert_asset_excels_to_wide_parquet(
     return {
         "status": "completed",
         "output_directory": str(output),
-        "manifest_path": str(manifest_path),
         "sheets_processed": len(outputs),
         "accounts_processed": len(sources_by_account),
         "write_mode": normalized_mode,
@@ -1827,14 +1633,7 @@ def convert_asset_excels_to_wide_parquet(
             "path": str(code_name_mapping_path),
             "rows": len(code_name_mapping),
         },
-        "account_mapping": {
-            "path": str(account_mapping_path),
-            "rows": len(account_mapping),
-            "items": account_mapping.to_dict("records"),
-        },
-        "updated_accounts": updated_accounts,
         "outputs": outputs,
-        "accounts": sources_by_account,
         "conflicts": {},
         "skipped": skipped,
         "resume_skipped": resume_skipped,
@@ -1871,8 +1670,6 @@ def merge_asset_parquet_outputs(
             raise ValueError(f"Cleanup destination already exists: {existing_destinations[0]}")
     output.mkdir(parents=True, exist_ok=True)
 
-    target_manifest = _load_asset_manifest(target)
-    target_info = {"accounts": target_manifest.get("accounts", {}) if target_manifest else {}}
     target_accounts = sorted({_account_name_from_output_stem(path.stem) for path in selected_paths})
     if not target_accounts:
         msg = f"No account Parquet files found in {target}"
@@ -1892,7 +1689,7 @@ def merge_asset_parquet_outputs(
         loaded_frames = _existing_account_frames(
             account_name,
             target,
-            target_info,
+            None,
             source_type="target_parquet",
             selected_paths=account_paths,
         )
@@ -1917,6 +1714,10 @@ def merge_asset_parquet_outputs(
         date_start = merged.index.min().isoformat() if len(merged.index) else ""
         date_end = merged.index.max().isoformat() if len(merged.index) else ""
         parquet_path = output / f"{_sheet_output_stem(account_name, date_start, date_end)}.parquet"
+        account_sources = sources_by_account.get(account_name, [])
+        source_meta = account_sources[0] if account_sources else {}
+        account_id = str(source_meta.get("account_id") or "")
+        quality = _account_quality_payload(merged)
         write_path = parquet_path
         if parquet_path in selected_paths:
             with tempfile.NamedTemporaryFile(
@@ -1927,39 +1728,30 @@ def merge_asset_parquet_outputs(
             ) as temporary_file:
                 write_path = Path(temporary_file.name)
             final_output_replacements.append((write_path, parquet_path))
-        merged.reset_index().to_parquet(write_path, index=False, compression="snappy")
+        _write_parquet_with_metadata(
+            merged.reset_index(),
+            write_path,
+            _account_footer_metadata(
+                account_id=account_id,
+                account_name=account_name,
+                date_start=date_start,
+                date_end=date_end,
+                rows=len(merged),
+                columns=len(merged.columns),
+                quality=quality,
+            ),
+        )
         accounts[account_name] = {
             "path": str(parquet_path),
             "output_file": parquet_path.name,
+            "account_id": account_id,
+            "account_name": account_name,
             "rows": len(merged),
             "columns": len(merged.columns),
             "date_start": date_start,
             "date_end": date_end,
-            "date_segments": _merged_date_segments_payload(
-                sources_by_account.get(account_name, []),
-            ),
-            "sources": sources_by_account.get(account_name, []),
-            "quality": _account_quality_payload(merged),
+            "quality": quality,
         }
-
-    manifest = {
-        "format": ASSET_PARQUET_FORMAT,
-        "operation": "merge_parquet",
-        "target_directory": str(target),
-        "selected_files": [path.name for path in selected_paths],
-        "output_directory": str(output),
-        "same_directory": same_directory,
-        "cleanup_merged_items": cleanup_merged_items,
-        "conflict_policy": "error",
-        "code_name_mapping": {
-            "path": str(code_name_mapping_path),
-            "rows": len(code_name_mapping),
-        },
-        "accounts": accounts,
-        "conflicts": conflicts_by_account,
-    }
-    manifest_path = output / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     moved_files: list[dict[str, str]] = []
     if cleanup_destinations:
@@ -1979,7 +1771,6 @@ def merge_asset_parquet_outputs(
         "same_directory": same_directory,
         "cleanup_merged_items": cleanup_merged_items,
         "moved_files": moved_files,
-        "manifest_path": str(manifest_path),
         "accounts_processed": len(accounts),
         "conflict_policy": "error",
         "code_name_mapping": {
@@ -2014,20 +1805,14 @@ def inspect_asset_excel_conversion(
             "output_file": f"{output_stem}.parquet",
             "account_id": source_info.get("account_id", ""),
             "account_name": source_info.get("account_name", ""),
-            "legacy_account_name": source_info.get("legacy_account_name", ""),
-            "file_name": source_info.get("file_name", ""),
-            "relative_path": source_info.get("relative_path", ""),
-            "sheet_name": source_info.get("sheet_name", ""),
             "rows": len(frame),
             "columns": len(frame.columns),
             "source_count": 1,
-            "date_segments": source_info.get("date_segments", []),
             "will_update_existing": False,
             "quality": _account_quality_payload(frame),
         }
         for output_stem, frame, source_info in sorted(scanned_sheets, key=lambda item: item[0])
     }
-    account_mapping = _account_mapping_frame(list(sources_by_account), account_mappings)
 
     return {
         "status": "preview",
@@ -2040,15 +1825,9 @@ def inspect_asset_excel_conversion(
             "path": str(output / CODE_NAME_MAPPING_FILE),
             "rows": len(_code_name_mapping_frame(code_name_mappings)),
         },
-        "account_mapping": {
-            "path": str(output / ACCOUNT_MAPPING_FILE),
-            "rows": len(account_mapping),
-            "items": account_mapping.to_dict("records"),
-        },
         "files": list_asset_excel_files(source),
         "sheets": sheet_summaries,
         "outputs": outputs,
-        "accounts": sources_by_account,
         "skipped": skipped,
         "conflicts": {},
         "output": output_info,
@@ -2057,7 +1836,6 @@ def inspect_asset_excel_conversion(
 
 __all__ = [
     "DEFAULT_ASSET_PARQUET_DIR",
-    "SHEET_ACCOUNT_NAMES",
     "convert_asset_excels_to_wide_parquet",
     "default_account_mappings",
     "inspect_asset_excel_conversion",

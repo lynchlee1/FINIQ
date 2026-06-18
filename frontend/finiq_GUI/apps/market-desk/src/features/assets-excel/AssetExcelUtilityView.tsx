@@ -104,25 +104,18 @@ function accountNameFromParquetFile(fileName: string): string {
   return stem;
 }
 
-type OutputSortKey = "sheet" | "account_id" | "account_name" | "file" | "rows" | "columns" | "missing_ratio" | "non_null_cells" | "total_cells" | "date_segments";
+type OutputSortKey = "account_id" | "account_name" | "file" | "rows" | "columns" | "missing_ratio" | "non_null_cells" | "total_cells" | "date_range";
 type SortDirection = "asc" | "desc";
 
-function outputDateSegmentsText(item: any): string {
-  return (item?.date_segments || []).map((segment: any) => `${segment.start || ""}~${segment.end || ""}`).join(", ");
+function outputDateRangeText(item: any): string {
+  return item?.date_start && item?.date_end ? `${item.date_start}~${item.date_end}` : "";
 }
 
 function outputExcelTitleText(name: string, item: any): string {
-  const sourceItems = Array.isArray(item?.sources) && item.sources.length ? item.sources : [item];
-  const titles = sourceItems
-    .map((source: any) => fileNameFromPath(source?.relative_path || source?.file_name || ""))
-    .map((fileName: string) => fileName.replace(/\.[^.]+$/, ""))
-    .filter(Boolean);
-  const uniqueTitles = Array.from(new Set(titles));
-  return uniqueTitles.join(", ") || name;
+  return outputFileNameFromRow(name, item);
 }
 
 function outputSortValue(name: string, item: any, key: OutputSortKey): string | number {
-  if (key === "sheet") return item?.sheet_name || name;
   if (key === "account_id") return item?.account_id || "";
   if (key === "account_name") return item?.account_name || "";
   if (key === "file") return outputExcelTitleText(name, item);
@@ -131,7 +124,7 @@ function outputSortValue(name: string, item: any, key: OutputSortKey): string | 
   if (key === "missing_ratio") return Number(item?.quality?.missing_ratio) || 0;
   if (key === "non_null_cells") return Number(item?.quality?.non_null_cells) || 0;
   if (key === "total_cells") return Number(item?.quality?.total_cells) || 0;
-  return outputDateSegmentsText(item);
+  return outputDateRangeText(item);
 }
 
 function outputRowsFromInfo(info: any): [string, any][] {
@@ -145,10 +138,6 @@ function outputFileNameFromRow(name: string, item: any): string {
 
 function outputAccountNameFromRow(name: string, item: any): string {
   return item?.account_name || accountNameFromParquetFile(outputFileNameFromRow(name, item));
-}
-
-function outputSheetNameFromRow(name: string, item: any): string {
-  return item?.sheet_name || outputAccountNameFromRow(name, item);
 }
 
 function formatOutputInteger(value: unknown): string {
@@ -484,7 +473,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         return {
           key: name,
           fileName,
-          label: item?.sheet_name || item?.account_name || name,
+          label: item?.account_name || fileName || name,
         };
       });
       const existingOptions = (outputInfo?.parquet_files || []).map((fileName: string) => ({
@@ -518,7 +507,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const sheetRows = sheetPayload?.rows || [];
   const parquetPreviewColumns = parquetPayload?.preview_columns || parquetPayload?.columns || [];
   const parquetRows = parquetPayload?.rows || [];
-  const selectedParquetSheet = parquetPayload?.sheet_name || "";
   const handleOutputSort = (key: OutputSortKey) => {
     setOutputSort((current) => {
       if (!current || current.key !== key) return { key, direction: "asc" };
@@ -566,7 +554,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
           <tr className="text-left text-slate-500 dark:text-slate-400">
             {selectable ? <th className="w-12 px-3 py-2 font-medium">선택</th> : null}
-            {renderOutputHeader("sheet", "Sheet")}
             {renderOutputHeader("account_id", "ID")}
             {renderOutputHeader("account_name", "계정")}
             {renderOutputHeader("file", "파일")}
@@ -575,7 +562,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             {renderOutputHeader("missing_ratio", "결측률", "right")}
             {renderOutputHeader("non_null_cells", "값 있음", "right")}
             {renderOutputHeader("total_cells", "전체 셀", "right")}
-            {renderOutputHeader("date_segments", "구간")}
+            {renderOutputHeader("date_range", "구간")}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
@@ -597,7 +584,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     />
                   </td>
                 ) : null}
-                <td className="whitespace-nowrap px-3 py-2 font-medium">{outputSheetNameFromRow(name, item)}</td>
                 <td className="whitespace-nowrap px-3 py-2">{item.account_id || "-"}</td>
                 <td className="whitespace-nowrap px-3 py-2">{outputAccountNameFromRow(name, item) || "-"}</td>
                 <td className="whitespace-nowrap px-3 py-2">{outputExcelTitleText(name, item)}</td>
@@ -606,13 +592,13 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatPercent(item.quality?.missing_ratio)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.quality?.non_null_cells)}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatOutputInteger(item.quality?.total_cells)}</td>
-                <td className="whitespace-nowrap px-3 py-2">{outputDateSegmentsText(item) || "-"}</td>
+                <td className="whitespace-nowrap px-3 py-2">{outputDateRangeText(item) || "-"}</td>
               </tr>
             );
           })}
           {!rows.length ? (
             <tr>
-              <td colSpan={selectable ? 11 : 10} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
+              <td colSpan={selectable ? 10 : 9} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
                 {emptyMessage}
               </td>
             </tr>
@@ -625,7 +611,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => accountMappings.map((mapping) => ({
       account_id: mapping.account_id.trim(),
       account_name: mapping.account_name.trim(),
-      legacy_account_name: "",
       sheet_name: mapping.sheet_name.trim(),
     })),
     [accountMappings],
@@ -767,7 +752,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       {
         account_id: nextAccountId(current),
         account_name: "",
-        legacy_account_name: "",
         sheet_name: "",
       },
     ]);
@@ -1270,7 +1254,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">파일</Label>
                   <Select value={selectedParquetFile} onValueChange={setSelectedParquetFile} disabled={!parquetOptions.length}>
@@ -1281,17 +1265,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                       {parquetOptions.map((item) => (
                         <SelectItem key={`${item.key}-${item.fileName}`} value={item.fileName}>{item.fileName}</SelectItem>
                       ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">Sheet</Label>
-                  <Select value={selectedParquetSheet} onValueChange={() => {}} disabled={!selectedParquetSheet}>
-                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200">
-                      <SelectValue placeholder={parquetLoading ? "Sheet 목록 로딩 중" : "Sheet 선택"} />
-                    </SelectTrigger>
-                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                      {selectedParquetSheet ? <SelectItem value={selectedParquetSheet}>{selectedParquetSheet}</SelectItem> : null}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1338,10 +1311,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     {!parquetPayload?.error && parquetLoading ? (
                       <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">본문을 불러오는 중...</td></tr>
                     ) : null}
-                    {!parquetPayload?.error && !parquetLoading && !selectedParquetSheet ? (
+                    {!parquetPayload?.error && !parquetLoading && !selectedParquetFile ? (
                       <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">Parquet 파일을 선택하세요.</td></tr>
                     ) : null}
-                    {!parquetPayload?.error && !parquetLoading && selectedParquetSheet && !parquetRows.length ? (
+                    {!parquetPayload?.error && !parquetLoading && selectedParquetFile && !parquetRows.length ? (
                       <tr><td colSpan={Math.max(1, parquetPreviewColumns.length)} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">표시할 행 없음</td></tr>
                     ) : null}
                   </tbody>
