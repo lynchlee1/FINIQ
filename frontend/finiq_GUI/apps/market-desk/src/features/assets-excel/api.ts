@@ -1,6 +1,6 @@
 import { apiGet, apiPost } from "@/api/client";
 import type { JobStartResponse } from "@/types/api";
-import type { AssetAccountMappingsResponse, AssetExcelConvertPayload, AssetExcelFilesResponse, AssetParquetMergePayload, PreviewData, SheetListPayload, SheetPayload } from "./types";
+import type { AssetAccountMappingsResponse, AssetExcelConvertPayload, AssetExcelFilesResponse, AssetParquetDuplicateCleanupPayload, AssetParquetMergePayload, PreviewData, SheetListPayload, SheetPayload } from "./types";
 
 function encodePath(value: string): string {
   return value.split("/").map((part) => encodeURIComponent(part)).join("/");
@@ -65,4 +65,8 @@ export function startAssetExcelConversion(payload: AssetExcelConvertPayload) {
 
 export function startAssetParquetMerge(payload: AssetParquetMergePayload) {
   return apiPost<JobStartResponse>("/api/assets/parquet/merge/start", payload);
+}
+
+export function startAssetParquetDuplicateCleanup(payload: AssetParquetDuplicateCleanupPayload) {
+  return apiPost<JobStartResponse>("/api/assets/parquet/duplicates/start", payload);
 }

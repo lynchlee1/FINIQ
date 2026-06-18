@@ -6,12 +6,13 @@ import { usePathname } from "next/navigation";
 import { Sun, Moon } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { getActiveNavItem, NAV_ITEMS } from "@/config/navigation";
+import { getActiveNavItem, getPageTitle, NAV_ITEMS } from "@/config/navigation";
 
 export function Topbar() {
   const pathname = usePathname();
   const [isDark, setIsDark] = useState(false);
   const activeItem = getActiveNavItem(pathname);
+  const pageTitle = getPageTitle(pathname) || activeItem?.label || "Ontology";
 
   useEffect(() => {
     // Initial check
@@ -24,6 +25,10 @@ export function Topbar() {
       setIsDark(true);
     }
   }, []);
+
+  useEffect(() => {
+    document.title = `${pageTitle} | FINIQ MarketDesk`;
+  }, [pageTitle]);
 
   const toggleDarkMode = () => {
     if (isDark) {
@@ -43,7 +48,7 @@ export function Topbar() {
         <div>
           <p className="text-sm font-medium text-slate-500 dark:text-slate-500 uppercase tracking-wider">FINIQ MarketDesk</p>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-            {activeItem?.label || "Ontology"}
+            {pageTitle}
           </h1>
         </div>
         <Button 

@@ -12,11 +12,22 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 ProgressCallback = Callable[[str], None]
+EXCEL_ENGINE = "calamine"
 
 
 def _emit(callback: ProgressCallback | None, message: str) -> None:
     if callback:
         callback(message)
+
+
+def _excel_file(path: str | Path) -> pd.ExcelFile:
+    return pd.ExcelFile(path, engine=EXCEL_ENGINE)
+
+
+def _read_excel(path: str | Path | pd.ExcelFile, **kwargs: Any) -> pd.DataFrame:
+    if isinstance(path, pd.ExcelFile):
+        return pd.read_excel(path, **kwargs)
+    return pd.read_excel(path, engine=EXCEL_ENGINE, **kwargs)
 
 
 def convert_quanti_excel_to_parquet(
@@ -55,7 +66,7 @@ def convert_quanti_excel_to_parquet(
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
         try:
-            excel = pd.ExcelFile(xlsx_path)
+            excel = _excel_file(xlsx_path)
             for sheet_name in excel.sheet_names:
                 if cancel_check and cancel_check():
                     raise RuntimeError("Job cancelled")
@@ -82,7 +93,7 @@ def convert_quanti_excel_to_parquet(
                 raise RuntimeError("Job cancelled")
             try:
                 # Assuming first column is 'date' or unnamed date column
-                df = pd.read_excel(xlsx_path, sheet_name=item_code, index_col=0)
+                df = _read_excel(xlsx_path, sheet_name=item_code, index_col=0)
                 df.index.name = "date"
                 # Ensure index is datetime and normalized to date
                 df.index = pd.to_datetime(df.index).date

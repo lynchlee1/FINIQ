@@ -22,10 +22,12 @@ import pyarrow.parquet as pq
 from finiq.config import QUANTIWISE_EXCEL_DIR, RESOURCES_DIR
 
 EXCEL_SUFFIXES = {".xlsx", ".xlsm"}
+EXCEL_ENGINE = "calamine"
 DEFAULT_ASSET_PARQUET_DIR = RESOURCES_DIR / "assets_merged"
 CODE_NAME_MAPPING_FILE = "code_name_mapping.parquet"
 ACCOUNT_MAPPING_FILE = "account_mapping.parquet"
 NON_ACCOUNT_PARQUET_FILES = {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
+ASSET_PARQUET_DELETE_CONFIRMATION_TEXT = "확인했습니다."
 REQUIRED_ACCOUNT_METADATA_KEYS = {
     "account_id",
     "account_name",
@@ -42,6 +44,16 @@ SourceInfo = dict[str, Any]
 CodeNameMapping = dict[str, str]
 AccountMapping = dict[str, str]
 AccountMappingInput = Mapping[str, Any]
+
+
+def _excel_file(path: str | Path) -> pd.ExcelFile:
+    return pd.ExcelFile(path, engine=EXCEL_ENGINE)
+
+
+def _read_excel(xlsx_path: str | Path | pd.ExcelFile, **kwargs: Any) -> pd.DataFrame:
+    if isinstance(xlsx_path, pd.ExcelFile):
+        return pd.read_excel(xlsx_path, **kwargs)
+    return pd.read_excel(xlsx_path, engine=EXCEL_ENGINE, **kwargs)
 
 SHEET_ACCOUNT_KEYS = {
     "종가": "close",
@@ -471,7 +483,7 @@ def read_asset_excel(
 ) -> dict[str, Any]:
     """Read one Excel sheet from an assets Excel file as JSON-friendly rows."""
     target = _resolve_asset_excel_path(file_name, root_directory=root_directory)
-    excel = pd.ExcelFile(target)
+    excel = _excel_file(target)
     selected_sheet: str | int = excel.sheet_names[0] if sheet_name is None else sheet_name
     selected_sheet_name = excel.sheet_names[selected_sheet] if isinstance(selected_sheet, int) else str(selected_sheet)
 
@@ -486,7 +498,7 @@ def read_asset_excel(
     if quanti_preview is not None:
         return quanti_preview
 
-    frame = pd.read_excel(target, sheet_name=selected_sheet, dtype=object, nrows=nrows)
+    frame = _read_excel(target, sheet_name=selected_sheet, dtype=object, nrows=nrows)
 
     columns = [str(column) for column in frame.columns]
     frame.columns = columns
@@ -510,7 +522,7 @@ def read_asset_excel_sheets(
 ) -> dict[str, Any]:
     """Read workbook sheet names without loading any sheet body rows."""
     target = _resolve_asset_excel_path(file_name, root_directory=root_directory)
-    excel = pd.ExcelFile(target)
+    excel = _excel_file(target)
     sheet_names = list(excel.sheet_names)
     return {
         "file_name": target.name,
@@ -672,7 +684,7 @@ def _read_quanti_preview_sheet(
     column_limit: int = 12,
 ) -> dict[str, Any] | None:
     raw_row_limit = None if row_limit is None else max(30, int(row_limit) + 20)
-    raw_frame = pd.read_excel(
+    raw_frame = _read_excel(
         xlsx_path,
         sheet_name=sheet_name,
         header=None,
@@ -744,7 +756,7 @@ def _read_quanti_wide_sheet_with_mapping(
     xlsx_path: Path | pd.ExcelFile,
     sheet_name: str,
 ) -> tuple[pd.DataFrame, list[CodeNameMapping]]:
-    raw_frame = pd.read_excel(xlsx_path, sheet_name=sheet_name, header=None, dtype=object)
+    raw_frame = _read_excel(xlsx_path, sheet_name=sheet_name, header=None, dtype=object)
     code_row = _find_marker_row(raw_frame, "Code")
     name_row = _find_marker_row(raw_frame, "Name")
     date_header_row = _find_marker_row(raw_frame, "D A T E")
@@ -1076,6 +1088,307 @@ def validate_asset_parquet_merge_selection(
     return [path.name for path in _selected_asset_parquet_paths(target, selected_files)]
 
 
+def _available_archive_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    index = 2
+    while True:
+        candidate = path.with_name(f"{path.stem}__{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def _asset_parquet_delete_confirmed(delete_confirmed: bool, delete_confirmation_text: str) -> bool:
+    return delete_confirmed and str(delete_confirmation_text or "").strip() == ASSET_PARQUET_DELETE_CONFIRMATION_TEXT
+
+
+def _duplicate_base_file_name(file_name: str) -> str | None:
+    match = re.match(r"^(?P<base>.+)__\d+(?P<suffix>\.parquet)$", file_name, re.IGNORECASE)
+    return f"{match.group('base')}{match.group('suffix')}" if match else None
+
+
+def _duplicate_suffix_index(file_name: str) -> int:
+    match = re.search(r"__(\d+)\.parquet$", file_name, re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def _comparison_frame(path: Path) -> tuple[dict[str, Any], pd.DataFrame]:
+    payload = _account_output_payload(path)
+    frame = pd.read_parquet(path)
+    if "date" not in frame.columns:
+        raise ValueError("Missing date column")
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date
+    frame = frame.dropna(subset=["date"]).set_index("date")
+    frame.columns = [str(column) for column in frame.columns]
+    return payload, frame.sort_index()
+
+
+def _frame_non_null_cells(frame: pd.DataFrame) -> int:
+    return int(frame.notna().sum().sum())
+
+
+def _date_range_contains(outer: dict[str, Any], inner: dict[str, Any]) -> bool:
+    outer_start = str(outer.get("date_start") or "")
+    outer_end = str(outer.get("date_end") or "")
+    inner_start = str(inner.get("date_start") or "")
+    inner_end = str(inner.get("date_end") or "")
+    return bool(outer_start and outer_end and inner_start and inner_end and outer_start <= inner_start and inner_end <= outer_end)
+
+
+def _file_preference_key(item: dict[str, Any]) -> tuple[int, int, int, int]:
+    return (
+        int(item["non_null_cells"]),
+        len(item["frame"].index),
+        len(item["frame"].columns),
+        -_duplicate_suffix_index(item["path"].name),
+    )
+
+
+def _preferred_duplicate_item(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    left_key = _file_preference_key(left)
+    right_key = _file_preference_key(right)
+    if left_key != right_key:
+        return left if left_key > right_key else right
+    return left if str(left["path"]) < str(right["path"]) else right
+
+
+def _axis_can_contain(candidate: dict[str, Any], keeper: dict[str, Any]) -> bool:
+    if int(keeper["payload"].get("columns") or 0) < int(candidate["payload"].get("columns") or 0):
+        return False
+    if int(keeper["payload"].get("rows") or 0) < int(candidate["payload"].get("rows") or 0):
+        return False
+    if not _date_range_contains(keeper["payload"], candidate["payload"]):
+        return False
+    return True
+
+
+def _subset_relation(candidate: pd.DataFrame, keeper: pd.DataFrame) -> tuple[bool, bool, str, dict[str, int]]:
+    missing_dates = candidate.index.difference(keeper.index)
+    missing_columns = candidate.columns.difference(keeper.columns)
+    if len(missing_dates) or len(missing_columns):
+        stats = {
+            "missing_dates": len(missing_dates),
+            "missing_columns": len(missing_columns),
+            "missing_values": 0,
+            "conflicting_values": 0,
+            "extra_dates": max(0, len(keeper.index.difference(candidate.index))),
+            "extra_columns": max(0, len(keeper.columns.difference(candidate.columns))),
+            "extra_non_null_cells": max(0, _frame_non_null_cells(keeper) - _frame_non_null_cells(candidate)),
+        }
+        return False, False, "date 또는 종목코드 축이 포함되지 않음", stats
+
+    keeper_aligned = keeper.loc[candidate.index, candidate.columns]
+    candidate_non_null = candidate.notna()
+    keeper_non_null = keeper_aligned.notna()
+    missing_value_mask = candidate_non_null & ~keeper_non_null
+    conflict_mask = candidate_non_null & keeper_non_null & ~candidate.eq(keeper_aligned)
+    missing_values = int(missing_value_mask.to_numpy().sum())
+    conflicting_values = int(conflict_mask.to_numpy().sum())
+    extra_non_null_cells = max(0, _frame_non_null_cells(keeper) - _frame_non_null_cells(candidate))
+    stats = {
+        "missing_dates": 0,
+        "missing_columns": 0,
+        "missing_values": missing_values,
+        "conflicting_values": conflicting_values,
+        "extra_dates": max(0, len(keeper.index.difference(candidate.index))),
+        "extra_columns": max(0, len(keeper.columns.difference(candidate.columns))),
+        "extra_non_null_cells": extra_non_null_cells,
+    }
+    if missing_values or conflicting_values:
+        return False, False, "내부 값이 포함 관계가 아님", stats
+    exact = (
+        len(candidate.index) == len(keeper.index)
+        and len(candidate.columns) == len(keeper.columns)
+        and extra_non_null_cells == 0
+    )
+    if exact:
+        return True, False, "동일한 Parquet 내용", stats
+    return True, True, "더 완전한 같은 계정 Parquet에 포함됨", stats
+
+
+def cleanup_duplicate_asset_parquet_outputs(
+    target_directory: str | Path,
+    *,
+    dry_run: bool = True,
+    delete_confirmed: bool = False,
+    delete_confirmation_text: str = "",
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Inspect or delete same-account Parquet files covered by a more complete file."""
+    target = Path(str(target_directory or "").strip()).expanduser().resolve()
+    if not str(target_directory or "").strip():
+        raise ValueError("target_directory is required")
+    if not target.is_dir():
+        raise ValueError(f"target_directory is not a directory: {target}")
+
+    scan_directories = [target]
+    merged_dir = target / "merged"
+    if merged_dir.is_dir():
+        scan_directories.append(merged_dir)
+
+    _emit(progress_callback, "중복 검사 시작")
+    _emit(progress_callback, f"병합 대상 경로: {target}")
+    _emit(progress_callback, f"검사 폴더: {len(scan_directories)}개")
+
+    items_by_account: dict[str, list[dict[str, Any]]] = {}
+    load_errors: list[dict[str, str]] = []
+    for directory in scan_directories:
+        for path in sorted(directory.glob("*.parquet")):
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
+            if path.name in NON_ACCOUNT_PARQUET_FILES:
+                continue
+            try:
+                payload, frame = _comparison_frame(path)
+            except Exception as exc:
+                load_errors.append(
+                    {
+                        "path": str(path),
+                        "file_name": path.name,
+                        "parent_directory": str(directory),
+                        "reason": f"읽기 실패: {exc}",
+                    }
+                )
+                continue
+            account_name = str(payload.get("account_name") or _account_name_from_output_stem(path.stem))
+            items_by_account.setdefault(account_name, []).append(
+                {
+                    "path": path,
+                    "payload": payload,
+                    "frame": frame,
+                    "non_null_cells": _frame_non_null_cells(frame),
+                }
+            )
+
+    deletion_candidates: list[dict[str, str]] = []
+    mismatched_duplicates: list[dict[str, str]] = []
+    duplicate_group_count = 0
+    candidate_by_path: dict[Path, dict[str, str]] = {}
+    mismatch_seen: set[tuple[Path, Path, str]] = set()
+    for account_name, items in sorted(items_by_account.items()):
+        if len(items) < 2:
+            continue
+        duplicate_group_count += 1
+        _emit(progress_callback, f"중복 후보 검사: 계정={account_name}, 파일 {len(items)}개")
+        for index, candidate in enumerate(items):
+            for keeper in items[index + 1:]:
+                if cancel_check and cancel_check():
+                    raise RuntimeError("Job cancelled")
+                relation_inputs = []
+                if _axis_can_contain(candidate, keeper):
+                    relation_inputs.append((candidate, keeper))
+                if _axis_can_contain(keeper, candidate):
+                    relation_inputs.append((keeper, candidate))
+                if not relation_inputs:
+                    continue
+                relations = [
+                    (subset_item, superset_item, *_subset_relation(subset_item["frame"], superset_item["frame"]))
+                    for subset_item, superset_item in relation_inputs
+                ]
+                has_subset_relation = any(relation[2] for relation in relations)
+                for subset_item, superset_item, is_subset, is_strict, reason, stats in relations:
+                    if not is_subset:
+                        if has_subset_relation:
+                            continue
+                        same_base_name = (
+                            _duplicate_base_file_name(subset_item["path"].name) or subset_item["path"].name
+                        ) == (
+                            _duplicate_base_file_name(superset_item["path"].name) or superset_item["path"].name
+                        )
+                        should_report = (
+                            same_base_name
+                            or int(stats.get("missing_values") or 0) > 0
+                            or int(stats.get("conflicting_values") or 0) > 0
+                        )
+                        key = (subset_item["path"], superset_item["path"], reason)
+                        if should_report and key not in mismatch_seen:
+                            mismatch_seen.add(key)
+                            mismatched_duplicates.append(
+                                {
+                                    "path": str(subset_item["path"]),
+                                    "file_name": subset_item["path"].name,
+                                    "canonical_path": str(superset_item["path"]),
+                                    "canonical_file": superset_item["path"].name,
+                                    "parent_directory": str(subset_item["path"].parent),
+                                    "account_name": account_name,
+                                    "reason": reason,
+                                    **{key: str(value) for key, value in stats.items()},
+                                }
+                        )
+                        continue
+                    if not is_strict:
+                        preferred = _preferred_duplicate_item(subset_item, superset_item)
+                        removable = superset_item if preferred is subset_item else subset_item
+                        kept = subset_item if removable is superset_item else superset_item
+                        if removable["path"] == kept["path"]:
+                            continue
+                        subset_item = removable
+                        superset_item = kept
+                        reason = "동일한 Parquet 내용"
+                    row = {
+                        "path": str(subset_item["path"]),
+                        "file_name": subset_item["path"].name,
+                        "canonical_path": str(superset_item["path"]),
+                        "canonical_file": superset_item["path"].name,
+                        "parent_directory": str(subset_item["path"].parent),
+                        "account_name": account_name,
+                        "reason": reason,
+                        **{key: str(value) for key, value in stats.items()},
+                    }
+                    existing = candidate_by_path.get(subset_item["path"])
+                    if existing is None or _file_preference_key(superset_item) > (
+                        int(existing.get("keeper_non_null_cells") or 0),
+                        int(existing.get("keeper_rows") or 0),
+                        int(existing.get("keeper_columns") or 0),
+                        -_duplicate_suffix_index(existing.get("canonical_file") or ""),
+                    ):
+                        row["keeper_non_null_cells"] = str(superset_item["non_null_cells"])
+                        row["keeper_rows"] = str(len(superset_item["frame"].index))
+                        row["keeper_columns"] = str(len(superset_item["frame"].columns))
+                        candidate_by_path[subset_item["path"]] = row
+
+    deletion_candidates = sorted(candidate_by_path.values(), key=lambda item: item["path"])
+    mismatched_duplicates.extend(load_errors)
+
+    if not dry_run and deletion_candidates and not _asset_parquet_delete_confirmed(delete_confirmed, delete_confirmation_text):
+        raise ValueError(f'파일 삭제 전 "{ASSET_PARQUET_DELETE_CONFIRMATION_TEXT}" 입력과 삭제 허가가 필요합니다.')
+
+    deleted_files: list[dict[str, str]] = []
+    if not dry_run:
+        for item in deletion_candidates:
+            path = Path(item["path"])
+            if path.exists():
+                path.unlink()
+            deleted_files.append(item)
+
+    _emit(
+        progress_callback,
+        (
+            "중복 검사 완료: "
+            f"삭제 후보 {len(deletion_candidates)}개, "
+            f"포함 불가 {len(mismatched_duplicates)}개"
+        ),
+    )
+    if not dry_run:
+        _emit(progress_callback, f"중복 삭제 완료: {len(deleted_files)}개")
+
+    return {
+        "status": "completed",
+        "format": "quantiwise_parquet_duplicate_cleanup_v1",
+        "operation": "parquet_duplicate_cleanup",
+        "target_directory": str(target),
+        "dry_run": dry_run,
+        "duplicate_group_count": duplicate_group_count,
+        "deletion_candidate_count": len(deletion_candidates),
+        "deleted_count": len(deleted_files),
+        "deletion_candidates": deletion_candidates,
+        "deleted_files": deleted_files,
+        "mismatched_duplicates": mismatched_duplicates,
+    }
+
+
 def _asset_excel_scan_workers(file_count: int) -> int:
     if file_count <= 1:
         return 1
@@ -1123,7 +1436,7 @@ def _scan_asset_excel_frames(
         file_sheet_summaries: list[dict[str, Any]] = []
         file_code_name_mappings: list[CodeNameMapping] = []
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] {xlsx_path.name} 스캔 중...")
-        excel = pd.ExcelFile(xlsx_path)
+        excel = _excel_file(xlsx_path)
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] Sheet {len(excel.sheet_names)}개 발견")
         for sheet_index, sheet_name in enumerate(excel.sheet_names, start=1):
             if cancel_check and cancel_check():
@@ -1333,7 +1646,7 @@ def _scan_and_write_asset_excel_parquet(
         file_code_name_mappings: list[CodeNameMapping] = []
         file_resume_skipped: list[dict[str, str]] = []
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] {xlsx_path.name} 스캔 중...")
-        excel = pd.ExcelFile(xlsx_path)
+        excel = _excel_file(xlsx_path)
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] Sheet {len(excel.sheet_names)}개 발견")
         for sheet_index, sheet_name in enumerate(excel.sheet_names, start=1):
             if cancel_check and cancel_check():
@@ -1676,10 +1989,10 @@ def merge_asset_parquet_outputs(
     cleanup_destinations: list[tuple[Path, Path]] = []
     if cleanup_merged_items:
         merged_dir = target / "merged"
-        cleanup_destinations = [(path, merged_dir / path.name) for path in selected_paths]
-        existing_destinations = [destination for _, destination in cleanup_destinations if destination.exists()]
-        if existing_destinations:
-            raise ValueError(f"Cleanup destination already exists: {existing_destinations[0]}")
+        cleanup_destinations = [
+            (path, _available_archive_path(merged_dir / path.name))
+            for path in selected_paths
+        ]
     output.mkdir(parents=True, exist_ok=True)
 
     target_accounts = sorted({_account_name_from_output_stem(path.stem) for path in selected_paths})
@@ -1848,6 +2161,7 @@ def inspect_asset_excel_conversion(
 
 __all__ = [
     "DEFAULT_ASSET_PARQUET_DIR",
+    "cleanup_duplicate_asset_parquet_outputs",
     "convert_asset_excels_to_wide_parquet",
     "default_account_mappings",
     "inspect_asset_excel_conversion",

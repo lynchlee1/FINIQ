@@ -3,6 +3,9 @@ name = "finiq"
 version = "1.1.0"
 description = "FINIQ monorepo"
 requires-python = ">=3.11"
+dependencies = [
+    "python-calamine>=0.7",
+]
 
 [build-system]
 requires = ["setuptools>=69"]
