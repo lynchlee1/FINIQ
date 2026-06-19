@@ -112,11 +112,11 @@ export default function UtilityPage() {
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">입력 폴더</Label>
+                  <Label className="dark:text-slate-300">입력 데이터 경로</Label>
                   <PathPickerInput mode="folder" value={sourceDirectory} onChange={setSourceDirectory} placeholder="/path/to/source" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">데이터 경로</Label>
+                  <Label className="dark:text-slate-300">결과 데이터 경로</Label>
                   <PathPickerInput mode="folder" value={outputDirectory} onChange={setOutputDirectory} placeholder="/path/to/output" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
               </div>

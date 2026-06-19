@@ -292,7 +292,7 @@ export default function FilterPage() {
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="grid gap-2">
-            <Label className="dark:text-slate-300">입력 경로</Label>
+            <Label className="dark:text-slate-300">입력 데이터 경로</Label>
             <PathPickerInput 
               mode="folder"
               value={rootDirectory || ""}
@@ -301,7 +301,7 @@ export default function FilterPage() {
             />
           </div>
           <div className="grid gap-2">
-            <Label className="dark:text-slate-300">데이터 경로</Label>
+            <Label className="dark:text-slate-300">결과 데이터 경로</Label>
             <PathPickerInput 
               mode="folder"
               value={htmlTransferPath || ""}

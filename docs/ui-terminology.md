@@ -47,6 +47,8 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Quantiwise Parquet preview workflow | Quantiwise - Parquet 미리보기 | Use for the `/utility/assets-excel/parquet` navigation label and page title. |
 | Quantiwise Parquet merge workflow | Quantiwise - 병합하기 | Use for the `/utility/assets-excel/merge` navigation label and page title. |
 | Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |
+| Source data path | 입력 데이터 경로 | Use for folder/file path inputs that feed a workflow. Add the source type in parentheses only when needed, e.g. `(Raw JSON)`. |
+| Result data path | 결과 데이터 경로 | Use for folder/file path inputs that receive workflow output when the page also has an input path. Add the output type in parentheses only when needed, e.g. `(SQLite)`. |
 | Quantiwise Parquet grouped result table | Parquet 모아보기 | Use for the table that lists generated Parquet outputs on `Quantiwise - Parquet 미리보기`. |
 | Quantiwise merge candidate table | 병합대상 모아보기 | Use for the selectable merge-candidate table on `Quantiwise - 병합하기`. |
 | Quantiwise merge target path | 병합 대상 경로 | Use for the single input path on `Quantiwise - 병합하기`. |

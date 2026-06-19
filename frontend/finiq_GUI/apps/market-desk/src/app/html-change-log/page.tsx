@@ -175,7 +175,7 @@ export default function HtmlChangeLogPage() {
     {
       id: "outputPath",
       kind: "path",
-      label: "파싱 결과 파일",
+      label: "파싱 결과 데이터 경로",
       mode: "file",
       value: outputPath || "",
       onChange: (val) => saveSetting("html_parse_result_path", val),
