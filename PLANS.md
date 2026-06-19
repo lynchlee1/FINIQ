@@ -202,3 +202,20 @@ Verification:
 - `node --test tests/frontend/*.test.mjs`
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
 - Real-route smoke check: `GET /api/ontology/company-panel?company_id=06090&start_date=2026-01-01&end_date=2026-06-19&title_keyword=&market=전체&display_frequency=자동` returned HTTP 200 with 72 candles and 40 markers.
+
+## Graph View Price Chart Interaction Upgrade
+
+Purpose: Upgrade the `Graph View` `주가-공시 차트` from the local canvas renderer to a more capable TradingView-style chart interaction model without using the commercial TradingView API.
+
+Implementation summary:
+- Replaced the custom `src/lib/charts.ts` renderer with the Apache-2.0 `lightweight-charts` package.
+- Kept the existing `PriceChart` props and crosshair callback contract so both `Graph View` and company detail pages receive the improved chart without caller changes.
+- Enabled mouse drag panning, wheel/pinch zooming, axis drag scaling, and axis double-click reset through the library interaction options.
+- Preserved user logical viewport across resize and data refresh instead of forcing `fitContent()` on every resize.
+- Kept disclosure markers on the candlestick series via `createSeriesMarkers` and retained the TradingView attribution logo required by the library license.
+- Added frontend tests for dependency usage, interaction options, attribution, and viewport preservation.
+
+Verification:
+- `node --test tests/frontend/priceChart.test.mjs`
+- `node --test tests/frontend/*.test.mjs`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
