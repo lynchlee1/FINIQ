@@ -1,12 +1,11 @@
 # Completed Changes
 
-## Quantiwise Parquet Convert Excel Selection
+## Workflow UI Title And Path Consistency
 
-Purpose: Allow `Quantiwise - Parquet 변환하기` to run against only selected Excel files instead of always converting every Excel file under the source path.
+Purpose: Make MarketDesk workflow pages use consistent visible titles and keep path inputs out of page-title cards.
 
-Implementation summary: Added a selectable `대상 파일` table in the convert UI, defaulting to all discovered Excel files. Conversion is disabled when no file is selected, and the selected relative paths are sent as `selected_files` in the conversion job payload. The backend conversion result now echoes `selected_files`, and the Quantiwise conversion docs/UI terminology were updated to match the new contract.
+Implementation summary: The workflow sidebar title now mirrors the active page title from navigation. HTML workflow pages no longer render a second in-content page-title panel, while mode toggles and notices remain available. Quantiwise and utility path inputs now live under `데이터 경로` cards, and action cards use `작업 실행` without mixed English eyebrows such as `Run`.
 
 Verification:
-- `python3 -m pytest tests/test_assets_excel.py`
-- `python3 -m pytest tests/market_desk/test_server.py`
-- `npm run build -w @finiq/app-market-desk --`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+- Local browser check on `/table`, `/utility`, `/utility/assets-excel`, `/html-download`, and `/html-parse` confirmed top/sidebar title alignment and no remaining `Run` eyebrow in the checked content.

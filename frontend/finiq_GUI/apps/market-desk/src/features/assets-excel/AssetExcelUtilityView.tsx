@@ -215,7 +215,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const isConvertMode = mode === "convert";
   const isParquetPreviewMode = mode === "parquet";
   const isMergeMode = mode === "merge";
-  const pageTitle = isConvertMode ? "Quantiwise - Parquet 변환하기" : isParquetPreviewMode ? "Quantiwise - Parquet 미리보기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - Excel 미리보기";
   const [excelFiles, setExcelFiles] = useState<AssetExcelFile[]>([]);
   const [selectedConvertFiles, setSelectedConvertFiles] = useState<string[]>([]);
   const [sourceDirectory, setSourceDirectory] = useState("");
@@ -1007,8 +1006,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Quantiwise</p>
-              <CardTitle className="text-xl dark:text-white">{pageTitle}</CardTitle>
+              <CardTitle className="dark:text-white">데이터 경로</CardTitle>
             </CardHeader>
             <CardContent className="pt-6 space-y-5">
               {!isMergeMode && !isParquetPreviewMode ? (
@@ -1335,7 +1333,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           {isConvertMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1536,7 +1533,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           {isMergeMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
