@@ -609,7 +609,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "sourcePath",
       kind: "path",
-      label: variant === "content" && contentSourceInputMode === "file" ? "외부 HTML 압축 JSON 파일" : variantConfig.sourceLabel,
+      label: variant === "content" && contentSourceInputMode === "file" ? "입력 데이터 경로 (외부 HTML 압축 JSON)" : variantConfig.sourceLabel,
       help: variant === "content" && contentSourceInputMode === "file" ? undefined : variantConfig.sourceHelp,
       mode: variant === "content" && contentSourceInputMode === "file" ? "file" : variantConfig.sourcePickMode,
       value: currentSourcePath,
@@ -655,7 +655,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "compressInputDirectory",
       kind: "path",
-      label: "외부 HTML 입력 경로",
+      label: "입력 데이터 경로 (외부 HTML)",
       help: "공시원문 외부 저장으로 만든 KIND 뷰어 HTML 폴더를 선택하세요.",
       mode: "folder",
       value: compressInputDirectory,
@@ -703,7 +703,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "mergeOutputPath",
       kind: "path",
-      label: "병합 파일 데이터 경로",
+      label: "병합 결과 데이터 경로",
       mode: mergeSplitByYear ? "folder" : "save",
       value: mergeOutputPath || (mergeSplitByYear ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : "")),
       onChange: (val) => {

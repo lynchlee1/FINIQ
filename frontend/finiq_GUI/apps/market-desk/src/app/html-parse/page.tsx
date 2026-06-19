@@ -275,7 +275,7 @@ export default function HtmlParsePage() {
     {
       id: "inputDirectory",
       kind: "path",
-      label: "입력 경로 (HTML 폴더)",
+      label: "입력 데이터 경로 (HTML)",
       mode: "folder",
       value: inputDirectory,
       onChange: handleInputDirectoryChange,
@@ -285,7 +285,7 @@ export default function HtmlParsePage() {
     {
       id: "outputPath",
       kind: "path",
-      label: "결과 경로 (JSON)",
+      label: "결과 데이터 경로 (JSON)",
       mode: "save",
       value: outputPath,
       onChange: handleOutputPathChange,
