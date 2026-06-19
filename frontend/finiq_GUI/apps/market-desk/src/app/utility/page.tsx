@@ -107,8 +107,7 @@ export default function UtilityPage() {
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">External Data Transform</p>
-              <CardTitle className="text-xl dark:text-white">분할저장 구조 전환</CardTitle>
+              <CardTitle className="dark:text-white">데이터 경로</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -121,16 +120,21 @@ export default function UtilityPage() {
                   <PathPickerInput mode="folder" value={outputDirectory} onChange={setOutputDirectory} placeholder="/path/to/output" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
                 </div>
               </div>
-              <div className="flex gap-2">
-                <Button onClick={handleStart} disabled={!!activeJobId || !sourceDirectory.trim() || !outputDirectory.trim()} className="w-full md:w-auto">
+            </CardContent>
+          </Card>
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader>
+              <CardTitle className="dark:text-white">작업 실행</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Button onClick={handleStart} disabled={!!activeJobId || !sourceDirectory.trim() || !outputDirectory.trim()} className="w-full">
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   {actionLabel}
                 </Button>
-                {activeJobId && (
-                  <Button variant="outline" onClick={cancelJob} className="w-full md:w-auto">
-                    {UI_TEXT.actions.cancelJob}
-                  </Button>
-                )}
+                <Button variant="outline" onClick={cancelJob} disabled={!activeJobId} className="w-full">
+                  {UI_TEXT.actions.cancelJob}
+                </Button>
               </div>
             </CardContent>
           </Card>

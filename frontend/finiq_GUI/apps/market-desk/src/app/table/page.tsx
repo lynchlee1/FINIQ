@@ -154,9 +154,8 @@ export default function TablePage() {
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
-              <CardTitle className="dark:text-white">공시내역 변환</CardTitle>
-              <CardDescription className="dark:text-slate-400">회사별로 분류된 Raw JSON 데이터를 검색과 분석에 용이한 SQLite 형식으로 변환합니다.</CardDescription>
+              <CardTitle className="dark:text-white">데이터 경로</CardTitle>
+              <CardDescription className="dark:text-slate-400">입력 경로와 SQLite 데이터 경로를 지정합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -189,7 +188,6 @@ export default function TablePage() {
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">

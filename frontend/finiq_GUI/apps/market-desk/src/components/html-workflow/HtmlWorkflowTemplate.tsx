@@ -120,9 +120,9 @@ type HtmlWorkflowFormProps = {
 
 export function HtmlWorkflowPage({
   workflowId = "html-processing",
-  eyebrow = "HTML Workflow",
-  title,
-  description,
+  eyebrow: _eyebrow = "HTML Workflow",
+  title: _title,
+  description: _description,
   notice,
   actions,
   children,
@@ -133,17 +133,12 @@ export function HtmlWorkflowPage({
     <main className="grid w-full gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
       <WorkflowSidebar title={sidebar.title} groups={sidebar.groups} />
       <div className="min-w-0 flex flex-col gap-6">
-        <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-[#161b22] dark:border-[#30363d]">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0 space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">{eyebrow}</p>
-              <h1 className="text-2xl font-bold text-slate-950 dark:text-white">{title}</h1>
-              <p className="max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p>
-            </div>
-            {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
-          </div>
-          {notice ? <div className="mt-4">{notice}</div> : null}
-        </section>
+        {(actions || notice) ? (
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:bg-[#161b22] dark:border-[#30363d]">
+            {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+            {notice ? <div className={actions ? "mt-4" : ""}>{notice}</div> : null}
+          </section>
+        ) : null}
         {children}
       </div>
     </main>

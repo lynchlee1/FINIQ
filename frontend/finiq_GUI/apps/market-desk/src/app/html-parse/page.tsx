@@ -423,7 +423,6 @@ export default function HtmlParsePage() {
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">

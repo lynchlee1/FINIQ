@@ -646,8 +646,7 @@ export default function DownloadPage() {
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Download Settings</p>
-              <CardTitle className="dark:text-white">기본 설정</CardTitle>
+              <CardTitle className="dark:text-white">검색 조건</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -923,7 +922,6 @@ export default function DownloadPage() {
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Run</p>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
