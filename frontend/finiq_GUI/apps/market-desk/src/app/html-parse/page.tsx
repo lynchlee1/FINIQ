@@ -356,7 +356,7 @@ export default function HtmlParsePage() {
 
       <HtmlStepGuide items={WORKFLOW_GUIDE} />
 
-      <div className="relative space-y-6">
+      <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <HtmlWorkflowCard
             title="공시원문 변환 경로"

@@ -150,7 +150,7 @@ export default function TablePage() {
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
-      <div className="relative space-y-6">
+      <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>

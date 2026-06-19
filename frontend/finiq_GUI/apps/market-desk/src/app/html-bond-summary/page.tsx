@@ -224,7 +224,7 @@ export default function HtmlBondSummaryPage() {
       title="발행내역 한눈에"
       description="파싱된 사채 발행 데이터를 조회하고 정정 이력, 원문 테이블, 투자자 정보를 한 화면에서 확인합니다."
     >
-      <div className="relative space-y-6">
+      <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <HtmlWorkflowCard
           title="조회"
           description="파싱 결과 JSON을 불러와 목록과 상세 패널을 구성합니다."

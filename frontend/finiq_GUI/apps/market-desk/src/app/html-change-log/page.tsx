@@ -245,7 +245,7 @@ export default function HtmlChangeLogPage() {
       title="공시 정정내역 한눈에"
       description="정정공시 전후의 필드 값 변화를 매트릭스 형태로 비교합니다. 파싱 결과 JSON을 기준으로 목록, 상세 변경 필드, Excel 내보내기를 한 화면에서 처리합니다."
     >
-      <div className="relative space-y-6">
+      <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <HtmlWorkflowCard
           title="조회 조건"
           description="모든 조회형 원문 처리 화면은 같은 필드 높이와 열 규칙을 사용합니다."

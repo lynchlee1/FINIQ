@@ -205,7 +205,7 @@ export default function HtmlSectionSplitPage() {
       title="공시원문 목차 분리"
       description="KIND 내부 HTML을 목차 단위로 분리하고, 문서별 목차 구성과 처리 상태를 확인합니다."
     >
-      <div className="relative space-y-6">
+      <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-[#30363d] dark:bg-[#161b22]">
           <div className="mb-4">
             <h2 className="text-base font-semibold text-slate-950 dark:text-white">데이터 경로</h2>

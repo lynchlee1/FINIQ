@@ -7,6 +7,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 
+from finiq.market_desk.analytics.ontology_graph import (
+    build_ontology_company_panel,
+    build_ontology_status,
+    search_ontology_companies,
+)
 from finiq.market_desk.web.discovery import (
     list_classification_files,
     list_price_source_files,
@@ -47,6 +52,63 @@ def create_market_data_router(config: Any) -> APIRouter:
     @router.get("/api/integrated-data/providers")
     async def get_integrated_providers_route():
         return {"providers": list_integrated_providers()}
+
+    @router.get("/api/ontology/status")
+    async def get_ontology_status(
+        manifest_path: Optional[str] = None,
+        quanti_dir: Optional[str] = None,
+    ):
+        try:
+            return build_ontology_status(
+                manifest_path=manifest_path,
+                quanti_dir=quanti_dir,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.get("/api/ontology/companies")
+    async def get_ontology_companies(
+        manifest_path: Optional[str] = None,
+        quanti_dir: Optional[str] = None,
+        keyword: str = "",
+        market: str = "전체",
+        limit: int = 30,
+    ):
+        try:
+            return search_ontology_companies(
+                manifest_path=manifest_path,
+                quanti_dir=quanti_dir,
+                keyword=keyword,
+                market=market,
+                limit=limit,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.get("/api/ontology/company-panel")
+    async def get_ontology_company_panel(
+        company_id: str,
+        manifest_path: Optional[str] = None,
+        quanti_dir: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        title_keyword: str = "",
+        market: str = "전체",
+        display_frequency: str = "자동",
+    ):
+        try:
+            return build_ontology_company_panel(
+                manifest_path=manifest_path,
+                quanti_dir=quanti_dir,
+                company_id=company_id,
+                start_date=start_date,
+                end_date=end_date,
+                title_keyword=title_keyword,
+                market=market,
+                display_frequency_label=display_frequency,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.get("/api/companies")
     async def get_companies(
