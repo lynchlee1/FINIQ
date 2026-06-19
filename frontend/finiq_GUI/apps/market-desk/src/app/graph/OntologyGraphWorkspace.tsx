@@ -6,13 +6,14 @@ import {
   AlertTriangle,
   Building2,
   Calendar,
-  Database,
   FileText,
   LineChart,
   Loader2,
+  Maximize2,
   RefreshCw,
   Search,
   SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
@@ -102,12 +103,11 @@ type OntologyPanel = {
   messages: string[];
 };
 
-type WorkspaceMode = "analysis" | "companies" | "data";
+type ChartViewMode = "chart" | "timeline";
 
-const WORKSPACE_MODES = [
-  { id: "analysis", label: "분석", description: "차트와 타임라인", icon: LineChart },
-  { id: "companies", label: "회사", description: "검색과 선택", icon: Search },
-  { id: "data", label: "데이터", description: "원천 상태", icon: Database },
+const CHART_VIEW_MODES = [
+  { id: "chart", label: "차트", icon: LineChart },
+  { id: "timeline", label: "공시 타임라인", icon: FileText },
 ] as const;
 
 function dateInputValue(date: Date) {
@@ -172,7 +172,8 @@ export function OntologyGraphWorkspace() {
   const [titleKeyword, setTitleKeyword] = useState("");
   const [displayFrequency, setDisplayFrequency] = useState("자동");
   const [chartZoomSensitivity, setChartZoomSensitivity] = useState(0.55);
-  const [activeMode, setActiveMode] = useState<WorkspaceMode>("analysis");
+  const [activeChartView, setActiveChartView] = useState<ChartViewMode>("chart");
+  const [chartFullscreen, setChartFullscreen] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingCompanies, setLoadingCompanies] = useState(false);
   const [loadingPanel, setLoadingPanel] = useState(false);
@@ -184,7 +185,7 @@ export function OntologyGraphWorkspace() {
       const data = await apiGet<OntologyStatus>("/api/ontology/status");
       setStatus(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "데이터 상태를 불러오지 못했습니다.");
+      setError(err instanceof Error ? err.message : "원천 정보를 불러오지 못했습니다.");
     } finally {
       setLoadingStatus(false);
     }
@@ -257,54 +258,78 @@ export function OntologyGraphWorkspace() {
     setChartZoomSensitivity(clampChartZoomSensitivity(Number(event.currentTarget.value) / 100));
   };
 
+  const renderPriceChart = (expanded = false) => (
+    <div
+      className={cn(
+        "rounded-lg border border-slate-200 bg-white p-4 dark:border-[#30363d] dark:bg-[#0d1117]",
+        expanded ? "h-full min-h-0" : "h-[min(68vh,720px)] min-h-[520px]",
+      )}
+    >
+      {loadingPanel ? (
+        <PageLoadingSpinner message="공시와 주가를 맞추는 중입니다..." />
+      ) : panel && panel.chart.candles.length > 0 ? (
+        <PriceChart
+          data={panel.chart.candles}
+          markers={panel.chart.markers}
+          title={selectedCompanyLabel}
+          subtitle={`${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}`}
+          zoomSensitivity={chartZoomSensitivity}
+        />
+      ) : (
+        <div className="flex h-full min-h-[420px] items-center justify-center text-center">
+          <div>
+            <LineChart className="mx-auto h-8 w-8 text-slate-400" />
+            <p className="mt-3 font-semibold text-slate-900 dark:text-slate-100">표시할 차트 데이터가 없습니다.</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">회사와 기간을 선택한 뒤 새로고침하세요.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="relative action-dock-host flex w-full flex-col gap-5 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
       <div className="flex w-full flex-col gap-5">
         <section>
           <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-xl dark:text-white">
-                <LineChart className="h-5 w-5" />
-                Graph View
-              </CardTitle>
-              <CardDescription className="dark:text-slate-400">
-                {selectedCompanyLabel} · {startDate} - {endDate}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <MessageBox messages={statusMessages} />
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {WORKSPACE_MODES.map((mode) => {
-                  const Icon = mode.icon;
-                  const active = activeMode === mode.id;
-                  return (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      onClick={() => setActiveMode(mode.id)}
-                      className={cn(
-                        "flex min-h-14 flex-1 items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
-                        active
-                          ? "border-slate-950 bg-slate-950 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300",
-                      )}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-semibold">{mode.label}</span>
-                        <span className={cn("block text-xs", active ? "text-slate-200 dark:text-slate-700" : "text-slate-500 dark:text-slate-400")}>
-                          {mode.description}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-xl dark:text-white">
+                    <LineChart className="h-5 w-5" />
+                    Graph View
+                  </CardTitle>
+                  <CardDescription className="mt-2 dark:text-slate-400">
+                    {selectedCompanyLabel} · {startDate} - {endDate}
+                  </CardDescription>
+                </div>
+                <div className="inline-flex self-start rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+                  {CHART_VIEW_MODES.map((mode) => {
+                    const Icon = mode.icon;
+                    return (
+                      <Button
+                        key={mode.id}
+                        type="button"
+                        variant={activeChartView === mode.id ? "default" : "ghost"}
+                        size="sm"
+                        className="h-8"
+                        onClick={() => setActiveChartView(mode.id)}
+                      >
+                        <Icon className="mr-2 h-4 w-4" />
+                        {mode.label}
+                      </Button>
+                    );
+                  })}
+                </div>
               </div>
+            </CardHeader>
+            <CardContent>
+              <MessageBox messages={statusMessages} />
             </CardContent>
           </Card>
         </section>
 
-        {activeMode === "analysis" ? (
+        {activeChartView === "chart" ? (
           <>
             <section>
             <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
@@ -319,10 +344,16 @@ export function OntologyGraphWorkspace() {
                       KIND 공시 이벤트와 Quantiwise 가격 데이터를 같은 기간 축에서 비교합니다.
                     </CardDescription>
                   </div>
-                  <Button variant="outline" size="sm" onClick={loadPanel} disabled={!selectedCompany || loadingPanel}>
-                    {loadingPanel ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    새로고침
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setChartFullscreen(true)} disabled={loadingPanel}>
+                      <Maximize2 className="h-4 w-4" />
+                      전체화면
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={loadPanel} disabled={!selectedCompany || loadingPanel}>
+                      {loadingPanel ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      새로고침
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -366,27 +397,7 @@ export function OntologyGraphWorkspace() {
                   </div>
                 </div>
 
-                <div className="min-h-[520px] rounded-lg border border-slate-200 bg-white p-4 dark:border-[#30363d] dark:bg-[#0d1117]">
-                  {loadingPanel ? (
-                    <PageLoadingSpinner message="공시와 주가를 맞추는 중입니다..." />
-                  ) : panel && panel.chart.candles.length > 0 ? (
-                    <PriceChart
-                      data={panel.chart.candles}
-                      markers={panel.chart.markers}
-                      title={selectedCompanyLabel}
-                      subtitle={`${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}`}
-                      zoomSensitivity={chartZoomSensitivity}
-                    />
-                  ) : (
-                    <div className="flex h-full min-h-[420px] items-center justify-center text-center">
-                      <div>
-                        <LineChart className="mx-auto h-8 w-8 text-slate-400" />
-                        <p className="mt-3 font-semibold text-slate-900 dark:text-slate-100">표시할 차트 데이터가 없습니다.</p>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">회사와 기간을 선택한 뒤 새로고침하세요.</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {renderPriceChart()}
               </CardContent>
             </Card>
             </section>
@@ -423,82 +434,118 @@ export function OntologyGraphWorkspace() {
             </Card>
             </section>
 
-            <section>
-            <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
-                  <FileText className="h-5 w-5" />
-                  공시 타임라인
-                </CardTitle>
-                <CardDescription className="dark:text-slate-400">차트에 표시된 기간과 같은 범위</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="max-h-[460px] overflow-y-auto pr-1">
-                  {panel?.timeline.length ? (
-                    <div className="divide-y divide-slate-100 dark:divide-[#30363d]">
-                      {panel.timeline.map((item) => (
-                        <div key={item.acpt_no} className="space-y-2 py-3">
-                          <div className="text-sm text-slate-500 dark:text-slate-400">
-                            <p className="font-medium text-slate-700 dark:text-slate-300">{item.disclosed_at}</p>
-                            <p className="mt-1 text-xs">마커 {item.trade_day || "-"}</p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold leading-snug text-slate-950 dark:text-slate-100">{item.title}</p>
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.submitter}</p>
-                          </div>
-                          <div className="text-left">
-                            <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-[#30363d] dark:text-slate-300">
-                              {item.group}
-                            </span>
-                            <p className="mt-2 text-xs text-slate-400">{item.acpt_no}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="rounded-lg border border-slate-200 p-4 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
-                      표시할 공시가 없습니다.
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-            </section>
           </>
         ) : null}
 
-        {activeMode === "companies" ? (
+        {activeChartView === "timeline" ? (
           <section>
           <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-            <CardHeader className="pb-3">
+            <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
-                <Search className="h-5 w-5" />
-                회사 검색
+                <FileText className="h-5 w-5" />
+                공시 타임라인
               </CardTitle>
-              <CardDescription className="dark:text-slate-400">KIND SQLite shard 기준</CardDescription>
+              <CardDescription className="dark:text-slate-400">차트에 표시된 기간과 같은 범위</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="회사명 또는 코드" />
-                <div className="flex gap-2">
-                  <select
-                    value={market}
-                    onChange={(event) => setMarket(event.target.value)}
-                    className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
-                  >
-                    <option value="전체">전체</option>
-                    <option value="코스피">코스피</option>
-                    <option value="코스닥">코스닥</option>
-                    <option value="코넥스">코넥스</option>
-                  </select>
-                  <Button className="flex-1" onClick={loadCompanies} disabled={loadingCompanies}>
-                    {loadingCompanies ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                    검색
-                  </Button>
-                </div>
+            <CardContent>
+              <div className="max-h-[calc(100vh-18rem)] overflow-y-auto pr-1">
+                {panel?.timeline.length ? (
+                  <div className="divide-y divide-slate-100 dark:divide-[#30363d]">
+                    {panel.timeline.map((item) => (
+                      <div key={item.acpt_no} className="space-y-2 py-3">
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                          <p className="font-medium text-slate-700 dark:text-slate-300">{item.disclosed_at}</p>
+                          <p className="mt-1 text-xs">마커 {item.trade_day || "-"}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold leading-snug text-slate-950 dark:text-slate-100">{item.title}</p>
+                          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.submitter}</p>
+                        </div>
+                        <div className="text-left">
+                          <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-[#30363d] dark:text-slate-300">
+                            {item.group}
+                          </span>
+                          <p className="mt-2 text-xs text-slate-400">{item.acpt_no}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-slate-200 p-4 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+                    표시할 공시가 없습니다.
+                  </p>
+                )}
               </div>
+            </CardContent>
+          </Card>
+          </section>
+        ) : null}
 
-              <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
+        {chartFullscreen ? (
+          <div className="fixed inset-0 z-50 flex flex-col bg-white p-4 dark:bg-[#0d1117]">
+            <div className="mb-3 flex flex-col gap-3 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between dark:border-[#30363d]">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">주가-공시 차트</p>
+                <h2 className="truncate text-xl font-bold text-slate-950 dark:text-slate-100">{selectedCompanyLabel}</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {panel ? `${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}` : `${startDate} - ${endDate}`}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={loadPanel} disabled={!selectedCompany || loadingPanel}>
+                  {loadingPanel ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  새로고침
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setChartFullscreen(false)}>
+                  <X className="h-4 w-4" />
+                  전체화면 닫기
+                </Button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1">{renderPriceChart(true)}</div>
+          </div>
+        ) : null}
+      </div>
+
+      <ActionDock
+        activityActive={loadingStatus || loadingCompanies || loadingPanel}
+        activityContent={
+          <div className="text-sm text-slate-600 dark:text-slate-300">
+            {loadingPanel ? "분석 데이터를 불러오는 중입니다." : loadingCompanies ? "회사 목록을 불러오는 중입니다." : "대기 중입니다."}
+          </div>
+        }
+        notificationActive={!!error}
+        notificationContent={
+          <div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-600 dark:text-slate-300"}>
+            {error || "알림 없음"}
+          </div>
+        }
+        settingsTitle="설정"
+        settingsContent={
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                <Search className="h-4 w-4" />
+                회사 선택
+              </div>
+              <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="회사명 또는 코드" />
+              <div className="flex gap-2">
+                <select
+                  value={market}
+                  onChange={(event) => setMarket(event.target.value)}
+                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                >
+                  <option value="전체">전체</option>
+                  <option value="코스피">코스피</option>
+                  <option value="코스닥">코스닥</option>
+                  <option value="코넥스">코넥스</option>
+                </select>
+                <Button className="flex-1" onClick={loadCompanies} disabled={loadingCompanies}>
+                  {loadingCompanies ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  검색
+                </Button>
+              </div>
+              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
                 {companies.length === 0 ? (
                   <p className="rounded-lg border border-slate-200 p-3 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
                     조건에 맞는 회사가 없습니다.
@@ -512,7 +559,7 @@ export function OntologyGraphWorkspace() {
                         type="button"
                         onClick={() => {
                           setSelectedCompany(company);
-                          setActiveMode("analysis");
+                          setActiveChartView("chart");
                         }}
                         className={cn(
                           "w-full rounded-lg border p-3 text-left transition-colors",
@@ -547,56 +594,8 @@ export function OntologyGraphWorkspace() {
                   })
                 )}
               </div>
-            </CardContent>
-          </Card>
-          </section>
-        ) : null}
+            </div>
 
-        {activeMode === "data" ? (
-          <section>
-          <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
-                <Database className="h-5 w-5" />
-                데이터 상태
-              </CardTitle>
-              <CardDescription className="dark:text-slate-400">읽기 전용 분석 원천</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {loadingStatus ? (
-                <PageLoadingSpinner message="데이터 상태를 확인하는 중입니다..." />
-              ) : (
-                <div className="rounded-lg border border-slate-200 px-4 py-2 dark:border-[#30363d]">
-                  <DetailRow label="KIND 공시" value={`${formatInteger(status?.kind.summary.disclosures)}건`} />
-                  <DetailRow label="회사" value={`${formatInteger(status?.kind.summary.companies)}개`} />
-                  <DetailRow label="주가 항목" value={(status?.quantiwise.available_items ?? []).join(", ")} />
-                  <DetailRow label="매핑 회사" value={`${formatInteger(status?.quantiwise.mapped_companies)}개`} />
-                  <DetailRow label="KIND 경로" value={status?.kind.manifest_path ?? ""} />
-                  <DetailRow label="Quantiwise 경로" value={status?.quantiwise.directory ?? ""} />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          </section>
-        ) : null}
-      </div>
-
-      <ActionDock
-        activityActive={loadingStatus || loadingCompanies || loadingPanel}
-        activityContent={
-          <div className="text-sm text-slate-600 dark:text-slate-300">
-            {loadingPanel ? "분석 데이터를 불러오는 중입니다." : loadingCompanies ? "회사 목록을 불러오는 중입니다." : "대기 중입니다."}
-          </div>
-        }
-        notificationActive={!!error}
-        notificationContent={
-          <div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-600 dark:text-slate-300"}>
-            {error || "알림 없음"}
-          </div>
-        }
-        settingsTitle="설정"
-        settingsContent={
-          <div className="space-y-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="ontology-chart-zoom-sensitivity" className="font-semibold dark:text-slate-200">
