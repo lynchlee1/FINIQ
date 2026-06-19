@@ -32,6 +32,7 @@ interface PriceChartProps {
   markers: PriceChartMarker[];
   title: string;
   subtitle: string;
+  showHeader?: boolean;
   zoomSensitivity?: number;
   onCrosshairMove?: (candle: any) => void;
 }
@@ -43,7 +44,7 @@ function volumeColor(datum: PriceChartDatum) {
   return datum.close >= datum.open ? "rgba(34, 171, 148, 0.38)" : "rgba(242, 54, 69, 0.38)";
 }
 
-export function PriceChart({ data, markers, title, subtitle, zoomSensitivity = 0.55, onCrosshairMove }: PriceChartProps) {
+export function PriceChart({ data, markers, title, subtitle, showHeader = true, zoomSensitivity = 0.55, onCrosshairMove }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const candleSeriesRef = useRef<any>(null);
@@ -163,10 +164,12 @@ export function PriceChart({ data, markers, title, subtitle, zoomSensitivity = 0
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-4 flex flex-col">
-        <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">{title}</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>
-      </div>
+      {showHeader ? (
+        <div className="mb-4 flex flex-col">
+          <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">{title}</h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>
+        </div>
+      ) : null}
       <div ref={containerRef} className="min-h-[400px] w-full flex-1" />
     </div>
   );

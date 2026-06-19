@@ -622,8 +622,10 @@ def build_ontology_company_panel(
 def _resolve_frequency(display_frequency_label: str, candle_count: int) -> str:
     if display_frequency_label == "일봉":
         return "day"
-    if display_frequency_label == "주봉":
-        return "week"
+    if display_frequency_label == "5일봉":
+        return "5day"
+    if display_frequency_label == "20일봉":
+        return "20day"
     if display_frequency_label == "월봉":
         return "month"
     if candle_count <= 180:
