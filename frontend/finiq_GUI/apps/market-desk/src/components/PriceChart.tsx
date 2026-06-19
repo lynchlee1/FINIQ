@@ -1,27 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
-  CandlestickSeries,
-  ColorType,
-  CrosshairMode,
-  HistogramSeries,
   createChart,
+  CandlestickSeries,
+  HistogramSeries,
   createSeriesMarkers,
-  type CandlestickData,
-  type HistogramData,
-  type IChartApi,
-  type ISeriesApi,
-  type ISeriesMarkersPluginApi,
-  type LogicalRange,
-  type MouseEventParams,
-  type SeriesMarker,
-  type SeriesMarkerBarPosition,
-  type Time,
-} from "lightweight-charts";
+  type ChartApi,
+} from "@/lib/charts";
 
 type PriceChartDatum = {
-  time: Time;
+  time: string;
   open: number;
   high: number;
   low: number;
@@ -31,7 +20,7 @@ type PriceChartDatum = {
 };
 
 type PriceChartMarker = {
-  time: Time;
+  time: string;
   position?: "aboveBar" | "belowBar" | "inBar";
   shape?: "circle" | "square" | "arrowUp" | "arrowDown";
   color?: string;
@@ -46,24 +35,6 @@ interface PriceChartProps {
   onCrosshairMove?: (candle: any) => void;
 }
 
-function markerShape(shape: PriceChartMarker["shape"]): SeriesMarker<Time>["shape"] {
-  if (shape === "square" || shape === "arrowUp" || shape === "arrowDown") {
-    return shape;
-  }
-  return "circle";
-}
-
-function markerPosition(position: PriceChartMarker["position"]): SeriesMarkerBarPosition {
-  if (position === "belowBar" || position === "inBar") {
-    return position;
-  }
-  return "aboveBar";
-}
-
-function markerColor(color: string | undefined) {
-  return color || "#64748b";
-}
-
 function volumeColor(datum: PriceChartDatum) {
   if (datum.color) {
     return datum.color.endsWith("66") ? datum.color : `${datum.color}66`;
@@ -73,114 +44,39 @@ function volumeColor(datum: PriceChartDatum) {
 
 export function PriceChart({ data, markers, title, subtitle, onCrosshairMove }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const markerApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
-  const hasUserViewportRef = useRef(false);
-  const suppressViewportTrackingRef = useRef(false);
+  const chartRef = useRef<ChartApi | null>(null);
+  const candleSeriesRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
+  const hasFittedContentRef = useRef(false);
   const onCrosshairMoveRef = useRef(onCrosshairMove);
 
   useEffect(() => {
     onCrosshairMoveRef.current = onCrosshairMove;
   }, [onCrosshairMove]);
 
-  const candleData = useMemo<CandlestickData<Time>[]>(
-    () =>
-      data.map((d) => ({
-        time: d.time,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-      })),
-    [data],
-  );
-
-  const volumeData = useMemo<HistogramData<Time>[]>(
-    () =>
-      data.map((d) => ({
-        time: d.time,
-        value: d.volume ?? 0,
-        color: volumeColor(d),
-      })),
-    [data],
-  );
-
-  const seriesMarkers = useMemo<SeriesMarker<Time>[]>(
-    () =>
-      markers.map((marker) => ({
-        time: marker.time,
-        position: markerPosition(marker.position),
-        shape: markerShape(marker.shape),
-        color: markerColor(marker.color),
-        text: marker.text,
-      })),
-    [markers],
-  );
-
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    if (!containerRef.current) return;
 
-    const chart = createChart(container, {
-      width: container.clientWidth,
-      height: Math.max(400, container.clientHeight),
+    const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#ffffff" },
+        background: { type: "solid", color: "#ffffff" },
         textColor: "#5f6f83",
-        fontFamily: "'IBM Plex Sans KR', Inter, sans-serif",
-        attributionLogo: true,
       },
       grid: {
         vertLines: { color: "rgba(148, 163, 184, 0.18)" },
         horzLines: { color: "rgba(148, 163, 184, 0.18)" },
-      },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-      },
-      rightPriceScale: {
-        borderVisible: false,
-        scaleMargins: {
-          top: 0.08,
-          bottom: 0.28,
-        },
-      },
-      timeScale: {
-        borderVisible: false,
-        rightOffset: 6,
-        barSpacing: 10,
-        fixLeftEdge: false,
-        fixRightEdge: false,
-      },
-      handleScroll: {
-        mouseWheel: true,
-        pressedMouseMove: true,
-        horzTouchDrag: true,
-        vertTouchDrag: false,
-      },
-      handleScale: {
-        mouseWheel: true,
-        pinch: true,
-        axisPressedMouseMove: true,
-        axisDoubleClickReset: true,
       },
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#22ab94",
       downColor: "#f23645",
-      wickUpColor: "#22ab94",
-      wickDownColor: "#f23645",
-      borderVisible: false,
     });
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
-      priceScaleId: "",
-      priceLineVisible: false,
-      lastValueVisible: false,
     });
+
     volumeSeries.priceScale().applyOptions({
       scaleMargins: {
         top: 0.76,
@@ -188,22 +84,13 @@ export function PriceChart({ data, markers, title, subtitle, onCrosshairMove }: 
       },
     });
 
-    const markerApi = createSeriesMarkers(candleSeries, []);
-
-    const onVisibleRangeChange = (_range: LogicalRange | null) => {
-      if (!suppressViewportTrackingRef.current) {
-        hasUserViewportRef.current = true;
-      }
-    };
-    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange);
-
-    chart.subscribeCrosshairMove((param: MouseEventParams<Time>) => {
+    chart.subscribeCrosshairMove((param: any) => {
       if (!param || !param.time) {
         onCrosshairMoveRef.current?.(null);
         return;
       }
-      const candle = param.seriesData.get(candleSeries) as CandlestickData<Time> | undefined;
-      const volume = param.seriesData.get(volumeSeries) as HistogramData<Time> | undefined;
+      const candle = param.seriesData.get(candleSeries);
+      const volume = param.seriesData.get(volumeSeries);
       onCrosshairMoveRef.current?.({
         time: param.time,
         open: candle?.open,
@@ -217,50 +104,54 @@ export function PriceChart({ data, markers, title, subtitle, onCrosshairMove }: 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
-    markerApiRef.current = markerApi;
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (!entry || !chartRef.current) return;
-      chartRef.current.applyOptions({
-        width: Math.max(1, Math.round(entry.contentRect.width)),
-        height: Math.max(400, Math.round(entry.contentRect.height)),
-      });
+      if (entry && chartRef.current) {
+        chartRef.current.applyOptions({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+      }
     });
-    resizeObserver.observe(container);
+    resizeObserver.observe(containerRef.current);
 
     return () => {
       resizeObserver.disconnect();
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange);
-      markerApi.detach();
-      chart.remove();
+      if (chartRef.current) {
+        chartRef.current.destroy();
+      }
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
-      markerApiRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    const chart = chartRef.current;
-    const candleSeries = candleSeriesRef.current;
-    const volumeSeries = volumeSeriesRef.current;
-    const markerApi = markerApiRef.current;
-    if (!chart || !candleSeries || !volumeSeries || !markerApi) return;
+    if (!chartRef.current || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    const visibleRange = chart.timeScale().getVisibleLogicalRange();
-    candleSeries.setData(candleData);
-    volumeSeries.setData(volumeData);
-    markerApi.setMarkers(seriesMarkers);
+    const candleData = data.map((d) => ({
+      time: d.time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }));
 
-    suppressViewportTrackingRef.current = true;
-    if (hasUserViewportRef.current && visibleRange) {
-      chart.timeScale().setVisibleLogicalRange(visibleRange);
-    } else {
-      chart.timeScale().fitContent();
+    const volumeData = data.map((d) => ({
+      time: d.time,
+      value: d.volume,
+      color: volumeColor(d),
+    }));
+
+    candleSeriesRef.current.setData(candleData);
+    volumeSeriesRef.current.setData(volumeData);
+    createSeriesMarkers(candleSeriesRef.current, markers);
+    if (!hasFittedContentRef.current) {
+      chartRef.current.timeScale().fitContent();
+      hasFittedContentRef.current = true;
     }
-    suppressViewportTrackingRef.current = false;
-  }, [candleData, seriesMarkers, volumeData]);
+  }, [data, markers]);
 
   return (
     <div className="flex h-full flex-col">

@@ -205,15 +205,15 @@ Verification:
 
 ## Graph View Price Chart Interaction Upgrade
 
-Purpose: Upgrade the `Graph View` `주가-공시 차트` from the local canvas renderer to a more capable TradingView-style chart interaction model without using the commercial TradingView API.
+Purpose: Upgrade the `Graph View` `주가-공시 차트` with FINIQ-owned chart code so the graph has professional trading-chart interactions without any external chart runtime, logo, or attribution requirement.
 
 Implementation summary:
-- Replaced the custom `src/lib/charts.ts` renderer with the Apache-2.0 `lightweight-charts` package.
-- Kept the existing `PriceChart` props and crosshair callback contract so both `Graph View` and company detail pages receive the improved chart without caller changes.
-- Enabled mouse drag panning, wheel/pinch zooming, axis drag scaling, and axis double-click reset through the library interaction options.
-- Preserved user logical viewport across resize and data refresh instead of forcing `fitContent()` on every resize.
-- Kept disclosure markers on the candlestick series via `createSeriesMarkers` and retained the TradingView attribution logo required by the library license.
-- Added frontend tests for dependency usage, interaction options, attribution, and viewport preservation.
+- Removed the `lightweight-charts` runtime dependency and restored the local `src/lib/charts.ts` renderer as FINIQ-owned chart code.
+- Kept the existing `PriceChart` props and crosshair callback contract so both `Graph View` and company detail pages receive the chart without caller changes.
+- Added right price-axis drag scaling, price-axis wheel zoom, and price-axis double-click reset to the local canvas renderer.
+- Preserved user viewport across resize and marker/data refresh after the initial fit instead of forcing `fitContent()` on every resize.
+- Kept disclosure markers on the candlestick series via the local `createSeriesMarkers` wrapper.
+- Added frontend tests for no external logo-obligation dependency, interaction support, and viewport preservation.
 
 Verification:
 - `node --test tests/frontend/priceChart.test.mjs`

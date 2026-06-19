@@ -12,7 +12,6 @@
     "@finiq/graph-viewer": "0.1.0",
     "@finiq/theme": "0.1.0",
     "@finiq/ui": "0.1.0",
-    "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.16.0",
     "next": "^16.3.0-canary.6",
     "react": "^19.2.5",
