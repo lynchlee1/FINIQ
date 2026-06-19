@@ -56,6 +56,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Quantiwise duplicate recursive scan setting | 내부까지 검사 | System setting for including subfolders recursively in `중복 검사하기`; default is off. |
 | Quantiwise duplicate Parquet cleanup action | 중복 검사하기 | Button/action on `Quantiwise - 병합하기` that finds same-account Parquet files fully covered by a more complete same-account file before deletion. |
 | Quantiwise conversion pre-run check | 변환 전 확인 | Use for the automatic check that scans Excel files without saving before `Quantiwise 변환`. |
+| Quantiwise conversion target Excel table | 대상 파일 | Use for the selectable Excel file table on `Quantiwise - Parquet 변환하기`. |
 | Quantiwise account ID mapping | 계정-ID 매핑 | Use for the editable Sheet/account_id/account_name mapping in `Parquet 변환하기`. |
 | Quantiwise failed-only resume button | 실패분 이어서 실행 | Use for rerunning `Parquet 변환하기` while skipping Sheet Parquet outputs already completed in the data path. |
 

@@ -1961,6 +1961,7 @@ def convert_asset_excels_to_wide_parquet(
         "accounts_processed": len(sources_by_account),
         "write_mode": normalized_mode,
         "resume_failed_only": resume_failed_only,
+        "selected_files": selected_files or [],
         "conflict_policy": "error",
         "code_name_mapping": {
             "path": str(code_name_mapping_path),
