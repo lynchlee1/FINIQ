@@ -23,6 +23,7 @@ export type AssetExcelConvertPayload = {
   source_directory: string;
   output_directory: string;
   write_mode: string;
+  selected_files?: string[];
   account_mappings?: AssetAccountMapping[];
   resume_failed_only?: boolean;
 };

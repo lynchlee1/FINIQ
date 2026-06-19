@@ -5,7 +5,7 @@
 - `/Users/wonwoolee/Documents/GitHub/FINIQ/resources/Quantiwise` 아래 Excel 목록 조회 및 Sheet 읽기 기능 추가.
 - Market Desk Web UI의 `/utility/assets-excel`은 `Quantiwise - Excel 미리보기`, `/utility/assets-excel/convert`는 `Parquet 변환하기`, `/utility/assets-excel/parquet`은 `Quantiwise - Parquet 미리보기`, `/utility/assets-excel/merge`는 `Quantiwise - 병합하기`로 분리한다.
 - `Quantiwise - Excel 미리보기`는 원본 데이터 경로 아래 Excel 파일 하나와 Sheet 하나를 선택해 Sheet preview를 보여준다.
-- `Parquet 변환하기`는 원본 데이터 경로 아래 모든 Excel 파일을 변환 전 확인 및 Wide Parquet 변환 대상으로 사용한다.
+- `Parquet 변환하기`는 원본 데이터 경로 아래 Excel 파일 목록을 보여주고, 사용자가 선택한 Excel 파일만 변환 전 확인 및 Wide Parquet 변환 대상으로 사용한다.
 - `Quantiwise - 병합하기`는 사용자가 고른 `병합 대상 경로` 안에서 같은 계정 Parquet 파일을 2개씩 하나 이상 선택해 `병합 결과 경로`에 결과를 저장한다.
 - 원본 데이터 경로와 데이터 경로는 UI/API 호출자가 명시적으로 지정한다. Quantiwise UI/API는 기본 경로나 출력 경로를 자동 생성하지 않는다.
 - 변환 결과는 Sheet 하나당 Parquet 하나로 저장한다. 파일명은 `<accountName>_<YYYYMMDD>_<YYYYMMDD>_<companiesHash>.parquet` 형식이다. 예: `nxtHigh_20001231_20251223_<sha256>.parquet`.
@@ -50,7 +50,7 @@
 - Quantiwise 경로 입력은 모두 명시 지정한다. 빈 원본 데이터 경로, 데이터 경로, 병합 대상, 병합 결과 경로를 기본값으로 대체하지 않는다.
 - 병합하기는 `병합 대상 경로` 안의 account Parquet 파일을 같은 계정별로 정확히 2개 선택한 경우만 실행한다. 경로 안의 모든 파일을 한 번에 병합하지 않는다.
 - 기존 관리 DB와 합치는 작업은 변환하기가 아니라 병합하기에서 처리한다.
-- 변환 대상 파일은 원본 데이터 경로 아래 전체 Excel 파일로 고정한다. 개별 파일 체크박스나 필터 선택 UI를 두지 않는다.
+- 변환 대상 파일은 `대상 파일`에서 선택한 Excel 파일이다. 화면 최초 로딩 시 전체 Excel을 선택하되, 사용자가 일부 파일만 남겨 실행할 수 있다.
 - 변환 실행 시 Sheet/계정 매핑과 skipped Sheet를 job 로그와 결과 payload에서 자동 확인할 수 있어야 한다.
 - 실패분 이어서 실행은 새 병합 기능이 아니며, 이미 완료된 Sheet Parquet를 재생성하지 않는 재시도 옵션으로만 사용한다.
 - 기존 출력 폴더의 Parquet 존재 여부는 내부 선택지 구성에만 사용하고, `Parquet 변환하기` 실행 화면에서 기존 결과 감지 경고를 표시하지 않는다.

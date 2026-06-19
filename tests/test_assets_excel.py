@@ -765,6 +765,7 @@ def test_convert_asset_excels_uses_selected_files(tmp_path):
     )
 
     assert payload["accounts_processed"] == 1
+    assert payload["selected_files"] == ["source-b.xlsx"]
     assert [item["account_name"] for item in payload["outputs"].values()] == ["volume"]
     assert not (output_dir / "stock_price.parquet").exists()
 

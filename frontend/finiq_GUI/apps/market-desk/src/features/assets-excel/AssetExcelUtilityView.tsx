@@ -217,6 +217,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const isMergeMode = mode === "merge";
   const pageTitle = isConvertMode ? "Quantiwise - Parquet 변환하기" : isParquetPreviewMode ? "Quantiwise - Parquet 미리보기" : isMergeMode ? "Quantiwise - 병합하기" : "Quantiwise - Excel 미리보기";
   const [excelFiles, setExcelFiles] = useState<AssetExcelFile[]>([]);
+  const [selectedConvertFiles, setSelectedConvertFiles] = useState<string[]>([]);
   const [sourceDirectory, setSourceDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
   const [mergeBaseDirectory, setMergeBaseDirectory] = useState("");
@@ -341,6 +342,13 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         if (cancelled) return;
         const files = data.excel_files || [];
         setExcelFiles(files);
+        if (isConvertMode) {
+          setSelectedConvertFiles((current) => {
+            const available = new Set(files.map((file: AssetExcelFile) => file.relative_path));
+            const kept = current.filter((fileName) => available.has(fileName));
+            return kept.length ? kept : files.map((file: AssetExcelFile) => file.relative_path);
+          });
+        }
         setSelectedPreviewFile((current) => current && files.some((file: AssetExcelFile) => file.relative_path === current) ? current : files[0]?.relative_path || "");
       })
       .catch((err) => {
@@ -354,7 +362,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     return () => {
       cancelled = true;
     };
-  }, [isMergeMode, isParquetPreviewMode, sourceDirectory, setIsErrorStatus, setStatus]);
+  }, [isConvertMode, isMergeMode, isParquetPreviewMode, sourceDirectory, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     if (!outputDirectory.trim()) {
@@ -543,9 +551,12 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => outputRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
     [outputRows],
   );
+  const selectedConvertFileSet = useMemo(() => new Set(selectedConvertFiles), [selectedConvertFiles]);
+  const selectedConvertFileCount = selectedConvertFiles.length;
+  const allConvertFilesSelected = excelFiles.length > 0 && selectedConvertFileCount === excelFiles.length;
   const activityStatus = [
     `작업: ${isMergeMode ? "Parquet 병합" : "Excel에서 Parquet 변환"}`,
-    isMergeMode ? null : `대상 파일: ${formatInteger(excelFiles.length)}개`,
+    isMergeMode ? null : `대상 파일: ${formatInteger(selectedConvertFileCount)} / ${formatInteger(excelFiles.length)}개`,
     `예상 Sheet Parquet: ${formatInteger(Object.keys(previewData?.outputs || {}).length)}개`,
     `기존 출력 업데이트: ${formatInteger(updatingAccountCount)}개`,
     `Skipped / 충돌: ${formatInteger(skippedRows.length)} / ${formatInteger(conflictCount)}`,
@@ -572,6 +583,20 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       </button>
     </th>
   );
+  const toggleConvertFile = (fileName: string, checked: boolean) => {
+    setSelectedConvertFiles((current) => {
+      if (checked) {
+        return current.includes(fileName) ? current : [...current, fileName];
+      }
+      return current.filter((item) => item !== fileName);
+    });
+  };
+  const selectAllConvertFiles = () => {
+    setSelectedConvertFiles(excelFiles.map((file) => file.relative_path));
+  };
+  const clearConvertFiles = () => {
+    setSelectedConvertFiles([]);
+  };
   const selectedMergeCountsByAccount = useMemo(() => {
     const counts: Record<string, number> = {};
     selectedMergeFiles.forEach((fileName) => {
@@ -752,6 +777,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     saveSetting("asset_excel_source_directory", value);
     setPreviewData(null);
     setLastResult(null);
+    setSelectedConvertFiles([]);
     setSelectedParquetFile("");
     setParquetPayload(null);
     sheetPreviewCache.current = {};
@@ -941,6 +967,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       setIsErrorStatus(true);
       return;
     }
+    if (!selectedConvertFileCount) {
+      setStatus("변환 대상 파일을 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
     if (mappingsLoading) {
       setStatus("계정-ID 매핑을 불러오는 중입니다.");
       setIsErrorStatus(true);
@@ -959,6 +990,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         source_directory: sourceDirectory,
         output_directory: outputDirectory,
         write_mode: writeMode,
+        selected_files: selectedConvertFiles,
         account_mappings: normalizedAccountMappings,
         resume_failed_only: resumeFailedOnly,
       });
@@ -990,7 +1022,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                   />
                   {isConvertMode ? (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">이 경로 아래의 모든 Excel 파일을 실행 대상으로 사용합니다. 대상 파일: {formatInteger(excelFiles.length)}개</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">이 경로 아래의 Excel 파일 중 선택한 파일만 실행 대상으로 사용합니다. 대상 파일: {formatInteger(selectedConvertFileCount)} / {formatInteger(excelFiles.length)}개</p>
                   ) : null}
                 </div>
               ) : null}
@@ -1038,6 +1070,70 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               ) : null}
             </CardContent>
           </Card>
+
+          {isConvertMode ? (
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base dark:text-white">대상 파일</CardTitle>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">선택한 Excel 파일만 변환합니다.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={selectAllConvertFiles} disabled={!!activeJobId || loading || allConvertFilesSelected || !excelFiles.length}>
+                    전체 선택
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={clearConvertFiles} disabled={!!activeJobId || loading || !selectedConvertFileCount}>
+                    선택 해제
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className={`text-sm ${selectedConvertFileCount ? "text-slate-600 dark:text-slate-300" : "text-amber-600 dark:text-amber-300"}`}>
+                선택한 파일: {formatInteger(selectedConvertFileCount)} / {formatInteger(excelFiles.length)}개
+              </p>
+              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
+                    <tr className="text-left text-slate-500 dark:text-slate-400">
+                      <th className="w-12 px-3 py-2 font-medium">선택</th>
+                      <th className="px-3 py-2 font-medium">파일</th>
+                      <th className="px-3 py-2 text-right font-medium">크기</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
+                    {excelFiles.map((file) => {
+                      const selected = selectedConvertFileSet.has(file.relative_path);
+                      return (
+                        <tr key={file.relative_path} className="dark:text-slate-300">
+                          <td className="px-3 py-2">
+                            <Checkbox
+                              checked={selected}
+                              disabled={!!activeJobId}
+                              onCheckedChange={(value) => toggleConvertFile(file.relative_path, !!value)}
+                              aria-label={`${file.relative_path} 선택`}
+                              className="dark:border-[#30363d]"
+                            />
+                          </td>
+                          <td className="break-all px-3 py-2">{file.relative_path}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatBytes(file.size_bytes)}</td>
+                        </tr>
+                      );
+                    })}
+                    {!excelFiles.length ? (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">
+                          {loading ? "파일 목록을 불러오는 중..." : "표시할 Excel 파일이 없습니다."}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+          ) : null}
 
           {isConvertMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
@@ -1244,11 +1340,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-3">
-                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length}>
+                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length || !selectedConvertFileCount}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
-                <Button variant="outline" className="w-full" onClick={() => handleStart(true)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length}>
+                <Button variant="outline" className="w-full" onClick={() => handleStart(true)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length || !selectedConvertFileCount}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실패분 이어서 실행
                 </Button>
