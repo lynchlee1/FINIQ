@@ -65,6 +65,19 @@ def _write_disclosure_shard(root: Path) -> Path:
                     "테스트전자",
                     "005930",
                     "코스피",
+                    "2024-12-30 09:10",
+                    "2024-12-30",
+                    "사업보고서",
+                    "사업보고서",
+                    "20241230000001",
+                    "",
+                    "테스트전자",
+                ),
+                (
+                    "005930",
+                    "테스트전자",
+                    "005930",
+                    "코스피",
                     "2025-01-02 09:10",
                     "2025-01-02",
                     "주주총회소집결의",
@@ -112,13 +125,13 @@ def _write_disclosure_shard(root: Path) -> Path:
                 "format": "finiq_disclosure_table_manifest_v1",
                 "schema_version": 2,
                 "table_name": "disclosures",
-                "summary": {"companies": 2, "disclosures": 3, "shards": 1},
+                "summary": {"companies": 2, "disclosures": 4, "shards": 1},
                 "shards": [
                     {
                         "year": "2025",
                         "relative_path": "2025.sqlite",
                         "companies": 2,
-                        "disclosures": 3,
+                        "disclosures": 4,
                     }
                 ],
             },
@@ -132,13 +145,13 @@ def _write_disclosure_shard(root: Path) -> Path:
 def _write_quanti_parquet(root: Path, *, include_volume: bool = True) -> Path:
     quanti_dir = root / "Quantiwise" / "parquetCalamine"
     quanti_dir.mkdir(parents=True)
-    dates = pd.to_datetime(["2025-01-02", "2025-01-03", "2025-01-06"])
+    dates = pd.to_datetime(["2024-12-30", "2025-01-02", "2025-01-03", "2025-01-06"])
     values = {
-        "open": [100, 110, 115],
-        "high": [112, 116, 118],
-        "low": [98, 108, 113],
-        "close": [111, 114, 117],
-        "volume": [1000, 1200, 900],
+        "open": [90, 100, 110, 115],
+        "high": [95, 112, 116, 118],
+        "low": [88, 98, 108, 113],
+        "close": [94, 111, 114, 117],
+        "volume": [800, 1000, 1200, 900],
     }
     for account, account_values in values.items():
         if account == "volume" and not include_volume:
@@ -158,7 +171,7 @@ def test_ontology_status_reports_manifest_and_quanti_coverage(tmp_path: Path) ->
 
     payload = build_ontology_status(manifest_path=manifest_path, quanti_dir=quanti_dir)
 
-    assert payload["kind"]["summary"]["disclosures"] == 3
+    assert payload["kind"]["summary"]["disclosures"] == 4
     assert payload["kind"]["shard_years"] == ["2025"]
     assert payload["quantiwise"]["available_items"] == ["close", "high", "low", "open", "volume"]
     assert payload["quantiwise"]["mapped_companies"] == 1
@@ -178,11 +191,12 @@ def test_search_ontology_companies_returns_counts_and_price_availability(tmp_pat
 
     assert payload["companies"] == [
         {
-            "company_id": "005930",
+            "company_id": "A005930",
+            "stock_code": "A005930",
             "company_name": "테스트전자",
             "market": "코스피",
-            "disclosure_count": 2,
-            "first_disclosed_date": "2025-01-02",
+            "disclosure_count": 3,
+            "first_disclosed_date": "2024-12-30",
             "last_disclosed_date": "2025-01-02",
             "has_price_data": True,
         }
@@ -196,13 +210,15 @@ def test_build_ontology_company_panel_aligns_disclosures_to_price_candles(tmp_pa
     payload = build_ontology_company_panel(
         manifest_path=manifest_path,
         quanti_dir=quanti_dir,
-        company_id="005930",
+        company_id="A005930",
         start_date=date(2025, 1, 2),
         end_date=date(2025, 1, 6),
         display_frequency_label="일봉",
     )
 
     assert payload["company"]["company_name"] == "테스트전자"
+    assert payload["company"]["company_id"] == "A005930"
+    assert payload["company"]["stock_code"] == "A005930"
     assert [candle["time"] for candle in payload["chart"]["candles"]] == [
         "2025-01-02",
         "2025-01-03",
@@ -214,6 +230,28 @@ def test_build_ontology_company_panel_aligns_disclosures_to_price_candles(tmp_pa
     assert payload["summary"]["visible_disclosures"] == 2
     assert payload["summary"]["after_close_disclosures"] == 1
     assert payload["messages"] == []
+
+
+def test_build_ontology_company_panel_defaults_to_full_available_range(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    payload = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A005930",
+        display_frequency_label="일봉",
+    )
+
+    assert payload["range_start"] == "2024-12-30"
+    assert payload["range_end"] == "2025-01-06"
+    assert [candle["time"] for candle in payload["chart"]["candles"]] == [
+        "2024-12-30",
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-06",
+    ]
+    assert payload["summary"]["visible_disclosures"] == 3
 
 
 def test_build_ontology_company_panel_returns_json_safe_timeline_for_unmatched_markers(tmp_path: Path) -> None:
@@ -308,14 +346,14 @@ def test_ontology_api_routes_return_real_data_payloads(tmp_path: Path) -> None:
         },
     )
     assert companies.status_code == 200
-    assert companies.json()["companies"][0]["company_id"] == "005930"
+    assert companies.json()["companies"][0]["company_id"] == "A005930"
 
     panel = client.get(
         "/api/ontology/company-panel",
         params={
             "manifest_path": str(manifest_path),
             "quanti_dir": str(quanti_dir),
-            "company_id": "005930",
+            "company_id": "A005930",
             "start_date": "2025-01-02",
             "end_date": "2025-01-06",
             "display_frequency": "일봉",

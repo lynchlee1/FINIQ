@@ -110,9 +110,14 @@ def _stock_column(company_id: str) -> str:
     return f"A{digits.zfill(6)}"
 
 
-def _display_stock_code(company_id: str) -> str:
+def _kind_company_id(company_id: str) -> str:
     digits = "".join(char for char in str(company_id or "") if char.isdigit())
     return digits.zfill(6) if digits else ""
+
+
+def _display_stock_code(company_id: str) -> str:
+    digits = "".join(char for char in str(company_id or "") if char.isdigit())
+    return f"A{digits.zfill(6)}" if digits else ""
 
 
 def _find_item_file(quanti_dir: Path, item: str) -> Path | None:
@@ -265,7 +270,8 @@ def search_ontology_companies(
 
     companies = [
         {
-            "company_id": str(row.get("company_id") or ""),
+            "company_id": _display_stock_code(str(row.get("company_id") or "")),
+            "stock_code": _display_stock_code(str(row.get("company_id") or "")),
             "company_name": str(row.get("company_name") or ""),
             "market": str(row.get("market") or ""),
             "disclosure_count": int(row.get("disclosure_count") or 0),
@@ -308,7 +314,7 @@ def _load_disclosures(
                 "disclosed_date >= ?",
                 "disclosed_date <= ?",
             ]
-            params: list[Any] = [company_id, start_date.isoformat(), end_date.isoformat()]
+            params: list[Any] = [_kind_company_id(company_id), start_date.isoformat(), end_date.isoformat()]
             if title_keyword:
                 clauses.append("(title LIKE ? OR title_display LIKE ?)")
                 pattern = f"%{title_keyword}%"
@@ -503,21 +509,24 @@ def build_ontology_company_panel(
     display_frequency_label: str = "자동",
 ) -> dict[str, Any]:
     today = date.today()
-    range_start = _parse_date(start_date, today.replace(day=1))
-    range_end = _parse_date(end_date, today)
+    has_manual_start = bool(str(start_date or "").strip())
+    has_manual_end = bool(str(end_date or "").strip())
+    query_start = _parse_date(start_date, date(1900, 1, 1))
+    query_end = _parse_date(end_date, today)
+    stock_code = _display_stock_code(str(company_id))
     resolved_manifest, manifest = _load_manifest(manifest_path)
     resolved_quanti = _resolve_path(quanti_dir, DEFAULT_QUANTIWISE_PARQUET_DIR)
     disclosure_rows = _load_disclosures(
         manifest_path=resolved_manifest,
         manifest=manifest,
-        company_id=str(company_id),
-        start_date=range_start,
-        end_date=range_end,
+        company_id=stock_code,
+        start_date=query_start,
+        end_date=query_end,
         title_keyword=title_keyword,
         market=market,
     )
     company = {
-        "company_id": str(company_id),
+        "company_id": stock_code,
         "company_name": disclosure_rows[0]["company_name"] if disclosure_rows else "",
         "market": disclosure_rows[0]["market"] if disclosure_rows else "",
         "disclosures": [
@@ -539,19 +548,19 @@ def build_ontology_company_panel(
 
     price_rows, messages = _load_quanti_ohlcv(
         quanti_dir=resolved_quanti,
-        company_id=str(company_id),
-        start_date=range_start,
-        end_date=range_end,
+        company_id=stock_code,
+        start_date=query_start,
+        end_date=query_end,
     )
     if messages:
-        return _empty_company_panel(company, range_start=range_start, range_end=range_end, messages=messages)
+        return _empty_company_panel(company, range_start=query_start, range_end=query_end, messages=messages)
 
     price_frame = prepare_price_dataframe(price_rows)
     if price_frame.empty:
         return _empty_company_panel(
             company,
-            range_start=range_start,
-            range_end=range_end,
+            range_start=query_start,
+            range_end=query_end,
             messages=["선택한 기간에 주가 데이터가 없습니다."],
         )
 
@@ -575,10 +584,14 @@ def build_ontology_company_panel(
 
     group_counts = Counter(disclosure_frame["disclosure_group"].tolist()) if not disclosure_frame.empty else Counter()
     trade_days = _non_empty_trade_days(disclosure_frame)
+    available_dates = [pd.Timestamp(value).date() for value in price_frame["trade_day"].tolist()]
+    available_dates.extend(date.fromisoformat(row["disclosed_date"]) for row in disclosure_rows if row.get("disclosed_date"))
+    range_start = query_start if has_manual_start or not available_dates else min(available_dates)
+    range_end = query_end if has_manual_end or not available_dates else max(available_dates)
     return {
         "company": {
-            "company_id": str(company_id),
-            "stock_code": _display_stock_code(str(company_id)),
+            "company_id": stock_code,
+            "stock_code": stock_code,
             "company_name": company["company_name"],
             "market": company["market"],
         },
@@ -629,7 +642,7 @@ def _empty_company_panel(
 ) -> dict[str, Any]:
     return {
         "company": {
-            "company_id": str(company.get("company_id") or ""),
+            "company_id": _display_stock_code(str(company.get("company_id") or "")),
             "stock_code": _display_stock_code(str(company.get("company_id") or "")),
             "company_name": str(company.get("company_name") or ""),
             "market": str(company.get("market") or ""),

@@ -264,3 +264,21 @@ Verification:
 - `node --test tests/frontend/ontologyGraphWorkspace.test.mjs`
 - `node --test tests/frontend/*.test.mjs`
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+
+## Graph View Full-Range Disclosure Analysis
+
+Purpose: Make `Graph View` focus on stock selection, default the `주가-공시 차트` to the full available date range, and replace the low-value `분석 요약` area with usable disclosure timeline and analysis surfaces.
+
+Implementation summary:
+- Changed Ontology company identifiers and stock labels to the `A000000` format while keeping Kind queries compatible with numeric company IDs.
+- Made company panels default to the full available price/disclosure range when no manual date range is provided.
+- Removed the visible `분석 조건` box and moved stock selection into the top chart toolbar.
+- Removed the chart/timeline mode switch so the top toolbar only changes the active stock.
+- Replaced `분석 요약` with `공시 타임라인`, and placed `공시 분석` in the former timeline area below it.
+- Added a first-pass Triple Barrier Method analysis table using 5% upper/lower barriers and a 20-trading-day horizon.
+- Updated Ontology UI terminology and regression coverage for full-range defaults, A-code selection, and disclosure analysis labels.
+
+Verification:
+- `node --test tests/frontend/ontologyGraphWorkspace.test.mjs`
+- `python3 -m pytest tests/market_desk/test_ontology_graph.py -q`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
