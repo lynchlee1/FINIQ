@@ -214,7 +214,7 @@ export default function FilterPage() {
 
   const handleFilter = async () => {
     if (!rootDirectory?.trim()) {
-      setStatus("입력 경로를 선택하세요.");
+      setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }

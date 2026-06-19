@@ -110,7 +110,7 @@ export default function HtmlParsePage() {
       lines.push(`파싱 성공: ${formatInteger(summary.parsed_files)}`);
       lines.push(`파싱 경고: ${formatInteger(warningCount)}`);
       lines.push(`파싱 실패: ${formatInteger(summary.failed_files)}`);
-      lines.push(`결과 경로: ${res.output_path || ""}`);
+      lines.push(`결과 데이터 경로: ${res.output_path || ""}`);
     }
 
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
@@ -221,7 +221,7 @@ export default function HtmlParsePage() {
 
   const handleRun = async () => {
     if (!inputDirectory) {
-      setStatus("입력 경로를 선택하세요.");
+      setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -259,7 +259,7 @@ export default function HtmlParsePage() {
 
   const handleExport = () => {
     if (!outputPath) {
-      setStatus("파싱 결과 경로가 필요합니다.");
+      setStatus("파싱 결과 데이터 경로가 필요합니다.");
       setIsErrorStatus(true);
       return;
     }

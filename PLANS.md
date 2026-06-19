@@ -8,4 +8,5 @@ Implementation summary: The workflow sidebar no longer repeats the page title, a
 
 Verification:
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
-- Local browser check on `/table`, `/utility`, `/utility/assets-excel`, `/html-download`, and `/html-parse` confirmed top/sidebar title alignment and no remaining `Run` eyebrow in the checked content.
+- Loop 1 browser check on `/utility/assets-excel`, `/table`, `/filter`, `/html-parse`, and `/` confirmed no sidebar `h2` title and path labels with `데이터 경로`.
+- Loop 2 browser check on `/html-download`, `/html-section-split`, `/html-parse`, `/html-change-log`, `/html-bond-summary`, and `/utility/assets-excel/merge` confirmed no sidebar `h2` title and no checked path labels missing `데이터 경로`.

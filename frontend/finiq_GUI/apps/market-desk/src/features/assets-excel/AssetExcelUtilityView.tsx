@@ -55,7 +55,7 @@ function jobStatusLines(data: any): string[] {
         `중복 묶음: ${formatInteger(data.result.duplicate_group_count)}개`,
         `삭제 후보: ${formatInteger(data.result.deletion_candidate_count)}개`,
         `삭제 파일: ${formatInteger(data.result.deleted_count)}개`,
-        `병합 대상 경로: ${data.result.target_directory || ""}`,
+        `병합 대상 데이터 경로: ${data.result.target_directory || ""}`,
       );
       return lines;
     }
@@ -65,7 +65,7 @@ function jobStatusLines(data: any): string[] {
         "병합 완료",
         `계정: ${formatInteger(data.result.accounts_processed)}개`,
         `선택 파일: ${formatInteger((data.result.selected_files || []).length)}개`,
-        `병합 결과 경로: ${data.result.output_directory || ""}`,
+        `병합 결과 데이터 경로: ${data.result.output_directory || ""}`,
       );
       return lines;
     }
@@ -828,7 +828,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const handleInspectDuplicates = async () => {
     if (activeJobId) return;
     if (!mergeBaseDirectory.trim()) {
-      setStatus("병합 대상 경로를 선택하세요.");
+      setStatus("병합 대상 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -922,17 +922,17 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     if (activeJobId) return;
     if (isMergeMode) {
       if (!mergeBaseDirectory.trim()) {
-        setStatus("병합 대상 경로를 선택하세요.");
+        setStatus("병합 대상 데이터 경로를 선택하세요.");
         setIsErrorStatus(true);
         return;
       }
       if (!mergeSameDirectory && !outputDirectory.trim()) {
-        setStatus("병합 결과 경로를 선택하세요.");
+        setStatus("병합 결과 데이터 경로를 선택하세요.");
         setIsErrorStatus(true);
         return;
       }
       if (!mergeSelectionReady) {
-        setStatus("병합 대상 경로에서 같은 계정 Parquet 파일을 2개씩 선택하세요.");
+        setStatus("병합 대상 데이터 경로에서 같은 계정 Parquet 파일을 2개씩 선택하세요.");
         setIsErrorStatus(true);
         return;
       }
@@ -1044,7 +1044,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               {isMergeMode ? (
                 <>
                   <div className="space-y-2">
-                    <Label className="dark:text-slate-300">병합 대상 경로</Label>
+                    <Label className="dark:text-slate-300">병합 대상 데이터 경로</Label>
                     <PathPickerInput
                       mode="folder"
                       value={mergeBaseDirectory}
@@ -1054,7 +1054,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="dark:text-slate-300">병합 결과 경로</Label>
+                    <Label className="dark:text-slate-300">병합 결과 데이터 경로</Label>
                     <PathPickerInput
                       mode="folder"
                       value={outputDirectory}
@@ -1524,7 +1524,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 </p>
               ) : null}
               <div className="space-y-2">
-                {renderOutputRowsTable(sortedMergeBaseOutputRows, "병합 대상 경로에 표시할 병합 대상이 없습니다.", true)}
+                {renderOutputRowsTable(sortedMergeBaseOutputRows, "병합 대상 데이터 경로에 표시할 병합 대상이 없습니다.", true)}
               </div>
             </CardContent>
           </Card>

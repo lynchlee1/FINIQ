@@ -31,11 +31,11 @@ const DOWNLOAD_VARIANTS = {
   external: {
     settingsTitle: "공시원문 외부 저장 설정",
     description: "다운로드된 공시 결과 JSON을 바탕으로 KIND 공시 뷰어 HTML을 대량 저장합니다.",
-    sourceLabel: "필터 결과 JSON 파일",
+    sourceLabel: "입력 데이터 경로 (필터 결과 JSON)",
     sourceHelp: "공시 필터링 결과 파일(JSON)을 선택하세요.",
     sourcePickMode: "file",
     sourceSettingKey: "html_download_source_path",
-    sourceRequiredMessage: "필터 결과 파일을 선택하세요.",
+    sourceRequiredMessage: "입력 데이터 경로를 선택하세요.",
     sourcePayloadKey: "source_json_path",
     defaultDirectoryKey: "html_output_directory",
     defaultDirectorySuffix: "viewer_html",
@@ -567,7 +567,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const handleCompressExternalHtml = async () => {
     if (variant !== "external") return;
     if (!compressInputDirectory) {
-      setStatus("외부 HTML 입력 경로를 선택하세요.");
+      setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }

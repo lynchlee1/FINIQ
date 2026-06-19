@@ -90,7 +90,7 @@ export default function HtmlSectionSplitPage() {
       lines.push(`대상 HTML: ${formatInteger(summary.found_files)}`);
       lines.push(`저장 완료: ${formatInteger(summary.saved_files)}`);
       lines.push(`건너뜀: ${formatInteger(summary.skipped_files)}`);
-      lines.push(`결과 경로: ${res.output_directory || ""}`);
+      lines.push(`결과 데이터 경로: ${res.output_directory || ""}`);
     }
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
       lines.push("", "최근 로그", ...data.progress_log);
@@ -136,7 +136,7 @@ export default function HtmlSectionSplitPage() {
 
   const inspectFolder = async () => {
     if (!inputDirectory) {
-      setStatus("입력 경로를 선택하세요.");
+      setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -169,7 +169,7 @@ export default function HtmlSectionSplitPage() {
 
   const startSave = async () => {
     if (!inputDirectory || !outputDirectory) {
-      setStatus("입력 경로와 결과 경로를 모두 입력하세요.");
+      setStatus("입력 데이터 경로와 결과 데이터 경로를 모두 입력하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -207,8 +207,11 @@ export default function HtmlSectionSplitPage() {
     >
       <div className="relative space-y-6">
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-[#30363d] dark:bg-[#161b22]">
+          <div className="mb-4">
+            <h2 className="text-base font-semibold text-slate-950 dark:text-white">데이터 경로</h2>
+          </div>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <HtmlField label="입력 경로">
+            <HtmlField label="입력 데이터 경로 (HTML)">
               <PathPickerInput
                 mode="folder"
                 value={inputDirectory}
@@ -217,7 +220,7 @@ export default function HtmlSectionSplitPage() {
                 onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
               />
             </HtmlField>
-            <HtmlField label="결과 경로">
+            <HtmlField label="결과 데이터 경로">
               <PathPickerInput
                 mode="folder"
                 value={outputDirectory}
