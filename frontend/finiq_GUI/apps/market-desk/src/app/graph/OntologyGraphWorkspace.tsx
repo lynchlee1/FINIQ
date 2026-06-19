@@ -17,7 +17,6 @@ import { cn } from "@finiq/ui/utils";
 import { apiGet } from "@/api/client";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { formatInteger } from "@/lib/format";
 
 const PriceChart = dynamic(() => import("@/components/PriceChart").then((mod) => mod.PriceChart), {
   ssr: false,
@@ -120,6 +119,8 @@ type OntologyPanel = {
   messages: string[];
 };
 
+const DISPLAY_FREQUENCY_OPTIONS = ["일봉", "5일봉", "20일봉", "월봉"] as const;
+
 function clampChartZoomSensitivity(value: number) {
   if (!Number.isFinite(value)) {
     return 0.55;
@@ -148,73 +149,13 @@ function normalizeStockCode(value: string) {
   return digits ? `A${digits.padStart(6, "0").slice(-6)}` : "";
 }
 
-function formatCompanyOptionLabel(company: OntologyCompany) {
-  return `${company.company_name} (${company.stock_code}) · ${company.market}`;
-}
-
-function buildTripleBarrierResults(
-  candles: CandleItem[],
-  markers: MarkerItem[],
-  upperBarrier: number,
-  lowerBarrier: number,
-  barrierHorizon: number,
-) {
-  return markers.slice(0, 80).map((marker) => {
-    const entryIndex = candles.findIndex((candle) => candle.time >= marker.time);
-    if (entryIndex < 0) {
-      return {
-        key: marker.acpt_no || `${marker.time}-${marker.title}`,
-        disclosedAt: marker.disclosed_at || marker.time,
-        group: marker.group || "기타",
-        title: marker.title || "-",
-        entryDate: "",
-        exitDate: "",
-        outcome: "가격 없음",
-        returnPct: 0,
-      };
-    }
-
-    const entry = candles[entryIndex];
-    const upper = entry.close * (1 + upperBarrier);
-    const lower = entry.close * (1 - lowerBarrier);
-    const lastIndex = Math.min(candles.length - 1, entryIndex + barrierHorizon);
-    let exit = candles[lastIndex];
-    let outcome = "기간 만료";
-
-    for (let index = entryIndex + 1; index <= lastIndex; index += 1) {
-      const candle = candles[index];
-      if (candle.high >= upper) {
-        exit = candle;
-        outcome = "상승 돌파";
-        break;
-      }
-      if (candle.low <= lower) {
-        exit = candle;
-        outcome = "하락 돌파";
-        break;
-      }
-    }
-
-    return {
-      key: marker.acpt_no || `${marker.time}-${marker.title}`,
-      disclosedAt: marker.disclosed_at || marker.time,
-      group: marker.group || "기타",
-      title: marker.title || "-",
-      entryDate: entry.time,
-      exitDate: exit.time,
-      outcome,
-      returnPct: entry.close ? ((exit.close - entry.close) / entry.close) * 100 : 0,
-    };
-  });
-}
-
 export function OntologyGraphWorkspace() {
   const [status, setStatus] = useState<OntologyStatus | null>(null);
-  const [companies, setCompanies] = useState<OntologyCompany[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<OntologyCompany | null>(null);
   const [panel, setPanel] = useState<OntologyPanel | null>(null);
   const [keyword, setKeyword] = useState("");
-  const [market, setMarket] = useState("전체");
+  const [displayFrequency, setDisplayFrequency] = useState<(typeof DISPLAY_FREQUENCY_OPTIONS)[number]>("일봉");
+  const [requestedPanelKey, setRequestedPanelKey] = useState("");
   const [chartZoomSensitivity, setChartZoomSensitivity] = useState(0.55);
   const [chartFullscreen, setChartFullscreen] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
@@ -240,11 +181,10 @@ export function OntologyGraphWorkspace() {
       const keywordText = keyword.trim().toUpperCase();
       const query = new URLSearchParams({
         keyword: keywordText.startsWith("A") ? normalizeStockCode(keywordText).slice(1) : keyword,
-        market,
+        market: "전체",
         limit: "30",
       });
       const data = await apiGet<OntologyCompaniesPayload>(`/api/ontology/companies?${query.toString()}`);
-      setCompanies(data.companies);
       setSelectedCompany((current) => {
         if (current && data.companies.some((company) => company.stock_code === current.stock_code)) {
           return current;
@@ -256,7 +196,7 @@ export function OntologyGraphWorkspace() {
     } finally {
       setLoadingCompanies(false);
     }
-  }, [keyword, market]);
+  }, [keyword]);
 
   const loadPanel = useCallback(async () => {
     if (!selectedCompany) {
@@ -264,11 +204,13 @@ export function OntologyGraphWorkspace() {
       return;
     }
     setLoadingPanel(true);
+    const requestKey = `${selectedCompany.stock_code}:${displayFrequency}`;
+    setRequestedPanelKey(requestKey);
     try {
       const query = new URLSearchParams({
         company_id: selectedCompany.stock_code,
-        market,
-        display_frequency: "자동",
+        market: "전체",
+        display_frequency: displayFrequency,
       });
       const data = await apiGet<OntologyPanel>(`/api/ontology/company-panel?${query.toString()}`);
       setPanel(data);
@@ -277,7 +219,7 @@ export function OntologyGraphWorkspace() {
     } finally {
       setLoadingPanel(false);
     }
-  }, [market, selectedCompany]);
+  }, [displayFrequency, selectedCompany]);
 
   useEffect(() => {
     loadStatus();
@@ -292,21 +234,12 @@ export function OntologyGraphWorkspace() {
     ? `${selectedCompany.company_name} (${selectedCompany.stock_code})`
     : "선택된 회사 없음";
   const statusMessages = useMemo(() => [...(status?.messages ?? []), ...(error ? [error] : [])], [error, status]);
-  const upperBarrier = 0.05;
-  const lowerBarrier = 0.05;
-  const barrierHorizon = 20;
-  const tripleBarrierResults = useMemo(
-    () => buildTripleBarrierResults(panel?.chart.candles ?? [], panel?.chart.markers ?? [], upperBarrier, lowerBarrier, barrierHorizon),
-    [panel],
-  );
-  const barrierSummary = useMemo(
-    () => ({
-      upper: tripleBarrierResults.filter((result) => result.outcome === "상승 돌파").length,
-      lower: tripleBarrierResults.filter((result) => result.outcome === "하락 돌파").length,
-      timeout: tripleBarrierResults.filter((result) => result.outcome === "기간 만료").length,
-    }),
-    [tripleBarrierResults],
-  );
+  const chartRangeText = panel ? `${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}` : "전체 기간";
+  const chartMetaText = `${selectedCompanyLabel} ${chartRangeText}`;
+  const chartIsLoading =
+    loadingCompanies ||
+    loadingPanel ||
+    (!!selectedCompany && requestedPanelKey !== `${selectedCompany.stock_code}:${displayFrequency}`);
   const handleChartZoomSensitivityChange = (event: ChangeEvent<HTMLInputElement> | FormEvent<HTMLInputElement>) => {
     setChartZoomSensitivity(clampChartZoomSensitivity(Number(event.currentTarget.value)));
   };
@@ -321,7 +254,7 @@ export function OntologyGraphWorkspace() {
         expanded ? "h-full min-h-0" : "h-[min(68vh,720px)] min-h-[520px]",
       )}
     >
-      {loadingPanel ? (
+      {chartIsLoading ? (
         <PageLoadingSpinner message="공시와 주가를 맞추는 중입니다..." />
       ) : panel && panel.chart.candles.length > 0 ? (
         <PriceChart
@@ -329,6 +262,7 @@ export function OntologyGraphWorkspace() {
           markers={panel.chart.markers}
           title={selectedCompanyLabel}
           subtitle={`${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}`}
+          showHeader={false}
           zoomSensitivity={chartZoomSensitivity}
         />
       ) : (
@@ -348,64 +282,21 @@ export function OntologyGraphWorkspace() {
       <div className="flex w-full flex-col gap-5">
         <section>
           <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-            <CardHeader className="pb-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-xl dark:text-white">
-                    <LineChart className="h-5 w-5" />
-                    Graph View
-                  </CardTitle>
-                  <CardDescription className="mt-2 dark:text-slate-400">
-                    {selectedCompanyLabel} · 전체 기간
-                  </CardDescription>
-                </div>
-                <div className="flex flex-col gap-2 sm:items-end">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ontology-stock-keyword">종목 선택</Label>
-                      <Input
-                        id="ontology-stock-keyword"
-                        value={keyword}
-                        onChange={(event) => setKeyword(event.target.value)}
-                        placeholder="회사명 또는 A000000"
-                        className="h-9 sm:w-44"
-                      />
-                    </div>
-                    <select
-                      value={market}
-                      onChange={(event) => setMarket(event.target.value)}
-                      className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
-                    >
-                      <option value="전체">전체</option>
-                      <option value="코스피">코스피</option>
-                      <option value="코스닥">코스닥</option>
-                      <option value="코넥스">코넥스</option>
-                    </select>
-                    <select
-                      value={selectedCompany?.stock_code ?? ""}
-                      onChange={(event) => {
-                        const nextStockCode = normalizeStockCode(event.target.value);
-                        const nextCompany = companies.find((company) => company.stock_code === nextStockCode) ?? null;
-                        setSelectedCompany(nextCompany);
-                      }}
-                      className="h-9 min-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
-                    >
-                      <option value="">종목 없음</option>
-                      {companies.map((company) => (
-                        <option key={`${company.stock_code}-${company.company_name}-${company.market}`} value={company.stock_code}>
-                          {formatCompanyOptionLabel(company)}
-                        </option>
-                      ))}
-                    </select>
-                    <Button variant="outline" size="sm" className="h-9" onClick={loadCompanies} disabled={loadingCompanies}>
-                      {loadingCompanies ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                      검색
-                    </Button>
-                  </div>
-                </div>
+            <CardContent className="pt-6">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="ontology-stock-keyword"
+                  aria-label="종목 선택"
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="종목명 또는 A000000"
+                  className="h-9 sm:max-w-sm"
+                />
+                <Button variant="outline" size="sm" className="h-9" onClick={loadCompanies} disabled={loadingCompanies}>
+                  {loadingCompanies ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  검색
+                </Button>
               </div>
-            </CardHeader>
-            <CardContent>
               <MessageBox messages={statusMessages} />
             </CardContent>
           </Card>
@@ -421,18 +312,34 @@ export function OntologyGraphWorkspace() {
                       주가-공시 차트
                     </CardTitle>
                     <CardDescription className="mt-2 dark:text-slate-400">
-                      KIND 공시 이벤트와 Quantiwise 가격 데이터를 같은 기간 축에서 비교합니다.
+                      {chartMetaText}
                     </CardDescription>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setChartFullscreen(true)} disabled={loadingPanel}>
-                      <Maximize2 className="h-4 w-4" />
-                      전체화면
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={loadPanel} disabled={!selectedCompany || loadingPanel}>
-                      {loadingPanel ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      새로고침
-                    </Button>
+                  <div className="flex flex-col gap-2 sm:items-end">
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setChartFullscreen(true)} disabled={chartIsLoading}>
+                        <Maximize2 className="h-4 w-4" />
+                        전체화면
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={loadPanel} disabled={!selectedCompany || chartIsLoading}>
+                        {chartIsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        새로고침
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {DISPLAY_FREQUENCY_OPTIONS.map((option) => (
+                        <Button
+                          key={option}
+                          type="button"
+                          variant={displayFrequency === option ? "default" : "outline"}
+                          size="sm"
+                          className="h-8"
+                          onClick={() => setDisplayFrequency(option)}
+                        >
+                          {option}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -484,73 +391,6 @@ export function OntologyGraphWorkspace() {
             </Card>
         </section>
 
-        <section>
-          <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
-                <FileText className="h-5 w-5" />
-                공시 분석
-              </CardTitle>
-              <CardDescription className="dark:text-slate-400">
-                Triple Barrier Method 후보 결과입니다. 기본값은 상하 5%, 20거래일입니다.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-2 sm:grid-cols-4">
-                <div className="rounded-lg border border-slate-200 px-3 py-2 dark:border-[#30363d]">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">분석 이벤트</p>
-                  <p className="mt-1 font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(tripleBarrierResults.length)}</p>
-                </div>
-                <div className="rounded-lg border border-emerald-200 px-3 py-2 dark:border-emerald-900/60">
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300">상승 돌파</p>
-                  <p className="mt-1 font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(barrierSummary.upper)}</p>
-                </div>
-                <div className="rounded-lg border border-red-200 px-3 py-2 dark:border-red-900/60">
-                  <p className="text-xs text-red-700 dark:text-red-300">하락 돌파</p>
-                  <p className="mt-1 font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(barrierSummary.lower)}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 px-3 py-2 dark:border-[#30363d]">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">기간 만료</p>
-                  <p className="mt-1 font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(barrierSummary.timeout)}</p>
-                </div>
-              </div>
-
-              <div className="max-h-[calc(100vh-18rem)] overflow-y-auto rounded-lg border border-slate-200 dark:border-[#30363d]">
-                {tripleBarrierResults.length ? (
-                  <div className="divide-y divide-slate-100 dark:divide-[#30363d]">
-                    {tripleBarrierResults.map((result) => (
-                      <div key={result.key} className="grid gap-2 p-3 text-sm md:grid-cols-[minmax(0,1.5fr)_7rem_7rem_6rem]">
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-slate-950 dark:text-slate-100">{result.title}</p>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                            {result.disclosedAt} · {result.group}
-                          </p>
-                        </div>
-                        <div className="text-slate-500 dark:text-slate-400">
-                          <p className="text-xs">진입/종료</p>
-                          <p className="font-medium text-slate-700 dark:text-slate-300">{result.entryDate || "-"} / {result.exitDate || "-"}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">결과</p>
-                          <p className="font-semibold text-slate-950 dark:text-slate-100">{result.outcome}</p>
-                        </div>
-                        <div className="text-left md:text-right">
-                          <p className="text-xs text-slate-500 dark:text-slate-400">수익률</p>
-                          <p className="font-semibold tabular-nums text-slate-950 dark:text-slate-100">{result.returnPct.toFixed(2)}%</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="rounded-lg border border-slate-200 p-4 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
-                    분석할 공시 이벤트가 없습니다.
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
         {chartFullscreen ? (
           <div className="fixed inset-0 z-50 flex flex-col bg-white p-4 dark:bg-[#0d1117]">
             <div className="mb-3 flex flex-col gap-3 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between dark:border-[#30363d]">
@@ -558,18 +398,34 @@ export function OntologyGraphWorkspace() {
                 <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">주가-공시 차트</p>
                 <h2 className="truncate text-xl font-bold text-slate-950 dark:text-slate-100">{selectedCompanyLabel}</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {panel ? `${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}` : "전체 기간"}
+                  {chartRangeText}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={loadPanel} disabled={!selectedCompany || loadingPanel}>
-                  {loadingPanel ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  새로고침
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setChartFullscreen(false)}>
-                  <X className="h-4 w-4" />
-                  전체화면 닫기
-                </Button>
+              <div className="flex flex-col gap-2 sm:items-end">
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={loadPanel} disabled={!selectedCompany || chartIsLoading}>
+                    {chartIsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    새로고침
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setChartFullscreen(false)}>
+                    <X className="h-4 w-4" />
+                    전체화면 닫기
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {DISPLAY_FREQUENCY_OPTIONS.map((option) => (
+                    <Button
+                      key={option}
+                      type="button"
+                      variant={displayFrequency === option ? "default" : "outline"}
+                      size="sm"
+                      className="h-8"
+                      onClick={() => setDisplayFrequency(option)}
+                    >
+                      {option}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="min-h-0 flex-1">{renderPriceChart(true)}</div>

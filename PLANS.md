@@ -282,3 +282,21 @@ Verification:
 - `node --test tests/frontend/ontologyGraphWorkspace.test.mjs`
 - `python3 -m pytest tests/market_desk/test_ontology_graph.py -q`
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+
+## Graph View Chart Surface Cleanup
+
+Purpose: Finish the `Graph View` split so `/graph` is only the stock/disclosure chart workspace, while `/graph/analysis` owns disclosure backtesting.
+
+Implementation summary:
+- Removed the Graph View card title and reduced the top control to the `A000000` stock input plus `검색`.
+- Removed market and company dropdown controls from the chart page.
+- Kept chart loading on screen while company/panel requests are pending so the empty-data message only appears after a completed empty response.
+- Moved chart company/range/frequency text into the chart card header and hid the internal `PriceChart` title block to avoid duplicate metadata.
+- Added `일봉`, `5일봉`, `20일봉`, and `월봉` controls below the chart action buttons, wired to the company-panel `display_frequency` query.
+- Linked the Ontology sidebar to `/graph/analysis` for the separate `공시 분석` backtesting page.
+
+Verification:
+- `node --test tests/frontend/ontologyGraphWorkspace.test.mjs`
+- `node --test tests/frontend/priceChart.test.mjs tests/frontend/navigation.test.mjs`
+- `python3 -m pytest tests/market_desk/test_ontology_graph.py -q`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
