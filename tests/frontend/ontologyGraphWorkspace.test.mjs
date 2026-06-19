@@ -49,6 +49,7 @@ test("ontology graph workspace exposes chart zoom sensitivity in the right setti
   assert.match(source, /ontology-chart-zoom-sensitivity/);
   assert.match(source, /ontology-chart-zoom-sensitivity-value/);
   assert.match(source, /type="number"/);
+  assert.match(source, /className="h-8 w-20 text-right tabular-nums dark:bg-\[#0d1117\] dark:border-\[#30363d\] dark:text-slate-200"/);
   assert.match(source, /확대\/축소 민감도/);
   assert.match(source, /onInput=\{handleChartZoomSensitivityChange\}/);
   assert.match(source, /zoomSensitivity=\{chartZoomSensitivity\}/);
