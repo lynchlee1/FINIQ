@@ -218,6 +218,22 @@ Implementation summary:
 Verification:
 - `node --test tests/frontend/priceChart.test.mjs`
 - `node --test tests/frontend/*.test.mjs`
+
+## Graph View Chart-Focused Workspace
+
+Purpose: Remove low-value `회사 검색` and `데이터 상태` top modes from `Graph View`, align the top selector with the compact workflow menu pattern used by `공시원문 외부 저장`, and make the `주가-공시 차트` easier to view at full size.
+
+Implementation summary:
+- Replaced the large `분석`/`회사`/`데이터` mode cards with a compact top selector for `차트` and `공시 타임라인`.
+- Moved company lookup into the right `설정` dock as `회사 선택`, keeping the function available without making it a primary workspace mode.
+- Removed the visible data-status mode from the Graph View workspace; source/readiness problems still surface through messages and the right notification/activity dock.
+- Added an app-level chart fullscreen overlay with `전체화면` and `전체화면 닫기`, reusing the same FINIQ-owned `PriceChart` renderer instead of any third-party branded runtime.
+- Updated Ontology UI terminology and frontend static coverage for the new labels and removed mode names.
+
+Verification:
+- `node --test tests/frontend/ontologyGraphWorkspace.test.mjs`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+- Browser smoke check on `http://127.0.0.1:3001/graph`: `Graph View`, `차트`, `공시 타임라인`, and active `전체화면` button are visible; `회사 검색` and `데이터 상태` are not visible on the page.
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
 
 ## Graph View Chart Zoom Sensitivity
