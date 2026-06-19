@@ -136,10 +136,42 @@ def aggregate_price_dataframe(
     *,
     frequency: str,
 ) -> pd.DataFrame:
-    """Aggregate normalized price data into weekly/monthly candles."""
+    """Aggregate normalized price data into multi-day, weekly, or monthly candles."""
     normalized = str(frequency).strip().lower()
     if price_frame.empty or normalized in {"day", "daily", "d"}:
         return price_frame.copy()
+
+    multi_day_map = {
+        "5day": 5,
+        "5d": 5,
+        "20day": 20,
+        "20d": 20,
+    }
+    period = multi_day_map.get(normalized)
+    if period is not None:
+        frame = price_frame.copy().sort_values("date").reset_index(drop=True)
+        frame["_period"] = [index // period for index in range(len(frame))]
+        aggregated = frame.groupby("_period", as_index=False).agg(
+            {
+                "date": "last",
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+                "vwap": "mean",
+            }
+        )
+        aggregated = aggregated.drop(columns=["_period"]).dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
+        aggregated["trade_day"] = aggregated["date"].dt.strftime("%Y-%m-%d")
+        aggregated["trade_label"] = aggregated["date"].dt.strftime("%y.%m.%d")
+        aggregated["candle_color"] = aggregated.apply(
+            lambda row: "#16a34a" if row["close"] >= row["open"] else "#dc2626",
+            axis=1,
+        )
+        aggregated["body_bottom"] = aggregated[["open", "close"]].min(axis=1)
+        aggregated["body_top"] = aggregated[["open", "close"]].max(axis=1)
+        return aggregated
 
     freq_map = {
         "week": "W-FRI",

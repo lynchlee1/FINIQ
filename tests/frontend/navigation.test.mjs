@@ -53,6 +53,18 @@ test("sidebar definitions match the narrowed top-level workflows", async () => {
   assert.deepEqual(utilitySidebar.groups[0].steps.map((step) => step.href), ["/utility"]);
 });
 
+test("ontology sidebar separates graph and disclosure analysis pages", async () => {
+  const { getSidebarDefinition, getPageTitle } = await loadNavigation();
+  const ontologySidebar = getSidebarDefinition("ontology");
+
+  assert.deepEqual(
+    ontologySidebar.groups[0].steps.map((step) => step.href),
+    ["/graph", "/graph/analysis"],
+  );
+  assert.equal(getPageTitle("/graph"), "Graph View");
+  assert.equal(getPageTitle("/graph/analysis"), "공시 분석");
+});
+
 test("price data pages use short page titles without repeating the top-level menu", async () => {
   const { getPageTitle } = await loadNavigation();
 

@@ -59,3 +59,11 @@ test("price chart preserves the user viewport across resize and data refresh", a
   assert.match(source, /hasFittedContentRef/);
   assert.doesNotMatch(resizeObserverBlock, /timeScale\(\)\.fitContent\(\)/);
 });
+
+test("price chart can hide its internal title block", async () => {
+  const source = await readFile(priceChartPath, "utf8");
+
+  assert.match(source, /showHeader\?: boolean/);
+  assert.match(source, /showHeader = true/);
+  assert.match(source, /\{showHeader \? \(/);
+});

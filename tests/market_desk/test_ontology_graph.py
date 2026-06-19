@@ -254,6 +254,32 @@ def test_build_ontology_company_panel_defaults_to_full_available_range(tmp_path:
     assert payload["summary"]["visible_disclosures"] == 3
 
 
+def test_build_ontology_company_panel_supports_multi_day_frequency_options(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    five_day = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A005930",
+        display_frequency_label="5일봉",
+    )
+    twenty_day = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A005930",
+        display_frequency_label="20일봉",
+    )
+
+    assert five_day["display_frequency"] == "5day"
+    assert twenty_day["display_frequency"] == "20day"
+    assert [candle["time"] for candle in five_day["chart"]["candles"]] == ["2025-01-06"]
+    assert [candle["time"] for candle in twenty_day["chart"]["candles"]] == ["2025-01-06"]
+    assert five_day["chart"]["candles"][0]["open"] == 90
+    assert five_day["chart"]["candles"][0]["close"] == 117
+    assert five_day["chart"]["candles"][0]["volume"] == 3900
+
+
 def test_build_ontology_company_panel_returns_json_safe_timeline_for_unmatched_markers(tmp_path: Path) -> None:
     manifest_path = _write_disclosure_shard(tmp_path)
     quanti_dir = _write_quanti_parquet(tmp_path)
