@@ -235,3 +235,16 @@ Verification:
 - `node --test tests/frontend/*.test.mjs`
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
 - Browser check on `http://localhost:3001/graph`: settings dock opened, `확대/축소 민감도` controls rendered, number input `35` synced the slider to `0.35`, chart canvas loaded, and no localhost console errors appeared.
+
+## Graph View Settings Input Tone
+
+Purpose: Align the `Graph View` right settings panel sensitivity number input with the existing input text/background styling.
+
+Implementation summary:
+- Added the existing dark input class pattern to the `확대/축소 민감도` percent input.
+- Added frontend static coverage so the settings input keeps the same dark background, border, and text tone as other MarketDesk inputs.
+
+Verification:
+- `node --test tests/frontend/ontologyGraphWorkspace.test.mjs`
+- `node --test tests/frontend/*.test.mjs`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`

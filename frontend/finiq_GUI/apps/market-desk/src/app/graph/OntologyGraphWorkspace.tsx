@@ -611,7 +611,7 @@ export function OntologyGraphWorkspace() {
                     step="5"
                     value={Math.round(chartZoomSensitivity * 100)}
                     onChange={handleChartZoomSensitivityPercentChange}
-                    className="h-8 w-20 text-right tabular-nums"
+                    className="h-8 w-20 text-right tabular-nums dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
                   />
                   <span className="text-sm text-slate-500 dark:text-slate-400">%</span>
                 </div>
