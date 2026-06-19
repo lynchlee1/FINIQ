@@ -165,7 +165,7 @@ export default function TablePage() {
                     value={classificationPath}
                     onChange={handleClassificationPathChange}
                     mode="folder"
-                    placeholder="분류 파일 또는 폴더 경로를 선택하세요"
+                    placeholder="입력 데이터 경로를 선택하세요"
                     onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                   />
                 </div>

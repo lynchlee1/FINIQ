@@ -39,7 +39,7 @@ export default function HtmlBondSummaryPage() {
 
   const loadBondSummary = async () => {
     if (!outputPath) {
-      setStatus("파싱 결과 경로가 필요합니다.");
+      setStatus("파싱 결과 데이터 경로가 필요합니다.");
       setIsErrorStatus(true);
       return;
     }
