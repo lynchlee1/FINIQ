@@ -32,6 +32,7 @@ interface PriceChartProps {
   markers: PriceChartMarker[];
   title: string;
   subtitle: string;
+  zoomSensitivity?: number;
   onCrosshairMove?: (candle: any) => void;
 }
 
@@ -42,7 +43,7 @@ function volumeColor(datum: PriceChartDatum) {
   return datum.close >= datum.open ? "rgba(34, 171, 148, 0.38)" : "rgba(242, 54, 69, 0.38)";
 }
 
-export function PriceChart({ data, markers, title, subtitle, onCrosshairMove }: PriceChartProps) {
+export function PriceChart({ data, markers, title, subtitle, zoomSensitivity = 0.55, onCrosshairMove }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const candleSeriesRef = useRef<any>(null);
@@ -66,6 +67,7 @@ export function PriceChart({ data, markers, title, subtitle, onCrosshairMove }: 
         vertLines: { color: "rgba(148, 163, 184, 0.18)" },
         horzLines: { color: "rgba(148, 163, 184, 0.18)" },
       },
+      interaction: { zoomSensitivity },
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -126,6 +128,12 @@ export function PriceChart({ data, markers, title, subtitle, onCrosshairMove }: 
       volumeSeriesRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({
+      interaction: { zoomSensitivity },
+    });
+  }, [zoomSensitivity]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current || !volumeSeriesRef.current) return;

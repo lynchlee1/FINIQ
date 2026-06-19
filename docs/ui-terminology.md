@@ -77,6 +77,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Ontology workspace company mode | 회사 | Mode for company search and selection. |
 | Ontology workspace data mode | 데이터 | Mode for source status and read-only paths. |
 | Ontology analysis filters | 분석 조건 | Compact controls for date range, title filter, and candle frequency. |
+| Ontology chart zoom sensitivity | 확대/축소 민감도 | Chart interaction setting in the right settings panel. |
 
 ## Right Dock Panels
 

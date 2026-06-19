@@ -338,9 +338,10 @@ export class ChartApi {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     const layout = this.getLayout();
+    const wheelZoomFactor = this.getWheelZoomFactor(event.deltaY);
     if (x >= layout.rightScaleLeft && y >= layout.plotTop && y <= layout.plotBottom) {
       event.preventDefault();
-      this.zoomPriceRangeAtY(y, event.deltaY > 0 ? 1.18 : 0.84, layout);
+      this.zoomPriceRangeAtY(y, wheelZoomFactor, layout);
       return;
     }
     if (x < layout.plotLeft || x > layout.plotRight || y < layout.plotTop || y > layout.plotBottom) {
@@ -353,8 +354,7 @@ export class ChartApi {
     const anchor = currentRange.from + span * ratio;
     const minSpan = Math.min(Math.max(6, priceSeries.data.length * 0.04), priceSeries.data.length - 1 || 1);
     const maxSpan = Math.max(priceSeries.data.length - 1, 1);
-    const zoomFactor = event.deltaY > 0 ? 1.18 : 0.84;
-    const nextSpan = clamp(span * zoomFactor, minSpan, maxSpan);
+    const nextSpan = clamp(span * wheelZoomFactor, minSpan, maxSpan);
     const nextFrom = anchor - nextSpan * ratio;
     const nextTo = nextFrom + nextSpan;
     this.visibleRange = this.clampVisibleRange(nextFrom, nextTo, priceSeries.data.length);
@@ -498,6 +498,15 @@ export class ChartApi {
       max: nextMin + nextSpan,
     };
     this.render();
+  }
+
+  getZoomSensitivity() {
+    return clamp(toNumber(this.options.interaction?.zoomSensitivity, 0.55), 0.2, 1.5);
+  }
+
+  getWheelZoomFactor(deltaY: number) {
+    const step = 0.18 * this.getZoomSensitivity();
+    return deltaY > 0 ? 1 + step : 1 / (1 + step);
   }
 
   getVolumeRange() {

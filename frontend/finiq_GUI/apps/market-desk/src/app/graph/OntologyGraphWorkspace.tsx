@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   AlertTriangle,
   Building2,
@@ -17,6 +17,7 @@ import {
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { apiGet } from "@/api/client";
+import { ActionDock } from "@/components/ui/ActionDock";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { formatInteger } from "@/lib/format";
 
@@ -125,6 +126,13 @@ function todayInputValue() {
   return dateInputValue(new Date());
 }
 
+function clampChartZoomSensitivity(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0.55;
+  }
+  return Math.min(Math.max(value, 0.2), 1.5);
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2 text-sm last:border-0 dark:border-[#30363d]">
@@ -163,6 +171,7 @@ export function OntologyGraphWorkspace() {
   const [endDate, setEndDate] = useState(todayInputValue());
   const [titleKeyword, setTitleKeyword] = useState("");
   const [displayFrequency, setDisplayFrequency] = useState("자동");
+  const [chartZoomSensitivity, setChartZoomSensitivity] = useState(0.55);
   const [activeMode, setActiveMode] = useState<WorkspaceMode>("analysis");
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingCompanies, setLoadingCompanies] = useState(false);
@@ -241,56 +250,63 @@ export function OntologyGraphWorkspace() {
     ? `${selectedCompany.company_name} (${selectedCompany.company_id})`
     : "선택된 회사 없음";
   const statusMessages = useMemo(() => [...(status?.messages ?? []), ...(error ? [error] : [])], [error, status]);
+  const handleChartZoomSensitivityChange = (event: ChangeEvent<HTMLInputElement> | FormEvent<HTMLInputElement>) => {
+    setChartZoomSensitivity(clampChartZoomSensitivity(Number(event.currentTarget.value)));
+  };
+  const handleChartZoomSensitivityPercentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setChartZoomSensitivity(clampChartZoomSensitivity(Number(event.currentTarget.value) / 100));
+  };
 
   return (
-    <div className="flex w-full flex-col gap-5">
-      <section>
-        <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-xl dark:text-white">
-              <LineChart className="h-5 w-5" />
-              Graph View
-            </CardTitle>
-            <CardDescription className="dark:text-slate-400">
-              {selectedCompanyLabel} · {startDate} - {endDate}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <MessageBox messages={statusMessages} />
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              {WORKSPACE_MODES.map((mode) => {
-                const Icon = mode.icon;
-                const active = activeMode === mode.id;
-                return (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => setActiveMode(mode.id)}
-                    className={cn(
-                      "flex min-h-14 flex-1 items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
-                      active
-                        ? "border-slate-950 bg-slate-950 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
-                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300",
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold">{mode.label}</span>
-                      <span className={cn("block text-xs", active ? "text-slate-200 dark:text-slate-700" : "text-slate-500 dark:text-slate-400")}>
-                        {mode.description}
+    <div className="relative action-dock-host flex w-full flex-col gap-5 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
+      <div className="flex w-full flex-col gap-5">
+        <section>
+          <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-xl dark:text-white">
+                <LineChart className="h-5 w-5" />
+                Graph View
+              </CardTitle>
+              <CardDescription className="dark:text-slate-400">
+                {selectedCompanyLabel} · {startDate} - {endDate}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <MessageBox messages={statusMessages} />
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                {WORKSPACE_MODES.map((mode) => {
+                  const Icon = mode.icon;
+                  const active = activeMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => setActiveMode(mode.id)}
+                      className={cn(
+                        "flex min-h-14 flex-1 items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
+                        active
+                          ? "border-slate-950 bg-slate-950 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold">{mode.label}</span>
+                        <span className={cn("block text-xs", active ? "text-slate-200 dark:text-slate-700" : "text-slate-500 dark:text-slate-400")}>
+                          {mode.description}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </section>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </section>
 
-      {activeMode === "analysis" ? (
-        <>
-          <section>
+        {activeMode === "analysis" ? (
+          <>
+            <section>
             <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
               <CardHeader className="pb-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -359,6 +375,7 @@ export function OntologyGraphWorkspace() {
                       markers={panel.chart.markers}
                       title={selectedCompanyLabel}
                       subtitle={`${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}`}
+                      zoomSensitivity={chartZoomSensitivity}
                     />
                   ) : (
                     <div className="flex h-full min-h-[420px] items-center justify-center text-center">
@@ -372,9 +389,9 @@ export function OntologyGraphWorkspace() {
                 </div>
               </CardContent>
             </Card>
-          </section>
+            </section>
 
-          <section>
+            <section>
             <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
@@ -404,9 +421,9 @@ export function OntologyGraphWorkspace() {
                 </div>
               </CardContent>
             </Card>
-          </section>
+            </section>
 
-          <section>
+            <section>
             <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
@@ -446,12 +463,12 @@ export function OntologyGraphWorkspace() {
                 </div>
               </CardContent>
             </Card>
-          </section>
-        </>
-      ) : null}
+            </section>
+          </>
+        ) : null}
 
-      {activeMode === "companies" ? (
-        <section>
+        {activeMode === "companies" ? (
+          <section>
           <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
@@ -532,11 +549,11 @@ export function OntologyGraphWorkspace() {
               </div>
             </CardContent>
           </Card>
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      {activeMode === "data" ? (
-        <section>
+        {activeMode === "data" ? (
+          <section>
           <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
@@ -560,8 +577,63 @@ export function OntologyGraphWorkspace() {
               )}
             </CardContent>
           </Card>
-        </section>
-      ) : null}
+          </section>
+        ) : null}
+      </div>
+
+      <ActionDock
+        activityActive={loadingStatus || loadingCompanies || loadingPanel}
+        activityContent={
+          <div className="text-sm text-slate-600 dark:text-slate-300">
+            {loadingPanel ? "분석 데이터를 불러오는 중입니다." : loadingCompanies ? "회사 목록을 불러오는 중입니다." : "대기 중입니다."}
+          </div>
+        }
+        notificationActive={!!error}
+        notificationContent={
+          <div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-600 dark:text-slate-300"}>
+            {error || "알림 없음"}
+          </div>
+        }
+        settingsTitle="설정"
+        settingsContent={
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="ontology-chart-zoom-sensitivity" className="font-semibold dark:text-slate-200">
+                  확대/축소 민감도
+                </Label>
+                <div className="flex items-center gap-1">
+                  <Input
+                    id="ontology-chart-zoom-sensitivity-value"
+                    type="number"
+                    min="20"
+                    max="150"
+                    step="5"
+                    value={Math.round(chartZoomSensitivity * 100)}
+                    onChange={handleChartZoomSensitivityPercentChange}
+                    className="h-8 w-20 text-right tabular-nums"
+                  />
+                  <span className="text-sm text-slate-500 dark:text-slate-400">%</span>
+                </div>
+              </div>
+              <Input
+                id="ontology-chart-zoom-sensitivity"
+                type="range"
+                min="0.2"
+                max="1.5"
+                step="0.05"
+                value={chartZoomSensitivity}
+                onInput={handleChartZoomSensitivityChange}
+                onChange={handleChartZoomSensitivityChange}
+              />
+              <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
+                <span>느림</span>
+                <span>빠름</span>
+              </div>
+            </div>
+          </div>
+        }
+      />
     </div>
   );
 }

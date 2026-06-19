@@ -36,6 +36,20 @@ test("FINIQ chart supports free pan, zoom, and price-axis scaling", async () => 
   assert.doesNotMatch(source, /TradingView/);
 });
 
+test("FINIQ chart applies configurable zoom sensitivity", async () => {
+  const [source, priceChartSource] = await Promise.all([
+    readFile(chartLibPath, "utf8"),
+    readFile(priceChartPath, "utf8"),
+  ]);
+
+  assert.match(priceChartSource, /zoomSensitivity\?: number/);
+  assert.match(priceChartSource, /zoomSensitivity = 0\.55/);
+  assert.match(priceChartSource, /interaction:\s*\{\s*zoomSensitivity/);
+  assert.match(source, /getZoomSensitivity/);
+  assert.match(source, /wheelZoomFactor/);
+  assert.match(source, /clamp\(toNumber\(this\.options\.interaction\?\.zoomSensitivity, 0\.55\), 0\.2, 1\.5\)/);
+});
+
 test("price chart preserves the user viewport across resize and data refresh", async () => {
   const source = await readFile(priceChartPath, "utf8");
   const resizeObserverStart = source.indexOf("const resizeObserver = new ResizeObserver");

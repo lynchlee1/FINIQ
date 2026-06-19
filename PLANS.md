@@ -219,3 +219,19 @@ Verification:
 - `node --test tests/frontend/priceChart.test.mjs`
 - `node --test tests/frontend/*.test.mjs`
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+
+## Graph View Chart Zoom Sensitivity
+
+Purpose: Reduce the default `주가-공시 차트` zoom sensitivity and make it adjustable from the `Graph View` right settings panel.
+
+Implementation summary:
+- Added a `zoomSensitivity` option to `PriceChart` and the FINIQ-owned canvas chart renderer.
+- Changed wheel zoom factors to use a clamped sensitivity value, with the new default set lower than the prior fixed zoom step.
+- Added the `Graph View` right `설정` dock with `확대/축소 민감도` controls.
+- Provided both a range slider and a percent number input so users can make coarse or precise adjustments.
+- Added UI terminology and frontend tests for the new setting and chart option propagation.
+
+Verification:
+- `node --test tests/frontend/*.test.mjs`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+- Browser check on `http://localhost:3001/graph`: settings dock opened, `확대/축소 민감도` controls rendered, number input `35` synced the slider to `0.35`, chart canvas loaded, and no localhost console errors appeared.
