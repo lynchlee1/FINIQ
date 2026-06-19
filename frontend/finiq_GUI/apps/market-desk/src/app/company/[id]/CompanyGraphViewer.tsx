@@ -128,7 +128,7 @@ export function CompanyGraphViewer({
   }
 
   return (
-    <div className={cn("relative flex flex-col gap-4", heightClassName ?? "h-[700px]")}>
+    <div className={cn("relative action-dock-host flex flex-col gap-4 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4", heightClassName ?? "h-[700px]")}>
       <Card className="flex-1 dark:bg-[#161b22] dark:border-[#30363d] flex flex-col h-full">
         <CardHeader className="flex flex-row items-center justify-between pb-2 border-b dark:border-[#30363d]">
         <div>

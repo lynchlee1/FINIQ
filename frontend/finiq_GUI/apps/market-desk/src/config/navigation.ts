@@ -8,6 +8,7 @@ export type WorkflowId =
   | "ontology"
   | "disclosure-build"
   | "html-processing"
+  | "price-data"
   | "utility";
 
 export type PageLayoutKind = "search" | "job" | "review" | "canvas";
@@ -51,7 +52,7 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
   },
   "disclosure-build": {
     id: "disclosure-build",
-    label: "공시데이터 구축",
+    label: "공시데이터",
     basePath: "/download",
     layout: "job",
     steps: [
@@ -81,10 +82,18 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     layout: "job",
     steps: [
       { href: "/utility", step: 1, label: "분할저장" },
-      { href: "/utility/assets-excel", step: 2, label: "Quantiwise - Excel 미리보기" },
-      { href: "/utility/assets-excel/convert", step: 3, label: "Quantiwise - Parquet 변환하기" },
-      { href: "/utility/assets-excel/parquet", step: 4, label: "Quantiwise - Parquet 미리보기" },
-      { href: "/utility/assets-excel/merge", step: 5, label: "Quantiwise - 병합하기" },
+    ],
+  },
+  "price-data": {
+    id: "price-data",
+    label: "주가데이터",
+    basePath: "/utility/assets-excel",
+    layout: "job",
+    steps: [
+      { href: "/utility/assets-excel", step: 1, label: "Excel 미리보기" },
+      { href: "/utility/assets-excel/convert", step: 2, label: "Parquet 변환하기" },
+      { href: "/utility/assets-excel/parquet", step: 3, label: "Parquet 미리보기" },
+      { href: "/utility/assets-excel/merge", step: 4, label: "Parquet 병합하기" },
     ],
   },
 };
@@ -97,10 +106,23 @@ export const NAV_ITEMS: NavItem[] = [
     paths: [
       ...WORKFLOWS["disclosure-build"].steps.map((tab) => tab.href),
       ...WORKFLOWS["html-processing"].steps.map((tab) => tab.href),
-      ...WORKFLOWS.utility.steps.map((tab) => tab.href),
     ],
     layout: WORKFLOWS["disclosure-build"].layout,
     workflowId: "disclosure-build",
+  },
+  {
+    href: WORKFLOWS["price-data"].basePath,
+    label: WORKFLOWS["price-data"].label,
+    paths: WORKFLOWS["price-data"].steps.map((tab) => tab.href),
+    layout: WORKFLOWS["price-data"].layout,
+    workflowId: "price-data",
+  },
+  {
+    href: WORKFLOWS.utility.basePath,
+    label: WORKFLOWS.utility.label,
+    paths: WORKFLOWS.utility.steps.map((tab) => tab.href),
+    layout: WORKFLOWS.utility.layout,
+    workflowId: "utility",
   },
 ];
 
@@ -121,13 +143,29 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
     };
   }
 
-  const partitionStorageStep = WORKFLOWS.utility.steps[0];
-  const quantiwiseSteps = [
-    { ...WORKFLOWS.utility.steps[1], label: "Excel 미리보기" },
-    { ...WORKFLOWS.utility.steps[2], label: "Parquet 변환하기" },
-    { ...WORKFLOWS.utility.steps[3], label: "Parquet 미리보기" },
-    { ...WORKFLOWS.utility.steps[4], label: "병합하기" },
-  ];
+  if (workflowId === "price-data") {
+    return {
+      title: WORKFLOWS["price-data"].label,
+      groups: [
+        {
+          label: "Quantiwise",
+          steps: WORKFLOWS["price-data"].steps,
+        },
+      ],
+    };
+  }
+
+  if (workflowId === "utility") {
+    return {
+      title: WORKFLOWS.utility.label,
+      groups: [
+        {
+          label: "유틸리티",
+          steps: WORKFLOWS.utility.steps,
+        },
+      ],
+    };
+  }
 
   return {
     title: WORKFLOWS["disclosure-build"].label,
@@ -139,14 +177,6 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
       {
         label: "공시 내용 분석",
         steps: WORKFLOWS["html-processing"].steps,
-      },
-      {
-        label: "유틸리티",
-        steps: [partitionStorageStep],
-      },
-      {
-        label: "Quantiwise",
-        steps: quantiwiseSteps,
       },
     ],
   };
@@ -171,3 +201,4 @@ export const ONTOLOGY_TABS = WORKFLOWS.ontology.steps;
 export const BUILD_TABS = WORKFLOWS["disclosure-build"].steps;
 export const HTML_PROCESS_TABS = WORKFLOWS["html-processing"].steps;
 export const UTILITY_TABS = WORKFLOWS.utility.steps;
+export const PRICE_DATA_TABS = WORKFLOWS["price-data"].steps;

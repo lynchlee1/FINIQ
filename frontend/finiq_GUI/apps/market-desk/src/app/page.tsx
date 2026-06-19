@@ -193,7 +193,7 @@ export default function Home() {
 
   return (
     <WorkflowPageShell workflowId="ontology">
-    <div className="relative flex w-full flex-col gap-6">
+    <div className="relative action-dock-host flex w-full flex-col gap-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
       <section className="flex items-center gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />

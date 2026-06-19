@@ -52,7 +52,7 @@ export function ActionDock({
   const renderPanel = (panel: DockPanel, title: string, content: ReactNode) => {
     if (openPanel !== panel) return null;
     return (
-      <Card className="absolute right-full top-0 mr-3 w-[min(420px,calc(100vw-2rem))] max-h-[calc(100vh-8rem)] overflow-auto shadow-xl dark:bg-[#161b22] dark:border-[#30363d]">
+      <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)] dark:bg-[#161b22] dark:border-[#30363d]">
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="dark:text-white">{title}</CardTitle>
@@ -73,8 +73,8 @@ export function ActionDock({
   };
 
   return (
-    <div className="absolute left-full top-0 z-40 ml-2" onClick={(event) => event.stopPropagation()}>
-      <div className="flex w-16 flex-col items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-lg dark:border-[#30363d] dark:bg-[#161b22]">
+    <div className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-40 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
+      <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-lg md:h-auto md:w-16 md:flex-col dark:border-[#30363d] dark:bg-[#161b22]">
         <Button
           variant="outline"
           size="icon"

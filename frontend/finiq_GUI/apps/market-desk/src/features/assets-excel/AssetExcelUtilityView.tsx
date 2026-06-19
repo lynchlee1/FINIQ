@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Eye, Loader2, Pencil, Play, Plus, Search, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
@@ -23,6 +23,7 @@ import {
   startAssetParquetDuplicateCleanup,
   startAssetParquetMerge,
 } from "./api";
+import { applyFileSelection, dragSelectionTargetChecked, formatMergeSelectionSummary, selectFirstTwoFilesPerAccount, selectionRowClassName } from "./dragSelection";
 import type { AssetAccountMapping, AssetExcelFile, PreviewData, SheetPayload } from "./types";
 
 function formatBytes(value: number): string {
@@ -223,6 +224,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [mergeSameDirectory, setMergeSameDirectory] = useState(false);
   const [cleanupMergedItems, setCleanupMergedItems] = useState(true);
   const [duplicateScanRecursive, setDuplicateScanRecursive] = useState(false);
+  const duplicateScanRecursiveRef = useRef(false);
   const [selectedMergeFiles, setSelectedMergeFiles] = useState<string[]>([]);
   const [duplicateInspectionResult, setDuplicateInspectionResult] = useState<any>(null);
   const [duplicateDeleteConfirmed, setDuplicateDeleteConfirmed] = useState(false);
@@ -249,6 +251,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const [outputSort, setOutputSort] = useState<{ key: OutputSortKey; direction: SortDirection } | null>(null);
   const sheetPreviewCache = useRef<Record<string, SheetPayload>>({});
   const sheetBodyRequestToken = useRef(0);
+  const convertDragSelection = useRef<{ checked: boolean } | null>(null);
+  const mergeDragSelection = useRef<{ checked: boolean } | null>(null);
   const { fetchSettings, saveSetting } = useSettingsStore();
 
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
@@ -295,9 +299,19 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         setMergeSameDirectory(!!config.asset_excel_merge_same_directory);
         setCleanupMergedItems(config.asset_excel_cleanup_merged_items !== false);
         setDuplicateScanRecursive(!!config.asset_excel_duplicate_scan_recursive);
+        duplicateScanRecursiveRef.current = !!config.asset_excel_duplicate_scan_recursive;
       }
     });
   }, [fetchSettings, isConvertMode, isMergeMode, isParquetPreviewMode]);
+
+  useEffect(() => {
+    const clearDragSelection = () => {
+      convertDragSelection.current = null;
+      mergeDragSelection.current = null;
+    };
+    window.addEventListener("mouseup", clearDragSelection);
+    return () => window.removeEventListener("mouseup", clearDragSelection);
+  }, []);
 
   useEffect(() => {
     if (!isConvertMode) return;
@@ -583,12 +597,18 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     </th>
   );
   const toggleConvertFile = (fileName: string, checked: boolean) => {
-    setSelectedConvertFiles((current) => {
-      if (checked) {
-        return current.includes(fileName) ? current : [...current, fileName];
-      }
-      return current.filter((item) => item !== fileName);
-    });
+    setSelectedConvertFiles((current) => applyFileSelection(current, fileName, checked));
+  };
+  const beginConvertFileDrag = (event: ReactMouseEvent, fileName: string, selected: boolean) => {
+    if (event.button !== 0 || activeJobId) return;
+    event.preventDefault();
+    const checked = dragSelectionTargetChecked(selected);
+    convertDragSelection.current = { checked };
+    toggleConvertFile(fileName, checked);
+  };
+  const continueConvertFileDrag = (fileName: string) => {
+    if (!convertDragSelection.current || activeJobId) return;
+    toggleConvertFile(fileName, convertDragSelection.current.checked);
   };
   const selectAllConvertFiles = () => {
     setSelectedConvertFiles(excelFiles.map((file) => file.relative_path));
@@ -608,26 +628,56 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     () => Object.entries(selectedMergeCountsByAccount).filter(([, count]) => count !== 2),
     [selectedMergeCountsByAccount],
   );
+  const incompleteMergeAccountNames = useMemo(
+    () => incompleteMergeGroups.map(([accountName]) => accountName),
+    [incompleteMergeGroups],
+  );
   const mergePairCount = Object.values(selectedMergeCountsByAccount).filter((count) => count === 2).length;
   const mergeSelectionReady = selectedMergeFiles.length > 0 && incompleteMergeGroups.length === 0;
   const toggleMergeFile = (fileName: string, checked: boolean) => {
     setSelectedMergeFiles((current) => {
-      if (checked) {
-        const accountName = accountNameFromParquetFile(fileName);
-        const accountCount = current.filter((item) => accountNameFromParquetFile(item) === accountName).length;
-        if (current.includes(fileName) || accountCount >= 2) return current;
-        return [...current, fileName];
-      }
-      return current.filter((item) => item !== fileName);
+      const canAdd = (items: readonly string[], candidate: string) => {
+        const accountName = accountNameFromParquetFile(candidate);
+        const accountCount = items.filter((item) => accountNameFromParquetFile(item) === accountName).length;
+        return accountCount < 2;
+      };
+      return applyFileSelection(current, fileName, checked, canAdd);
     });
   };
+  const beginMergeFileDrag = (event: ReactMouseEvent, fileName: string, selected: boolean, disabled: boolean) => {
+    if (event.button !== 0 || disabled) return;
+    event.preventDefault();
+    const checked = dragSelectionTargetChecked(selected);
+    mergeDragSelection.current = { checked };
+    toggleMergeFile(fileName, checked);
+  };
+  const continueMergeFileDrag = (fileName: string, disabled: boolean) => {
+    if (!mergeDragSelection.current || disabled) return;
+    toggleMergeFile(fileName, mergeDragSelection.current.checked);
+  };
   const mergeSelectedCount = selectedMergeFiles.length;
+  const selectableMergeFiles = useMemo(
+    () => selectFirstTwoFilesPerAccount(
+      sortedMergeBaseOutputRows.map(([name, item]: [string, any]) => outputFileNameFromRow(name, item)),
+      accountNameFromParquetFile,
+    ),
+    [sortedMergeBaseOutputRows],
+  );
+  const allMergeFilesSelected = selectableMergeFiles.length > 0
+    && mergeSelectedCount === selectableMergeFiles.length
+    && selectableMergeFiles.every((fileName) => selectedMergeFiles.includes(fileName));
+  const selectAllMergeFiles = () => {
+    setSelectedMergeFiles(selectableMergeFiles);
+  };
+  const clearMergeFiles = () => {
+    setSelectedMergeFiles([]);
+  };
   const renderOutputRowsTable = (rows: [string, any][], emptyMessage = "표시할 Parquet 결과가 없습니다.", selectable = false) => (
     <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-      <table className="w-max min-w-full text-sm">
+      <table className="w-max min-w-full select-none text-sm">
         <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
           <tr className="text-left text-slate-500 dark:text-slate-400">
-            {selectable ? <th className="w-12 px-3 py-2 font-medium">선택</th> : null}
+            {selectable ? <th className="min-w-16 whitespace-nowrap px-3 py-2 font-medium">선택</th> : null}
             {renderOutputHeader("account_id", "ID")}
             {renderOutputHeader("account_name", "계정")}
             {renderOutputHeader("rows", "행", "right")}
@@ -647,12 +697,18 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             const accountName = item?.account_name || accountNameFromParquetFile(fileName);
             const disabled = selectable && !selected && (selectedMergeCountsByAccount[accountName] || 0) >= 2;
             return (
-              <tr key={name} className="dark:text-slate-300">
+              <tr
+                key={name}
+                className={selectionRowClassName(selected)}
+                onMouseDown={(event) => selectable ? beginMergeFileDrag(event, fileName, selected, disabled) : undefined}
+                onMouseEnter={() => selectable ? continueMergeFileDrag(fileName, disabled) : undefined}
+              >
                 {selectable ? (
                   <td className="px-3 py-2">
                     <Checkbox
                       checked={selected}
                       disabled={disabled}
+                      onMouseDown={(event) => event.stopPropagation()}
                       onCheckedChange={(value) => toggleMergeFile(fileName, !!value)}
                       aria-label={`${fileName} 선택`}
                       className="dark:border-[#30363d]"
@@ -821,6 +877,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   };
 
   const handleDuplicateScanRecursiveChange = (value: boolean) => {
+    duplicateScanRecursiveRef.current = value;
     setDuplicateScanRecursive(value);
     saveSetting("asset_excel_duplicate_scan_recursive", value);
   };
@@ -839,7 +896,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       const data = await startAssetParquetDuplicateCleanup({
         target_directory: mergeBaseDirectory,
         dry_run: true,
-        scan_recursive: duplicateScanRecursive,
+        scan_recursive: duplicateScanRecursiveRef.current,
       });
       startPolling(data.job_id);
     } catch (err: any) {
@@ -863,7 +920,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         dry_run: false,
         delete_confirmed: duplicateDeleteConfirmed,
         delete_confirmation_text: duplicateDeleteConfirmationText,
-        scan_recursive: duplicateScanRecursive,
+        scan_recursive: duplicateScanRecursiveRef.current,
       });
       startPolling(data.job_id);
     } catch (err: any) {
@@ -1001,8 +1058,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   };
 
   return (
-    <WorkflowPageShell workflowId="utility">
-      <div className="relative space-y-6">
+    <WorkflowPageShell workflowId="price-data">
+      <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
@@ -1092,10 +1149,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 선택한 파일: {formatInteger(selectedConvertFileCount)} / {formatInteger(excelFiles.length)}개
               </p>
               <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-                <table className="w-full min-w-[560px] text-sm">
+                <table className="w-full min-w-[560px] select-none text-sm">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
-                      <th className="w-12 px-3 py-2 font-medium">선택</th>
+                      <th className="min-w-16 whitespace-nowrap px-3 py-2 font-medium">선택</th>
                       <th className="px-3 py-2 font-medium">파일</th>
                       <th className="px-3 py-2 text-right font-medium">크기</th>
                     </tr>
@@ -1104,11 +1161,17 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     {excelFiles.map((file) => {
                       const selected = selectedConvertFileSet.has(file.relative_path);
                       return (
-                        <tr key={file.relative_path} className="dark:text-slate-300">
+                        <tr
+                          key={file.relative_path}
+                          className={selectionRowClassName(selected)}
+                          onMouseDown={(event) => beginConvertFileDrag(event, file.relative_path, selected)}
+                          onMouseEnter={() => continueConvertFileDrag(file.relative_path)}
+                        >
                           <td className="px-3 py-2">
                             <Checkbox
                               checked={selected}
                               disabled={!!activeJobId}
+                              onMouseDown={(event) => event.stopPropagation()}
                               onCheckedChange={(value) => toggleConvertFile(file.relative_path, !!value)}
                               aria-label={`${file.relative_path} 선택`}
                               className="dark:border-[#30363d]"
@@ -1509,20 +1572,25 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           {isMergeMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base dark:text-white">
-                <Eye className="h-4 w-4" />
-                병합대상 모아보기
-              </CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="flex items-center gap-2 text-base dark:text-white">
+                  <Eye className="h-4 w-4" />
+                  병합대상 모아보기
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={selectAllMergeFiles} disabled={!!activeJobId || loading || allMergeFilesSelected || !mergeBaseOutputRows.length}>
+                    전체 선택
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={clearMergeFiles} disabled={!!activeJobId || loading || !mergeSelectedCount}>
+                    선택 해제
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2">
               <p className={`text-sm ${mergeSelectionReady ? "text-emerald-600 dark:text-emerald-300" : "text-slate-500 dark:text-slate-400"}`}>
-                선택한 파일: {formatInteger(mergeSelectedCount)}개 / 묶음: {formatInteger(mergePairCount)}개
+                {formatMergeSelectionSummary(formatInteger(mergeSelectedCount), formatInteger(mergePairCount), incompleteMergeAccountNames)}
               </p>
-              {incompleteMergeGroups.length ? (
-                <p className="text-xs text-amber-600 dark:text-amber-300">
-                  1개만 선택된 계정: {incompleteMergeGroups.map(([accountName]) => accountName).join(", ")}
-                </p>
-              ) : null}
               <div className="space-y-2">
                 {renderOutputRowsTable(sortedMergeBaseOutputRows, "병합 대상 데이터 경로에 표시할 병합 대상이 없습니다.", true)}
               </div>

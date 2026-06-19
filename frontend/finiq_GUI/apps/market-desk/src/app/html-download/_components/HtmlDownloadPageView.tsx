@@ -845,7 +845,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         </div>
       ) : null}
     >
-      <div className="relative space-y-6">
+      <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           {showSaveWorkflow && (
             <HtmlWorkflowCard
