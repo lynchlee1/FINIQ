@@ -74,6 +74,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Ontology event-price chart | 주가-공시 차트 | Plot combining Quantiwise price candles and KIND disclosure markers. |
 | Ontology event timeline | 공시 타임라인 | List of visible disclosures for the selected company and period. |
 | Ontology disclosure analysis | 공시 분석 | Event analysis workspace for triple-barrier and related disclosure tests. |
+| Ontology chart frequency selector | 일봉/5일봉/20일봉/월봉 | Chart candle aggregation selector below the chart action buttons. |
 | Ontology full date range | 전체 기간 | Default date range for Graph View chart and disclosure analysis. |
 | Ontology chart fullscreen action | 전체화면 | Opens the chart in an app-level fullscreen overlay. |
 | Ontology chart exit fullscreen action | 전체화면 닫기 | Closes the chart fullscreen overlay. |

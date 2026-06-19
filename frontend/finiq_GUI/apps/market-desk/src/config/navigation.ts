@@ -47,7 +47,7 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     layout: "canvas",
     steps: [
       { href: "/graph", step: 1, label: "Graph View" },
-      { href: "/", step: 2, label: "Chart View" },
+      { href: "/graph/analysis", step: 2, label: "공시 분석" },
     ],
   },
   "disclosure-build": {
