@@ -70,11 +70,11 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Ontology real-data workspace | Graph View | Use for the production Ontology analysis page. |
 | Ontology data status | 데이터 상태 | Source readiness panel for KIND and Quantiwise data. |
 | Ontology company selector | 회사 선택 | Company selector backed by KIND SQLite shards, shown in the right settings panel. |
+| Ontology stock selector | 종목 선택 | Top selector for changing the active stock in `A000000` format. |
 | Ontology event-price chart | 주가-공시 차트 | Plot combining Quantiwise price candles and KIND disclosure markers. |
 | Ontology event timeline | 공시 타임라인 | List of visible disclosures for the selected company and period. |
-| Ontology analysis summary | 분석 요약 | Decision-useful metrics for the selected company and period. |
-| Ontology chart view mode | 차트 | Top mode for the event-price chart. |
-| Ontology analysis filters | 분석 조건 | Compact controls for date range, title filter, and candle frequency. |
+| Ontology disclosure analysis | 공시 분석 | Event analysis workspace for triple-barrier and related disclosure tests. |
+| Ontology full date range | 전체 기간 | Default date range for Graph View chart and disclosure analysis. |
 | Ontology chart fullscreen action | 전체화면 | Opens the chart in an app-level fullscreen overlay. |
 | Ontology chart exit fullscreen action | 전체화면 닫기 | Closes the chart fullscreen overlay. |
 | Ontology chart zoom sensitivity | 확대/축소 민감도 | Chart interaction setting in the right settings panel. |

@@ -23,7 +23,8 @@ test("ontology graph workspace calls real data APIs and avoids synthetic copy", 
   assert.match(source, /\/api\/ontology\/company-panel/);
   assert.match(source, /주가-공시 차트/);
   assert.match(source, /공시 타임라인/);
-  assert.match(source, /분석 요약/);
+  assert.match(source, /공시 분석/);
+  assert.match(source, /Triple Barrier/);
   assert.doesNotMatch(source, /TEST DATA/);
   assert.doesNotMatch(source, /Synthetic/);
   assert.doesNotMatch(source, /Export disabled for test data/);
@@ -58,17 +59,39 @@ test("ontology graph workspace exposes chart zoom sensitivity in the right setti
 test("ontology graph workspace keeps the top selector chart-focused", async () => {
   const source = await readFile(workspacePath, "utf8");
 
-  assert.match(source, /type ChartViewMode/);
-  assert.match(source, /CHART_VIEW_MODES/);
-  assert.match(source, /activeChartView === "chart"/);
-  assert.match(source, /activeChartView === "timeline"/);
-  assert.match(source, /setActiveChartView/);
-  assert.match(source, /분석 조건/);
-  assert.match(source, /회사 선택/);
+  assert.match(source, /종목 선택/);
+  assert.match(source, /selectedCompany\.stock_code/);
+  assert.match(source, /normalizeStockCode/);
+  assert.match(source, /formatCompanyOptionLabel/);
+  assert.doesNotMatch(source, /type ChartViewMode/);
+  assert.doesNotMatch(source, /CHART_VIEW_MODES/);
+  assert.doesNotMatch(source, /activeChartView/);
+  assert.doesNotMatch(source, /setActiveChartView/);
   assert.doesNotMatch(source, /WorkspaceMode/);
   assert.doesNotMatch(source, /WORKSPACE_MODES/);
   assert.doesNotMatch(source, /activeMode/);
+  assert.doesNotMatch(source, /분석 조건/);
+  assert.doesNotMatch(source, /분석 요약/);
+  assert.doesNotMatch(source, /시작일/);
+  assert.doesNotMatch(source, /종료일/);
   assert.doesNotMatch(source, /데이터 상태/);
+});
+
+test("ontology graph workspace defaults to full range and provides disclosure analysis", async () => {
+  const source = await readFile(workspacePath, "utf8");
+
+  assert.match(source, /전체 기간/);
+  assert.match(source, /tripleBarrierResults/);
+  assert.match(source, /upperBarrier/);
+  assert.match(source, /lowerBarrier/);
+  assert.match(source, /barrierHorizon/);
+  assert.match(source, /상승 돌파/);
+  assert.match(source, /하락 돌파/);
+  assert.match(source, /기간 만료/);
+  assert.doesNotMatch(source, /currentYearStart/);
+  assert.doesNotMatch(source, /todayInputValue/);
+  assert.doesNotMatch(source, /start_date: startDate/);
+  assert.doesNotMatch(source, /end_date: endDate/);
 });
 
 test("ontology graph workspace can expand the price chart without third-party branding", async () => {
@@ -90,14 +113,17 @@ test("ontology terminology documents the real-data workspace labels", async () =
   assert.match(source, /\| Ontology real-data workspace \| Graph View \|/);
   assert.match(source, /\| Ontology data status \| 데이터 상태 \|/);
   assert.match(source, /\| Ontology company selector \| 회사 선택 \|/);
+  assert.match(source, /\| Ontology stock selector \| 종목 선택 \|/);
   assert.match(source, /\| Ontology event-price chart \| 주가-공시 차트 \|/);
   assert.match(source, /\| Ontology event timeline \| 공시 타임라인 \|/);
-  assert.match(source, /\| Ontology analysis summary \| 분석 요약 \|/);
-  assert.match(source, /\| Ontology chart view mode \| 차트 \|/);
-  assert.match(source, /\| Ontology analysis filters \| 분석 조건 \|/);
+  assert.match(source, /\| Ontology disclosure analysis \| 공시 분석 \|/);
+  assert.match(source, /\| Ontology full date range \| 전체 기간 \|/);
   assert.match(source, /\| Ontology chart fullscreen action \| 전체화면 \|/);
   assert.match(source, /\| Ontology chart exit fullscreen action \| 전체화면 닫기 \|/);
   assert.match(source, /\| Ontology chart zoom sensitivity \| 확대\/축소 민감도 \|/);
+  assert.doesNotMatch(source, /\| Ontology chart view mode \| 차트 \|/);
+  assert.doesNotMatch(source, /\| Ontology analysis summary \| 분석 요약 \|/);
+  assert.doesNotMatch(source, /\| Ontology analysis filters \| 분석 조건 \|/);
   assert.doesNotMatch(source, /\| Ontology workspace analysis mode \| 분석 \|/);
   assert.doesNotMatch(source, /\| Ontology workspace company mode \| 회사 \|/);
   assert.doesNotMatch(source, /\| Ontology workspace data mode \| 데이터 \|/);
