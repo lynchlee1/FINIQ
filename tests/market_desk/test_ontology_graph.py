@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from finiq.config import AppConfig
+from finiq.market_desk.analytics import ontology_graph
 from finiq.market_desk.analytics.ontology_graph import (
     OntologyRequestCancelled,
     build_ontology_company_panel,
@@ -144,7 +145,7 @@ def _write_disclosure_shard(root: Path) -> Path:
     return manifest_path
 
 
-def _write_quanti_parquet(root: Path, *, include_volume: bool = True) -> Path:
+def _write_quanti_parquet(root: Path, *, include_volume: bool = True, include_adjusted: bool = False) -> Path:
     quanti_dir = root / "Quantiwise" / "parquetCalamine"
     quanti_dir.mkdir(parents=True)
     dates = pd.to_datetime(["2024-12-30", "2025-01-02", "2025-01-03", "2025-01-06"])
@@ -155,12 +156,23 @@ def _write_quanti_parquet(root: Path, *, include_volume: bool = True) -> Path:
         "close": [94, 111, 114, 117],
         "volume": [800, 1000, 1200, 900],
     }
+    adjusted_values = {
+        "adjOpen": [9, 10, 11, 12],
+        "adjHigh": [10, 12, 13, 14],
+        "adjLow": [8, 9, 10, 11],
+        "adjClose": [9, 11, 12, 13],
+        "adjVolume": [8000, 10000, 12000, 9000],
+    }
     for account, account_values in values.items():
         if account == "volume" and not include_volume:
             continue
-        frame = pd.DataFrame({"date": dates, "A005930": account_values})
+        frame = pd.DataFrame({"date": dates, "A005930": account_values, "A123456": account_values})
         frame.to_parquet(quanti_dir / f"{account}_20250102_20250106_fixture.parquet", index=False)
-    pd.DataFrame({"code": ["A005930"], "name": ["테스트전자"]}).to_parquet(
+    if include_adjusted:
+        for account, account_values in adjusted_values.items():
+            frame = pd.DataFrame({"date": dates, "A005930": account_values, "A123456": account_values})
+            frame.to_parquet(quanti_dir / f"{account}_20250102_20250106_fixture.parquet", index=False)
+    pd.DataFrame({"code": ["A005930", "A123456"], "name": ["테스트전자", "매핑전용"]}).to_parquet(
         quanti_dir / "code_name_mapping.parquet",
         index=False,
     )
@@ -176,7 +188,7 @@ def test_ontology_status_reports_manifest_and_quanti_coverage(tmp_path: Path) ->
     assert payload["kind"]["summary"]["disclosures"] == 4
     assert payload["kind"]["shard_years"] == ["2025"]
     assert payload["quantiwise"]["available_items"] == ["close", "high", "low", "open", "volume"]
-    assert payload["quantiwise"]["mapped_companies"] == 1
+    assert payload["quantiwise"]["mapped_companies"] == 2
     assert set(payload["disclosure_groups"]) >= {"shareholder_meeting", "bond_issuance", "rights_issuance"}
     assert payload["messages"] == []
 
@@ -206,6 +218,52 @@ def test_search_ontology_companies_returns_counts_and_price_availability(tmp_pat
     ]
 
 
+def test_search_ontology_companies_returns_quanti_mapping_matches_without_kind_rows(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    by_code = search_ontology_companies(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        keyword="A123456",
+    )
+    by_name = search_ontology_companies(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        keyword="매핑전용",
+    )
+
+    expected = {
+        "company_id": "A123456",
+        "stock_code": "A123456",
+        "company_name": "매핑전용",
+        "market": "",
+        "disclosure_count": 0,
+        "first_disclosed_date": "",
+        "last_disclosed_date": "",
+        "has_price_data": True,
+    }
+    assert by_code["companies"] == [expected]
+    assert by_name["companies"] == [expected]
+
+
+def test_build_ontology_company_panel_uses_quanti_mapping_name_without_kind_rows(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    payload = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A123456",
+        display_frequency_label="일봉",
+    )
+
+    assert payload["company"]["company_id"] == "A123456"
+    assert payload["company"]["stock_code"] == "A123456"
+    assert payload["company"]["company_name"] == "매핑전용"
+    assert payload["company"]["market"] == ""
+
+
 def test_build_ontology_company_panel_aligns_disclosures_to_price_candles(tmp_path: Path) -> None:
     manifest_path = _write_disclosure_shard(tmp_path)
     quanti_dir = _write_quanti_parquet(tmp_path)
@@ -233,6 +291,75 @@ def test_build_ontology_company_panel_aligns_disclosures_to_price_candles(tmp_pa
     assert payload["summary"]["visible_disclosures"] == 2
     assert payload["summary"]["after_close_disclosures"] == 1
     assert payload["messages"] == []
+
+
+def test_build_ontology_company_panel_prefers_adjusted_quanti_prices(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path, include_adjusted=True)
+
+    payload = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A005930",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 6),
+        display_frequency_label="일봉",
+    )
+
+    assert payload["chart"]["candles"][0]["open"] == 10
+    assert payload["chart"]["candles"][0]["high"] == 12
+    assert payload["chart"]["candles"][0]["low"] == 9
+    assert payload["chart"]["candles"][0]["close"] == 11
+    assert payload["chart"]["candles"][0]["volume"] == 10000
+
+
+def test_build_ontology_company_panel_loads_category_json_disclosures_without_sqlite_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+    kind_category_dir = tmp_path / "KIND"
+    category_dir = kind_category_dir / "bond_issuance"
+    category_dir.mkdir(parents=True)
+    (category_dir / "filtered.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "company_id": "123456",
+                        "company_name": "매핑전용",
+                        "market": "코스피",
+                        "disclosed_at": "2025-01-02 09:10",
+                        "disclosed_date": "2025-01-02",
+                        "title": "전환사채권발행결정",
+                        "title_display": "전환사채권발행결정",
+                        "has_later_correction": False,
+                        "acpt_no": "20250102009999",
+                        "doc_no": "",
+                        "submitter": "매핑전용",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ontology_graph, "DEFAULT_KIND_CATEGORY_DIR", kind_category_dir)
+
+    payload = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A123456",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 6),
+        display_frequency_label="일봉",
+        disclosure_group="bond_issuance",
+    )
+
+    assert payload["chart"]["markers"][0]["acpt_no"] == "20250102009999"
+    assert payload["timeline"][0]["acpt_no"] == "20250102009999"
+    assert payload["summary"]["visible_disclosures"] == 1
 
 
 def test_build_ontology_company_panel_filters_by_disclosure_group(tmp_path: Path) -> None:

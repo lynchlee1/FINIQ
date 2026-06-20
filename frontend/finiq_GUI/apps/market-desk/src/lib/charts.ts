@@ -1,5 +1,6 @@
 "use client"
 
+const DEFAULT_LEFT_SCALE_WIDTH = 88;
 const DEFAULT_RIGHT_SCALE_WIDTH = 72;
 const DEFAULT_TIME_SCALE_HEIGHT = 28;
 const DEFAULT_PADDING = 12;
@@ -401,10 +402,12 @@ export class ChartApi {
   }
 
   getLayout() {
+    const leftScaleWidth = DEFAULT_LEFT_SCALE_WIDTH;
     const rightScaleWidth = DEFAULT_RIGHT_SCALE_WIDTH;
     const timeScaleHeight = DEFAULT_TIME_SCALE_HEIGHT;
     return {
-      plotLeft: DEFAULT_PADDING,
+      leftScaleWidth,
+      plotLeft: DEFAULT_PADDING + leftScaleWidth,
       plotTop: DEFAULT_PADDING,
       plotRight: this.width - DEFAULT_PADDING - rightScaleWidth,
       plotBottom: this.height - DEFAULT_PADDING - timeScaleHeight,
@@ -599,6 +602,7 @@ export class ChartApi {
     this.drawPriceSeries(ctx, layout, priceSeries);
     this.drawMarkers(ctx, layout, priceSeries);
     this.drawAxes(ctx, layout, priceSeries);
+    this.drawVolumeAxis(ctx, layout, volumeSeries);
     this.drawCrosshair(ctx, layout, priceSeries);
   }
 
@@ -674,6 +678,39 @@ export class ChartApi {
     ctx.restore();
   }
 
+  drawVolumeAxis(ctx: CanvasRenderingContext2D, layout: any, volumeSeries: SeriesApi | null) {
+    if (!volumeSeries) {
+      return;
+    }
+    const data = volumeSeries.data || [];
+    if (!data.length) {
+      return;
+    }
+    const volumeRect = this.getPaneRect(volumeSeries.scaleMargins, layout);
+    const volumeRange = this.getVolumeRange();
+    const tickCount: number = 2;
+
+    ctx.save();
+    ctx.strokeStyle = this.options.grid?.horzLines?.color || "#e8e8e8";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(layout.plotLeft, volumeRect.top);
+    ctx.lineTo(layout.plotRight, volumeRect.top);
+    ctx.stroke();
+
+    ctx.fillStyle = this.options.layout?.textColor || "#6b7280";
+    ctx.font = "12px 'IBM Plex Sans KR', sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < tickCount; i += 1) {
+      const ratio = tickCount === 1 ? 0 : i / (tickCount - 1);
+      const y = volumeRect.top + volumeRect.height * ratio;
+      const volume = volumeRange.max - (volumeRange.max - volumeRange.min) * ratio;
+      ctx.fillText(Math.round(volume).toLocaleString("ko-KR"), layout.plotLeft - 8, y);
+    }
+    ctx.restore();
+  }
+
   drawPriceSeries(ctx: CanvasRenderingContext2D, layout: any, priceSeries: SeriesApi | null) {
     if (!priceSeries) return;
     const data = priceSeries.data || [];
@@ -694,6 +731,9 @@ export class ChartApi {
     }
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(layout.plotLeft, priceRect.top, layout.plotRight - layout.plotLeft, priceRect.height);
+    ctx.clip();
     data.slice(visibleIndexes.startIndex, visibleIndexes.endIndex + 1).forEach((item, offset) => {
       const index = visibleIndexes.startIndex + offset;
       const x = this.getX(index, data.length, layout);
@@ -753,6 +793,9 @@ export class ChartApi {
     const visibleIndexes = this.getVisibleIndexes(data.length);
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(layout.plotLeft, priceRect.top, layout.plotRight - layout.plotLeft, priceRect.height);
+    ctx.clip();
     ctx.lineWidth = toNumber(priceSeries.options.lineWidth, 2);
     ctx.strokeStyle = priceSeries.options.color || "#2563eb";
     ctx.beginPath();
@@ -815,6 +858,9 @@ export class ChartApi {
     const visibleIndexes = this.getVisibleIndexes(data.length);
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(layout.plotLeft, priceRect.top, layout.plotRight - layout.plotLeft, priceRect.height);
+    ctx.clip();
     ctx.font = "11px 'IBM Plex Sans KR', sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -836,6 +882,7 @@ export class ChartApi {
         } else if (marker.position === "belowBar") {
           y = lowY + 12 + markerIndex * 16;
         }
+        y = clamp(y, priceRect.top + 6, priceRect.bottom - 6);
 
         ctx.fillStyle = marker.color || "#94a3b8";
         ctx.strokeStyle = marker.color || "#94a3b8";
