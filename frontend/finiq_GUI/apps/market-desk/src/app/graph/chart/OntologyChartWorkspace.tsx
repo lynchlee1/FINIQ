@@ -78,21 +78,6 @@ function isStockCodeKeyword(value: string) {
   return /^A\d{6}$/.test(value.trim().toUpperCase());
 }
 
-function fallbackCompany(value: string): OntologyCompany | null {
-  const stockCode = normalizeStockCode(value);
-  if (!stockCode) return null;
-  return {
-    company_id: stockCode,
-    stock_code: stockCode,
-    company_name: stockCode,
-    market: "",
-    disclosure_count: 0,
-    first_disclosed_date: "",
-    last_disclosed_date: "",
-    has_price_data: true,
-  };
-}
-
 function isAbortError(err: unknown) {
   return err instanceof DOMException && err.name === "AbortError";
 }
@@ -161,16 +146,11 @@ export function OntologyChartWorkspace() {
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      const fallback = isStockCodeKeyword(keywordText) ? fallbackCompany(keywordText) : null;
       setSelectedCompany((current) => {
-        if (
-          current &&
-          (data.companies.some((company) => company.stock_code === current.stock_code) ||
-            fallback?.stock_code === current.stock_code)
-        ) {
+        if (current && data.companies.some((company) => company.stock_code === current.stock_code)) {
           return current;
         }
-        return data.companies[0] ?? fallback;
+        return data.companies[0] ?? null;
       });
     } catch (err) {
       if (isAbortError(err)) return;

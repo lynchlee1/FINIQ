@@ -82,6 +82,29 @@ test("price chart can render close-only line mode", async () => {
   assert.match(chartSource, /drawLineSeries/);
 });
 
+test("price chart keeps price and volume on separate vertical axes", async () => {
+  const [source, chartSource] = await Promise.all([
+    readFile(priceChartPath, "utf8"),
+    readFile(chartLibPath, "utf8"),
+  ]);
+
+  const priceScaleIndex = source.indexOf("priceSeries.priceScale().applyOptions");
+  const volumeScaleIndex = source.indexOf("volumeSeries.priceScale().applyOptions");
+  assert.notEqual(priceScaleIndex, -1);
+  assert.notEqual(volumeScaleIndex, -1);
+
+  const priceScaleBlock = source.slice(priceScaleIndex, volumeScaleIndex);
+  const volumeScaleBlock = source.slice(volumeScaleIndex, source.indexOf("chart.subscribeCrosshairMove", volumeScaleIndex));
+  assert.match(priceScaleBlock, /bottom:\s*0\.28/);
+  assert.match(volumeScaleBlock, /top:\s*0\.76/);
+  assert.match(chartSource, /drawVolumeAxis/);
+  assert.match(chartSource, /getVolumeRange/);
+  assert.match(chartSource, /DEFAULT_LEFT_SCALE_WIDTH/);
+  assert.match(chartSource, /leftScaleWidth/);
+  assert.match(chartSource, /ctx\.rect\(layout\.plotLeft, priceRect\.top/);
+  assert.match(chartSource, /ctx\.clip\(\)/);
+});
+
 test("FINIQ chart renders all disclosure markers on the same date", async () => {
   const source = await readFile(chartLibPath, "utf8");
 

@@ -46,11 +46,11 @@ KIND_CATEGORY_GROUPS = {
     "rights_issuance": ("유상증자",),
 }
 ITEM_FILE_CANDIDATES = {
-    "open": ("open",),
-    "high": ("high",),
-    "low": ("low",),
-    "close": ("close",),
-    "volume": ("volume", "adjVolume"),
+    "open": ("adjOpen", "open"),
+    "high": ("adjHigh", "high"),
+    "low": ("adjLow", "low"),
+    "close": ("adjClose", "close"),
+    "volume": ("adjVolume", "volume"),
 }
 CancellationCheck = Callable[[], bool] | None
 
@@ -154,11 +154,20 @@ def _available_item_files(quanti_dir: Path) -> dict[str, Path]:
 
 
 def _quanti_mapping_codes(quanti_dir: Path) -> set[str]:
+    return set(_quanti_mapping_names(quanti_dir))
+
+
+def _quanti_mapping_names(quanti_dir: Path) -> dict[str, str]:
     mapping_path = quanti_dir / "code_name_mapping.parquet"
     if not mapping_path.exists():
-        return set()
-    frame = pd.read_parquet(mapping_path, columns=["code"])
-    return {str(code).strip().upper() for code in frame["code"].dropna().tolist()}
+        return {}
+    frame = pd.read_parquet(mapping_path, columns=["code", "name"])
+    mappings: dict[str, str] = {}
+    for row in frame.to_dict("records"):
+        code = str(row.get("code") or "").strip().upper()
+        if code:
+            mappings[code] = str(row.get("name") or "").strip()
+    return mappings
 
 
 def _has_price_data(quanti_codes: set[str], company_id: str) -> bool:
@@ -248,7 +257,8 @@ def search_ontology_companies(
 ) -> dict[str, Any]:
     resolved_manifest, manifest = _load_manifest(manifest_path)
     resolved_quanti = _resolve_path(quanti_dir, DEFAULT_QUANTIWISE_PARQUET_DIR)
-    quanti_codes = _quanti_mapping_codes(resolved_quanti)
+    quanti_names = _quanti_mapping_names(resolved_quanti)
+    quanti_codes = set(quanti_names)
     table_name = str(manifest.get("table_name") or TABLE_NAME_DEFAULT)
     normalized_keyword = str(keyword or "").strip()
     normalized_market = str(market or "전체").strip()
@@ -319,6 +329,29 @@ def search_ontology_companies(
         }
         for row in merged.values()
     ]
+    existing_stock_codes = {company["stock_code"] for company in companies}
+    keyword_casefold = normalized_keyword.casefold()
+    normalized_keyword_code = _display_stock_code(normalized_keyword)
+    for code, name in quanti_names.items():
+        if code in existing_stock_codes:
+            continue
+        if normalized_keyword:
+            name_matches = keyword_casefold in name.casefold()
+            code_matches = normalized_keyword_code == code or normalized_keyword.upper() in code
+            if not name_matches and not code_matches:
+                continue
+        companies.append(
+            {
+                "company_id": code,
+                "stock_code": code,
+                "company_name": name,
+                "market": "",
+                "disclosure_count": 0,
+                "first_disclosed_date": "",
+                "last_disclosed_date": "",
+                "has_price_data": True,
+            }
+        )
     companies.sort(key=lambda item: (-item["disclosure_count"], item["company_name"], item["company_id"]))
     return {
         "companies": companies[: max(int(limit or 30), 1)],
@@ -384,6 +417,52 @@ def _load_disclosures(
             _raise_if_cancelled(cancellation_check)
         finally:
             connection.close()
+    return rows
+
+
+def _load_category_disclosures(
+    *,
+    company_id: str,
+    start_date: date,
+    end_date: date,
+    disclosure_group: str,
+    market: str = "전체",
+) -> list[dict[str, Any]]:
+    selected_group_names = _selected_disclosure_groups(disclosure_group)
+    if selected_group_names is None:
+        category_names = _disclosure_group_options()
+    else:
+        category_names = [
+            folder_name
+            for folder_name, group_names in KIND_CATEGORY_GROUPS.items()
+            if selected_group_names.intersection(group_names)
+        ]
+        category_names.extend(sorted(selected_group_names - set().union(*map(set, KIND_CATEGORY_GROUPS.values()))))
+
+    normalized_company_id = _kind_company_id(company_id)
+    market = str(market or "전체").strip()
+    rows: list[dict[str, Any]] = []
+    for category_name in category_names:
+        filtered_path = DEFAULT_KIND_CATEGORY_DIR / category_name / "filtered.json"
+        if not filtered_path.exists():
+            continue
+        payload = json.loads(filtered_path.read_text(encoding="utf-8"))
+        for row in list(payload.get("disclosures") or []):
+            row_company_id = _kind_company_id(str(row.get("company_id") or row.get("company_key") or ""))
+            if row_company_id != normalized_company_id:
+                continue
+            disclosed_date = str(row.get("disclosed_date") or str(row.get("disclosed_at") or "")[:10])
+            if not disclosed_date:
+                continue
+            row_date = date.fromisoformat(disclosed_date)
+            if row_date < start_date or row_date > end_date:
+                continue
+            if market and market != "전체" and str(row.get("market") or "") != market:
+                continue
+            normalized_row = dict(row)
+            normalized_row["disclosed_date"] = disclosed_date
+            rows.append(normalized_row)
+    rows.sort(key=lambda row: (str(row.get("disclosed_at") or ""), str(row.get("acpt_no") or "")))
     return rows
 
 
@@ -569,6 +648,7 @@ def build_ontology_company_panel(
     selected_disclosure_group = str(disclosure_group or DISCLOSURE_GROUP_ALL).strip() or DISCLOSURE_GROUP_ALL
     resolved_manifest, manifest = _load_manifest(manifest_path)
     resolved_quanti = _resolve_path(quanti_dir, DEFAULT_QUANTIWISE_PARQUET_DIR)
+    quanti_name = _quanti_mapping_names(resolved_quanti).get(stock_code, "")
     _raise_if_cancelled(cancellation_check)
     disclosure_rows = _load_disclosures(
         manifest_path=resolved_manifest,
@@ -580,10 +660,18 @@ def build_ontology_company_panel(
         market=market,
         cancellation_check=cancellation_check,
     )
+    if not disclosure_rows:
+        disclosure_rows = _load_category_disclosures(
+            company_id=stock_code,
+            start_date=query_start,
+            end_date=query_end,
+            disclosure_group=selected_disclosure_group,
+            market=market,
+        )
     _raise_if_cancelled(cancellation_check)
     company = {
         "company_id": stock_code,
-        "company_name": disclosure_rows[0]["company_name"] if disclosure_rows else "",
+        "company_name": disclosure_rows[0]["company_name"] if disclosure_rows else quanti_name,
         "market": disclosure_rows[0]["market"] if disclosure_rows else "",
         "disclosures": [
             {

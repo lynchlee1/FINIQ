@@ -231,14 +231,6 @@ test("ontology chart workspace keeps empty search state until the user searches"
   assert.doesNotMatch(source, /keywordText\.startsWith\("A"\)/);
 });
 
-test("ontology chart workspace falls back to direct stock-code panels when company search is empty", async () => {
-  const source = await readFile(chartWorkspacePath, "utf8");
-
-  assert.match(source, /fallbackCompany/);
-  assert.match(source, /isStockCodeKeyword\(keywordText\) \? fallbackCompany\(keywordText\) : null/);
-  assert.match(source, /return data\.companies\[0\] \?\? fallback/);
-});
-
 test("ontology workspaces only strip A prefix from stock-code keywords", async () => {
   const sources = await Promise.all([
     readFile(workspacePath, "utf8"),

@@ -88,6 +88,13 @@ export function PriceChart({ data, markers, title, subtitle, chartType = "candle
       priceFormat: { type: "volume" },
     });
 
+    priceSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.04,
+        bottom: 0.28,
+      },
+    });
+
     volumeSeries.priceScale().applyOptions({
       scaleMargins: {
         top: 0.76,
