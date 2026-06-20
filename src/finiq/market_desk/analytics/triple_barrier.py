@@ -99,6 +99,19 @@ def build_parameter_hash(params: TripleBarrierParams) -> tuple[str, str]:
     return sha256(params_json.encode("utf-8")).hexdigest(), params_json
 
 
+def _validate_params(params: TripleBarrierParams) -> None:
+    if params.event_time_basis not in {"disclosed_date", "disclosed_at"}:
+        raise ValueError("event_time_basis must be disclosed_date or disclosed_at")
+    if params.price_basis not in {"close", "intraday"}:
+        raise ValueError("price_basis must be close or intraday")
+    if params.upper_pct <= 0:
+        raise ValueError("upper_pct must be greater than 0")
+    if params.lower_pct <= 0:
+        raise ValueError("lower_pct must be greater than 0")
+    if params.vertical_days <= 0:
+        raise ValueError("vertical_days must be greater than 0")
+
+
 def calculate_triple_barrier_rows(
     disclosures: list[TripleBarrierDisclosure],
     prices: list[TripleBarrierPrice],
@@ -106,6 +119,7 @@ def calculate_triple_barrier_rows(
     *,
     source_manifest_path: str,
 ) -> list[TripleBarrierResult]:
+    _validate_params(params)
     sorted_prices = sorted(prices, key=lambda price: price.date)
     parameter_hash, params_json = build_parameter_hash(params)
     return [
@@ -194,6 +208,20 @@ def _calculate_disclosure_row(
                     label=-1,
                 )
         else:
+            touches_upper = price.high >= upper_price
+            touches_lower = price.low <= lower_price
+            if touches_upper and touches_lower:
+                return _failed_row(
+                    disclosure,
+                    params,
+                    source_manifest_path=source_manifest_path,
+                    calculation_params_json=calculation_params_json,
+                    parameter_hash=parameter_hash,
+                    error_message=(
+                        f"Upper and lower barriers touched in the same price row {price.date}; "
+                        "intraday sequence is unavailable"
+                    ),
+                )
             if price.high >= upper_price:
                 return _success_row(
                     disclosure,

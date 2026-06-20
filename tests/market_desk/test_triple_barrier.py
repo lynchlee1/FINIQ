@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import sqlite3
 
+import pytest
+
 from finiq.market_desk.analytics.triple_barrier import (
     TripleBarrierDisclosure,
     TripleBarrierParams,
@@ -56,6 +58,30 @@ def test_intraday_mode_labels_upper_when_high_touches_first() -> None:
     assert row.touched_datetime == "2025-01-03"
     assert row.touched_price == 105
     assert row.return_pct == 5
+
+
+def test_intraday_mode_fails_when_same_bar_touches_both_barriers() -> None:
+    params = TripleBarrierParams(
+        event_time_basis="disclosed_date",
+        price_basis="intraday",
+        upper_pct=5,
+        lower_pct=3,
+        vertical_days=2,
+        price_source="quantiwise",
+    )
+    prices = [
+        TripleBarrierPrice(date="2025-01-02", open=100, high=101, low=99, close=100, volume=1000),
+        TripleBarrierPrice(date="2025-01-03", open=100, high=106, low=96, close=101, volume=1100),
+        TripleBarrierPrice(date="2025-01-06", open=101, high=102, low=100, close=101, volume=1200),
+    ]
+
+    rows = calculate_triple_barrier_rows([_disclosure()], prices, params, source_manifest_path="/kind/manifest.json")
+
+    row = rows[0]
+    assert row.status == "failed"
+    assert row.touched_barrier == "error"
+    assert row.label is None
+    assert "same price row" in row.error_message
 
 
 def test_close_mode_ignores_intraday_high_and_labels_lower_on_close() -> None:
@@ -136,6 +162,20 @@ def test_parameter_hash_is_stable_for_equivalent_params() -> None:
     assert first_hash == second_hash
     assert first_json == second_json
     assert "disclosed_date" in first_json
+
+
+def test_invalid_params_raise_value_error() -> None:
+    params = TripleBarrierParams(
+        event_time_basis="disclosed_date",
+        price_basis="intraday",
+        upper_pct=0,
+        lower_pct=3,
+        vertical_days=3,
+        price_source="quantiwise",
+    )
+
+    with pytest.raises(ValueError, match="upper_pct"):
+        calculate_triple_barrier_rows([_disclosure()], _prices(), params, source_manifest_path="/kind/manifest.json")
 
 
 def test_sqlite_storage_prevents_duplicate_disclosure_parameter_rows(tmp_path: Path) -> None:
