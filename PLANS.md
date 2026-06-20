@@ -26,3 +26,23 @@ Verification:
 - `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
 - Real-resource smoke check: `build_ontology_company_panel(company_id="A005930", display_frequency_label="일봉")` returned 6482 candles with adjusted first candle `open=5200, high=5560, low=5050, close=5320`; local KIND resources still returned 0 삼성전자 markers because no exact `005930` or `삼성전자` rows exist in the configured SQLite/category JSON resources.
 - Real-resource smoke check: `build_ontology_company_panel(company_id="A064090", display_frequency_label="일봉")` returned 5758 candles, 1564 chart markers, 1584 timeline rows, and top disclosure groups `기타`, `주주총회`, `유상증자`, `CB`, `BW`.
+
+## Disclosure Triple Barrier Labeling
+
+Purpose: Let the existing `공시 분석` page run Triple Barrier Method labeling from disclosure event times, persist the results, and reload them for later backtests or model training.
+
+Implementation summary:
+- Added a reusable Triple Barrier calculation module that combines disclosure events with Quantiwise OHLCV prices and supports disclosure-date or disclosure-timestamp event bases.
+- Implemented close-price and intraday high/low barrier modes, upper/lower/vertical barrier parameters, label generation, return storage, and failed-row reporting.
+- Added SQLite persistence with a canonical parameter hash and a unique key on source manifest, disclosure ID, ticker, and parameters to prevent duplicate runs.
+- Exposed API routes for running analysis and reading stored results from the ontology market-data router.
+- Replaced the previous in-memory disclosure backtest panel with a `Triple Barrier 실행` panel and a persisted result table on `공시 분석`.
+
+Verification:
+- `PYTHONPATH=src python3 -m pytest tests/market_desk/test_triple_barrier.py -v`
+- `PYTHONPATH=src python3 -m pytest tests/market_desk/test_ontology_graph.py::test_triple_barrier_api_runs_stores_and_reuses_results -v`
+- `PYTHONPATH=src python3 -m pytest tests/market_desk/test_ontology_graph.py -v`
+- `node --test tests/frontend/ontologyGraphWorkspace.test.mjs`
+- `node --test tests/frontend/ontologyGraphWorkspace.test.mjs tests/frontend/navigation.test.mjs`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+- Fixture smoke check: `run_triple_barrier_analysis(company_id="A005930", upper_pct=5, lower_pct=3, vertical_days=2)` created 3 SQLite rows, all completed, and reloaded the first row with `touched_barrier="upper"` and `label=1`.
