@@ -2,6 +2,22 @@
 
 All completed implementation changes listed in this file have been reviewed and verified to be free of errors, including search regressions, mode splits, chart-focused workspaces, and A-prefix conversion behaviors.
 
+## Price Chart Hover OHLCV and Crosshair Readout
+
+Purpose: Add TradingView-style pointer readouts to the FINIQ-owned `주가-공시 차트`, including top-left OHLC, signed price change, percent change, volume, and the existing dashed crosshair price/time labels.
+
+Implementation summary:
+- Added a chart overlay readout in `PriceChart` that follows the active crosshair candle and falls back to the latest candle when not hovering.
+- Cleared stale hover state when the chart data changes.
+- Formatted open, high, low, close, signed change, percent change, and volume using Korean locale-friendly values.
+- Preserved the existing FINIQ-owned Canvas crosshair drawing contract for dashed vertical/horizontal guides, right-side price label, and bottom time label.
+- Added frontend regression coverage for hover OHLCV readout state/formatting and crosshair label drawing.
+
+Verification:
+- `node --test tests/frontend/priceChart.test.mjs`
+- `node --test tests/frontend/*.test.mjs`
+- `npm --prefix frontend/finiq_GUI/apps/market-desk run build`
+
 ## Price Chart Adjusted Prices and Separate Axes
 
 Purpose: Fix the 주가-공시 차트 rendering where raw split-unadjusted prices distorted long-range charts, the price series could enter the volume area, volume scaling was not manually adjustable, and disclosure markers were unavailable when KIND used short company IDs or only category JSON files had rows.
@@ -15,8 +31,10 @@ Implementation summary:
 - Prevented automatic price-range padding from pushing non-negative stock prices below zero.
 - Added a category JSON disclosure fallback for `resources/KIND/*/filtered.json` when the SQLite manifest has no company rows for the selected stock.
 - Matched KIND disclosure rows that use shortened trailing-zero company IDs such as `06409` for `A064090`.
-- Added right settings controls for `공시 마커 위치` and `공시 마커 모양`, including chart-top, chart-bottom, candle-relative, and basic shape overrides.
-- Added frontend and backend regression coverage for adjusted prices, category JSON disclosure fallback, short KIND IDs, pane clipping, separate price/volume axes, vertical price panning, manual volume scaling, marker customization, and non-negative automatic price ranges.
+- Added a compact `공시 마커 스타일` section to the Chart View condition panel, with one target selector for `전체` or a disclosure group and controls for marker shape, placement, color, size, and line width.
+- Restyled the marker-style section as a compact toolbar with a subtle background, tighter controls, and an inline color preview so it does not read as a full extra form block.
+- Applied marker style overrides by disclosure `group`, preserving existing per-group marker meaning unless a selected group is explicitly changed.
+- Added frontend and backend regression coverage for adjusted prices, category JSON disclosure fallback, short KIND IDs, pane clipping, separate price/volume axes, vertical price panning, manual volume scaling, per-disclosure marker customization, and non-negative automatic price ranges.
 
 Verification:
 - `node --test tests/frontend/priceChart.test.mjs`

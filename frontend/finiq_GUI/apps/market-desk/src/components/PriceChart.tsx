@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createChart,
   CandlestickSeries,
@@ -29,7 +29,18 @@ type PriceChartMarker = {
   position?: PriceChartMarkerPosition;
   shape?: Exclude<MarkerShapeOverride, "default">;
   color?: string;
+  group?: string;
+  size?: number;
+  lineWidth?: number;
   text?: string;
+};
+
+type MarkerStyleConfig = {
+  position: MarkerPlacementOverride;
+  shape: MarkerShapeOverride;
+  color: string;
+  size: number;
+  lineWidth: number;
 };
 
 interface PriceChartProps {
@@ -40,8 +51,8 @@ interface PriceChartProps {
   chartType?: "candlestick" | "line";
   showHeader?: boolean;
   zoomSensitivity?: number;
-  markerPlacement?: MarkerPlacementOverride;
-  markerShape?: MarkerShapeOverride;
+  markerStyleDefault?: MarkerStyleConfig;
+  markerStylesByGroup?: Record<string, MarkerStyleConfig>;
   onCrosshairMove?: (candle: any) => void;
 }
 
@@ -52,6 +63,65 @@ function volumeColor(datum: PriceChartDatum) {
   return datum.close >= datum.open ? "rgba(34, 171, 148, 0.38)" : "rgba(242, 54, 69, 0.38)";
 }
 
+function formatPrice(value?: number) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  return Number(value).toLocaleString("ko-KR", {
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatSignedChange(value?: number) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  const sign = Number(value) > 0 ? "+" : "";
+  return `${sign}${formatPrice(value)}`;
+}
+
+function formatPercentChange(value?: number, previousClose?: number) {
+  if (!Number.isFinite(value) || !Number.isFinite(previousClose) || Number(previousClose) === 0) {
+    return "-";
+  }
+  const percent = (Number(value) / Math.abs(Number(previousClose))) * 100;
+  const sign = percent > 0 ? "+" : "";
+  return `${sign}${percent.toLocaleString("ko-KR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
+}
+
+function formatVolume(value?: number) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  const volume = Number(value);
+  if (Math.abs(volume) >= 1_000_000) {
+    return `${(volume / 1_000_000).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}M`;
+  }
+  if (Math.abs(volume) >= 1_000) {
+    return `${(volume / 1_000).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}K`;
+  }
+  return volume.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
+}
+
+function resolveMarkerStyle(
+  marker: PriceChartMarker,
+  markerStyleDefault: MarkerStyleConfig,
+  markerStylesByGroup: Record<string, MarkerStyleConfig>,
+) {
+  const groupStyle = marker.group ? markerStylesByGroup[marker.group] : undefined;
+  return {
+    ...marker,
+    position: groupStyle?.position === "default" ? marker.position : groupStyle?.position ?? (markerStyleDefault.position === "default" ? marker.position : markerStyleDefault.position),
+    shape: groupStyle?.shape === "default" ? marker.shape : groupStyle?.shape ?? (markerStyleDefault.shape === "default" ? marker.shape : markerStyleDefault.shape),
+    color: groupStyle?.color ?? markerStyleDefault.color ?? marker.color,
+    size: groupStyle?.size ?? markerStyleDefault.size,
+    lineWidth: groupStyle?.lineWidth ?? markerStyleDefault.lineWidth,
+  };
+}
+
 export function PriceChart({
   data,
   markers,
@@ -60,8 +130,8 @@ export function PriceChart({
   chartType = "candlestick",
   showHeader = true,
   zoomSensitivity = 0.55,
-  markerPlacement = "default",
-  markerShape = "default",
+  markerStyleDefault = { position: "default", shape: "default", color: "#94a3b8", size: 4, lineWidth: 1 },
+  markerStylesByGroup = {},
   onCrosshairMove,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,10 +140,15 @@ export function PriceChart({
   const volumeSeriesRef = useRef<any>(null);
   const hasFittedContentRef = useRef(false);
   const onCrosshairMoveRef = useRef(onCrosshairMove);
+  const [activeCandle, setActiveCandle] = useState<PriceChartDatum | null>(null);
 
   useEffect(() => {
     onCrosshairMoveRef.current = onCrosshairMove;
   }, [onCrosshairMove]);
+
+  useEffect(() => {
+    setActiveCandle(null);
+  }, [data]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -121,19 +196,22 @@ export function PriceChart({
 
     chart.subscribeCrosshairMove((param: any) => {
       if (!param || !param.time) {
+        setActiveCandle(null);
         onCrosshairMoveRef.current?.(null);
         return;
       }
       const candle = param.seriesData.get(priceSeries);
       const volume = param.seriesData.get(volumeSeries);
-      onCrosshairMoveRef.current?.({
+      const hoverCandle = {
         time: param.time,
         open: candle?.open ?? candle?.value,
         high: candle?.high ?? candle?.value,
         low: candle?.low ?? candle?.value,
         close: candle?.close ?? candle?.value,
         volume: volume?.value,
-      });
+      };
+      setActiveCandle(hoverCandle);
+      onCrosshairMoveRef.current?.(hoverCandle);
     });
 
     chartRef.current = chart;
@@ -196,17 +274,19 @@ export function PriceChart({
 
     priceSeriesRef.current.setData(chartType === "line" ? lineData : candleData);
     volumeSeriesRef.current.setData(volumeData);
-    const chartMarkers = markers.map((marker) => ({
-      ...marker,
-      position: markerPlacement === "default" ? marker.position : markerPlacement,
-      shape: markerShape === "default" ? marker.shape : markerShape,
-    }));
+    const chartMarkers = markers.map((marker) => resolveMarkerStyle(marker, markerStyleDefault, markerStylesByGroup));
     createSeriesMarkers(priceSeriesRef.current, chartMarkers);
     if (!hasFittedContentRef.current) {
       chartRef.current.timeScale().fitContent();
       hasFittedContentRef.current = true;
     }
-  }, [chartType, data, markerPlacement, markerShape, markers]);
+  }, [chartType, data, markerStyleDefault, markerStylesByGroup, markers]);
+
+  const displayCandle = activeCandle ?? data[data.length - 1] ?? null;
+  const displayIndex = displayCandle ? data.findIndex((datum) => datum.time === displayCandle.time) : -1;
+  const previousClose = displayIndex > 0 ? data[displayIndex - 1].close : undefined;
+  const priceChange = displayCandle && previousClose !== undefined ? displayCandle.close - previousClose : undefined;
+  const changeIsNegative = Number(priceChange) < 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -216,7 +296,22 @@ export function PriceChart({
           <p className="text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>
         </div>
       ) : null}
-      <div ref={containerRef} className="min-h-[400px] w-full flex-1" />
+      <div className="relative min-h-[400px] w-full flex-1">
+        {displayCandle ? (
+          <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-white/85 px-2 py-1 text-xs font-medium text-slate-500 shadow-sm dark:bg-slate-950/80 dark:text-slate-300">
+            <span>{displayCandle.time}</span>
+            <span>O {formatPrice(displayCandle.open)}</span>
+            <span>H {formatPrice(displayCandle.high)}</span>
+            <span>L {formatPrice(displayCandle.low)}</span>
+            <span>C {formatPrice(displayCandle.close)}</span>
+            <span className={changeIsNegative ? "text-red-500" : "text-emerald-500"}>
+              {formatSignedChange(priceChange)} ({formatPercentChange(priceChange, previousClose)})
+            </span>
+            <span>Vol {formatVolume(displayCandle.volume)}</span>
+          </div>
+        ) : null}
+        <div ref={containerRef} className="h-full w-full" />
+      </div>
     </div>
   );
 }

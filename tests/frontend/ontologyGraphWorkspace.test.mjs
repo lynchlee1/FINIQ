@@ -343,8 +343,13 @@ test("ontology terminology documents the real-data workspace labels", async () =
   assert.match(source, /\| Ontology chart fullscreen action \| 전체화면 \|/);
   assert.match(source, /\| Ontology chart exit fullscreen action \| 전체화면 닫기 \|/);
   assert.match(source, /\| Ontology chart zoom sensitivity \| 확대\/축소 민감도 \|/);
+  assert.match(source, /\| Ontology chart marker style section \| 공시 마커 스타일 \|/);
+  assert.match(source, /\| Ontology chart marker style target \| 스타일 대상 \|/);
   assert.match(source, /\| Ontology chart marker placement setting \| 공시 마커 위치 \|/);
   assert.match(source, /\| Ontology chart marker shape setting \| 공시 마커 모양 \|/);
+  assert.match(source, /\| Ontology chart marker color setting \| 색상 \|/);
+  assert.match(source, /\| Ontology chart marker size setting \| 크기 \|/);
+  assert.match(source, /\| Ontology chart marker line width setting \| 선 두께 \|/);
   assert.doesNotMatch(source, /\| Ontology chart view mode \| 차트 \|/);
   assert.doesNotMatch(source, /\| Ontology analysis summary \| 분석 요약 \|/);
   assert.doesNotMatch(source, /\| Ontology analysis filters \| 분석 조건 \|/);
@@ -353,20 +358,35 @@ test("ontology terminology documents the real-data workspace labels", async () =
   assert.doesNotMatch(source, /\| Ontology workspace data mode \| 데이터 \|/);
 });
 
-test("ontology chart settings expose disclosure marker placement and shape", async () => {
+test("ontology chart settings expose per-disclosure marker styles in one compact section", async () => {
   const source = await readFile(chartWorkspacePath, "utf8");
 
   assert.match(source, /MARKER_PLACEMENT_OPTIONS/);
   assert.match(source, /MARKER_SHAPE_OPTIONS/);
-  assert.match(source, /공시 마커 위치/);
-  assert.match(source, /공시 마커 모양/);
+  assert.match(source, /MARKER_STYLE_GROUP_ALL/);
+  assert.match(source, /markerStyleGroups/);
+  assert.match(source, /공시 마커 스타일/);
+  assert.match(source, /스타일 대상/);
+  assert.match(source, /모양/);
+  assert.match(source, /위치/);
+  assert.match(source, /색상/);
+  assert.match(source, /크기/);
+  assert.match(source, /선 두께/);
+  assert.match(source, /rounded-lg border border-slate-200\/70 bg-slate-50\/70/);
+  assert.match(source, /flex flex-wrap items-end gap-2/);
+  assert.match(source, /h-8 rounded-md/);
+  assert.match(source, /aria-label="공시 마커 스타일 미리보기"/);
   assert.match(source, /value: "paneTop", label: "차트 상단"/);
   assert.match(source, /value: "paneBottom", label: "차트 하단"/);
   assert.match(source, /value: "arrowDown", label: "아래 삼각형"/);
-  assert.match(source, /const \[markerPlacement, setMarkerPlacement\]/);
-  assert.match(source, /const \[markerShape, setMarkerShape\]/);
-  assert.match(source, /markerPlacement=\{markerPlacement\}/);
-  assert.match(source, /markerShape=\{markerShape\}/);
+  assert.match(source, /const \[activeMarkerStyleGroup, setActiveMarkerStyleGroup\]/);
+  assert.match(source, /const \[markerStyleDefault, setMarkerStyleDefault\]/);
+  assert.match(source, /const \[markerStylesByGroup, setMarkerStylesByGroup\]/);
+  assert.match(source, /updateActiveMarkerStyle/);
+  assert.match(source, /markerStyleDefault=\{markerStyleDefault\}/);
+  assert.match(source, /markerStylesByGroup=\{markerStylesByGroup\}/);
+  assert.doesNotMatch(source, /markerPlacement=\{markerPlacement\}/);
+  assert.doesNotMatch(source, /markerShape=\{markerShape\}/);
 });
 
 test("disclosure analysis page runs and displays persisted triple barrier results", async () => {

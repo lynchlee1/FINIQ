@@ -983,33 +983,39 @@ export class ChartApi {
         }
         y = clamp(y, priceRect.top + 6, priceRect.bottom - 6);
 
+        const markerSize = clamp(toNumber(marker.size, 4), 2, 14);
         ctx.fillStyle = marker.color || "#94a3b8";
         ctx.strokeStyle = marker.color || "#94a3b8";
+        ctx.lineWidth = clamp(toNumber(marker.lineWidth, 1), 1, 6);
         if (marker.shape === "circle") {
           ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.arc(x, y, markerSize, 0, Math.PI * 2);
           ctx.fill();
+          ctx.stroke();
         } else if (marker.shape === "square") {
-          ctx.fillRect(x - 4, y - 4, 8, 8);
+          ctx.fillRect(x - markerSize, y - markerSize, markerSize * 2, markerSize * 2);
+          ctx.strokeRect(x - markerSize, y - markerSize, markerSize * 2, markerSize * 2);
         } else if (marker.shape === "arrowDown") {
           ctx.beginPath();
-          ctx.moveTo(x, y + 5);
-          ctx.lineTo(x - 5, y - 4);
-          ctx.lineTo(x + 5, y - 4);
+          ctx.moveTo(x, y + markerSize + 1);
+          ctx.lineTo(x - markerSize - 1, y - markerSize);
+          ctx.lineTo(x + markerSize + 1, y - markerSize);
           ctx.closePath();
           ctx.fill();
+          ctx.stroke();
         } else {
           ctx.beginPath();
-          ctx.moveTo(x, y - 5);
-          ctx.lineTo(x - 5, y + 4);
-          ctx.lineTo(x + 5, y + 4);
+          ctx.moveTo(x, y - markerSize - 1);
+          ctx.lineTo(x - markerSize - 1, y + markerSize);
+          ctx.lineTo(x + markerSize + 1, y + markerSize);
           ctx.closePath();
           ctx.fill();
+          ctx.stroke();
         }
 
         if (marker.text) {
           ctx.fillStyle = marker.color || "#94a3b8";
-          ctx.fillText(String(marker.text), x, y - 12);
+          ctx.fillText(String(marker.text), x, y - markerSize - 8);
         }
       });
     });
