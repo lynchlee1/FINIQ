@@ -105,6 +105,36 @@ test("price chart keeps price and volume on separate vertical axes", async () =>
   assert.match(chartSource, /ctx\.clip\(\)/);
 });
 
+test("price chart shows TradingView-style hover OHLCV readout", async () => {
+  const source = await readFile(priceChartPath, "utf8");
+
+  assert.match(source, /useState/);
+  assert.match(source, /activeCandle/);
+  assert.match(source, /formatSignedChange/);
+  assert.match(source, /formatPercentChange/);
+  assert.match(source, /formatVolume/);
+  assert.match(source, /previousClose/);
+  assert.match(source, /setActiveCandle\(null\)/);
+  assert.match(source, /setActiveCandle\(hoverCandle\)/);
+  assert.match(source, /useEffect\(\(\) => \{\s*setActiveCandle\(null\);\s*\}, \[data\]\);/);
+  assert.match(source, />O\s*\{/);
+  assert.match(source, />H\s*\{/);
+  assert.match(source, />L\s*\{/);
+  assert.match(source, />C\s*\{/);
+  assert.match(source, />Vol\s*\{/);
+});
+
+test("FINIQ chart draws dashed crosshair with price and time labels", async () => {
+  const source = await readFile(chartLibPath, "utf8");
+
+  assert.match(source, /drawCrosshair/);
+  assert.match(source, /ctx\.setLineDash\(\[4, 4\]\)/);
+  assert.match(source, /this\.yToPrice\(y, priceRange, priceRect\)/);
+  assert.match(source, /priceText/);
+  assert.match(source, /timeText/);
+  assert.match(source, /layout\.timeScaleTop/);
+});
+
 test("FINIQ chart pans price vertically while keeping volume on the shared time range", async () => {
   const source = await readFile(chartLibPath, "utf8");
 
@@ -138,13 +168,17 @@ test("price chart supports configurable disclosure marker placement and shape", 
     readFile(chartLibPath, "utf8"),
   ]);
 
-  assert.match(source, /markerPlacement\?: MarkerPlacementOverride/);
-  assert.match(source, /markerShape\?: MarkerShapeOverride/);
-  assert.match(source, /markerPlacement === "default" \? marker\.position : markerPlacement/);
-  assert.match(source, /markerShape === "default" \? marker\.shape : markerShape/);
+  assert.match(source, /markerStyleDefault\?: MarkerStyleConfig/);
+  assert.match(source, /markerStylesByGroup\?: Record<string, MarkerStyleConfig>/);
+  assert.match(source, /resolveMarkerStyle/);
+  assert.match(source, /const groupStyle = marker\.group \? markerStylesByGroup\[marker\.group\] : undefined/);
+  assert.match(source, /size: groupStyle\?\.size \?\? markerStyleDefault\.size/);
+  assert.match(source, /lineWidth: groupStyle\?\.lineWidth \?\? markerStyleDefault\.lineWidth/);
   assert.match(chartSource, /marker\.position === "paneTop"/);
   assert.match(chartSource, /marker\.position === "paneBottom"/);
   assert.match(chartSource, /marker\.shape === "arrowDown"/);
+  assert.match(chartSource, /const markerSize = clamp\(toNumber\(marker\.size, 4\), 2, 14\)/);
+  assert.match(chartSource, /ctx\.lineWidth = clamp\(toNumber\(marker\.lineWidth, 1\), 1, 6\)/);
 });
 
 test("FINIQ chart renders all disclosure markers on the same date", async () => {

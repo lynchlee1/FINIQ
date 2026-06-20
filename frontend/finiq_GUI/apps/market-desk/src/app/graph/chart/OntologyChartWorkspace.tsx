@@ -41,6 +41,7 @@ type OntologyCompaniesPayload = {
 
 const DISPLAY_FREQUENCY_OPTIONS = ["일봉", "5일봉", "20일봉", "월봉"] as const;
 const DISCLOSURE_GROUP_ALL = "전체";
+const MARKER_STYLE_GROUP_ALL = "전체";
 const CHART_TYPE_OPTIONS = [
   { value: "candlestick", label: "캔들" },
   { value: "line", label: "종가선" },
@@ -63,6 +64,21 @@ const MARKER_SHAPE_OPTIONS = [
 
 type MarkerPlacementOverride = (typeof MARKER_PLACEMENT_OPTIONS)[number]["value"];
 type MarkerShapeOverride = (typeof MARKER_SHAPE_OPTIONS)[number]["value"];
+type MarkerStyleConfig = {
+  position: MarkerPlacementOverride;
+  shape: MarkerShapeOverride;
+  color: string;
+  size: number;
+  lineWidth: number;
+};
+
+const DEFAULT_MARKER_STYLE: MarkerStyleConfig = {
+  position: "default",
+  shape: "default",
+  color: "#94a3b8",
+  size: 4,
+  lineWidth: 1,
+};
 
 function clampChartZoomSensitivity(value: number) {
   if (!Number.isFinite(value)) {
@@ -113,8 +129,9 @@ export function OntologyChartWorkspace() {
   const [chartType, setChartType] = useState<(typeof CHART_TYPE_OPTIONS)[number]["value"]>("candlestick");
   const [requestedPanelKey, setRequestedPanelKey] = useState("");
   const [chartZoomSensitivity, setChartZoomSensitivity] = useState(0.55);
-  const [markerPlacement, setMarkerPlacement] = useState<MarkerPlacementOverride>("default");
-  const [markerShape, setMarkerShape] = useState<MarkerShapeOverride>("default");
+  const [activeMarkerStyleGroup, setActiveMarkerStyleGroup] = useState(MARKER_STYLE_GROUP_ALL);
+  const [markerStyleDefault, setMarkerStyleDefault] = useState<MarkerStyleConfig>(DEFAULT_MARKER_STYLE);
+  const [markerStylesByGroup, setMarkerStylesByGroup] = useState<Record<string, MarkerStyleConfig>>({});
   const [chartFullscreen, setChartFullscreen] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingCompanies, setLoadingCompanies] = useState(false);
@@ -243,6 +260,11 @@ export function OntologyChartWorkspace() {
     : "검색한 종목이 없습니다.";
   const statusMessages = useMemo(() => [...(status?.messages ?? []), ...(error ? [error] : [])], [error, status]);
   const disclosureGroups = useMemo(() => status?.disclosure_groups ?? [], [status?.disclosure_groups]);
+  const markerStyleGroups = useMemo(() => [MARKER_STYLE_GROUP_ALL, ...disclosureGroups], [disclosureGroups]);
+  const activeMarkerStyle =
+    activeMarkerStyleGroup === MARKER_STYLE_GROUP_ALL
+      ? markerStyleDefault
+      : (markerStylesByGroup[activeMarkerStyleGroup] ?? markerStyleDefault);
   const chartRangeText = panel ? `${panel.range_start} - ${panel.range_end} / ${panel.display_frequency}` : "전체 기간";
   const chartDisclosureText = disclosureGroup === DISCLOSURE_GROUP_ALL ? DISCLOSURE_GROUP_ALL : disclosureGroup;
   const chartMetaText = `${selectedCompanyLabel} ${chartRangeText} · ${chartDisclosureText}`;
@@ -255,6 +277,19 @@ export function OntologyChartWorkspace() {
   };
   const handleChartZoomSensitivityPercentChange = (event: ChangeEvent<HTMLInputElement>) => {
     setChartZoomSensitivity(clampChartZoomSensitivity(Number(event.currentTarget.value) / 100));
+  };
+  const updateActiveMarkerStyle = <Key extends keyof MarkerStyleConfig>(key: Key, value: MarkerStyleConfig[Key]) => {
+    if (activeMarkerStyleGroup === MARKER_STYLE_GROUP_ALL) {
+      setMarkerStyleDefault((current) => ({ ...current, [key]: value }));
+      return;
+    }
+    setMarkerStylesByGroup((current) => ({
+      ...current,
+      [activeMarkerStyleGroup]: {
+        ...(current[activeMarkerStyleGroup] ?? markerStyleDefault),
+        [key]: value,
+      },
+    }));
   };
 
   const renderChartControls = () => (
@@ -318,8 +353,8 @@ export function OntologyChartWorkspace() {
           showHeader={false}
           zoomSensitivity={chartZoomSensitivity}
           chartType={chartType}
-          markerPlacement={markerPlacement}
-          markerShape={markerShape}
+          markerStyleDefault={markerStyleDefault}
+          markerStylesByGroup={markerStylesByGroup}
         />
       ) : (
         <div className="flex h-full min-h-[420px] items-center justify-center text-center">
@@ -392,6 +427,118 @@ export function OntologyChartWorkspace() {
                     </select>
                   </div>
                   {renderChartControls()}
+                </div>
+              </div>
+              <div className="border-t border-slate-200 pt-5 dark:border-[#30363d]">
+                <div className="rounded-lg border border-slate-200/70 bg-slate-50/70 p-3 dark:border-[#30363d] dark:bg-[#0d1117]/60">
+                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <Label htmlFor="ontology-chart-marker-style-group" className="font-semibold dark:text-slate-200">
+                        공시 마커 스타일
+                      </Label>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        공시 종류를 고른 뒤 해당 마커만 조정합니다.
+                      </p>
+                    </div>
+                    <select
+                      id="ontology-chart-marker-style-group"
+                      value={activeMarkerStyleGroup}
+                      onChange={(event) => setActiveMarkerStyleGroup(event.target.value)}
+                      aria-label="스타일 대상"
+                      className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-950 shadow-sm sm:w-48 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                    >
+                      {markerStyleGroups.map((group) => (
+                        <option key={group} value={group}>
+                          {group}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="min-w-36 flex-1 space-y-1">
+                      <Label htmlFor="ontology-chart-marker-shape" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        모양
+                      </Label>
+                      <select
+                        id="ontology-chart-marker-shape"
+                        value={activeMarkerStyle.shape}
+                        onChange={(event) => updateActiveMarkerStyle("shape", event.target.value as MarkerShapeOverride)}
+                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-950 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                      >
+                        {MARKER_SHAPE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="min-w-36 flex-1 space-y-1">
+                      <Label htmlFor="ontology-chart-marker-placement" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        위치
+                      </Label>
+                      <select
+                        id="ontology-chart-marker-placement"
+                        value={activeMarkerStyle.position}
+                        onChange={(event) => updateActiveMarkerStyle("position", event.target.value as MarkerPlacementOverride)}
+                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-950 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                      >
+                        {MARKER_PLACEMENT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="w-28 space-y-1">
+                      <Label htmlFor="ontology-chart-marker-color" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        색상
+                      </Label>
+                      <div className="flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117]">
+                        <span
+                          aria-label="공시 마커 스타일 미리보기"
+                          className="h-4 w-4 rounded-full border border-slate-300 dark:border-slate-600"
+                          style={{ backgroundColor: activeMarkerStyle.color }}
+                        />
+                        <Input
+                          id="ontology-chart-marker-color"
+                          type="color"
+                          value={activeMarkerStyle.color}
+                          onChange={(event) => updateActiveMarkerStyle("color", event.target.value)}
+                          className="h-5 w-10 border-0 bg-transparent p-0 shadow-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="w-24 space-y-1">
+                      <Label htmlFor="ontology-chart-marker-size" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        크기
+                      </Label>
+                      <Input
+                        id="ontology-chart-marker-size"
+                        type="number"
+                        min="2"
+                        max="14"
+                        step="1"
+                        value={activeMarkerStyle.size}
+                        onChange={(event) => updateActiveMarkerStyle("size", Number(event.target.value))}
+                        className="h-8 rounded-md text-sm"
+                      />
+                    </div>
+                    <div className="w-24 space-y-1">
+                      <Label htmlFor="ontology-chart-marker-line-width" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        선 두께
+                      </Label>
+                      <Input
+                        id="ontology-chart-marker-line-width"
+                        type="number"
+                        min="1"
+                        max="6"
+                        step="1"
+                        value={activeMarkerStyle.lineWidth}
+                        onChange={(event) => updateActiveMarkerStyle("lineWidth", Number(event.target.value))}
+                        className="h-8 rounded-md text-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
               <MessageBox messages={statusMessages} />
@@ -564,40 +711,6 @@ export function OntologyChartWorkspace() {
                 <span>느림</span>
                 <span>빠름</span>
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ontology-chart-marker-placement" className="font-semibold dark:text-slate-200">
-                공시 마커 위치
-              </Label>
-              <select
-                id="ontology-chart-marker-placement"
-                value={markerPlacement}
-                onChange={(event) => setMarkerPlacement(event.target.value as MarkerPlacementOverride)}
-                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
-              >
-                {MARKER_PLACEMENT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ontology-chart-marker-shape" className="font-semibold dark:text-slate-200">
-                공시 마커 모양
-              </Label>
-              <select
-                id="ontology-chart-marker-shape"
-                value={markerShape}
-                onChange={(event) => setMarkerShape(event.target.value as MarkerShapeOverride)}
-                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
-              >
-                {MARKER_SHAPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
         }
