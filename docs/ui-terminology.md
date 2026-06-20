@@ -83,6 +83,10 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Ontology chart disclosure group selector | 공시 선택 | Selector label for choosing `전체` or one category folder under `resources/KIND`. |
 | Ontology event timeline | 공시 타임라인 | List of visible disclosures for the selected company and period. |
 | Ontology disclosure analysis | 공시 분석 | Event analysis workspace for triple-barrier and related disclosure tests. |
+| Ontology triple barrier execution action | Triple Barrier 실행 | Button/action on `공시 분석` that calculates and stores Triple Barrier labels. |
+| Ontology triple barrier event basis | 이벤트 기준일 | Selector for using disclosure date or disclosure timestamp as event time. |
+| Ontology triple barrier price basis | 가격 기준 | Selector for close-based or intraday high/low-based barrier checks. |
+| Ontology triple barrier result table | 결과 테이블 | Stored Triple Barrier label result table on `공시 분석`. |
 | Ontology chart frequency selector | 일봉/5일봉/20일봉/월봉 | Chart candle aggregation selector below the chart action buttons. |
 | Ontology chart type selector | 캔들/종가선 | Chart type selector for OHLC candles or close-only line plotting. |
 | Ontology final report marker | 최종보고서 | Y/N field for whether a disclosure is the latest report in a correction chain. |
