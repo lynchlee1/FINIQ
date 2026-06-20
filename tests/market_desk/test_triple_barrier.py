@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sqlite3
+
 from finiq.market_desk.analytics.triple_barrier import (
     TripleBarrierDisclosure,
     TripleBarrierParams,
     TripleBarrierPrice,
     build_parameter_hash,
     calculate_triple_barrier_rows,
+    load_triple_barrier_results,
+    save_triple_barrier_results,
 )
 
 
@@ -131,3 +136,30 @@ def test_parameter_hash_is_stable_for_equivalent_params() -> None:
     assert first_hash == second_hash
     assert first_json == second_json
     assert "disclosed_date" in first_json
+
+
+def test_sqlite_storage_prevents_duplicate_disclosure_parameter_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "triple_barrier_results.sqlite"
+    params = TripleBarrierParams(
+        event_time_basis="disclosed_date",
+        price_basis="intraday",
+        upper_pct=5,
+        lower_pct=3,
+        vertical_days=3,
+        price_source="quantiwise",
+    )
+    rows = calculate_triple_barrier_rows([_disclosure()], _prices(), params, source_manifest_path="/kind/manifest.json")
+
+    first = save_triple_barrier_results(db_path, rows)
+    second = save_triple_barrier_results(db_path, rows)
+    stored = load_triple_barrier_results(db_path, ticker="A005930")
+
+    assert first == {"created": 1, "reused": 0}
+    assert second == {"created": 0, "reused": 1}
+    assert len(stored) == 1
+    assert stored[0].disclosure_id == "20250102000001"
+    assert stored[0].parameter_hash == rows[0].parameter_hash
+
+    with sqlite3.connect(db_path) as connection:
+        index_rows = connection.execute("PRAGMA index_list(triple_barrier_results)").fetchall()
+    assert any(row[2] for row in index_rows)

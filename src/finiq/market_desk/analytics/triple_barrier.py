@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
+from pathlib import Path
+import sqlite3
+from typing import Any
+
+
+RESULT_TABLE = "triple_barrier_results"
 
 
 @dataclass(frozen=True)
@@ -312,4 +319,181 @@ def _success_row(
         calculation_params_json=calculation_params_json,
         parameter_hash=parameter_hash,
         status="completed",
+    )
+
+
+def default_result_db_path(manifest_path: str | Path) -> Path:
+    return Path(manifest_path).expanduser().resolve().parent / "triple_barrier_results.sqlite"
+
+
+def init_triple_barrier_db(db_path: str | Path) -> None:
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS triple_barrier_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_manifest_path TEXT NOT NULL,
+                disclosure_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                company_name TEXT NOT NULL,
+                event_datetime TEXT NOT NULL,
+                event_price REAL,
+                upper_pct REAL NOT NULL,
+                lower_pct REAL NOT NULL,
+                vertical_days INTEGER NOT NULL,
+                upper_price REAL,
+                lower_price REAL,
+                vertical_datetime TEXT,
+                touched_barrier TEXT NOT NULL,
+                touched_datetime TEXT,
+                touched_price REAL,
+                return_pct REAL,
+                label INTEGER,
+                price_source TEXT NOT NULL,
+                event_time_basis TEXT NOT NULL,
+                price_basis TEXT NOT NULL,
+                calculation_params_json TEXT NOT NULL,
+                parameter_hash TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(source_manifest_path, disclosure_id, ticker, parameter_hash)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_triple_barrier_results_ticker
+            ON triple_barrier_results(ticker, parameter_hash, event_datetime)
+            """
+        )
+
+
+def save_triple_barrier_results(db_path: str | Path, rows: list[TripleBarrierResult]) -> dict[str, int]:
+    init_triple_barrier_db(db_path)
+    created = 0
+    reused = 0
+    now_text = _utc_now_text()
+    with sqlite3.connect(db_path) as connection:
+        for row in rows:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO triple_barrier_results (
+                    source_manifest_path, disclosure_id, ticker, company_name, event_datetime,
+                    event_price, upper_pct, lower_pct, vertical_days, upper_price, lower_price,
+                    vertical_datetime, touched_barrier, touched_datetime, touched_price,
+                    return_pct, label, price_source, event_time_basis, price_basis,
+                    calculation_params_json, parameter_hash, status, error_message,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _sqlite_values(row, now_text),
+            )
+            if cursor.rowcount:
+                created += 1
+            else:
+                reused += 1
+    return {"created": created, "reused": reused}
+
+
+def load_triple_barrier_results(
+    db_path: str | Path,
+    *,
+    ticker: str = "",
+    parameter_hash: str = "",
+) -> list[TripleBarrierResult]:
+    path = Path(db_path)
+    if not path.exists():
+        return []
+    clauses: list[str] = []
+    params: list[Any] = []
+    if ticker:
+        clauses.append("ticker = ?")
+        params.append(ticker)
+    if parameter_hash:
+        clauses.append("parameter_hash = ?")
+        params.append(parameter_hash)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with sqlite3.connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            f"""
+            SELECT *
+            FROM {RESULT_TABLE}
+            {where_sql}
+            ORDER BY event_datetime ASC, disclosure_id ASC
+            """,
+            params,
+        ).fetchall()
+    return [_result_from_sqlite(row) for row in rows]
+
+
+def _utc_now_text() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _sqlite_values(row: TripleBarrierResult, now_text: str) -> tuple[Any, ...]:
+    return (
+        row.source_manifest_path,
+        row.disclosure_id,
+        row.ticker,
+        row.company_name,
+        row.event_datetime,
+        row.event_price,
+        row.upper_pct,
+        row.lower_pct,
+        row.vertical_days,
+        row.upper_price,
+        row.lower_price,
+        row.vertical_datetime,
+        row.touched_barrier,
+        row.touched_datetime,
+        row.touched_price,
+        row.return_pct,
+        row.label,
+        row.price_source,
+        row.event_time_basis,
+        row.price_basis,
+        row.calculation_params_json,
+        row.parameter_hash,
+        row.status,
+        row.error_message,
+        now_text,
+        now_text,
+    )
+
+
+def _result_from_sqlite(row: sqlite3.Row) -> TripleBarrierResult:
+    return TripleBarrierResult(
+        id=int(row["id"]),
+        source_manifest_path=str(row["source_manifest_path"]),
+        disclosure_id=str(row["disclosure_id"]),
+        ticker=str(row["ticker"]),
+        company_name=str(row["company_name"]),
+        event_datetime=str(row["event_datetime"]),
+        event_price=row["event_price"],
+        upper_pct=float(row["upper_pct"]),
+        lower_pct=float(row["lower_pct"]),
+        vertical_days=int(row["vertical_days"]),
+        upper_price=row["upper_price"],
+        lower_price=row["lower_price"],
+        vertical_datetime=str(row["vertical_datetime"] or ""),
+        touched_barrier=str(row["touched_barrier"]),
+        touched_datetime=str(row["touched_datetime"] or ""),
+        touched_price=row["touched_price"],
+        return_pct=row["return_pct"],
+        label=row["label"],
+        price_source=str(row["price_source"]),
+        event_time_basis=str(row["event_time_basis"]),
+        price_basis=str(row["price_basis"]),
+        calculation_params_json=str(row["calculation_params_json"]),
+        parameter_hash=str(row["parameter_hash"]),
+        status=str(row["status"]),
+        error_message=str(row["error_message"] or ""),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
     )
