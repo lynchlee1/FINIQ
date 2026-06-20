@@ -10,6 +10,14 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+import pandas as pd
+import pyarrow.parquet as pq
+
+from finiq.market_desk.analytics.ontology_graph import (
+    DEFAULT_KIND_MANIFEST_PATH,
+    DEFAULT_QUANTIWISE_PARQUET_DIR,
+)
+
 
 RESULT_TABLE = "triple_barrier_results"
 
@@ -497,3 +505,232 @@ def _result_from_sqlite(row: sqlite3.Row) -> TripleBarrierResult:
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
+
+
+def result_to_dict(row: TripleBarrierResult) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "source_manifest_path": row.source_manifest_path,
+        "disclosure_id": row.disclosure_id,
+        "ticker": row.ticker,
+        "company_name": row.company_name,
+        "event_datetime": row.event_datetime,
+        "event_price": row.event_price,
+        "upper_pct": row.upper_pct,
+        "lower_pct": row.lower_pct,
+        "vertical_days": row.vertical_days,
+        "upper_price": row.upper_price,
+        "lower_price": row.lower_price,
+        "vertical_datetime": row.vertical_datetime,
+        "touched_barrier": row.touched_barrier,
+        "touched_datetime": row.touched_datetime,
+        "touched_price": row.touched_price,
+        "return_pct": row.return_pct,
+        "label": row.label,
+        "price_source": row.price_source,
+        "event_time_basis": row.event_time_basis,
+        "price_basis": row.price_basis,
+        "calculation_params_json": row.calculation_params_json,
+        "parameter_hash": row.parameter_hash,
+        "status": row.status,
+        "error_message": row.error_message,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def run_triple_barrier_analysis(
+    *,
+    manifest_path: str | Path | None = None,
+    quanti_dir: str | Path | None = None,
+    company_id: str,
+    market: str = "전체",
+    disclosure_group: str = "전체",
+    disclosure_ids: list[str] | None = None,
+    event_time_basis: str = "disclosed_date",
+    price_basis: str = "intraday",
+    upper_pct: float = 5,
+    lower_pct: float = 3,
+    vertical_days: int = 20,
+) -> dict[str, Any]:
+    del disclosure_group
+    resolved_manifest, manifest = _resolve_manifest(manifest_path)
+    params = TripleBarrierParams(
+        event_time_basis=event_time_basis,
+        price_basis=price_basis,
+        upper_pct=float(upper_pct),
+        lower_pct=float(lower_pct),
+        vertical_days=int(vertical_days),
+        price_source="quantiwise",
+    )
+    disclosures = _load_disclosures_for_triple_barrier(
+        manifest_path=resolved_manifest,
+        manifest=manifest,
+        company_id=company_id,
+        market=market,
+        disclosure_ids=disclosure_ids or [],
+    )
+    prices = _load_prices_for_triple_barrier(quanti_dir, company_id)
+    rows = calculate_triple_barrier_rows(disclosures, prices, params, source_manifest_path=str(resolved_manifest))
+    db_path = default_result_db_path(resolved_manifest)
+    storage_counts = save_triple_barrier_results(db_path, rows)
+    parameter_hash, _ = build_parameter_hash(params)
+    stored_rows = load_triple_barrier_results(db_path, ticker=_display_stock_code(company_id), parameter_hash=parameter_hash)
+    selected_ids = {str(value) for value in (disclosure_ids or []) if str(value).strip()}
+    if selected_ids:
+        stored_rows = [row for row in stored_rows if row.disclosure_id in selected_ids]
+    return {
+        "summary": _summary(rows, storage_counts),
+        "result_db_path": str(db_path),
+        "parameter_hash": parameter_hash,
+        "rows": [result_to_dict(row) for row in stored_rows],
+    }
+
+
+def get_triple_barrier_results_payload(
+    *,
+    manifest_path: str | Path | None = None,
+    company_id: str,
+    parameter_hash: str = "",
+) -> dict[str, Any]:
+    resolved_manifest, _ = _resolve_manifest(manifest_path)
+    db_path = default_result_db_path(resolved_manifest)
+    rows = load_triple_barrier_results(db_path, ticker=_display_stock_code(company_id), parameter_hash=parameter_hash)
+    return {
+        "summary": {
+            "total": len(rows),
+            "completed": sum(1 for row in rows if row.status == "completed"),
+            "failed": sum(1 for row in rows if row.status == "failed"),
+        },
+        "result_db_path": str(db_path),
+        "rows": [result_to_dict(row) for row in rows],
+    }
+
+
+def _summary(rows: list[TripleBarrierResult], storage_counts: dict[str, int]) -> dict[str, int]:
+    return {
+        "total": len(rows),
+        "completed": sum(1 for row in rows if row.status == "completed"),
+        "failed": sum(1 for row in rows if row.status == "failed"),
+        "created": int(storage_counts.get("created", 0)),
+        "reused": int(storage_counts.get("reused", 0)),
+    }
+
+
+def _resolve_manifest(path: str | Path | None) -> tuple[Path, dict[str, Any]]:
+    manifest_path = Path(path).expanduser().resolve() if path else DEFAULT_KIND_MANIFEST_PATH
+    return manifest_path, json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _resolve_shard_path(manifest_path: Path, shard: dict[str, Any]) -> Path:
+    raw_path = str(shard.get("path") or "").strip()
+    if raw_path:
+        path = Path(raw_path)
+        if path.is_absolute() and path.exists():
+            return path
+    relative_path = str(shard.get("relative_path") or "").strip()
+    if relative_path:
+        return (manifest_path.parent / relative_path).resolve()
+    return (manifest_path.parent / f"{shard.get('year')}.sqlite").resolve()
+
+
+def _load_disclosures_for_triple_barrier(
+    *,
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    company_id: str,
+    market: str,
+    disclosure_ids: list[str],
+) -> list[TripleBarrierDisclosure]:
+    table_name = str(manifest.get("table_name") or "disclosures")
+    selected_ids = {str(value) for value in disclosure_ids if str(value).strip()}
+    rows: list[TripleBarrierDisclosure] = []
+    for shard in list(manifest.get("shards") or []):
+        shard_path = _resolve_shard_path(manifest_path, shard)
+        if not shard_path.exists():
+            continue
+        clauses = ["company_id = ?"]
+        params: list[Any] = [_kind_company_id(company_id)]
+        if market and market != "전체":
+            clauses.append("market = ?")
+            params.append(market)
+        if selected_ids:
+            placeholders = ", ".join("?" for _ in selected_ids)
+            clauses.append(f"acpt_no IN ({placeholders})")
+            params.extend(sorted(selected_ids))
+        with sqlite3.connect(shard_path) as connection:
+            connection.row_factory = sqlite3.Row
+            fetched = connection.execute(
+                f"""
+                SELECT company_name, disclosed_at, disclosed_date, acpt_no
+                FROM {table_name}
+                WHERE {" AND ".join(clauses)}
+                ORDER BY disclosed_at ASC, acpt_no ASC
+                """,
+                params,
+            ).fetchall()
+        for row in fetched:
+            rows.append(
+                TripleBarrierDisclosure(
+                    disclosure_id=str(row["acpt_no"] or ""),
+                    ticker=_display_stock_code(company_id),
+                    company_name=str(row["company_name"] or ""),
+                    event_datetime=str(row["disclosed_at"] or row["disclosed_date"] or ""),
+                    disclosed_date=str(row["disclosed_date"] or str(row["disclosed_at"] or "")[:10]),
+                )
+            )
+    return rows
+
+
+def _load_prices_for_triple_barrier(quanti_dir: str | Path | None, company_id: str) -> list[TripleBarrierPrice]:
+    resolved_quanti = Path(quanti_dir).expanduser().resolve() if quanti_dir else DEFAULT_QUANTIWISE_PARQUET_DIR
+    stock_code = _display_stock_code(company_id)
+    series_map: dict[str, pd.Series] = {}
+    for item in ["open", "high", "low", "close", "volume"]:
+        path = _find_item_file(resolved_quanti, item)
+        if path is None:
+            return []
+        parquet_file = pq.ParquetFile(path)
+        if stock_code not in parquet_file.schema_arrow.names:
+            return []
+        frame = parquet_file.read(columns=["date", stock_code]).to_pandas()
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+        series_map[item] = pd.to_numeric(frame.set_index("date")[stock_code], errors="coerce")
+    combined = pd.DataFrame(series_map).dropna(subset=["open", "high", "low", "close"]).sort_index()
+    return [
+        TripleBarrierPrice(
+            date=timestamp.strftime("%Y-%m-%d"),
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=float(row.get("volume") or 0),
+        )
+        for timestamp, row in combined.iterrows()
+    ]
+
+
+def _find_item_file(quanti_dir: Path, item: str) -> Path | None:
+    candidates = {
+        "open": ("adjOpen", "open"),
+        "high": ("adjHigh", "high"),
+        "low": ("adjLow", "low"),
+        "close": ("adjClose", "close"),
+        "volume": ("adjVolume", "volume"),
+    }[item]
+    for prefix in candidates:
+        matches = sorted(quanti_dir.glob(f"{prefix}_*.parquet"))
+        if matches:
+            return matches[0]
+    return None
+
+
+def _display_stock_code(company_id: str) -> str:
+    raw = str(company_id or "").strip().upper()
+    digits = "".join(char for char in raw if char.isdigit())
+    return f"A{digits.zfill(6)}" if digits else raw
+
+
+def _kind_company_id(company_id: str) -> str:
+    digits = "".join(char for char in str(company_id or "") if char.isdigit())
+    return digits.zfill(6) if digits else ""
