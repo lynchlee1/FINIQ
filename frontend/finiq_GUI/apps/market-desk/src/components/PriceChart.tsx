@@ -5,6 +5,7 @@ import {
   createChart,
   CandlestickSeries,
   HistogramSeries,
+  LineSeries,
   createSeriesMarkers,
   type ChartApi,
 } from "@/lib/charts";
@@ -32,6 +33,7 @@ interface PriceChartProps {
   markers: PriceChartMarker[];
   title: string;
   subtitle: string;
+  chartType?: "candlestick" | "line";
   showHeader?: boolean;
   zoomSensitivity?: number;
   onCrosshairMove?: (candle: any) => void;
@@ -44,10 +46,10 @@ function volumeColor(datum: PriceChartDatum) {
   return datum.close >= datum.open ? "rgba(34, 171, 148, 0.38)" : "rgba(242, 54, 69, 0.38)";
 }
 
-export function PriceChart({ data, markers, title, subtitle, showHeader = true, zoomSensitivity = 0.55, onCrosshairMove }: PriceChartProps) {
+export function PriceChart({ data, markers, title, subtitle, chartType = "candlestick", showHeader = true, zoomSensitivity = 0.55, onCrosshairMove }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartApi | null>(null);
-  const candleSeriesRef = useRef<any>(null);
+  const priceSeriesRef = useRef<any>(null);
   const volumeSeriesRef = useRef<any>(null);
   const hasFittedContentRef = useRef(false);
   const onCrosshairMoveRef = useRef(onCrosshairMove);
@@ -71,10 +73,16 @@ export function PriceChart({ data, markers, title, subtitle, showHeader = true, 
       interaction: { zoomSensitivity },
     });
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#22ab94",
-      downColor: "#f23645",
-    });
+    const priceSeries =
+      chartType === "line"
+        ? chart.addSeries(LineSeries, {
+            color: "#2563eb",
+            lineWidth: 2,
+          })
+        : chart.addSeries(CandlestickSeries, {
+            upColor: "#22ab94",
+            downColor: "#f23645",
+          });
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -92,21 +100,22 @@ export function PriceChart({ data, markers, title, subtitle, showHeader = true, 
         onCrosshairMoveRef.current?.(null);
         return;
       }
-      const candle = param.seriesData.get(candleSeries);
+      const candle = param.seriesData.get(priceSeries);
       const volume = param.seriesData.get(volumeSeries);
       onCrosshairMoveRef.current?.({
         time: param.time,
-        open: candle?.open,
-        high: candle?.high,
-        low: candle?.low,
-        close: candle?.close,
+        open: candle?.open ?? candle?.value,
+        high: candle?.high ?? candle?.value,
+        low: candle?.low ?? candle?.value,
+        close: candle?.close ?? candle?.value,
         volume: volume?.value,
       });
     });
 
     chartRef.current = chart;
-    candleSeriesRef.current = candleSeries;
+    priceSeriesRef.current = priceSeries;
     volumeSeriesRef.current = volumeSeries;
+    hasFittedContentRef.current = false;
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -125,10 +134,10 @@ export function PriceChart({ data, markers, title, subtitle, showHeader = true, 
         chartRef.current.destroy();
       }
       chartRef.current = null;
-      candleSeriesRef.current = null;
+      priceSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, []);
+  }, [chartType]);
 
   useEffect(() => {
     chartRef.current?.applyOptions({
@@ -137,7 +146,7 @@ export function PriceChart({ data, markers, title, subtitle, showHeader = true, 
   }, [zoomSensitivity]);
 
   useEffect(() => {
-    if (!chartRef.current || !candleSeriesRef.current || !volumeSeriesRef.current) return;
+    if (!chartRef.current || !priceSeriesRef.current || !volumeSeriesRef.current) return;
 
     const candleData = data.map((d) => ({
       time: d.time,
@@ -152,15 +161,23 @@ export function PriceChart({ data, markers, title, subtitle, showHeader = true, 
       value: d.volume,
       color: volumeColor(d),
     }));
+    const lineData = data.map((d) => ({
+      time: d.time,
+      value: d.close,
+      open: d.close,
+      high: d.close,
+      low: d.close,
+      close: d.close,
+    }));
 
-    candleSeriesRef.current.setData(candleData);
+    priceSeriesRef.current.setData(chartType === "line" ? lineData : candleData);
     volumeSeriesRef.current.setData(volumeData);
-    createSeriesMarkers(candleSeriesRef.current, markers);
+    createSeriesMarkers(priceSeriesRef.current, markers);
     if (!hasFittedContentRef.current) {
       chartRef.current.timeScale().fitContent();
       hasFittedContentRef.current = true;
     }
-  }, [data, markers]);
+  }, [chartType, data, markers]);
 
   return (
     <div className="flex h-full flex-col">

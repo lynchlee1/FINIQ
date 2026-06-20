@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
+from threading import Event
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from finiq.market_desk.analytics.ontology_graph import (
+    OntologyRequestCancelled,
     build_ontology_company_panel,
     build_ontology_status,
     search_ontology_companies,
@@ -25,6 +29,14 @@ from finiq.market_desk.web.service import (
     list_integrated_providers,
     load_company_index_payload,
 )
+
+
+async def _watch_client_disconnect(request: Request, cancel_event: Event, done_event: Event) -> None:
+    while not done_event.is_set() and not cancel_event.is_set():
+        if await request.is_disconnected():
+            cancel_event.set()
+            return
+        await asyncio.sleep(0.1)
 
 
 def create_market_data_router(config: Any) -> APIRouter:
@@ -87,6 +99,7 @@ def create_market_data_router(config: Any) -> APIRouter:
 
     @router.get("/api/ontology/company-panel")
     async def get_ontology_company_panel(
+        request: Request,
         company_id: str,
         manifest_path: Optional[str] = None,
         quanti_dir: Optional[str] = None,
@@ -95,9 +108,14 @@ def create_market_data_router(config: Any) -> APIRouter:
         title_keyword: str = "",
         market: str = "전체",
         display_frequency: str = "자동",
+        disclosure_group: str = "전체",
     ):
+        cancel_event = Event()
+        done_event = Event()
+        watch_task = asyncio.create_task(_watch_client_disconnect(request, cancel_event, done_event))
         try:
-            return build_ontology_company_panel(
+            return await run_in_threadpool(
+                build_ontology_company_panel,
                 manifest_path=manifest_path,
                 quanti_dir=quanti_dir,
                 company_id=company_id,
@@ -106,9 +124,16 @@ def create_market_data_router(config: Any) -> APIRouter:
                 title_keyword=title_keyword,
                 market=market,
                 display_frequency_label=display_frequency,
+                disclosure_group=disclosure_group,
+                cancellation_check=cancel_event.is_set,
             )
+        except OntologyRequestCancelled:
+            raise HTTPException(status_code=499, detail="Client disconnected")
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        finally:
+            done_event.set()
+            watch_task.cancel()
 
     @router.get("/api/companies")
     async def get_companies(

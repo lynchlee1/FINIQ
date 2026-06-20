@@ -41,6 +41,10 @@ function normalizeStockCode(value: string) {
   return digits ? `A${digits.padStart(6, "0").slice(-6)}` : "";
 }
 
+function isStockCodeKeyword(value: string) {
+  return /^A\d{6}$/.test(value.trim().toUpperCase());
+}
+
 export function DisclosureAnalysisWorkspace() {
   const [keyword, setKeyword] = useState("");
   const [companies, setCompanies] = useState<OntologyCompany[]>([]);
@@ -52,11 +56,18 @@ export function DisclosureAnalysisWorkspace() {
   const [error, setError] = useState("");
 
   const loadCompanies = useCallback(async () => {
+    if (!keyword.trim()) {
+      setCompanies([]);
+      setSelectedCompany(null);
+      setPanel(null);
+      setLoadingCompanies(false);
+      return;
+    }
     setLoadingCompanies(true);
     try {
       const keywordText = keyword.trim().toUpperCase();
       const query = new URLSearchParams({
-        keyword: keywordText.startsWith("A") ? normalizeStockCode(keywordText).slice(1) : keyword,
+        keyword: isStockCodeKeyword(keywordText) ? normalizeStockCode(keywordText).slice(1) : keyword.trim(),
         market: "전체",
         limit: "30",
       });
@@ -97,10 +108,6 @@ export function DisclosureAnalysisWorkspace() {
   }, [selectedCompany]);
 
   useEffect(() => {
-    loadCompanies();
-  }, [loadCompanies]);
-
-  useEffect(() => {
     loadPanel();
   }, [loadPanel]);
 
@@ -109,7 +116,7 @@ export function DisclosureAnalysisWorkspace() {
     () => runDisclosureBacktest(methodId, { candles: panel?.chart.candles ?? [], markers: panel?.chart.markers ?? [] }),
     [methodId, panel],
   );
-  const selectedCompanyLabel = selectedCompany ? `${selectedCompany.company_name} (${selectedCompany.stock_code})` : "선택된 종목 없음";
+  const selectedCompanyLabel = selectedCompany ? `${selectedCompany.company_name} (${selectedCompany.stock_code})` : "검색한 종목이 없습니다.";
 
   return (
     <div className="flex w-full flex-col gap-5">

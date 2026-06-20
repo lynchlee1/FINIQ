@@ -37,6 +37,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
 | Utility sidebar group | 유틸리티 | Use for the sidebar group containing `분할저장`. |
+| Partition storage conversion workflow | 분할저장 구조 전환 | Use for the Utility page/card that converts between flat folders and year-split folders. |
 | Price data top-level workflow | 주가데이터 | Use as the top-level menu for Quantiwise-based price data pages. Do not repeat it in page titles. |
 | Quantiwise sidebar group | Quantiwise | Use as the left sidebar group under the `주가데이터` top-level workflow. |
 | Price data Excel preview sidebar item | Excel 미리보기 | Use under the `Quantiwise` sidebar group for `/utility/assets-excel`. |
@@ -68,13 +69,23 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
 | Ontology real-data workspace | Graph View | Use for the production Ontology analysis page. |
+| Ontology chart workspace | Chart View | Use for the production Ontology event-price chart page. |
 | Ontology data status | 데이터 상태 | Source readiness panel for KIND and Quantiwise data. |
 | Ontology company selector | 회사 선택 | Company selector backed by KIND SQLite shards, shown in the right settings panel. |
 | Ontology stock selector | 종목 선택 | Top selector for changing the active stock in `A000000` format. |
+| Ontology node graph | 공시 관계 그래프 | Obsidian-like graph-viewer canvas showing company, disclosure group, and disclosure event relationships. |
+| Ontology node search | 노드 검색 | Search input for nodes inside the Ontology node graph. |
+| Ontology graph unpin action | 핀 해제 | Clears pinned nodes in the Ontology node graph. |
 | Ontology event-price chart | 주가-공시 차트 | Plot combining Quantiwise price candles and KIND disclosure markers. |
+| Ontology chart condition panel | 공시 조건 | Top condition box on Chart View that manages company search, `resources/KIND` disclosure category selection, and chart display buttons. |
+| Ontology chart company section | 회사명 | Section label for company-name search in the Chart View condition panel. |
+| Ontology chart disclosure section | 공시내역 | Section label for KIND disclosure category selection in the Chart View condition panel. |
+| Ontology chart disclosure group selector | 공시 선택 | Selector label for choosing `전체` or one category folder under `resources/KIND`. |
 | Ontology event timeline | 공시 타임라인 | List of visible disclosures for the selected company and period. |
 | Ontology disclosure analysis | 공시 분석 | Event analysis workspace for triple-barrier and related disclosure tests. |
 | Ontology chart frequency selector | 일봉/5일봉/20일봉/월봉 | Chart candle aggregation selector below the chart action buttons. |
+| Ontology chart type selector | 캔들/종가선 | Chart type selector for OHLC candles or close-only line plotting. |
+| Ontology final report marker | 최종보고서 | Y/N field for whether a disclosure is the latest report in a correction chain. |
 | Ontology full date range | 전체 기간 | Default date range for Graph View chart and disclosure analysis. |
 | Ontology chart fullscreen action | 전체화면 | Opens the chart in an app-level fullscreen overlay. |
 | Ontology chart exit fullscreen action | 전체화면 닫기 | Closes the chart fullscreen overlay. |

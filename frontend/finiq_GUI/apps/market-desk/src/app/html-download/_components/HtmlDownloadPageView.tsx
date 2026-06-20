@@ -655,7 +655,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "compressInputDirectory",
       kind: "path",
-      label: "입력 데이터 경로 (외부 HTML)",
+      label: "외부 HTML 입력 경로",
       help: "공시원문 외부 저장으로 만든 KIND 뷰어 HTML 폴더를 선택하세요.",
       mode: "folder",
       value: compressInputDirectory,

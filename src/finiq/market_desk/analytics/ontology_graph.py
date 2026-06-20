@@ -8,7 +8,7 @@ import json
 import math
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -35,9 +35,16 @@ DEFAULT_KIND_MANIFEST_PATH = (
     / "KIND_DISCTABLE_FULL.sqlite_manifest_shards"
     / "KIND_DISCTABLE_FULL.sqlite_manifest.json"
 )
+DEFAULT_KIND_CATEGORY_DIR = PROJECT_ROOT / "resources" / "KIND"
 DEFAULT_QUANTIWISE_PARQUET_DIR = PROJECT_ROOT / "resources" / "Quantiwise" / "parquetCalamine"
 TABLE_NAME_DEFAULT = "disclosures"
 OHLCV_ITEMS = ("open", "high", "low", "close", "volume")
+DISCLOSURE_GROUP_ALL = "전체"
+KIND_CATEGORY_GROUPS = {
+    "shareholder_meeting": ("주주총회",),
+    "bond_issuance": ("CB", "EB", "BW"),
+    "rights_issuance": ("유상증자",),
+}
 ITEM_FILE_CANDIDATES = {
     "open": ("open",),
     "high": ("high",),
@@ -45,6 +52,16 @@ ITEM_FILE_CANDIDATES = {
     "close": ("close",),
     "volume": ("volume", "adjVolume"),
 }
+CancellationCheck = Callable[[], bool] | None
+
+
+class OntologyRequestCancelled(Exception):
+    """Raised when the client leaves before an ontology payload is finished."""
+
+
+def _raise_if_cancelled(cancellation_check: CancellationCheck = None) -> None:
+    if cancellation_check and cancellation_check():
+        raise OntologyRequestCancelled()
 
 
 def _resolve_path(path: str | Path | None, default: Path) -> Path:
@@ -157,6 +174,26 @@ def _parse_date(value: str | date | None, fallback: date) -> date:
     return date.fromisoformat(text)
 
 
+def _disclosure_group_options() -> list[str]:
+    if not DEFAULT_KIND_CATEGORY_DIR.exists():
+        return list(KIND_CATEGORY_GROUPS)
+    folder_names = {
+        path.name
+        for path in DEFAULT_KIND_CATEGORY_DIR.iterdir()
+        if path.is_dir() and not path.name.startswith(".")
+    }
+    known_names = [name for name in KIND_CATEGORY_GROUPS if name in folder_names]
+    extra_names = sorted(folder_names - set(KIND_CATEGORY_GROUPS))
+    return known_names + extra_names
+
+
+def _selected_disclosure_groups(disclosure_group: str) -> set[str] | None:
+    selected = str(disclosure_group or DISCLOSURE_GROUP_ALL).strip() or DISCLOSURE_GROUP_ALL
+    if selected == DISCLOSURE_GROUP_ALL:
+        return None
+    return set(KIND_CATEGORY_GROUPS.get(selected, (selected,)))
+
+
 def build_ontology_status(
     *,
     manifest_path: str | Path | None = None,
@@ -196,6 +233,7 @@ def build_ontology_status(
             "available_items": available_items,
             "mapped_companies": mapped_companies,
         },
+        "disclosure_groups": _disclosure_group_options(),
         "messages": messages,
     }
 
@@ -299,12 +337,14 @@ def _load_disclosures(
     end_date: date,
     title_keyword: str = "",
     market: str = "전체",
+    cancellation_check: CancellationCheck = None,
 ) -> list[dict[str, Any]]:
     table_name = str(manifest.get("table_name") or TABLE_NAME_DEFAULT)
     rows: list[dict[str, Any]] = []
     title_keyword = str(title_keyword or "").strip()
     market = str(market or "전체").strip()
     for _, shard_path in _iter_shards(manifest_path, manifest, start_date=start_date, end_date=end_date):
+        _raise_if_cancelled(cancellation_check)
         if not shard_path.exists():
             continue
         connection = _connect(shard_path)
@@ -331,6 +371,8 @@ def _load_disclosures(
                     disclosed_date,
                     title,
                     title_display,
+                    is_correction_report,
+                    has_later_correction,
                     acpt_no,
                     doc_no,
                     submitter
@@ -339,6 +381,7 @@ def _load_disclosures(
                 ORDER BY disclosed_at ASC, acpt_no ASC
             """
             rows.extend(dict(row) for row in connection.execute(query, params).fetchall())
+            _raise_if_cancelled(cancellation_check)
         finally:
             connection.close()
     return rows
@@ -350,7 +393,9 @@ def _load_quanti_ohlcv(
     company_id: str,
     start_date: date,
     end_date: date,
+    cancellation_check: CancellationCheck = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    _raise_if_cancelled(cancellation_check)
     item_files = _available_item_files(quanti_dir)
     missing = [item for item in OHLCV_ITEMS if item not in item_files]
     if missing:
@@ -359,10 +404,12 @@ def _load_quanti_ohlcv(
     stock_column = _stock_column(company_id)
     series_map: dict[str, pd.Series] = {}
     for item, path in item_files.items():
+        _raise_if_cancelled(cancellation_check)
         parquet_file = pq.ParquetFile(path)
         if stock_column not in parquet_file.schema_arrow.names:
             return [], [f"Quantiwise column is missing: {stock_column}"]
         table = parquet_file.read(columns=["date", stock_column])
+        _raise_if_cancelled(cancellation_check)
         frame = table.to_pandas()
         frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
         series = pd.to_numeric(frame.set_index("date")[stock_column], errors="coerce")
@@ -436,6 +483,7 @@ def _build_markers(disclosure_points: pd.DataFrame) -> list[dict[str, Any]]:
                 "submitter": row.get("submitter"),
                 "disclosed_at": row.get("disclosed_at"),
                 "acpt_no": row.get("acpt_no"),
+                "final_report": row.get("final_report"),
             }
         )
     return markers
@@ -470,6 +518,7 @@ def _build_timeline(disclosure_frame: pd.DataFrame) -> list[dict[str, Any]]:
                 "submitter": row.get("submitter"),
                 "acpt_no": row.get("acpt_no"),
                 "trade_day": _json_text(row.get("trade_day")),
+                "final_report": row.get("final_report"),
             }
         )
     return timeline
@@ -507,15 +556,20 @@ def build_ontology_company_panel(
     title_keyword: str = "",
     market: str = "전체",
     display_frequency_label: str = "자동",
+    disclosure_group: str = DISCLOSURE_GROUP_ALL,
+    cancellation_check: CancellationCheck = None,
 ) -> dict[str, Any]:
+    _raise_if_cancelled(cancellation_check)
     today = date.today()
     has_manual_start = bool(str(start_date or "").strip())
     has_manual_end = bool(str(end_date or "").strip())
     query_start = _parse_date(start_date, date(1900, 1, 1))
     query_end = _parse_date(end_date, today)
     stock_code = _display_stock_code(str(company_id))
+    selected_disclosure_group = str(disclosure_group or DISCLOSURE_GROUP_ALL).strip() or DISCLOSURE_GROUP_ALL
     resolved_manifest, manifest = _load_manifest(manifest_path)
     resolved_quanti = _resolve_path(quanti_dir, DEFAULT_QUANTIWISE_PARQUET_DIR)
+    _raise_if_cancelled(cancellation_check)
     disclosure_rows = _load_disclosures(
         manifest_path=resolved_manifest,
         manifest=manifest,
@@ -524,7 +578,9 @@ def build_ontology_company_panel(
         end_date=query_end,
         title_keyword=title_keyword,
         market=market,
+        cancellation_check=cancellation_check,
     )
+    _raise_if_cancelled(cancellation_check)
     company = {
         "company_id": stock_code,
         "company_name": disclosure_rows[0]["company_name"] if disclosure_rows else "",
@@ -536,6 +592,7 @@ def build_ontology_company_panel(
                 "submitter": row.get("submitter"),
                 "acpt_no": row.get("acpt_no"),
                 "doc_no": row.get("doc_no"),
+                "final_report": "N" if int(row.get("has_later_correction") or 0) else "Y",
             }
             for row in disclosure_rows
         ],
@@ -545,15 +602,28 @@ def build_ontology_company_panel(
         disclosure_frame["disclosure_group"] = disclosure_frame["title"].map(
             lambda title: classify_disclosure_group(title, DEFAULT_DISCLOSURE_GROUP_RULES)
         )
+        selected_group_names = _selected_disclosure_groups(selected_disclosure_group)
+        if selected_group_names is not None:
+            disclosure_frame = disclosure_frame[
+                disclosure_frame["disclosure_group"].isin(selected_group_names)
+            ].copy()
 
     price_rows, messages = _load_quanti_ohlcv(
         quanti_dir=resolved_quanti,
         company_id=stock_code,
         start_date=query_start,
         end_date=query_end,
+        cancellation_check=cancellation_check,
     )
+    _raise_if_cancelled(cancellation_check)
     if messages:
-        return _empty_company_panel(company, range_start=query_start, range_end=query_end, messages=messages)
+        return _empty_company_panel(
+            company,
+            range_start=query_start,
+            range_end=query_end,
+            messages=messages,
+            selected_disclosure_group=selected_disclosure_group,
+        )
 
     price_frame = prepare_price_dataframe(price_rows)
     if price_frame.empty:
@@ -562,6 +632,7 @@ def build_ontology_company_panel(
             range_start=query_start,
             range_end=query_end,
             messages=["선택한 기간에 주가 데이터가 없습니다."],
+            selected_disclosure_group=selected_disclosure_group,
         )
 
     frequency = _resolve_frequency(display_frequency_label, len(price_frame))
@@ -571,6 +642,7 @@ def build_ontology_company_panel(
         display_price_frame,
         placement="candle_below",
     )
+    _raise_if_cancelled(cancellation_check)
     if not disclosure_frame.empty and not disclosure_points.empty:
         disclosure_frame = disclosure_frame.merge(
             disclosure_points[["acpt_no", "trade_day"]],
@@ -598,6 +670,7 @@ def build_ontology_company_panel(
         "range_start": range_start.isoformat(),
         "range_end": range_end.isoformat(),
         "display_frequency": frequency,
+        "selected_disclosure_group": selected_disclosure_group,
         "chart": {
             "candles": _build_candles(display_price_frame),
             "markers": _build_markers(disclosure_points),
@@ -641,6 +714,7 @@ def _empty_company_panel(
     range_start: date,
     range_end: date,
     messages: list[str],
+    selected_disclosure_group: str = DISCLOSURE_GROUP_ALL,
 ) -> dict[str, Any]:
     return {
         "company": {
@@ -652,6 +726,7 @@ def _empty_company_panel(
         "range_start": range_start.isoformat(),
         "range_end": range_end.isoformat(),
         "display_frequency": "day",
+        "selected_disclosure_group": selected_disclosure_group,
         "chart": {"candles": [], "markers": [], "groups": []},
         "timeline": [],
         "summary": {
@@ -668,7 +743,9 @@ def _empty_company_panel(
 
 __all__ = [
     "DEFAULT_KIND_MANIFEST_PATH",
+    "DEFAULT_KIND_CATEGORY_DIR",
     "DEFAULT_QUANTIWISE_PARQUET_DIR",
+    "OntologyRequestCancelled",
     "build_ontology_company_panel",
     "build_ontology_status",
     "search_ontology_companies",

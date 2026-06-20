@@ -107,7 +107,7 @@ export default function UtilityPage() {
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle className="dark:text-white">데이터 경로</CardTitle>
+              <CardTitle className="dark:text-white">분할저장 구조 전환</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
