@@ -34,6 +34,8 @@ Purpose: Let the existing `공시 분석` page run Triple Barrier Method labelin
 Implementation summary:
 - Added a reusable Triple Barrier calculation module that combines disclosure events with Quantiwise OHLCV prices and supports disclosure-date or disclosure-timestamp event bases.
 - Implemented close-price and intraday high/low barrier modes, upper/lower/vertical barrier parameters, label generation, return storage, and failed-row reporting.
+- Validated event basis, price basis, positive barrier percentages, and positive vertical trading-day horizons before execution.
+- Marked same-row intraday upper/lower touches as failed rows instead of storing an unsupported first-touch label when OHLC data cannot identify sequence.
 - Added SQLite persistence with a canonical parameter hash and a unique key on source manifest, disclosure ID, ticker, and parameters to prevent duplicate runs.
 - Exposed API routes for running analysis and reading stored results from the ontology market-data router.
 - Replaced the previous in-memory disclosure backtest panel with a `Triple Barrier 실행` panel and a persisted result table on `공시 분석`.
