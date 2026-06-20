@@ -4,8 +4,12 @@ import test from "node:test";
 
 const graphPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/page.tsx";
 const workspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/OntologyGraphWorkspace.tsx";
+const nodeGraphPath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/OntologyNodeGraph.tsx";
+const chartPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/page.tsx";
+const chartWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/OntologyChartWorkspace.tsx";
 const analysisPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/page.tsx";
 const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/DisclosureAnalysisWorkspace.tsx";
+const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts";
 const backtestPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureBacktests.ts";
 const terminologyPath = "docs/ui-terminology.md";
 
@@ -24,13 +28,62 @@ test("ontology graph workspace calls real data APIs and avoids synthetic copy", 
   assert.match(source, /\/api\/ontology\/status/);
   assert.match(source, /\/api\/ontology\/companies/);
   assert.match(source, /\/api\/ontology\/company-panel/);
-  assert.match(source, /주가-공시 차트/);
-  assert.match(source, /공시 타임라인/);
+  assert.match(source, /Graph View/);
+  assert.match(source, /OntologyNodeGraph/);
+  assert.doesNotMatch(source, /주가-공시 차트/);
+  assert.doesNotMatch(source, /공시 타임라인/);
+  assert.doesNotMatch(source, /renderPriceChart/);
+  assert.doesNotMatch(source, /PriceChart/);
   assert.doesNotMatch(source, /공시 분석/);
   assert.doesNotMatch(source, /Triple Barrier/);
   assert.doesNotMatch(source, /TEST DATA/);
   assert.doesNotMatch(source, /Synthetic/);
   assert.doesNotMatch(source, /Export disabled for test data/);
+});
+
+test("ontology graph workspace restores the Obsidian-like node graph canvas", async () => {
+  const [workspaceSource, nodeGraphSource] = await Promise.all([
+    readFile(workspacePath, "utf8"),
+    readFile(nodeGraphPath, "utf8"),
+  ]);
+
+  assert.match(workspaceSource, /import\("\.\/OntologyNodeGraph"\)/);
+  assert.match(workspaceSource, /ssr: false/);
+  assert.match(workspaceSource, /<OntologyNodeGraph/);
+  assert.doesNotMatch(workspaceSource, /from "@finiq\/graph-viewer"/);
+  assert.match(nodeGraphSource, /from "@finiq\/graph-viewer"/);
+  assert.match(nodeGraphSource, /GraphCanvas/);
+  assert.match(nodeGraphSource, /useGraphViewer/);
+  assert.match(nodeGraphSource, /STYLE_PRESETS\["Obsidian-like"\]/);
+  assert.match(nodeGraphSource, /buildOntologyGraphData/);
+  assert.match(nodeGraphSource, /공시 관계 그래프/);
+  assert.match(nodeGraphSource, /nodeTypes\.map/);
+  assert.match(nodeGraphSource, /노드 검색/);
+  assert.match(nodeGraphSource, /SettingsPanel/);
+  assert.match(nodeGraphSource, /ActionDock/);
+  assert.match(nodeGraphSource, /JobStatusLogger/);
+  assert.match(nodeGraphSource, /undo/);
+  assert.match(nodeGraphSource, /redo/);
+  assert.match(nodeGraphSource, /showAll/);
+  assert.match(nodeGraphSource, /shortestPath/);
+  assert.match(nodeGraphSource, /jumpToNodeId/);
+  assert.match(nodeGraphSource, /exportGraphJson/);
+  assert.match(nodeGraphSource, /exportStyleJson/);
+  assert.match(nodeGraphSource, /exportLayoutJson/);
+  assert.match(nodeGraphSource, /exportVisibleSvg/);
+  assert.match(nodeGraphSource, /exportCanvasPng/);
+  assert.match(nodeGraphSource, /handleSaveLayout/);
+  assert.match(nodeGraphSource, /handleLoadLayout/);
+  assert.match(nodeGraphSource, /handleHideSelected/);
+  assert.match(nodeGraphSource, /handleApplyNeighborhood/);
+  assert.match(nodeGraphSource, /handleJumpSelected/);
+  assert.match(nodeGraphSource, /localStorage\.setItem\(`ontology_graph_layout_/);
+  assert.match(nodeGraphSource, /현재 레이아웃 저장/);
+  assert.match(nodeGraphSource, /저장된 레이아웃 불러오기/);
+  assert.match(nodeGraphSource, /숨김 초기화/);
+  assert.match(nodeGraphSource, /그래프 JSON 내보내기/);
+  assert.match(nodeGraphSource, /SVG 내보내기/);
+  assert.match(nodeGraphSource, /PNG 내보내기/);
 });
 
 test("ontology graph workspace uses one major box per row", async () => {
@@ -44,8 +97,8 @@ test("ontology graph workspace uses one major box per row", async () => {
   assert.doesNotMatch(source, /function SummaryMetric/);
 });
 
-test("ontology graph workspace exposes chart zoom sensitivity in the right settings dock", async () => {
-  const source = await readFile(workspacePath, "utf8");
+test("ontology chart workspace exposes chart zoom sensitivity in the right settings dock", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
 
   assert.match(source, /ActionDock/);
   assert.match(source, /settingsTitle="설정"/);
@@ -59,7 +112,7 @@ test("ontology graph workspace exposes chart zoom sensitivity in the right setti
   assert.match(source, /zoomSensitivity=\{chartZoomSensitivity\}/);
 });
 
-test("ontology graph workspace keeps the top selector chart-focused", async () => {
+test("ontology graph workspace keeps the top selector graph-focused", async () => {
   const source = await readFile(workspacePath, "utf8");
 
   assert.match(source, /종목 선택/);
@@ -68,7 +121,6 @@ test("ontology graph workspace keeps the top selector chart-focused", async () =
   assert.match(source, /normalizeStockCode/);
   assert.match(source, /loadCompanies/);
   assert.doesNotMatch(source, /formatCompanyOptionLabel/);
-  assert.doesNotMatch(source, /<CardTitle[\s\S]*Graph View/);
   assert.doesNotMatch(source, /<select/);
   assert.doesNotMatch(source, /코스피/);
   assert.doesNotMatch(source, /종목 없음/);
@@ -86,14 +138,14 @@ test("ontology graph workspace keeps the top selector chart-focused", async () =
   assert.doesNotMatch(source, /데이터 상태/);
 });
 
-test("ontology graph workspace defaults to full range and provides disclosure analysis", async () => {
-  const [source, analysisSource, backtestSource] = await Promise.all([
-    readFile(workspacePath, "utf8"),
+test("ontology chart workspace defaults to full range and provides disclosure analysis", async () => {
+  const [chartSource, analysisSource, backtestSource] = await Promise.all([
+    readFile(chartWorkspacePath, "utf8"),
     readFile(analysisWorkspacePath, "utf8"),
     readFile(backtestPath, "utf8"),
   ]);
 
-  assert.match(source, /전체 기간/);
+  assert.match(chartSource, /전체 기간/);
   assert.match(analysisSource, /공시 분석/);
   assert.match(analysisSource, /BACKTEST_METHODS/);
   assert.match(analysisSource, /runDisclosureBacktest/);
@@ -104,14 +156,14 @@ test("ontology graph workspace defaults to full range and provides disclosure an
   assert.match(backtestSource, /상승 돌파/);
   assert.match(backtestSource, /하락 돌파/);
   assert.match(backtestSource, /기간 만료/);
-  assert.doesNotMatch(source, /currentYearStart/);
-  assert.doesNotMatch(source, /todayInputValue/);
-  assert.doesNotMatch(source, /start_date: startDate/);
-  assert.doesNotMatch(source, /end_date: endDate/);
+  assert.doesNotMatch(chartSource, /currentYearStart/);
+  assert.doesNotMatch(chartSource, /todayInputValue/);
+  assert.doesNotMatch(chartSource, /start_date: startDate/);
+  assert.doesNotMatch(chartSource, /end_date: endDate/);
 });
 
-test("ontology graph workspace can expand the price chart without third-party branding", async () => {
-  const source = await readFile(workspacePath, "utf8");
+test("ontology chart workspace can expand the price chart without third-party branding", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
 
   assert.match(source, /chartFullscreen/);
   assert.match(source, /setChartFullscreen/);
@@ -126,19 +178,144 @@ test("ontology graph workspace can expand the price chart without third-party br
   assert.doesNotMatch(source, /tv-lightweight-charts/);
 });
 
-test("ontology graph workspace handles loading and frequency controls", async () => {
-  const source = await readFile(workspacePath, "utf8");
+test("ontology chart workspace manages chart conditions in a top filter box", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
+  const conditionBoxStart = source.indexOf("FILTERS");
+  const chartCardStart = source.indexOf("주가-공시 차트", conditionBoxStart);
+  const timelineStart = source.indexOf("공시 타임라인", chartCardStart);
+  const conditionBoxSource = source.slice(conditionBoxStart, chartCardStart);
+  const chartCardSource = source.slice(chartCardStart, timelineStart);
+
+  assert.notEqual(conditionBoxStart, -1);
+  assert.match(conditionBoxSource, /공시 조건/);
+  assert.match(conditionBoxSource, /회사명/);
+  assert.match(conditionBoxSource, /공시내역/);
+  assert.match(conditionBoxSource, /공시 선택/);
+  assert.match(conditionBoxSource, /border-t border-slate-200/);
+  assert.match(conditionBoxSource, /ontology-chart-disclosure-group/);
+  assert.match(conditionBoxSource, /DISCLOSURE_GROUP_ALL/);
+  assert.match(conditionBoxSource, /renderChartControls/);
+  assert.doesNotMatch(chartCardSource, /CHART_TYPE_OPTIONS\.map/);
+  assert.doesNotMatch(chartCardSource, /DISPLAY_FREQUENCY_OPTIONS\.map/);
+  assert.doesNotMatch(chartCardSource, /setChartFullscreen/);
+});
+
+test("ontology chart workspace handles loading and frequency controls", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
 
   assert.match(source, /chartIsLoading/);
   assert.match(source, /loadingCompanies/);
   assert.match(source, /requestedPanelKey/);
   assert.match(source, /setDisplayFrequency/);
   assert.match(source, /DISPLAY_FREQUENCY_OPTIONS/);
+  assert.match(source, /disclosureGroup/);
+  assert.match(source, /status\?\.disclosure_groups/);
+  assert.match(source, /disclosure_group: disclosureGroup/);
   assert.match(source, /일봉/);
   assert.match(source, /5일봉/);
   assert.match(source, /20일봉/);
   assert.match(source, /월봉/);
   assert.match(source, /display_frequency: displayFrequency/);
+});
+
+test("ontology chart workspace keeps empty search state until the user searches", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
+
+  assert.doesNotMatch(source, /loadStatus\(\);\s*loadCompanies\(\);/);
+  assert.match(source, /loadStatus\(\);/);
+  assert.match(source, /if \(!keyword\.trim\(\)\)/);
+  assert.match(source, /setSelectedCompany\(null\)/);
+  assert.match(source, /setPanel\(null\)/);
+  assert.match(source, /검색한 종목이 없습니다/);
+  assert.match(source, /isStockCodeKeyword/);
+  assert.doesNotMatch(source, /keywordText\.startsWith\("A"\)/);
+});
+
+test("ontology chart workspace falls back to direct stock-code panels when company search is empty", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
+
+  assert.match(source, /fallbackCompany/);
+  assert.match(source, /isStockCodeKeyword\(keywordText\) \? fallbackCompany\(keywordText\) : null/);
+  assert.match(source, /return data\.companies\[0\] \?\? fallback/);
+});
+
+test("ontology workspaces only strip A prefix from stock-code keywords", async () => {
+  const sources = await Promise.all([
+    readFile(workspacePath, "utf8"),
+    readFile(chartWorkspacePath, "utf8"),
+    readFile(analysisWorkspacePath, "utf8"),
+  ]);
+
+  for (const source of sources) {
+    assert.match(source, /function isStockCodeKeyword\(value: string\) \{\s+return \/\^A\\d\{6\}\$\/\.test\(value\.trim\(\)\.toUpperCase\(\)\);\s+\}/);
+    assert.match(source, /isStockCodeKeyword\(keywordText\) \? normalizeStockCode\(keywordText\)\.slice\(1\) : keyword\.trim\(\)/);
+    assert.doesNotMatch(source, /keywordText\.startsWith\("A"\)/);
+  }
+});
+
+test("ontology disclosure analysis keeps empty search state until the user searches", async () => {
+  const source = await readFile(analysisWorkspacePath, "utf8");
+
+  assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*loadCompanies\(\);/);
+  assert.match(source, /if \(!keyword\.trim\(\)\)/);
+  assert.match(source, /setSelectedCompany\(null\)/);
+  assert.match(source, /setPanel\(null\)/);
+  assert.match(source, /검색한 종목이 없습니다/);
+  assert.match(source, /isStockCodeKeyword/);
+  assert.doesNotMatch(source, /keywordText\.startsWith\("A"\)/);
+});
+
+test("ontology chart workspace offers a close-price line view", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
+
+  assert.match(source, /chartType/);
+  assert.match(source, /setChartType/);
+  assert.match(source, /"candlestick"/);
+  assert.match(source, /"line"/);
+  assert.match(source, /캔들/);
+  assert.match(source, /종가선/);
+  assert.match(source, /chartType=\{chartType\}/);
+});
+
+test("ontology graph workspace aborts in-flight API loads when leaving the page", async () => {
+  const [graphSource, chartSource] = await Promise.all([
+    readFile(workspacePath, "utf8"),
+    readFile(chartWorkspacePath, "utf8"),
+  ]);
+  const source = `${graphSource}\n${chartSource}`;
+
+  assert.match(source, /AbortController/);
+  assert.match(source, /useRef/);
+  assert.match(source, /statusAbortControllerRef/);
+  assert.match(source, /companiesAbortControllerRef/);
+  assert.match(source, /panelAbortControllerRef/);
+  assert.match(source, /signal: controller\.signal/);
+  assert.match(source, /controller\.signal\.aborted/);
+  assert.match(source, /err instanceof DOMException && err\.name === "AbortError"/);
+  assert.match(source, /statusAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(source, /companiesAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(source, /panelAbortControllerRef\.current\?\.abort\(\)/);
+});
+
+test("ontology workflow separates relationship graph and chart routes", async () => {
+  const [navigationSource, graphPageSource, chartPageSource, chartWorkspaceSource] = await Promise.all([
+    readFile(navigationPath, "utf8"),
+    readFile(graphPagePath, "utf8"),
+    readFile(chartPagePath, "utf8"),
+    readFile(chartWorkspacePath, "utf8"),
+  ]);
+
+  assert.match(navigationSource, /basePath: "\/graph\/chart"/);
+  assert.match(navigationSource, /\{ href: "\/graph\/chart", step: 1, label: "Chart View" \}/);
+  assert.match(navigationSource, /\{ href: "\/graph", step: 2, label: "Graph View" \}/);
+  assert.match(navigationSource, /\{ href: "\/graph\/analysis", step: 3, label: "공시 분석" \}/);
+  assert.match(graphPageSource, /OntologyGraphWorkspace/);
+  assert.match(chartPageSource, /OntologyChartWorkspace/);
+  assert.match(chartPageSource, /WorkflowPageShell/);
+  assert.match(chartPageSource, /workflowId="ontology"/);
+  assert.match(chartWorkspaceSource, /Chart View/);
+  assert.match(chartWorkspaceSource, /주가-공시 차트/);
+  assert.doesNotMatch(chartWorkspaceSource, /OntologyNodeGraph/);
 });
 
 test("ontology disclosure analysis has a dedicated page and extensible method registry", async () => {
@@ -149,6 +326,8 @@ test("ontology disclosure analysis has a dedicated page and extensible method re
   ]);
 
   assert.match(pageSource, /DisclosureAnalysisWorkspace/);
+  assert.match(pageSource, /WorkflowPageShell/);
+  assert.match(pageSource, /workflowId="ontology"/);
   assert.match(workspaceSource, /공시 분석/);
   assert.match(workspaceSource, /methodId/);
   assert.match(workspaceSource, /BACKTEST_METHODS/);
@@ -163,13 +342,19 @@ test("ontology terminology documents the real-data workspace labels", async () =
   const source = await readFile(terminologyPath, "utf8");
 
   assert.match(source, /\| Ontology real-data workspace \| Graph View \|/);
+  assert.match(source, /\| Ontology chart workspace \| Chart View \|/);
   assert.match(source, /\| Ontology data status \| 데이터 상태 \|/);
   assert.match(source, /\| Ontology company selector \| 회사 선택 \|/);
   assert.match(source, /\| Ontology stock selector \| 종목 선택 \|/);
+  assert.match(source, /\| Ontology node graph \| 공시 관계 그래프 \|/);
+  assert.match(source, /\| Ontology node search \| 노드 검색 \|/);
+  assert.match(source, /\| Ontology graph unpin action \| 핀 해제 \|/);
   assert.match(source, /\| Ontology event-price chart \| 주가-공시 차트 \|/);
   assert.match(source, /\| Ontology event timeline \| 공시 타임라인 \|/);
   assert.match(source, /\| Ontology disclosure analysis \| 공시 분석 \|/);
   assert.match(source, /\| Ontology chart frequency selector \| 일봉\/5일봉\/20일봉\/월봉 \|/);
+  assert.match(source, /\| Ontology chart type selector \| 캔들\/종가선 \|/);
+  assert.match(source, /\| Ontology final report marker \| 최종보고서 \|/);
   assert.match(source, /\| Ontology full date range \| 전체 기간 \|/);
   assert.match(source, /\| Ontology chart fullscreen action \| 전체화면 \|/);
   assert.match(source, /\| Ontology chart exit fullscreen action \| 전체화면 닫기 \|/);

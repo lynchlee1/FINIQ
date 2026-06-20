@@ -6,11 +6,13 @@ from pathlib import Path
 import sqlite3
 
 import pandas as pd
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from finiq.config import AppConfig
 from finiq.market_desk.analytics.ontology_graph import (
+    OntologyRequestCancelled,
     build_ontology_company_panel,
     build_ontology_status,
     search_ontology_companies,
@@ -175,6 +177,7 @@ def test_ontology_status_reports_manifest_and_quanti_coverage(tmp_path: Path) ->
     assert payload["kind"]["shard_years"] == ["2025"]
     assert payload["quantiwise"]["available_items"] == ["close", "high", "low", "open", "volume"]
     assert payload["quantiwise"]["mapped_companies"] == 1
+    assert set(payload["disclosure_groups"]) >= {"shareholder_meeting", "bond_issuance", "rights_issuance"}
     assert payload["messages"] == []
 
 
@@ -230,6 +233,80 @@ def test_build_ontology_company_panel_aligns_disclosures_to_price_candles(tmp_pa
     assert payload["summary"]["visible_disclosures"] == 2
     assert payload["summary"]["after_close_disclosures"] == 1
     assert payload["messages"] == []
+
+
+def test_build_ontology_company_panel_filters_by_disclosure_group(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    payload = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A005930",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 6),
+        display_frequency_label="일봉",
+        disclosure_group="shareholder_meeting",
+    )
+
+    assert payload["selected_disclosure_group"] == "shareholder_meeting"
+    assert [marker["group"] for marker in payload["chart"]["markers"]] == ["주주총회"]
+    assert [item["group"] for item in payload["timeline"]] == ["주주총회"]
+    assert payload["summary"]["visible_candles"] == 3
+    assert payload["summary"]["visible_disclosures"] == 1
+    assert payload["summary"]["top_groups"] == [{"name": "주주총회", "count": 1}]
+
+
+def test_build_ontology_company_panel_reports_final_report_status(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+    shard_path = tmp_path / "KIND_DISCTABLE_FULL.sqlite_manifest_shards" / "2025.sqlite"
+    connection = sqlite3.connect(shard_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO disclosures (
+                company_key, company_name, company_id, market, disclosed_at,
+                disclosed_date, title, title_display, is_correction_report,
+                has_later_correction, acpt_no, doc_no, submitter
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "005930",
+                "테스트전자",
+                "005930",
+                "코스피",
+                "2025-01-03 09:10",
+                "2025-01-03",
+                "[정정]전환사채권발행결정",
+                "[정정]전환사채권발행결정",
+                1,
+                1,
+                "20250103000099",
+                "",
+                "테스트전자",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    payload = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A005930",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 6),
+        display_frequency_label="일봉",
+    )
+
+    markers_by_acpt_no = {marker["acpt_no"]: marker for marker in payload["chart"]["markers"]}
+    timeline_by_acpt_no = {item["acpt_no"]: item for item in payload["timeline"]}
+    assert markers_by_acpt_no["20250103000099"]["final_report"] == "N"
+    assert timeline_by_acpt_no["20250103000099"]["final_report"] == "N"
+    assert markers_by_acpt_no["20250102000001"]["final_report"] == "Y"
+    assert timeline_by_acpt_no["20250102000001"]["final_report"] == "Y"
 
 
 def test_build_ontology_company_panel_defaults_to_full_available_range(tmp_path: Path) -> None:
@@ -345,6 +422,21 @@ def test_build_ontology_company_panel_reports_missing_price_items_without_fallba
     assert payload["messages"] == ["Quantiwise item is missing: volume"]
 
 
+def test_build_ontology_company_panel_stops_when_cancelled(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    with pytest.raises(OntologyRequestCancelled):
+        build_ontology_company_panel(
+            manifest_path=manifest_path,
+            quanti_dir=quanti_dir,
+            company_id="005930",
+            start_date=date(2025, 1, 2),
+            end_date=date(2025, 1, 6),
+            cancellation_check=lambda: True,
+        )
+
+
 def test_ontology_api_routes_return_real_data_payloads(tmp_path: Path) -> None:
     manifest_path = _write_disclosure_shard(tmp_path)
     quanti_dir = _write_quanti_parquet(tmp_path)
@@ -383,7 +475,10 @@ def test_ontology_api_routes_return_real_data_payloads(tmp_path: Path) -> None:
             "start_date": "2025-01-02",
             "end_date": "2025-01-06",
             "display_frequency": "일봉",
+            "disclosure_group": "shareholder_meeting",
         },
     )
     assert panel.status_code == 200
     assert len(panel.json()["chart"]["candles"]) == 3
+    assert panel.json()["selected_disclosure_group"] == "shareholder_meeting"
+    assert [marker["group"] for marker in panel.json()["chart"]["markers"]] == ["주주총회"]

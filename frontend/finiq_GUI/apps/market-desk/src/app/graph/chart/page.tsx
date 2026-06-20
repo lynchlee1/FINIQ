@@ -1,10 +1,10 @@
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
-import { DisclosureAnalysisWorkspace } from "./DisclosureAnalysisWorkspace";
+import { OntologyChartWorkspace } from "./OntologyChartWorkspace";
 
-export default function GraphAnalysisPage() {
+export default function GraphChartPage() {
   return (
     <WorkflowPageShell workflowId="ontology">
-      <DisclosureAnalysisWorkspace />
+      <OntologyChartWorkspace />
     </WorkflowPageShell>
   );
 }

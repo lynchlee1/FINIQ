@@ -67,3 +67,25 @@ test("price chart can hide its internal title block", async () => {
   assert.match(source, /showHeader = true/);
   assert.match(source, /\{showHeader \? \(/);
 });
+
+test("price chart can render close-only line mode", async () => {
+  const [source, chartSource] = await Promise.all([
+    readFile(priceChartPath, "utf8"),
+    readFile(chartLibPath, "utf8"),
+  ]);
+
+  assert.match(source, /chartType\?: "candlestick" \| "line"/);
+  assert.match(source, /chartType = "candlestick"/);
+  assert.match(source, /LineSeries/);
+  assert.match(source, /value: d\.close/);
+  assert.match(chartSource, /export const LineSeries = "LineSeries" as const/);
+  assert.match(chartSource, /drawLineSeries/);
+});
+
+test("FINIQ chart renders all disclosure markers on the same date", async () => {
+  const source = await readFile(chartLibPath, "utf8");
+
+  assert.match(source, /markersByTime/);
+  assert.match(source, /forEach\(\(marker\) =>/);
+  assert.doesNotMatch(source, /new Map\(markers\.map\(\(marker\) => \[marker\.time, marker\]\)\)/);
+});

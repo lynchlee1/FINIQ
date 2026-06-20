@@ -9,8 +9,9 @@ const DEFAULT_TIME_TICKS = 6;
 export const BarSeries = "BarSeries" as const;
 export const CandlestickSeries = "CandlestickSeries" as const;
 export const HistogramSeries = "HistogramSeries" as const;
+export const LineSeries = "LineSeries" as const;
 
-export type SeriesType = typeof BarSeries | typeof CandlestickSeries | typeof HistogramSeries;
+export type SeriesType = typeof BarSeries | typeof CandlestickSeries | typeof HistogramSeries | typeof LineSeries;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -416,7 +417,7 @@ export class ChartApi {
 
   getPriceSeries() {
     return this.series.find(
-      (series) => series.type === CandlestickSeries || series.type === BarSeries,
+      (series) => series.type === CandlestickSeries || series.type === BarSeries || series.type === LineSeries,
     ) || null;
   }
 
@@ -470,8 +471,10 @@ export class ChartApi {
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
     priceSeries.data.slice(startIndex, endIndex + 1).forEach((item) => {
-      min = Math.min(min, toNumber(item.low, 0));
-      max = Math.max(max, toNumber(item.high, 0));
+      const low = item.low === undefined ? item.value : item.low;
+      const high = item.high === undefined ? item.value : item.high;
+      min = Math.min(min, toNumber(low, 0));
+      max = Math.max(max, toNumber(high, 0));
     });
     if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
       const anchor = Number.isFinite(min) ? min : 0;
@@ -685,6 +688,11 @@ export class ChartApi {
     const barHalfWidth = clamp(step * 0.22, 3, 8);
     const visibleIndexes = this.getVisibleIndexes(data.length);
 
+    if (priceSeries.type === LineSeries) {
+      this.drawLineSeries(ctx, layout, priceSeries);
+      return;
+    }
+
     ctx.save();
     data.slice(visibleIndexes.startIndex, visibleIndexes.endIndex + 1).forEach((item, offset) => {
       const index = visibleIndexes.startIndex + offset;
@@ -735,6 +743,33 @@ export class ChartApi {
     ctx.restore();
   }
 
+  drawLineSeries(ctx: CanvasRenderingContext2D, layout: any, priceSeries: SeriesApi) {
+    const data = priceSeries.data || [];
+    if (!data.length) {
+      return;
+    }
+    const priceRect = this.getPaneRect(priceSeries.scaleMargins, layout);
+    const priceRange = this.getPriceRange();
+    const visibleIndexes = this.getVisibleIndexes(data.length);
+
+    ctx.save();
+    ctx.lineWidth = toNumber(priceSeries.options.lineWidth, 2);
+    ctx.strokeStyle = priceSeries.options.color || "#2563eb";
+    ctx.beginPath();
+    data.slice(visibleIndexes.startIndex, visibleIndexes.endIndex + 1).forEach((item, offset) => {
+      const index = visibleIndexes.startIndex + offset;
+      const x = this.getX(index, data.length, layout);
+      const y = this.priceToY(item.value, priceRange, priceRect);
+      if (offset === 0) {
+        ctx.moveTo(x, y);
+        return;
+      }
+      ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawVolumeSeries(ctx: CanvasRenderingContext2D, layout: any, volumeSeries: SeriesApi | null) {
     if (!volumeSeries) return;
     const data = volumeSeries.data || [];
@@ -768,7 +803,13 @@ export class ChartApi {
     if (!markers.length || !data.length) {
       return;
     }
-    const markerByTime = new Map(markers.map((marker) => [marker.time, marker]));
+    const markersByTime = new Map<string, any[]>();
+    markers.forEach((marker) => {
+      const key = String(marker.time || "");
+      const current = markersByTime.get(key) || [];
+      current.push(marker);
+      markersByTime.set(key, current);
+    });
     const priceRect = this.getPaneRect(priceSeries.scaleMargins, layout);
     const priceRange = this.getPriceRange();
     const visibleIndexes = this.getVisibleIndexes(data.length);
@@ -780,42 +821,44 @@ export class ChartApi {
 
     data.slice(visibleIndexes.startIndex, visibleIndexes.endIndex + 1).forEach((item, offset) => {
       const index = visibleIndexes.startIndex + offset;
-      const marker = markerByTime.get(item.time);
-      if (!marker) {
+      const itemMarkers = markersByTime.get(String(item.time || ""));
+      if (!itemMarkers?.length) {
         return;
       }
       const x = this.getX(index, data.length, layout);
       const highY = this.priceToY(item.high, priceRange, priceRect);
       const lowY = this.priceToY(item.low, priceRange, priceRect);
       const midY = this.priceToY((toNumber(item.high) + toNumber(item.low)) / 2, priceRange, priceRect);
-      let y = midY;
-      if (marker.position === "aboveBar") {
-        y = highY - 12;
-      } else if (marker.position === "belowBar") {
-        y = lowY + 12;
-      }
+      itemMarkers.forEach((marker, markerIndex) => {
+        let y = midY;
+        if (marker.position === "aboveBar") {
+          y = highY - 12 - markerIndex * 16;
+        } else if (marker.position === "belowBar") {
+          y = lowY + 12 + markerIndex * 16;
+        }
 
-      ctx.fillStyle = marker.color || "#94a3b8";
-      ctx.strokeStyle = marker.color || "#94a3b8";
-      if (marker.shape === "circle") {
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (marker.shape === "square") {
-        ctx.fillRect(x - 4, y - 4, 8, 8);
-      } else {
-        ctx.beginPath();
-        ctx.moveTo(x, y - 5);
-        ctx.lineTo(x - 5, y + 4);
-        ctx.lineTo(x + 5, y + 4);
-        ctx.closePath();
-        ctx.fill();
-      }
-
-      if (marker.text) {
         ctx.fillStyle = marker.color || "#94a3b8";
-        ctx.fillText(String(marker.text), x, y - 12);
-      }
+        ctx.strokeStyle = marker.color || "#94a3b8";
+        if (marker.shape === "circle") {
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (marker.shape === "square") {
+          ctx.fillRect(x - 4, y - 4, 8, 8);
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(x, y - 5);
+          ctx.lineTo(x - 5, y + 4);
+          ctx.lineTo(x + 5, y + 4);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        if (marker.text) {
+          ctx.fillStyle = marker.color || "#94a3b8";
+          ctx.fillText(String(marker.text), x, y - 12);
+        }
+      });
     });
 
     ctx.restore();

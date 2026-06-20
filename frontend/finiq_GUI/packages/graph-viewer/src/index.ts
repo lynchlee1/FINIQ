@@ -38,6 +38,13 @@ export { DEFAULT_STYLE, STYLE_PRESETS } from './utils/stylePresets'
 export { computeVisibleGraph } from './utils/filtering'
 export { parseAndValidateGraphJson } from './utils/validation'
 export {
+  exportCanvasPng,
+  exportGraphJson,
+  exportLayoutJson,
+  exportStyleJson,
+  exportVisibleSvg,
+} from './utils/export'
+export {
   buildAdjacency,
   calculateDegrees,
   connectedNodeAndEdgeSets,

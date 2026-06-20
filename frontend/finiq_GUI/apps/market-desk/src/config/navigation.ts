@@ -43,11 +43,12 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
   ontology: {
     id: "ontology",
     label: "Ontology",
-    basePath: "/graph",
+    basePath: "/graph/chart",
     layout: "canvas",
     steps: [
-      { href: "/graph", step: 1, label: "Graph View" },
-      { href: "/graph/analysis", step: 2, label: "공시 분석" },
+      { href: "/graph/chart", step: 1, label: "Chart View" },
+      { href: "/graph", step: 2, label: "Graph View" },
+      { href: "/graph/analysis", step: 3, label: "공시 분석" },
     ],
   },
   "disclosure-build": {

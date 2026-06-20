@@ -54,13 +54,16 @@ test("sidebar definitions match the narrowed top-level workflows", async () => {
 });
 
 test("ontology sidebar separates graph and disclosure analysis pages", async () => {
-  const { getSidebarDefinition, getPageTitle } = await loadNavigation();
+  const { NAV_ITEMS, getSidebarDefinition, getPageTitle } = await loadNavigation();
+  const ontologyNav = NAV_ITEMS.find((item) => item.label === "Ontology");
   const ontologySidebar = getSidebarDefinition("ontology");
 
+  assert.equal(ontologyNav?.href, "/graph/chart");
   assert.deepEqual(
     ontologySidebar.groups[0].steps.map((step) => step.href),
-    ["/graph", "/graph/analysis"],
+    ["/graph/chart", "/graph", "/graph/analysis"],
   );
+  assert.equal(getPageTitle("/graph/chart"), "Chart View");
   assert.equal(getPageTitle("/graph"), "Graph View");
   assert.equal(getPageTitle("/graph/analysis"), "공시 분석");
 });

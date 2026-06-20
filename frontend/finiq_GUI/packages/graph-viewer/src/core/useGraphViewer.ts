@@ -118,6 +118,7 @@ export interface GraphViewerController {
   onVisibleBounds: (width: number, height: number) => void
   runCorporateAnalysis: () => void
   unpinAllNodes: () => void
+  showAll: () => void
 }
 
 function cloneStyle(style: GraphStyleConfig): GraphStyleConfig {
@@ -496,6 +497,12 @@ export function useGraphViewer(options: UseGraphViewerOptions = {}): GraphViewer
     }))
   }, [setGraph])
 
+  const showAll = useCallback(() => {
+    setHiddenNodeIds(new Set())
+    setHiddenEdgeIds(new Set())
+    setNeighborhoodRootId(undefined)
+  }, [])
+
   return {
     appTheme,
     importText,
@@ -541,6 +548,6 @@ export function useGraphViewer(options: UseGraphViewerOptions = {}): GraphViewer
     onVisibleBounds,
     runCorporateAnalysis,
     unpinAllNodes,
+    showAll,
   }
 }
-
