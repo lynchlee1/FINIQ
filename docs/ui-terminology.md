@@ -90,6 +90,8 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Ontology chart fullscreen action | 전체화면 | Opens the chart in an app-level fullscreen overlay. |
 | Ontology chart exit fullscreen action | 전체화면 닫기 | Closes the chart fullscreen overlay. |
 | Ontology chart zoom sensitivity | 확대/축소 민감도 | Chart interaction setting in the right settings panel. |
+| Ontology chart marker placement setting | 공시 마커 위치 | Settings control for where disclosure markers render on the price chart. |
+| Ontology chart marker shape setting | 공시 마커 모양 | Settings control for disclosure marker symbol shape on the price chart. |
 
 ## Right Dock Panels
 

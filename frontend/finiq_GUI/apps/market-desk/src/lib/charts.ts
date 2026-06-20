@@ -115,8 +115,10 @@ export class ChartApi {
   crosshair: any = null;
   visibleRange: { from: number; to: number } | null = null;
   manualPriceRange: { min: number; max: number } | null = null;
+  manualVolumeRange: { min: number; max: number } | null = null;
   dragState: any = null;
   priceScaleDragState: any = null;
+  volumeScaleDragState: any = null;
   timeScaleApi: TimeScaleApi;
   devicePixelRatio: number;
   canvas: HTMLCanvasElement;
@@ -204,6 +206,7 @@ export class ChartApi {
 
   fitContent() {
     this.manualPriceRange = null;
+    this.manualVolumeRange = null;
     const count = this.getPriceSeries()?.data?.length || 0;
     if (count <= 1) {
       this.visibleRange = { from: 0, to: 0 };
@@ -229,7 +232,7 @@ export class ChartApi {
     if (!priceSeries || !priceSeries.data.length) {
       return;
     }
-    if (this.dragState || this.priceScaleDragState) {
+    if (this.dragState || this.priceScaleDragState || this.volumeScaleDragState) {
       return;
     }
     const rect = this.canvas.getBoundingClientRect();
@@ -237,6 +240,12 @@ export class ChartApi {
     const y = event.clientY - rect.top;
     const layout = this.getLayout();
     if (x >= layout.rightScaleLeft && y >= layout.plotTop && y <= layout.plotBottom) {
+      this.canvas.style.cursor = "ns-resize";
+      return;
+    }
+    const volumeSeries = this.getVolumeSeries();
+    const volumeRect = volumeSeries ? this.getPaneRect(volumeSeries.scaleMargins, layout) : null;
+    if (volumeRect && x <= layout.plotLeft && x >= layout.plotLeft - layout.leftScaleWidth && y >= volumeRect.top && y <= volumeRect.bottom) {
       this.canvas.style.cursor = "ns-resize";
       return;
     }
@@ -271,13 +280,28 @@ export class ChartApi {
       event.preventDefault();
       return;
     }
+    const volumeSeries = this.getVolumeSeries();
+    const volumeRect = volumeSeries ? this.getPaneRect(volumeSeries.scaleMargins, layout) : null;
+    if (volumeRect && x <= layout.plotLeft && x >= layout.plotLeft - layout.leftScaleWidth && y >= volumeRect.top && y <= volumeRect.bottom) {
+      this.volumeScaleDragState = {
+        startClientY: event.clientY,
+        startRange: { ...this.getVolumeRange() },
+      };
+      this.canvas.style.cursor = "ns-resize";
+      event.preventDefault();
+      return;
+    }
     if (x < layout.plotLeft || x > layout.plotRight || y < layout.plotTop || y > layout.plotBottom) {
       return;
     }
     const range = this.getVisibleRange(priceSeries.data.length);
+    const priceRect = this.getPaneRect(priceSeries.scaleMargins, layout);
     this.dragState = {
       startClientX: event.clientX,
+      startClientY: event.clientY,
       startRange: { ...range },
+      startPriceRange: y <= priceRect.bottom ? { ...this.getPriceRange() } : null,
+      priceRectHeight: priceRect.height,
     };
     this.canvas.style.cursor = "grabbing";
     event.preventDefault();
@@ -293,6 +317,20 @@ export class ChartApi {
       this.manualPriceRange = {
         min: center - nextSpan / 2,
         max: center + nextSpan / 2,
+      };
+      this.crosshair = null;
+      this.emitCrosshair(null);
+      this.render();
+      return;
+    }
+    if (this.volumeScaleDragState) {
+      const startRange = this.volumeScaleDragState.startRange;
+      const startSpan = Math.max(startRange.max - startRange.min, 1);
+      const deltaY = event.clientY - this.volumeScaleDragState.startClientY;
+      const nextSpan = startSpan * Math.exp(deltaY / 180);
+      this.manualVolumeRange = {
+        min: 0,
+        max: Math.max(nextSpan, 1),
       };
       this.crosshair = null;
       this.emitCrosshair(null);
@@ -317,17 +355,21 @@ export class ChartApi {
       priceSeries.data.length,
     );
     this.visibleRange = nextRange;
+    if (this.dragState.startPriceRange) {
+      this.panPriceRangeByPixels(event.clientY - this.dragState.startClientY);
+    }
     this.crosshair = null;
     this.emitCrosshair(null);
     this.render();
   }
 
   onPointerUp() {
-    if (!this.dragState && !this.priceScaleDragState) {
+    if (!this.dragState && !this.priceScaleDragState && !this.volumeScaleDragState) {
       return;
     }
     this.dragState = null;
     this.priceScaleDragState = null;
+    this.volumeScaleDragState = null;
     this.canvas.style.cursor = "crosshair";
   }
 
@@ -344,6 +386,13 @@ export class ChartApi {
     if (x >= layout.rightScaleLeft && y >= layout.plotTop && y <= layout.plotBottom) {
       event.preventDefault();
       this.zoomPriceRangeAtY(y, wheelZoomFactor, layout);
+      return;
+    }
+    const volumeSeries = this.getVolumeSeries();
+    const volumeRect = volumeSeries ? this.getPaneRect(volumeSeries.scaleMargins, layout) : null;
+    if (volumeRect && x <= layout.plotLeft && x >= layout.plotLeft - layout.leftScaleWidth && y >= volumeRect.top && y <= volumeRect.bottom) {
+      event.preventDefault();
+      this.zoomVolumeRangeAtY(y, wheelZoomFactor, layout);
       return;
     }
     if (x < layout.plotLeft || x > layout.plotRight || y < layout.plotTop || y > layout.plotBottom) {
@@ -370,6 +419,14 @@ export class ChartApi {
     const layout = this.getLayout();
     if (x >= layout.rightScaleLeft && y >= layout.plotTop && y <= layout.plotBottom) {
       this.manualPriceRange = null;
+      this.render();
+      event.preventDefault();
+      return;
+    }
+    const volumeSeries = this.getVolumeSeries();
+    const volumeRect = volumeSeries ? this.getPaneRect(volumeSeries.scaleMargins, layout) : null;
+    if (volumeRect && x <= layout.plotLeft && x >= layout.plotLeft - layout.leftScaleWidth && y >= volumeRect.top && y <= volumeRect.bottom) {
+      this.manualVolumeRange = null;
       this.render();
       event.preventDefault();
     }
@@ -484,7 +541,22 @@ export class ChartApi {
       return { min: anchor * 0.98, max: anchor * 1.02 + 1 };
     }
     const padding = (max - min) * 0.06;
-    return { min: min - padding, max: max + padding };
+    return { min: min >= 0 ? Math.max(0, min - padding) : min - padding, max: max + padding };
+  }
+
+  panPriceRangeByPixels(deltaY: number) {
+    if (!this.dragState?.startPriceRange) {
+      return;
+    }
+    const startRange = this.dragState.startPriceRange;
+    const span = Math.max(startRange.max - startRange.min, 1e-9);
+    const pricePerPixel = span / Math.max(this.dragState.priceRectHeight, 1);
+    const shift = deltaY * pricePerPixel;
+    const nextRange = {
+      min: startRange.min + shift,
+      max: startRange.max + shift,
+    };
+    this.manualPriceRange = nextRange;
   }
 
   zoomPriceRangeAtY(y: number, zoomFactor: number, layout: any) {
@@ -499,9 +571,29 @@ export class ChartApi {
     const nextSpan = span * zoomFactor;
     const ratio = (anchor - range.min) / span;
     const nextMin = anchor - nextSpan * ratio;
-    this.manualPriceRange = {
+    const nextRange = {
       min: nextMin,
       max: nextMin + nextSpan,
+    };
+    this.manualPriceRange = nextRange;
+    this.render();
+  }
+
+  zoomVolumeRangeAtY(y: number, zoomFactor: number, layout: any) {
+    const volumeSeries = this.getVolumeSeries();
+    if (!volumeSeries || !volumeSeries.data.length) {
+      return;
+    }
+    const volumeRect = this.getPaneRect(volumeSeries.scaleMargins, layout);
+    if (y < volumeRect.top || y > volumeRect.bottom) {
+      return;
+    }
+    const range = this.getVolumeRange();
+    const span = Math.max(range.max - range.min, 1);
+    const nextSpan = Math.max(span * zoomFactor, 1);
+    this.manualVolumeRange = {
+      min: 0,
+      max: nextSpan,
     };
     this.render();
   }
@@ -516,6 +608,9 @@ export class ChartApi {
   }
 
   getVolumeRange() {
+    if (this.manualVolumeRange) {
+      return this.manualVolumeRange;
+    }
     const volumeSeries = this.getVolumeSeries();
     if (!volumeSeries || !volumeSeries.data.length) {
       return { min: 0, max: 1 };
@@ -877,7 +972,11 @@ export class ChartApi {
       const midY = this.priceToY((toNumber(item.high) + toNumber(item.low)) / 2, priceRange, priceRect);
       itemMarkers.forEach((marker, markerIndex) => {
         let y = midY;
-        if (marker.position === "aboveBar") {
+        if (marker.position === "paneTop") {
+          y = priceRect.top + 12 + markerIndex * 16;
+        } else if (marker.position === "paneBottom") {
+          y = priceRect.bottom - 12 - markerIndex * 16;
+        } else if (marker.position === "aboveBar") {
           y = highY - 12 - markerIndex * 16;
         } else if (marker.position === "belowBar") {
           y = lowY + 12 + markerIndex * 16;
@@ -892,6 +991,13 @@ export class ChartApi {
           ctx.fill();
         } else if (marker.shape === "square") {
           ctx.fillRect(x - 4, y - 4, 8, 8);
+        } else if (marker.shape === "arrowDown") {
+          ctx.beginPath();
+          ctx.moveTo(x, y + 5);
+          ctx.lineTo(x - 5, y - 4);
+          ctx.lineTo(x + 5, y - 4);
+          ctx.closePath();
+          ctx.fill();
         } else {
           ctx.beginPath();
           ctx.moveTo(x, y - 5);

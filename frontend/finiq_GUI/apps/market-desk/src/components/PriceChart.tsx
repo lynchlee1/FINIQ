@@ -20,10 +20,14 @@ type PriceChartDatum = {
   color?: string;
 };
 
+type PriceChartMarkerPosition = "aboveBar" | "belowBar" | "inBar" | "paneTop" | "paneBottom";
+type MarkerPlacementOverride = "default" | PriceChartMarkerPosition;
+type MarkerShapeOverride = "default" | "circle" | "square" | "arrowUp" | "arrowDown";
+
 type PriceChartMarker = {
   time: string;
-  position?: "aboveBar" | "belowBar" | "inBar";
-  shape?: "circle" | "square" | "arrowUp" | "arrowDown";
+  position?: PriceChartMarkerPosition;
+  shape?: Exclude<MarkerShapeOverride, "default">;
   color?: string;
   text?: string;
 };
@@ -36,6 +40,8 @@ interface PriceChartProps {
   chartType?: "candlestick" | "line";
   showHeader?: boolean;
   zoomSensitivity?: number;
+  markerPlacement?: MarkerPlacementOverride;
+  markerShape?: MarkerShapeOverride;
   onCrosshairMove?: (candle: any) => void;
 }
 
@@ -46,7 +52,18 @@ function volumeColor(datum: PriceChartDatum) {
   return datum.close >= datum.open ? "rgba(34, 171, 148, 0.38)" : "rgba(242, 54, 69, 0.38)";
 }
 
-export function PriceChart({ data, markers, title, subtitle, chartType = "candlestick", showHeader = true, zoomSensitivity = 0.55, onCrosshairMove }: PriceChartProps) {
+export function PriceChart({
+  data,
+  markers,
+  title,
+  subtitle,
+  chartType = "candlestick",
+  showHeader = true,
+  zoomSensitivity = 0.55,
+  markerPlacement = "default",
+  markerShape = "default",
+  onCrosshairMove,
+}: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const priceSeriesRef = useRef<any>(null);
@@ -179,12 +196,17 @@ export function PriceChart({ data, markers, title, subtitle, chartType = "candle
 
     priceSeriesRef.current.setData(chartType === "line" ? lineData : candleData);
     volumeSeriesRef.current.setData(volumeData);
-    createSeriesMarkers(priceSeriesRef.current, markers);
+    const chartMarkers = markers.map((marker) => ({
+      ...marker,
+      position: markerPlacement === "default" ? marker.position : markerPlacement,
+      shape: markerShape === "default" ? marker.shape : markerShape,
+    }));
+    createSeriesMarkers(priceSeriesRef.current, chartMarkers);
     if (!hasFittedContentRef.current) {
       chartRef.current.timeScale().fitContent();
       hasFittedContentRef.current = true;
     }
-  }, [chartType, data, markers]);
+  }, [chartType, data, markerPlacement, markerShape, markers]);
 
   return (
     <div className="flex h-full flex-col">
