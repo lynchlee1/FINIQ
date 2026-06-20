@@ -139,23 +139,15 @@ test("ontology graph workspace keeps the top selector graph-focused", async () =
 });
 
 test("ontology chart workspace defaults to full range and provides disclosure analysis", async () => {
-  const [chartSource, analysisSource, backtestSource] = await Promise.all([
+  const [chartSource, analysisSource] = await Promise.all([
     readFile(chartWorkspacePath, "utf8"),
     readFile(analysisWorkspacePath, "utf8"),
-    readFile(backtestPath, "utf8"),
   ]);
 
   assert.match(chartSource, /전체 기간/);
   assert.match(analysisSource, /공시 분석/);
-  assert.match(analysisSource, /BACKTEST_METHODS/);
-  assert.match(analysisSource, /runDisclosureBacktest/);
-  assert.match(backtestSource, /triple-barrier/);
-  assert.match(backtestSource, /upperBarrier/);
-  assert.match(backtestSource, /lowerBarrier/);
-  assert.match(backtestSource, /barrierHorizon/);
-  assert.match(backtestSource, /상승 돌파/);
-  assert.match(backtestSource, /하락 돌파/);
-  assert.match(backtestSource, /기간 만료/);
+  assert.match(analysisSource, /Triple Barrier 실행/);
+  assert.match(analysisSource, /\/api\/ontology\/triple-barrier\/run/);
   assert.doesNotMatch(chartSource, /currentYearStart/);
   assert.doesNotMatch(chartSource, /todayInputValue/);
   assert.doesNotMatch(chartSource, /start_date: startDate/);
@@ -310,24 +302,20 @@ test("ontology workflow separates relationship graph and chart routes", async ()
   assert.doesNotMatch(chartWorkspaceSource, /OntologyNodeGraph/);
 });
 
-test("ontology disclosure analysis has a dedicated page and extensible method registry", async () => {
-  const [pageSource, workspaceSource, backtestSource] = await Promise.all([
+test("ontology disclosure analysis has a dedicated API-backed page", async () => {
+  const [pageSource, workspaceSource] = await Promise.all([
     readFile(analysisPagePath, "utf8"),
     readFile(analysisWorkspacePath, "utf8"),
-    readFile(backtestPath, "utf8"),
   ]);
 
   assert.match(pageSource, /DisclosureAnalysisWorkspace/);
   assert.match(pageSource, /WorkflowPageShell/);
   assert.match(pageSource, /workflowId="ontology"/);
   assert.match(workspaceSource, /공시 분석/);
-  assert.match(workspaceSource, /methodId/);
-  assert.match(workspaceSource, /BACKTEST_METHODS/);
-  assert.match(workspaceSource, /runDisclosureBacktest/);
-  assert.match(backtestSource, /type BacktestMethodDefinition/);
-  assert.match(backtestSource, /BACKTEST_METHODS/);
-  assert.match(backtestSource, /runDisclosureBacktest/);
-  assert.match(backtestSource, /runTripleBarrierMethod/);
+  assert.match(workspaceSource, /apiPost/);
+  assert.match(workspaceSource, /loadTripleBarrierResults/);
+  assert.doesNotMatch(workspaceSource, /BACKTEST_METHODS/);
+  assert.doesNotMatch(workspaceSource, /runDisclosureBacktest/);
 });
 
 test("ontology terminology documents the real-data workspace labels", async () => {
@@ -344,6 +332,10 @@ test("ontology terminology documents the real-data workspace labels", async () =
   assert.match(source, /\| Ontology event-price chart \| 주가-공시 차트 \|/);
   assert.match(source, /\| Ontology event timeline \| 공시 타임라인 \|/);
   assert.match(source, /\| Ontology disclosure analysis \| 공시 분석 \|/);
+  assert.match(source, /\| Ontology triple barrier execution action \| Triple Barrier 실행 \|/);
+  assert.match(source, /\| Ontology triple barrier event basis \| 이벤트 기준일 \|/);
+  assert.match(source, /\| Ontology triple barrier price basis \| 가격 기준 \|/);
+  assert.match(source, /\| Ontology triple barrier result table \| 결과 테이블 \|/);
   assert.match(source, /\| Ontology chart frequency selector \| 일봉\/5일봉\/20일봉\/월봉 \|/);
   assert.match(source, /\| Ontology chart type selector \| 캔들\/종가선 \|/);
   assert.match(source, /\| Ontology final report marker \| 최종보고서 \|/);
@@ -375,4 +367,42 @@ test("ontology chart settings expose disclosure marker placement and shape", asy
   assert.match(source, /const \[markerShape, setMarkerShape\]/);
   assert.match(source, /markerPlacement=\{markerPlacement\}/);
   assert.match(source, /markerShape=\{markerShape\}/);
+});
+
+test("disclosure analysis page runs and displays persisted triple barrier results", async () => {
+  const [analysisSource, terminologySource] = await Promise.all([
+    readFile(analysisWorkspacePath, "utf8"),
+    readFile(terminologyPath, "utf8"),
+  ]);
+
+  assert.match(terminologySource, /Triple Barrier 실행/);
+  assert.match(analysisSource, /apiPost/);
+  assert.match(analysisSource, /\/api\/ontology\/triple-barrier\/run/);
+  assert.match(analysisSource, /\/api\/ontology\/triple-barrier\/results/);
+  assert.match(analysisSource, /event_time_basis/);
+  assert.match(analysisSource, /price_basis/);
+  assert.match(analysisSource, /upper_pct/);
+  assert.match(analysisSource, /lower_pct/);
+  assert.match(analysisSource, /vertical_days/);
+  assert.match(analysisSource, /disclosure_ids/);
+  for (const label of [
+    "공시 ID",
+    "종목코드",
+    "종목명",
+    "공시일",
+    "이벤트 가격",
+    "upper barrier 가격",
+    "lower barrier 가격",
+    "vertical barrier 날짜",
+    "최초 도달 barrier",
+    "최초 도달 날짜",
+    "최초 도달 가격",
+    "수익률",
+    "label",
+    "계산 상태",
+    "에러 메시지",
+  ]) {
+    assert.match(analysisSource, new RegExp(label));
+  }
+  assert.doesNotMatch(analysisSource, /runDisclosureBacktest/);
 });
