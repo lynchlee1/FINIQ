@@ -105,6 +105,48 @@ test("price chart keeps price and volume on separate vertical axes", async () =>
   assert.match(chartSource, /ctx\.clip\(\)/);
 });
 
+test("FINIQ chart pans price vertically while keeping volume on the shared time range", async () => {
+  const source = await readFile(chartLibPath, "utf8");
+
+  assert.match(source, /startClientY:\s*event\.clientY/);
+  assert.match(source, /startPriceRange/);
+  assert.match(source, /panPriceRangeByPixels/);
+  assert.match(source, /this\.manualPriceRange\s*=/);
+  assert.match(source, /const visibleRange = this\.getVisibleRange\(data\.length\)/);
+  assert.match(source, /const x = this\.getX\(index, data\.length, layout\)/);
+});
+
+test("FINIQ chart allows manual volume-axis scaling from the left axis", async () => {
+  const source = await readFile(chartLibPath, "utf8");
+
+  assert.match(source, /manualVolumeRange/);
+  assert.match(source, /volumeScaleDragState/);
+  assert.match(source, /x <= layout\.plotLeft && x >= layout\.plotLeft - layout\.leftScaleWidth/);
+  assert.match(source, /zoomVolumeRangeAtY/);
+  assert.match(source, /this\.manualVolumeRange\s*=/);
+});
+
+test("FINIQ chart does not auto-pad non-negative prices below zero", async () => {
+  const source = await readFile(chartLibPath, "utf8");
+
+  assert.match(source, /min >= 0 \? Math\.max\(0, min - padding\) : min - padding/);
+});
+
+test("price chart supports configurable disclosure marker placement and shape", async () => {
+  const [source, chartSource] = await Promise.all([
+    readFile(priceChartPath, "utf8"),
+    readFile(chartLibPath, "utf8"),
+  ]);
+
+  assert.match(source, /markerPlacement\?: MarkerPlacementOverride/);
+  assert.match(source, /markerShape\?: MarkerShapeOverride/);
+  assert.match(source, /markerPlacement === "default" \? marker\.position : markerPlacement/);
+  assert.match(source, /markerShape === "default" \? marker\.shape : markerShape/);
+  assert.match(chartSource, /marker\.position === "paneTop"/);
+  assert.match(chartSource, /marker\.position === "paneBottom"/);
+  assert.match(chartSource, /marker\.shape === "arrowDown"/);
+});
+
 test("FINIQ chart renders all disclosure markers on the same date", async () => {
   const source = await readFile(chartLibPath, "utf8");
 

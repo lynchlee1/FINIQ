@@ -132,6 +132,17 @@ def _kind_company_id(company_id: str) -> str:
     return digits.zfill(6) if digits else ""
 
 
+def _kind_company_id_candidates(company_id: str) -> list[str]:
+    primary = _kind_company_id(company_id)
+    if not primary:
+        return []
+    candidates = [primary]
+    shortened = primary.rstrip("0")
+    if shortened and len(shortened) >= 5 and shortened not in candidates:
+        candidates.append(shortened)
+    return candidates
+
+
 def _display_stock_code(company_id: str) -> str:
     digits = "".join(char for char in str(company_id or "") if char.isdigit())
     return f"A{digits.zfill(6)}" if digits else ""
@@ -372,6 +383,33 @@ def _load_disclosures(
     market: str = "전체",
     cancellation_check: CancellationCheck = None,
 ) -> list[dict[str, Any]]:
+    for candidate in _kind_company_id_candidates(company_id):
+        rows = _load_disclosures_for_company_id(
+            manifest_path=manifest_path,
+            manifest=manifest,
+            kind_company_id=candidate,
+            start_date=start_date,
+            end_date=end_date,
+            title_keyword=title_keyword,
+            market=market,
+            cancellation_check=cancellation_check,
+        )
+        if rows:
+            return rows
+    return []
+
+
+def _load_disclosures_for_company_id(
+    *,
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    kind_company_id: str,
+    start_date: date,
+    end_date: date,
+    title_keyword: str = "",
+    market: str = "전체",
+    cancellation_check: CancellationCheck = None,
+) -> list[dict[str, Any]]:
     table_name = str(manifest.get("table_name") or TABLE_NAME_DEFAULT)
     rows: list[dict[str, Any]] = []
     title_keyword = str(title_keyword or "").strip()
@@ -387,7 +425,7 @@ def _load_disclosures(
                 "disclosed_date >= ?",
                 "disclosed_date <= ?",
             ]
-            params: list[Any] = [_kind_company_id(company_id), start_date.isoformat(), end_date.isoformat()]
+            params: list[Any] = [kind_company_id, start_date.isoformat(), end_date.isoformat()]
             if title_keyword:
                 clauses.append("(title LIKE ? OR title_display LIKE ?)")
                 pattern = f"%{title_keyword}%"
@@ -439,7 +477,7 @@ def _load_category_disclosures(
         ]
         category_names.extend(sorted(selected_group_names - set().union(*map(set, KIND_CATEGORY_GROUPS.values()))))
 
-    normalized_company_id = _kind_company_id(company_id)
+    normalized_company_ids = set(_kind_company_id_candidates(company_id))
     market = str(market or "전체").strip()
     rows: list[dict[str, Any]] = []
     for category_name in category_names:
@@ -449,7 +487,7 @@ def _load_category_disclosures(
         payload = json.loads(filtered_path.read_text(encoding="utf-8"))
         for row in list(payload.get("disclosures") or []):
             row_company_id = _kind_company_id(str(row.get("company_id") or row.get("company_key") or ""))
-            if row_company_id != normalized_company_id:
+            if row_company_id not in normalized_company_ids:
                 continue
             disclosed_date = str(row.get("disclosed_date") or str(row.get("disclosed_at") or "")[:10])
             if not disclosed_date:

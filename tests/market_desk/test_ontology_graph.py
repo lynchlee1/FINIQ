@@ -115,6 +115,19 @@ def _write_disclosure_shard(root: Path) -> Path:
                     "",
                     "다른반도체",
                 ),
+                (
+                    "06409",
+                    "인크레더블버즈",
+                    "06409",
+                    "코스닥",
+                    "2025-01-02 09:10",
+                    "2025-01-02",
+                    "유상증자결정",
+                    "유상증자결정",
+                    "20250102006409",
+                    "",
+                    "인크레더블버즈",
+                ),
             ],
         )
         connection.commit()
@@ -166,13 +179,15 @@ def _write_quanti_parquet(root: Path, *, include_volume: bool = True, include_ad
     for account, account_values in values.items():
         if account == "volume" and not include_volume:
             continue
-        frame = pd.DataFrame({"date": dates, "A005930": account_values, "A123456": account_values})
+        frame = pd.DataFrame({"date": dates, "A005930": account_values, "A123456": account_values, "A064090": account_values})
         frame.to_parquet(quanti_dir / f"{account}_20250102_20250106_fixture.parquet", index=False)
     if include_adjusted:
         for account, account_values in adjusted_values.items():
-            frame = pd.DataFrame({"date": dates, "A005930": account_values, "A123456": account_values})
+            frame = pd.DataFrame({"date": dates, "A005930": account_values, "A123456": account_values, "A064090": account_values})
             frame.to_parquet(quanti_dir / f"{account}_20250102_20250106_fixture.parquet", index=False)
-    pd.DataFrame({"code": ["A005930", "A123456"], "name": ["테스트전자", "매핑전용"]}).to_parquet(
+    pd.DataFrame(
+        {"code": ["A005930", "A123456", "A064090"], "name": ["테스트전자", "매핑전용", "인크레더블버즈"]}
+    ).to_parquet(
         quanti_dir / "code_name_mapping.parquet",
         index=False,
     )
@@ -188,7 +203,7 @@ def test_ontology_status_reports_manifest_and_quanti_coverage(tmp_path: Path) ->
     assert payload["kind"]["summary"]["disclosures"] == 4
     assert payload["kind"]["shard_years"] == ["2025"]
     assert payload["quantiwise"]["available_items"] == ["close", "high", "low", "open", "volume"]
-    assert payload["quantiwise"]["mapped_companies"] == 2
+    assert payload["quantiwise"]["mapped_companies"] == 3
     assert set(payload["disclosure_groups"]) >= {"shareholder_meeting", "bond_issuance", "rights_issuance"}
     assert payload["messages"] == []
 
@@ -359,6 +374,24 @@ def test_build_ontology_company_panel_loads_category_json_disclosures_without_sq
 
     assert payload["chart"]["markers"][0]["acpt_no"] == "20250102009999"
     assert payload["timeline"][0]["acpt_no"] == "20250102009999"
+    assert payload["summary"]["visible_disclosures"] == 1
+
+
+def test_build_ontology_company_panel_matches_short_kind_company_ids(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    payload = build_ontology_company_panel(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        company_id="A064090",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 6),
+        display_frequency_label="일봉",
+    )
+
+    assert payload["company"]["company_name"] == "인크레더블버즈"
+    assert payload["chart"]["markers"][0]["acpt_no"] == "20250102006409"
     assert payload["summary"]["visible_disclosures"] == 1
 
 

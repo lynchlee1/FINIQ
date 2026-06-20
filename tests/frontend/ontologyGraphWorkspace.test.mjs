@@ -351,10 +351,28 @@ test("ontology terminology documents the real-data workspace labels", async () =
   assert.match(source, /\| Ontology chart fullscreen action \| 전체화면 \|/);
   assert.match(source, /\| Ontology chart exit fullscreen action \| 전체화면 닫기 \|/);
   assert.match(source, /\| Ontology chart zoom sensitivity \| 확대\/축소 민감도 \|/);
+  assert.match(source, /\| Ontology chart marker placement setting \| 공시 마커 위치 \|/);
+  assert.match(source, /\| Ontology chart marker shape setting \| 공시 마커 모양 \|/);
   assert.doesNotMatch(source, /\| Ontology chart view mode \| 차트 \|/);
   assert.doesNotMatch(source, /\| Ontology analysis summary \| 분석 요약 \|/);
   assert.doesNotMatch(source, /\| Ontology analysis filters \| 분석 조건 \|/);
   assert.doesNotMatch(source, /\| Ontology workspace analysis mode \| 분석 \|/);
   assert.doesNotMatch(source, /\| Ontology workspace company mode \| 회사 \|/);
   assert.doesNotMatch(source, /\| Ontology workspace data mode \| 데이터 \|/);
+});
+
+test("ontology chart settings expose disclosure marker placement and shape", async () => {
+  const source = await readFile(chartWorkspacePath, "utf8");
+
+  assert.match(source, /MARKER_PLACEMENT_OPTIONS/);
+  assert.match(source, /MARKER_SHAPE_OPTIONS/);
+  assert.match(source, /공시 마커 위치/);
+  assert.match(source, /공시 마커 모양/);
+  assert.match(source, /value: "paneTop", label: "차트 상단"/);
+  assert.match(source, /value: "paneBottom", label: "차트 하단"/);
+  assert.match(source, /value: "arrowDown", label: "아래 삼각형"/);
+  assert.match(source, /const \[markerPlacement, setMarkerPlacement\]/);
+  assert.match(source, /const \[markerShape, setMarkerShape\]/);
+  assert.match(source, /markerPlacement=\{markerPlacement\}/);
+  assert.match(source, /markerShape=\{markerShape\}/);
 });

@@ -45,6 +45,24 @@ const CHART_TYPE_OPTIONS = [
   { value: "candlestick", label: "캔들" },
   { value: "line", label: "종가선" },
 ] as const;
+const MARKER_PLACEMENT_OPTIONS = [
+  { value: "default", label: "공시별 기본" },
+  { value: "paneTop", label: "차트 상단" },
+  { value: "paneBottom", label: "차트 하단" },
+  { value: "aboveBar", label: "캔들 위" },
+  { value: "belowBar", label: "캔들 아래" },
+  { value: "inBar", label: "캔들 안" },
+] as const;
+const MARKER_SHAPE_OPTIONS = [
+  { value: "default", label: "공시별 기본" },
+  { value: "circle", label: "원" },
+  { value: "square", label: "사각형" },
+  { value: "arrowUp", label: "위 삼각형" },
+  { value: "arrowDown", label: "아래 삼각형" },
+] as const;
+
+type MarkerPlacementOverride = (typeof MARKER_PLACEMENT_OPTIONS)[number]["value"];
+type MarkerShapeOverride = (typeof MARKER_SHAPE_OPTIONS)[number]["value"];
 
 function clampChartZoomSensitivity(value: number) {
   if (!Number.isFinite(value)) {
@@ -95,6 +113,8 @@ export function OntologyChartWorkspace() {
   const [chartType, setChartType] = useState<(typeof CHART_TYPE_OPTIONS)[number]["value"]>("candlestick");
   const [requestedPanelKey, setRequestedPanelKey] = useState("");
   const [chartZoomSensitivity, setChartZoomSensitivity] = useState(0.55);
+  const [markerPlacement, setMarkerPlacement] = useState<MarkerPlacementOverride>("default");
+  const [markerShape, setMarkerShape] = useState<MarkerShapeOverride>("default");
   const [chartFullscreen, setChartFullscreen] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingCompanies, setLoadingCompanies] = useState(false);
@@ -298,6 +318,8 @@ export function OntologyChartWorkspace() {
           showHeader={false}
           zoomSensitivity={chartZoomSensitivity}
           chartType={chartType}
+          markerPlacement={markerPlacement}
+          markerShape={markerShape}
         />
       ) : (
         <div className="flex h-full min-h-[420px] items-center justify-center text-center">
@@ -542,6 +564,40 @@ export function OntologyChartWorkspace() {
                 <span>느림</span>
                 <span>빠름</span>
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ontology-chart-marker-placement" className="font-semibold dark:text-slate-200">
+                공시 마커 위치
+              </Label>
+              <select
+                id="ontology-chart-marker-placement"
+                value={markerPlacement}
+                onChange={(event) => setMarkerPlacement(event.target.value as MarkerPlacementOverride)}
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
+              >
+                {MARKER_PLACEMENT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ontology-chart-marker-shape" className="font-semibold dark:text-slate-200">
+                공시 마커 모양
+              </Label>
+              <select
+                id="ontology-chart-marker-shape"
+                value={markerShape}
+                onChange={(event) => setMarkerShape(event.target.value as MarkerShapeOverride)}
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
+              >
+                {MARKER_SHAPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         }
