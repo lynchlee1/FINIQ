@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from finiq.market_desk.analytics.ontology_graph import (
@@ -15,6 +16,10 @@ from finiq.market_desk.analytics.ontology_graph import (
     build_ontology_company_panel,
     build_ontology_status,
     search_ontology_companies,
+)
+from finiq.market_desk.analytics.triple_barrier import (
+    get_triple_barrier_results_payload,
+    run_triple_barrier_analysis,
 )
 from finiq.market_desk.web.discovery import (
     list_classification_files,
@@ -37,6 +42,20 @@ async def _watch_client_disconnect(request: Request, cancel_event: Event, done_e
             cancel_event.set()
             return
         await asyncio.sleep(0.1)
+
+
+class TripleBarrierRunRequest(BaseModel):
+    manifest_path: str | None = None
+    quanti_dir: str | None = None
+    company_id: str
+    market: str = "전체"
+    disclosure_group: str = "전체"
+    disclosure_ids: list[str] = Field(default_factory=list)
+    event_time_basis: str = "disclosed_date"
+    price_basis: str = "intraday"
+    upper_pct: float = 5
+    lower_pct: float = 3
+    vertical_days: int = 20
 
 
 def create_market_data_router(config: Any) -> APIRouter:
@@ -134,6 +153,42 @@ def create_market_data_router(config: Any) -> APIRouter:
         finally:
             done_event.set()
             watch_task.cancel()
+
+    @router.post("/api/ontology/triple-barrier/run")
+    async def post_triple_barrier_run(payload: TripleBarrierRunRequest):
+        try:
+            return await run_in_threadpool(
+                run_triple_barrier_analysis,
+                manifest_path=payload.manifest_path,
+                quanti_dir=payload.quanti_dir or config.quanti_dir,
+                company_id=payload.company_id,
+                market=payload.market,
+                disclosure_group=payload.disclosure_group,
+                disclosure_ids=payload.disclosure_ids,
+                event_time_basis=payload.event_time_basis,
+                price_basis=payload.price_basis,
+                upper_pct=payload.upper_pct,
+                lower_pct=payload.lower_pct,
+                vertical_days=payload.vertical_days,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.get("/api/ontology/triple-barrier/results")
+    async def get_triple_barrier_results(
+        manifest_path: Optional[str] = None,
+        company_id: str = "",
+        parameter_hash: str = "",
+    ):
+        try:
+            return await run_in_threadpool(
+                get_triple_barrier_results_payload,
+                manifest_path=manifest_path,
+                company_id=company_id,
+                parameter_hash=parameter_hash,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.get("/api/companies")
     async def get_companies(

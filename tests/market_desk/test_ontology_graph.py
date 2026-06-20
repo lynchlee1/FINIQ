@@ -642,3 +642,53 @@ def test_ontology_api_routes_return_real_data_payloads(tmp_path: Path) -> None:
     assert len(panel.json()["chart"]["candles"]) == 3
     assert panel.json()["selected_disclosure_group"] == "shareholder_meeting"
     assert [marker["group"] for marker in panel.json()["chart"]["markers"]] == ["주주총회"]
+
+
+def test_triple_barrier_api_runs_stores_and_reuses_results(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+    api = FastAPI()
+    api.include_router(
+        create_market_data_router(
+            AppConfig(output_root=str(tmp_path), quanti_dir=str(quanti_dir)),
+        )
+    )
+    client = TestClient(api)
+
+    payload = {
+        "manifest_path": str(manifest_path),
+        "quanti_dir": str(quanti_dir),
+        "company_id": "A005930",
+        "market": "전체",
+        "disclosure_group": "전체",
+        "disclosure_ids": ["20250102000001"],
+        "event_time_basis": "disclosed_date",
+        "price_basis": "intraday",
+        "upper_pct": 5,
+        "lower_pct": 3,
+        "vertical_days": 2,
+    }
+
+    first = client.post("/api/ontology/triple-barrier/run", json=payload)
+    second = client.post("/api/ontology/triple-barrier/run", json=payload)
+    listed = client.get(
+        "/api/ontology/triple-barrier/results",
+        params={
+            "manifest_path": str(manifest_path),
+            "company_id": "A005930",
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert listed.status_code == 200
+    assert first.json()["summary"]["created"] == 1
+    assert first.json()["summary"]["reused"] == 0
+    assert second.json()["summary"]["created"] == 0
+    assert second.json()["summary"]["reused"] == 1
+    assert first.json()["summary"]["completed"] == 1
+    assert first.json()["rows"][0]["disclosure_id"] == "20250102000001"
+    assert first.json()["rows"][0]["ticker"] == "A005930"
+    assert first.json()["rows"][0]["label"] == 1
+    assert listed.json()["summary"]["total"] == 1
+    assert listed.json()["rows"][0]["parameter_hash"] == first.json()["parameter_hash"]
