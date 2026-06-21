@@ -132,7 +132,7 @@ export function CompanyGraphViewer({
       <Card className="flex-1 dark:bg-[#161b22] dark:border-[#30363d] flex flex-col h-full">
         <CardHeader className="flex flex-row items-center justify-between pb-2 border-b dark:border-[#30363d]">
         <div>
-          <CardTitle className="flex flex-wrap items-center gap-2 text-lg dark:text-white">
+          <CardTitle className="flex flex-wrap items-center gap-2 dark:text-white">
             <span>Graph View</span>
             {dataScopeLabel ? (
               <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-700/70 dark:bg-amber-950/40 dark:text-amber-200">

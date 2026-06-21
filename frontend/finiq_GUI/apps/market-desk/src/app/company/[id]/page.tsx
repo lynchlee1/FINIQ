@@ -302,7 +302,7 @@ function CompanyDetailContent() {
 
       <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-lg dark:text-white">공시 타임라인</CardTitle>
+          <CardTitle className="dark:text-white">공시 타임라인</CardTitle>
           <div className="px-2 py-1 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold">
             {formatNumber(filteredTimeline.length)}건
           </div>

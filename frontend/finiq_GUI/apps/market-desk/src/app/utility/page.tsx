@@ -110,7 +110,7 @@ export default function UtilityPage() {
               <CardTitle className="dark:text-white">분할저장 구조 전환</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">입력 데이터 경로</Label>
                   <PathPickerInput mode="folder" value={sourceDirectory} onChange={setSourceDirectory} placeholder="/path/to/source" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />

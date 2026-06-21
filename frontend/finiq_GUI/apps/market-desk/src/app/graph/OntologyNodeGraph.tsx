@@ -278,7 +278,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
       <CardHeader className="border-b border-slate-200 pb-3 dark:border-[#30363d]">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
+            <CardTitle className="flex items-center gap-2 dark:text-white">
               <LineChart className="h-5 w-5" />
               공시 관계 그래프
             </CardTitle>

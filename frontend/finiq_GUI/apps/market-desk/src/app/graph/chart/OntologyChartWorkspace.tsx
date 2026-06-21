@@ -377,7 +377,7 @@ export function OntologyChartWorkspace() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                 FILTERS
               </p>
-              <CardTitle className="text-xl dark:text-white">공시 조건</CardTitle>
+              <CardTitle className="dark:text-white">공시 조건</CardTitle>
               <CardDescription className="dark:text-slate-400">Chart View</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -456,7 +456,7 @@ export function OntologyChartWorkspace() {
                   </div>
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="min-w-36 flex-1 space-y-1">
-                      <Label htmlFor="ontology-chart-marker-shape" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <Label htmlFor="ontology-chart-marker-shape" className="text-slate-600 dark:text-slate-300">
                         모양
                       </Label>
                       <select
@@ -473,7 +473,7 @@ export function OntologyChartWorkspace() {
                       </select>
                     </div>
                     <div className="min-w-36 flex-1 space-y-1">
-                      <Label htmlFor="ontology-chart-marker-placement" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <Label htmlFor="ontology-chart-marker-placement" className="text-slate-600 dark:text-slate-300">
                         위치
                       </Label>
                       <select
@@ -490,7 +490,7 @@ export function OntologyChartWorkspace() {
                       </select>
                     </div>
                     <div className="w-28 space-y-1">
-                      <Label htmlFor="ontology-chart-marker-color" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <Label htmlFor="ontology-chart-marker-color" className="text-slate-600 dark:text-slate-300">
                         색상
                       </Label>
                       <div className="flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117]">
@@ -509,7 +509,7 @@ export function OntologyChartWorkspace() {
                       </div>
                     </div>
                     <div className="w-24 space-y-1">
-                      <Label htmlFor="ontology-chart-marker-size" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <Label htmlFor="ontology-chart-marker-size" className="text-slate-600 dark:text-slate-300">
                         크기
                       </Label>
                       <Input
@@ -524,7 +524,7 @@ export function OntologyChartWorkspace() {
                       />
                     </div>
                     <div className="w-24 space-y-1">
-                      <Label htmlFor="ontology-chart-marker-line-width" className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <Label htmlFor="ontology-chart-marker-line-width" className="text-slate-600 dark:text-slate-300">
                         선 두께
                       </Label>
                       <Input
@@ -549,7 +549,7 @@ export function OntologyChartWorkspace() {
         <section>
           <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
+              <CardTitle className="flex items-center gap-2 dark:text-white">
                 <LineChart className="h-5 w-5" />
                 주가-공시 차트
               </CardTitle>
@@ -566,7 +566,7 @@ export function OntologyChartWorkspace() {
         <section>
           <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg dark:text-white">
+              <CardTitle className="flex items-center gap-2 dark:text-white">
                 <FileText className="h-5 w-5" />
                 공시 타임라인
               </CardTitle>
