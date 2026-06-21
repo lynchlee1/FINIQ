@@ -84,9 +84,19 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Ontology event timeline | 공시 타임라인 | List of visible disclosures for the selected company and period. |
 | Ontology disclosure analysis | 공시 분석 | Event analysis workspace for triple-barrier and related disclosure tests. |
 | Ontology triple barrier execution action | Triple Barrier 실행 | Button/action on `공시 분석` that calculates and stores Triple Barrier labels. |
+| Ontology triple barrier execution company selector | 실행 종목 선택 | Stock search box used only for the Triple Barrier execution flow. |
+| Ontology triple barrier execution company search action | 실행 대상 검색 | Button that searches stocks for the execution flow. |
+| Ontology triple barrier result company selector | 결과 종목 선택 | Stock search box used only for saved Triple Barrier result lookup. |
+| Ontology triple barrier result company search action | 저장 결과 검색 | Button that searches stocks for persisted-result review. |
+| Ontology triple barrier selected result lookup action | 선택 종목 결과 조회 | Button that reloads persisted results for the selected result company. |
 | Ontology triple barrier event basis | 이벤트 기준일 | Selector for using disclosure date or disclosure timestamp as event time. |
 | Ontology triple barrier price basis | 가격 기준 | Selector for close-based or intraday high/low-based barrier checks. |
 | Ontology triple barrier result table | 결과 테이블 | Stored Triple Barrier label result table on `공시 분석`. |
+| Ontology triple barrier run mode | 실행 설정 | Mode/menu label for configuring and running Triple Barrier on `공시 분석`. |
+| Ontology triple barrier results mode | 저장 결과 | Mode/menu label for reviewing stored Triple Barrier rows on `공시 분석`. |
+| Ontology triple barrier disclosure group selector | 공시 선택 | Selector label for choosing `전체` or one `resources/KIND` category before Triple Barrier execution. |
+| Ontology triple barrier selected event table | 검사 대상 이벤트 | Selectable event list scoped by stock and disclosure category on `공시 분석`. |
+| Ontology triple barrier result summary | 저장 결과 요약 | Summary row for stored Triple Barrier result counts and latest parameter hash. |
 | Ontology chart frequency selector | 일봉/5일봉/20일봉/월봉 | Chart candle aggregation selector below the chart action buttons. |
 | Ontology chart type selector | 캔들/종가선 | Chart type selector for OHLC candles or close-only line plotting. |
 | Ontology final report marker | 최종보고서 | Y/N field for whether a disclosure is the latest report in a correction chain. |

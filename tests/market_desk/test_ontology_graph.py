@@ -18,6 +18,7 @@ from finiq.market_desk.analytics.ontology_graph import (
     build_ontology_status,
     search_ontology_companies,
 )
+from finiq.market_desk.web.routers import market_data as market_data_router
 from finiq.market_desk.web.routers.market_data import create_market_data_router
 
 
@@ -692,3 +693,200 @@ def test_triple_barrier_api_runs_stores_and_reuses_results(tmp_path: Path) -> No
     assert first.json()["rows"][0]["label"] == 1
     assert listed.json()["summary"]["total"] == 1
     assert listed.json()["rows"][0]["parameter_hash"] == first.json()["parameter_hash"]
+
+
+def test_triple_barrier_api_matches_short_kind_company_ids(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+    api = FastAPI()
+    api.include_router(
+        create_market_data_router(
+            AppConfig(output_root=str(tmp_path), quanti_dir=str(quanti_dir)),
+        )
+    )
+    client = TestClient(api)
+
+    response = client.post(
+        "/api/ontology/triple-barrier/run",
+        json={
+            "manifest_path": str(manifest_path),
+            "quanti_dir": str(quanti_dir),
+            "company_id": "A064090",
+            "market": "전체",
+            "disclosure_group": "전체",
+            "disclosure_ids": ["20250102006409"],
+            "event_time_basis": "disclosed_date",
+            "price_basis": "intraday",
+            "upper_pct": 5,
+            "lower_pct": 3,
+            "vertical_days": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["completed"] == 1
+    assert payload["rows"][0]["ticker"] == "A064090"
+    assert payload["rows"][0]["disclosure_id"] == "20250102006409"
+
+
+def test_triple_barrier_api_filters_by_disclosure_group(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+    api = FastAPI()
+    api.include_router(
+        create_market_data_router(
+            AppConfig(output_root=str(tmp_path), quanti_dir=str(quanti_dir)),
+        )
+    )
+    client = TestClient(api)
+
+    full_response = client.post(
+        "/api/ontology/triple-barrier/run",
+        json={
+            "manifest_path": str(manifest_path),
+            "quanti_dir": str(quanti_dir),
+            "company_id": "A005930",
+            "market": "전체",
+            "disclosure_group": "전체",
+            "disclosure_ids": [],
+            "event_time_basis": "disclosed_date",
+            "price_basis": "intraday",
+            "upper_pct": 5,
+            "lower_pct": 3,
+            "vertical_days": 2,
+        },
+    )
+    response = client.post(
+        "/api/ontology/triple-barrier/run",
+        json={
+            "manifest_path": str(manifest_path),
+            "quanti_dir": str(quanti_dir),
+            "company_id": "A005930",
+            "market": "전체",
+            "disclosure_group": "shareholder_meeting",
+            "disclosure_ids": [],
+            "event_time_basis": "disclosed_date",
+            "price_basis": "intraday",
+            "upper_pct": 5,
+            "lower_pct": 3,
+            "vertical_days": 2,
+        },
+    )
+
+    assert full_response.status_code == 200
+    assert full_response.json()["summary"]["total"] == 3
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["total"] == 1
+    assert len(payload["rows"]) == 1
+    assert payload["rows"][0]["disclosure_id"] == "20250102000001"
+
+
+def test_triple_barrier_api_loads_category_json_disclosures_without_sqlite_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+    kind_category_dir = tmp_path / "KIND"
+    category_dir = kind_category_dir / "bond_issuance"
+    category_dir.mkdir(parents=True)
+    (category_dir / "filtered.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "company_id": "123456",
+                        "company_name": "매핑전용",
+                        "market": "코스피",
+                        "disclosed_at": "2025-01-02 09:10",
+                        "disclosed_date": "2025-01-02",
+                        "title": "전환사채권발행결정",
+                        "title_display": "전환사채권발행결정",
+                        "has_later_correction": False,
+                        "acpt_no": "20250102009999",
+                        "doc_no": "",
+                        "submitter": "매핑전용",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ontology_graph, "DEFAULT_KIND_CATEGORY_DIR", kind_category_dir)
+    api = FastAPI()
+    api.include_router(
+        create_market_data_router(
+            AppConfig(output_root=str(tmp_path), quanti_dir=str(quanti_dir)),
+        )
+    )
+    client = TestClient(api)
+
+    response = client.post(
+        "/api/ontology/triple-barrier/run",
+        json={
+            "manifest_path": str(manifest_path),
+            "quanti_dir": str(quanti_dir),
+            "company_id": "A123456",
+            "market": "코스피",
+            "disclosure_group": "bond_issuance",
+            "disclosure_ids": [],
+            "event_time_basis": "disclosed_date",
+            "price_basis": "intraday",
+            "upper_pct": 5,
+            "lower_pct": 3,
+            "vertical_days": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["total"] == 1
+    assert payload["rows"][0]["disclosure_id"] == "20250102009999"
+    assert payload["rows"][0]["ticker"] == "A123456"
+
+
+def test_triple_barrier_api_omits_config_quanti_dir_when_payload_uses_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_triple_barrier_analysis(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            "summary": {"total": 0, "completed": 0, "failed": 0, "created": 0, "reused": 0},
+            "result_db_path": "",
+            "parameter_hash": "",
+            "rows": [],
+        }
+
+    monkeypatch.setattr(market_data_router, "run_triple_barrier_analysis", fake_run_triple_barrier_analysis)
+    api = FastAPI()
+    api.include_router(
+        create_market_data_router(
+            AppConfig(output_root=str(tmp_path), quanti_dir=str(tmp_path / "legacy-by-item")),
+        )
+    )
+    client = TestClient(api)
+
+    response = client.post(
+        "/api/ontology/triple-barrier/run",
+        json={
+            "company_id": "A064090",
+            "market": "전체",
+            "disclosure_group": "bond_issuance",
+            "disclosure_ids": [],
+            "event_time_basis": "disclosed_date",
+            "price_basis": "intraday",
+            "upper_pct": 5,
+            "lower_pct": 3,
+            "vertical_days": 20,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["quanti_dir"] is None

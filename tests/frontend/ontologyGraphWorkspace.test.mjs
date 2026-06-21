@@ -154,6 +154,23 @@ test("ontology chart workspace defaults to full range and provides disclosure an
   assert.doesNotMatch(chartSource, /end_date: endDate/);
 });
 
+test("disclosure analysis groups execution controls by workflow", async () => {
+  const source = await readFile(analysisWorkspacePath, "utf8");
+  const executionTargetStart = source.indexOf("1. 실행 대상");
+  const disclosureScopeStart = source.indexOf("2. 공시 범위");
+  const parameterStart = source.indexOf("3. Triple Barrier 설정");
+  const summaryStart = source.indexOf("저장 결과 요약");
+  const tableStart = source.indexOf("결과 테이블");
+
+  assert.ok(executionTargetStart > -1);
+  assert.ok(disclosureScopeStart > executionTargetStart);
+  assert.ok(parameterStart > disclosureScopeStart);
+  assert.ok(summaryStart > parameterStart);
+  assert.ok(tableStart > summaryStart);
+  assert.match(source, /검사 대상 이벤트/);
+  assert.match(source, /Triple Barrier 실행/);
+});
+
 test("ontology chart workspace can expand the price chart without third-party branding", async () => {
   const source = await readFile(chartWorkspacePath, "utf8");
 
@@ -224,27 +241,35 @@ test("ontology chart workspace keeps empty search state until the user searches"
 });
 
 test("ontology workspaces only strip A prefix from stock-code keywords", async () => {
-  const sources = await Promise.all([
+  const [graphSource, chartSource, analysisSource] = await Promise.all([
     readFile(workspacePath, "utf8"),
     readFile(chartWorkspacePath, "utf8"),
     readFile(analysisWorkspacePath, "utf8"),
   ]);
 
-  for (const source of sources) {
+  for (const source of [graphSource, chartSource]) {
     assert.match(source, /function isStockCodeKeyword\(value: string\) \{\s+return \/\^A\\d\{6\}\$\/\.test\(value\.trim\(\)\.toUpperCase\(\)\);\s+\}/);
     assert.match(source, /isStockCodeKeyword\(keywordText\) \? normalizeStockCode\(keywordText\)\.slice\(1\) : keyword\.trim\(\)/);
     assert.doesNotMatch(source, /keywordText\.startsWith\("A"\)/);
   }
+  assert.match(analysisSource, /function isStockCodeKeyword\(value: string\) \{\s+return \/\^A\\d\{6\}\$\/\.test\(value\.trim\(\)\.toUpperCase\(\)\);\s+\}/);
+  assert.match(analysisSource, /isStockCodeKeyword\(keywordText\) \? normalizeStockCode\(keywordText\)\.slice\(1\) : runKeyword\.trim\(\)/);
+  assert.match(analysisSource, /isStockCodeKeyword\(keywordText\) \? normalizeStockCode\(keywordText\)\.slice\(1\) : resultKeyword\.trim\(\)/);
+  assert.doesNotMatch(analysisSource, /keywordText\.startsWith\("A"\)/);
 });
 
 test("ontology disclosure analysis keeps empty search state until the user searches", async () => {
   const source = await readFile(analysisWorkspacePath, "utf8");
 
-  assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*loadCompanies\(\);/);
-  assert.match(source, /if \(!keyword\.trim\(\)\)/);
-  assert.match(source, /setSelectedCompany\(null\)/);
+  assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*loadRunCompanies\(\);/);
+  assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*loadResultCompanies\(\);/);
+  assert.match(source, /if \(!runKeyword\.trim\(\)\)/);
+  assert.match(source, /if \(!resultKeyword\.trim\(\)\)/);
+  assert.match(source, /setSelectedRunCompany\(null\)/);
+  assert.match(source, /setSelectedResultCompany\(null\)/);
   assert.match(source, /setPanel\(null\)/);
-  assert.match(source, /검색한 종목이 없습니다/);
+  assert.match(source, /실행할 종목이 없습니다/);
+  assert.match(source, /조회할 종목이 없습니다/);
   assert.match(source, /isStockCodeKeyword/);
   assert.doesNotMatch(source, /keywordText\.startsWith\("A"\)/);
 });
@@ -318,6 +343,37 @@ test("ontology disclosure analysis has a dedicated API-backed page", async () =>
   assert.doesNotMatch(workspaceSource, /runDisclosureBacktest/);
 });
 
+test("ontology disclosure analysis exposes result review and category-scoped execution", async () => {
+  const source = await readFile(analysisWorkspacePath, "utf8");
+
+  assert.match(source, /실행 설정/);
+  assert.match(source, /저장 결과/);
+  assert.match(source, /저장 결과 요약/);
+  assert.match(source, /저장 결과 조회/);
+  assert.match(source, /실행 종목 선택/);
+  assert.match(source, /실행 대상 검색/);
+  assert.match(source, /결과 종목 선택/);
+  assert.match(source, /저장 결과 검색/);
+  assert.match(source, /선택 종목 결과 조회/);
+  assert.match(source, /저장 결과 보기/);
+  assert.match(source, /검사 대상 이벤트/);
+  assert.match(source, /공시 선택/);
+  assert.match(source, /formatDisclosureGroupLabel/);
+  assert.match(source, /aria-pressed={disclosureGroup === group}/);
+  assert.match(source, /disclosureGroup/);
+  assert.match(source, /status\?\.disclosure_groups/);
+  assert.match(source, /selectedAnalysisMode/);
+  assert.match(source, /selectedRunCompany/);
+  assert.match(source, /selectedResultCompany/);
+  assert.match(source, /runKeyword/);
+  assert.match(source, /resultKeyword/);
+  assert.match(source, /disclosure_group: disclosureGroup/);
+  assert.match(source, /setTripleBarrierResult\(null\);/);
+  assert.doesNotMatch(source, /const \[keyword, setKeyword\]/);
+  assert.doesNotMatch(source, /const \[selectedCompany, setSelectedCompany\]/);
+  assert.doesNotMatch(source, /disclosure_group: "전체"/);
+});
+
 test("ontology terminology documents the real-data workspace labels", async () => {
   const source = await readFile(terminologyPath, "utf8");
 
@@ -333,6 +389,11 @@ test("ontology terminology documents the real-data workspace labels", async () =
   assert.match(source, /\| Ontology event timeline \| 공시 타임라인 \|/);
   assert.match(source, /\| Ontology disclosure analysis \| 공시 분석 \|/);
   assert.match(source, /\| Ontology triple barrier execution action \| Triple Barrier 실행 \|/);
+  assert.match(source, /\| Ontology triple barrier execution company selector \| 실행 종목 선택 \|/);
+  assert.match(source, /\| Ontology triple barrier execution company search action \| 실행 대상 검색 \|/);
+  assert.match(source, /\| Ontology triple barrier result company selector \| 결과 종목 선택 \|/);
+  assert.match(source, /\| Ontology triple barrier result company search action \| 저장 결과 검색 \|/);
+  assert.match(source, /\| Ontology triple barrier selected result lookup action \| 선택 종목 결과 조회 \|/);
   assert.match(source, /\| Ontology triple barrier event basis \| 이벤트 기준일 \|/);
   assert.match(source, /\| Ontology triple barrier price basis \| 가격 기준 \|/);
   assert.match(source, /\| Ontology triple barrier result table \| 결과 테이블 \|/);

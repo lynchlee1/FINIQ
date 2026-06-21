@@ -73,7 +73,7 @@ export function ActionDock({
   };
 
   return (
-    <div className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-40 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
+    <div className="action-dock-root relative z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-40 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
       <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-lg md:h-auto md:w-16 md:flex-col dark:border-[#30363d] dark:bg-[#161b22]">
         <Button
           variant="outline"

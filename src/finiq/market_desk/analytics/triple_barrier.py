@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -16,6 +16,13 @@ import pyarrow.parquet as pq
 from finiq.market_desk.analytics.ontology_graph import (
     DEFAULT_KIND_MANIFEST_PATH,
     DEFAULT_QUANTIWISE_PARQUET_DIR,
+    kind_company_id_candidates,
+    load_kind_category_disclosures,
+    selected_disclosure_groups,
+)
+from finiq.market_desk.analytics.disclosure_groups import (
+    DEFAULT_DISCLOSURE_GROUP_RULES,
+    classify_disclosure_group,
 )
 
 
@@ -581,7 +588,6 @@ def run_triple_barrier_analysis(
     lower_pct: float = 3,
     vertical_days: int = 20,
 ) -> dict[str, Any]:
-    del disclosure_group
     resolved_manifest, manifest = _resolve_manifest(manifest_path)
     params = TripleBarrierParams(
         event_time_basis=event_time_basis,
@@ -596,6 +602,7 @@ def run_triple_barrier_analysis(
         manifest=manifest,
         company_id=company_id,
         market=market,
+        disclosure_group=disclosure_group,
         disclosure_ids=disclosure_ids or [],
     )
     prices = _load_prices_for_triple_barrier(quanti_dir, company_id)
@@ -604,6 +611,8 @@ def run_triple_barrier_analysis(
     storage_counts = save_triple_barrier_results(db_path, rows)
     parameter_hash, _ = build_parameter_hash(params)
     stored_rows = load_triple_barrier_results(db_path, ticker=_display_stock_code(company_id), parameter_hash=parameter_hash)
+    run_disclosure_ids = {row.disclosure_id for row in rows}
+    stored_rows = [row for row in stored_rows if row.disclosure_id in run_disclosure_ids]
     selected_ids = {str(value) for value in (disclosure_ids or []) if str(value).strip()}
     if selected_ids:
         stored_rows = [row for row in stored_rows if row.disclosure_id in selected_ids]
@@ -668,17 +677,23 @@ def _load_disclosures_for_triple_barrier(
     manifest: dict[str, Any],
     company_id: str,
     market: str,
+    disclosure_group: str,
     disclosure_ids: list[str],
 ) -> list[TripleBarrierDisclosure]:
     table_name = str(manifest.get("table_name") or "disclosures")
     selected_ids = {str(value) for value in disclosure_ids if str(value).strip()}
+    selected_group_names = selected_disclosure_groups(disclosure_group)
     rows: list[TripleBarrierDisclosure] = []
     for shard in list(manifest.get("shards") or []):
         shard_path = _resolve_shard_path(manifest_path, shard)
         if not shard_path.exists():
             continue
-        clauses = ["company_id = ?"]
-        params: list[Any] = [_kind_company_id(company_id)]
+        company_id_candidates = kind_company_id_candidates(company_id)
+        if not company_id_candidates:
+            return rows
+        placeholders = ", ".join("?" for _ in company_id_candidates)
+        clauses = [f"company_id IN ({placeholders})"]
+        params: list[Any] = company_id_candidates
         if market and market != "전체":
             clauses.append("market = ?")
             params.append(market)
@@ -690,7 +705,7 @@ def _load_disclosures_for_triple_barrier(
             connection.row_factory = sqlite3.Row
             fetched = connection.execute(
                 f"""
-                SELECT company_name, disclosed_at, disclosed_date, acpt_no
+                SELECT company_name, disclosed_at, disclosed_date, acpt_no, title
                 FROM {table_name}
                 WHERE {" AND ".join(clauses)}
                 ORDER BY disclosed_at ASC, acpt_no ASC
@@ -698,6 +713,9 @@ def _load_disclosures_for_triple_barrier(
                 params,
             ).fetchall()
         for row in fetched:
+            group_name = classify_disclosure_group(str(row["title"] or ""), DEFAULT_DISCLOSURE_GROUP_RULES)
+            if selected_group_names is not None and group_name not in selected_group_names:
+                continue
             rows.append(
                 TripleBarrierDisclosure(
                     disclosure_id=str(row["acpt_no"] or ""),
@@ -707,7 +725,56 @@ def _load_disclosures_for_triple_barrier(
                     disclosed_date=str(row["disclosed_date"] or str(row["disclosed_at"] or "")[:10]),
                 )
             )
-    return rows
+    if selected_group_names is not None:
+        rows.extend(
+            _category_disclosures_for_triple_barrier(
+                company_id=company_id,
+                market=market,
+                disclosure_group=disclosure_group,
+                selected_ids=selected_ids,
+            )
+        )
+    return _dedupe_disclosures(rows)
+
+
+def _category_disclosures_for_triple_barrier(
+    *,
+    company_id: str,
+    market: str,
+    disclosure_group: str,
+    selected_ids: set[str],
+) -> list[TripleBarrierDisclosure]:
+    category_rows = load_kind_category_disclosures(
+        company_id=company_id,
+        start_date=date(1900, 1, 1),
+        end_date=date.max,
+        disclosure_group=disclosure_group,
+        market=market,
+    )
+    disclosures: list[TripleBarrierDisclosure] = []
+    for row in category_rows:
+        disclosure_id = str(row.get("acpt_no") or "")
+        if selected_ids and disclosure_id not in selected_ids:
+            continue
+        disclosed_at = str(row.get("disclosed_at") or row.get("disclosed_date") or "")
+        disclosed_date = str(row.get("disclosed_date") or disclosed_at[:10])
+        disclosures.append(
+            TripleBarrierDisclosure(
+                disclosure_id=disclosure_id,
+                ticker=_display_stock_code(company_id),
+                company_name=str(row.get("company_name") or ""),
+                event_datetime=disclosed_at,
+                disclosed_date=disclosed_date,
+            )
+        )
+    return disclosures
+
+
+def _dedupe_disclosures(disclosures: list[TripleBarrierDisclosure]) -> list[TripleBarrierDisclosure]:
+    by_id: dict[str, TripleBarrierDisclosure] = {}
+    for disclosure in disclosures:
+        by_id[disclosure.disclosure_id] = disclosure
+    return sorted(by_id.values(), key=lambda disclosure: (disclosure.event_datetime, disclosure.disclosure_id))
 
 
 def _load_prices_for_triple_barrier(quanti_dir: str | Path | None, company_id: str) -> list[TripleBarrierPrice]:
