@@ -321,7 +321,7 @@ export function DisclosureAnalysisWorkspace() {
           <CardHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2 text-xl dark:text-white">
+                <CardTitle className="flex items-center gap-2 dark:text-white">
                   <FileText className="h-5 w-5" />
                   공시 분석
                 </CardTitle>
@@ -358,7 +358,7 @@ export function DisclosureAnalysisWorkspace() {
       <section>
         <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
           <CardHeader>
-            <CardTitle className="text-lg dark:text-white">
+            <CardTitle className="dark:text-white">
               {isResultsMode ? "Triple Barrier 저장 결과" : "Triple Barrier 실행"}
             </CardTitle>
             <CardDescription className="dark:text-slate-400">

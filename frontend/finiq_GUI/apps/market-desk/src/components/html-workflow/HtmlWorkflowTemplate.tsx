@@ -164,7 +164,7 @@ export function HtmlWorkflowCard({
         </div>
         {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
       </CardHeader>
-      <CardContent className="space-y-6">{children}</CardContent>
+      <CardContent className="space-y-4">{children}</CardContent>
       {footer}
     </Card>
   );
@@ -197,7 +197,7 @@ export function HtmlField({
         className
       )}
     >
-      <Label className="text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</Label>
+      <Label className="text-slate-600 dark:text-slate-300">{label}</Label>
       {children}
       {help ? <p className="text-xs leading-5 text-slate-500 dark:text-slate-500">{help}</p> : null}
     </div>

@@ -303,7 +303,7 @@ export function OntologyGraphWorkspace() {
       <section>
         <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-xl dark:text-white">
+            <CardTitle className="flex items-center gap-2 dark:text-white">
               <LineChart className="h-5 w-5" />
               Graph View
             </CardTitle>

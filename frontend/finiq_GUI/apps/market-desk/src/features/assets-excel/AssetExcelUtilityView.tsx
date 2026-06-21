@@ -1065,7 +1065,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             <CardHeader>
               <CardTitle className="dark:text-white">데이터 경로</CardTitle>
             </CardHeader>
-            <CardContent className="pt-6 space-y-5">
+            <CardContent className="space-y-4">
               {!isMergeMode && !isParquetPreviewMode ? (
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">원본 데이터 경로</Label>
