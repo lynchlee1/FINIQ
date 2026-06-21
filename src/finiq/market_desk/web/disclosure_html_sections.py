@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 from lxml import etree, html
 
@@ -15,6 +16,8 @@ from finiq.market_desk.web.html_parsers.common import decode_html_markup
 ProgressCallback = Callable[[str], None]
 _TOC_ID_RE = re.compile(r"^toc_(\d+)$")
 DEFAULT_REPORT_LIMIT = 50
+DEFAULT_HTML_SECTION_WORKERS = 8
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,13 @@ class HtmlSection:
     index: int
     title: str
     html: str
+
+
+@dataclass(frozen=True)
+class HtmlSectionSummary:
+    toc_id: str
+    index: int
+    title: str
 
 
 def _clean_text(value: object) -> str:
@@ -110,6 +120,55 @@ def _is_legacy_section_heading(element: etree._Element) -> bool:
     return bool(_clean_text(element.text_content()))
 
 
+def _has_class(element: etree._Element, class_name: str) -> bool:
+    return class_name in set(str(element.get("class") or "").split())
+
+
+def _xforms_title_sections(document: html.HtmlElement) -> list[tuple[str, list[etree._Element]]]:
+    title_nodes = document.xpath('//*[contains(concat(" ", normalize-space(@class), " "), " xforms_title ")]')
+    sections: list[tuple[str, list[etree._Element]]] = []
+    for title_node in title_nodes:
+        title = _clean_text(title_node.text_content())
+        if not title:
+            continue
+        parent = title_node.getparent()
+        if parent is None:
+            sections.append((title, [title_node]))
+            continue
+        siblings = list(parent)
+        start = siblings.index(title_node)
+        end = len(siblings)
+        for position in range(start + 1, len(siblings)):
+            if _has_class(siblings[position], "xforms_title"):
+                end = position
+                break
+        sections.append((title, siblings[start:end]))
+    return sections
+
+
+def _split_xforms_sections(document: html.HtmlElement) -> list[HtmlSection]:
+    sections: list[HtmlSection] = []
+    for order, (title, section_children) in enumerate(_xforms_title_sections(document), start=1):
+        section_markup = "".join(_element_html(child) for child in section_children)
+        toc_id = f"toc_{order}"
+        sections.append(
+            HtmlSection(
+                toc_id=toc_id,
+                index=order,
+                title=title,
+                html=_wrap_section_html(document, section_markup),
+            )
+        )
+    return sections
+
+
+def _inspect_xforms_sections(document: html.HtmlElement) -> list[HtmlSectionSummary]:
+    return [
+        HtmlSectionSummary(toc_id=f"toc_{order}", index=order, title=title)
+        for order, (title, _section_children) in enumerate(_xforms_title_sections(document), start=1)
+    ]
+
+
 def split_content_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
     """Split a KIND content HTML document by top-level TOC headings."""
     parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
@@ -125,6 +184,8 @@ def split_content_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
             for position, child in enumerate(children)
             if _is_legacy_section_heading(child)
         ]
+    if not heading_positions:
+        return _split_xforms_sections(document)
 
     sections: list[HtmlSection] = []
     for order, (start, heading) in enumerate(heading_positions, start=1):
@@ -143,6 +204,38 @@ def split_content_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
     return sections
 
 
+def inspect_content_html_sections(html_markup: str | bytes) -> list[HtmlSectionSummary]:
+    """Read only top-level TOC metadata from a KIND content HTML document."""
+    parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
+    document = html.fromstring(decode_html_markup(html_markup), parser=parser)
+    children = _body_direct_children(document)
+    heading_positions: list[tuple[int, etree._Element]] = []
+    for position, child in enumerate(children):
+        if _is_toc_heading(child):
+            heading_positions.append((position, child))
+    if not heading_positions:
+        heading_positions = [
+            (position, child)
+            for position, child in enumerate(children)
+            if _is_legacy_section_heading(child)
+        ]
+    if not heading_positions:
+        return _inspect_xforms_sections(document)
+
+    sections: list[HtmlSectionSummary] = []
+    for order, (start, heading) in enumerate(heading_positions, start=1):
+        end = heading_positions[order][0] if order < len(heading_positions) else len(children)
+        toc_id = str(heading.get("id") or "").strip() or f"toc_{order}"
+        sections.append(
+            HtmlSectionSummary(
+                toc_id=toc_id,
+                index=_toc_index(toc_id, order),
+                title=_section_title(heading, children[start:end]),
+            )
+        )
+    return sections
+
+
 def _parse_report_limit(value: Any) -> int:
     if value in (None, ""):
         return DEFAULT_REPORT_LIMIT
@@ -153,7 +246,28 @@ def _parse_report_limit(value: Any) -> int:
     return parsed
 
 
-def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, Any]:
+def parse_html_section_worker_count(value: Any) -> int:
+    if value in (None, ""):
+        return DEFAULT_HTML_SECTION_WORKERS
+    parsed = int(value)
+    if parsed < 1:
+        msg = "workers must be >= 1"
+        raise ValueError(msg)
+    return min(parsed, DEFAULT_HTML_SECTION_WORKERS)
+
+
+def _map_html_files(html_files: list[Path], workers: int, callback: Callable[[Path], T]) -> list[T]:
+    if workers <= 1 or len(html_files) <= 1:
+        return [callback(source_file) for source_file in html_files]
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(callback, html_files))
+
+
+def inspect_disclosure_html_sections_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     input_directory_raw = str(body.get("input_directory") or "").strip()
     if not input_directory_raw:
         msg = "input_directory is required"
@@ -164,26 +278,31 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
-    documents: list[dict[str, Any]] = []
-    problem_files: list[dict[str, str]] = []
+    workers = parse_html_section_worker_count(body.get("workers"))
     files_without_sections = 0
     failed_files = 0
     report_limit = _parse_report_limit(body.get("report_limit"))
-    for source_file in html_files:
+
+    def emit(message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(message)
+
+    def inspect_one(source_file: Path) -> dict[str, Any]:
         try:
-            sections = split_content_html_sections(source_file.read_bytes())
+            sections = inspect_content_html_sections(source_file.read_bytes())
         except Exception as exc:
-            failed_files += 1
-            if len(problem_files) < report_limit:
-                problem_files.append({"kind": "read_failed", "source_file": str(source_file), "error": str(exc)})
-            continue
+            return {
+                "status": "read_failed",
+                "problem": {"kind": "read_failed", "source_file": str(source_file), "error": str(exc)},
+            }
         if not sections:
-            files_without_sections += 1
-            if len(problem_files) < report_limit:
-                problem_files.append({"kind": "no_sections", "source_file": str(source_file), "error": ""})
-            continue
-        documents.append(
-            {
+            return {
+                "status": "no_sections",
+                "problem": {"kind": "no_sections", "source_file": str(source_file), "error": ""},
+            }
+        return {
+            "status": "ok",
+            "document": {
                 "source_file": str(source_file),
                 "source_name": source_file.name,
                 "source_relative_path": _relative_source_path(input_directory, source_file),
@@ -192,8 +311,28 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
                     {"toc_id": section.toc_id, "index": section.index, "title": section.title}
                     for section in sections
                 ],
-            }
-        )
+            },
+        }
+
+    emit(f"목차 확인 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다.")
+    results = _map_html_files(html_files, workers, inspect_one)
+    documents: list[dict[str, Any]] = []
+    problem_files: list[dict[str, str]] = []
+    for index, result in enumerate(results, start=1):
+        if cancel_check is not None and cancel_check():
+            return {"cancelled": True}
+        if result["status"] == "ok":
+            documents.append(result["document"])
+        elif result["status"] == "read_failed":
+            failed_files += 1
+            if len(problem_files) < report_limit:
+                problem_files.append(result["problem"])
+        else:
+            files_without_sections += 1
+            if len(problem_files) < report_limit:
+                problem_files.append(result["problem"])
+        if index == 1 or index == len(results) or index % 100 == 0:
+            emit(f"목차 확인 중간 확인: {index}/{len(results)}건 처리.")
 
     total_files = len(html_files)
     return {
@@ -240,6 +379,7 @@ def _parse_limit(value: Any) -> int | None:
 def save_disclosure_html_sections_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     input_directory_raw = str(body.get("input_directory") or "").strip()
     output_directory_raw = str(body.get("output_directory") or "").strip()
@@ -260,6 +400,7 @@ def save_disclosure_html_sections_payload(
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    workers = parse_html_section_worker_count(body.get("workers"))
     output_directory.mkdir(parents=True, exist_ok=True)
     saved_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
@@ -270,24 +411,44 @@ def save_disclosure_html_sections_payload(
         if progress_callback is not None:
             progress_callback(message)
 
-    emit(f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다.")
-    for index, source_file in enumerate(html_files, start=1):
+    def save_one(source_file: Path) -> dict[str, Any]:
         try:
             sections = split_content_html_sections(source_file.read_bytes())
         except Exception as exc:
-            skipped_files.append({"source_file": str(source_file), "error": str(exc)})
-            emit(f"읽기 실패 {index}/{len(html_files)}: {source_file.name}")
-            continue
+            return {
+                "status": "read_failed",
+                "skipped": {"source_file": str(source_file), "error": str(exc)},
+                "saved": [],
+            }
         if not sections:
-            skipped_files.append({"source_file": str(source_file), "error": "no sections found"})
-            emit(f"목차 없음 {index}/{len(html_files)}: {source_file.name}")
-            continue
+            return {
+                "status": "no_sections",
+                "skipped": {"source_file": str(source_file), "error": "no sections found"},
+                "saved": [],
+            }
+        file_saved: list[str] = []
         for section in sections:
             section_directory = output_directory / section.toc_id
             output_path = section_directory / source_file.relative_to(input_directory)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(section.html, encoding="utf-8")
-            saved_files.append(str(output_path))
+            file_saved.append(str(output_path))
+        return {"status": "ok", "saved": file_saved}
+
+    emit(f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다.")
+    results = _map_html_files(html_files, workers, save_one)
+    for index, result in enumerate(results, start=1):
+        if cancel_check is not None and cancel_check():
+            return {"cancelled": True}
+        if result["status"] == "ok":
+            saved_files.extend(result["saved"])
+        else:
+            skipped_files.append(result["skipped"])
+            source_name = Path(result["skipped"]["source_file"]).name
+            if result["status"] == "read_failed":
+                emit(f"읽기 실패 {index}/{len(html_files)}: {source_name}")
+            else:
+                emit(f"목차 없음 {index}/{len(html_files)}: {source_name}")
         if index == 1 or index == len(html_files) or index % 25 == 0:
             emit(f"목차 저장 중간 확인: {index}/{len(html_files)}건 처리.")
 

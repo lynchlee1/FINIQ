@@ -44,6 +44,7 @@ export default function HtmlSectionSplitPage() {
   const [outputDirectory, setOutputDirectory] = useState("");
   const [limit, setLimit] = useState("");
   const [reportLimit, setReportLimit] = useState("50");
+  const [workers, setWorkers] = useState("8");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [isInspecting, setIsInspecting] = useState(false);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
@@ -55,9 +56,15 @@ export default function HtmlSectionSplitPage() {
     if (data.error) lines.push(`오류: ${data.error}`);
     if (summary.found_files !== undefined) {
       lines.push(`대상 HTML: ${formatInteger(summary.found_files)}`);
-      lines.push(`저장 완료: ${formatInteger(summary.saved_files)}`);
-      lines.push(`건너뜀: ${formatInteger(summary.skipped_files)}`);
-      lines.push(`결과 데이터 경로: ${res.output_directory || ""}`);
+      if (res.format === "finiq_disclosure_html_section_inspect_v1") {
+        lines.push(`공시 표시: ${formatInteger(summary.documents_with_sections)}`);
+        lines.push(`목차 없음: ${formatInteger(summary.files_without_sections)}`);
+        lines.push(`읽기 실패: ${formatInteger(summary.failed_files)}`);
+      } else {
+        lines.push(`저장 완료: ${formatInteger(summary.saved_files)}`);
+        lines.push(`건너뜀: ${formatInteger(summary.skipped_files)}`);
+        lines.push(`결과 데이터 경로: ${res.output_directory || ""}`);
+      }
     }
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
       lines.push("", "최근 로그", ...data.progress_log);
@@ -72,8 +79,25 @@ export default function HtmlSectionSplitPage() {
     startPolling,
     setStatus,
     setIsErrorStatus,
+    cancelJob,
   } = useJobPolling({
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
+    cancelEndpoint: "/api/disclosures/html/cancel",
+    onSuccess: (data) => {
+      if (data?.format === "finiq_disclosure_html_section_inspect_v1") {
+        setInspectResult(data.result || data);
+        setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.documents_with_sections || 0)}개 공시`);
+      }
+      setIsInspecting(false);
+    },
+    onError: () => {
+      setIsInspecting(false);
+    },
+    onCancel: () => {
+      setIsInspecting(false);
+      setStatus("소스 불러오기를 중단했습니다.");
+      setIsErrorStatus(false);
+    },
     formatStatus,
   });
 
@@ -154,6 +178,16 @@ export default function HtmlSectionSplitPage() {
       onChange: setReportLimit,
       span: 2,
     },
+    {
+      id: "workers",
+      kind: "input",
+      type: "number",
+      label: "병렬 처리 개수",
+      help: "현재 기기 기준 최대 8개까지 사용합니다.",
+      value: workers,
+      onChange: setWorkers,
+      span: 2,
+    },
   ];
 
   const inspectFolder = async () => {
@@ -162,50 +196,36 @@ export default function HtmlSectionSplitPage() {
       setIsErrorStatus(true);
       return;
     }
-    inspectAbortControllerRef.current?.abort();
-    const controller = new AbortController();
-    inspectAbortControllerRef.current = controller;
     setIsInspecting(true);
     try {
-      const response = await fetch("/api/disclosures/html/sections/inspect", {
+      const response = await fetch("/api/disclosures/html/sections/inspect/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input_directory: inputDirectory,
           limit: parseOptionalNumber(limit),
           report_limit: Number(reportLimit || 50),
+          workers: parseOptionalNumber(workers),
         }),
-        signal: controller.signal,
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.detail || "폴더 열기에 실패했습니다.");
       }
-      const data: InspectResult = await response.json();
-      setInspectResult(data);
-      setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.documents_with_sections || 0)}개 공시`);
-      setIsErrorStatus(false);
+      const data = await response.json();
+      startPolling(data.job_id);
     } catch (err: any) {
-      if (err.name === "AbortError") {
-        setStatus("소스 불러오기를 중단했습니다.");
-        setIsErrorStatus(false);
-        return;
-      }
       setStatus(errorMessage(err));
       setIsErrorStatus(true);
+      setIsInspecting(false);
       setInspectResult(null);
-    } finally {
-      if (!controller.signal.aborted) {
-        inspectAbortControllerRef.current = null;
-        setIsInspecting(false);
-      }
     }
   };
 
   const cancelInspectFolder = () => {
     inspectAbortControllerRef.current?.abort();
     inspectAbortControllerRef.current = null;
-    setIsInspecting(false);
+    cancelJob();
     setStatus("소스 불러오기 중단을 요청했습니다.");
     setIsErrorStatus(false);
   };
@@ -224,6 +244,7 @@ export default function HtmlSectionSplitPage() {
           input_directory: inputDirectory,
           output_directory: outputDirectory,
           limit: parseOptionalNumber(limit),
+          workers: parseOptionalNumber(workers),
         }),
       });
       if (!response.ok) {
@@ -260,10 +281,6 @@ export default function HtmlSectionSplitPage() {
             inputDirectory={reviewedInputDirectory}
             documents={documents}
             problemFiles={problemFiles}
-            status={status}
-            isErrorStatus={isErrorStatus}
-            isInspecting={isInspecting}
-            onCancel={cancelInspectFolder}
           />
 
           <HtmlWorkflowCard title="작업 실행">

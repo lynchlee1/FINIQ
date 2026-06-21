@@ -48,10 +48,6 @@ type HtmlSectionSplitResultsProps = {
   inputDirectory: string;
   documents: DocumentRow[];
   problemFiles: ProblemFile[];
-  status: string;
-  isErrorStatus: boolean;
-  isInspecting: boolean;
-  onCancel: () => void;
 };
 
 type HtmlSectionSplitActionDockProps = {
@@ -87,10 +83,6 @@ export function HtmlSectionSplitResults({
   inputDirectory,
   documents,
   problemFiles,
-  status,
-  isErrorStatus,
-  isInspecting,
-  onCancel,
 }: HtmlSectionSplitResultsProps) {
   return (
     <>
@@ -182,14 +174,6 @@ export function HtmlSectionSplitResults({
         </HtmlWorkflowCard>
       ) : null}
 
-      <HtmlWorkflowCard title="작업 상태">
-        <JobStatusLogger
-          status={status}
-          isErrorStatus={isErrorStatus}
-          isCancellable={isInspecting}
-          onCancel={onCancel}
-        />
-      </HtmlWorkflowCard>
     </>
   );
 }

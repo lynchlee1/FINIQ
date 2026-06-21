@@ -739,3 +739,47 @@ def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) ->
     assert snapshot["result"]["summary"] == {"found_files": 1, "saved_files": 2, "skipped_files": 0}
     assert (output_directory / "toc_1" / "20260422000832.html").is_file()
     assert (output_directory / "toc_2" / "20260422000832.html").is_file()
+
+
+def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    (input_directory / "20260422000832.html").write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+          <p>표지 내용</p>
+          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/sections/inspect/start",
+        json={"input_directory": str(input_directory), "workers": 8},
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    snapshot = None
+    for _ in range(20):
+        status_response = client.get(f"/api/disclosures/html/jobs/{job_id}")
+        assert status_response.status_code == 200
+        snapshot = status_response.json()
+        if snapshot["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    assert snapshot is not None
+    assert snapshot["status"] == "completed"
+    assert snapshot["result"]["summary"] == {
+        "found_files": 1,
+        "documents_with_sections": 1,
+        "files_without_sections": 0,
+        "failed_files": 0,
+        "reported_problem_files": 0,
+    }
+    assert snapshot["result"]["documents"][0]["section_count"] == 2
