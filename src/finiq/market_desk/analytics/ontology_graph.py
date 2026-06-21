@@ -132,7 +132,7 @@ def _kind_company_id(company_id: str) -> str:
     return digits.zfill(6) if digits else ""
 
 
-def _kind_company_id_candidates(company_id: str) -> list[str]:
+def kind_company_id_candidates(company_id: str) -> list[str]:
     primary = _kind_company_id(company_id)
     if not primary:
         return []
@@ -207,7 +207,7 @@ def _disclosure_group_options() -> list[str]:
     return known_names + extra_names
 
 
-def _selected_disclosure_groups(disclosure_group: str) -> set[str] | None:
+def selected_disclosure_groups(disclosure_group: str) -> set[str] | None:
     selected = str(disclosure_group or DISCLOSURE_GROUP_ALL).strip() or DISCLOSURE_GROUP_ALL
     if selected == DISCLOSURE_GROUP_ALL:
         return None
@@ -383,7 +383,7 @@ def _load_disclosures(
     market: str = "전체",
     cancellation_check: CancellationCheck = None,
 ) -> list[dict[str, Any]]:
-    for candidate in _kind_company_id_candidates(company_id):
+    for candidate in kind_company_id_candidates(company_id):
         rows = _load_disclosures_for_company_id(
             manifest_path=manifest_path,
             manifest=manifest,
@@ -458,7 +458,7 @@ def _load_disclosures_for_company_id(
     return rows
 
 
-def _load_category_disclosures(
+def load_kind_category_disclosures(
     *,
     company_id: str,
     start_date: date,
@@ -466,7 +466,7 @@ def _load_category_disclosures(
     disclosure_group: str,
     market: str = "전체",
 ) -> list[dict[str, Any]]:
-    selected_group_names = _selected_disclosure_groups(disclosure_group)
+    selected_group_names = selected_disclosure_groups(disclosure_group)
     if selected_group_names is None:
         category_names = _disclosure_group_options()
     else:
@@ -477,7 +477,7 @@ def _load_category_disclosures(
         ]
         category_names.extend(sorted(selected_group_names - set().union(*map(set, KIND_CATEGORY_GROUPS.values()))))
 
-    normalized_company_ids = set(_kind_company_id_candidates(company_id))
+    normalized_company_ids = set(kind_company_id_candidates(company_id))
     market = str(market or "전체").strip()
     rows: list[dict[str, Any]] = []
     for category_name in category_names:
@@ -699,7 +699,7 @@ def build_ontology_company_panel(
         cancellation_check=cancellation_check,
     )
     if not disclosure_rows:
-        disclosure_rows = _load_category_disclosures(
+        disclosure_rows = load_kind_category_disclosures(
             company_id=stock_code,
             start_date=query_start,
             end_date=query_end,
@@ -728,7 +728,7 @@ def build_ontology_company_panel(
         disclosure_frame["disclosure_group"] = disclosure_frame["title"].map(
             lambda title: classify_disclosure_group(title, DEFAULT_DISCLOSURE_GROUP_RULES)
         )
-        selected_group_names = _selected_disclosure_groups(selected_disclosure_group)
+        selected_group_names = selected_disclosure_groups(selected_disclosure_group)
         if selected_group_names is not None:
             disclosure_frame = disclosure_frame[
                 disclosure_frame["disclosure_group"].isin(selected_group_names)
@@ -874,5 +874,8 @@ __all__ = [
     "OntologyRequestCancelled",
     "build_ontology_company_panel",
     "build_ontology_status",
+    "kind_company_id_candidates",
+    "load_kind_category_disclosures",
+    "selected_disclosure_groups",
     "search_ontology_companies",
 ]

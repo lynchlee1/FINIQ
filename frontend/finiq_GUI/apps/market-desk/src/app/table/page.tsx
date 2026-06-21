@@ -158,7 +158,7 @@ export default function TablePage() {
               <CardDescription className="dark:text-slate-400">입력 데이터 경로와 SQLite 결과 데이터 경로를 지정합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">입력 데이터 경로 (Raw JSON)</Label>
                   <PathPickerInput

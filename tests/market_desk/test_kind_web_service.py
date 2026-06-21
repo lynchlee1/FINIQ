@@ -61,6 +61,7 @@ GUI_HTML_DOWNLOAD_PAGE = GUI_APP_DIR / "html-download" / "page.tsx"
 GUI_HTML_DOWNLOAD_COMPONENT = GUI_APP_DIR / "html-download" / "_components" / "HtmlDownloadPageView.tsx"
 GUI_HTML_CONTENT_DOWNLOAD_PAGE = GUI_APP_DIR / "html-content-download" / "page.tsx"
 GUI_HTML_SECTION_SPLIT_PAGE = GUI_APP_DIR / "html-section-split" / "page.tsx"
+GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT = GUI_APP_DIR / "html-section-split" / "_components" / "HtmlSectionSplitResults.tsx"
 GUI_HTML_PARSE_PAGE = GUI_APP_DIR / "html-parse" / "page.tsx"
 GUI_HTML_CHANGE_LOG_PAGE = GUI_APP_DIR / "html-change-log" / "page.tsx"
 GUI_UTILITY_PAGE = GUI_APP_DIR / "utility" / "page.tsx"
@@ -3565,7 +3566,10 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     download_ui_html = GUI_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     download_component_html = GUI_HTML_DOWNLOAD_COMPONENT.read_text(encoding="utf-8")
     content_download_ui_html = GUI_HTML_CONTENT_DOWNLOAD_PAGE.read_text(encoding="utf-8")
-    section_split_ui_html = GUI_HTML_SECTION_SPLIT_PAGE.read_text(encoding="utf-8")
+    section_split_ui_html = (
+        GUI_HTML_SECTION_SPLIT_PAGE.read_text(encoding="utf-8")
+        + GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT.read_text(encoding="utf-8")
+    )
     parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
     change_log_ui_html = GUI_HTML_CHANGE_LOG_PAGE.read_text(encoding="utf-8")
     utility_ui_html = GUI_UTILITY_PAGE.read_text(encoding="utf-8")

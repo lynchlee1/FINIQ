@@ -160,7 +160,7 @@ def create_market_data_router(config: Any) -> APIRouter:
             return await run_in_threadpool(
                 run_triple_barrier_analysis,
                 manifest_path=payload.manifest_path,
-                quanti_dir=payload.quanti_dir or config.quanti_dir,
+                quanti_dir=payload.quanti_dir or None,
                 company_id=payload.company_id,
                 market=payload.market,
                 disclosure_group=payload.disclosure_group,
