@@ -2,6 +2,25 @@
 
 All completed implementation changes listed in this file have been reviewed and verified to be free of errors, including search regressions, mode splits, chart-focused workspaces, and A-prefix conversion behaviors.
 
+## Disclosure Section Split Execution UI
+
+Purpose: Make `공시원문 목차 분리` expose the missing execution action while keeping large-folder reads explicitly user-triggered via `소스 불러오기`.
+
+Implementation summary:
+- Kept input-folder inspection manual and renamed the page-local action from `소스 새로고침` to `소스 불러오기`.
+- Swapped the source-load icon from refresh to the shared folder-open icon to match the action.
+- Moved the `개별 공시` review table above `작업 실행` so users can inspect loaded files before running the split.
+- Restored the `실행` button against `/api/disclosures/html/sections/save/start`, using the existing job polling status flow.
+- Restored `결과 데이터 경로` because the split execution API requires an output directory.
+
+Verification:
+- Red check: `node --test tests/frontend/pathLayout.test.mjs` and `pytest tests/market_desk/test_kind_web_service.py -q -k "html_parse_modes_are_registered_documented_and_listed_in_ui"` failed before `소스 불러오기`, the above-button review table, and the execution API call were implemented.
+- `node --test tests/frontend/pathLayout.test.mjs`
+- `pytest tests/market_desk/test_kind_web_service.py -q -k "html_parse_modes_are_registered_documented_and_listed_in_ui"`
+- `pytest tests/market_desk/test_kind_web_service.py -q -k "inspect_disclosure_html_sections_payload_lists_document_toc_and_problems or save_disclosure_html_sections_payload_writes_every_toc or save_disclosure_html_sections_payload_continues_after_files_without_toc"`
+- `pytest tests/market_desk/test_kind_web_app.py -q -k "html_section_save_start_route_saves_all_toc_sections or html_sections_source"`
+- `npm run build --workspace @finiq/app-market-desk` from `frontend`
+
 ## Disclosure Path Fields Vertical Layout
 
 Purpose: Match the `데이터 경로` layout on `공시원문 목차 분리` and `공시내역 변환` to the other workflow pages by stacking path inputs vertically instead of placing them side by side on desktop.
@@ -171,3 +190,59 @@ Verification:
 - Browser QA on `http://localhost:3002/html-section-split`: verified `데이터 경로`, `문서별 목차`, `목차 스캔`, and `목차 저장` render on desktop and mobile.
 - Browser QA on 1280px and 375px production viewports: verified page-level horizontal overflow is false and the action dock does not overlap inputs.
 - Screenshot evidence: `/tmp/finiq-html-section-split-desktop-prod.png`, `/tmp/finiq-html-section-split-mobile-prod.png`.
+
+## Disclosure HTML Section Individual Review
+
+Purpose: Adjust `공시원문 목차 분리` toward the intended review workflow: open an individual disclosure, check whether its TOC split looks right, and leave selected-TOC extraction out for now because TOC titles can vary.
+
+Implementation summary:
+- Added an inline HTML source route for scanned section documents at `/api/disclosures/html/sections/source`.
+- Constrained the source route to `input_directory + source_name` resolution so it serves only HTML files directly under the scanned folder and rejects parent traversal.
+- Added a `공시 열기` link and `분리 확인` status in the `문서별 목차` table for each scanned disclosure.
+- Kept the existing bulk `목차 저장` behavior unchanged and did not add selected-TOC extraction controls.
+
+Verification:
+- Red check: `test_html_section_source_route_opens_individual_disclosure` returned 404 before the source route existed.
+- `env TMPDIR=/var/tmp /Library/Frameworks/Python.framework/Versions/3.13/bin/pytest -s -p no:cacheprovider tests/market_desk/test_kind_web_app.py::test_html_section_source_route_opens_individual_disclosure tests/market_desk/test_kind_web_app.py::test_html_section_source_route_rejects_parent_traversal tests/market_desk/test_kind_web_service.py::test_html_parse_modes_are_registered_documented_and_listed_in_ui`
+- `frontend/node_modules/.bin/tsc --noEmit --incremental false --project frontend/finiq_GUI/apps/market-desk/tsconfig.json`
+- `NEXT_TELEMETRY_DISABLED=1 npm run build` in `frontend/finiq_GUI/apps/market-desk`
+- Local API check on `http://127.0.0.1:8766/api/disclosures/html/sections/source`: fixture HTML returned `200`, `text/html; charset=utf-8`, inline content disposition, and contained `전환사채권 발행결정`.
+- Local API traversal check returned `404` for `source_name=../test_kind_web_app.py`.
+- Local Next dev server compiled the updated chunk containing `sections/source`, `공시 열기`, and `분리 확인`.
+- Visual browser QA was blocked because the in-app browser runtime failed before execution with invalid sandbox cwd metadata, and this repo does not have Playwright installed.
+
+## Disclosure HTML Section Folder Review
+
+Purpose: Make `공시원문 목차 분리` behave as a folder-open review page for individual disclosure files, including nested `kind_html_contents` structures, instead of presenting it as a bulk processing page.
+
+Implementation summary:
+- Changed HTML discovery to scan `input_directory` recursively and return `source_relative_path` for each document.
+- Updated `/api/disclosures/html/sections/source` to allow nested relative HTML paths while still rejecting paths outside the selected input folder.
+- Preserved nested relative paths when the existing save helper writes split HTML, avoiding basename collisions in recursive folders.
+- Reworked the page around `폴더 열기`, always-visible `폴더 요약`, and `개별 공시`; removed the visible output directory, `목차 저장`, and save-start API call from this screen.
+- Updated UI terminology and regression tests for the new folder-review labels.
+
+Verification:
+- Red check: nested source route returned `404`, recursive inspect found only top-level files, and UI text coverage still found `/api/disclosures/html/sections/save/start`.
+- `env TMPDIR=/var/tmp /Library/Frameworks/Python.framework/Versions/3.13/bin/pytest -s -p no:cacheprovider tests/market_desk/test_kind_web_app.py::test_html_section_inspect_route_returns_document_toc_and_problem_files tests/market_desk/test_kind_web_app.py::test_html_section_source_route_opens_individual_disclosure tests/market_desk/test_kind_web_app.py::test_html_section_source_route_opens_nested_individual_disclosure tests/market_desk/test_kind_web_app.py::test_html_section_source_route_rejects_parent_traversal tests/market_desk/test_kind_web_app.py::test_html_section_save_start_route_saves_all_toc_sections tests/market_desk/test_kind_web_service.py::test_split_content_html_sections_uses_toc_boundaries tests/market_desk/test_kind_web_service.py::test_save_disclosure_html_sections_payload_writes_every_toc tests/market_desk/test_kind_web_service.py::test_save_disclosure_html_sections_payload_continues_after_files_without_toc tests/market_desk/test_kind_web_service.py::test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problems tests/market_desk/test_kind_web_service.py::test_html_parse_modes_are_registered_documented_and_listed_in_ui`
+- `frontend/node_modules/.bin/tsc --noEmit --incremental false --project frontend/finiq_GUI/apps/market-desk/tsconfig.json`
+- `npm run build` in `frontend/finiq_GUI/apps/market-desk`
+- TestClient API smoke: recursive inspect returned `200` with `source_relative_path=2025/shareholder_meeting/20250101000001.html`; source open returned `200 text/html` and the nested disclosure body.
+- Local route smoke: `curl http://localhost:3000/html-section-split` returned `200`; built chunks contain `폴더 열기`, `폴더 요약`, `개별 공시`, `공시 열기`, and `분리 확인`, and do not contain `sections/save/start`, `목차 저장`, `목차 스캔`, or `문서별 목차`.
+- Visual browser QA was blocked by the in-app browser runtime error `sandboxCwd must be an absolute file URI`; no standalone Playwright dependency is installed in this app.
+
+## Data Path Card UI Consistency
+
+Purpose: Make `데이터 경로` cards use the same compact title treatment across the disclosure pages and remove fixed explanatory copy from those cards.
+
+Implementation summary:
+- Removed the `데이터 경로` card descriptions from `공시내역 변환`, `공시원문 목차 분리`, and the external/internal HTML save view.
+- Made `HtmlWorkflowCard` keep its extra header gap only when a description is present, so descriptionless path cards place the title closer to the path inputs.
+- Added frontend source coverage for descriptionless data path cards and compact spacing.
+
+Verification:
+- Red check: `node --test tests/frontend/pathLayout.test.mjs` failed on the remaining `CardDescription` in `공시내역 변환`.
+- `node --test tests/frontend/pathLayout.test.mjs`
+- `frontend/node_modules/.bin/tsc --noEmit --incremental false --project frontend/finiq_GUI/apps/market-desk/tsconfig.json`
+- `git diff --check -- frontend/finiq_GUI/apps/market-desk/src/components/html-workflow/HtmlWorkflowTemplate.tsx frontend/finiq_GUI/apps/market-desk/src/app/html-download/_components/HtmlDownloadPageView.tsx frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/page.tsx frontend/finiq_GUI/apps/market-desk/src/app/table/page.tsx tests/frontend/pathLayout.test.mjs`
+- Browser QA was blocked: in-app browser failed with invalid sandbox cwd metadata, and standalone Playwright could not launch local Chrome in this sandbox. Existing dev server was already running at `http://localhost:3000`.

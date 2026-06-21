@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Play, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
+import { Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { Input } from "@finiq/ui";
 import { Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
@@ -155,7 +155,6 @@ export default function TablePage() {
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="dark:text-white">데이터 경로</CardTitle>
-              <CardDescription className="dark:text-slate-400">입력 데이터 경로와 SQLite 결과 데이터 경로를 지정합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4">

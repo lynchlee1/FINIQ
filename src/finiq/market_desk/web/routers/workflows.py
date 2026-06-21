@@ -294,6 +294,23 @@ def create_workflows_router(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
+    @router.get("/api/disclosures/html/sections/source")
+    async def open_html_section_source(input_directory: str, source_name: str):
+        input_path = Path(input_directory).expanduser().resolve()
+        source_file = (input_path / source_name).resolve()
+        try:
+            source_file.relative_to(input_path)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="HTML source file not found")
+        if source_file.suffix.lower() != ".html" or not source_file.is_file():
+            raise HTTPException(status_code=404, detail="HTML source file not found")
+        return FileResponse(
+            source_file,
+            filename=source_file.name,
+            media_type="text/html; charset=utf-8",
+            content_disposition_type="inline",
+        )
+
     @router.post("/api/disclosures/html/parse/cancel")
     async def cancel_html_parse_route(payload: dict[str, Any]):
         return cancel_disclosure_html_parse(str(payload.get("cancel_token") or ""))

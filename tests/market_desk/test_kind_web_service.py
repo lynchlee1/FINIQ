@@ -2500,6 +2500,8 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
 def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problems(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
+    nested_directory = input_directory / "2025" / "shareholder_meeting"
+    nested_directory.mkdir(parents=True)
     (input_directory / "20260422000832.html").write_text(
         """
         <html><body>
@@ -2511,7 +2513,7 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problem
         """,
         encoding="utf-8",
     )
-    (input_directory / "20260423000533.html").write_text(
+    (nested_directory / "20260423000533.html").write_text(
         """
         <html><body>
           <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
@@ -2531,12 +2533,17 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problem
         "failed_files": 0,
         "reported_problem_files": 1,
     }
-    assert [document["source_name"] for document in payload["documents"]] == [
+    documents = sorted(payload["documents"], key=lambda document: document["source_name"])
+    assert [document["source_name"] for document in documents] == [
         "20260422000832.html",
         "20260423000533.html",
     ]
-    assert [section["toc_id"] for section in payload["documents"][0]["sections"]] == ["toc_1", "toc_2"]
-    assert [section["toc_id"] for section in payload["documents"][1]["sections"]] == ["toc_1"]
+    assert [document["source_relative_path"] for document in documents] == [
+        "20260422000832.html",
+        "2025/shareholder_meeting/20260423000533.html",
+    ]
+    assert [section["toc_id"] for section in documents[0]["sections"]] == ["toc_1", "toc_2"]
+    assert [section["toc_id"] for section in documents[1]["sections"]] == ["toc_1"]
     assert payload["problem_files"] == [
         {
             "kind": "no_sections",
@@ -3582,10 +3589,24 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/html-content-download" in parse_ui_html
     assert "공시원문 목차 분리" in section_split_ui_html
     assert "/api/disclosures/html/sections/inspect" in section_split_ui_html
+    assert "/api/disclosures/html/sections/source" in section_split_ui_html
     assert "/api/disclosures/html/sections/save/start" in section_split_ui_html
-    assert "목차 스캔" in section_split_ui_html
-    assert "목차 저장" in section_split_ui_html
-    assert "문서별 목차" in section_split_ui_html
+    assert "데이터 경로" in section_split_ui_html
+    assert "작업 실행" in section_split_ui_html
+    assert "소스 불러오기" in section_split_ui_html
+    assert "FolderOpen" in section_split_ui_html
+    assert "소스 새로고침" not in section_split_ui_html
+    assert "RefreshCw" not in section_split_ui_html
+    assert "startSave" in section_split_ui_html
+    assert "Play" in section_split_ui_html
+    assert "UI_TEXT.actions.cancelJob" in section_split_ui_html
+    assert "폴더 요약" not in section_split_ui_html
+    assert "개별 공시" in section_split_ui_html
+    assert "공시 열기" in section_split_ui_html
+    assert "분리 확인" in section_split_ui_html
+    assert "목차 저장" not in section_split_ui_html
+    assert "목차 스캔" not in section_split_ui_html
+    assert "문서별 목차" not in section_split_ui_html
     assert "문제 파일 표시 수" in section_split_ui_html
     assert "/api/disclosures/html/sections/preview" not in section_split_ui_html
     assert "/api/disclosures/html/sections/render" not in section_split_ui_html

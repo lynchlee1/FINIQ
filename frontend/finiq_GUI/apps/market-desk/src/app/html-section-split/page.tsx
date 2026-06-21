@@ -1,11 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react";
-import { FileSearch, Loader2, Play } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FolderOpen, Loader2, Play, Square } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { UI_TEXT } from "@/config/uiText";
 import {
   HtmlWorkflowCard,
   HtmlWorkflowForm,
@@ -32,6 +33,10 @@ function parseOptionalNumber(value: string) {
   return trimmed ? Number(trimmed) : null;
 }
 
+function errorMessage(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export default function HtmlSectionSplitPage() {
   const { fetchSettings } = useSettingsStore();
   const [loading, setLoading] = useState(true);
@@ -41,6 +46,7 @@ export default function HtmlSectionSplitPage() {
   const [reportLimit, setReportLimit] = useState("50");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [isInspecting, setIsInspecting] = useState(false);
+  const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
   const formatStatus = useCallback((data: any) => {
     const res = data.result || {};
@@ -73,7 +79,7 @@ export default function HtmlSectionSplitPage() {
 
   const documents = inspectResult?.documents || [];
   const problemFiles = inspectResult?.problem_files || [];
-  const summary = inspectResult?.summary;
+  const reviewedInputDirectory = inspectResult?.input_directory || inputDirectory;
   const isJobActive = !!activeJobId;
 
   useEffect(() => {
@@ -82,12 +88,18 @@ export default function HtmlSectionSplitPage() {
       setInputDirectory(defaultInput || "");
       setOutputDirectory(defaultInput ? `${defaultInput}_sections` : "");
     }).catch((err) => {
-      setStatus(err.message);
+      setStatus(errorMessage(err));
       setIsErrorStatus(true);
     }).finally(() => {
       setLoading(false);
     });
   }, [fetchSettings, setIsErrorStatus, setStatus]);
+
+  useEffect(() => {
+    return () => {
+      inspectAbortControllerRef.current?.abort();
+    };
+  }, []);
 
   const handleInputDirectoryChange = (value: string) => {
     setInputDirectory(value);
@@ -95,7 +107,7 @@ export default function HtmlSectionSplitPage() {
     setInspectResult(null);
   };
 
-  const splitPathFields: HtmlWorkflowField[] = [
+  const folderPathFields: HtmlWorkflowField[] = [
     {
       id: "inputDirectory",
       kind: "path",
@@ -125,8 +137,8 @@ export default function HtmlSectionSplitPage() {
       id: "limit",
       kind: "input",
       type: "number",
-      label: "최대 처리 건수",
-      help: "스캔과 저장에서 처리할 HTML 파일 수를 제한합니다.",
+      label: "최대 표시 파일 수",
+      help: "하위 폴더까지 불러올 HTML 파일 수를 제한합니다.",
       placeholder: "전체",
       value: limit,
       onChange: setLimit,
@@ -150,6 +162,9 @@ export default function HtmlSectionSplitPage() {
       setIsErrorStatus(true);
       return;
     }
+    inspectAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    inspectAbortControllerRef.current = controller;
     setIsInspecting(true);
     try {
       const response = await fetch("/api/disclosures/html/sections/inspect", {
@@ -160,21 +175,39 @@ export default function HtmlSectionSplitPage() {
           limit: parseOptionalNumber(limit),
           report_limit: Number(reportLimit || 50),
         }),
+        signal: controller.signal,
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new Error(payload?.detail || "목차 스캔에 실패했습니다.");
+        throw new Error(payload?.detail || "폴더 열기에 실패했습니다.");
       }
-      const data = await response.json();
+      const data: InspectResult = await response.json();
       setInspectResult(data);
-      setStatus(`목차 스캔 완료: ${formatInteger(data.summary?.documents_with_sections || 0)}개 문서`);
+      setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.documents_with_sections || 0)}개 공시`);
       setIsErrorStatus(false);
     } catch (err: any) {
-      setStatus(err.message);
+      if (err.name === "AbortError") {
+        setStatus("소스 불러오기를 중단했습니다.");
+        setIsErrorStatus(false);
+        return;
+      }
+      setStatus(errorMessage(err));
       setIsErrorStatus(true);
+      setInspectResult(null);
     } finally {
-      setIsInspecting(false);
+      if (!controller.signal.aborted) {
+        inspectAbortControllerRef.current = null;
+        setIsInspecting(false);
+      }
     }
+  };
+
+  const cancelInspectFolder = () => {
+    inspectAbortControllerRef.current?.abort();
+    inspectAbortControllerRef.current = null;
+    setIsInspecting(false);
+    setStatus("소스 불러오기 중단을 요청했습니다.");
+    setIsErrorStatus(false);
   };
 
   const startSave = async () => {
@@ -195,12 +228,12 @@ export default function HtmlSectionSplitPage() {
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new Error(payload?.detail || "목차 저장 작업을 시작하지 못했습니다.");
+        throw new Error(payload?.detail || "목차 분리 작업을 시작하지 못했습니다.");
       }
       const data = await response.json();
       startPolling(data.job_id);
     } catch (err: any) {
-      setStatus(err.message);
+      setStatus(errorMessage(err));
       setIsErrorStatus(true);
     }
   };
@@ -213,40 +246,42 @@ export default function HtmlSectionSplitPage() {
     <HtmlWorkflowPage
       eyebrow="Disclosure Section Desk"
       title="공시원문 목차 분리"
-      description="KIND 내부 HTML을 목차 단위로 분리하고, 문서별 목차 구성과 처리 상태를 확인합니다."
+      description="KIND 내부 HTML 폴더를 열어 개별 공시 원문과 목차 분리 상태를 확인합니다."
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <HtmlWorkflowCard
             title="데이터 경로"
-            description="입력 HTML 폴더와 목차별 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
           >
-            <HtmlWorkflowForm fields={splitPathFields} />
-          </HtmlWorkflowCard>
-
-          <HtmlWorkflowCard
-            title="작업 실행"
-            description="먼저 목차 스캔으로 문서별 목차를 확인한 뒤, 같은 입력 경로를 목차 단위로 저장합니다."
-          >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button variant="outline" className="h-10 w-full" onClick={inspectFolder} disabled={isInspecting}>
-                {isInspecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSearch className="mr-2 h-4 w-4" />}
-                목차 스캔
-              </Button>
-              <Button className="h-10 w-full" onClick={startSave} disabled={isJobActive}>
-                {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                목차 저장
-              </Button>
-            </div>
+            <HtmlWorkflowForm fields={folderPathFields} />
           </HtmlWorkflowCard>
 
           <HtmlSectionSplitResults
-            summary={summary}
+            inputDirectory={reviewedInputDirectory}
             documents={documents}
             problemFiles={problemFiles}
             status={status}
             isErrorStatus={isErrorStatus}
+            isInspecting={isInspecting}
+            onCancel={cancelInspectFolder}
           />
+
+          <HtmlWorkflowCard title="작업 실행">
+            <div className="grid gap-3 md:grid-cols-3">
+              <Button variant="outline" className="h-10 w-full" onClick={inspectFolder} disabled={isInspecting || isJobActive}>
+                {isInspecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
+                소스 불러오기
+              </Button>
+              <Button className="h-10 w-full" onClick={startSave} disabled={isJobActive || isInspecting}>
+                {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                실행
+              </Button>
+              <Button type="button" variant="outline" className="h-10 w-full" onClick={cancelInspectFolder} disabled={!isInspecting}>
+                <Square className="mr-2 h-4 w-4" />
+                {UI_TEXT.actions.cancelJob}
+              </Button>
+            </div>
+          </HtmlWorkflowCard>
         </section>
 
         <HtmlSectionSplitActionDock
@@ -256,6 +291,7 @@ export default function HtmlSectionSplitPage() {
           isErrorStatus={isErrorStatus}
           problemFileCount={problemFiles.length}
           settingsFields={splitOptionFields}
+          onCancel={cancelInspectFolder}
         />
       </div>
     </HtmlWorkflowPage>

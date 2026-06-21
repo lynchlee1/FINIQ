@@ -5,6 +5,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 ## General Rules
 
 - 기존 화면, 라우트, 백엔드 로그, 테스트에서 쓰는 용어를 우선한다.
+- 버튼, 카드, 입력, 아이콘, 상태 표시 등 UI 요소는 기존 화면과 공통 컴포넌트/에셋을 우선 재사용한다. 정말 부득이하게 기존 에셋으로 표현할 수 없을 때만 새 UI를 만든다.
 - 같은 기능은 페이지, 버튼, 카드 제목, 상태 문구에서 같은 명칭을 쓴다.
 - 새 기능명이 필요하면 구현 전에 이 파일에 용어를 추가하고, 같은 변경에서 UI와 테스트를 맞춘다.
 - 파일 형식 설명은 도움말이나 상세 문구에만 넣고, 버튼명에는 넣지 않는다.
@@ -16,12 +17,13 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Viewer HTML save workflow | 공시원문 외부 저장 | Navigation/page workflow name. |
 | Content HTML save workflow | 공시원문 내부 저장 | Navigation/page workflow name. |
 | Content HTML section workflow | 공시원문 목차 분리 | Navigation/page workflow name. |
-| Content HTML section scan action | 목차 스캔 | Button/action that scans per-document TOC lists in a folder. |
+| Content HTML section source load action | 소스 불러오기 | Button/action on `공시원문 목차 분리` that reads the selected HTML folder on demand. Use instead of loading large folders automatically. |
+| Content HTML section folder open action | 폴더 열기 | Button/action that opens a folder and lists individual disclosure HTML files. |
 | Content HTML section save action | 목차 저장 | Button/action that splits each HTML file into TOC-specific output folders. |
-| Content HTML document TOC table | 문서별 목차 | Table listing per-file section lists. |
+| Content HTML individual disclosure table | 개별 공시 | Table listing per-file section lists and source-open actions. |
 | Content HTML problem file table | 문제 파일 | Table listing files without TOC sections and files that failed to read. |
 | Content HTML problem file setting | 문제 파일 표시 수 | Setting for the maximum combined problem-file rows returned by scan. |
-| Content HTML scan summary row | 스캔 결과 | Row box showing folder scan counts. |
+| Content HTML folder summary row | 폴더 요약 | Row box showing selected-folder file and section counts. |
 | Content HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | Viewer HTML save mode/button | 외부 HTML 저장 | Top mode button in 공시원문 외부 저장. |
 | Viewer HTML compression mode/button | 외부 HTML 압축 | Use for the compact JSON creation from saved viewer HTML. |

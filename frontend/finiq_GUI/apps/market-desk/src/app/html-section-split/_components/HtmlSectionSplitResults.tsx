@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react";
+import { ExternalLink } from "lucide-react";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import {
@@ -19,6 +20,7 @@ export type TocItem = {
 export type DocumentRow = {
   source_file: string;
   source_name: string;
+  source_relative_path: string;
   section_count: number;
   sections: TocItem[];
 };
@@ -30,6 +32,7 @@ export type ProblemFile = {
 };
 
 export type InspectResult = {
+  input_directory?: string;
   summary?: {
     found_files?: number;
     documents_with_sections?: number;
@@ -42,11 +45,13 @@ export type InspectResult = {
 };
 
 type HtmlSectionSplitResultsProps = {
-  summary: InspectResult["summary"];
+  inputDirectory: string;
   documents: DocumentRow[];
   problemFiles: ProblemFile[];
   status: string;
   isErrorStatus: boolean;
+  isInspecting: boolean;
+  onCancel: () => void;
 };
 
 type HtmlSectionSplitActionDockProps = {
@@ -56,6 +61,7 @@ type HtmlSectionSplitActionDockProps = {
   isErrorStatus: boolean;
   problemFileCount: number;
   settingsFields: HtmlWorkflowField[];
+  onCancel: () => void;
 };
 
 function compactPath(path: string) {
@@ -69,45 +75,37 @@ function problemKindLabel(kind: ProblemFile["kind"]) {
   return "목차 없음";
 }
 
+function sourceHtmlUrl(inputDirectory: string, document: DocumentRow) {
+  const params = new URLSearchParams({
+    input_directory: inputDirectory,
+    source_name: document.source_relative_path || document.source_name,
+  });
+  return `/api/disclosures/html/sections/source?${params.toString()}`;
+}
+
 export function HtmlSectionSplitResults({
-  summary,
+  inputDirectory,
   documents,
   problemFiles,
   status,
   isErrorStatus,
+  isInspecting,
+  onCancel,
 }: HtmlSectionSplitResultsProps) {
   return (
     <>
-      {summary ? (
-        <HtmlWorkflowCard title="스캔 결과" description="문서별 목차 구성과 문제 파일 범위를 요약합니다.">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {[
-              ["문서", summary.found_files],
-              ["목차 있음", summary.documents_with_sections],
-              ["목차 없음", summary.files_without_sections],
-              ["읽기 실패", summary.failed_files],
-              ["문제 표시", summary.reported_problem_files],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-md border border-slate-200 bg-slate-50 p-4 dark:border-[#30363d] dark:bg-[#0d1117]">
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-500">{label}</p>
-                <p className="mt-1 text-xl font-semibold tabular-nums text-slate-950 dark:text-white">{formatInteger(Number(value || 0))}</p>
-              </div>
-            ))}
-          </div>
-        </HtmlWorkflowCard>
-      ) : null}
-
       <HtmlWorkflowCard
-        title="문서별 목차"
-        description={`${formatInteger(documents.length)}개 문서가 표시됩니다.`}
+        title="개별 공시"
+        description={`${formatInteger(documents.length)}개 공시의 원문을 열고 목차 분리 상태를 확인합니다.`}
       >
         {documents.length ? (
           <div className="max-h-[560px] overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500 dark:bg-[#0d1117] dark:text-slate-400">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">파일</th>
+                  <th className="px-3 py-2 font-semibold">공시 파일</th>
                   <th className="w-28 px-3 py-2 text-right font-semibold">목차 수</th>
+                  <th className="w-28 px-3 py-2 font-semibold">확인</th>
                   <th className="px-3 py-2 font-semibold">목차</th>
                 </tr>
               </thead>
@@ -116,10 +114,26 @@ export function HtmlSectionSplitResults({
                   <tr key={item.source_file}>
                     <td className="px-3 py-3 align-top">
                       <p className="font-medium text-slate-900 dark:text-slate-100">{item.source_name}</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">{compactPath(item.source_file)}</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">{compactPath(item.source_relative_path || item.source_file)}</p>
                     </td>
                     <td className="px-3 py-3 text-right align-top tabular-nums text-slate-700 dark:text-slate-300">
                       {formatInteger(item.section_count)}
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <div className="flex flex-col gap-2">
+                        <a
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 underline-offset-2 hover:underline dark:text-slate-200"
+                          href={sourceHtmlUrl(inputDirectory, item)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          공시 열기
+                        </a>
+                        <span className="inline-flex w-fit rounded bg-green-50 px-1.5 py-0.5 text-xs font-medium text-green-700 dark:bg-green-950/40 dark:text-green-300">
+                          분리 확인
+                        </span>
+                      </div>
                     </td>
                     <td className="px-3 py-3 align-top">
                       <div className="flex flex-wrap gap-1.5">
@@ -138,7 +152,7 @@ export function HtmlSectionSplitResults({
           </div>
         ) : (
           <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
-            목차 스캔을 실행하세요.
+            폴더를 열면 개별 공시와 목차 분리 상태가 표시됩니다.
           </div>
         )}
       </HtmlWorkflowCard>
@@ -169,7 +183,12 @@ export function HtmlSectionSplitResults({
       ) : null}
 
       <HtmlWorkflowCard title="작업 상태">
-        <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
+        <JobStatusLogger
+          status={status}
+          isErrorStatus={isErrorStatus}
+          isCancellable={isInspecting}
+          onCancel={onCancel}
+        />
       </HtmlWorkflowCard>
     </>
   );
@@ -182,6 +201,7 @@ export function HtmlSectionSplitActionDock({
   isErrorStatus,
   problemFileCount,
   settingsFields,
+  onCancel,
 }: HtmlSectionSplitActionDockProps) {
   let notificationContent: ReactNode;
   if (isErrorStatus) {
@@ -203,14 +223,21 @@ export function HtmlSectionSplitActionDock({
   return (
     <ActionDock
       activityActive={isJobActive || isInspecting}
-      activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} />}
+      activityContent={
+        <JobStatusLogger
+          status={status}
+          isErrorStatus={isErrorStatus}
+          isCancellable={isInspecting}
+          onCancel={onCancel}
+        />
+      }
       notificationActive={isErrorStatus || problemFileCount > 0}
       notificationContent={notificationContent}
-      settingsTitle="시스템 설정"
+      settingsTitle="설정"
       settingsContent={
         <div className="space-y-3">
           <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>
           </div>
           <HtmlWorkflowForm fields={settingsFields} />
         </div>
