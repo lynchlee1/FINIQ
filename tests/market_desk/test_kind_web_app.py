@@ -647,6 +647,60 @@ def test_html_section_inspect_route_returns_document_toc_and_problem_files(tmp_p
     ]
 
 
+def test_html_section_source_route_opens_individual_disclosure() -> None:
+    source_file = Path(__file__).parent / "fixtures" / "kind_bond_issuance_20260508000981.html"
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/disclosures/html/sections/source",
+        params={
+            "input_directory": str(source_file.parent),
+            "source_name": source_file.name,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["content-disposition"].startswith("inline")
+    assert "전환사채권 발행결정" in response.text
+
+
+def test_html_section_source_route_opens_nested_individual_disclosure(tmp_path: Path) -> None:
+    input_directory = tmp_path / "kind_html_contents"
+    nested_directory = input_directory / "2025" / "shareholder_meeting"
+    nested_directory.mkdir(parents=True)
+    source_file = nested_directory / "20250101000001.html"
+    source_file.write_text("<html><body>중첩 공시 원문</body></html>", encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/disclosures/html/sections/source",
+        params={
+            "input_directory": str(input_directory),
+            "source_name": "2025/shareholder_meeting/20250101000001.html",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "중첩 공시 원문" in response.text
+
+
+def test_html_section_source_route_rejects_parent_traversal() -> None:
+    fixture_directory = Path(__file__).parent / "fixtures"
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/disclosures/html/sections/source",
+        params={
+            "input_directory": str(fixture_directory),
+            "source_name": "../test_kind_web_app.py",
+        },
+    )
+
+    assert response.status_code == 404
+
+
 def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"

@@ -850,7 +850,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           {showSaveWorkflow && (
             <HtmlWorkflowCard
               title="데이터 경로"
-              description="원천 파일과 저장 위치는 작업 대상이므로 메인 화면에서 관리합니다."
               actions={variant === "content" ? (
                 <div className="inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
                   <Button

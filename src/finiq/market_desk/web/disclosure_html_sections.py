@@ -186,6 +186,7 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
             {
                 "source_file": str(source_file),
                 "source_name": source_file.name,
+                "source_relative_path": _relative_source_path(input_directory, source_file),
                 "section_count": len(sections),
                 "sections": [
                     {"toc_id": section.toc_id, "index": section.index, "title": section.title}
@@ -211,8 +212,19 @@ def inspect_disclosure_html_sections_payload(body: dict[str, Any]) -> dict[str, 
 
 
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
-    files = sorted(path for path in input_directory.iterdir() if path.is_file() and path.suffix.lower() == ".html")
+    files = sorted(
+        (
+            path
+            for path in input_directory.rglob("*")
+            if path.is_file() and path.suffix.lower() == ".html"
+        ),
+        key=lambda path: _relative_source_path(input_directory, path),
+    )
     return files[:limit] if limit is not None else files
+
+
+def _relative_source_path(input_directory: Path, source_file: Path) -> str:
+    return source_file.relative_to(input_directory).as_posix()
 
 
 def _parse_limit(value: Any) -> int | None:
@@ -272,8 +284,8 @@ def save_disclosure_html_sections_payload(
             continue
         for section in sections:
             section_directory = output_directory / section.toc_id
-            section_directory.mkdir(parents=True, exist_ok=True)
-            output_path = section_directory / source_file.name
+            output_path = section_directory / source_file.relative_to(input_directory)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(section.html, encoding="utf-8")
             saved_files.append(str(output_path))
         if index == 1 or index == len(html_files) or index % 25 == 0:

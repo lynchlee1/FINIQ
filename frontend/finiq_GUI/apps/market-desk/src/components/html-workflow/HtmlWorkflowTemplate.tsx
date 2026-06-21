@@ -154,7 +154,10 @@ export function HtmlWorkflowCard({
 }: HtmlWorkflowCardProps) {
   return (
     <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-      <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">
+      <CardHeader className={cn(
+        "flex flex-col md:flex-row md:items-start md:justify-between md:space-y-0",
+        description ? "gap-3 pb-4" : "gap-0"
+      )}>
         <div className="min-w-0 space-y-1">
           <CardTitle className="dark:text-white">{title}</CardTitle>
           {description ? <CardDescription className="dark:text-slate-400">{description}</CardDescription> : null}
