@@ -647,6 +647,71 @@ def test_html_section_inspect_route_returns_document_toc_and_problem_files(tmp_p
     ]
 
 
+def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    for index in range(21):
+        section_markup = "<h2 id='toc_1'><p>목차</p></h2>"
+        if index == 0:
+            section_markup += "<h2 id='toc_2'><p>본문</p></h2>"
+        (input_directory / f"202604{index + 1:02d}000001.html").write_text(
+            f"<html><body>{section_markup}</body></html>",
+            encoding="utf-8",
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/sections/list",
+        json={"input_directory": str(input_directory), "page_size": 20},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"] == {
+        "page": 1,
+        "page_size": 20,
+        "returned_files": 20,
+        "has_next_page": True,
+    }
+    assert len(data["documents"]) == 20
+    assert data["documents"][0]["section_count"] == 2
+    assert data["documents"][1]["section_count"] == 1
+    assert "sections" not in data["documents"][0]
+
+
+def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: Path) -> None:
+    input_directory = tmp_path / "kind_html_contents"
+    input_directory.mkdir()
+    for source_name in ["20260401000001.html", "20260402000001.html"]:
+        (input_directory / source_name).write_text(
+            """
+            <html><body>
+              <h2 id="toc_1"><p>1</p></h2>
+              <h2 id="toc_2"><p>2</p></h2>
+            </body></html>
+            """,
+            encoding="utf-8",
+        )
+    (input_directory / "20260403000001.html").write_text(
+        "<html><body><h2 id='toc_1'><p>1</p></h2></body></html>",
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/sections/kinds",
+        json={"input_directory": str(input_directory)},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["format"] == "finiq_disclosure_html_section_kind_summary_v1"
+    assert data["items"] == [
+        {"signature": "toc_1 1 toc_2 2", "count": 2, "section_count": 2},
+        {"signature": "toc_1 1", "count": 1, "section_count": 1},
+    ]
+
+
 def test_html_section_source_route_opens_individual_disclosure() -> None:
     source_file = Path(__file__).parent / "fixtures" / "kind_bond_issuance_20260508000981.html"
 
@@ -699,6 +764,39 @@ def test_html_section_source_route_rejects_parent_traversal() -> None:
     )
 
     assert response.status_code == 404
+
+
+def test_html_section_source_split_route_returns_selected_disclosure_sections(tmp_path: Path) -> None:
+    input_directory = tmp_path / "kind_html_contents"
+    input_directory.mkdir()
+    source_file = input_directory / "20260422000832.html"
+    source_file.write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+          <p>표지 내용</p>
+          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/sections/source/split",
+        json={"input_directory": str(input_directory), "source_name": source_file.name},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["document"]["source_name"] == "20260422000832.html"
+    assert [(section["toc_id"], section["title"]) for section in data["sections"]] == [
+        ("toc_1", "주요사항보고서"),
+        ("toc_2", "전환사채권 발행결정"),
+    ]
+    assert "표지 내용" in data["sections"][0]["html"]
+    assert "발행금액 250,000,000" in data["sections"][1]["html"]
 
 
 def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) -> None:

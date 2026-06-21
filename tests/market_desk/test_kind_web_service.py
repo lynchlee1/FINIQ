@@ -45,9 +45,12 @@ from finiq.market_desk.web.disclosure_html_parse import (
 from finiq.market_desk.web.disclosure_html_sections import (
     DEFAULT_HTML_SECTION_WORKERS,
     inspect_disclosure_html_sections_payload,
+    list_disclosure_html_section_sources_payload,
     parse_html_section_worker_count,
     save_disclosure_html_sections_payload,
+    split_disclosure_html_section_source_payload,
     split_content_html_sections,
+    summarize_disclosure_html_section_kinds_payload,
 )
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance
 from finiq.market_desk.web.html_parsers.common import expand_table, parse_html_document
@@ -2449,11 +2452,16 @@ def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
     )
 
     assert [(section.toc_id, section.index, section.title) for section in sections] == [
-        ("toc_1", 1, "주주총회소집 결의"),
+        ("toc_1", 1, "정정신고(보고)"),
+        ("toc_2", 2, "주주총회소집 결의"),
     ]
-    assert "주주총회소집 결의" in sections[0].html
-    assert "1. 일시" in sections[0].html
-    assert "정정신고" not in sections[0].html
+    assert 'class="xforms"' in sections[0].html
+    assert 'class="xforms"' in sections[1].html
+    assert "정정신고(보고)" in sections[0].html
+    assert "주주총회소집 결의" not in sections[0].html
+    assert "주주총회소집 결의" in sections[1].html
+    assert "1. 일시" in sections[1].html
+    assert "정정신고" not in sections[1].html
 
 
 def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) -> None:
@@ -2579,6 +2587,121 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problem
             "error": "",
         }
     ]
+
+
+def test_list_disclosure_html_section_sources_payload_pages_with_current_page_toc_counts(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    for index in range(22):
+        section_markup = "<h2 id='toc_1'><p>목차</p></h2>"
+        if index == 0:
+            section_markup += "<h2 id='toc_2'><p>본문</p></h2>"
+        (input_directory / f"202604{index + 1:02d}000001.html").write_text(
+            f"<html><body>{section_markup}</body></html>",
+            encoding="utf-8",
+        )
+
+    first_page = list_disclosure_html_section_sources_payload({"input_directory": str(input_directory)})
+    second_page = list_disclosure_html_section_sources_payload(
+        {"input_directory": str(input_directory), "page": 2, "page_size": 20}
+    )
+
+    assert first_page["format"] == "finiq_disclosure_html_section_source_list_v1"
+    assert first_page["summary"] == {
+        "page": 1,
+        "page_size": 20,
+        "returned_files": 20,
+        "has_next_page": True,
+    }
+    assert len(first_page["documents"]) == 20
+    assert first_page["documents"][0]["source_name"] == "20260401000001.html"
+    assert first_page["documents"][0]["section_count"] == 2
+    assert first_page["documents"][1]["section_count"] == 1
+    assert "sections" not in first_page["documents"][0]
+    assert second_page["summary"] == {
+        "page": 2,
+        "page_size": 20,
+        "returned_files": 2,
+        "has_next_page": False,
+    }
+    assert [document["source_name"] for document in second_page["documents"]] == [
+        "20260421000001.html",
+        "20260422000001.html",
+    ]
+    assert [document["section_count"] for document in second_page["documents"]] == [1, 1]
+
+
+def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    for source_name in ["20260401000001.html", "20260402000001.html"]:
+        (input_directory / source_name).write_text(
+            """
+            <html><body>
+              <h2 id="toc_1"><p>1</p></h2>
+              <p>표지</p>
+              <h2 id="toc_2"><p>2</p></h2>
+              <p>본문</p>
+            </body></html>
+            """,
+            encoding="utf-8",
+        )
+    (input_directory / "20260403000001.html").write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>1</p></h2>
+          <p>표지</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    (input_directory / "20260404000001.html").write_text("<html><body>목차 없음</body></html>", encoding="utf-8")
+
+    payload = summarize_disclosure_html_section_kinds_payload({"input_directory": str(input_directory)})
+
+    assert payload["format"] == "finiq_disclosure_html_section_kind_summary_v1"
+    assert payload["summary"] == {
+        "found_files": 4,
+        "documents_with_sections": 3,
+        "files_without_sections": 1,
+        "failed_files": 0,
+        "unique_kinds": 2,
+    }
+    assert payload["items"] == [
+        {"signature": "toc_1 1 toc_2 2", "count": 2, "section_count": 2},
+        {"signature": "toc_1 1", "count": 1, "section_count": 1},
+    ]
+
+
+def test_split_disclosure_html_section_source_payload_splits_one_selected_file(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    nested_directory = input_directory / "2026"
+    nested_directory.mkdir(parents=True)
+    source_file = nested_directory / "20260422000832.html"
+    source_file.write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+          <p>표지 내용</p>
+          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = split_disclosure_html_section_source_payload(
+        {"input_directory": str(input_directory), "source_name": "2026/20260422000832.html"}
+    )
+
+    assert payload["format"] == "finiq_disclosure_html_section_source_split_v1"
+    assert payload["document"]["source_relative_path"] == "2026/20260422000832.html"
+    assert [(section["toc_id"], section["title"]) for section in payload["sections"]] == [
+        ("toc_1", "주요사항보고서"),
+        ("toc_2", "전환사채권 발행결정"),
+    ]
+    assert "표지 내용" in payload["sections"][0]["html"]
+    assert "발행금액 250,000,000" in payload["sections"][1]["html"]
 
 
 def test_html_section_worker_count_defaults_to_cpu_cap_and_accepts_payload_value() -> None:
@@ -3611,10 +3734,9 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     download_ui_html = GUI_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     download_component_html = GUI_HTML_DOWNLOAD_COMPONENT.read_text(encoding="utf-8")
     content_download_ui_html = GUI_HTML_CONTENT_DOWNLOAD_PAGE.read_text(encoding="utf-8")
-    section_split_ui_html = (
-        GUI_HTML_SECTION_SPLIT_PAGE.read_text(encoding="utf-8")
-        + GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT.read_text(encoding="utf-8")
-    )
+    section_split_page_html = GUI_HTML_SECTION_SPLIT_PAGE.read_text(encoding="utf-8")
+    section_split_results_component_html = GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT.read_text(encoding="utf-8")
+    section_split_ui_html = section_split_page_html + section_split_results_component_html
     parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
     change_log_ui_html = GUI_HTML_CHANGE_LOG_PAGE.read_text(encoding="utf-8")
     utility_ui_html = GUI_UTILITY_PAGE.read_text(encoding="utf-8")
@@ -3626,13 +3748,19 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/html-parse" in parse_ui_html
     assert "/html-content-download" in parse_ui_html
     assert "공시원문 목차 분리" in section_split_ui_html
-    assert "/api/disclosures/html/sections/inspect" in section_split_ui_html
+    assert "/api/disclosures/html/sections/list" in section_split_ui_html
+    assert "/api/disclosures/html/sections/kinds" in section_split_ui_html
     assert "/api/disclosures/html/sections/source" in section_split_ui_html
+    assert "/api/disclosures/html/sections/source/split" in section_split_ui_html
     assert "/api/disclosures/html/sections/save/start" in section_split_ui_html
     assert "데이터 경로" in section_split_ui_html
     assert "작업 실행" in section_split_ui_html
     assert "소스 불러오기" in section_split_ui_html
     assert "FolderOpen" in section_split_ui_html
+    assert "FolderOpen" not in section_split_page_html
+    assert "FolderOpen" in section_split_results_component_html
+    assert "소스 불러오기" in section_split_results_component_html
+    assert "onInspectFolder={inspectFolder}" in section_split_page_html
     assert "소스 새로고침" not in section_split_ui_html
     assert "RefreshCw" not in section_split_ui_html
     assert "startSave" in section_split_ui_html
@@ -3640,8 +3768,29 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "UI_TEXT.actions.cancelJob" in section_split_ui_html
     assert "폴더 요약" not in section_split_ui_html
     assert "개별 공시" in section_split_ui_html
-    assert "공시 열기" in section_split_ui_html
-    assert "분리 확인" in section_split_ui_html
+    assert "목차 수" in section_split_ui_html
+    assert "목차 종류 보기" in section_split_ui_html
+    assert "불러오기" in section_split_ui_html
+    assert "sectionKindItems" in section_split_ui_html
+    assert "maxKindCount" in section_split_ui_html
+    assert "align-middle" in section_split_results_component_html
+    assert "flex flex-col items-center gap-2 sm:flex-row" in section_split_results_component_html
+    assert "원문 보기" in section_split_ui_html
+    assert "공시 열기" not in section_split_ui_html
+    assert "이전" in section_split_ui_html
+    assert "다음" in section_split_ui_html
+    assert "목차별 보기" in section_split_ui_html
+    assert "sectionPanelRef" in section_split_results_component_html
+    assert "scrollToSectionPanel" in section_split_results_component_html
+    assert "inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]" in section_split_results_component_html
+    assert "activePanel === \"source\" ? \"default\" : \"ghost\"" in section_split_results_component_html
+    assert "activePanel === \"sections\" ? \"default\" : \"ghost\"" in section_split_results_component_html
+    assert "공시 파일을 선택하면 원문이 표시됩니다." in section_split_ui_html
+    assert "목차별 보기를 실행하면 분리된 목차가 표시됩니다." in section_split_ui_html
+    assert "onSplitSelected" not in section_split_ui_html
+    assert "페이지에서 최대" not in section_split_ui_html
+    assert "scrollIntoView" in section_split_ui_html
+    assert "requestAnimationFrame" in section_split_ui_html
     assert "목차 저장" not in section_split_ui_html
     assert "목차 스캔" not in section_split_ui_html
     assert "문서별 목차" not in section_split_ui_html
