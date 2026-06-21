@@ -2,6 +2,43 @@
 
 All completed implementation changes listed in this file have been reviewed and verified to be free of errors, including search regressions, mode splits, chart-focused workspaces, and A-prefix conversion behaviors.
 
+## Disclosure Section Split XForms TOC Fallback
+
+Purpose: Remove the redundant in-page `작업 상태` card from `공시원문 목차 분리` and correctly recognize old KIND XForms content such as `20080825000156.html` that uses `xforms_title` instead of `h2#toc_*` or `p.SECTION-1`.
+
+Implementation summary:
+- Removed the main-content `작업 상태` card from the section split result component; job logs remain available through the existing right-side ActionDock.
+- Added an XForms title fallback that runs only when the standard TOC heading and legacy `SECTION-1` paragraph detection find no sections.
+- Split XForms sections from each `xforms_title` sibling onward, excluding preceding correction blocks from the generated section HTML.
+- Added backend and frontend regression coverage for the XForms fallback and ActionDock-only job status display.
+
+Verification:
+- Red checks: `pytest ... -k "xforms_title_fallback"` failed with `[]`, and `node --test tests/frontend/pathLayout.test.mjs` failed while the in-page `작업 상태` card existed.
+- `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m pytest tests/market_desk/test_kind_web_service.py tests/market_desk/test_kind_web_app.py -q -k "html_section"`
+- `node --test tests/frontend/pathLayout.test.mjs`
+- `PYTHONPATH=src /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m py_compile src/finiq/market_desk/web/disclosure_html_sections.py`
+- `npx tsc --noEmit -p finiq_GUI/apps/market-desk/tsconfig.json` from `frontend`
+- Manual check: `resources/KIND/shareholder_meeting/kind_html_contents/2008/20080825000156.html` now returns `toc_1 / 주주총회소집 결의`.
+
+## Disclosure Section Split Parallel Loading
+
+Purpose: Reduce long loading on `공시원문 목차 분리` by moving source inspection into a background job and processing HTML files in parallel with a configurable worker count capped at 8.
+
+Implementation summary:
+- Added an inspect-only TOC metadata parser so `소스 불러오기` no longer builds full section HTML just to list documents.
+- Added worker-count parsing with a default and cap of 8 workers, shared by source inspection and section saving.
+- Processed inspect and save work per HTML file through a bounded `ThreadPoolExecutor`, preserving input order in the returned payload.
+- Registered `section_inspect` as a background job and added `/api/disclosures/html/sections/inspect/start` plus a shared HTML job cancel route.
+- Added a right-side `병렬 처리 개수` setting on `공시원문 목차 분리` and passed the value to both source inspection and save execution.
+
+Verification:
+- Red checks: new worker-count import failed, `/api/disclosures/html/sections/inspect/start` returned 404, and `node --test tests/frontend/pathLayout.test.mjs` failed before the worker setting and background inspect route were implemented.
+- `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m pytest tests/market_desk/test_kind_web_service.py tests/market_desk/test_kind_web_app.py -q -k "html_section"`
+- `node --test tests/frontend/pathLayout.test.mjs`
+- `PYTHONPATH=src /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m py_compile src/finiq/market_desk/web/disclosure_html_sections.py src/finiq/market_desk/web/app.py src/finiq/market_desk/web/routers/workflows.py`
+- `npx tsc --noEmit -p finiq_GUI/apps/market-desk/tsconfig.json` from `frontend`
+- Manual timing with 2,000 copied sample HTML files: inspect `0.761s`, save `1.24s` using `workers: 8`.
+
 ## Disclosure Section Split Execution UI
 
 Purpose: Make `공시원문 목차 분리` expose the missing execution action while keeping large-folder reads explicitly user-triggered via `소스 불러오기`.

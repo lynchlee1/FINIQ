@@ -33,6 +33,30 @@ test("html section split uses shared data path and execution cards", async () =>
   assert.doesNotMatch(source, /title="폴더 선택"/);
 });
 
+test("html section split exposes worker count setting and uses background inspect job", async () => {
+  const source = await readFile(htmlSectionSplitPath, "utf8");
+
+  assert.match(source, /const \[workers, setWorkers\] = useState\("8"\)/);
+  assert.match(source, /label: "병렬 처리 개수"/);
+  assert.match(source, /\/api\/disclosures\/html\/sections\/inspect\/start/);
+  assert.match(source, /workers: parseOptionalNumber\(workers\)/);
+  assert.match(source, /\/api\/disclosures\/html\/cancel/);
+  assert.match(source, /setInspectResult\(data\.result \|\| data\)/);
+});
+
+test("html section split keeps job status only in the action dock", async () => {
+  const source = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx",
+    "utf8",
+  );
+  const mainResultsBlock = source.match(/export function HtmlSectionSplitResults[\s\S]*?export function HtmlSectionSplitActionDock/)?.[0] ?? "";
+  const actionDockBlock = source.match(/export function HtmlSectionSplitActionDock[\s\S]*$/)?.[0] ?? "";
+
+  assert.doesNotMatch(mainResultsBlock, /title="작업 상태"/);
+  assert.match(actionDockBlock, /activityContent=\{/);
+  assert.match(actionDockBlock, /<JobStatusLogger/);
+});
+
 test("disclosure table conversion path fields stack vertically", async () => {
   const source = await readFile(tablePagePath, "utf8");
 

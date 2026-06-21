@@ -20,7 +20,10 @@ from finiq.market_desk.web.disclosure_html import (
     merge_disclosure_content_html_payload,
 )
 from finiq.market_desk.web.disclosure_html_parse import parse_disclosure_html_payload
-from finiq.market_desk.web.disclosure_html_sections import save_disclosure_html_sections_payload
+from finiq.market_desk.web.disclosure_html_sections import (
+    inspect_disclosure_html_sections_payload,
+    save_disclosure_html_sections_payload,
+)
 from finiq.market_desk.web.jobs import job_manager
 from finiq.market_desk.web.routers.assets_excel import create_assets_excel_router
 from finiq.market_desk.web.routers.config import (
@@ -123,6 +126,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "content_download": download_disclosure_html_contents_payload,
     "content_merge": merge_disclosure_content_html_payload,
     "parse": parse_disclosure_html_payload,
+    "section_inspect": inspect_disclosure_html_sections_payload,
     "section_save": save_disclosure_html_sections_payload,
     "integrated_convert": run_integrated_convert_payload,
     "integrated_merge": run_integrated_merge_payload,

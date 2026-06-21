@@ -287,12 +287,30 @@ def create_workflows_router(
             run_job_worker=run_job_worker,
         )
 
+    @router.post("/api/disclosures/html/sections/inspect/start")
+    async def start_html_section_inspect(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="section_inspect",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
     @router.post("/api/disclosures/html/sections/inspect")
     async def inspect_html_sections(payload: dict[str, Any]):
         try:
             return inspect_disclosure_html_sections_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/cancel")
+    async def cancel_html_job(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
 
     @router.get("/api/disclosures/html/sections/source")
     async def open_html_section_source(input_directory: str, source_name: str):

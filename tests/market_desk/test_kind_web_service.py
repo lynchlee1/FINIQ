@@ -43,7 +43,9 @@ from finiq.market_desk.web.disclosure_html_parse import (
     parse_disclosure_html_payload,
 )
 from finiq.market_desk.web.disclosure_html_sections import (
+    DEFAULT_HTML_SECTION_WORKERS,
     inspect_disclosure_html_sections_payload,
+    parse_html_section_worker_count,
     save_disclosure_html_sections_payload,
     split_content_html_sections,
 )
@@ -2428,6 +2430,32 @@ def test_split_content_html_sections_supports_legacy_section_one_paragraphs() ->
     assert "발행금액 16,000,000,000" in sections[1].html
 
 
+def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
+    sections = split_content_html_sections(
+        """
+        <html>
+          <head><title>:: 70471_주주총회소집결의</title></head>
+          <body>
+            <div class="xforms">
+              <div>
+                <div><span>정정신고(보고)</span></div>
+                <div class="xforms_title"><div><span>주주총회소집 결의</span></div></div>
+                <table><tbody><tr><td><span>1. 일시</span></td></tr></tbody></table>
+              </div>
+            </div>
+          </body>
+        </html>
+        """
+    )
+
+    assert [(section.toc_id, section.index, section.title) for section in sections] == [
+        ("toc_1", 1, "주주총회소집 결의"),
+    ]
+    assert "주주총회소집 결의" in sections[0].html
+    assert "1. 일시" in sections[0].html
+    assert "정정신고" not in sections[0].html
+
+
 def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
@@ -2551,6 +2579,16 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problem
             "error": "",
         }
     ]
+
+
+def test_html_section_worker_count_defaults_to_cpu_cap_and_accepts_payload_value() -> None:
+    assert DEFAULT_HTML_SECTION_WORKERS == 8
+    assert parse_html_section_worker_count(None) == 8
+    assert parse_html_section_worker_count("") == 8
+    assert parse_html_section_worker_count("4") == 4
+
+    with pytest.raises(ValueError, match="workers must be >= 1"):
+        parse_html_section_worker_count(0)
 
 
 def test_merge_disclosure_content_html_payload_writes_split_json(tmp_path: Path) -> None:
