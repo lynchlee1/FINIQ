@@ -17,6 +17,7 @@ ProgressCallback = Callable[[str], None]
 _TOC_ID_RE = re.compile(r"^toc_(\d+)$")
 DEFAULT_REPORT_LIMIT = 50
 DEFAULT_HTML_SECTION_WORKERS = 8
+DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 T = TypeVar("T")
 
 
@@ -41,6 +42,22 @@ def _clean_text(value: object) -> str:
 
 def _element_html(element: etree._Element) -> str:
     return html.tostring(element, encoding="unicode", method="html")
+
+
+def _element_start_tag(element: etree._Element) -> str:
+    if not isinstance(element.tag, str):
+        return ""
+    attrs = "".join(
+        f' {key}="{escape(str(value), quote=True)}"'
+        for key, value in element.attrib.items()
+    )
+    return f"<{element.tag}{attrs}>"
+
+
+def _element_end_tag(element: etree._Element) -> str:
+    if not isinstance(element.tag, str):
+        return ""
+    return f"</{element.tag}>"
 
 
 def _toc_index(toc_id: str, fallback: int) -> int:
@@ -124,9 +141,31 @@ def _has_class(element: etree._Element, class_name: str) -> bool:
     return class_name in set(str(element.get("class") or "").split())
 
 
+def _first_clean_text(element: etree._Element) -> str:
+    for text in element.xpath(".//text()[normalize-space()]"):
+        cleaned = _clean_text(text)
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _xforms_leading_correction_section(
+    section_children: list[etree._Element],
+) -> tuple[str, list[etree._Element]] | None:
+    for child in section_children:
+        title = _first_clean_text(child)
+        if not title:
+            continue
+        if title.startswith("정정신고"):
+            return title, section_children
+        return None
+    return None
+
+
 def _xforms_title_sections(document: html.HtmlElement) -> list[tuple[str, list[etree._Element]]]:
     title_nodes = document.xpath('//*[contains(concat(" ", normalize-space(@class), " "), " xforms_title ")]')
     sections: list[tuple[str, list[etree._Element]]] = []
+    correction_parent_ids: set[int] = set()
     for title_node in title_nodes:
         title = _clean_text(title_node.text_content())
         if not title:
@@ -137,6 +176,12 @@ def _xforms_title_sections(document: html.HtmlElement) -> list[tuple[str, list[e
             continue
         siblings = list(parent)
         start = siblings.index(title_node)
+        parent_id = id(parent)
+        if start > 0 and parent_id not in correction_parent_ids:
+            correction_section = _xforms_leading_correction_section(siblings[:start])
+            if correction_section is not None:
+                sections.append(correction_section)
+            correction_parent_ids.add(parent_id)
         end = len(siblings)
         for position in range(start + 1, len(siblings)):
             if _has_class(siblings[position], "xforms_title"):
@@ -146,10 +191,28 @@ def _xforms_title_sections(document: html.HtmlElement) -> list[tuple[str, list[e
     return sections
 
 
+def _xforms_section_markup(section_children: list[etree._Element]) -> str:
+    section_markup = "".join(_element_html(child) for child in section_children)
+    if not section_children:
+        return section_markup
+
+    ancestors: list[etree._Element] = []
+    for ancestor in section_children[0].iterancestors():
+        ancestors.append(ancestor)
+        if _has_class(ancestor, "xforms"):
+            wrappers = list(reversed(ancestors))
+            return (
+                "".join(_element_start_tag(wrapper) for wrapper in wrappers)
+                + section_markup
+                + "".join(_element_end_tag(wrapper) for wrapper in reversed(wrappers))
+            )
+    return section_markup
+
+
 def _split_xforms_sections(document: html.HtmlElement) -> list[HtmlSection]:
     sections: list[HtmlSection] = []
     for order, (title, section_children) in enumerate(_xforms_title_sections(document), start=1):
-        section_markup = "".join(_element_html(child) for child in section_children)
+        section_markup = _xforms_section_markup(section_children)
         toc_id = f"toc_{order}"
         sections.append(
             HtmlSection(
@@ -246,6 +309,26 @@ def _parse_report_limit(value: Any) -> int:
     return parsed
 
 
+def _parse_page(value: Any) -> int:
+    if value in (None, ""):
+        return 1
+    parsed = int(value)
+    if parsed < 1:
+        msg = "page must be >= 1"
+        raise ValueError(msg)
+    return parsed
+
+
+def _parse_page_size(value: Any) -> int:
+    if value in (None, ""):
+        return DEFAULT_HTML_SECTION_PAGE_SIZE
+    parsed = int(value)
+    if parsed < 1:
+        msg = "page_size must be >= 1"
+        raise ValueError(msg)
+    return parsed
+
+
 def parse_html_section_worker_count(value: Any) -> int:
     if value in (None, ""):
         return DEFAULT_HTML_SECTION_WORKERS
@@ -261,6 +344,108 @@ def _map_html_files(html_files: list[Path], workers: int, callback: Callable[[Pa
         return [callback(source_file) for source_file in html_files]
     with ThreadPoolExecutor(max_workers=workers) as executor:
         return list(executor.map(callback, html_files))
+
+
+def _iter_html_files(input_directory: Path):
+    for child in sorted(input_directory.iterdir(), key=lambda path: path.name):
+        if child.is_dir():
+            yield from _iter_html_files(child)
+        elif child.is_file() and child.suffix.lower() == ".html":
+            yield child
+
+
+def _collect_html_file_page(input_directory: Path, page: int, page_size: int) -> tuple[list[Path], bool]:
+    start = (page - 1) * page_size
+    stop = start + page_size + 1
+    selected: list[Path] = []
+    for index, source_file in enumerate(_iter_html_files(input_directory)):
+        if index < start:
+            continue
+        if index >= stop:
+            break
+        selected.append(source_file)
+    return selected[:page_size], len(selected) > page_size
+
+
+def _source_document(input_directory: Path, source_file: Path) -> dict[str, str]:
+    return {
+        "source_file": str(source_file),
+        "source_name": source_file.name,
+        "source_relative_path": _relative_source_path(input_directory, source_file),
+    }
+
+
+def _source_document_with_section_count(input_directory: Path, source_file: Path) -> dict[str, str | int]:
+    document: dict[str, str | int] = _source_document(input_directory, source_file)
+    document["section_count"] = len(inspect_content_html_sections(source_file.read_bytes()))
+    return document
+
+
+def _resolve_html_source_file(input_directory_raw: str, source_name_raw: str) -> tuple[Path, Path]:
+    input_directory = Path(input_directory_raw).expanduser().resolve()
+    source_name = source_name_raw.strip()
+    source_file = (input_directory / source_name).resolve()
+    try:
+        source_file.relative_to(input_directory)
+    except ValueError:
+        msg = "HTML source file not found"
+        raise FileNotFoundError(msg)
+    if source_file.suffix.lower() != ".html" or not source_file.is_file():
+        msg = "HTML source file not found"
+        raise FileNotFoundError(msg)
+    return input_directory, source_file
+
+
+def list_disclosure_html_section_sources_payload(body: dict[str, Any]) -> dict[str, Any]:
+    input_directory_raw = str(body.get("input_directory") or "").strip()
+    if not input_directory_raw:
+        msg = "input_directory is required"
+        raise ValueError(msg)
+    input_directory = Path(input_directory_raw).expanduser().resolve()
+    if not input_directory.is_dir():
+        msg = f"input_directory does not exist: {input_directory}"
+        raise ValueError(msg)
+
+    page = _parse_page(body.get("page"))
+    page_size = _parse_page_size(body.get("page_size"))
+    html_files, has_next_page = _collect_html_file_page(input_directory, page, page_size)
+    return {
+        "format": "finiq_disclosure_html_section_source_list_v1",
+        "input_directory": str(input_directory),
+        "summary": {
+            "page": page,
+            "page_size": page_size,
+            "returned_files": len(html_files),
+            "has_next_page": has_next_page,
+        },
+        "documents": [
+            _source_document_with_section_count(input_directory, source_file)
+            for source_file in html_files
+        ],
+    }
+
+
+def split_disclosure_html_section_source_payload(body: dict[str, Any]) -> dict[str, Any]:
+    input_directory, source_file = _resolve_html_source_file(
+        str(body.get("input_directory") or "").strip(),
+        str(body.get("source_name") or ""),
+    )
+    sections = split_content_html_sections(source_file.read_bytes())
+    return {
+        "format": "finiq_disclosure_html_section_source_split_v1",
+        "input_directory": str(input_directory),
+        "document": _source_document(input_directory, source_file),
+        "section_count": len(sections),
+        "sections": [
+            {
+                "toc_id": section.toc_id,
+                "index": section.index,
+                "title": section.title,
+                "html": section.html,
+            }
+            for section in sections
+        ],
+    }
 
 
 def inspect_disclosure_html_sections_payload(

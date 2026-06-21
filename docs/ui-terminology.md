@@ -19,8 +19,12 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Content HTML section workflow | 공시원문 목차 분리 | Navigation/page workflow name. |
 | Content HTML section source load action | 소스 불러오기 | Button/action on `공시원문 목차 분리` that reads the selected HTML folder on demand. Use instead of loading large folders automatically. |
 | Content HTML section folder open action | 폴더 열기 | Button/action that opens a folder and lists individual disclosure HTML files. |
+| Content HTML selected disclosure source view | 원문 보기 | Row action that loads the selected disclosure source and its section review data. |
+| Content HTML selected disclosure split action | 목차 분리 | Button/action that splits the selected disclosure into TOC sections for review. |
+| Content HTML selected disclosure section view | 목차별 보기 | Button/action and result card that split and show the selected disclosure by TOC section. |
 | Content HTML section save action | 목차 저장 | Button/action that splits each HTML file into TOC-specific output folders. |
 | Content HTML individual disclosure table | 개별 공시 | Table listing per-file section lists and source-open actions. |
+| Content HTML individual disclosure section count | 목차 수 | Column showing the number of sections in each listed disclosure. |
 | Content HTML problem file table | 문제 파일 | Table listing files without TOC sections and files that failed to read. |
 | Content HTML problem file setting | 문제 파일 표시 수 | Setting for the maximum combined problem-file rows returned by scan. |
 | Content HTML folder summary row | 폴더 요약 | Row box showing selected-folder file and section counts. |

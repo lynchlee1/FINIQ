@@ -26,6 +26,8 @@ from finiq.market_desk.web.disclosure_html_parse import (
 )
 from finiq.market_desk.web.disclosure_html_sections import (
     inspect_disclosure_html_sections_payload,
+    list_disclosure_html_section_sources_payload,
+    split_disclosure_html_section_source_payload,
 )
 from finiq.market_desk.web.jobs import job_manager
 from finiq.market_desk.web.table_export import build_disclosure_table_payload
@@ -303,6 +305,13 @@ def create_workflows_router(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
+    @router.post("/api/disclosures/html/sections/list")
+    async def list_html_section_sources(payload: dict[str, Any]):
+        try:
+            return list_disclosure_html_section_sources_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     @router.post("/api/disclosures/html/cancel")
     async def cancel_html_job(payload: dict[str, Any]):
         job_id = str(payload.get("job_id") or "").strip()
@@ -328,6 +337,15 @@ def create_workflows_router(
             media_type="text/html; charset=utf-8",
             content_disposition_type="inline",
         )
+
+    @router.post("/api/disclosures/html/sections/source/split")
+    async def split_html_section_source(payload: dict[str, Any]):
+        try:
+            return split_disclosure_html_section_source_payload(payload)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/parse/cancel")
     async def cancel_html_parse_route(payload: dict[str, Any]):

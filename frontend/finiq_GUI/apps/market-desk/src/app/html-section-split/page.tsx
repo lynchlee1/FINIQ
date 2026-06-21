@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FolderOpen, Loader2, Play, Square } from "lucide-react";
+import { Loader2, Play, Square } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { useJobPolling } from "@/hooks/useJobPolling";
@@ -17,7 +17,9 @@ import { formatInteger } from "@/lib/format";
 import {
   HtmlSectionSplitActionDock,
   HtmlSectionSplitResults,
+  type DocumentRow,
   type InspectResult,
+  type SplitResult,
 } from "./_components/HtmlSectionSplitResults";
 
 function statusLabel(status: string) {
@@ -42,10 +44,16 @@ export default function HtmlSectionSplitPage() {
   const [loading, setLoading] = useState(true);
   const [inputDirectory, setInputDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [limit, setLimit] = useState("");
+  const [limit, setLimit] = useState("20");
   const [reportLimit, setReportLimit] = useState("50");
   const [workers, setWorkers] = useState("8");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
+  const [page, setPage] = useState(1);
+  const [selectedDocument, setSelectedDocument] = useState<DocumentRow | null>(null);
+  const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
+  const [splitResult, setSplitResult] = useState<SplitResult | null>(null);
+  const [selectedSectionId, setSelectedSectionId] = useState("");
+  const [isSplitting, setIsSplitting] = useState(false);
   const [isInspecting, setIsInspecting] = useState(false);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -104,6 +112,7 @@ export default function HtmlSectionSplitPage() {
   const documents = inspectResult?.documents || [];
   const problemFiles = inspectResult?.problem_files || [];
   const reviewedInputDirectory = inspectResult?.input_directory || inputDirectory;
+  const hasNextPage = Boolean(inspectResult?.summary?.has_next_page);
   const isJobActive = !!activeJobId;
 
   useEffect(() => {
@@ -129,6 +138,11 @@ export default function HtmlSectionSplitPage() {
     setInputDirectory(value);
     setOutputDirectory(value ? `${value}_sections` : "");
     setInspectResult(null);
+    setPage(1);
+    setSelectedDocument(null);
+    setSelectedSourceUrl("");
+    setSplitResult(null);
+    setSelectedSectionId("");
   };
 
   const folderPathFields: HtmlWorkflowField[] = [
@@ -162,8 +176,7 @@ export default function HtmlSectionSplitPage() {
       kind: "input",
       type: "number",
       label: "최대 표시 파일 수",
-      help: "하위 폴더까지 불러올 HTML 파일 수를 제한합니다.",
-      placeholder: "전체",
+      help: "한 페이지에 표시할 HTML 파일 수입니다.",
       value: limit,
       onChange: setLimit,
       span: 2,
@@ -190,22 +203,40 @@ export default function HtmlSectionSplitPage() {
     },
   ];
 
-  const inspectFolder = async () => {
+  const sourceHtmlUrl = (document: DocumentRow) => {
+    const params = new URLSearchParams({
+      input_directory: reviewedInputDirectory,
+      source_name: document.source_relative_path || document.source_name,
+    });
+    return `/api/disclosures/html/sections/source?${params.toString()}`;
+  };
+
+  const resetSelectedDisclosure = () => {
+    setSelectedDocument(null);
+    setSelectedSourceUrl("");
+    setSplitResult(null);
+    setSelectedSectionId("");
+  };
+
+  const loadSourcePage = async (targetPage: number) => {
     if (!inputDirectory) {
       setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
+    inspectAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    inspectAbortControllerRef.current = abortController;
     setIsInspecting(true);
     try {
-      const response = await fetch("/api/disclosures/html/sections/inspect/start", {
+      const response = await fetch("/api/disclosures/html/sections/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           input_directory: inputDirectory,
-          limit: parseOptionalNumber(limit),
-          report_limit: Number(reportLimit || 50),
-          workers: parseOptionalNumber(workers),
+          page: targetPage,
+          page_size: Number(limit || 20),
         }),
       });
       if (!response.ok) {
@@ -213,13 +244,84 @@ export default function HtmlSectionSplitPage() {
         throw new Error(payload?.detail || "폴더 열기에 실패했습니다.");
       }
       const data = await response.json();
-      startPolling(data.job_id);
+      setInspectResult(data);
+      setPage(targetPage);
+      resetSelectedDisclosure();
+      setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.returned_files || 0)}개 공시`);
+      setIsErrorStatus(false);
     } catch (err: any) {
+      if (err?.name === "AbortError") {
+        return;
+      }
       setStatus(errorMessage(err));
       setIsErrorStatus(true);
       setIsInspecting(false);
       setInspectResult(null);
+      resetSelectedDisclosure();
+    } finally {
+      if (inspectAbortControllerRef.current === abortController) {
+        inspectAbortControllerRef.current = null;
+      }
+      setIsInspecting(false);
     }
+  };
+
+  const inspectFolder = () => {
+    loadSourcePage(1);
+  };
+
+  const handlePreviousPage = () => {
+    if (page > 1) {
+      loadSourcePage(page - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (hasNextPage) {
+      loadSourcePage(page + 1);
+    }
+  };
+
+  const selectDocument = (document: DocumentRow) => {
+    setSelectedDocument(document);
+    setSelectedSourceUrl(sourceHtmlUrl(document));
+    setSplitResult(null);
+    setSelectedSectionId("");
+  };
+
+  const splitDocument = async (document: DocumentRow) => {
+    setIsSplitting(true);
+    try {
+      const response = await fetch("/api/disclosures/html/sections/source/split", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input_directory: reviewedInputDirectory,
+          source_name: document.source_relative_path || document.source_name,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.detail || "목차 분리에 실패했습니다.");
+      }
+      const data = await response.json();
+      setSplitResult(data);
+      setSelectedSectionId(data.sections?.[0]?.toc_id || "");
+      setStatus(`목차 분리 완료: ${formatInteger(data.section_count || 0)}개 목차`);
+      setIsErrorStatus(false);
+    } catch (err: any) {
+      setStatus(errorMessage(err));
+      setIsErrorStatus(true);
+      setSplitResult(null);
+      setSelectedSectionId("");
+    } finally {
+      setIsSplitting(false);
+    }
+  };
+
+  const handleViewSections = (document: DocumentRow) => {
+    selectDocument(document);
+    void splitDocument(document);
   };
 
   const cancelInspectFolder = () => {
@@ -281,14 +383,24 @@ export default function HtmlSectionSplitPage() {
             inputDirectory={reviewedInputDirectory}
             documents={documents}
             problemFiles={problemFiles}
+            page={page}
+            hasNextPage={hasNextPage}
+            selectedDocument={selectedDocument}
+            selectedSourceUrl={selectedSourceUrl}
+            splitResult={splitResult}
+            selectedSectionId={selectedSectionId}
+            isInspecting={isInspecting}
+            isSourceLoadDisabled={isInspecting || isJobActive}
+            isSplitting={isSplitting}
+            onInspectFolder={inspectFolder}
+            onViewSections={handleViewSections}
+            onPreviousPage={handlePreviousPage}
+            onNextPage={handleNextPage}
+            onSelectSection={setSelectedSectionId}
           />
 
           <HtmlWorkflowCard title="작업 실행">
-            <div className="grid gap-3 md:grid-cols-3">
-              <Button variant="outline" className="h-10 w-full" onClick={inspectFolder} disabled={isInspecting || isJobActive}>
-                {isInspecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
-                소스 불러오기
-              </Button>
+            <div className="grid gap-3 md:grid-cols-2">
               <Button className="h-10 w-full" onClick={startSave} disabled={isJobActive || isInspecting}>
                 {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                 실행
