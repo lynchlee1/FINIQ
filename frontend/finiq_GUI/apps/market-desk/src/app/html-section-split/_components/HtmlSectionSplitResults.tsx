@@ -36,6 +36,8 @@ export type SplitResult = {
   sections: SplitSection[];
 };
 
+export type ReviewView = "source" | "sections";
+
 export type ProblemFile = {
   kind: "read_failed" | "no_sections";
   source_file: string;
@@ -69,11 +71,14 @@ type HtmlSectionSplitResultsProps = {
   selectedSourceUrl: string;
   splitResult: SplitResult | null;
   selectedSectionId: string;
+  activeReviewView: ReviewView;
   isInspecting: boolean;
   isSourceLoadDisabled: boolean;
   isSplitting: boolean;
   onInspectFolder: () => void;
+  onViewSource: (document: DocumentRow) => void;
   onViewSections: (document: DocumentRow) => void;
+  onChangeReviewView: (view: ReviewView) => void;
   onPreviousPage: () => void;
   onNextPage: () => void;
   onSelectSection: (tocId: string) => void;
@@ -118,59 +123,158 @@ export function HtmlSectionSplitResults({
   selectedSourceUrl,
   splitResult,
   selectedSectionId,
+  activeReviewView,
   isInspecting,
   isSourceLoadDisabled,
   isSplitting,
   onInspectFolder,
+  onViewSource,
   onViewSections,
+  onChangeReviewView,
   onPreviousPage,
   onNextPage,
   onSelectSection,
 }: HtmlSectionSplitResultsProps) {
-  const sourcePanelRef = useRef<HTMLDivElement | null>(null);
-  const sectionPanelRef = useRef<HTMLDivElement | null>(null);
+  const reviewPanelRef = useRef<HTMLDivElement | null>(null);
   const selectedSection = splitResult?.sections.find((section) => section.toc_id === selectedSectionId) || splitResult?.sections[0] || null;
 
-  const scrollToSourcePanel = useCallback(() => {
+  const scrollToReviewPanel = useCallback(() => {
     window.requestAnimationFrame(() => {
-      sourcePanelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
-  }, []);
-
-  const scrollToSectionPanel = useCallback(() => {
-    window.requestAnimationFrame(() => {
-      sectionPanelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+      reviewPanelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, []);
 
   useEffect(() => {
     if (selectedDocument) {
-      scrollToSourcePanel();
+      scrollToReviewPanel();
     }
-  }, [scrollToSourcePanel, selectedDocument?.source_file]);
+  }, [scrollToReviewPanel, selectedDocument?.source_file]);
 
-  const reviewPanelActions = (activePanel: "source" | "sections") => (
+  const reviewPanelActions = (
     <div className="inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
       <Button
         type="button"
-        variant={activePanel === "source" ? "default" : "ghost"}
+        variant={activeReviewView === "source" ? "default" : "ghost"}
         size="sm"
         className="h-8"
-        onClick={scrollToSourcePanel}
+        onClick={() => onChangeReviewView("source")}
+        disabled={!selectedDocument}
       >
         공시 원문
       </Button>
       <Button
         type="button"
-        variant={activePanel === "sections" ? "default" : "ghost"}
+        variant={activeReviewView === "sections" ? "default" : "ghost"}
         size="sm"
         className="h-8"
-        onClick={scrollToSectionPanel}
+        onClick={() => onChangeReviewView("sections")}
+        disabled={!selectedDocument}
       >
         목차별 보기
       </Button>
     </div>
   );
+
+  const rowReviewActions = (item: DocumentRow, isSelected: boolean) => (
+    <div className="inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+      <Button
+        type="button"
+        variant={isSelected && activeReviewView === "source" ? "default" : "ghost"}
+        size="sm"
+        className="h-8"
+        onClick={() => {
+          onViewSource(item);
+          scrollToReviewPanel();
+        }}
+        disabled={isSplitting && isSelected}
+      >
+        {isSplitting && isSelected && activeReviewView === "source" ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+        원문 보기
+      </Button>
+      <Button
+        type="button"
+        variant={isSelected && activeReviewView === "sections" ? "default" : "ghost"}
+        size="sm"
+        className="h-8"
+        onClick={() => {
+          onViewSections(item);
+          scrollToReviewPanel();
+        }}
+        disabled={isSplitting && isSelected}
+      >
+        {isSplitting && isSelected && activeReviewView === "sections" ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+        목차별 보기
+      </Button>
+    </div>
+  );
+
+  const renderReviewContent = () => {
+    if (!selectedDocument) {
+      return (
+        <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+          개별 공시에서 원문 보기 또는 목차별 보기를 선택하세요.
+        </div>
+      );
+    }
+
+    if (activeReviewView === "source") {
+      return (
+        <iframe
+          className="h-[560px] w-full rounded-md border border-slate-200 bg-white dark:border-[#30363d]"
+          src={selectedSourceUrl || sourceHtmlUrl(inputDirectory, selectedDocument)}
+          title="공시 원문"
+        />
+      );
+    }
+
+    if (isSplitting && !splitResult) {
+      return (
+        <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+          목차를 불러오는 중입니다.
+        </div>
+      );
+    }
+
+    if (!splitResult) {
+      return (
+        <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+          이 공시의 목차 데이터를 아직 불러오지 못했습니다.
+        </div>
+      );
+    }
+
+    if (!splitResult.sections.length) {
+      return (
+        <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+          이 공시에서 분리할 목차를 찾지 못했습니다.
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className="flex flex-wrap gap-1.5">
+          {splitResult.sections.map((section) => (
+            <Button
+              key={section.toc_id}
+              type="button"
+              variant={section.toc_id === selectedSection?.toc_id ? "default" : "outline"}
+              size="sm"
+              onClick={() => onSelectSection(section.toc_id)}
+            >
+              <span className="font-mono">{section.toc_id}</span>
+              {section.title ? <span className="ml-1">{section.title}</span> : null}
+            </Button>
+          ))}
+        </div>
+        <iframe
+          className="h-[560px] w-full rounded-md border border-slate-200 bg-white dark:border-[#30363d]"
+          srcDoc={selectedSection?.html || ""}
+          title="목차별 보기"
+        />
+      </>
+    );
+  };
 
   return (
     <>
@@ -201,7 +305,7 @@ export function HtmlSectionSplitResults({
                 <tr>
                   <th className="px-3 py-2 font-semibold">공시 파일</th>
                   <th className="w-24 px-3 py-2 text-right font-semibold">목차 수</th>
-                  <th className="w-48 px-3 py-2 font-semibold">확인</th>
+                  <th className="w-64 px-3 py-2 text-center font-semibold">보기</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-[#30363d]">
@@ -216,18 +320,8 @@ export function HtmlSectionSplitResults({
                       <td className="px-3 py-3 text-right align-middle tabular-nums text-slate-700 dark:text-slate-300">
                         {formatInteger(item.section_count || 0)}
                       </td>
-                      <td className="px-3 py-3 align-middle">
-                        <div className="flex flex-col items-center gap-2 sm:flex-row">
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => onViewSections(item)}
-                            disabled={isSplitting}
-                          >
-                            {isSplitting && isSelected ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                            원문 보기
-                          </Button>
-                        </div>
+                      <td className="px-3 py-3 text-center align-middle">
+                        {rowReviewActions(item, isSelected)}
                       </td>
                     </tr>
                   );
@@ -242,65 +336,19 @@ export function HtmlSectionSplitResults({
         )}
       </HtmlWorkflowCard>
 
-      <div ref={sourcePanelRef}>
+      <div ref={reviewPanelRef}>
         <HtmlWorkflowCard
-          title="공시 원문"
-          description={selectedDocument ? selectedDocument.source_relative_path || selectedDocument.source_name : "공시 파일을 선택하세요."}
-          actions={reviewPanelActions("source")}
+          title={activeReviewView === "source" ? "공시 원문" : "목차별 보기"}
+          description={
+            selectedDocument
+              ? activeReviewView === "sections" && splitResult
+                ? `${selectedDocument.source_relative_path || selectedDocument.source_name} - ${formatInteger(splitResult.section_count)}개 목차`
+                : selectedDocument.source_relative_path || selectedDocument.source_name
+              : "공시 파일을 선택하세요."
+          }
+          actions={reviewPanelActions}
         >
-          {selectedDocument ? (
-            <iframe
-              className="h-[560px] w-full rounded-md border border-slate-200 bg-white dark:border-[#30363d]"
-              src={selectedSourceUrl || sourceHtmlUrl(inputDirectory, selectedDocument)}
-              title="공시 원문"
-            />
-          ) : (
-            <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
-              공시 파일을 선택하면 원문이 표시됩니다.
-            </div>
-          )}
-        </HtmlWorkflowCard>
-      </div>
-
-      <div ref={sectionPanelRef}>
-        <HtmlWorkflowCard
-          title="목차별 보기"
-          description={splitResult ? `${formatInteger(splitResult.section_count)}개 목차를 확인합니다.` : "목차별 보기를 실행하세요."}
-          actions={reviewPanelActions("sections")}
-        >
-          {splitResult ? (
-            splitResult.sections.length ? (
-              <>
-                <div className="flex flex-wrap gap-1.5">
-                  {splitResult.sections.map((section) => (
-                    <Button
-                      key={section.toc_id}
-                      type="button"
-                      variant={section.toc_id === selectedSection?.toc_id ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => onSelectSection(section.toc_id)}
-                    >
-                      <span className="font-mono">{section.toc_id}</span>
-                      {section.title ? <span className="ml-1">{section.title}</span> : null}
-                    </Button>
-                  ))}
-                </div>
-                <iframe
-                  className="h-[560px] w-full rounded-md border border-slate-200 bg-white dark:border-[#30363d]"
-                  srcDoc={selectedSection?.html || ""}
-                  title="목차별 보기"
-                />
-              </>
-            ) : (
-              <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
-                이 공시에서 분리할 목차를 찾지 못했습니다.
-              </div>
-            )
-          ) : (
-            <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
-              목차별 보기를 실행하면 분리된 목차가 표시됩니다.
-            </div>
-          )}
+          {renderReviewContent()}
         </HtmlWorkflowCard>
       </div>
 

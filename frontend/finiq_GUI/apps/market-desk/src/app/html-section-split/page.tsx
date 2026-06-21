@@ -19,6 +19,7 @@ import {
   HtmlSectionSplitResults,
   type DocumentRow,
   type InspectResult,
+  type ReviewView,
   type SplitResult,
 } from "./_components/HtmlSectionSplitResults";
 
@@ -53,6 +54,7 @@ export default function HtmlSectionSplitPage() {
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
   const [splitResult, setSplitResult] = useState<SplitResult | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState("");
+  const [activeReviewView, setActiveReviewView] = useState<ReviewView>("source");
   const [isSplitting, setIsSplitting] = useState(false);
   const [isInspecting, setIsInspecting] = useState(false);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
@@ -143,6 +145,7 @@ export default function HtmlSectionSplitPage() {
     setSelectedSourceUrl("");
     setSplitResult(null);
     setSelectedSectionId("");
+    setActiveReviewView("source");
   };
 
   const folderPathFields: HtmlWorkflowField[] = [
@@ -216,6 +219,7 @@ export default function HtmlSectionSplitPage() {
     setSelectedSourceUrl("");
     setSplitResult(null);
     setSelectedSectionId("");
+    setActiveReviewView("source");
   };
 
   const loadSourcePage = async (targetPage: number) => {
@@ -282,11 +286,12 @@ export default function HtmlSectionSplitPage() {
     }
   };
 
-  const selectDocument = (document: DocumentRow) => {
+  const selectDocument = (document: DocumentRow, view: ReviewView) => {
     setSelectedDocument(document);
     setSelectedSourceUrl(sourceHtmlUrl(document));
     setSplitResult(null);
     setSelectedSectionId("");
+    setActiveReviewView(view);
   };
 
   const splitDocument = async (document: DocumentRow) => {
@@ -307,7 +312,7 @@ export default function HtmlSectionSplitPage() {
       const data = await response.json();
       setSplitResult(data);
       setSelectedSectionId(data.sections?.[0]?.toc_id || "");
-      setStatus(`목차 분리 완료: ${formatInteger(data.section_count || 0)}개 목차`);
+      setStatus(`목차 로딩 완료: ${formatInteger(data.section_count || 0)}개 목차`);
       setIsErrorStatus(false);
     } catch (err: any) {
       setStatus(errorMessage(err));
@@ -319,9 +324,17 @@ export default function HtmlSectionSplitPage() {
     }
   };
 
-  const handleViewSections = (document: DocumentRow) => {
-    selectDocument(document);
+  const openDocument = (document: DocumentRow, view: ReviewView) => {
+    selectDocument(document, view);
     void splitDocument(document);
+  };
+
+  const handleViewSource = (document: DocumentRow) => {
+    openDocument(document, "source");
+  };
+
+  const handleViewSections = (document: DocumentRow) => {
+    openDocument(document, "sections");
   };
 
   const cancelInspectFolder = () => {
@@ -389,11 +402,14 @@ export default function HtmlSectionSplitPage() {
             selectedSourceUrl={selectedSourceUrl}
             splitResult={splitResult}
             selectedSectionId={selectedSectionId}
+            activeReviewView={activeReviewView}
             isInspecting={isInspecting}
             isSourceLoadDisabled={isInspecting || isJobActive}
             isSplitting={isSplitting}
             onInspectFolder={inspectFolder}
+            onViewSource={handleViewSource}
             onViewSections={handleViewSections}
+            onChangeReviewView={setActiveReviewView}
             onPreviousPage={handlePreviousPage}
             onNextPage={handleNextPage}
             onSelectSection={setSelectedSectionId}
