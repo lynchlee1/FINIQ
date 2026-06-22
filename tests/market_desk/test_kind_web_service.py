@@ -2489,7 +2489,14 @@ def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) 
     toc_1_html = (output_directory / "toc_1" / "20260422000832.html").read_text(encoding="utf-8")
     toc_2_html = (output_directory / "toc_2" / "20260422000832.html").read_text(encoding="utf-8")
 
-    assert payload["summary"] == {"found_files": 1, "saved_files": 2, "skipped_files": 0}
+    assert payload["summary"] == {
+        "found_files": 1,
+        "saved_files": 2,
+        "skipped_files": 0,
+        "expected_files": 2,
+        "integrity_ok": True,
+        "missing_files": 0,
+    }
     assert "주요사항보고서" in toc_1_html
     assert "표지 내용" in toc_1_html
     assert "전환사채권 발행결정" not in toc_1_html
@@ -2525,7 +2532,14 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
         }
     )
 
-    assert payload["summary"] == {"found_files": 2, "saved_files": 2, "skipped_files": 1}
+    assert payload["summary"] == {
+        "found_files": 2,
+        "saved_files": 2,
+        "skipped_files": 1,
+        "expected_files": 2,
+        "integrity_ok": True,
+        "missing_files": 0,
+    }
     assert (output_directory / "toc_1" / "20260422000832.html").is_file()
     assert (output_directory / "toc_2" / "20260422000832.html").is_file()
     assert payload["skipped_files"] == [
@@ -2668,9 +2682,68 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
         "unique_kinds": 2,
     }
     assert payload["items"] == [
-        {"signature": "toc_1 1 toc_2 2", "count": 2, "section_count": 2},
-        {"signature": "toc_1 1", "count": 1, "section_count": 1},
+        {
+            "signature": "toc_1 1 toc_2 2",
+            "count": 2,
+            "section_count": 2,
+            "sections": [
+                {"toc_id": "toc_1", "index": 1, "title": "1"},
+                {"toc_id": "toc_2", "index": 2, "title": "2"},
+            ],
+        },
+        {
+            "signature": "toc_1 1",
+            "count": 1,
+            "section_count": 1,
+            "sections": [{"toc_id": "toc_1", "index": 1, "title": "1"}],
+        },
     ]
+
+
+def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_rule(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    (input_directory / "20260401000001.html").write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>1</p></h2>
+          <p>표지</p>
+          <h2 id="toc_2"><p>2</p></h2>
+          <p>본문</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    (input_directory / "20260402000001.html").write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>단독</p></h2>
+          <p>단독 본문</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
+        }
+    )
+
+    assert payload["summary"] == {
+        "found_files": 2,
+        "saved_files": 2,
+        "skipped_files": 0,
+        "expected_files": 2,
+        "integrity_ok": True,
+        "missing_files": 0,
+    }
+    assert (output_directory / "toc_1" / "20260401000001.html").is_file()
+    assert not (output_directory / "toc_2" / "20260401000001.html").exists()
+    assert (output_directory / "toc_1" / "20260402000001.html").is_file()
 
 
 def test_split_disclosure_html_section_source_payload_splits_one_selected_file(tmp_path: Path) -> None:
@@ -3765,28 +3838,34 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "RefreshCw" not in section_split_ui_html
     assert "startSave" in section_split_ui_html
     assert "Play" in section_split_ui_html
+    assert "저장 대상" in section_split_ui_html
+    assert "누락 파일" in section_split_ui_html
     assert "UI_TEXT.actions.cancelJob" in section_split_ui_html
     assert "폴더 요약" not in section_split_ui_html
     assert "개별 공시" in section_split_ui_html
     assert "목차 수" in section_split_ui_html
-    assert "목차 종류 보기" in section_split_ui_html
+    assert "목차 조합 모아보기" in section_split_ui_html
     assert "불러오기" in section_split_ui_html
-    assert "sectionKindItems" in section_split_ui_html
-    assert "maxKindCount" in section_split_ui_html
+    assert "sectionPatterns" in section_split_ui_html
+    assert "maxSectionPatternCount" in section_split_ui_html
+    assert "section_save_rules" in section_split_ui_html
+    assert "selectedPatternTocIds" in section_split_ui_html
+    assert "onTogglePatternSection" in section_split_ui_html
+    assert "저장할 목차" in section_split_ui_html
+    assert "limit: parseOptionalNumber(limit)" not in section_split_page_html
     assert "align-middle" in section_split_results_component_html
-    assert "flex flex-col items-center gap-2 sm:flex-row" in section_split_results_component_html
     assert "원문 보기" in section_split_ui_html
     assert "공시 열기" not in section_split_ui_html
     assert "이전" in section_split_ui_html
     assert "다음" in section_split_ui_html
     assert "목차별 보기" in section_split_ui_html
-    assert "sectionPanelRef" in section_split_results_component_html
-    assert "scrollToSectionPanel" in section_split_results_component_html
+    assert "reviewPanelRef" in section_split_results_component_html
+    assert "scrollToReviewPanel" in section_split_results_component_html
     assert "inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]" in section_split_results_component_html
-    assert "activePanel === \"source\" ? \"default\" : \"ghost\"" in section_split_results_component_html
-    assert "activePanel === \"sections\" ? \"default\" : \"ghost\"" in section_split_results_component_html
-    assert "공시 파일을 선택하면 원문이 표시됩니다." in section_split_ui_html
-    assert "목차별 보기를 실행하면 분리된 목차가 표시됩니다." in section_split_ui_html
+    assert "activeReviewView === \"source\" ? \"default\" : \"ghost\"" in section_split_results_component_html
+    assert "activeReviewView === \"sections\" ? \"default\" : \"ghost\"" in section_split_results_component_html
+    assert "개별 공시에서 원문 보기 또는 목차별 보기를 선택하세요." in section_split_ui_html
+    assert "이 공시의 목차 데이터를 아직 불러오지 못했습니다." in section_split_ui_html
     assert "onSplitSelected" not in section_split_ui_html
     assert "페이지에서 최대" not in section_split_ui_html
     assert "scrollIntoView" in section_split_ui_html

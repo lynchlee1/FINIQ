@@ -707,8 +707,21 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
     data = response.json()
     assert data["format"] == "finiq_disclosure_html_section_kind_summary_v1"
     assert data["items"] == [
-        {"signature": "toc_1 1 toc_2 2", "count": 2, "section_count": 2},
-        {"signature": "toc_1 1", "count": 1, "section_count": 1},
+        {
+            "signature": "toc_1 1 toc_2 2",
+            "count": 2,
+            "section_count": 2,
+            "sections": [
+                {"toc_id": "toc_1", "index": 1, "title": "1"},
+                {"toc_id": "toc_2", "index": 2, "title": "2"},
+            ],
+        },
+        {
+            "signature": "toc_1 1",
+            "count": 1,
+            "section_count": 1,
+            "sections": [{"toc_id": "toc_1", "index": 1, "title": "1"}],
+        },
     ]
 
 
@@ -834,9 +847,67 @@ def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) ->
 
     assert snapshot is not None
     assert snapshot["status"] == "completed"
-    assert snapshot["result"]["summary"] == {"found_files": 1, "saved_files": 2, "skipped_files": 0}
+    assert snapshot["result"]["summary"] == {
+        "found_files": 1,
+        "saved_files": 2,
+        "skipped_files": 0,
+        "expected_files": 2,
+        "integrity_ok": True,
+        "missing_files": 0,
+    }
     assert (output_directory / "toc_1" / "20260422000832.html").is_file()
     assert (output_directory / "toc_2" / "20260422000832.html").is_file()
+
+
+def test_html_section_save_start_route_applies_pattern_toc_selection(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    (input_directory / "20260422000832.html").write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+          <p>표지 내용</p>
+          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <p>발행금액 250,000,000</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/html/sections/save/start",
+        json={
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 주요사항보고서 toc_2 전환사채권 발행결정": ["toc_1"]},
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    snapshot = None
+    for _ in range(20):
+        status_response = client.get(f"/api/disclosures/html/jobs/{job_id}")
+        assert status_response.status_code == 200
+        snapshot = status_response.json()
+        if snapshot["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    assert snapshot is not None
+    assert snapshot["status"] == "completed"
+    assert snapshot["result"]["summary"] == {
+        "found_files": 1,
+        "saved_files": 1,
+        "skipped_files": 0,
+        "expected_files": 1,
+        "integrity_ok": True,
+        "missing_files": 0,
+    }
+    assert (output_directory / "toc_1" / "20260422000832.html").is_file()
+    assert not (output_directory / "toc_2" / "20260422000832.html").exists()
 
 
 def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> None:
