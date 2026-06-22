@@ -20,6 +20,7 @@ import {
   type DocumentRow,
   type InspectResult,
   type ReviewView,
+  type SectionPattern,
   type SplitResult,
 } from "./_components/HtmlSectionSplitResults";
 
@@ -40,6 +41,24 @@ function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : String(err);
 }
 
+function waitForPollingInterval(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timeoutId = window.setTimeout(resolve, 1000);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timeoutId);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
+
 export default function HtmlSectionSplitPage() {
   const { fetchSettings } = useSettingsStore();
   const [loading, setLoading] = useState(true);
@@ -49,6 +68,7 @@ export default function HtmlSectionSplitPage() {
   const [reportLimit, setReportLimit] = useState("50");
   const [workers, setWorkers] = useState("8");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
+  const [sectionPatterns, setSectionPatterns] = useState<SectionPattern[]>([]);
   const [page, setPage] = useState(1);
   const [selectedDocument, setSelectedDocument] = useState<DocumentRow | null>(null);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
@@ -57,7 +77,9 @@ export default function HtmlSectionSplitPage() {
   const [activeReviewView, setActiveReviewView] = useState<ReviewView>("source");
   const [isSplitting, setIsSplitting] = useState(false);
   const [isInspecting, setIsInspecting] = useState(false);
+  const [isLoadingSectionPatterns, setIsLoadingSectionPatterns] = useState(false);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
+  const sectionPatternAbortControllerRef = useRef<AbortController | null>(null);
 
   const formatStatus = useCallback((data: any) => {
     const res = data.result || {};
@@ -133,13 +155,18 @@ export default function HtmlSectionSplitPage() {
   useEffect(() => {
     return () => {
       inspectAbortControllerRef.current?.abort();
+      sectionPatternAbortControllerRef.current?.abort();
     };
   }, []);
 
   const handleInputDirectoryChange = (value: string) => {
+    sectionPatternAbortControllerRef.current?.abort();
+    sectionPatternAbortControllerRef.current = null;
     setInputDirectory(value);
     setOutputDirectory(value ? `${value}_sections` : "");
     setInspectResult(null);
+    setSectionPatterns([]);
+    setIsLoadingSectionPatterns(false);
     setPage(1);
     setSelectedDocument(null);
     setSelectedSourceUrl("");
@@ -222,7 +249,76 @@ export default function HtmlSectionSplitPage() {
     setActiveReviewView("source");
   };
 
-  const loadSourcePage = async (targetPage: number) => {
+  const loadSectionPatterns = async (targetInputDirectory: string) => {
+    sectionPatternAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    sectionPatternAbortControllerRef.current = abortController;
+    setIsLoadingSectionPatterns(true);
+    setSectionPatterns([]);
+    let jobId = "";
+    try {
+      const startResponse = await fetch("/api/disclosures/html/sections/kinds/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          input_directory: targetInputDirectory,
+        }),
+      });
+      if (!startResponse.ok) {
+        const payload = await startResponse.json().catch(() => null);
+        throw new Error(payload?.detail || "목차 조합 모아보기에 실패했습니다.");
+      }
+      const startPayload = await startResponse.json();
+      jobId = String(startPayload.job_id || "");
+      if (!jobId) {
+        throw new Error("목차 조합 작업 ID를 받지 못했습니다.");
+      }
+
+      while (!abortController.signal.aborted) {
+        const jobResponse = await fetch(`/api/disclosures/html/jobs/${jobId}`, {
+          signal: abortController.signal,
+        });
+        if (!jobResponse.ok) {
+          const payload = await jobResponse.json().catch(() => null);
+          throw new Error(payload?.detail || "목차 조합 작업 상태를 불러오지 못했습니다.");
+        }
+        const snapshot = await jobResponse.json();
+        if (snapshot.status === "completed") {
+          setSectionPatterns(snapshot.result?.items || []);
+          return;
+        }
+        if (snapshot.status === "failed") {
+          throw new Error(snapshot.error || "목차 조합 모아보기에 실패했습니다.");
+        }
+        if (snapshot.status === "cancelled") {
+          return;
+        }
+        await waitForPollingInterval(abortController.signal);
+      }
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        if (jobId) {
+          fetch("/api/disclosures/html/cancel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ job_id: jobId }),
+          }).catch(() => undefined);
+        }
+      } else {
+        setStatus(errorMessage(err));
+        setIsErrorStatus(true);
+        setSectionPatterns([]);
+      }
+    } finally {
+      if (sectionPatternAbortControllerRef.current === abortController) {
+        sectionPatternAbortControllerRef.current = null;
+        setIsLoadingSectionPatterns(false);
+      }
+    }
+  };
+
+  const loadSourcePage = async (targetPage: number, options: { refreshSectionPatterns?: boolean } = {}) => {
     if (!inputDirectory) {
       setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
@@ -232,6 +328,12 @@ export default function HtmlSectionSplitPage() {
     const abortController = new AbortController();
     inspectAbortControllerRef.current = abortController;
     setIsInspecting(true);
+    if (options.refreshSectionPatterns) {
+      sectionPatternAbortControllerRef.current?.abort();
+      sectionPatternAbortControllerRef.current = null;
+      setSectionPatterns([]);
+      setIsLoadingSectionPatterns(false);
+    }
     try {
       const response = await fetch("/api/disclosures/html/sections/list", {
         method: "POST",
@@ -253,6 +355,11 @@ export default function HtmlSectionSplitPage() {
       resetSelectedDisclosure();
       setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.returned_files || 0)}개 공시`);
       setIsErrorStatus(false);
+      if (options.refreshSectionPatterns) {
+        window.requestAnimationFrame(() => {
+          void loadSectionPatterns(data.input_directory || inputDirectory);
+        });
+      }
     } catch (err: any) {
       if (err?.name === "AbortError") {
         return;
@@ -261,6 +368,10 @@ export default function HtmlSectionSplitPage() {
       setIsErrorStatus(true);
       setIsInspecting(false);
       setInspectResult(null);
+      if (options.refreshSectionPatterns) {
+        setSectionPatterns([]);
+        setIsLoadingSectionPatterns(false);
+      }
       resetSelectedDisclosure();
     } finally {
       if (inspectAbortControllerRef.current === abortController) {
@@ -271,7 +382,7 @@ export default function HtmlSectionSplitPage() {
   };
 
   const inspectFolder = () => {
-    loadSourcePage(1);
+    loadSourcePage(1, { refreshSectionPatterns: true });
   };
 
   const handlePreviousPage = () => {
@@ -340,6 +451,9 @@ export default function HtmlSectionSplitPage() {
   const cancelInspectFolder = () => {
     inspectAbortControllerRef.current?.abort();
     inspectAbortControllerRef.current = null;
+    sectionPatternAbortControllerRef.current?.abort();
+    sectionPatternAbortControllerRef.current = null;
+    setIsLoadingSectionPatterns(false);
     cancelJob();
     setStatus("소스 불러오기 중단을 요청했습니다.");
     setIsErrorStatus(false);
@@ -396,6 +510,8 @@ export default function HtmlSectionSplitPage() {
             inputDirectory={reviewedInputDirectory}
             documents={documents}
             problemFiles={problemFiles}
+            sectionPatterns={sectionPatterns}
+            isLoadingSectionPatterns={isLoadingSectionPatterns}
             page={page}
             hasNextPage={hasNextPage}
             selectedDocument={selectedDocument}

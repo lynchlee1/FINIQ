@@ -375,10 +375,54 @@ def _source_document(input_directory: Path, source_file: Path) -> dict[str, str]
     }
 
 
+def _source_document_with_sections(input_directory: Path, source_file: Path) -> dict[str, Any]:
+    sections = inspect_content_html_sections(source_file.read_bytes())
+    return {
+        **_source_document(input_directory, source_file),
+        "section_count": len(sections),
+        "sections": [
+            {"toc_id": section.toc_id, "index": section.index, "title": section.title}
+            for section in sections
+        ],
+    }
+
+
 def _source_document_with_section_count(input_directory: Path, source_file: Path) -> dict[str, str | int]:
-    document: dict[str, str | int] = _source_document(input_directory, source_file)
-    document["section_count"] = len(inspect_content_html_sections(source_file.read_bytes()))
-    return document
+    document = _source_document_with_sections(input_directory, source_file)
+    return {
+        "source_file": str(document["source_file"]),
+        "source_name": str(document["source_name"]),
+        "source_relative_path": str(document["source_relative_path"]),
+        "section_count": int(document["section_count"]),
+    }
+
+
+def _section_signature(sections: list[dict[str, Any]]) -> str:
+    return " ".join(
+        " ".join(part for part in [str(section.get("toc_id") or ""), str(section.get("title") or "")] if part).strip()
+        for section in sections
+    ).strip()
+
+
+def _section_patterns(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: dict[str, dict[str, Any]] = {}
+    for document in documents:
+        sections = list(document.get("sections") or [])
+        if not sections:
+            continue
+        signature = _section_signature(sections)
+        if not signature:
+            continue
+        item = counts.setdefault(
+            signature,
+            {
+                "signature": signature,
+                "count": 0,
+                "section_count": len(sections),
+            },
+        )
+        item["count"] += 1
+    return sorted(counts.values(), key=lambda item: (-int(item["count"]), int(item["section_count"]), str(item["signature"])))
 
 
 def _resolve_html_source_file(input_directory_raw: str, source_name_raw: str) -> tuple[Path, Path]:
@@ -409,6 +453,19 @@ def list_disclosure_html_section_sources_payload(body: dict[str, Any]) -> dict[s
     page = _parse_page(body.get("page"))
     page_size = _parse_page_size(body.get("page_size"))
     html_files, has_next_page = _collect_html_file_page(input_directory, page, page_size)
+    documents_with_sections = [
+        _source_document_with_sections(input_directory, source_file)
+        for source_file in html_files
+    ]
+    documents = [
+        {
+            "source_file": str(document["source_file"]),
+            "source_name": str(document["source_name"]),
+            "source_relative_path": str(document["source_relative_path"]),
+            "section_count": int(document["section_count"]),
+        }
+        for document in documents_with_sections
+    ]
     return {
         "format": "finiq_disclosure_html_section_source_list_v1",
         "input_directory": str(input_directory),
@@ -418,10 +475,58 @@ def list_disclosure_html_section_sources_payload(body: dict[str, Any]) -> dict[s
             "returned_files": len(html_files),
             "has_next_page": has_next_page,
         },
-        "documents": [
-            _source_document_with_section_count(input_directory, source_file)
-            for source_file in html_files
-        ],
+        "documents": documents,
+        "section_patterns": _section_patterns(documents_with_sections),
+    }
+
+
+def summarize_disclosure_html_section_kinds_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    input_directory_raw = str(body.get("input_directory") or "").strip()
+    if not input_directory_raw:
+        msg = "input_directory is required"
+        raise ValueError(msg)
+    input_directory = Path(input_directory_raw).expanduser().resolve()
+    if not input_directory.is_dir():
+        msg = f"input_directory does not exist: {input_directory}"
+        raise ValueError(msg)
+
+    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    if progress_callback is not None:
+        progress_callback(f"목차 조합 확인 대상 HTML {len(html_files)}건을 찾았습니다.")
+    documents: list[dict[str, Any]] = []
+    files_without_sections = 0
+    failed_files = 0
+    for index, source_file in enumerate(html_files, start=1):
+        if cancel_check is not None and cancel_check():
+            return {"cancelled": True}
+        try:
+            document = _source_document_with_sections(input_directory, source_file)
+        except Exception:
+            failed_files += 1
+            continue
+        if int(document["section_count"]) <= 0:
+            files_without_sections += 1
+            continue
+        documents.append(document)
+        if progress_callback is not None and (index == 1 or index == len(html_files) or index % 100 == 0):
+            progress_callback(f"목차 조합 확인 중: {index}/{len(html_files)}건 처리.")
+
+    items = _section_patterns(documents)
+    return {
+        "format": "finiq_disclosure_html_section_kind_summary_v1",
+        "input_directory": str(input_directory),
+        "summary": {
+            "found_files": len(html_files),
+            "documents_with_sections": len(documents),
+            "files_without_sections": files_without_sections,
+            "failed_files": failed_files,
+            "unique_kinds": len(items),
+        },
+        "items": items,
     }
 
 
