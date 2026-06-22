@@ -44,6 +44,12 @@ export type ProblemFile = {
   error?: string;
 };
 
+export type SectionPattern = {
+  signature: string;
+  count: number;
+  section_count: number;
+};
+
 export type InspectResult = {
   input_directory?: string;
   summary?: {
@@ -59,12 +65,15 @@ export type InspectResult = {
   };
   documents?: DocumentRow[];
   problem_files?: ProblemFile[];
+  section_patterns?: SectionPattern[];
 };
 
 type HtmlSectionSplitResultsProps = {
   inputDirectory: string;
   documents: DocumentRow[];
   problemFiles: ProblemFile[];
+  sectionPatterns: SectionPattern[];
+  isLoadingSectionPatterns: boolean;
   page: number;
   hasNextPage: boolean;
   selectedDocument: DocumentRow | null;
@@ -117,6 +126,8 @@ export function HtmlSectionSplitResults({
   inputDirectory,
   documents,
   problemFiles,
+  sectionPatterns,
+  isLoadingSectionPatterns,
   page,
   hasNextPage,
   selectedDocument,
@@ -137,6 +148,7 @@ export function HtmlSectionSplitResults({
 }: HtmlSectionSplitResultsProps) {
   const reviewPanelRef = useRef<HTMLDivElement | null>(null);
   const selectedSection = splitResult?.sections.find((section) => section.toc_id === selectedSectionId) || splitResult?.sections[0] || null;
+  const maxSectionPatternCount = Math.max(1, ...sectionPatterns.map((pattern) => pattern.count));
 
   const scrollToReviewPanel = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -181,28 +193,38 @@ export function HtmlSectionSplitResults({
         type="button"
         variant={isSelected && activeReviewView === "source" ? "default" : "ghost"}
         size="sm"
-        className="h-8"
+        className="h-8 min-w-24"
         onClick={() => {
           onViewSource(item);
           scrollToReviewPanel();
         }}
         disabled={isSplitting && isSelected}
       >
-        {isSplitting && isSelected && activeReviewView === "source" ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+        <Loader2
+          className={[
+            "mr-1 h-3.5 w-3.5 shrink-0",
+            isSplitting && isSelected && activeReviewView === "source" ? "animate-spin opacity-100" : "opacity-0",
+          ].join(" ")}
+        />
         원문 보기
       </Button>
       <Button
         type="button"
         variant={isSelected && activeReviewView === "sections" ? "default" : "ghost"}
         size="sm"
-        className="h-8"
+        className="h-8 min-w-28"
         onClick={() => {
           onViewSections(item);
           scrollToReviewPanel();
         }}
         disabled={isSplitting && isSelected}
       >
-        {isSplitting && isSelected && activeReviewView === "sections" ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+        <Loader2
+          className={[
+            "mr-1 h-3.5 w-3.5 shrink-0",
+            isSplitting && isSelected && activeReviewView === "sections" ? "animate-spin opacity-100" : "opacity-0",
+          ].join(" ")}
+        />
         목차별 보기
       </Button>
     </div>
@@ -351,6 +373,49 @@ export function HtmlSectionSplitResults({
           {renderReviewContent()}
         </HtmlWorkflowCard>
       </div>
+
+      <HtmlWorkflowCard
+        title="목차 조합 모아보기"
+        description="전체 입력 디렉토리에서 같은 목차 조합이 몇 번 나왔는지 표시합니다."
+      >
+        {isLoadingSectionPatterns ? (
+          <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+            목차 조합을 불러오는 중입니다.
+          </div>
+        ) : sectionPatterns.length ? (
+          <div className="space-y-2">
+            {sectionPatterns.map((pattern) => {
+              const widthPercent = Math.max(4, Math.round((pattern.count / maxSectionPatternCount) * 100));
+              return (
+                <div
+                  key={pattern.signature}
+                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(7rem,30%)_5rem] items-center gap-3 rounded-md px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium text-slate-700 dark:text-slate-300">{pattern.signature}</p>
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-500">
+                      목차 {formatInteger(pattern.section_count)}개 조합
+                    </p>
+                  </div>
+                  <div className="h-3 rounded-full bg-slate-100 dark:bg-[#0d1117]">
+                    <div
+                      className="h-3 rounded-full bg-slate-700 dark:bg-slate-300"
+                      style={{ width: `${widthPercent}%` }}
+                    />
+                  </div>
+                  <div className="text-right text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                    {formatInteger(pattern.count)}개
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+            소스를 불러오면 전체 디렉토리의 목차 조합 빈도가 표시됩니다.
+          </div>
+        )}
+      </HtmlWorkflowCard>
 
       {problemFiles.length ? (
         <HtmlWorkflowCard title="문제 파일" description="목차가 없거나 읽기에 실패한 HTML 파일입니다.">

@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from finiq.market_desk.web.disclosure_html import (
     cancel_disclosure_html_download,
@@ -28,6 +29,7 @@ from finiq.market_desk.web.disclosure_html_sections import (
     inspect_disclosure_html_sections_payload,
     list_disclosure_html_section_sources_payload,
     split_disclosure_html_section_source_payload,
+    summarize_disclosure_html_section_kinds_payload,
 )
 from finiq.market_desk.web.jobs import job_manager
 from finiq.market_desk.web.table_export import build_disclosure_table_payload
@@ -298,17 +300,33 @@ def create_workflows_router(
             run_job_worker=run_job_worker,
         )
 
+    @router.post("/api/disclosures/html/sections/kinds/start")
+    async def start_html_section_kinds(payload: dict[str, Any], background_tasks: BackgroundTasks):
+        return _start_background_job(
+            kind="section_kinds",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
     @router.post("/api/disclosures/html/sections/inspect")
     async def inspect_html_sections(payload: dict[str, Any]):
         try:
-            return inspect_disclosure_html_sections_payload(payload)
+            return await run_in_threadpool(inspect_disclosure_html_sections_payload, payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/sections/list")
     async def list_html_section_sources(payload: dict[str, Any]):
         try:
-            return list_disclosure_html_section_sources_payload(payload)
+            return await run_in_threadpool(list_disclosure_html_section_sources_payload, payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/sections/kinds")
+    async def summarize_html_section_kinds(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(summarize_disclosure_html_section_kinds_payload, payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -341,7 +359,7 @@ def create_workflows_router(
     @router.post("/api/disclosures/html/sections/source/split")
     async def split_html_section_source(payload: dict[str, Any]):
         try:
-            return split_disclosure_html_section_source_payload(payload)
+            return await run_in_threadpool(split_disclosure_html_section_source_payload, payload)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
