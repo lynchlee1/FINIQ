@@ -419,10 +419,30 @@ def _section_patterns(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "signature": signature,
                 "count": 0,
                 "section_count": len(sections),
+                "sections": sections,
             },
         )
         item["count"] += 1
     return sorted(counts.values(), key=lambda item: (-int(item["count"]), int(item["section_count"]), str(item["signature"])))
+
+
+def _section_save_rules(value: Any) -> dict[str, set[str]]:
+    if not isinstance(value, dict):
+        return {}
+    rules: dict[str, set[str]] = {}
+    for signature, toc_ids in value.items():
+        signature_text = str(signature or "").strip()
+        if not signature_text or not isinstance(toc_ids, list):
+            continue
+        rules[signature_text] = {str(toc_id).strip() for toc_id in toc_ids if str(toc_id).strip()}
+    return rules
+
+
+def _section_dicts_from_split_sections(sections: list[HtmlSection]) -> list[dict[str, Any]]:
+    return [
+        {"toc_id": section.toc_id, "index": section.index, "title": section.title}
+        for section in sections
+    ]
 
 
 def _resolve_html_source_file(input_directory_raw: str, source_name_raw: str) -> tuple[Path, Path]:
@@ -691,8 +711,10 @@ def save_disclosure_html_sections_payload(
 
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
+    section_save_rules = _section_save_rules(body.get("section_save_rules"))
     output_directory.mkdir(parents=True, exist_ok=True)
     saved_files: list[str] = []
+    expected_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
     progress_log: list[str] = []
 
@@ -716,14 +738,20 @@ def save_disclosure_html_sections_payload(
                 "skipped": {"source_file": str(source_file), "error": "no sections found"},
                 "saved": [],
             }
+        signature = _section_signature(_section_dicts_from_split_sections(sections))
+        allowed_toc_ids = section_save_rules.get(signature)
         file_saved: list[str] = []
+        file_expected: list[str] = []
         for section in sections:
+            if allowed_toc_ids is not None and section.toc_id not in allowed_toc_ids:
+                continue
             section_directory = output_directory / section.toc_id
             output_path = section_directory / source_file.relative_to(input_directory)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(section.html, encoding="utf-8")
             file_saved.append(str(output_path))
-        return {"status": "ok", "saved": file_saved}
+            file_expected.append(str(output_path))
+        return {"status": "ok", "saved": file_saved, "expected": file_expected}
 
     emit(f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다.")
     results = _map_html_files(html_files, workers, save_one)
@@ -732,6 +760,7 @@ def save_disclosure_html_sections_payload(
             return {"cancelled": True}
         if result["status"] == "ok":
             saved_files.extend(result["saved"])
+            expected_files.extend(result["expected"])
         else:
             skipped_files.append(result["skipped"])
             source_name = Path(result["skipped"]["source_file"]).name
@@ -742,7 +771,11 @@ def save_disclosure_html_sections_payload(
         if index == 1 or index == len(html_files) or index % 25 == 0:
             emit(f"목차 저장 중간 확인: {index}/{len(html_files)}건 처리.")
 
+    missing_files = [path for path in expected_files if not Path(path).is_file()]
     emit(f"목차 HTML 저장 완료: {len(saved_files)}건")
+    emit(
+        f"무결성 검사 완료: 저장 대상 {len(expected_files)}건, 저장 완료 {len(saved_files)}건, 누락 {len(missing_files)}건"
+    )
     return {
         "format": "finiq_disclosure_html_section_save_v2",
         "input_directory": str(input_directory),
@@ -751,8 +784,13 @@ def save_disclosure_html_sections_payload(
             "found_files": len(html_files),
             "saved_files": len(saved_files),
             "skipped_files": len(skipped_files),
+            "expected_files": len(expected_files),
+            "integrity_ok": len(saved_files) == len(expected_files) and not missing_files,
+            "missing_files": len(missing_files),
         },
         "saved_files": saved_files,
+        "expected_files": expected_files,
+        "missing_files": missing_files,
         "skipped_files": skipped_files,
         "progress_log": progress_log[-200:],
     }

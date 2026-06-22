@@ -59,6 +59,15 @@ function waitForPollingInterval(signal: AbortSignal) {
   });
 }
 
+function defaultPatternTocIds(patterns: SectionPattern[]) {
+  return Object.fromEntries(
+    patterns.map((pattern) => [
+      pattern.signature,
+      (pattern.sections || []).map((section) => section.toc_id),
+    ]),
+  );
+}
+
 export default function HtmlSectionSplitPage() {
   const { fetchSettings } = useSettingsStore();
   const [loading, setLoading] = useState(true);
@@ -69,6 +78,7 @@ export default function HtmlSectionSplitPage() {
   const [workers, setWorkers] = useState("8");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [sectionPatterns, setSectionPatterns] = useState<SectionPattern[]>([]);
+  const [selectedPatternTocIds, setSelectedPatternTocIds] = useState<Record<string, string[]>>({});
   const [page, setPage] = useState(1);
   const [selectedDocument, setSelectedDocument] = useState<DocumentRow | null>(null);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
@@ -93,7 +103,9 @@ export default function HtmlSectionSplitPage() {
         lines.push(`목차 없음: ${formatInteger(summary.files_without_sections)}`);
         lines.push(`읽기 실패: ${formatInteger(summary.failed_files)}`);
       } else {
+        lines.push(`저장 대상: ${formatInteger(summary.expected_files)}`);
         lines.push(`저장 완료: ${formatInteger(summary.saved_files)}`);
+        lines.push(`누락 파일: ${formatInteger(summary.missing_files)}`);
         lines.push(`건너뜀: ${formatInteger(summary.skipped_files)}`);
         lines.push(`결과 데이터 경로: ${res.output_directory || ""}`);
       }
@@ -166,6 +178,7 @@ export default function HtmlSectionSplitPage() {
     setOutputDirectory(value ? `${value}_sections` : "");
     setInspectResult(null);
     setSectionPatterns([]);
+    setSelectedPatternTocIds({});
     setIsLoadingSectionPatterns(false);
     setPage(1);
     setSelectedDocument(null);
@@ -255,6 +268,7 @@ export default function HtmlSectionSplitPage() {
     sectionPatternAbortControllerRef.current = abortController;
     setIsLoadingSectionPatterns(true);
     setSectionPatterns([]);
+    setSelectedPatternTocIds({});
     let jobId = "";
     try {
       const startResponse = await fetch("/api/disclosures/html/sections/kinds/start", {
@@ -285,7 +299,9 @@ export default function HtmlSectionSplitPage() {
         }
         const snapshot = await jobResponse.json();
         if (snapshot.status === "completed") {
-          setSectionPatterns(snapshot.result?.items || []);
+          const items = snapshot.result?.items || [];
+          setSectionPatterns(items);
+          setSelectedPatternTocIds(defaultPatternTocIds(items));
           return;
         }
         if (snapshot.status === "failed") {
@@ -309,6 +325,7 @@ export default function HtmlSectionSplitPage() {
         setStatus(errorMessage(err));
         setIsErrorStatus(true);
         setSectionPatterns([]);
+        setSelectedPatternTocIds({});
       }
     } finally {
       if (sectionPatternAbortControllerRef.current === abortController) {
@@ -332,6 +349,7 @@ export default function HtmlSectionSplitPage() {
       sectionPatternAbortControllerRef.current?.abort();
       sectionPatternAbortControllerRef.current = null;
       setSectionPatterns([]);
+      setSelectedPatternTocIds({});
       setIsLoadingSectionPatterns(false);
     }
     try {
@@ -370,6 +388,7 @@ export default function HtmlSectionSplitPage() {
       setInspectResult(null);
       if (options.refreshSectionPatterns) {
         setSectionPatterns([]);
+        setSelectedPatternTocIds({});
         setIsLoadingSectionPatterns(false);
       }
       resetSelectedDisclosure();
@@ -448,6 +467,18 @@ export default function HtmlSectionSplitPage() {
     openDocument(document, "sections");
   };
 
+  const togglePatternSection = (signature: string, tocId: string) => {
+    setSelectedPatternTocIds((current) => {
+      const pattern = sectionPatterns.find((item) => item.signature === signature);
+      const fallback = (pattern?.sections || []).map((section) => section.toc_id);
+      const selected = current[signature] || fallback;
+      const nextSelected = selected.includes(tocId)
+        ? selected.filter((item) => item !== tocId)
+        : [...selected, tocId];
+      return { ...current, [signature]: nextSelected };
+    });
+  };
+
   const cancelInspectFolder = () => {
     inspectAbortControllerRef.current?.abort();
     inspectAbortControllerRef.current = null;
@@ -472,8 +503,8 @@ export default function HtmlSectionSplitPage() {
         body: JSON.stringify({
           input_directory: inputDirectory,
           output_directory: outputDirectory,
-          limit: parseOptionalNumber(limit),
           workers: parseOptionalNumber(workers),
+          section_save_rules: selectedPatternTocIds,
         }),
       });
       if (!response.ok) {
@@ -511,6 +542,7 @@ export default function HtmlSectionSplitPage() {
             documents={documents}
             problemFiles={problemFiles}
             sectionPatterns={sectionPatterns}
+            selectedPatternTocIds={selectedPatternTocIds}
             isLoadingSectionPatterns={isLoadingSectionPatterns}
             page={page}
             hasNextPage={hasNextPage}
@@ -529,6 +561,7 @@ export default function HtmlSectionSplitPage() {
             onPreviousPage={handlePreviousPage}
             onNextPage={handleNextPage}
             onSelectSection={setSelectedSectionId}
+            onTogglePatternSection={togglePatternSection}
           />
 
           <HtmlWorkflowCard title="작업 실행">

@@ -1,5 +1,21 @@
 # Review Findings
 
+## Completed: HTML Section Pattern Save Rules
+
+Purpose:
+- `공시원문 목차 분리`에서 모든 HTML을 저장 대상으로 유지하면서, 목차 조합별로 저장할 `toc_*` 항목을 선택할 수 있게 했다.
+
+Implementation summary:
+- 목차 조합 요약 응답에 조합별 `sections` 목록을 추가했다.
+- `section_save_rules` payload를 저장 작업에 추가해 signature별 선택된 `toc_id`만 저장하도록 했다.
+- `목차 조합 모아보기`에 조합별 저장 대상 목차 체크박스를 추가하고, 선택 상태를 저장 실행 payload로 전달했다.
+- `작업 실행`에서는 표시용 `최대 표시 파일 수`를 전달하지 않도록 해 전체 HTML을 저장 대상으로 유지했다.
+- 저장 완료 후 저장 대상 파일 수와 실제 저장 파일 수를 비교하는 무결성 검사 summary와 로그를 추가했다.
+
+Verification:
+- `pytest tests/market_desk/test_kind_web_service.py::test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences tests/market_desk/test_kind_web_service.py::test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_rule tests/market_desk/test_kind_web_service.py::test_html_parse_modes_are_registered_documented_and_listed_in_ui tests/market_desk/test_kind_web_app.py::test_html_section_kinds_route_returns_unique_toc_sequence_counts tests/market_desk/test_kind_web_app.py::test_html_section_save_start_route_saves_all_toc_sections tests/market_desk/test_kind_web_app.py::test_html_section_save_start_route_applies_pattern_toc_selection -q` passed: 6 tests.
+- `npm run build -w @finiq/app-market-desk` passed.
+
 The review is complete. Topics without review findings were removed. Remaining topics below need fixes before they can be considered free of errors.
 
 ## Disclosure Section Split Parallel Loading

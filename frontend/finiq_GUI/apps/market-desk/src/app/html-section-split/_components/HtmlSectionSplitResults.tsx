@@ -48,6 +48,7 @@ export type SectionPattern = {
   signature: string;
   count: number;
   section_count: number;
+  sections?: TocItem[];
 };
 
 export type InspectResult = {
@@ -73,6 +74,7 @@ type HtmlSectionSplitResultsProps = {
   documents: DocumentRow[];
   problemFiles: ProblemFile[];
   sectionPatterns: SectionPattern[];
+  selectedPatternTocIds: Record<string, string[]>;
   isLoadingSectionPatterns: boolean;
   page: number;
   hasNextPage: boolean;
@@ -91,6 +93,7 @@ type HtmlSectionSplitResultsProps = {
   onPreviousPage: () => void;
   onNextPage: () => void;
   onSelectSection: (tocId: string) => void;
+  onTogglePatternSection: (signature: string, tocId: string) => void;
 };
 
 type HtmlSectionSplitActionDockProps = {
@@ -127,6 +130,7 @@ export function HtmlSectionSplitResults({
   documents,
   problemFiles,
   sectionPatterns,
+  selectedPatternTocIds,
   isLoadingSectionPatterns,
   page,
   hasNextPage,
@@ -145,6 +149,7 @@ export function HtmlSectionSplitResults({
   onPreviousPage,
   onNextPage,
   onSelectSection,
+  onTogglePatternSection,
 }: HtmlSectionSplitResultsProps) {
   const reviewPanelRef = useRef<HTMLDivElement | null>(null);
   const selectedSection = splitResult?.sections.find((section) => section.toc_id === selectedSectionId) || splitResult?.sections[0] || null;
@@ -386,16 +391,37 @@ export function HtmlSectionSplitResults({
           <div className="space-y-2">
             {sectionPatterns.map((pattern) => {
               const widthPercent = Math.max(4, Math.round((pattern.count / maxSectionPatternCount) * 100));
+              const selectedTocIds = selectedPatternTocIds[pattern.signature] || (pattern.sections || []).map((section) => section.toc_id);
               return (
                 <div
                   key={pattern.signature}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(7rem,30%)_5rem] items-center gap-3 rounded-md px-3 py-2"
+                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(7rem,30%)_5rem] items-start gap-3 rounded-md px-3 py-2"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium text-slate-700 dark:text-slate-300">{pattern.signature}</p>
                     <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-500">
                       목차 {formatInteger(pattern.section_count)}개 조합
                     </p>
+                    {pattern.sections?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {pattern.sections.map((section) => (
+                          <label
+                            key={`${pattern.signature}-${section.toc_id}`}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-600 dark:border-[#30363d] dark:text-slate-300"
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 rounded border-slate-300"
+                              checked={selectedTocIds.includes(section.toc_id)}
+                              onChange={() => onTogglePatternSection(pattern.signature, section.toc_id)}
+                            />
+                            <span className="font-mono">{section.toc_id}</span>
+                            {section.title ? <span>{section.title}</span> : null}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-500">저장할 목차</p>
                   </div>
                   <div className="h-3 rounded-full bg-slate-100 dark:bg-[#0d1117]">
                     <div
