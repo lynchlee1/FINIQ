@@ -815,8 +815,9 @@ def test_html_section_source_split_route_returns_selected_disclosure_sections(tm
 def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    (input_directory / "20260422000832.html").write_text(
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260422000832.html").write_text(
         """
         <html><body>
           <h2 id="toc_1"><p>주요사항보고서</p></h2>
@@ -855,15 +856,19 @@ def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) ->
         "integrity_ok": True,
         "missing_files": 0,
     }
-    assert (output_directory / "toc_1" / "20260422000832.html").is_file()
-    assert (output_directory / "toc_2" / "20260422000832.html").is_file()
+    assert (output_directory / "2008" / "20260422000832.html").is_file()
+    assert not (output_directory / "2008" / "20260422000832_1.html").exists()
+    assert not (output_directory / "2008" / "20260422000832_2.html").exists()
+    assert not (output_directory / "toc_1").exists()
+    assert not (output_directory / "2008" / "toc_1").exists()
 
 
 def test_html_section_save_start_route_applies_pattern_toc_selection(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    (input_directory / "20260422000832.html").write_text(
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260422000832.html").write_text(
         """
         <html><body>
           <h2 id="toc_1"><p>주요사항보고서</p></h2>
@@ -906,8 +911,11 @@ def test_html_section_save_start_route_applies_pattern_toc_selection(tmp_path: P
         "integrity_ok": True,
         "missing_files": 0,
     }
-    assert (output_directory / "toc_1" / "20260422000832.html").is_file()
-    assert not (output_directory / "toc_2" / "20260422000832.html").exists()
+    assert (output_directory / "2008" / "20260422000832.html").is_file()
+    assert not (output_directory / "2008" / "20260422000832_1.html").exists()
+    assert not (output_directory / "2008" / "20260422000832_2.html").exists()
+    assert not (output_directory / "toc_1").exists()
+    assert not (output_directory / "2008" / "toc_1").exists()
 
 
 def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> None:

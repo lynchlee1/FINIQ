@@ -2467,8 +2467,9 @@ def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
 def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    (input_directory / "20260422000832.html").write_text(
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260422000832.html").write_text(
         """
         <html><body>
           <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
@@ -2486,8 +2487,7 @@ def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) 
             "output_directory": str(output_directory),
         }
     )
-    toc_1_html = (output_directory / "toc_1" / "20260422000832.html").read_text(encoding="utf-8")
-    toc_2_html = (output_directory / "toc_2" / "20260422000832.html").read_text(encoding="utf-8")
+    section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
 
     assert payload["summary"] == {
         "found_files": 1,
@@ -2497,23 +2497,23 @@ def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) 
         "integrity_ok": True,
         "missing_files": 0,
     }
-    assert "주요사항보고서" in toc_1_html
-    assert "표지 내용" in toc_1_html
-    assert "전환사채권 발행결정" not in toc_1_html
-    assert "전환사채권 발행결정" in toc_2_html
-    assert "발행금액 250,000,000" in toc_2_html
-    assert "주요사항보고서" not in toc_2_html
+    assert "전환사채권 발행결정" in section_html
+    assert "발행금액 250,000,000" in section_html
+    assert "주요사항보고서" not in section_html
+    assert not (output_directory / "toc_1").exists()
+    assert not (output_directory / "2008" / "toc_1").exists()
 
 
 def test_save_disclosure_html_sections_payload_continues_after_files_without_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    (input_directory / "20260421000111.html").write_text(
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260421000111.html").write_text(
         "<html><body><p>목차 없는 문서</p></body></html>",
         encoding="utf-8",
     )
-    (input_directory / "20260422000832.html").write_text(
+    (source_directory / "20260422000832.html").write_text(
         """
         <html><body>
           <h2 id="toc_1"><p>주요사항보고서</p></h2>
@@ -2540,10 +2540,12 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
         "integrity_ok": True,
         "missing_files": 0,
     }
-    assert (output_directory / "toc_1" / "20260422000832.html").is_file()
-    assert (output_directory / "toc_2" / "20260422000832.html").is_file()
+    assert (output_directory / "2008" / "20260422000832.html").is_file()
+    assert not (output_directory / "2008" / "20260422000832_1.html").exists()
+    assert not (output_directory / "2008" / "20260422000832_2.html").exists()
+    assert not (output_directory / "2008" / "toc_1").exists()
     assert payload["skipped_files"] == [
-        {"source_file": str(input_directory / "20260421000111.html"), "error": "no sections found"}
+        {"source_file": str(source_directory / "20260421000111.html"), "error": "no sections found"}
     ]
 
 
@@ -2703,8 +2705,9 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
 def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_rule(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    (input_directory / "20260401000001.html").write_text(
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260401000001.html").write_text(
         """
         <html><body>
           <h2 id="toc_1"><p>1</p></h2>
@@ -2715,7 +2718,7 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
         """,
         encoding="utf-8",
     )
-    (input_directory / "20260402000001.html").write_text(
+    (source_directory / "20260402000001.html").write_text(
         """
         <html><body>
           <h2 id="toc_1"><p>단독</p></h2>
@@ -2741,9 +2744,13 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
         "integrity_ok": True,
         "missing_files": 0,
     }
-    assert (output_directory / "toc_1" / "20260401000001.html").is_file()
-    assert not (output_directory / "toc_2" / "20260401000001.html").exists()
-    assert (output_directory / "toc_1" / "20260402000001.html").is_file()
+    assert (output_directory / "2008" / "20260401000001.html").is_file()
+    assert not (output_directory / "2008" / "20260401000001_1.html").exists()
+    assert not (output_directory / "2008" / "20260401000001_2.html").exists()
+    assert (output_directory / "2008" / "20260402000001.html").is_file()
+    assert not (output_directory / "2008" / "20260402000001_1.html").exists()
+    assert not (output_directory / "toc_1").exists()
+    assert not (output_directory / "2008" / "toc_1").exists()
 
 
 def test_split_disclosure_html_section_source_payload_splits_one_selected_file(tmp_path: Path) -> None:
