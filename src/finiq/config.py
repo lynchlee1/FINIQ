@@ -39,6 +39,7 @@ SAVED_SETTINGS_KEYS = (
     "sqlite_manifest_path",
     "html_output_directory",
     "html_content_output_directory",
+    "html_section_split_output_directory",
     "html_transfer_directory",
     "html_parse_result_path",
     "html_parse_mode",
@@ -80,6 +81,7 @@ class AppConfig:
     sqlite_manifest_path: str = ""
     html_output_directory: str = ""
     html_content_output_directory: str = ""
+    html_section_split_output_directory: str = ""
     html_transfer_directory: str = ""
     html_parse_result_path: str = ""
     html_parse_mode: str = ""
@@ -180,6 +182,7 @@ def init_config() -> AppConfig:
         sqlite_manifest_path=settings.get("sqlite_manifest_path", str(KIND_DATA_DIR / "manifest.json")),
         html_output_directory=settings.get("html_output_directory", str(KIND_DATA_DIR / "html")),
         html_content_output_directory=settings.get("html_content_output_directory", str(KIND_DATA_DIR / "html_contents")),
+        html_section_split_output_directory=settings.get("html_section_split_output_directory", ""),
         html_transfer_directory=settings.get("html_transfer_directory", str(KIND_DATA_DIR / "transfer")),
         html_parse_result_path=settings.get("html_parse_result_path", str(KIND_DATA_DIR / "parsed")),
         html_parse_mode=settings.get("html_parse_mode", "bond_issuance"),

@@ -36,6 +36,7 @@ class SettingsUpdate(BaseModel):
     sqlite_manifest_path: Optional[str] = None
     html_output_directory: Optional[str] = None
     html_content_output_directory: Optional[str] = None
+    html_section_split_output_directory: Optional[str] = None
     html_transfer_directory: Optional[str] = None
     html_parse_result_path: Optional[str] = None
     html_parse_mode: Optional[str] = None
@@ -145,6 +146,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "sqlite_manifest_path": config.sqlite_manifest_path,
             "html_output_directory": config.html_output_directory or f"{config.output_root}/viewer_html",
             "html_content_output_directory": config.html_content_output_directory or f"{config.output_root}/viewer_html_contents",
+            "html_section_split_output_directory": config.html_section_split_output_directory,
             "html_transfer_directory": config.html_transfer_directory or f"{config.output_root}/.finiq/transfers",
             "html_parse_result_path": config.html_parse_result_path,
             "html_parse_mode": config.html_parse_mode,

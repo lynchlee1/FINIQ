@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Iterator, TypeVar
 
 from lxml import etree, html
 
@@ -339,11 +340,48 @@ def parse_html_section_worker_count(value: Any) -> int:
     return min(parsed, DEFAULT_HTML_SECTION_WORKERS)
 
 
-def _map_html_files(html_files: list[Path], workers: int, callback: Callable[[Path], T]) -> list[T]:
+def _cancel_requested(cancel_check: Callable[[], bool] | None) -> bool:
+    return bool(cancel_check is not None and cancel_check())
+
+
+def _map_html_files(
+    html_files: list[Path],
+    workers: int,
+    callback: Callable[[Path], T],
+    cancel_check: Callable[[], bool] | None = None,
+) -> Iterator[T]:
     if workers <= 1 or len(html_files) <= 1:
-        return [callback(source_file) for source_file in html_files]
+        for source_file in html_files:
+            if _cancel_requested(cancel_check):
+                return
+            yield callback(source_file)
+        return
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        return list(executor.map(callback, html_files))
+        source_iter = iter(html_files)
+        pending: deque[Future[T]] = deque()
+
+        def submit_next() -> bool:
+            if _cancel_requested(cancel_check):
+                return False
+            try:
+                source_file = next(source_iter)
+            except StopIteration:
+                return False
+            pending.append(executor.submit(callback, source_file))
+            return True
+
+        for _ in range(min(workers, len(html_files))):
+            if not submit_next():
+                break
+
+        while pending:
+            future = pending.popleft()
+            yield future.result()
+            if _cancel_requested(cancel_check):
+                for pending_future in pending:
+                    pending_future.cancel()
+                return
+            submit_next()
 
 
 def _iter_html_files(input_directory: Path):
@@ -625,11 +663,11 @@ def inspect_disclosure_html_sections_payload(
         }
 
     emit(f"목차 확인 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다.")
-    results = _map_html_files(html_files, workers, inspect_one)
+    results = _map_html_files(html_files, workers, inspect_one, cancel_check)
     documents: list[dict[str, Any]] = []
     problem_files: list[dict[str, str]] = []
     for index, result in enumerate(results, start=1):
-        if cancel_check is not None and cancel_check():
+        if _cancel_requested(cancel_check):
             return {"cancelled": True}
         if result["status"] == "ok":
             documents.append(result["document"])
@@ -641,8 +679,8 @@ def inspect_disclosure_html_sections_payload(
             files_without_sections += 1
             if len(problem_files) < report_limit:
                 problem_files.append(result["problem"])
-        if index == 1 or index == len(results) or index % 100 == 0:
-            emit(f"목차 확인 중간 확인: {index}/{len(results)}건 처리.")
+        if index == 1 or index == len(html_files) or index % 100 == 0:
+            emit(f"목차 확인 중간 확인: {index}/{len(html_files)}건 처리.")
 
     total_files = len(html_files)
     return {
@@ -740,23 +778,23 @@ def save_disclosure_html_sections_payload(
             }
         signature = _section_signature(_section_dicts_from_split_sections(sections))
         allowed_toc_ids = section_save_rules.get(signature)
-        file_saved: list[str] = []
-        file_expected: list[str] = []
+        selected_sections = [
+            section
+            for section in sections
+            if allowed_toc_ids is None or section.toc_id in allowed_toc_ids
+        ]
+        if not selected_sections:
+            return {"status": "ok", "saved": [], "expected": []}
         source_relative_path = source_file.relative_to(input_directory)
-        for section in sections:
-            if allowed_toc_ids is not None and section.toc_id not in allowed_toc_ids:
-                continue
-            output_path = output_directory / source_relative_path
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(section.html, encoding="utf-8")
-            file_saved.append(str(output_path))
-            file_expected.append(str(output_path))
-        return {"status": "ok", "saved": file_saved, "expected": file_expected}
+        output_path = output_directory / source_relative_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("\n".join(section.html for section in selected_sections), encoding="utf-8")
+        return {"status": "ok", "saved": [str(output_path)], "expected": [str(output_path)]}
 
     emit(f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다.")
-    results = _map_html_files(html_files, workers, save_one)
+    results = _map_html_files(html_files, workers, save_one, cancel_check)
     for index, result in enumerate(results, start=1):
-        if cancel_check is not None and cancel_check():
+        if _cancel_requested(cancel_check):
             return {"cancelled": True}
         if result["status"] == "ok":
             saved_files.extend(result["saved"])

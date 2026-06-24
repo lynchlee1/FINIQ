@@ -850,13 +850,17 @@ def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) ->
     assert snapshot["status"] == "completed"
     assert snapshot["result"]["summary"] == {
         "found_files": 1,
-        "saved_files": 2,
+        "saved_files": 1,
         "skipped_files": 0,
-        "expected_files": 2,
+        "expected_files": 1,
         "integrity_ok": True,
         "missing_files": 0,
     }
-    assert (output_directory / "2008" / "20260422000832.html").is_file()
+    section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
+    assert "주요사항보고서" in section_html
+    assert "표지 내용" in section_html
+    assert "전환사채권 발행결정" in section_html
+    assert "발행금액 250,000,000" in section_html
     assert not (output_directory / "2008" / "20260422000832_1.html").exists()
     assert not (output_directory / "2008" / "20260422000832_2.html").exists()
     assert not (output_directory / "toc_1").exists()
@@ -911,7 +915,11 @@ def test_html_section_save_start_route_applies_pattern_toc_selection(tmp_path: P
         "integrity_ok": True,
         "missing_files": 0,
     }
-    assert (output_directory / "2008" / "20260422000832.html").is_file()
+    section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
+    assert "주요사항보고서" in section_html
+    assert "표지 내용" in section_html
+    assert "전환사채권 발행결정" not in section_html
+    assert "발행금액 250,000,000" not in section_html
     assert not (output_directory / "2008" / "20260422000832_1.html").exists()
     assert not (output_directory / "2008" / "20260422000832_2.html").exists()
     assert not (output_directory / "toc_1").exists()

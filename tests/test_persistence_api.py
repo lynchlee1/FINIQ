@@ -56,3 +56,19 @@ def test_html_download_settings_persist(tmp_path: Path):
     data = resp.json()
     for key, value in payload.items():
         assert data[key] == str(Path(value).resolve())
+
+
+def test_html_section_split_output_directory_persists(tmp_path: Path):
+    config.settings_path = str(tmp_path / "settings.json")
+    client = TestClient(app)
+
+    output_directory = tmp_path / "sections"
+    resp = client.post("/api/settings", json={"html_section_split_output_directory": str(output_directory)})
+
+    assert resp.status_code == 200
+    assert resp.json()["html_section_split_output_directory"] == str(output_directory.resolve())
+
+    resp = client.get("/api/config")
+
+    assert resp.status_code == 200
+    assert resp.json()["html_section_split_output_directory"] == str(output_directory.resolve())

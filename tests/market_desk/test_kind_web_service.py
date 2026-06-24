@@ -35,6 +35,7 @@ from finiq.market_desk.web.disclosure_html import (
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.download import inspect_download_output_directory_payload
+import finiq.market_desk.web.disclosure_html_sections as disclosure_html_sections
 from finiq.market_desk.web.disclosure_html_parse import (
     PARSER_REGISTRY,
     build_bond_parse_summary_payload,
@@ -44,6 +45,7 @@ from finiq.market_desk.web.disclosure_html_parse import (
 )
 from finiq.market_desk.web.disclosure_html_sections import (
     DEFAULT_HTML_SECTION_WORKERS,
+    HtmlSectionSummary,
     inspect_disclosure_html_sections_payload,
     list_disclosure_html_section_sources_payload,
     parse_html_section_worker_count,
@@ -2491,15 +2493,16 @@ def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) 
 
     assert payload["summary"] == {
         "found_files": 1,
-        "saved_files": 2,
+        "saved_files": 1,
         "skipped_files": 0,
-        "expected_files": 2,
+        "expected_files": 1,
         "integrity_ok": True,
         "missing_files": 0,
     }
+    assert "주요사항보고서" in section_html
+    assert "표지 내용" in section_html
     assert "전환사채권 발행결정" in section_html
     assert "발행금액 250,000,000" in section_html
-    assert "주요사항보고서" not in section_html
     assert not (output_directory / "toc_1").exists()
     assert not (output_directory / "2008" / "toc_1").exists()
 
@@ -2534,9 +2537,9 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
 
     assert payload["summary"] == {
         "found_files": 2,
-        "saved_files": 2,
+        "saved_files": 1,
         "skipped_files": 1,
-        "expected_files": 2,
+        "expected_files": 1,
         "integrity_ok": True,
         "missing_files": 0,
     }
@@ -2603,6 +2606,43 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problem
             "error": "",
         }
     ]
+
+
+def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    (input_directory / "20260401000001.html").write_text(
+        "<html><body><h2 id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
+        encoding="utf-8",
+    )
+    (input_directory / "20260402000001.html").write_text(
+        "<html><body><h2 id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
+        encoding="utf-8",
+    )
+    checks = 0
+    parsed: list[str] = []
+
+    def fake_inspect(markup: bytes) -> list[HtmlSectionSummary]:
+        parsed.append(markup.decode("utf-8"))
+        return [HtmlSectionSummary(toc_id="toc_1", index=1, title="1")]
+
+    monkeypatch.setattr(disclosure_html_sections, "inspect_content_html_sections", fake_inspect)
+
+    def cancel_check() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks > 1
+
+    payload = inspect_disclosure_html_sections_payload(
+        {"input_directory": str(input_directory), "workers": 1},
+        cancel_check=cancel_check,
+    )
+
+    assert payload == {"cancelled": True}
+    assert len(parsed) == 1
+    assert "첫 번째" in parsed[0]
 
 
 def test_list_disclosure_html_section_sources_payload_pages_with_current_page_toc_counts(tmp_path: Path) -> None:
@@ -2745,12 +2785,79 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
         "missing_files": 0,
     }
     assert (output_directory / "2008" / "20260401000001.html").is_file()
+    filtered_html = (output_directory / "2008" / "20260401000001.html").read_text(encoding="utf-8")
+    assert "표지" in filtered_html
+    assert "본문" not in filtered_html
     assert not (output_directory / "2008" / "20260401000001_1.html").exists()
     assert not (output_directory / "2008" / "20260401000001_2.html").exists()
     assert (output_directory / "2008" / "20260402000001.html").is_file()
     assert not (output_directory / "2008" / "20260402000001_1.html").exists()
     assert not (output_directory / "toc_1").exists()
     assert not (output_directory / "2008" / "toc_1").exists()
+
+
+def test_save_disclosure_html_sections_payload_preserves_multiple_selected_sections(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260401000001.html").write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>1</p></h2>
+          <p>표지</p>
+          <h2 id="toc_2"><p>2</p></h2>
+          <p>본문</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1", "toc_2"]},
+        }
+    )
+    section_html = (output_directory / "2008" / "20260401000001.html").read_text(encoding="utf-8")
+
+    assert payload["summary"]["saved_files"] == 1
+    assert payload["summary"]["expected_files"] == 1
+    assert "표지" in section_html
+    assert "본문" in section_html
+    assert not (output_directory / "2008" / "20260401000001_1.html").exists()
+    assert not (output_directory / "2008" / "toc_1").exists()
+
+
+def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cancelled(tmp_path: Path) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260401000001.html").write_text(
+        "<html><body><h2 id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
+        encoding="utf-8",
+    )
+    (source_directory / "20260402000001.html").write_text(
+        "<html><body><h2 id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
+        encoding="utf-8",
+    )
+    checks = 0
+
+    def cancel_check() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks > 1
+
+    payload = save_disclosure_html_sections_payload(
+        {"input_directory": str(input_directory), "output_directory": str(output_directory), "workers": 1},
+        cancel_check=cancel_check,
+    )
+
+    assert payload == {"cancelled": True}
+    assert (output_directory / "2008" / "20260401000001.html").is_file()
+    assert not (output_directory / "2008" / "20260402000001.html").exists()
 
 
 def test_split_disclosure_html_section_source_payload_splits_one_selected_file(tmp_path: Path) -> None:

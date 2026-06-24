@@ -69,7 +69,7 @@ function defaultPatternTocIds(patterns: SectionPattern[]) {
 }
 
 export default function HtmlSectionSplitPage() {
-  const { fetchSettings } = useSettingsStore();
+  const { fetchSettings, saveSetting } = useSettingsStore();
   const [loading, setLoading] = useState(true);
   const [inputDirectory, setInputDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -90,6 +90,7 @@ export default function HtmlSectionSplitPage() {
   const [isLoadingSectionPatterns, setIsLoadingSectionPatterns] = useState(false);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
   const sectionPatternAbortControllerRef = useRef<AbortController | null>(null);
+  const activeJobIdRef = useRef<string | null>(null);
 
   const formatStatus = useCallback((data: any) => {
     const res = data.result || {};
@@ -139,7 +140,7 @@ export default function HtmlSectionSplitPage() {
     },
     onCancel: () => {
       setIsInspecting(false);
-      setStatus("소스 불러오기를 중단했습니다.");
+      setStatus("작업을 중단했습니다.");
       setIsErrorStatus(false);
     },
     formatStatus,
@@ -152,10 +153,14 @@ export default function HtmlSectionSplitPage() {
   const isJobActive = !!activeJobId;
 
   useEffect(() => {
+    activeJobIdRef.current = activeJobId;
+  }, [activeJobId]);
+
+  useEffect(() => {
     fetchSettings().then((config) => {
       const defaultInput = config.html_content_output_directory || (config.output_root ? `${config.output_root}/viewer_html_contents` : "");
       setInputDirectory(defaultInput || "");
-      setOutputDirectory(defaultInput ? `${defaultInput}_sections` : "");
+      setOutputDirectory(config.html_section_split_output_directory || (defaultInput ? `${defaultInput}_sections` : ""));
     }).catch((err) => {
       setStatus(errorMessage(err));
       setIsErrorStatus(true);
@@ -168,14 +173,24 @@ export default function HtmlSectionSplitPage() {
     return () => {
       inspectAbortControllerRef.current?.abort();
       sectionPatternAbortControllerRef.current?.abort();
+      if (activeJobIdRef.current) {
+        fetch("/api/disclosures/html/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: activeJobIdRef.current }),
+        }).catch(() => undefined);
+      }
     };
   }, []);
 
   const handleInputDirectoryChange = (value: string) => {
     sectionPatternAbortControllerRef.current?.abort();
     sectionPatternAbortControllerRef.current = null;
+    const nextOutputDirectory = value ? `${value}_sections` : "";
     setInputDirectory(value);
-    setOutputDirectory(value ? `${value}_sections` : "");
+    setOutputDirectory(nextOutputDirectory);
+    saveSetting("html_content_output_directory", value);
+    saveSetting("html_section_split_output_directory", nextOutputDirectory);
     setInspectResult(null);
     setSectionPatterns([]);
     setSelectedPatternTocIds({});
@@ -186,6 +201,11 @@ export default function HtmlSectionSplitPage() {
     setSplitResult(null);
     setSelectedSectionId("");
     setActiveReviewView("source");
+  };
+
+  const handleOutputDirectoryChange = (value: string) => {
+    setOutputDirectory(value);
+    saveSetting("html_section_split_output_directory", value);
   };
 
   const folderPathFields: HtmlWorkflowField[] = [
@@ -206,7 +226,7 @@ export default function HtmlSectionSplitPage() {
       label: "결과 데이터 경로",
       mode: "folder",
       value: outputDirectory,
-      onChange: setOutputDirectory,
+      onChange: handleOutputDirectoryChange,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       placeholder: "/path/to/output-folder",
       span: 4,
@@ -486,7 +506,7 @@ export default function HtmlSectionSplitPage() {
     sectionPatternAbortControllerRef.current = null;
     setIsLoadingSectionPatterns(false);
     cancelJob();
-    setStatus("소스 불러오기 중단을 요청했습니다.");
+    setStatus("작업 중단을 요청했습니다.");
     setIsErrorStatus(false);
   };
 
@@ -570,7 +590,7 @@ export default function HtmlSectionSplitPage() {
                 {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                 실행
               </Button>
-              <Button type="button" variant="outline" className="h-10 w-full" onClick={cancelInspectFolder} disabled={!isInspecting}>
+              <Button type="button" variant="outline" className="h-10 w-full" onClick={cancelInspectFolder} disabled={!isInspecting && !isJobActive}>
                 <Square className="mr-2 h-4 w-4" />
                 {UI_TEXT.actions.cancelJob}
               </Button>

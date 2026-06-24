@@ -505,7 +505,7 @@ export function HtmlSectionSplitActionDock({
         <JobStatusLogger
           status={status}
           isErrorStatus={isErrorStatus}
-          isCancellable={isInspecting}
+          isCancellable={isJobActive || isInspecting}
           onCancel={onCancel}
         />
       }
