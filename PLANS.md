@@ -1,5 +1,18 @@
 # Review Findings
 
+## Completed: HTML Section Save Original Folder Structure
+
+Purpose:
+- `공시원문 목차 분리` 저장 결과가 `toc_1`, `toc_2` 폴더를 만들지 않고 원본 데이터의 연도 폴더 구조를 보존하게 했다.
+
+Implementation summary:
+- 목차 HTML 저장 경로를 `결과 데이터 경로/toc_id/원본상대경로`에서 `결과 데이터 경로/원본상대경로`로 변경했다.
+- 서비스 테스트와 API 작업 테스트가 `2008/20260422000832.html` 구조 및 `toc_1` 폴더, `_1`/`_2` suffix 파일 미생성을 검증하게 했다.
+
+Verification:
+- `pytest tests/market_desk/test_kind_web_service.py::test_save_disclosure_html_sections_payload_writes_every_toc tests/market_desk/test_kind_web_service.py::test_save_disclosure_html_sections_payload_continues_after_files_without_toc tests/market_desk/test_kind_web_service.py::test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_rule tests/market_desk/test_kind_web_app.py::test_html_section_save_start_route_saves_all_toc_sections tests/market_desk/test_kind_web_app.py::test_html_section_save_start_route_applies_pattern_toc_selection -q` passed: 5 tests.
+- `pytest tests/market_desk/test_kind_web_service.py tests/market_desk/test_kind_web_app.py -q` passed: 190 tests.
+
 ## Completed: HTML Section Pattern Save Rules
 
 Purpose:

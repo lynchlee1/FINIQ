@@ -742,11 +742,11 @@ def save_disclosure_html_sections_payload(
         allowed_toc_ids = section_save_rules.get(signature)
         file_saved: list[str] = []
         file_expected: list[str] = []
+        source_relative_path = source_file.relative_to(input_directory)
         for section in sections:
             if allowed_toc_ids is not None and section.toc_id not in allowed_toc_ids:
                 continue
-            section_directory = output_directory / section.toc_id
-            output_path = section_directory / source_file.relative_to(input_directory)
+            output_path = output_directory / source_relative_path
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(section.html, encoding="utf-8")
             file_saved.append(str(output_path))
