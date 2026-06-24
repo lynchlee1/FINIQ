@@ -22,11 +22,16 @@ test("html section split path fields stack vertically", async () => {
 
 test("html section split uses shared data path and execution cards", async () => {
   const source = await readFile(htmlSectionSplitPath, "utf8");
+  const resultsSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx",
+    "utf8",
+  );
+  const combinedSource = `${source}\n${resultsSource}`;
 
   assert.match(source, /title="데이터 경로"/);
   assert.match(source, /title="작업 실행"/);
-  assert.match(source, /소스 불러오기/);
-  assert.match(source, /FolderOpen/);
+  assert.match(combinedSource, /소스 불러오기/);
+  assert.match(combinedSource, /FolderOpen/);
   assert.match(source, /\/api\/disclosures\/html\/sections\/save\/start/);
   assert.match(source, /onClick=\{startSave\}[\s\S]*?\n\s*실행\s*\n/);
   assert.ok(
@@ -41,15 +46,43 @@ test("html section split uses shared data path and execution cards", async () =>
   assert.doesNotMatch(source, /title="폴더 선택"/);
 });
 
-test("html section split exposes worker count setting and uses background inspect job", async () => {
+test("html section split exposes worker count setting and background section kind job", async () => {
   const source = await readFile(htmlSectionSplitPath, "utf8");
 
   assert.match(source, /const \[workers, setWorkers\] = useState\("8"\)/);
   assert.match(source, /label: "병렬 처리 개수"/);
-  assert.match(source, /\/api\/disclosures\/html\/sections\/inspect\/start/);
+  assert.match(source, /\/api\/disclosures\/html\/sections\/kinds\/start/);
   assert.match(source, /workers: parseOptionalNumber\(workers\)/);
   assert.match(source, /\/api\/disclosures\/html\/cancel/);
-  assert.match(source, /setInspectResult\(data\.result \|\| data\)/);
+  assert.match(source, /setSectionPatterns\(items\)/);
+});
+
+test("html section split can cancel save jobs and source loading", async () => {
+  const pageSource = await readFile(htmlSectionSplitPath, "utf8");
+  const resultsSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx",
+    "utf8",
+  );
+
+  assert.match(pageSource, /onClick=\{cancelInspectFolder\} disabled=\{!isInspecting && !isJobActive\}/);
+  assert.match(pageSource, /activeJobIdRef\.current = activeJobId/);
+  assert.match(pageSource, /body: JSON\.stringify\(\{ job_id: activeJobIdRef\.current \}\)/);
+  assert.match(resultsSource, /isCancellable=\{isJobActive \|\| isInspecting\}/);
+});
+
+test("html section split persists data path fields", async () => {
+  const pageSource = await readFile(htmlSectionSplitPath, "utf8");
+  const storeSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/store/useSettingsStore.ts",
+    "utf8",
+  );
+
+  assert.match(storeSource, /html_section_split_output_directory: string/);
+  assert.match(pageSource, /const \{ fetchSettings, saveSetting \} = useSettingsStore\(\)/);
+  assert.match(pageSource, /config\.html_section_split_output_directory \|\| \(defaultInput \? `\$\{defaultInput\}_sections` : ""\)/);
+  assert.match(pageSource, /saveSetting\("html_content_output_directory", value\)/);
+  assert.match(pageSource, /saveSetting\("html_section_split_output_directory", nextOutputDirectory\)/);
+  assert.match(pageSource, /saveSetting\("html_section_split_output_directory", value\)/);
 });
 
 test("html section split keeps job status only in the action dock", async () => {

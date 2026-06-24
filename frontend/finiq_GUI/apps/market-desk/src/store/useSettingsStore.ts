@@ -12,6 +12,7 @@ interface SettingsState {
   sqlite_manifest_path: string;
   html_output_directory: string;
   html_content_output_directory: string;
+  html_section_split_output_directory: string;
   html_transfer_directory: string;
   html_parse_result_path: string;
   html_parse_mode: string;
@@ -55,6 +56,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   sqlite_manifest_path: "",
   html_output_directory: "",
   html_content_output_directory: "",
+  html_section_split_output_directory: "",
   html_transfer_directory: "",
   html_parse_result_path: "",
   html_parse_mode: "",
