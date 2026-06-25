@@ -1,5 +1,21 @@
 # Review Findings
 
+## Completed: HTML Section Pattern Sample Opens
+
+Purpose:
+- `목차 조합 모아보기`에서 같은 목차 조합에 해당하는 대표 공시를 몇 개 바로 열어볼 수 있게 한다.
+
+Implementation summary:
+- `_section_patterns()` now includes up to 3 `sample_documents` per TOC signature, preserving relative paths for nested HTML folders.
+- `HtmlSectionSplitResults` renders those samples as `공시 열기` links that open the existing inline HTML source endpoint in a new tab.
+- Regression coverage now checks backend sample payloads and the UI link affordance.
+
+Verification:
+- `pytest tests/market_desk/test_kind_web_service.py::test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences tests/market_desk/test_kind_web_service.py::test_html_parse_modes_are_registered_documented_and_listed_in_ui -q` failed before implementation because `sample_documents` and new-tab links were absent.
+- `pytest tests/market_desk/test_kind_web_service.py::test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences tests/market_desk/test_kind_web_service.py::test_html_parse_modes_are_registered_documented_and_listed_in_ui -q` passed: 2 tests.
+- `pytest tests/market_desk/test_kind_web_service.py::test_list_disclosure_html_section_sources_payload_pages_with_current_page_toc_counts tests/market_desk/test_kind_web_service.py::test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences tests/market_desk/test_kind_web_service.py::test_html_parse_modes_are_registered_documented_and_listed_in_ui -q` passed: 3 tests.
+- `../../../node_modules/.bin/tsc --noEmit -p tsconfig.json` passed.
+
 ## Completed: HTML Section Split Cancellation
 
 Purpose:

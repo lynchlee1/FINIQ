@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, FolderOpen, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -49,6 +49,7 @@ export type SectionPattern = {
   count: number;
   section_count: number;
   sections?: TocItem[];
+  sample_documents?: DocumentRow[];
 };
 
 export type InspectResult = {
@@ -422,6 +423,22 @@ export function HtmlSectionSplitResults({
                       </div>
                     ) : null}
                     <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-500">저장할 목차</p>
+                    {pattern.sample_documents?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {pattern.sample_documents.map((document) => (
+                          <a
+                            key={`${pattern.signature}-${document.source_relative_path || document.source_name}`}
+                            href={sourceHtmlUrl(inputDirectory, document)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-[#30363d] dark:text-slate-300 dark:hover:bg-[#21262d]"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            공시 열기
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="h-3 rounded-full bg-slate-100 dark:bg-[#0d1117]">
                     <div
