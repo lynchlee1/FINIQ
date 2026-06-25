@@ -458,9 +458,18 @@ def _section_patterns(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "count": 0,
                 "section_count": len(sections),
                 "sections": sections,
+                "sample_documents": [],
             },
         )
         item["count"] += 1
+        if len(item["sample_documents"]) < 3:
+            item["sample_documents"].append(
+                {
+                    "source_file": str(document.get("source_file") or ""),
+                    "source_name": str(document.get("source_name") or ""),
+                    "source_relative_path": str(document.get("source_relative_path") or ""),
+                }
+            )
     return sorted(counts.values(), key=lambda item: (-int(item["count"]), int(item["section_count"]), str(item["signature"])))
 
 

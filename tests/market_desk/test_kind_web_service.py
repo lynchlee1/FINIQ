@@ -2690,8 +2690,15 @@ def test_list_disclosure_html_section_sources_payload_pages_with_current_page_to
 def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
-    for source_name in ["20260401000001.html", "20260402000001.html"]:
-        (input_directory / source_name).write_text(
+    nested_directory = input_directory / "2026"
+    nested_directory.mkdir()
+    for source_file in [
+        input_directory / "20260401000001.html",
+        nested_directory / "20260402000001.html",
+        input_directory / "20260403000001.html",
+        input_directory / "20260404000001.html",
+    ]:
+        source_file.write_text(
             """
             <html><body>
               <h2 id="toc_1"><p>1</p></h2>
@@ -2702,7 +2709,7 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
             """,
             encoding="utf-8",
         )
-    (input_directory / "20260403000001.html").write_text(
+    (input_directory / "20260405000001.html").write_text(
         """
         <html><body>
           <h2 id="toc_1"><p>1</p></h2>
@@ -2711,14 +2718,14 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
         """,
         encoding="utf-8",
     )
-    (input_directory / "20260404000001.html").write_text("<html><body>목차 없음</body></html>", encoding="utf-8")
+    (input_directory / "20260406000001.html").write_text("<html><body>목차 없음</body></html>", encoding="utf-8")
 
     payload = summarize_disclosure_html_section_kinds_payload({"input_directory": str(input_directory)})
 
     assert payload["format"] == "finiq_disclosure_html_section_kind_summary_v1"
     assert payload["summary"] == {
-        "found_files": 4,
-        "documents_with_sections": 3,
+        "found_files": 6,
+        "documents_with_sections": 5,
         "files_without_sections": 1,
         "failed_files": 0,
         "unique_kinds": 2,
@@ -2726,11 +2733,28 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
     assert payload["items"] == [
         {
             "signature": "toc_1 1 toc_2 2",
-            "count": 2,
+            "count": 4,
             "section_count": 2,
             "sections": [
                 {"toc_id": "toc_1", "index": 1, "title": "1"},
                 {"toc_id": "toc_2", "index": 2, "title": "2"},
+            ],
+            "sample_documents": [
+                {
+                    "source_file": str(nested_directory / "20260402000001.html"),
+                    "source_name": "20260402000001.html",
+                    "source_relative_path": "2026/20260402000001.html",
+                },
+                {
+                    "source_file": str(input_directory / "20260401000001.html"),
+                    "source_name": "20260401000001.html",
+                    "source_relative_path": "20260401000001.html",
+                },
+                {
+                    "source_file": str(input_directory / "20260403000001.html"),
+                    "source_name": "20260403000001.html",
+                    "source_relative_path": "20260403000001.html",
+                },
             ],
         },
         {
@@ -2738,6 +2762,13 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
             "count": 1,
             "section_count": 1,
             "sections": [{"toc_id": "toc_1", "index": 1, "title": "1"}],
+            "sample_documents": [
+                {
+                    "source_file": str(input_directory / "20260405000001.html"),
+                    "source_name": "20260405000001.html",
+                    "source_relative_path": "20260405000001.html",
+                }
+            ],
         },
     ]
 
@@ -3966,10 +3997,12 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "selectedPatternTocIds" in section_split_ui_html
     assert "onTogglePatternSection" in section_split_ui_html
     assert "저장할 목차" in section_split_ui_html
+    assert "sample_documents" in section_split_results_component_html
+    assert "공시 열기" in section_split_results_component_html
+    assert 'target="_blank"' in section_split_results_component_html
     assert "limit: parseOptionalNumber(limit)" not in section_split_page_html
     assert "align-middle" in section_split_results_component_html
     assert "원문 보기" in section_split_ui_html
-    assert "공시 열기" not in section_split_ui_html
     assert "이전" in section_split_ui_html
     assert "다음" in section_split_ui_html
     assert "목차별 보기" in section_split_ui_html
