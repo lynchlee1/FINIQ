@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from lxml import html
 
-from .text import clean_text
+from .text import clean_text, element_text
 from .io import parse_html_document
 from .tables import extract_tables
 
@@ -21,13 +21,16 @@ def extract_title(document: html.HtmlElement) -> str:
         "//meta[translate(@property, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='og:title']/@content",
         "//meta[translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='title']/@content",
         "//title/text()",
+        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ') and contains(., '사채')]",
+        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ')]",
+        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ')]/text()",
         "//*[@title]/@title",
         "//h1/text()",
         "//h2/text()",
     ):
         values = document.xpath(xpath)
         for value in values:
-            title = clean_text(str(value))
+            title = element_text(value) if hasattr(value, "itertext") else clean_text(str(value))
             if title:
                 return title
     return ""

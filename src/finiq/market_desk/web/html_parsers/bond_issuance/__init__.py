@@ -26,19 +26,24 @@ def parse_bond_issuance(
 
     schema_record = BondIssuanceRecord(
         기업명_발행사=record_dict.get("기업명(발행사)"),
-        회차=extractor.get_round_number(),
-        종류=extractor.get_security_type(title),
-        기업명_행사대상=extractor.get_target_company_name(),
+        회차=extractor.extract_round_from_bond_type_row(),
+        종류=extractor.extract_security_type_from_title(title),
+        기업명_행사대상=(
+            extractor.extract_target_company_name_from_exercise_target_stock_row()
+        ),
         상장구분=listing_market,
-        발행금액=extractor.get_issue_amount(),
-        행사가액=extractor.get_exercise_price(),
-        납입일=extractor.get_payment_date(),
-        만기일=extractor.get_maturity_date(),
-        행사시작일=extractor.get_exercise_period_start(),
-        행사종료일=extractor.get_exercise_period_end(),
-        투자자=extractor.get_issue_targets(),
-        발행대상자세부엔티티=extractor.get_issue_target_entities(),
+        발행금액=extractor.extract_issue_amount_from_bond_face_value_row(),
+        행사가액=(
+            extractor.extract_exercise_price_from_conversion_exchange_or_warrant_price_row()
+        ),
+        납입일=extractor.extract_payment_date_from_payment_date_row(),
+        만기일=extractor.extract_maturity_date_from_bond_maturity_row(),
+        행사시작일=extractor.extract_exercise_period_start_from_claim_period_row(),
+        행사종료일=extractor.extract_exercise_period_end_from_claim_period_row(),
+        투자자=extractor.extract_investors_from_specific_person_bond_issue_table(),
     )
 
     record_dict.update(schema_record.to_dict())
+    if extractor.warnings:
+        record_dict.setdefault("parse_warnings", []).extend(extractor.warnings)
     return record_dict

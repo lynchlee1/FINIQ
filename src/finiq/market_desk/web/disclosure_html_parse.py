@@ -99,7 +99,6 @@ CHANGE_LOG_FIELDS = {
         "행사시작일",
         "행사종료일",
         "투자자",
-        "발행대상자세부엔티티",
     ),
     "rights_issuance": (
         "상장시장",
@@ -128,7 +127,6 @@ MAJOR_CHANGE_FIELDS = {
         "행사시작일",
         "행사종료일",
         "투자자",
-        "발행대상자세부엔티티",
     },
     "rights_issuance": {
         "신주의 종류와 수",
@@ -167,7 +165,31 @@ def _normalize_listing_market(value: Any) -> str:
 
 
 def _load_html_manifest_metadata_index(input_directory: Path) -> dict[str, dict[str, str]]:
+    metadata_index: dict[str, dict[str, str]] = {}
     manifest_path = input_directory / HTML_MANIFEST_FILENAME
+    if manifest_path.is_file():
+        _merge_metadata_index(metadata_index, _load_download_manifest_metadata_index(manifest_path))
+    for directory in (input_directory, input_directory.parent, input_directory.parent.parent):
+        filtered_path = directory / "filtered.json"
+        if filtered_path.is_file():
+            _merge_metadata_index(metadata_index, _load_filtered_metadata_index(filtered_path))
+        compressed_path = directory / "compressed-external-html.json"
+        if compressed_path.is_file():
+            _merge_metadata_index(metadata_index, _load_compressed_external_html_metadata_index(compressed_path))
+    return metadata_index
+
+
+def _merge_metadata_index(
+    target: dict[str, dict[str, str]], source: dict[str, dict[str, str]]
+) -> None:
+    for acpt_no, metadata in source.items():
+        current = target.setdefault(acpt_no, {})
+        for key, value in metadata.items():
+            if value:
+                current[key] = value
+
+
+def _load_download_manifest_metadata_index(manifest_path: Path) -> dict[str, dict[str, str]]:
     if not manifest_path.is_file():
         return {}
     try:
@@ -191,6 +213,57 @@ def _load_html_manifest_metadata_index(input_directory: Path) -> dict[str, dict[
     return metadata_index
 
 
+def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, str]] | None:
+    acpt_no = str(item.get("acpt_no") or "").strip()
+    if not acpt_no:
+        return None
+    metadata = {
+        "market": _normalize_listing_market(item.get("market")),
+        "company_name": str(item.get("company_name") or "").strip(),
+        "title": str(item.get("title") or item.get("title_display") or item.get("title_attr") or "").strip(),
+    }
+    header = str(item.get("header") or "").strip()
+    if header and not metadata["company_name"]:
+        metadata["company_name"] = re.sub(r"\s*\([^)]*\)\s*$", "", header).strip()
+    return acpt_no, metadata
+
+
+def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, str]]:
+    try:
+        payload = json.loads(filtered_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"필터 결과 JSON을 읽을 수 없습니다: {filtered_path}") from exc
+    if not isinstance(payload, dict):
+        return {}
+    metadata_index: dict[str, dict[str, str]] = {}
+    for item in payload.get("rows") or []:
+        if not isinstance(item, dict):
+            continue
+        parsed = _metadata_item(item)
+        if parsed is not None:
+            acpt_no, metadata = parsed
+            metadata_index[acpt_no] = metadata
+    return metadata_index
+
+
+def _load_compressed_external_html_metadata_index(compressed_path: Path) -> dict[str, dict[str, str]]:
+    try:
+        payload = json.loads(compressed_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"외부 HTML 압축 JSON을 읽을 수 없습니다: {compressed_path}") from exc
+    if not isinstance(payload, dict):
+        return {}
+    metadata_index: dict[str, dict[str, str]] = {}
+    for item in payload.get("records") or []:
+        if not isinstance(item, dict):
+            continue
+        parsed = _metadata_item(item)
+        if parsed is not None:
+            acpt_no, metadata = parsed
+            metadata_index[acpt_no] = metadata
+    return metadata_index
+
+
 def _apply_manifest_metadata(
     record: dict[str, Any],
     metadata_index: dict[str, dict[str, str]],
@@ -201,9 +274,12 @@ def _apply_manifest_metadata(
     metadata = metadata_index.get(acpt_no) or {}
     market = metadata.get("market")
     company_name = metadata.get("company_name")
-    if not market and not company_name:
+    title = metadata.get("title")
+    if not market and not company_name and not title:
         return record
     updated_record = dict(record)
+    if title and not updated_record.get("title"):
+        updated_record["title"] = title
     if mode == "bond_issuance":
         if market:
             updated_record["상장구분"] = market
@@ -259,7 +335,7 @@ def _parse_progress_interval(value: Any) -> int:
 
 
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
-    files = sorted(path for path in input_directory.iterdir() if path.is_file() and path.suffix.lower() == ".html")
+    files = sorted(path for path in input_directory.rglob("*.html") if path.is_file())
     return files[:limit] if limit is not None else files
 
 
