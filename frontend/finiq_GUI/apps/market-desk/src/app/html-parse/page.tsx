@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { AlertTriangle, Database, FileSearch, FileSpreadsheet, Info, ListChecks, Loader2, Play, Square } from "lucide-react";
+import { FileSpreadsheet, Info, Loader2, Play, Square } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Checkbox } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -10,7 +10,6 @@ import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { ActionDock } from "@/components/ui/ActionDock";
 import {
-  HtmlStepGuide,
   HtmlWorkflowForm,
   HtmlWorkflowCard,
   HtmlWorkflowPage,
@@ -52,24 +51,6 @@ const PARSE_MODES = [
   },
 ];
 
-const WORKFLOW_GUIDE = [
-  {
-    icon: FileSearch,
-    title: "1. HTML 폴더 선택",
-    description: "KIND 뷰어 HTML이 저장된 폴더를 입력합니다. .html 파일만 처리하고 파일명 순서대로 읽습니다.",
-  },
-  {
-    icon: Database,
-    title: "2. 파싱 모드 선택",
-    description: "공시 양식에 맞는 파서를 고릅니다. 모드가 맞지 않으면 결과는 생성되지만 일부 필드가 비거나 경고가 남을 수 있습니다.",
-  },
-  {
-    icon: ListChecks,
-    title: "3. JSON 저장 후 검토",
-    description: "결과 JSON에는 records, errors, warnings, progress_log가 저장됩니다. 이후 공시 정정내역 한눈에와 Excel 내보내기에 사용됩니다.",
-  },
-];
-
 const PARSING_RULES = [
   "HTML 문서에서 KIND 뷰어 본문을 우선 찾고, 표의 rowspan/colspan을 펼쳐 논리 행으로 변환합니다.",
   "정정 신고 표는 별도 보존하되 핵심 필드 추출은 정정이 아닌 본문 표를 우선 사용합니다.",
@@ -79,6 +60,12 @@ const PARSING_RULES = [
 
 const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
 
+const buildParseOutputPath = (inputDirectory: string, mode: string) => {
+  const trimmedInputDirectory = inputDirectory.trim();
+  const normalizedInputDirectory = trimmedInputDirectory === "/" ? trimmedInputDirectory : trimmedInputDirectory.replace(/\/+$/, "");
+  return normalizedInputDirectory ? `${normalizedInputDirectory}/parsed-${mode}.json` : "";
+};
+
 export default function HtmlParsePage() {
   const {
     fetchSettings,
@@ -86,8 +73,6 @@ export default function HtmlParsePage() {
   } = useSettingsStore();
 
   const [loading, setLoading] = useState(true);
-  
-  const [result, setResult] = useState<any>(null);
 
   const formatStatus = useCallback((data: any) => {
     const statusLbl = (s: string) => {
@@ -129,7 +114,6 @@ export default function HtmlParsePage() {
   } = useJobPolling({
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     formatStatus,
-    onSuccess: setResult,
   });
 
   const isJobActive = !!activeJobId;
@@ -182,7 +166,7 @@ export default function HtmlParsePage() {
         setOutputPath(config.html_parse_result_path);
       } else {
         const initialInput = config.html_content_output_directory || config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : "");
-        setOutputPath(initialInput ? `${initialInput}/parsed-${config.html_parse_mode || "bond_issuance"}.json` : "");
+        setOutputPath(buildParseOutputPath(initialInput, config.html_parse_mode || "bond_issuance"));
       }
     }).catch(err => {
       setStatus(err.message);
@@ -193,7 +177,7 @@ export default function HtmlParsePage() {
   }, [fetchSettings, setStatus, setIsErrorStatus]);
 
   const updateOutputPath = useCallback((input: string, mode: string) => {
-    setOutputPath(input ? `${input}/parsed-${mode}.json` : "");
+    setOutputPath(buildParseOutputPath(input, mode));
   }, []);
 
   const handleInputDirectoryChange = (val: string) => {
@@ -335,27 +319,12 @@ export default function HtmlParsePage() {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
-  // Customize job status presentation slightly for HTML Parse specifically
-  // While useJobPolling provides a nice string by default, the original code had summary stats.
-  // We can let JobStatusLogger display `status` string as usual, and also show the raw result JSON.
-
   return (
     <HtmlWorkflowPage
       eyebrow="HTML Parse Guide"
       title="공시원문 변환"
       description="저장된 KIND HTML을 모드별 파서로 읽어 핵심 필드, 오류, 경고, 진행 로그를 하나의 JSON에 남깁니다. 결과 파일은 이어하기, 공시 정정내역 한눈에, 발행내역 한눈에, Excel 내보내기의 기준 데이터가 됩니다."
-      notice={
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>새 양식에서 필드가 비면 warnings와 원본 HTML을 함께 확인하세요.</span>
-          </div>
-        </div>
-      }
     >
-
-      <HtmlStepGuide items={WORKFLOW_GUIDE} />
-
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <HtmlWorkflowCard
@@ -454,18 +423,11 @@ export default function HtmlParsePage() {
               onCancel={handleCancel}
             />
           }
-          notificationActive={isErrorStatus || !!result?.warnings?.length}
+          notificationActive={isErrorStatus}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (
                 <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
-              ) : result?.warnings?.length ? (
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">파싱 경고</Label>
-                  <pre className="max-h-72 overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
-                    {JSON.stringify(result.warnings, null, 2)}
-                  </pre>
-                </div>
               ) : (
                 <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
               )}

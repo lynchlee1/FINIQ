@@ -8,8 +8,6 @@ from typing import Any
 
 from ..common import (
     build_base_record,
-    fetch_selected_viewer_body,
-    preserve_viewer_metadata,
     row_containing,
     row_with_label,
     value_after,
@@ -68,16 +66,9 @@ class _BondRows:
 def _build_bond_parse_context(
     html_text: str | bytes, *, file_path: str | Path
 ) -> _BondParseContext:
-    """공통 메타데이터를 생성하고 본문 HTML 및 주요 행 데이터를 구성한다."""
+    """공통 메타데이터를 생성하고 본문 HTML의 주요 행 데이터를 구성한다."""
     record = build_base_record(html_text, file_path=file_path, mode=MODE)
     rows = _main_bond_rows(record["raw_tables"])
-    if not rows:
-        body_html = fetch_selected_viewer_body(html_text, file_path=file_path)
-        if body_html is not None:
-            viewer_record = record
-            record = build_base_record(body_html, file_path=file_path, mode=MODE)
-            preserve_viewer_metadata(record, viewer_record)
-            rows = _main_bond_rows(record["raw_tables"])
     return _BondParseContext(record=record, rows=_BondRows(rows))
 
 

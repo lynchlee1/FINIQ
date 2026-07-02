@@ -22,7 +22,6 @@ class BondIssuanceRecord:
     행사시작일: str | None
     행사종료일: str | None
     투자자: list[list[Any]]
-    발행대상자세부엔티티: list[list[str]]
 
     def to_dict(self) -> dict[str, Any]:
         """추출된 데이터를 기존 파이프라인에서 기대하는 dict 키 형태로 매핑합니다."""
@@ -39,5 +38,4 @@ class BondIssuanceRecord:
             "행사시작일": self.행사시작일,
             "행사종료일": self.행사종료일,
             "투자자": self.투자자,
-            "발행대상자세부엔티티": self.발행대상자세부엔티티,
         }

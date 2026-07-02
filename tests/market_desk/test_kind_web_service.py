@@ -3377,6 +3377,93 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
     assert payload["records"][0]["기업명(발행사)"] == "테스트발행사"
 
 
+def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp_path: Path) -> None:
+    bond_dir = tmp_path / "bond_issuance"
+    input_dir = bond_dir / "kind_html_contents_grouped_sections"
+    year_dir = input_dir / "2025"
+    year_dir.mkdir(parents=True)
+    (year_dir / "20250102000002.html").write_text(
+        """
+        <html>
+          <body>
+            <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
+            <table>
+              <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+              <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+              <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+              <tr><td>5. 사채만기일</td><td>2028년 01월 02일</td></tr>
+              <tr><td>9. 전환에 관한 사항</td><td>전환가액 (원/주)</td><td>1,000</td></tr>
+              <tr><td>9. 전환에 관한 사항</td><td>전환에 따라 발행할 주식의 종류</td><td>테스트발행사 기명식 보통주</td></tr>
+              <tr><td>9. 전환에 관한 사항</td><td>전환청구기간</td><td>시작일</td><td>2026년 01월 02일</td></tr>
+              <tr><td>9. 전환에 관한 사항</td><td>전환청구기간</td><td>종료일</td><td>2027년 12월 02일</td></tr>
+              <tr><td>12. 납입일</td><td>2025년 01월 02일</td></tr>
+            </table>
+            <table>
+              <tr><th>발행 대상자명</th><th>발행권면총액(원)</th></tr>
+              <tr><td>테스트조합</td><td>1,000,000,000</td></tr>
+            </table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    (bond_dir / "filtered.json").write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "acpt_no": "20250102000002",
+                        "company_name": "테스트발행사",
+                        "market": "코스닥",
+                        "title": "[테스트발행사] 전환사채권발행결정",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (bond_dir / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250102000002",
+                        "title": "[테스트발행사] 전환사채권발행결정",
+                        "header": "테스트발행사 (123456)",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_dir),
+            "mode": "bond_issuance",
+            "resume": False,
+        }
+    )
+
+    assert payload["summary"]["found_files"] == 1
+    record = payload["records"][0]
+    assert record["acpt_no"] == "20250102000002"
+    assert record["title"] == "전환사채권 발행결정"
+    assert record["기업명(발행사)"] == "테스트발행사"
+    assert record["상장구분"] == "코스닥"
+    assert record["회차"] == "3"
+    assert record["종류"] == "CB"
+    assert record["발행금액"] == 1_000_000_000
+    assert record["행사가액"] == 1000
+    assert record["납입일"] == "2025년 01월 02일"
+    assert record["만기일"] == "2028년 01월 02일"
+    assert record["행사시작일"] == "2026년 01월 02일"
+    assert record["행사종료일"] == "2027년 12월 02일"
+    assert record["투자자"] == [["테스트조합", 1_000_000_000]]
+
+
 def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -3731,17 +3818,21 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
 
     assert payload["summary"]["parsed_files"] == 1
     assert payload["summary"]["failed_files"] == 0
-    assert payload["warnings"] == [
-        {
-            "index": 1,
-            "total": 1,
-            "mode": "bond_issuance",
-            "source_file": str(html_path.resolve()),
-            "source_name": "20250101000001.html",
-            "warning": "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.",
-        }
+    assert payload["warnings"][0] == {
+        "index": 1,
+        "total": 1,
+        "mode": "bond_issuance",
+        "source_file": str(html_path.resolve()),
+        "source_name": "20250101000001.html",
+        "warning": "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.",
+    }
+    assert any(
+        item["warning"].startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
+        for item in payload["warnings"]
+    )
+    assert payload["records"][0]["parse_warnings"] == [
+        item["warning"] for item in payload["warnings"]
     ]
-    assert payload["records"][0]["parse_warnings"] == [payload["warnings"][0]["warning"]]
     assert any("파싱 경고 1/1: 20250101000001.html" in line for line in payload["progress_log"])
     assert stored["warnings"] == payload["warnings"]
 
@@ -4112,14 +4203,12 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     assert parsed["행사종료일"] == "2031년 04월 29일"
     assert parsed["납입일"] == "2026년 05월 08일"
     assert parsed["투자자"] == [["아이티씨홀딩스(유)", 40_000_000_000]]
-    assert parsed["발행대상자세부엔티티"] == [
-        ["아이티씨홀딩스(유)", "임현철", "케이씨지아이혁신성장이에스지제1호사모투자 합자회사"]
-    ]
+    assert "발행대상자세부엔티티" not in parsed
     for removed_field in ("발행목적", "할증률(%)", "행사대상", "전환시작일", "전환종료일", "리픽싱(%)", "청약일", "납입방법"):
         assert removed_field not in parsed
 
 
-def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path: Path) -> None:
+def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path) -> None:
     wrapper_path = tmp_path / "20080826000187.html"
     wrapper_html = """
     <html>
@@ -4132,30 +4221,6 @@ def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path
       </body>
     </html>
     """
-    body_html = """
-    <html><body>
-      <p class="CORRECTION">정 정 신 고 (보고)</p>
-      <table>
-        <tr><td>1. 사채의 종류</td><td>회차</td><td>9</td><td>종류</td><td>무기명 무보증 전환사채</td></tr>
-        <tr><td>2. 사채의 권면총액 (원)</td><td>15,000,000,000</td></tr>
-        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>0</td></tr>
-      </table>
-      <h2 class="SECTION-1"><p class="SECTION-1">전환사채발행결정</p></h2>
-      <table>
-        <tr><td>1. 사채의 종류</td><td>회차</td><td>9</td><td>종류</td><td>무기명 무보증 전환사채</td></tr>
-        <tr><td>2. 사채의 권면총액 (원)</td><td>15,000,000,000</td></tr>
-        <tr><td>3. 자금조달의 목적</td><td>시설자금 (원)</td><td>-</td></tr>
-        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>4,000,000,000</td></tr>
-        <tr><td>3. 자금조달의 목적</td><td>기타자금 (원)</td><td>11,000,000,000</td></tr>
-        <tr><td>5. 사채만기일</td><td>2011년 10월 01일</td></tr>
-      </table>
-    </body></html>
-    """
-
-    monkeypatch.setattr(
-        "finiq.market_desk.web.html_parsers.bond_issuance.utils.fetch_selected_viewer_body",
-        lambda html_text, **kwargs: body_html.encode("utf-8"),
-    )
 
     parsed = parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
 
@@ -4170,11 +4235,99 @@ def test_parse_bond_issuance_resolves_selected_viewer_body(monkeypatch, tmp_path
             ],
         }
     }
-    assert parsed["회차"] == "9"
+    assert parsed["회차"] is None
     assert parsed["종류"] == "CB"
-    assert parsed["발행금액"] == 15_000_000_000
-    assert parsed["만기일"] == "2011년 10월 01일"
+    assert parsed["발행금액"] is None
+    assert parsed["만기일"] is None
     assert parsed["투자자"] == []
+    assert parsed["parse_warnings"][0] == (
+        "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
+    )
+    assert any(
+        warning.startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+
+
+def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20250102000002.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">교환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>2</td><td>종류</td><td>무기명식 무보증 교환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>5. 사채만기일</td><td>2028년 01월 02일</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환가액 (원/주)</td><td>12,500</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환대상</td><td>주식회사 테스트타겟 기명식 보통주</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>시작일</td><td>2026년 01월 02일</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>종료일</td><td>2027년 12월 02일</td></tr>
+        <tr><td>12. 납입일</td><td>2025년 01월 02일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["회차"] == "2"
+    assert parsed["종류"] == "EB"
+    assert parsed["기업명(행사대상)"] == "테스트타겟"
+    assert parsed["발행금액"] == 5_000_000_000
+    assert parsed["행사가액"] == 12_500
+    assert parsed["납입일"] == "2025년 01월 02일"
+    assert parsed["만기일"] == "2028년 01월 02일"
+    assert parsed["행사시작일"] == "2026년 01월 02일"
+    assert parsed["행사종료일"] == "2027년 12월 02일"
+    assert parsed["투자자"] == []
+    assert any(
+        warning.startswith("투자자: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+    assert not any("발행대상자세부엔티티" in warning for warning in parsed["parse_warnings"])
+
+
+def test_parse_bond_issuance_cleans_standalone_stock_suffix_from_target_company(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20250102000003.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">교환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>2</td><td>종류</td><td>무기명식 무보증 교환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>5. 사채만기일</td><td>2028년 01월 02일</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환가액 (원/주)</td><td>12,500</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환대상</td><td>테스트타겟 주식</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>시작일</td><td>2026년 01월 02일</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>종료일</td><td>2027년 12월 02일</td></tr>
+        <tr><td>12. 납입일</td><td>2025년 01월 02일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["기업명(행사대상)"] == "테스트타겟"
+
+
+def test_parse_bond_issuance_reads_legacy_section_title_anchor(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20081118000345.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1"><a name="#119">신주인수권부사채 발행결정</a></p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무보증신주인수권부사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>3,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>3,000,000,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["title"] == "신주인수권부사채 발행결정"
+    assert parsed["종류"] == "BW"
 
 
 def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path: Path) -> None:
@@ -4306,27 +4459,18 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path
     ],
 )
 def test_parse_bond_issuance_maps_kind_warrant_resource_examples(
-    monkeypatch, tmp_path: Path, acpt_no: str, body_html: str, expected: dict[str, object]
+    tmp_path: Path, acpt_no: str, body_html: str, expected: dict[str, object]
 ) -> None:
     fixture_path = tmp_path / f"{acpt_no}.html"
-    fixture_path.write_text(
-        "<html><body><select id='mainDoc'><option value='DOC001|Y' selected>main</option></select></body></html>",
-        encoding="utf-8",
-    )
 
-    monkeypatch.setattr(
-        "finiq.market_desk.web.html_parsers.bond_issuance.utils.fetch_selected_viewer_body",
-        lambda html_text, **kwargs: body_html.encode("utf-8"),
-    )
-
-    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
     assert parsed["acpt_no"] == acpt_no
     for key, value in expected.items():
         assert parsed[key] == value
 
 
-def test_parse_bond_issuance_collects_multiple_target_entity_tables() -> None:
+def test_parse_bond_issuance_collects_multiple_issue_targets() -> None:
     fixture_path = TESTS_DIR / "fixtures" / "kind_bond_issuance_20260508000981.html"
 
     parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
@@ -4336,10 +4480,7 @@ def test_parse_bond_issuance_collects_multiple_target_entity_tables() -> None:
         ["주식회사 비에스파트너", 2_000_000_000],
         ["송 준", 1_500_000_000],
     ]
-    assert parsed["발행대상자세부엔티티"] == [
-        ["퀸버메자닌1호조합", "이기승", "이기승"],
-        ["주식회사 비에스파트너", "이기승", "박락호", "소민지"],
-    ]
+    assert "발행대상자세부엔티티" not in parsed
 
 
 def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> None:
