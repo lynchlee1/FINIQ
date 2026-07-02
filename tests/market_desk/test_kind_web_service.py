@@ -40,6 +40,7 @@ from finiq.market_desk.web.disclosure_html_parse import (
     PARSER_REGISTRY,
     build_bond_parse_summary_payload,
     build_parse_change_log_payload,
+    build_parse_preview_payload,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
@@ -3633,6 +3634,162 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
     assert preview["tables"][0]["rows"][1] == ["2. 사채의 권면(전자등록)총액", "1,000,000,000"]
 
 
+def test_build_parse_preview_payload_loads_result_records_with_source_preview(tmp_path: Path) -> None:
+    source_path = tmp_path / "20250102000002.html"
+    source_path.write_text(
+        """
+        <html>
+          <head><title>전환사채권발행결정</title></head>
+          <body>
+            <table>
+              <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
+              <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
+            </table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    parse_path = tmp_path / "parsed-bond_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "bond_issuance",
+                "records": [
+                    {
+                        "title": "전환사채권발행결정",
+                        "acpt_no": "20250102000002",
+                        "source_file": str(source_path),
+                        "발행금액": 1_000_000_000,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_preview_payload(
+        {
+            "output_path": str(parse_path),
+            "mode": "bond_issuance",
+            "limit": 2,
+        }
+    )
+
+    assert payload["format"] == "finiq_parse_preview_v1"
+    assert payload["source_kind"] == "result_json"
+    assert payload["summary"] == {"records": 1, "visible_records": 1}
+    assert payload["records"][0]["parsed_result"]["발행금액"] == 1_000_000_000
+    assert payload["records"][0]["source_preview"]["tables"][0]["rows"][0] == ["1. 사채의 종류", "전환사채"]
+
+
+def test_build_parse_preview_payload_parses_input_directory_when_result_is_missing(tmp_path: Path) -> None:
+    bond_dir = tmp_path / "bond_issuance"
+    input_dir = bond_dir / "viewer_html"
+    input_dir.mkdir(parents=True)
+    (input_dir / "20250102000002.html").write_text(
+        """
+        <html>
+          <head><title>전환사채권발행결정</title></head>
+          <body>
+            <table>
+              <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
+              <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
+            </table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    (bond_dir / "filtered.json").write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "acpt_no": "20250102000002",
+                        "company_name": "테스트발행사",
+                        "market": "코스닥",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (bond_dir / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250102000002",
+                        "title": "[테스트발행사] 전환사채권발행결정",
+                        "header": "테스트발행사 (123456)",
+                        "selected_main_doc_no": "20250102009999",
+                        "docs": [
+                            {
+                                "select_id": "mainDoc",
+                                "doc_no": "00000000835386",
+                                "value": "00000000835386|N",
+                                "latest_flag": "N",
+                                "selected": False,
+                            },
+                            {
+                                "select_id": "mainDoc",
+                                "doc_no": "20250102009999",
+                                "value": "20250102009999|Y",
+                                "latest_flag": "Y",
+                                "selected": True,
+                            },
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_preview_payload(
+        {
+            "input_directory": str(input_dir),
+            "output_path": str(input_dir / "parsed-bond_issuance.json"),
+            "mode": "bond_issuance",
+            "limit": 1,
+        }
+    )
+
+    assert payload["source_kind"] == "input_directory"
+    assert payload["summary"] == {"records": 1, "visible_records": 1, "errors": 0}
+    assert payload["records"][0]["title"] == "전환사채권발행결정"
+    record = payload["records"][0]["parsed_result"]
+    assert record["acpt_no"] == "20250102000002"
+    assert record["rcept_no"] == "20250102009999"
+    assert record["기업명(발행사)"] == "테스트발행사"
+    assert record["상장구분"] == "코스닥"
+    assert record["correction_families"] == {
+        "20250102009999": {
+            "current_sequence": 1,
+            "members": [
+                {
+                    "sequence": 0,
+                    "acpt_no": None,
+                    "doc_no": "00000000835386",
+                    "rcept_no": None,
+                },
+                {
+                    "sequence": 1,
+                    "acpt_no": "20250102000002",
+                    "doc_no": "20250102009999",
+                    "rcept_no": "20250102009999",
+                },
+            ],
+        }
+    }
+    assert payload["records"][0]["source_preview"]["available"] is True
+
+
 def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path, monkeypatch) -> None:
     from finiq.market_desk.web.app import config as app_config
 
@@ -4230,8 +4387,13 @@ def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path)
         "20080826000555": {
             "current_sequence": 1,
             "members": [
-                {"sequence": 0, "acpt_no": None, "rcept_no": "00000000867311"},
-                {"sequence": 1, "acpt_no": "20080826000187", "rcept_no": "20080826000555"},
+                {"sequence": 0, "acpt_no": None, "doc_no": "00000000867311", "rcept_no": None},
+                {
+                    "sequence": 1,
+                    "acpt_no": "20080826000187",
+                    "doc_no": "20080826000555",
+                    "rcept_no": "20080826000555",
+                },
             ],
         }
     }

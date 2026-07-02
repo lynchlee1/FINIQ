@@ -23,6 +23,7 @@ from finiq.market_desk.web.disclosure_html_parse import (
     build_bond_parse_summary_payload,
     build_parse_change_log_payload,
     build_parse_export_xlsx,
+    build_parse_preview_payload,
     cancel_disclosure_html_parse,
 )
 from finiq.market_desk.web.disclosure_html_sections import (
@@ -372,6 +373,13 @@ def create_workflows_router(
     @router.post("/api/disclosures/html/parse/bond-summary")
     async def bond_parse_summary_route(payload: dict[str, Any]):
         return build_bond_parse_summary_payload(payload)
+
+    @router.post("/api/disclosures/html/parse/preview")
+    async def parse_preview_route(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(build_parse_preview_payload, payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/parse/change-log")
     async def parse_change_log_route(payload: dict[str, Any]):

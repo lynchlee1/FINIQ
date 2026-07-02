@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { FileSpreadsheet, Info, Loader2, Play, Square } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Label, Checkbox } from "@finiq/ui";
+import { Eye, Loader2, Play, Square } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -23,42 +23,33 @@ const PARSE_MODES = [
     key: "bond_issuance",
     label: "사채발행파싱",
     status: "상세 필드 지원",
-    description: "전환사채 등 사채 발행 HTML에서 발행사, 종류, 행사대상, 발행금액, 행사가액, 일정, 투자자를 추출합니다.",
+    description: "메자닌 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
   },
   {
     key: "rights_issuance",
     label: "유무상증자파싱",
     status: "상세 필드 지원",
-    description: "유무상증자 HTML에서 신주 수, 발행목적, 발행가액, 기준주가, 납입일, 상장예정일, 배정 대상자를 추출합니다.",
+    description: "유상증자 및 무상증자 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
   },
   {
     key: "shareholder_meeting",
     label: "주주총회파싱",
     status: "원본 테이블 구조 지원",
-    description: "주주총회 HTML을 공통 구조로 파싱합니다. 상세 필드 규칙은 아직 추가되지 않았습니다.",
+    description: "주주총회 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
   },
   {
     key: "asset_transaction",
     label: "유무형자산거래파싱",
     status: "원본 테이블 구조 지원",
-    description: "유무형자산 거래 HTML을 공통 구조로 파싱합니다. 상세 필드 규칙은 아직 추가되지 않았습니다.",
+    description: "유형자산 및 무형자산 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
   },
   {
     key: "security_transaction",
     label: "발행증권거래파싱",
     status: "원본 테이블 구조 지원",
-    description: "발행증권 거래 HTML을 공통 구조로 파싱합니다. 상세 필드 규칙은 아직 추가되지 않았습니다.",
+    description: "발행증권 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
   },
 ];
-
-const PARSING_RULES = [
-  "HTML 문서에서 KIND 뷰어 본문을 우선 찾고, 표의 rowspan/colspan을 펼쳐 논리 행으로 변환합니다.",
-  "정정 신고 표는 별도 보존하되 핵심 필드 추출은 정정이 아닌 본문 표를 우선 사용합니다.",
-  "다운로드 manifest가 있으면 접수번호 기준으로 상장시장과 발행사명을 보강합니다.",
-  "이어하기를 켜면 기존 JSON의 source_file을 기준으로 이미 처리된 파일과 실패 파일을 건너뜁니다.",
-];
-
-const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
 
 const buildParseOutputPath = (inputDirectory: string, mode: string) => {
   const trimmedInputDirectory = inputDirectory.trim();
@@ -66,10 +57,13 @@ const buildParseOutputPath = (inputDirectory: string, mode: string) => {
   return normalizedInputDirectory ? `${normalizedInputDirectory}/parsed-${mode}.json` : "";
 };
 
+const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
+
 export default function HtmlParsePage() {
   const {
     fetchSettings,
     saveSetting,
+    saveSettings,
   } = useSettingsStore();
 
   const [loading, setLoading] = useState(true);
@@ -88,7 +82,7 @@ export default function HtmlParsePage() {
     const warningCount = Array.isArray(res.warnings) ? res.warnings.length : 0;
     const lines = [`작업 상태: ${statusLbl(data.status)}`];
     if (data.error) lines.push(`오류: ${data.error}`);
-    
+
     if (summary.found_files !== undefined) {
       lines.push(`대상 HTML: ${formatInteger(summary.found_files)}`);
       lines.push(`이어받은 파일: ${formatInteger(summary.resumed_files)}`);
@@ -126,9 +120,10 @@ export default function HtmlParsePage() {
   const [parseMode, setParseMode] = useState("bond_issuance");
   const [limit, setLimit] = useState("");
   const [skipErrors, setSkipErrors] = useState(true);
-  const [resumeParse, setResumeParse] = useState(true);
+  const [resumeParse, setResumeParse] = useState(false);
   const [progressInterval, setProgressInterval] = useState("10");
-  const [exportLatestOnly, setExportLatestOnly] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null);
 
   const startJob = useCallback(async (endpoint: string, payload: any) => {
     try {
@@ -157,7 +152,7 @@ export default function HtmlParsePage() {
         const defaultInput = config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : "");
         setInputDirectory(defaultInput);
       }
-      
+
       if (config.html_parse_mode) {
         setParseMode(config.html_parse_mode);
       }
@@ -176,14 +171,14 @@ export default function HtmlParsePage() {
     });
   }, [fetchSettings, setStatus, setIsErrorStatus]);
 
-  const updateOutputPath = useCallback((input: string, mode: string) => {
-    setOutputPath(buildParseOutputPath(input, mode));
-  }, []);
-
   const handleInputDirectoryChange = (val: string) => {
+    const nextOutputPath = buildParseOutputPath(val, parseMode);
     setInputDirectory(val);
-    updateOutputPath(val, parseMode);
-    saveSetting("html_output_directory", val);
+    setOutputPath(nextOutputPath);
+    saveSettings({
+      html_content_output_directory: val,
+      html_parse_result_path: nextOutputPath,
+    });
   };
 
   const handleOutputPathChange = (val: string) => {
@@ -192,9 +187,13 @@ export default function HtmlParsePage() {
   };
 
   const handleParseModeChange = (val: string) => {
+    const nextOutputPath = buildParseOutputPath(inputDirectory, val);
     setParseMode(val);
-    updateOutputPath(inputDirectory, val);
-    saveSetting("html_parse_mode", val);
+    setOutputPath(nextOutputPath);
+    saveSettings({
+      html_parse_mode: val,
+      html_parse_result_path: nextOutputPath,
+    });
   };
 
   useEffect(() => {
@@ -211,7 +210,7 @@ export default function HtmlParsePage() {
     }
     const cancelToken = window.crypto.randomUUID();
     setActiveCancelToken(cancelToken);
-    
+
     const payload = {
       input_directory: inputDirectory,
       output_path: outputPath,
@@ -241,18 +240,47 @@ export default function HtmlParsePage() {
     }
   };
 
-  const handleExport = () => {
-    if (!outputPath) {
-      setStatus("파싱 결과 데이터 경로가 필요합니다.");
+  const handleLoadPreview = async () => {
+    if (!inputDirectory && !outputPath) {
+      setStatus("입력 데이터 경로 또는 결과 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
-    const params = new URLSearchParams({
-      output_path: outputPath,
-      mode: parseMode,
-      latest_only: String(exportLatestOnly),
-    });
-    window.location.href = `/api/disclosures/html/parse/export.xlsx?${params.toString()}`;
+
+    setPreviewLoading(true);
+    setPreviewData(null);
+    setIsErrorStatus(false);
+    try {
+      const response = await fetch("/api/disclosures/html/parse/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input_directory: inputDirectory,
+          output_path: outputPath,
+          mode: parseMode,
+          limit: 3,
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        let message = text;
+        try {
+          const detail = JSON.parse(text);
+          message = detail.detail || detail.message || text;
+        } catch {
+          message = text;
+        }
+        throw new Error(message || "리포트 미리보기를 불러오지 못했습니다.");
+      }
+      const data = await response.json();
+      setPreviewData(data);
+      setStatus(`리포트 미리보기 ${formatInteger(data.summary?.visible_records || 0)}건을 불러왔습니다.`);
+    } catch (err: any) {
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const parseSettingFields: HtmlWorkflowField[] = [
@@ -264,7 +292,7 @@ export default function HtmlParsePage() {
       value: inputDirectory,
       onChange: handleInputDirectoryChange,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 2,
+      span: 4,
     },
     {
       id: "outputPath",
@@ -274,7 +302,7 @@ export default function HtmlParsePage() {
       value: outputPath,
       onChange: handleOutputPathChange,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 2,
+      span: 4,
     },
     {
       id: "limit",
@@ -314,6 +342,87 @@ export default function HtmlParsePage() {
   ];
   const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputPath");
   const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputPath");
+  const selectedParseMode = PARSE_MODES.find((mode) => mode.key === parseMode) || PARSE_MODES[0];
+  const parsedValueTableClassName = "w-full table-auto border-collapse text-left text-[11px] leading-5";
+  const parsedValueCellClassName = "border-b border-slate-100 px-3 py-2 align-top text-left font-normal text-slate-700 dark:border-[#30363d] dark:text-slate-300";
+  const parsedValueHeaderClassName = "w-44 border-b border-slate-200 bg-slate-50 px-3 py-2 align-top text-left text-[11px] font-semibold leading-5 text-slate-600 dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300";
+  const parsedValueIndexClassName = "w-12 border-b border-slate-200 bg-slate-50 px-3 py-2 align-top text-center text-[11px] font-semibold leading-5 text-slate-500 dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-400";
+
+  const renderParsedValue = (value: any): any => {
+    if (value === null || value === undefined || value === "") {
+      return <span className="text-slate-400 dark:text-slate-500">-</span>;
+    }
+    if (typeof value !== "object") {
+      return <span>{String(value)}</span>;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return <span className="text-slate-400 dark:text-slate-500">-</span>;
+      }
+      if (value.every((item) => Array.isArray(item))) {
+        return (
+          <table className={parsedValueTableClassName}>
+            <tbody>
+              {value.map((row: any[], rowIndex: number) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className={parsedValueCellClassName}>{renderParsedValue(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      }
+      if (value.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
+        const columns = Array.from(new Set(value.flatMap((item) => Object.keys(item))));
+        return (
+          <table className={parsedValueTableClassName}>
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column} className={parsedValueHeaderClassName}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {value.map((item, rowIndex) => (
+                <tr key={rowIndex}>
+                  {columns.map((column) => (
+                    <td key={column} className={parsedValueCellClassName}>{renderParsedValue(item[column])}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      }
+      return (
+        <table className={parsedValueTableClassName}>
+          <tbody>
+            {value.map((item, index) => (
+              <tr key={index}>
+                <th className={parsedValueIndexClassName}>{index + 1}</th>
+                <td className={parsedValueCellClassName}>{renderParsedValue(item)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+    }
+    return (
+      <table className={parsedValueTableClassName}>
+        <tbody>
+          {Object.entries(value).map(([key, nestedValue]) => (
+            <tr key={key}>
+              <th className={parsedValueHeaderClassName}>{key}</th>
+              <td className={parsedValueCellClassName}>{renderParsedValue(nestedValue)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
@@ -328,65 +437,94 @@ export default function HtmlParsePage() {
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <HtmlWorkflowCard
-            title="공시원문 변환 경로"
-            description="입력 HTML 폴더와 결과 JSON 경로는 작업 대상이므로 메인 화면에서 관리합니다."
+            title="데이터 경로"
           >
             <HtmlWorkflowForm fields={parsePathFields} />
           </HtmlWorkflowCard>
 
-          <HtmlWorkflowCard
-            title="작동 원리와 파싱 방식"
-            description="버그 리포트가 들어왔을 때 확인할 기준 흐름입니다."
-          >
-              <div className="flex items-center gap-2">
-                <Info className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">How Parsing Works</p>
-              </div>
-              <ol className="grid gap-3">
-                {PARSING_RULES.map((rule, index) => (
-                  <li key={rule} className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white dark:bg-slate-100 dark:text-slate-900">
-                      {index + 1}
-                    </span>
-                    <span>{rule}</span>
-                  </li>
-                ))}
-              </ol>
-          </HtmlWorkflowCard>
-
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]" data-related-routes={HTML_PARSE_RELATED_ROUTES}>
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Parsing Modes</p>
               <CardTitle className="dark:text-white">모드별 기능</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid gap-3">
                 {PARSE_MODES.map(mode => (
-                  <div 
-                    key={mode.key} 
+                  <div
+                    key={mode.key}
                     onClick={() => handleParseModeChange(mode.key)}
                     className={cn(
-                      "p-4 rounded-xl border transition-all cursor-pointer",
-                      parseMode === mode.key 
-                        ? "bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100 shadow-md" 
+                      "rounded-md border px-4 py-3 transition-shadow cursor-pointer",
+                      parseMode === mode.key
+                        ? "bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100 shadow-sm"
                         : "bg-white text-slate-600 border-slate-200 dark:bg-[#0d1117] dark:text-slate-300 dark:border-[#30363d]"
                     )}
                   >
-                    <div className="flex justify-between items-start mb-2">
-                      <strong className="text-sm font-bold">{mode.label}</strong>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <strong className="text-sm font-semibold">{mode.label}</strong>
+                          <code className={cn(
+                            "text-[10px] font-mono opacity-60",
+                            parseMode === mode.key ? "text-white/75 dark:text-black/60" : "text-slate-400"
+                          )}>{mode.key}</code>
+                        </div>
+                        <p className="mt-2 text-xs leading-6 opacity-85">{mode.description}</p>
+                      </div>
                       <span className={cn(
-                        "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                        "shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium",
                         parseMode === mode.key ? "bg-white/20 text-white dark:bg-black/10 dark:text-black" : "bg-slate-100 text-slate-500 dark:bg-[#21262d] dark:text-slate-400"
                       )}>{mode.status}</span>
                     </div>
-                    <code className={cn(
-                      "text-[10px] block mb-2 font-mono opacity-70",
-                      parseMode === mode.key ? "text-white/80 dark:text-black/70" : "text-slate-400"
-                    )}>{mode.key}</code>
-                    <p className="text-xs leading-relaxed opacity-90">{mode.description}</p>
                   </div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:space-y-0">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Report Preview</p>
+                <CardTitle className="dark:text-white">리포트 미리보기</CardTitle>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  {selectedParseMode.label} 기준으로 경로 내 리포트 최대 3건의 파싱 결과를 표로 확인합니다.
+                </p>
+              </div>
+              <Button variant="outline" onClick={handleLoadPreview} disabled={previewLoading} className="h-10 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200">
+                {previewLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
+                미리보기 불러오기
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {previewData?.records?.length ? (
+                previewData.records.map((record: any) => (
+                  <div key={`${record.index}-${record.source_file}`} className="rounded-md border border-slate-200 bg-white p-3 dark:border-[#30363d] dark:bg-[#0d1117]">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{record.title || record.source_file || `리포트 ${record.index}`}</p>
+                        <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">{record.source_file}</p>
+                      </div>
+                      <code className="rounded bg-slate-100 px-2 py-1 text-[10px] text-slate-500 dark:bg-[#161b22] dark:text-slate-400">
+                        {record.acpt_no || record.rcept_no || `#${record.index}`}
+                      </code>
+                    </div>
+
+                    <div className="mt-3 min-w-0 rounded-md border border-slate-200 dark:border-[#30363d]">
+                      <div className="border-b border-slate-200 px-3 py-2 dark:border-[#30363d]">
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">파싱 결과</p>
+                      </div>
+                      <div className="max-h-[34rem] overflow-auto p-3">
+                        {renderParsedValue(record.parsed_result)}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+                  미리보기를 불러오면 경로 내 리포트의 파싱 결과가 표시됩니다.
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -395,7 +533,7 @@ export default function HtmlParsePage() {
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
                   {isJobActive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
@@ -403,10 +541,6 @@ export default function HtmlParsePage() {
                 <Button variant="outline" className="h-10 w-full" onClick={handleCancel} disabled={!activeCancelToken}>
                   <Square className="mr-2 h-4 w-4" />
                   {UI_TEXT.actions.cancelJob}
-                </Button>
-                <Button onClick={handleExport} disabled={!outputPath} variant="outline" className="h-10 w-full dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-300">
-                  <FileSpreadsheet className="mr-2 h-4 w-4" />
-                  Excel로 내보내기
                 </Button>
               </div>
             </CardContent>
@@ -441,15 +575,6 @@ export default function HtmlParsePage() {
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
                 <HtmlWorkflowForm fields={parseOptionFields} />
-              </div>
-              <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">내보내기</p>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#30363d]" />
-                  <Label htmlFor="exportLatestOnly" className="cursor-pointer dark:text-slate-300">최신버전만 보기</Label>
-                </div>
               </div>
             </>
           }
