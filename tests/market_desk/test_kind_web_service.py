@@ -3785,6 +3785,8 @@ def test_build_parse_preview_payload_parses_input_directory_when_result_is_missi
     record = payload["records"][0]["parsed_result"]
     assert record["acpt_no"] == "20250102000002"
     assert record["rcept_no"] is None
+    assert record["doc_no"] == "20250102009999"
+    assert record["selected_main_doc_no"] == "20250102009999"
     assert record["기업명(발행사)"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
     assert record["correction_families"] == {

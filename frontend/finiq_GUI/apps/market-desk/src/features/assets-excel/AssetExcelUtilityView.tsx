@@ -9,6 +9,7 @@ import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { ActionDock } from "@/components/ui/ActionDock";
+import { htmlTableFrameClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import {
@@ -673,7 +674,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     setSelectedMergeFiles([]);
   };
   const renderOutputRowsTable = (rows: [string, any][], emptyMessage = "표시할 Parquet 결과가 없습니다.", selectable = false) => (
-    <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+    <div className={htmlTableFrameClassName}>
       <table className="w-max min-w-full select-none text-sm">
         <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
           <tr className="text-left text-slate-500 dark:text-slate-400">
@@ -1148,7 +1149,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               <p className={`text-sm ${selectedConvertFileCount ? "text-slate-600 dark:text-slate-300" : "text-amber-600 dark:text-amber-300"}`}>
                 선택한 파일: {formatInteger(selectedConvertFileCount)} / {formatInteger(excelFiles.length)}개
               </p>
-              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+              <div className={htmlTableFrameClassName}>
                 <table className="w-full min-w-[560px] select-none text-sm">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
@@ -1224,7 +1225,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+              <div className={htmlTableFrameClassName}>
                 <table className="w-full min-w-[620px] table-fixed text-sm">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
@@ -1361,7 +1362,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {formatInteger(sheetPayload?.columns?.length)}개</p>
               ) : null}
 
-              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+              <div className={htmlTableFrameClassName}>
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
@@ -1413,7 +1414,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 </Button>
               </div>
               {previewData?.sheets?.length ? (
-                <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+                <div className={htmlTableFrameClassName}>
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                       <tr className="text-left text-slate-500 dark:text-slate-400">
@@ -1537,7 +1538,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 <p className="text-xs text-slate-500 dark:text-slate-400">미리보기는 앞 12개 컬럼만 표시합니다. 전체 컬럼: {formatInteger(parquetPayload?.columns?.length)}개</p>
               ) : null}
 
-              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+              <div className={htmlTableFrameClassName}>
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-[#0d1117]">
                     <tr className="text-left text-slate-500 dark:text-slate-400">
