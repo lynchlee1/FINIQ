@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -19,7 +20,6 @@ from finiq.market_desk.web.html_parsers import (
 from finiq.market_desk.web.html_parsers.common import (
     build_base_record,
     fetch_selected_viewer_body,
-    is_kind_receipt_no,
 )
 from finiq.market_desk.web.disclosure_html import HTML_MANIFEST_FILENAME
 
@@ -190,6 +190,8 @@ def _merge_metadata_index(
         current = target.setdefault(acpt_no, {})
         for key, value in metadata.items():
             if value:
+                if key in {"rcept_no", "correction_families"} and current.get(key):
+                    continue
                 current[key] = value
 
 
@@ -217,58 +219,6 @@ def _load_download_manifest_metadata_index(manifest_path: Path) -> dict[str, dic
     return metadata_index
 
 
-def _main_doc_metadata(item: dict[str, Any], *, acpt_no: str) -> dict[str, Any]:
-    docs = [
-        doc
-        for doc in item.get("docs") or []
-        if isinstance(doc, dict)
-        and str(doc.get("select_id") or doc.get("select_name") or "").strip() == "mainDoc"
-    ]
-    if not docs:
-        return {}
-
-    current_sequence = next(
-        (index for index, doc in enumerate(docs) if bool(doc.get("selected"))),
-        None,
-    )
-    latest_doc = next(
-        (doc for doc in docs if str(doc.get("latest_flag") or "").strip().upper() == "Y"),
-        docs[-1],
-    )
-    latest_doc_no = str(latest_doc.get("doc_no") or "").strip()
-    family_id = latest_doc_no
-    if not family_id:
-        return {}
-    selected_doc_no = (
-        str(docs[current_sequence].get("doc_no") or "").strip()
-        if current_sequence is not None
-        else str(item.get("selected_main_doc_no") or "").strip()
-    )
-    rcept_no = selected_doc_no if is_kind_receipt_no(selected_doc_no) else ""
-    members = []
-    for sequence, doc in enumerate(docs):
-        doc_no = str(doc.get("doc_no") or "").strip()
-        if not doc_no:
-            continue
-        members.append(
-            {
-                "sequence": sequence,
-                "acpt_no": acpt_no if sequence == current_sequence else None,
-                "doc_no": doc_no,
-                "rcept_no": doc_no if is_kind_receipt_no(doc_no) else None,
-            }
-        )
-    return {
-        "rcept_no": rcept_no,
-        "correction_families": {
-            family_id: {
-                "current_sequence": current_sequence,
-                "members": members,
-            }
-        },
-    }
-
-
 def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
@@ -281,8 +231,80 @@ def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     header = str(item.get("header") or "").strip()
     if header and not metadata["company_name"]:
         metadata["company_name"] = re.sub(r"\s*\([^)]*\)\s*$", "", header).strip()
-    metadata.update(_main_doc_metadata(item, acpt_no=acpt_no))
     return acpt_no, metadata
+
+
+def _filtered_correction_group_key(item: dict[str, Any]) -> tuple[str, str]:
+    company_key = str(item.get("company_key") or item.get("company_name") or "").strip()
+    title_base = str(item.get("title_base") or item.get("title_attr") or item.get("title") or "").strip()
+    return (company_key, title_base)
+
+
+def _filtered_disclosed_sort_key(item: dict[str, Any]) -> tuple[str, str]:
+    disclosed_at = str(item.get("disclosed_at") or "").strip()
+    try:
+        disclosed_key = datetime.strptime(disclosed_at, "%Y-%m-%d %H:%M").isoformat()
+    except ValueError:
+        disclosed_key = disclosed_at
+    return (disclosed_key, str(item.get("acpt_no") or ""))
+
+
+def _apply_filtered_correction_metadata(metadata_index: dict[str, dict[str, Any]], rows: list[dict[str, Any]]) -> None:
+    unique_rows = {str(row.get("acpt_no") or "").strip(): row for row in rows if str(row.get("acpt_no") or "").strip()}
+    rows_by_group: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in unique_rows.values():
+        key = _filtered_correction_group_key(row)
+        if key[0] and key[1]:
+            rows_by_group.setdefault(key, []).append(row)
+
+    for group_rows in rows_by_group.values():
+        current_family: list[dict[str, Any]] = []
+        for row in sorted(group_rows, key=_filtered_disclosed_sort_key):
+            is_correction = bool(row.get("is_correction_report"))
+            if not is_correction:
+                if len(current_family) > 1:
+                    _store_filtered_correction_family(metadata_index, current_family)
+                current_family = [row]
+            elif current_family:
+                current_family.append(row)
+            else:
+                current_family = [row]
+        if len(current_family) > 1:
+            _store_filtered_correction_family(metadata_index, current_family)
+
+
+def _store_filtered_correction_family(
+    metadata_index: dict[str, dict[str, Any]],
+    family_rows: list[dict[str, Any]],
+) -> None:
+    family_id = str(family_rows[-1].get("acpt_no") or "").strip()
+    if not family_id:
+        return
+    members = []
+    for sequence, row in enumerate(family_rows):
+        acpt_no = str(row.get("acpt_no") or "").strip()
+        doc_no = str(row.get("doc_no") or "").strip() or None
+        members.append(
+            {
+                "sequence": sequence,
+                "acpt_no": acpt_no,
+                "doc_no": doc_no,
+                "title": row.get("title_display") or row.get("title") or "",
+                "disclosed_at": row.get("disclosed_at") or "",
+                "is_correction_report": bool(row.get("is_correction_report")),
+            }
+        )
+    for current_sequence, row in enumerate(family_rows):
+        acpt_no = str(row.get("acpt_no") or "").strip()
+        if not acpt_no:
+            continue
+        metadata = metadata_index.setdefault(acpt_no, {})
+        metadata["correction_families"] = {
+            family_id: {
+                "current_sequence": current_sequence,
+                "members": members,
+            }
+        }
 
 
 def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, Any]]:
@@ -293,13 +315,19 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, An
     if not isinstance(payload, dict):
         return {}
     metadata_index: dict[str, dict[str, Any]] = {}
-    for item in payload.get("rows") or []:
+    rows = [
+        item
+        for item in [*(payload.get("rows") or []), *(payload.get("disclosures") or [])]
+        if isinstance(item, dict)
+    ]
+    for item in rows:
         if not isinstance(item, dict):
             continue
         parsed = _metadata_item(item)
         if parsed is not None:
             acpt_no, metadata = parsed
             metadata_index[acpt_no] = metadata
+    _apply_filtered_correction_metadata(metadata_index, rows)
     return metadata_index
 
 
@@ -341,7 +369,7 @@ def _apply_manifest_metadata(
         updated_record["title"] = title
     if rcept_no and not updated_record.get("rcept_no"):
         updated_record["rcept_no"] = rcept_no
-    if correction_families and not updated_record.get("correction_families"):
+    if correction_families:
         updated_record["correction_families"] = correction_families
     if mode == "bond_issuance":
         if market:

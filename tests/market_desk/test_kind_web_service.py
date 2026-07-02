@@ -3411,7 +3411,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     (bond_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "rows": [
+                "disclosures": [
                     {
                         "acpt_no": "20250102000002",
                         "company_name": "테스트발행사",
@@ -3708,9 +3708,28 @@ def test_build_parse_preview_payload_parses_input_directory_when_result_is_missi
             {
                 "rows": [
                     {
+                        "company_key": "TEST",
+                        "acpt_no": "20250101000001",
+                        "company_name": "테스트발행사",
+                        "market": "코스닥",
+                        "disclosed_at": "2025-01-01 09:00",
+                        "title": "전환사채권발행결정",
+                        "title_base": "전환사채권발행결정",
+                        "title_display": "전환사채권발행결정",
+                        "is_correction_report": False,
+                        "has_later_correction": True,
+                    },
+                    {
+                        "company_key": "TEST",
                         "acpt_no": "20250102000002",
                         "company_name": "테스트발행사",
                         "market": "코스닥",
+                        "disclosed_at": "2025-01-02 09:00",
+                        "title": "[정정]전환사채권발행결정",
+                        "title_base": "전환사채권발행결정",
+                        "title_display": "[정정]전환사채권발행결정",
+                        "is_correction_report": True,
+                        "has_later_correction": False,
                     }
                 ]
             },
@@ -3765,24 +3784,28 @@ def test_build_parse_preview_payload_parses_input_directory_when_result_is_missi
     assert payload["records"][0]["title"] == "전환사채권발행결정"
     record = payload["records"][0]["parsed_result"]
     assert record["acpt_no"] == "20250102000002"
-    assert record["rcept_no"] == "20250102009999"
+    assert record["rcept_no"] is None
     assert record["기업명(발행사)"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
     assert record["correction_families"] == {
-        "20250102009999": {
+        "20250102000002": {
             "current_sequence": 1,
             "members": [
                 {
                     "sequence": 0,
-                    "acpt_no": None,
-                    "doc_no": "00000000835386",
-                    "rcept_no": None,
+                    "acpt_no": "20250101000001",
+                    "doc_no": None,
+                    "title": "전환사채권발행결정",
+                    "disclosed_at": "2025-01-01 09:00",
+                    "is_correction_report": False,
                 },
                 {
                     "sequence": 1,
                     "acpt_no": "20250102000002",
-                    "doc_no": "20250102009999",
-                    "rcept_no": "20250102009999",
+                    "doc_no": None,
+                    "title": "[정정]전환사채권발행결정",
+                    "disclosed_at": "2025-01-02 09:00",
+                    "is_correction_report": True,
                 },
             ],
         }
@@ -4382,21 +4405,8 @@ def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path)
     parsed = parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
 
     assert parsed["title"] == "[에스브이에이치] [정정]전환사채발행결정"
-    assert parsed["rcept_no"] == "20080826000555"
-    assert parsed["correction_families"] == {
-        "20080826000555": {
-            "current_sequence": 1,
-            "members": [
-                {"sequence": 0, "acpt_no": None, "doc_no": "00000000867311", "rcept_no": None},
-                {
-                    "sequence": 1,
-                    "acpt_no": "20080826000187",
-                    "doc_no": "20080826000555",
-                    "rcept_no": "20080826000555",
-                },
-            ],
-        }
-    }
+    assert parsed["rcept_no"] is None
+    assert parsed["correction_families"] == {}
     assert parsed["회차"] is None
     assert parsed["종류"] == "CB"
     assert parsed["발행금액"] is None

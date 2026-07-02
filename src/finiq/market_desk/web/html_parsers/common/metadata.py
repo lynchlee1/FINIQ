@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from lxml import html
@@ -44,18 +43,6 @@ def extract_acpt_no(file_path: str | Path) -> str:
     return candidate if candidate.isdigit() else ""
 
 
-def is_kind_receipt_no(value: Any) -> bool:
-    """KIND 접수번호처럼 보이는 14자리 날짜 기반 번호인지 확인한다."""
-    text = clean_text(str(value or ""))
-    if len(text) != 14 or not text.isdigit() or not text.startswith(("19", "20")):
-        return False
-    try:
-        datetime.strptime(text[:8], "%Y%m%d")
-    except ValueError:
-        return False
-    return True
-
-
 def _viewer_acpt_no(document: html.HtmlElement, file_path: str | Path) -> str:
     """HTML 내에서 KIND 접수번호를 찾고, 실패할 경우 파일명에서 추론한다."""
     values = document.xpath("//input[@name='acptNo']/@value")
@@ -64,70 +51,6 @@ def _viewer_acpt_no(document: html.HtmlElement, file_path: str | Path) -> str:
         if acpt_no:
             return acpt_no
     return extract_acpt_no(file_path)
-
-
-def _main_doc_options(document: html.HtmlElement) -> list[dict[str, Any]]:
-    """KIND 뷰어 내 정정 문서 버전 선택기(select) 목록을 파싱한다."""
-    options: list[dict[str, Any]] = []
-    for option in document.xpath("//select[@id='mainDoc' or @name='mainDoc']/option"):
-        raw_value = clean_text(str(option.get("value") or ""))
-        if not raw_value:
-            continue
-        doc_no, _, latest_flag = raw_value.partition("|")
-        doc_no = clean_text(doc_no)
-        if not doc_no:
-            continue
-        options.append(
-            {
-                "doc_no": doc_no,
-                "rcept_no": doc_no if is_kind_receipt_no(doc_no) else None,
-                "latest_flag": clean_text(latest_flag).upper(),
-                "selected": option.get("selected") is not None,
-            }
-        )
-    return options
-
-
-def _correction_families(document: html.HtmlElement, *, acpt_no: str) -> tuple[str | None, dict[str, Any]]:
-    """메인 문서 목록을 통해 정정 공시 묶음(family) 메타데이터를 구성한다.
-
-    최신 접수번호가 family ID가 되며, 현재 선택된 옵션을 통해 
-    파싱 중인 HTML의 정정 차수를 식별한다.
-    """
-    main_docs = _main_doc_options(document)
-    if not main_docs:
-        return None, {}
-
-    current_sequence = next(
-        (index for index, item in enumerate(main_docs) if item["selected"]),
-        None,
-    )
-    latest_item = next(
-        (item for item in main_docs if item["latest_flag"] == "Y"),
-        main_docs[-1],
-    )
-    family_id = latest_item["rcept_no"] or latest_item["doc_no"]
-    current_rcept_no = (
-        main_docs[current_sequence]["rcept_no"]
-        if current_sequence is not None
-        else None
-    )
-    members = []
-    for sequence, item in enumerate(main_docs):
-        members.append(
-            {
-                "sequence": sequence,
-                "acpt_no": acpt_no if sequence == current_sequence else None,
-                "doc_no": item["doc_no"],
-                "rcept_no": item["rcept_no"],
-            }
-        )
-    return current_rcept_no, {
-        family_id: {
-            "current_sequence": current_sequence,
-            "members": members,
-        }
-    }
 
 
 def _listing_market(document_text: str) -> str:
@@ -166,11 +89,10 @@ def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: 
     document = parse_html_document(html_markup)
     raw_tables = extract_tables(document)
     acpt_no = _viewer_acpt_no(document, file_path)
-    rcept_no, correction_families = _correction_families(document, acpt_no=acpt_no)
     document_text = clean_text(" ".join(document.itertext()))
     return {
-        "correction_families": correction_families,
-        "rcept_no": rcept_no,
+        "correction_families": {},
+        "rcept_no": None,
         "acpt_no": acpt_no,
         "source_file": str(Path(file_path).resolve()),
         "mode": mode,
