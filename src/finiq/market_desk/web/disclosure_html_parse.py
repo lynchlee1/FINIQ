@@ -223,11 +223,18 @@ def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
         return None
+    selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
+    doc_no = str(item.get("doc_no") or selected_main_doc_no or "").strip()
     metadata = {
         "market": _normalize_listing_market(item.get("market")),
         "company_name": str(item.get("company_name") or "").strip(),
         "title": str(item.get("title") or item.get("title_display") or item.get("title_attr") or "").strip(),
+        "doc_no": doc_no,
+        "selected_main_doc_no": selected_main_doc_no,
     }
+    docs = item.get("docs")
+    if isinstance(docs, list):
+        metadata["docs"] = [doc for doc in docs if isinstance(doc, dict)]
     header = str(item.get("header") or "").strip()
     if header and not metadata["company_name"]:
         metadata["company_name"] = re.sub(r"\s*\([^)]*\)\s*$", "", header).strip()
@@ -361,14 +368,32 @@ def _apply_manifest_metadata(
     company_name = metadata.get("company_name")
     title = metadata.get("title")
     rcept_no = metadata.get("rcept_no")
+    doc_no = metadata.get("doc_no")
+    selected_main_doc_no = metadata.get("selected_main_doc_no")
+    docs = metadata.get("docs")
     correction_families = metadata.get("correction_families")
-    if not market and not company_name and not title and not rcept_no and not correction_families:
+    if (
+        not market
+        and not company_name
+        and not title
+        and not rcept_no
+        and not doc_no
+        and not selected_main_doc_no
+        and not docs
+        and not correction_families
+    ):
         return record
     updated_record = dict(record)
     if title and not updated_record.get("title"):
         updated_record["title"] = title
     if rcept_no and not updated_record.get("rcept_no"):
         updated_record["rcept_no"] = rcept_no
+    if doc_no and not updated_record.get("doc_no"):
+        updated_record["doc_no"] = doc_no
+    if selected_main_doc_no and not updated_record.get("selected_main_doc_no"):
+        updated_record["selected_main_doc_no"] = selected_main_doc_no
+    if docs and not updated_record.get("docs"):
+        updated_record["docs"] = docs
     if correction_families:
         updated_record["correction_families"] = correction_families
     if mode == "bond_issuance":

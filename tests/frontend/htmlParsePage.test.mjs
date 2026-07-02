@@ -55,6 +55,8 @@ test("html parse mode cards use readable list row spacing", async () => {
   const source = await readFile(pagePath, "utf8");
   const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?{PARSE_MODES\.map[\s\S]*?<\/CardContent>/)?.[0] ?? "";
 
+  assert.match(source, /<CardHeader className="gap-3 pb-4">[\s\S]*?<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>/);
+  assert.match(source, /<CardContent className="space-y-4">[\s\S]*?<div className="grid gap-3">/);
   assert.match(modeCardContent, /rounded-md border px-4 py-3/);
   assert.match(modeCardContent, /transition-shadow/);
   assert.doesNotMatch(modeCardContent, /transition-all/);
@@ -74,7 +76,10 @@ test("html parse page renders report preview box for selected mode", async () =>
   assert.match(source, /const \[previewData, setPreviewData\] = useState<any>\(null\)/);
   assert.match(source, /\/api\/disclosures\/html\/parse\/preview/);
   assert.match(source, /limit: 3/);
-  assert.match(previewCardContent, /리포트 최대 3건의 파싱 결과를 표로 확인/);
+  assert.match(source, /<CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">/);
+  assert.match(source, /<div className="min-w-0 space-y-1">[\s\S]*?<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>/);
+  assert.doesNotMatch(previewCardContent, /<p className="mt-1 text-sm/);
+  assert.doesNotMatch(previewCardContent, /리포트 최대 3건의 파싱 결과를 표로 확인/);
   assert.match(previewCardContent, /미리보기 불러오기/);
   assert.match(previewCardContent, /파싱 결과/);
   assert.match(source, /const renderParsedValue = \(value: any\): any =>/);
@@ -82,6 +87,8 @@ test("html parse page renders report preview box for selected mode", async () =>
   assert.match(source, /px-3 py-2 align-top text-left/);
   assert.match(source, /const parsedValueIndexClassName =/);
   assert.match(source, /<table className=\{parsedValueTableClassName\}>/);
+  assert.match(previewCardContent, /rounded-md border border-slate-200 bg-white px-4 py-3/);
+  assert.doesNotMatch(previewCardContent, /rounded-md border border-slate-200 bg-white p-3/);
   assert.match(previewCardContent, /renderParsedValue\(record\.parsed_result\)/);
   assert.doesNotMatch(previewCardContent, /리포트 내용/);
   assert.doesNotMatch(previewCardContent, /JSON\.stringify\(record\.parsed_result, null, 2\)/);

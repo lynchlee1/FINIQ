@@ -12,6 +12,7 @@ import {
   HtmlWorkflowCard,
   HtmlWorkflowPage,
   htmlControlClassName,
+  htmlInsetPanelClassName,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { ActionDock } from "@/components/ui/ActionDock";
@@ -877,7 +878,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             >
               <HtmlWorkflowForm fields={basePathFields} />
             {checkingExisting && !existingData && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-[#30363d] dark:bg-[#161b22]">
+              <div className={`${htmlInsetPanelClassName} text-sm`}>
                 <div className="flex items-start gap-3">
                   <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
                   <div className="space-y-1">
@@ -894,7 +895,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
               </div>
             )}
             {existingData && (
-              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-[#30363d] dark:bg-[#161b22] animate-fade-in transition-all">
+              <div className={`${htmlInsetPanelClassName} space-y-3 text-sm animate-fade-in transition-all`}>
                 <div className="flex flex-col gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d] md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
                     <p className="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">

@@ -12,6 +12,9 @@ import { getSidebarDefinition, type WorkflowId } from "@/config/navigation";
 export const htmlControlClassName = "h-10 text-sm dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:placeholder:text-slate-600";
 export const htmlSelectTriggerClassName = htmlControlClassName;
 export const htmlSelectContentClassName = "dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200";
+export const htmlPageNoticeClassName = "rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:bg-[#161b22] dark:border-[#30363d]";
+export const htmlInsetPanelClassName = "rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-[#30363d] dark:bg-[#161b22]";
+export const htmlTableFrameClassName = "max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]";
 
 type HtmlWorkflowPageProps = {
   workflowId?: WorkflowId;
@@ -134,7 +137,7 @@ export function HtmlWorkflowPage({
       <WorkflowSidebar title={sidebar.title} groups={sidebar.groups} />
       <div className="min-w-0 flex flex-col gap-6">
         {(actions || notice) ? (
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:bg-[#161b22] dark:border-[#30363d]">
+          <section className={htmlPageNoticeClassName}>
             {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
             {notice ? <div className={actions ? "mt-4" : ""}>{notice}</div> : null}
           </section>

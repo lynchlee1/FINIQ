@@ -14,6 +14,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { htmlInsetPanelClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
@@ -661,7 +662,7 @@ export default function DownloadPage() {
               </div>
 
               {checkingExisting && !existingData && (
-                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-[#30363d] dark:bg-[#161b22] text-sm animate-fade-in transition-all">
+                <div className={`${htmlInsetPanelClassName} space-y-3 text-sm animate-fade-in transition-all`}>
                   <div className="flex items-start gap-3">
                     <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
                     <div className="space-y-1">
@@ -675,7 +676,7 @@ export default function DownloadPage() {
               )}
 
               {existingData && existingData.has_existing && (
-                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-[#30363d] dark:bg-[#161b22] text-sm animate-fade-in transition-all">
+                <div className={`${htmlInsetPanelClassName} space-y-3 text-sm animate-fade-in transition-all`}>
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d]">
                         <div className="space-y-1">
                           <p className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">

@@ -66,6 +66,7 @@ test("price chart can hide its internal title block", async () => {
   assert.match(source, /showHeader\?: boolean/);
   assert.match(source, /showHeader = true/);
   assert.match(source, /\{showHeader \? \(/);
+  assert.match(source, /\{subtitle \? <p className="text-sm text-slate-500 dark:text-slate-400">\{subtitle\}<\/p> : null\}/);
 });
 
 test("price chart can render close-only line mode", async () => {

@@ -443,11 +443,13 @@ export default function HtmlParsePage() {
           </HtmlWorkflowCard>
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]" data-related-routes={HTML_PARSE_RELATED_ROUTES}>
-            <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Parsing Modes</p>
-              <CardTitle className="dark:text-white">모드별 기능</CardTitle>
+            <CardHeader className="gap-3 pb-4">
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Parsing Modes</p>
+                <CardTitle className="dark:text-white">모드별 기능</CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <div className="grid gap-3">
                 {PARSE_MODES.map(mode => (
                   <div
@@ -483,13 +485,10 @@ export default function HtmlParsePage() {
           </Card>
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:space-y-0">
-              <div className="min-w-0">
+            <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">
+              <div className="min-w-0 space-y-1">
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Report Preview</p>
                 <CardTitle className="dark:text-white">리포트 미리보기</CardTitle>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  {selectedParseMode.label} 기준으로 경로 내 리포트 최대 3건의 파싱 결과를 표로 확인합니다.
-                </p>
               </div>
               <Button variant="outline" onClick={handleLoadPreview} disabled={previewLoading} className="h-10 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200">
                 {previewLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
@@ -499,7 +498,7 @@ export default function HtmlParsePage() {
             <CardContent className="space-y-4">
               {previewData?.records?.length ? (
                 previewData.records.map((record: any) => (
-                  <div key={`${record.index}-${record.source_file}`} className="rounded-md border border-slate-200 bg-white p-3 dark:border-[#30363d] dark:bg-[#0d1117]">
+                  <div key={`${record.index}-${record.source_file}`} className="rounded-md border border-slate-200 bg-white px-4 py-3 dark:border-[#30363d] dark:bg-[#0d1117]">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{record.title || record.source_file || `리포트 ${record.index}`}</p>

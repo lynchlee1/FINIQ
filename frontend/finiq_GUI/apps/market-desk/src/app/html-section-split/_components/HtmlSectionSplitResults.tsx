@@ -8,6 +8,7 @@ import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import {
   HtmlWorkflowCard,
   HtmlWorkflowForm,
+  htmlTableFrameClassName,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { formatInteger } from "@/lib/format";
@@ -462,7 +463,7 @@ export function HtmlSectionSplitResults({
 
       {problemFiles.length ? (
         <HtmlWorkflowCard title="문제 파일" description="목차가 없거나 읽기에 실패한 HTML 파일입니다.">
-          <div className="max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
+          <div className={htmlTableFrameClassName}>
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500 dark:bg-[#0d1117] dark:text-slate-400">
                 <tr>
