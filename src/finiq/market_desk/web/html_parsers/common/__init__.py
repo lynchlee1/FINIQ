@@ -39,7 +39,6 @@ from .tables import (
 from .metadata import (
     extract_title,
     extract_acpt_no,
-    is_kind_receipt_no,
     preserve_viewer_metadata,
     build_base_record,
 )
@@ -69,7 +68,6 @@ __all__ = [
     "non_correction_rows",
     "extract_title",
     "extract_acpt_no",
-    "is_kind_receipt_no",
     "preserve_viewer_metadata",
     "build_base_record",
 ]
