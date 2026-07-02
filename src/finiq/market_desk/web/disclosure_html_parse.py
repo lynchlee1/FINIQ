@@ -16,7 +16,11 @@ from finiq.market_desk.web.html_parsers import (
     parse_security_transaction,
     parse_shareholder_meeting,
 )
-from finiq.market_desk.web.html_parsers.common import build_base_record, fetch_selected_viewer_body
+from finiq.market_desk.web.html_parsers.common import (
+    build_base_record,
+    fetch_selected_viewer_body,
+    is_kind_receipt_no,
+)
 from finiq.market_desk.web.disclosure_html import HTML_MANIFEST_FILENAME
 
 ParseFunction = Callable[[str | bytes], dict[str, Any]]
@@ -44,7 +48,7 @@ class ParseRequest:
     input_directory: Path
     output_path: Path
     html_files: list[Path]
-    manifest_metadata_index: dict[str, dict[str, str]]
+    manifest_metadata_index: dict[str, dict[str, Any]]
     limit: int | None
     skip_errors: bool
     resume: bool
@@ -164,8 +168,8 @@ def _normalize_listing_market(value: Any) -> str:
     return market
 
 
-def _load_html_manifest_metadata_index(input_directory: Path) -> dict[str, dict[str, str]]:
-    metadata_index: dict[str, dict[str, str]] = {}
+def _load_html_manifest_metadata_index(input_directory: Path) -> dict[str, dict[str, Any]]:
+    metadata_index: dict[str, dict[str, Any]] = {}
     manifest_path = input_directory / HTML_MANIFEST_FILENAME
     if manifest_path.is_file():
         _merge_metadata_index(metadata_index, _load_download_manifest_metadata_index(manifest_path))
@@ -180,7 +184,7 @@ def _load_html_manifest_metadata_index(input_directory: Path) -> dict[str, dict[
 
 
 def _merge_metadata_index(
-    target: dict[str, dict[str, str]], source: dict[str, dict[str, str]]
+    target: dict[str, dict[str, Any]], source: dict[str, dict[str, Any]]
 ) -> None:
     for acpt_no, metadata in source.items():
         current = target.setdefault(acpt_no, {})
@@ -189,7 +193,7 @@ def _merge_metadata_index(
                 current[key] = value
 
 
-def _load_download_manifest_metadata_index(manifest_path: Path) -> dict[str, dict[str, str]]:
+def _load_download_manifest_metadata_index(manifest_path: Path) -> dict[str, dict[str, Any]]:
     if not manifest_path.is_file():
         return {}
     try:
@@ -198,7 +202,7 @@ def _load_download_manifest_metadata_index(manifest_path: Path) -> dict[str, dic
         raise ValueError(f"HTML 메타데이터 manifest를 읽을 수 없습니다: {manifest_path}") from exc
     if not isinstance(payload, dict):
         return {}
-    metadata_index: dict[str, dict[str, str]] = {}
+    metadata_index: dict[str, dict[str, Any]] = {}
     for item in payload.get("disclosures") or []:
         if not isinstance(item, dict):
             continue
@@ -213,7 +217,59 @@ def _load_download_manifest_metadata_index(manifest_path: Path) -> dict[str, dic
     return metadata_index
 
 
-def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, str]] | None:
+def _main_doc_metadata(item: dict[str, Any], *, acpt_no: str) -> dict[str, Any]:
+    docs = [
+        doc
+        for doc in item.get("docs") or []
+        if isinstance(doc, dict)
+        and str(doc.get("select_id") or doc.get("select_name") or "").strip() == "mainDoc"
+    ]
+    if not docs:
+        return {}
+
+    current_sequence = next(
+        (index for index, doc in enumerate(docs) if bool(doc.get("selected"))),
+        None,
+    )
+    latest_doc = next(
+        (doc for doc in docs if str(doc.get("latest_flag") or "").strip().upper() == "Y"),
+        docs[-1],
+    )
+    latest_doc_no = str(latest_doc.get("doc_no") or "").strip()
+    family_id = latest_doc_no
+    if not family_id:
+        return {}
+    selected_doc_no = (
+        str(docs[current_sequence].get("doc_no") or "").strip()
+        if current_sequence is not None
+        else str(item.get("selected_main_doc_no") or "").strip()
+    )
+    rcept_no = selected_doc_no if is_kind_receipt_no(selected_doc_no) else ""
+    members = []
+    for sequence, doc in enumerate(docs):
+        doc_no = str(doc.get("doc_no") or "").strip()
+        if not doc_no:
+            continue
+        members.append(
+            {
+                "sequence": sequence,
+                "acpt_no": acpt_no if sequence == current_sequence else None,
+                "doc_no": doc_no,
+                "rcept_no": doc_no if is_kind_receipt_no(doc_no) else None,
+            }
+        )
+    return {
+        "rcept_no": rcept_no,
+        "correction_families": {
+            family_id: {
+                "current_sequence": current_sequence,
+                "members": members,
+            }
+        },
+    }
+
+
+def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
         return None
@@ -225,17 +281,18 @@ def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, str]] | None:
     header = str(item.get("header") or "").strip()
     if header and not metadata["company_name"]:
         metadata["company_name"] = re.sub(r"\s*\([^)]*\)\s*$", "", header).strip()
+    metadata.update(_main_doc_metadata(item, acpt_no=acpt_no))
     return acpt_no, metadata
 
 
-def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, str]]:
+def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, Any]]:
     try:
         payload = json.loads(filtered_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"필터 결과 JSON을 읽을 수 없습니다: {filtered_path}") from exc
     if not isinstance(payload, dict):
         return {}
-    metadata_index: dict[str, dict[str, str]] = {}
+    metadata_index: dict[str, dict[str, Any]] = {}
     for item in payload.get("rows") or []:
         if not isinstance(item, dict):
             continue
@@ -246,14 +303,14 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, st
     return metadata_index
 
 
-def _load_compressed_external_html_metadata_index(compressed_path: Path) -> dict[str, dict[str, str]]:
+def _load_compressed_external_html_metadata_index(compressed_path: Path) -> dict[str, dict[str, Any]]:
     try:
         payload = json.loads(compressed_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"외부 HTML 압축 JSON을 읽을 수 없습니다: {compressed_path}") from exc
     if not isinstance(payload, dict):
         return {}
-    metadata_index: dict[str, dict[str, str]] = {}
+    metadata_index: dict[str, dict[str, Any]] = {}
     for item in payload.get("records") or []:
         if not isinstance(item, dict):
             continue
@@ -266,7 +323,7 @@ def _load_compressed_external_html_metadata_index(compressed_path: Path) -> dict
 
 def _apply_manifest_metadata(
     record: dict[str, Any],
-    metadata_index: dict[str, dict[str, str]],
+    metadata_index: dict[str, dict[str, Any]],
     *,
     mode: str,
 ) -> dict[str, Any]:
@@ -275,11 +332,17 @@ def _apply_manifest_metadata(
     market = metadata.get("market")
     company_name = metadata.get("company_name")
     title = metadata.get("title")
-    if not market and not company_name and not title:
+    rcept_no = metadata.get("rcept_no")
+    correction_families = metadata.get("correction_families")
+    if not market and not company_name and not title and not rcept_no and not correction_families:
         return record
     updated_record = dict(record)
     if title and not updated_record.get("title"):
         updated_record["title"] = title
+    if rcept_no and not updated_record.get("rcept_no"):
+        updated_record["rcept_no"] = rcept_no
+    if correction_families and not updated_record.get("correction_families"):
+        updated_record["correction_families"] = correction_families
     if mode == "bond_issuance":
         if market:
             updated_record["상장구분"] = market
@@ -542,6 +605,19 @@ def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in record.items()
         if key not in {"raw_tables", "raw_rows"}
+    }
+
+
+def _build_preview_record(record: dict[str, Any], *, index: int, mode: str) -> dict[str, Any]:
+    compact_record = _compact_record(record)
+    return {
+        "index": index,
+        "title": record.get("title") or "",
+        "acpt_no": record.get("acpt_no") or "",
+        "rcept_no": record.get("rcept_no") or "",
+        "source_file": record.get("source_file") or "",
+        "source_preview": _load_source_preview(record, mode=mode),
+        "parsed_result": compact_record,
     }
 
 
@@ -1152,6 +1228,97 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             "minor_changes": sum(1 for family in visible_families if family.get("severity") == "minor"),
         },
         "families": visible_families,
+    }
+
+
+def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Return a few reports with source-table preview and parsed JSON for the UI."""
+    requested_mode = str(body.get("mode") or "").strip()
+    if not requested_mode:
+        msg = "mode is required"
+        raise ValueError(msg)
+    parser = PARSER_REGISTRY.get(requested_mode)
+    if parser is None:
+        supported_modes = ", ".join(sorted(PARSER_REGISTRY))
+        msg = f"unsupported mode: {requested_mode!r}. supported modes: {supported_modes}"
+        raise ValueError(msg)
+
+    limit = _parse_limit(body.get("limit")) or 3
+    output_path_raw = str(body.get("output_path") or body.get("parse_result_path") or "").strip()
+    if output_path_raw:
+        output_path = _resolve_parse_result_path(Path(output_path_raw).expanduser().resolve(), requested_mode)
+        if output_path.is_file():
+            payload = _get_cached_payload(output_path)
+            mode = str(payload.get("mode") or requested_mode)
+            if mode != requested_mode:
+                msg = f"parse result mode must be {requested_mode}"
+                raise ValueError(msg)
+            records = [record for record in list(payload.get("records") or []) if isinstance(record, dict)]
+            visible_records = records[:limit]
+            return {
+                "format": "finiq_parse_preview_v1",
+                "mode": mode,
+                "source_kind": "result_json",
+                "source_path": str(output_path),
+                "summary": {
+                    "records": len(records),
+                    "visible_records": len(visible_records),
+                },
+                "records": [
+                    _build_preview_record(record, index=index, mode=mode)
+                    for index, record in enumerate(visible_records, start=1)
+                ],
+            }
+
+    input_directory_raw = str(body.get("input_directory") or "").strip()
+    if not input_directory_raw:
+        msg = "input_directory is required when output_path does not point to a result JSON"
+        raise ValueError(msg)
+    input_directory = Path(input_directory_raw).expanduser().resolve()
+    if not input_directory.is_dir():
+        msg = f"input_directory does not exist: {input_directory}"
+        raise ValueError(msg)
+
+    html_files = _collect_html_files(input_directory, limit)
+    metadata_index = _load_html_manifest_metadata_index(input_directory)
+    records: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for index, html_file in enumerate(html_files, start=1):
+        try:
+            records.append(
+                _apply_manifest_metadata(
+                    _compact_record(parser(html_file.read_bytes(), file_path=html_file)),
+                    metadata_index,
+                    mode=requested_mode,
+                )
+            )
+        except Exception as exc:
+            errors.append(
+                {
+                    "index": index,
+                    "source_file": str(html_file),
+                    "error": str(exc),
+                }
+            )
+
+    return {
+        "format": "finiq_parse_preview_v1",
+        "mode": requested_mode,
+        "source_kind": "input_directory",
+        "source_path": str(input_directory),
+        "summary": {
+            "records": len(html_files),
+            "visible_records": len(records),
+            "errors": len(errors),
+        },
+        "records": [
+            _build_preview_record(record, index=index, mode=requested_mode)
+            for index, record in enumerate(
+                _resolve_correction_family_acpt_numbers(records),
+                start=1,
+            )
+        ],
+        "errors": errors,
     }
 
 

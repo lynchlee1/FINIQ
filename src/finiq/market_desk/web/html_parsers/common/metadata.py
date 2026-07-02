@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from lxml import html
@@ -43,6 +44,18 @@ def extract_acpt_no(file_path: str | Path) -> str:
     return candidate if candidate.isdigit() else ""
 
 
+def is_kind_receipt_no(value: Any) -> bool:
+    """KIND 접수번호처럼 보이는 14자리 날짜 기반 번호인지 확인한다."""
+    text = clean_text(str(value or ""))
+    if len(text) != 14 or not text.isdigit() or not text.startswith(("19", "20")):
+        return False
+    try:
+        datetime.strptime(text[:8], "%Y%m%d")
+    except ValueError:
+        return False
+    return True
+
+
 def _viewer_acpt_no(document: html.HtmlElement, file_path: str | Path) -> str:
     """HTML 내에서 KIND 접수번호를 찾고, 실패할 경우 파일명에서 추론한다."""
     values = document.xpath("//input[@name='acptNo']/@value")
@@ -61,12 +74,13 @@ def _main_doc_options(document: html.HtmlElement) -> list[dict[str, Any]]:
         if not raw_value:
             continue
         doc_no, _, latest_flag = raw_value.partition("|")
-        rcept_no = clean_text(doc_no)
-        if not rcept_no:
+        doc_no = clean_text(doc_no)
+        if not doc_no:
             continue
         options.append(
             {
-                "rcept_no": rcept_no,
+                "doc_no": doc_no,
+                "rcept_no": doc_no if is_kind_receipt_no(doc_no) else None,
                 "latest_flag": clean_text(latest_flag).upper(),
                 "selected": option.get("selected") is not None,
             }
@@ -92,7 +106,7 @@ def _correction_families(document: html.HtmlElement, *, acpt_no: str) -> tuple[s
         (item for item in main_docs if item["latest_flag"] == "Y"),
         main_docs[-1],
     )
-    family_id = latest_item["rcept_no"]
+    family_id = latest_item["rcept_no"] or latest_item["doc_no"]
     current_rcept_no = (
         main_docs[current_sequence]["rcept_no"]
         if current_sequence is not None
@@ -104,6 +118,7 @@ def _correction_families(document: html.HtmlElement, *, acpt_no: str) -> tuple[s
             {
                 "sequence": sequence,
                 "acpt_no": acpt_no if sequence == current_sequence else None,
+                "doc_no": item["doc_no"],
                 "rcept_no": item["rcept_no"],
             }
         )
