@@ -22,6 +22,7 @@ class BondIssuanceRecord:
     행사가액: int | None
     납입일: str | None
     만기일: str | None
+    사채발행방법: str | None
     행사시작일: str | None
     행사종료일: str | None
     투자자: list[list[Any]]
@@ -38,6 +39,7 @@ class BondIssuanceRecord:
             "행사가액": self.행사가액,
             "납입일": self.납입일,
             "만기일": self.만기일,
+            "사채발행방법": self.사채발행방법,
             "행사시작일": self.행사시작일,
             "행사종료일": self.행사종료일,
             "투자자": self.투자자,

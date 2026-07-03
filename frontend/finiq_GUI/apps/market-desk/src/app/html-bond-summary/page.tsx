@@ -118,6 +118,7 @@ export default function HtmlBondSummaryPage() {
     ["행사가액", formatNumber(getField(record, "행사가액"))],
     ["납입일", getField(record, "납입일")],
     ["만기일", getField(record, "만기일")],
+    ["사채발행방법", getField(record, "사채발행방법")],
     ["행사시작일", getField(record, "행사시작일")],
     ["행사종료일", getField(record, "행사종료일")],
   ];
@@ -139,6 +140,7 @@ export default function HtmlBondSummaryPage() {
           getField(record, "기업명(발행사)"),
           getField(record, "기업명(행사대상)"),
           getField(record, "납입일"),
+          getField(record, "사채발행방법"),
           getTargetText(record),
         ].join(" ").toLowerCase();
         if (!haystack.includes(keyword)) return false;
