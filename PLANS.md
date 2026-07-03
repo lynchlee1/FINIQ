@@ -1,5 +1,19 @@
 # Review Findings
 
+## Table span regression coverage
+
+Purpose: add direct regression coverage for HTML table cells that declare
+`rowspan` and `colspan` at the same time.
+
+Implementation summary: added an `expand_table` unit test where one cell spans
+two rows and two columns, then asserted both the expanded text grid and the
+`from_span` metadata for the second row.
+
+Verification result: `PYTHONPATH=src pytest -q
+tests/market_desk/test_kind_web_service.py::test_expand_table_expands_rowspan_and_colspan
+tests/market_desk/test_kind_web_service.py::test_expand_table_expands_cell_with_rowspan_and_colspan`
+passed.
+
 ## Listing market source-of-truth cleanup
 
 Purpose: remove body-text listing market inference from common HTML metadata
