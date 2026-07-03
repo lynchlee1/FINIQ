@@ -22,7 +22,6 @@ class RightsIssuanceRecord:
     신주권교부예정일: str | None
     상장예정일: str | None
     발행대상자: list[list[Any]]
-    발행대상자세부엔티티: list[list[str]]
 
     def to_dict(self) -> dict[str, Any]:
         """추출된 데이터를 기존 파이프라인에서 기대하는 dict 키 형태로 매핑합니다."""
@@ -36,5 +35,4 @@ class RightsIssuanceRecord:
             "신주권교부예정일": self.신주권교부예정일,
             "상장예정일": self.상장예정일,
             "발행대상자": self.발행대상자,
-            "발행대상자세부엔티티": self.발행대상자세부엔티티,
         }
