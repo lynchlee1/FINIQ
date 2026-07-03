@@ -12,22 +12,24 @@ from .tables import extract_tables
 from .text import clean_text, element_text
 
 
-def extract_title(document: html.HtmlElement) -> str:
-    """채권발 HTML에서 공시 제목을 추출한다."""
-    for xpath in (
-        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ') and contains(., '사채')]",
-        "//title/text()",
-    ):
-        values = document.xpath(xpath)
-        for value in values:
-            title = (
-                element_text(value)
-                if hasattr(value, "itertext")
-                else clean_text(str(value))
-            )
-            if title:
-                return title
+def _first_text(document: html.HtmlElement, xpath: str) -> str:
+    for value in document.xpath(xpath):
+        text = (
+            element_text(value)
+            if hasattr(value, "itertext")
+            else clean_text(str(value))
+        )
+        if text:
+            return text
     return ""
+
+
+def extract_title(document: html.HtmlElement) -> str:
+    """공시 제목을 SECTION-1 후보와 HTML title에서 추출한다."""
+    return _first_text(
+        document,
+        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ')]",
+    ) or _first_text(document, "//title/text()")
 
 
 def extract_acpt_no(file_path: str | Path) -> str:
@@ -65,7 +67,10 @@ def preserve_viewer_metadata(
 
 
 def build_base_record(
-    html_markup: str | bytes, *, file_path: str | Path, mode: str
+    html_markup: str | bytes,
+    *,
+    file_path: str | Path,
+    mode: str,
 ) -> dict[str, Any]:
     """공시 HTML 파일의 기초가 되는 공통 파싱 레코드를 생성한다.
 

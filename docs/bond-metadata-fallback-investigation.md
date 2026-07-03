@@ -158,13 +158,14 @@ sufficient for current bond type classification.
 
 ## Implemented Less-Fallback System
 
-For this bond corpus, the equivalent minimal behavior has been implemented in
-`metadata.py`:
+For this bond corpus, the equivalent minimal behavior has been implemented with
+a structure-based title extractor. `metadata.py` searches the first `SECTION-1`
+title candidate, then falls back to `<title>`.
 
 ```python
 def extract_bond_title(document):
     return first_non_empty(
-        section1_paragraph_containing("사채"),
+        first_section1_paragraph(),
         title_tag_text(),
     )
 
@@ -195,15 +196,16 @@ branch is retained even though it is unused in this specific corpus.
 ## Implementation Note
 
 The common `metadata.py` implementation now follows the bond-corpus evidence
-directly. This intentionally removes broad fallback behavior that was not used
-by the scoped bond corpus.
+directly while avoiding domain keyword matching in the common title extraction
+logic. This intentionally removes broad fallback behavior that was not used by
+the scoped bond corpus.
 
 If other parser modes are completed later, they should be validated against
 their own corpora before adding fallback behavior back.
 
 The retained behavior is:
 
-- title: `SECTION-1 + 사채`, then `<title>`
+- title: first `SECTION-1` paragraph, then `<title>`
 - acpt_no: filename numeric prefix
 - market: `코스닥시장`, `유가증권시장`, `코넥스시장`, else `기타`
 
