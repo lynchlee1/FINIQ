@@ -122,6 +122,7 @@ export default function HtmlParsePage() {
   const [skipErrors, setSkipErrors] = useState(true);
   const [resumeParse, setResumeParse] = useState(false);
   const [progressInterval, setProgressInterval] = useState("10");
+  const [parallelWorkers, setParallelWorkers] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
 
@@ -219,6 +220,7 @@ export default function HtmlParsePage() {
       skip_errors: skipErrors,
       resume: resumeParse,
       progress_interval: Number(progressInterval),
+      parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
       cancel_token: cancelToken,
     };
 
@@ -321,6 +323,17 @@ export default function HtmlParsePage() {
       label: "진행 확인 간격 (건)",
       value: progressInterval,
       onChange: setProgressInterval,
+      span: 2,
+    },
+    {
+      id: "parallelWorkers",
+      kind: "input",
+      type: "number",
+      label: "병렬 워커 수",
+      help: "비워 두면 기존처럼 1개 워커로 실행합니다.",
+      placeholder: "1",
+      value: parallelWorkers,
+      onChange: setParallelWorkers,
       span: 2,
     },
     {
