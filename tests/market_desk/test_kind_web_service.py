@@ -3378,6 +3378,30 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
     assert payload["records"][0]["기업명(발행사)"] == "테스트발행사"
 
 
+def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path: Path) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    (viewer_dir / "20250101000001.html").write_text(
+        """
+        <html>
+          <head><title>Sample Disclosure</title></head>
+          <body>유가증권시장 <table><tr><th>Field</th><td>Value</td></tr></table></body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "bond_issuance",
+            "resume": False,
+        }
+    )
+
+    assert payload["records"][0]["상장구분"] is None
+
+
 def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp_path: Path) -> None:
     bond_dir = tmp_path / "bond_issuance"
     input_dir = bond_dir / "kind_html_contents_grouped_sections"
@@ -4377,7 +4401,7 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     assert parsed["회차"] == "16"
     assert parsed["종류"] == "CB"
     assert parsed["발행금액"] == 40_000_000_000
-    assert parsed["상장구분"] == "기타"
+    assert parsed["상장구분"] is None
     assert parsed["만기일"] == "2031년 05월 08일"
     assert parsed["행사가액"] == 54_315
     assert parsed["기업명(행사대상)"] == "아이티센글로벌"

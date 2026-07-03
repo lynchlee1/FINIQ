@@ -39,17 +39,6 @@ def extract_acpt_no(file_path: str | Path) -> str:
     return candidate if candidate.isdigit() else ""
 
 
-def _listing_market(document_text: str) -> str:
-    """명시적인 메타데이터가 없을 경우 문서 본문을 통해 상장 시장을 추론한다."""
-    if "코스닥시장" in document_text:
-        return "코스닥"
-    if "유가증권시장" in document_text:
-        return "코스피"
-    if "코넥스시장" in document_text:
-        return "코넥스"
-    return "기타"
-
-
 def preserve_viewer_metadata(
     record: dict[str, Any], viewer_record: dict[str, Any]
 ) -> None:
@@ -80,7 +69,6 @@ def build_base_record(
     document = parse_html_document(html_markup)
     raw_tables = extract_tables(document)
     acpt_no = extract_acpt_no(file_path)
-    document_text = clean_text(" ".join(document.itertext()))
     return {
         "correction_families": {},
         "rcept_no": None,
@@ -88,7 +76,7 @@ def build_base_record(
         "source_file": str(Path(file_path).resolve()),
         "mode": mode,
         "title": extract_title(document),
-        "상장시장": _listing_market(document_text),
+        "상장시장": None,
         "raw_tables": raw_tables,
         "raw_rows": [row for table in raw_tables for row in table["logical_rows"]],
     }
