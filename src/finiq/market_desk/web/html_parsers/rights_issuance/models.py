@@ -1,15 +1,18 @@
 """유무상증자 데이터 모델."""
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any
+
 
 @dataclass
 class RightsIssuanceRecord:
     """유무상증자 공시 추출 데이터 모델(스키마).
-    
+
     어떤 필드들이 최종적으로 추출되는지 직관적으로 확인할 수 있습니다.
     """
+
     신주의_종류와_수: list[list[Any]]
     발행목적: list[list[Any]]
     발행가액: list[list[Any]]

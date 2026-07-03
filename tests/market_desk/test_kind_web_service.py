@@ -4892,6 +4892,79 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> N
     assert parsed["발행대상자세부엔티티"] == [["주식회사 에프앤지", "이미란", "(주)에스제이씨"]]
 
 
+def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "resources"
+        / "KIND"
+        / "rights_issuance"
+        / "kind_html_contents_sections"
+        / "20120419000357.html"
+    )
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["신주의 종류와 수"] == [["보통주식", 3_600_000], ["기타주식", 0]]
+    assert parsed["발행가액"] == [["보통주식", 2_000], ["기타주식", 0]]
+    assert parsed["발행목적"] == [
+        ["시설자금", 0],
+        ["영업양수자금", 0],
+        ["운영자금", 4_200_000_000],
+        ["채무상환자금", 0],
+        ["타법인 증권 취득자금", 0],
+        ["기타자금", 3_000_000_000],
+    ]
+    assert parsed.get("parse_warnings") is None
+
+
+def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "resources"
+        / "KIND"
+        / "rights_issuance"
+        / "kind_html_contents_sections"
+        / "20080825000072.html"
+    )
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["신주의 종류와 수"] == [["보통주식", 3_560_000], ["기타주식", 0]]
+    assert parsed["증자방식"] == "무상증자"
+    assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", 0]]
+    assert parsed["납입일"] is None
+    assert parsed["신주권교부예정일"] == "2008년 10월 01일"
+    assert parsed["상장예정일"] == "2008년 10월 02일"
+    assert parsed.get("parse_warnings") is None
+
+
+def test_parse_rights_issuance_warns_when_main_table_is_absent(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20250102000004.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>임의 표</td><td>값</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 0]]
+    assert parsed["증자방식"] is None
+    assert parsed["parse_warnings"][0] == (
+        "유무상증자 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
+    )
+    assert any(
+        warning.startswith("신주의 종류와 수: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+    assert any(
+        warning.startswith("증자방식: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+
+
 def test_build_insight_payload_groups_disclosures(tmp_path: Path, monkeypatch) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
 
