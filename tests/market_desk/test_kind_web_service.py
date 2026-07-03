@@ -4818,9 +4818,8 @@ def test_parse_bond_issuance_reads_legacy_warrant_exercise_period_label(
     )
 
 
-def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> None:
+def test_parse_rights_issuance_extracts_kind_stockissue_fields() -> None:
     fixture_path = Path("20240822000349.html")
-    wrapper_html = "<html><body><select id='mainDoc'><option value='DOC001|Y' selected>main</option></select></body></html>"
     body_html = """
     <html><body>
       <h2 class="SECTION-1"><p class="SECTION-1">유상증자결정</p></h2>
@@ -4866,12 +4865,8 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> N
       </table>
     </body></html>
     """
-    monkeypatch.setattr(
-        "finiq.market_desk.web.html_parsers.rights_issuance.fetch_selected_viewer_body",
-        lambda html_text, **kwargs: body_html.encode("utf-8"),
-    )
 
-    parsed = parse_rights_issuance(wrapper_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 2_495_327], ["기타주식", 0]]
     assert parsed["발행목적"] == [
@@ -4938,7 +4933,9 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     assert parsed.get("parse_warnings") is None
 
 
-def test_parse_rights_issuance_warns_when_main_table_is_absent(tmp_path: Path) -> None:
+def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
+    tmp_path: Path,
+) -> None:
     fixture_path = tmp_path / "20250102000004.html"
     body_html = """
     <html><body>
@@ -4953,7 +4950,7 @@ def test_parse_rights_issuance_warns_when_main_table_is_absent(tmp_path: Path) -
     assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 0]]
     assert parsed["증자방식"] is None
     assert parsed["parse_warnings"][0] == (
-        "유무상증자 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
+        "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
     )
     assert any(
         warning.startswith("신주의 종류와 수: 정해진 출처에서 값을 찾지 못했습니다.")
@@ -4961,6 +4958,33 @@ def test_parse_rights_issuance_warns_when_main_table_is_absent(tmp_path: Path) -
     )
     assert any(
         warning.startswith("증자방식: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+
+
+def test_parse_rights_issuance_does_not_infer_bonus_type_from_table(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000005.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td>기타주식 (주)</td><td>-</td></tr>
+        <tr><td colspan="2">3. 신주배정기준일</td><td>2025년 01월 02일</td></tr>
+        <tr><td colspan="2">8. 신주권교부예정일</td><td>2025년 01월 03일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["증자방식"] is None
+    assert parsed["parse_warnings"][0] == (
+        "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+    )
+    assert any(
+        warning.startswith("발행가액: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
     )
 
