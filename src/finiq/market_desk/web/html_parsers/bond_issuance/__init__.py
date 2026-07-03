@@ -38,6 +38,7 @@ def parse_bond_issuance(
         ),
         납입일=extractor.extract_payment_date_from_payment_date_row(),
         만기일=extractor.extract_maturity_date_from_bond_maturity_row(),
+        사채발행방법=extractor.extract_issue_method_from_bond_issue_method_row(),
         행사시작일=extractor.extract_exercise_period_start_from_claim_period_row(),
         행사종료일=extractor.extract_exercise_period_end_from_claim_period_row(),
         투자자=extractor.extract_investors_from_specific_person_bond_issue_table(),

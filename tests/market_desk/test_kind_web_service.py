@@ -3429,6 +3429,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
               <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
               <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
               <tr><td>5. 사채만기일</td><td>2028년 01월 02일</td></tr>
+              <tr><td>8. 사채발행방법</td><td>사모</td></tr>
               <tr><td>9. 전환에 관한 사항</td><td>전환가액 (원/주)</td><td>1,000</td></tr>
               <tr><td>9. 전환에 관한 사항</td><td>전환에 따라 발행할 주식의 종류</td><td>테스트발행사 기명식 보통주</td></tr>
               <tr><td>9. 전환에 관한 사항</td><td>전환청구기간</td><td>시작일</td><td>2026년 01월 02일</td></tr>
@@ -3496,6 +3497,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     assert record["행사가액"] == 1000
     assert record["납입일"] == "2025년 01월 02일"
     assert record["만기일"] == "2028년 01월 02일"
+    assert record["사채발행방법"] == "사모"
     assert record["행사시작일"] == "2026년 01월 02일"
     assert record["행사종료일"] == "2027년 12월 02일"
     assert record["투자자"] == [["테스트조합", 1_000_000_000]]
@@ -3593,6 +3595,7 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
                         "행사가액": 1000,
                         "납입일": "2025년 01월 02일",
                         "만기일": "2028년 01월 02일",
+                        "사채발행방법": "사모",
                         "행사시작일": "2026년 01월 02일",
                         "행사종료일": "2027년 12월 02일",
                         "투자자": [["테스트조합", 1_000_000_000]],
@@ -3616,6 +3619,7 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
     }
     assert payload["records"][0]["family_id"] == "20250102009999"
     assert payload["records"][0]["fields"]["발행금액"] == 1_000_000_000
+    assert payload["records"][0]["fields"]["사채발행방법"] == "사모"
     assert payload["records"][0]["fields"]["투자자"] == [["테스트조합", 1_000_000_000]]
     assert "리픽싱(%)" not in payload["records"][0]["fields"]
 
@@ -4036,6 +4040,9 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
 
     assert payload["summary"]["parsed_files"] == 1
     assert payload["summary"]["failed_files"] == 0
+    assert payload["warning_report_counts"] == {
+        "20250101000001": len(payload["warnings"])
+    }
     assert payload["warnings"][0] == {
         "index": 1,
         "total": 1,
@@ -4052,6 +4059,7 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         item["warning"] for item in payload["warnings"]
     ]
     assert any("파싱 경고 1/1: 20250101000001.html" in line for line in payload["progress_log"])
+    assert stored["warning_report_counts"] == payload["warning_report_counts"]
     assert stored["warnings"] == payload["warnings"]
 
 
@@ -4475,6 +4483,7 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     assert parsed["발행금액"] == 40_000_000_000
     assert parsed["상장구분"] is None
     assert parsed["만기일"] == "2031년 05월 08일"
+    assert parsed["사채발행방법"] == "사모"
     assert parsed["행사가액"] == 54_315
     assert parsed["기업명(행사대상)"] == "아이티센글로벌"
     assert parsed["행사시작일"] == "2027년 05월 08일"
@@ -4529,6 +4538,7 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
         <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
         <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
         <tr><td>5. 사채만기일</td><td>2028년 01월 02일</td></tr>
+        <tr><td>8. 사채발행방법</td><td>사모</td></tr>
         <tr><td>9. 교환에 관한 사항</td><td>교환가액 (원/주)</td><td>12,500</td></tr>
         <tr><td>9. 교환에 관한 사항</td><td>교환대상</td><td>주식회사 테스트타겟 기명식 보통주</td></tr>
         <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>시작일</td><td>2026년 01월 02일</td></tr>
@@ -4547,6 +4557,7 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
     assert parsed["행사가액"] == 12_500
     assert parsed["납입일"] == "2025년 01월 02일"
     assert parsed["만기일"] == "2028년 01월 02일"
+    assert parsed["사채발행방법"] == "사모"
     assert parsed["행사시작일"] == "2026년 01월 02일"
     assert parsed["행사종료일"] == "2027년 12월 02일"
     assert parsed["투자자"] == []
@@ -4786,6 +4797,8 @@ def test_parse_bond_issuance_reads_legacy_warrant_exercise_period_label(
         <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무기명식 무보증 해외 신주인수권부사채</td></tr>
         <tr><td>2. 사채의 권면총액</td><td>원화기준 (원)</td><td>3,150,000,000</td></tr>
         <tr><td>4. 자금조달의 목적</td><td>시설자금 (원)</td><td>3,150,000,000</td></tr>
+        <tr><td>6. 사채만기</td><td>2011년 12월 14일</td></tr>
+        <tr><td>9. 사채발행방법</td><td>공모</td></tr>
         <tr><td>10. 신주인수권에 관한 사항</td><td>행사가액 (원/주)</td><td>2,874</td></tr>
         <tr><td>10. 신주인수권에 관한 사항</td><td>행사기간</td><td>시작일</td><td>2005년 01월 15일</td></tr>
         <tr><td>10. 신주인수권에 관한 사항</td><td>행사기간</td><td>종료일</td><td>2011년 12월 13일</td></tr>
@@ -4797,6 +4810,12 @@ def test_parse_bond_issuance_reads_legacy_warrant_exercise_period_label(
 
     assert parsed["행사시작일"] == "2005년 01월 15일"
     assert parsed["행사종료일"] == "2011년 12월 13일"
+    assert parsed["만기일"] == "2011년 12월 14일"
+    assert parsed["사채발행방법"] == "공모"
+    assert any(
+        warning.startswith("투자자: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
 
 
 def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> None:

@@ -15,7 +15,8 @@ BOND_FIELD_EXTRACTION_RULES = {
     "발행금액": "메인 표 > '사채의 권면' 행 > 마지막 숫자",
     "행사가액": "메인 표 > '전환가액'|'교환가액'|'행사가액'|'행사가격' 행 > 마지막 숫자",
     "납입일": "메인 표 > '납입일' 라벨 행 > 마지막 값",
-    "만기일": "메인 표 > '사채만기일' 행 > 마지막 값",
+    "만기일": "메인 표 > '사채만기일'|'사채만기' 행 > 마지막 값",
+    "사채발행방법": "메인 표 > '사채발행방법' 행 > 마지막 값",
     "행사시작일": "메인 표 > '전환청구기간'|'교환청구기간'|'권리행사기간'|'행사기간' 행 > '시작일' 값",
     "행사종료일": "메인 표 > '전환청구기간'|'교환청구기간'|'권리행사기간'|'행사기간' 행 > '종료일' 값",
     "투자자": "'특정인에 대한 대상자별 사채발행내역' 표 > 발행 대상자명 + 발행권면총액",
@@ -108,7 +109,14 @@ class BondIssuanceExtractor:
 
     def extract_maturity_date_from_bond_maturity_row(self) -> str | None:
         value = self.rows.last_value("사채만기일")
+        if value is None:
+            value = self.rows.last_value("사채만기")
         self._warn_if_missing("만기일", value)
+        return value
+
+    def extract_issue_method_from_bond_issue_method_row(self) -> str | None:
+        value = self.rows.last_value("사채발행방법")
+        self._warn_if_missing("사채발행방법", value)
         return value
 
     def extract_exercise_period_start_from_claim_period_row(self) -> str | None:

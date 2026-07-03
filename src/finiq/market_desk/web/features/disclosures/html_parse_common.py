@@ -88,6 +88,7 @@ BOND_SUMMARY_FIELDS = (
     "행사가액",
     "납입일",
     "만기일",
+    "사채발행방법",
     "행사시작일",
     "행사종료일",
     "투자자",
@@ -103,6 +104,7 @@ CHANGE_LOG_FIELDS = {
         "행사가액",
         "납입일",
         "만기일",
+        "사채발행방법",
         "행사시작일",
         "행사종료일",
         "투자자",
@@ -131,6 +133,7 @@ MAJOR_CHANGE_FIELDS = {
         "행사가액",
         "납입일",
         "만기일",
+        "사채발행방법",
         "행사시작일",
         "행사종료일",
         "투자자",
@@ -628,6 +631,17 @@ def _resolve_correction_family_acpt_numbers(
     return resolved_records
 
 
+def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, int]:
+    report_counts: dict[str, int] = {}
+    for warning in warnings:
+        source_name = str(warning.get("source_name") or "").strip()
+        report_no = Path(source_name).stem if source_name else ""
+        if not report_no:
+            continue
+        report_counts[report_no] = report_counts.get(report_no, 0) + 1
+    return report_counts
+
+
 def _build_payload(
     *,
     mode: str,
@@ -647,6 +661,7 @@ def _build_payload(
         "input_directory": str(input_directory),
         "output_path": str(output_path),
         "cancelled": cancelled,
+        "warning_report_counts": _build_warning_report_counts(warnings),
         "summary": {
             "found_files": len(html_files),
             "parsed_files": len(records),
