@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 from lxml import etree, html
 
 from .text import clean_text, element_text
@@ -31,7 +32,7 @@ def _cell_slot(
 ) -> dict[str, Any]:
     """단일 테이블 셀에 해당하는 정규화된 논리적 그리드 슬롯을 생성한다.
 
-    병합(span)된 셀이 여러 슬롯을 차지할 때 원본 HTML의 좌표를 유지하여 
+    병합(span)된 셀이 여러 슬롯을 차지할 때 원본 HTML의 좌표를 유지하여
     디버깅을 돕고 논리적 행 구조를 일관되게 유지한다.
     """
     return {
@@ -49,7 +50,7 @@ def _cell_slot(
 def expand_table(table: etree._Element) -> list[list[dict[str, Any]]]:
     """병합(rowspan/colspan)된 셀을 모든 해당 위치에 복사하여 테이블을 평면화한다.
 
-    시각적 테이블을 단순한 그리드 형태로 변환하여, 파서가 HTML 레이아웃 차이에 
+    시각적 테이블을 단순한 그리드 형태로 변환하여, 파서가 HTML 레이아웃 차이에
     구애받지 않고 일관된 검색 및 추출을 수행할 수 있도록 한다.
     """
     active_spans: dict[int, tuple[int, etree._Element, int, int, int, int]] = {}
@@ -138,11 +139,22 @@ def expand_table(table: etree._Element) -> list[list[dict[str, Any]]]:
         if any(slot["text"] for slot in expanded_row):
             grid.append(expanded_row)
 
-        next_active_spans: dict[int, tuple[int, etree._Element, int, int, int, int]] = {}
-        for active_col, (remaining, span_cell, source_row, span_source_col, rowspan, colspan) in active_spans.items():
+        next_active_spans: dict[
+            int, tuple[int, etree._Element, int, int, int, int]
+        ] = {}
+        for active_col, (
+            remaining,
+            span_cell,
+            source_row,
+            span_source_col,
+            rowspan,
+            colspan,
+        ) in active_spans.items():
             # 실제로 사용된 span 데이터에 한해서만 남은 행 수를 차감한다.
             # 깨진 마크업으로 인해 누락이 발생하더라도 병합 구조를 최대한 유지한다.
-            next_remaining = remaining - 1 if active_col in consumed_active_cols else remaining
+            next_remaining = (
+                remaining - 1 if active_col in consumed_active_cols else remaining
+            )
             if next_remaining > 0:
                 next_active_spans[active_col] = (
                     next_remaining,
@@ -160,7 +172,7 @@ def expand_table(table: etree._Element) -> list[list[dict[str, Any]]]:
 def compress_repeated_texts(row: list[str]) -> list[str]:
     """행 데이터에서 빈 값 및 연속된 중복 값을 제거하여 압축한다.
 
-    테이블 평면화로 인해 의도적으로 반복된 라벨 노이즈를 제거하면서도 
+    테이블 평면화로 인해 의도적으로 반복된 라벨 노이즈를 제거하면서도
     핵심 정보의 순서는 유지하여 분석 가독성을 높인다.
     """
     compressed: list[str] = []
@@ -175,15 +187,14 @@ def compress_repeated_texts(row: list[str]) -> list[str]:
 def extract_tables(document: html.HtmlElement) -> list[dict[str, Any]]:
     """문서 내 모든 테이블을 평면화된 그리드 및 정규화된 논리 행(row) 형태로 반환한다.
 
-    `cells`는 전체 형태가 보존된 디버깅용 데이터이며, 
+    `cells`는 전체 형태가 보존된 디버깅용 데이터이며,
     `logical_rows`는 개별 추출기에서 실질적으로 활용하는 간소화된 데이터다.
     """
     tables: list[dict[str, Any]] = []
     for table_index, table in enumerate(document.xpath("//table")):
         grid = expand_table(table)
         logical_rows = [
-            compress_repeated_texts([slot["text"] for slot in row])
-            for row in grid
+            compress_repeated_texts([slot["text"] for slot in row]) for row in grid
         ]
         logical_rows = [row for row in logical_rows if row]
         tables.append(

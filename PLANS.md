@@ -1,5 +1,28 @@
 # Review Findings
 
+## Listing market source-of-truth cleanup
+
+Purpose: remove body-text listing market inference from common HTML metadata
+parsing and rely on external KIND metadata for market values.
+
+Implementation summary: removed `_listing_market()` and the full-document text
+scan from `metadata.py`. `build_base_record()` now keeps the existing default
+`상장시장=None` until `_apply_manifest_metadata()` overwrites the market from
+download manifest, filtered metadata, or compressed external HTML metadata.
+Added a regression test that body text such as `유가증권시장` is not used as a
+market fallback without external metadata, and that missing external metadata
+stays unknown instead of being labeled `기타`.
+
+Verification result: `python3 -m py_compile
+src/finiq/market_desk/web/html_parsers/common/metadata.py
+src/finiq/market_desk/web/disclosure_html_parse.py` passed.
+`PYTHONPATH=src pytest -q
+tests/market_desk/test_kind_web_service.py::test_parse_disclosure_html_payload_prefers_download_manifest_market
+tests/market_desk/test_kind_web_service.py::test_parse_disclosure_html_payload_does_not_infer_market_from_body
+tests/market_desk/test_kind_web_service.py::test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files
+tests/market_desk/test_kind_web_service.py::test_parse_bond_issuance_extracts_kind_sample_fields`
+passed.
+
 ## Bond metadata fallback simplification
 
 Purpose: remove common metadata fallbacks that were unused by the bond issuance
