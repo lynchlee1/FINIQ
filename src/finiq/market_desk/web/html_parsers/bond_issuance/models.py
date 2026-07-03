@@ -1,15 +1,18 @@
 """사채 발행 데이터 모델."""
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any
+
 
 @dataclass
 class BondIssuanceRecord:
     """사채 발행 공시 추출 데이터 모델(스키마).
-    
+
     어떤 필드들이 최종적으로 추출되는지 직관적으로 확인할 수 있습니다.
     """
+
     기업명_발행사: str | Any | None
     회차: str | None
     종류: str | None

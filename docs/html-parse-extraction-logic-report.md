@@ -141,7 +141,7 @@ span이 해제된 grid에서 cell text만 뽑은 뒤 `compress_repeated_texts()`
 
 ### 메인 table 선택
 
-`_main_bond_rows()`는 정정표가 아닌 table 중 아래 3개 조건을 모두 만족하는 table을 메인 table로 본다.
+`_main_bond_rows()`는 아래 3개 조건을 모두 만족하는 첫 번째 table을 메인 table로 본다.
 
 | 필수 포함 라벨 |
 | --- |
@@ -153,7 +153,7 @@ span이 해제된 grid에서 cell text만 뽑은 뒤 `compress_repeated_texts()`
 
 - 사채 발행 결정의 핵심 정보는 하나의 table 안에 있다.
 - 위 3개 라벨은 사채 발행 주요 표에 항상 존재한다.
-- 정정표가 아닌 첫 번째 매칭 table이 실제 메인 table이다.
+- 첫 번째 매칭 table이 실제 메인 table이다.
 
 틀릴 수 있는 경우:
 
