@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-import finiq.market_desk.web.download as download_module
+import finiq.market_desk.web.features.downloads.kind_runner as download_module
 
 
 def test_run_yearly_returns_promptly_when_parallel_worker_fails(tmp_path, monkeypatch) -> None:

@@ -574,7 +574,7 @@ def test_download_inspect_folder_start_route(tmp_path: Path, monkeypatch) -> Non
         return {"format": "kind_download_folder_cleanup_v1", "dry_run": True, "deletion_candidates": []}
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.download.inspect_download_output_directory_payload",
+        "finiq.market_desk.web.features.downloads.kind_jobs.inspect_download_output_directory_payload",
         fake_inspect,
     )
 
@@ -715,12 +715,31 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
                 {"toc_id": "toc_1", "index": 1, "title": "1"},
                 {"toc_id": "toc_2", "index": 2, "title": "2"},
             ],
+            "sample_documents": [
+                {
+                    "source_file": str(input_directory / "20260401000001.html"),
+                    "source_name": "20260401000001.html",
+                    "source_relative_path": "20260401000001.html",
+                },
+                {
+                    "source_file": str(input_directory / "20260402000001.html"),
+                    "source_name": "20260402000001.html",
+                    "source_relative_path": "20260402000001.html",
+                },
+            ],
         },
         {
             "signature": "toc_1 1",
             "count": 1,
             "section_count": 1,
             "sections": [{"toc_id": "toc_1", "index": 1, "title": "1"}],
+            "sample_documents": [
+                {
+                    "source_file": str(input_directory / "20260403000001.html"),
+                    "source_name": "20260403000001.html",
+                    "source_relative_path": "20260403000001.html",
+                }
+            ],
         },
     ]
 

@@ -2,24 +2,23 @@
 
 from __future__ import annotations
 
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from pathlib import Path
-from datetime import datetime, timezone
 import json
 import os
 import sqlite3
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from finiq.market_desk.data.facade import load_company_classification_file
-from finiq.market_desk.web.discovery import (
+from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
     resolve_default_classification,
 )
-from finiq.market_desk.web.service import (
+from finiq.market_desk.web.features.market_data.service_sources import (
     _find_source_body_files,
     _parse_source_body_file,
 )
-
 
 TABLE_SCHEMA_VERSION = 2
 DEFAULT_TABLE_NAME = "disclosures"
@@ -33,7 +32,10 @@ def _date_part(value: object) -> str:
 
 def _company_key(company: dict[str, Any]) -> str:
     return str(
-        company.get("company_key") or company.get("company_id") or company.get("company_name") or ""
+        company.get("company_key")
+        or company.get("company_id")
+        or company.get("company_name")
+        or ""
     ).strip()
 
 
@@ -44,7 +46,9 @@ def _summary_disclosure_count(payload: dict[str, Any]) -> int | None:
     return int(summary.get("disclosures") or 0)
 
 
-def _company_disclosures(company: dict[str, Any], company_index: int) -> list[dict[str, Any]]:
+def _company_disclosures(
+    company: dict[str, Any], company_index: int
+) -> list[dict[str, Any]]:
     disclosures = company.get("disclosures")
     if disclosures is None:
         return []
@@ -69,7 +73,9 @@ def _normalize_table_name(value: object) -> str:
 
 
 def _default_output_path(classification_path: Path) -> Path:
-    return classification_path.with_name(f"{classification_path.stem}.sqlite_manifest.json")
+    return classification_path.with_name(
+        f"{classification_path.stem}.sqlite_manifest.json"
+    )
 
 
 def _shard_directory(manifest_path: Path) -> Path:
@@ -87,13 +93,21 @@ def _manifest_path_inside_shard_directory(manifest_path: Path) -> Path:
 
 def _manifest_output_path(raw_path: str, classification_path: Path) -> Path:
     if not raw_path:
-        return _manifest_path_inside_shard_directory(_default_output_path(classification_path)).resolve()
-    output_path = _normalize_workspace_resource_path(Path(raw_path).expanduser(), allow_missing_leaf=True).resolve()
+        return _manifest_path_inside_shard_directory(
+            _default_output_path(classification_path)
+        ).resolve()
+    output_path = _normalize_workspace_resource_path(
+        Path(raw_path).expanduser(), allow_missing_leaf=True
+    ).resolve()
     if output_path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}:
-        return _manifest_path_inside_shard_directory(output_path.with_suffix(".sqlite_manifest.json"))
+        return _manifest_path_inside_shard_directory(
+            output_path.with_suffix(".sqlite_manifest.json")
+        )
     if output_path.suffix:
         return _manifest_path_inside_shard_directory(output_path)
-    return _manifest_path_inside_shard_directory(output_path / _default_output_path(classification_path).name)
+    return _manifest_path_inside_shard_directory(
+        output_path / _default_output_path(classification_path).name
+    )
 
 
 def _source_has_body_files(path: Path) -> bool:
@@ -118,7 +132,9 @@ def _workspace_resource_bases() -> list[Path]:
     return unique_bases
 
 
-def _normalize_workspace_resource_path(path: Path, *, allow_missing_leaf: bool = False) -> Path:
+def _normalize_workspace_resource_path(
+    path: Path, *, allow_missing_leaf: bool = False
+) -> Path:
     candidate = path.resolve()
     if candidate.exists() or "resources" not in candidate.parts:
         return candidate
@@ -159,7 +175,10 @@ def _resolve_source(raw_path: str, root_directory: str) -> tuple[str, Path]:
                     return ("source_folder", root_path)
                 root_resolved = resolve_default_classification(root_path)
                 if root_resolved:
-                    return ("classification", Path(root_resolved).expanduser().resolve())
+                    return (
+                        "classification",
+                        Path(root_resolved).expanduser().resolve(),
+                    )
             msg = f"classification JSON or KIND body files not found in directory: {candidate}"
             raise FileNotFoundError(msg)
         if root_path is not None:
@@ -248,11 +267,19 @@ def _collect_classification_rows_by_year(
                 "disclosed_date": _date_part(disclosed_at),
                 "title": disclosure.get("title"),
                 "title_attr": disclosure.get("title_attr"),
-                "title_base": disclosure.get("title_base") or disclosure.get("title_attr"),
-                "title_display": disclosure.get("title_display") or disclosure.get("title"),
-                "title_flags_json": json.dumps(list(disclosure.get("title_flags") or []), ensure_ascii=False),
-                "is_correction_report": 1 if disclosure.get("is_correction_report") else 0,
-                "has_later_correction": 1 if disclosure.get("has_later_correction") else 0,
+                "title_base": disclosure.get("title_base")
+                or disclosure.get("title_attr"),
+                "title_display": disclosure.get("title_display")
+                or disclosure.get("title"),
+                "title_flags_json": json.dumps(
+                    list(disclosure.get("title_flags") or []), ensure_ascii=False
+                ),
+                "is_correction_report": 1
+                if disclosure.get("is_correction_report")
+                else 0,
+                "has_later_correction": 1
+                if disclosure.get("has_later_correction")
+                else 0,
                 "acpt_no": disclosure.get("acpt_no") or disclosure.get("acptno"),
                 "doc_no": disclosure.get("doc_no"),
                 "submitter": disclosure.get("submitter"),
@@ -292,14 +319,18 @@ def _collect_source_folder_rows_by_year(
                 "company_name": record.get("company_name"),
                 "company_id": record.get("company_id"),
                 "market": record.get("market"),
-                "badges_json": json.dumps(list(record.get("badges") or []), ensure_ascii=False),
+                "badges_json": json.dumps(
+                    list(record.get("badges") or []), ensure_ascii=False
+                ),
                 "disclosed_at": disclosed_at,
                 "disclosed_date": _date_part(disclosed_at),
                 "title": record.get("title"),
                 "title_attr": record.get("title_attr"),
                 "title_base": record.get("title_base") or record.get("title_attr"),
                 "title_display": record.get("title_display") or record.get("title"),
-                "title_flags_json": json.dumps(list(record.get("title_flags") or []), ensure_ascii=False),
+                "title_flags_json": json.dumps(
+                    list(record.get("title_flags") or []), ensure_ascii=False
+                ),
                 "is_correction_report": 1 if record.get("is_correction_report") else 0,
                 "has_later_correction": 1 if record.get("has_later_correction") else 0,
                 "acpt_no": record.get("acpt_no") or record.get("acptno"),
@@ -308,7 +339,12 @@ def _collect_source_folder_rows_by_year(
                 "source_file": record.get("source_file"),
                 "source_page": record.get("source_page"),
             }
-            company_key = str(row.get("company_key") or row.get("company_id") or row.get("company_name") or "").strip()
+            company_key = str(
+                row.get("company_key")
+                or row.get("company_id")
+                or row.get("company_name")
+                or ""
+            ).strip()
             if company_key:
                 company_keys.add(company_key)
             rows_by_year.setdefault(_row_year(row), []).append(row)
@@ -458,9 +494,19 @@ def _write_sqlite_shard(
         temporary_path.unlink()
 
     company_keys = {
-        str(row.get("company_key") or row.get("company_id") or row.get("company_name") or "").strip()
+        str(
+            row.get("company_key")
+            or row.get("company_id")
+            or row.get("company_name")
+            or ""
+        ).strip()
         for row in rows
-        if str(row.get("company_key") or row.get("company_id") or row.get("company_name") or "").strip()
+        if str(
+            row.get("company_key")
+            or row.get("company_id")
+            or row.get("company_name")
+            or ""
+        ).strip()
     }
     connection = sqlite3.connect(temporary_path)
     try:
@@ -584,7 +630,9 @@ def _write_sqlite_shards(
         for i, (year, shard_rows) in enumerate(shard_items, 1):
             _raise_if_cancelled(cancel_check)
             if progress_callback:
-                progress_callback(f"[{i}/{total_shards}] {year}년 샤드 생성 중... ({len(shard_rows)} 건)")
+                progress_callback(
+                    f"[{i}/{total_shards}] {year}년 샤드 생성 중... ({len(shard_rows)} 건)"
+                )
             shard_path = shard_root / f"{year}.sqlite"
             shards.append(
                 _write_sqlite_shard(
@@ -602,13 +650,17 @@ def _write_sqlite_shards(
         progress_callback(f"연도 샤드 병렬 생성을 사용합니다. workers={worker_count}")
 
     shards_by_year: dict[str, dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="kind-table-shard") as executor:
+    with ThreadPoolExecutor(
+        max_workers=worker_count, thread_name_prefix="kind-table-shard"
+    ) as executor:
         pending = {}
         try:
             for i, (year, shard_rows) in enumerate(shard_items, 1):
                 _raise_if_cancelled(cancel_check)
                 if progress_callback:
-                    progress_callback(f"[{i}/{total_shards}] {year}년 샤드 생성 예약... ({len(shard_rows)} 건)")
+                    progress_callback(
+                        f"[{i}/{total_shards}] {year}년 샤드 생성 예약... ({len(shard_rows)} 건)"
+                    )
                 shard_path = shard_root / f"{year}.sqlite"
                 future = executor.submit(
                     _write_sqlite_shard,
@@ -633,7 +685,9 @@ def _write_sqlite_shards(
                     shards_by_year[year] = result
                     completed += 1
                     if progress_callback:
-                        progress_callback(f"[{completed}/{total_shards}] {year}년 샤드 생성 완료 ({result['disclosures']} 건)")
+                        progress_callback(
+                            f"[{completed}/{total_shards}] {year}년 샤드 생성 완료 ({result['disclosures']} 건)"
+                        )
         except RuntimeError as exc:
             if str(exc) == "Job cancelled":
                 for future in pending:
@@ -659,17 +713,23 @@ def build_disclosure_table_payload(
     manifest_path = _manifest_output_path(output_path_raw, source_path)
     shard_root = _shard_directory(manifest_path)
     table_name = _normalize_table_name(body.get("table_name"))
-    
+
     if progress_callback:
         progress_callback("공시 메타데이터를 로드합니다...")
-    
+
     if source_type == "classification":
         payload = load_company_classification_file(source_path)
-        rows_by_year, companies, row_count = _collect_classification_rows_by_year(payload, cancel_check=cancel_check)
+        rows_by_year, companies, row_count = _collect_classification_rows_by_year(
+            payload, cancel_check=cancel_check
+        )
         _validate_classification_disclosure_counts(payload, row_count, source_path)
     else:
-        rows_by_year, companies, row_count = _collect_source_folder_rows_by_year(source_path, cancel_check=cancel_check)
-    shard_workers = _resolve_shard_workers(body.get("table_workers") or body.get("shard_workers"), len(rows_by_year))
+        rows_by_year, companies, row_count = _collect_source_folder_rows_by_year(
+            source_path, cancel_check=cancel_check
+        )
+    shard_workers = _resolve_shard_workers(
+        body.get("table_workers") or body.get("shard_workers"), len(rows_by_year)
+    )
 
     if progress_callback:
         progress_callback(
@@ -691,14 +751,15 @@ def build_disclosure_table_payload(
     if progress_callback:
         progress_callback("매니페스트 파일을 기록합니다...")
 
-
     manifest = {
         "format": MANIFEST_FORMAT,
         "schema_version": TABLE_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_type": source_type,
         "source_path": str(source_path),
-        "source_classification_path": str(source_path) if source_type == "classification" else "",
+        "source_classification_path": str(source_path)
+        if source_type == "classification"
+        else "",
         "manifest_path": str(manifest_path),
         "shard_root": str(shard_root),
         "table_name": table_name,
@@ -715,7 +776,9 @@ def build_disclosure_table_payload(
         "manifest_format": MANIFEST_FORMAT,
         "source_type": source_type,
         "source_path": str(source_path),
-        "source_classification_path": str(source_path) if source_type == "classification" else "",
+        "source_classification_path": str(source_path)
+        if source_type == "classification"
+        else "",
         "output_path": str(manifest_path),
         "manifest_path": str(manifest_path),
         "shard_root": str(shard_root),
@@ -724,7 +787,9 @@ def build_disclosure_table_payload(
             "companies": companies,
             "disclosures": row_count,
             "shards": len(shards),
-            "fts_enabled": all(shard["fts_enabled"] for shard in shards) if shards else False,
+            "fts_enabled": all(shard["fts_enabled"] for shard in shards)
+            if shards
+            else False,
             "schema_version": TABLE_SCHEMA_VERSION,
         },
         "shards": shards,

@@ -70,14 +70,19 @@ def resolve_default_classification(root_directory: str | Path) -> str | None:
     files = list_classification_files(root)
     if not files:
         return None
-    for preferred_name in ("kind.company_classification.json", "kind.company_classification.sample.json"):
+    for preferred_name in (
+        "kind.company_classification.json",
+        "kind.company_classification.sample.json",
+    ):
         for file_info in files:
             if Path(file_info["path"]).name == preferred_name:
                 return file_info["path"]
     return files[0]["path"]
 
 
-def resolve_default_price_source(root_directory: str | Path, current_path: str | Path | None = None) -> str | None:
+def resolve_default_price_source(
+    root_directory: str | Path, current_path: str | Path | None = None
+) -> str | None:
     root = Path(root_directory).resolve()
     current = Path(current_path).resolve() if current_path else None
     files = list_price_source_files(root)

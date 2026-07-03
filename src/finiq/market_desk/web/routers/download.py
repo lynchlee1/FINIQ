@@ -4,19 +4,23 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
 
-from finiq.market_desk.web.download import (
+from finiq.market_desk.web.features.downloads.kind_api import (
     build_download_options_payload,
     build_download_preview_payload,
     build_download_status_payload,
-    cancel_download_job,
-    check_existing_downloads,
-    detect_existing_downloads,
-    get_download_job,
-    inspect_download_output_directory_payload,
     run_download_action,
+)
+from finiq.market_desk.web.features.downloads.kind_existing import (
+    check_existing_downloads,
+    create_folder_metadata,
+    detect_existing_downloads,
+)
+from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
+from finiq.market_desk.web.features.downloads.kind_jobs import (
+    cancel_download_job,
+    get_download_job,
     start_download_job,
     start_inspect_folder_job,
-    create_folder_metadata,
 )
 
 
