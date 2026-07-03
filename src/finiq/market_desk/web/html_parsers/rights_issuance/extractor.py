@@ -128,41 +128,6 @@ class RightsIssuanceExtractor:
             self._warn_if_missing("발행대상자", None)
         return []
 
-    def get_issue_target_entities(self) -> list[list[str]]:
-        """배정 대상자의 명칭, 대표자 및 최대주주 상세 정보를 추출 및 그룹화한다."""
-        entities: list[list[str]] = []
-        for table in non_correction_tables(self.context.raw_tables):
-            rows = table.get("logical_rows") or []
-            if len(rows) < 3 or not row_contains(
-                rows[0], "명칭", "대표이사", "최대주주"
-            ):
-                continue
-            grouped: dict[str, dict[str, list[str]]] = {}
-            for row in rows[2:]:
-                if len(row) < 3 or row[0] == "-":
-                    continue
-                values = grouped.setdefault(
-                    row[0], {"representatives": [], "major_holders": []}
-                )
-                representative = row[2]
-                if (
-                    representative != "-"
-                    and representative not in values["representatives"]
-                ):
-                    values["representatives"].append(representative)
-                if len(row) >= 6:
-                    major_holder = row[-2]
-                    if (
-                        major_holder != "-"
-                        and major_holder not in values["major_holders"]
-                    ):
-                        values["major_holders"].append(major_holder)
-            for name, values in grouped.items():
-                entities.append(
-                    [name, *values["representatives"], *values["major_holders"]]
-                )
-        return entities
-
     def _stock_values(
         self,
         section_label: str,

@@ -4884,7 +4884,7 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields() -> None:
     assert parsed["신주권교부예정일"] == "2023년 10월 04일"
     assert parsed["상장예정일"] == "2024년 10월 04일"
     assert parsed["발행대상자"] == [["주식회사 에프앤지", 2_495_327]]
-    assert parsed["발행대상자세부엔티티"] == [["주식회사 에프앤지", "이미란", "(주)에스제이씨"]]
+    assert "발행대상자세부엔티티" not in parsed
 
 
 def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:

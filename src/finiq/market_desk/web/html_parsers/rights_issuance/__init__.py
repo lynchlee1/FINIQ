@@ -33,7 +33,6 @@ def parse_rights_issuance(
         신주권교부예정일=extractor.get_delivery_date(),
         상장예정일=extractor.get_listing_date(),
         발행대상자=extractor.get_issue_targets(),
-        발행대상자세부엔티티=extractor.get_issue_target_entities(),
     )
 
     record.update(schema_record.to_dict())
