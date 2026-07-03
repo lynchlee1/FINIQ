@@ -4,33 +4,27 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
 from lxml import html
 
-from .text import clean_text, element_text
 from .io import parse_html_document
 from .tables import extract_tables
+from .text import clean_text, element_text
 
 
 def extract_title(document: html.HtmlElement) -> str:
-    """다양한 HTML 구조 속에서 가장 신뢰도 높은 공시 제목을 추출한다.
-
-    연도별로 뷰어 내 제목 위치가 다르기 때문에 메타 태그부터 헤딩 태그까지 
-    우선순위에 따라 순차적으로 탐색한다.
-    """
+    """채권발 HTML에서 공시 제목을 추출한다."""
     for xpath in (
-        "//meta[translate(@property, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='og:title']/@content",
-        "//meta[translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='title']/@content",
-        "//title/text()",
         "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ') and contains(., '사채')]",
-        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ')]",
-        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ')]/text()",
-        "//*[@title]/@title",
-        "//h1/text()",
-        "//h2/text()",
+        "//title/text()",
     ):
         values = document.xpath(xpath)
         for value in values:
-            title = element_text(value) if hasattr(value, "itertext") else clean_text(str(value))
+            title = (
+                element_text(value)
+                if hasattr(value, "itertext")
+                else clean_text(str(value))
+            )
             if title:
                 return title
     return ""
@@ -41,16 +35,6 @@ def extract_acpt_no(file_path: str | Path) -> str:
     stem = Path(file_path).stem
     candidate = stem.split("_", 1)[0]
     return candidate if candidate.isdigit() else ""
-
-
-def _viewer_acpt_no(document: html.HtmlElement, file_path: str | Path) -> str:
-    """HTML 내에서 KIND 접수번호를 찾고, 실패할 경우 파일명에서 추론한다."""
-    values = document.xpath("//input[@name='acptNo']/@value")
-    for value in values:
-        acpt_no = clean_text(str(value))
-        if acpt_no:
-            return acpt_no
-    return extract_acpt_no(file_path)
 
 
 def _listing_market(document_text: str) -> str:
@@ -80,7 +64,9 @@ def preserve_viewer_metadata(
         record["acpt_no"] = viewer_record["acpt_no"]
 
 
-def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: str) -> dict[str, Any]:
+def build_base_record(
+    html_markup: str | bytes, *, file_path: str | Path, mode: str
+) -> dict[str, Any]:
     """공시 HTML 파일의 기초가 되는 공통 파싱 레코드를 생성한다.
 
     유형별 파서는 반환된 레코드 위에 비즈니스 필드를 덧붙이는 구조로 동작한다.
@@ -88,7 +74,7 @@ def build_base_record(html_markup: str | bytes, *, file_path: str | Path, mode: 
     """
     document = parse_html_document(html_markup)
     raw_tables = extract_tables(document)
-    acpt_no = _viewer_acpt_no(document, file_path)
+    acpt_no = extract_acpt_no(file_path)
     document_text = clean_text(" ".join(document.itertext()))
     return {
         "correction_families": {},
