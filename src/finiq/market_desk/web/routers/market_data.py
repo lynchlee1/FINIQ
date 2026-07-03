@@ -21,17 +21,21 @@ from finiq.market_desk.analytics.triple_barrier import (
     get_triple_barrier_results_payload,
     run_triple_barrier_analysis,
 )
-from finiq.market_desk.web.discovery import (
+from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
     list_price_source_files,
     resolve_default_classification,
     resolve_default_price_source,
 )
-from finiq.market_desk.web.service import (
-    PRICE_SOURCE_QUANTI,
+from finiq.market_desk.web.features.market_data.service_common import PRICE_SOURCE_QUANTI
+from finiq.market_desk.web.features.market_data.service_integrated import (
     build_company_list_export,
-    build_insight_payload,
     list_integrated_providers,
+)
+from finiq.market_desk.web.features.market_data.service_insight import (
+    build_insight_payload,
+)
+from finiq.market_desk.web.features.market_data.service_payloads import (
     load_company_index_payload,
 )
 

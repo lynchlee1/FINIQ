@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import time
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Callable, Dict, Optional
+
 
 @dataclass(slots=True)
 class HtmlJob:
     """Represents a background job."""
+
     id: str
     kind: str
     status: str = "queued"
@@ -20,8 +22,10 @@ class HtmlJob:
     result: dict[str, Any] | None = None
     error: str | None = None
 
+
 class JobManager:
     """Manages background jobs in memory."""
+
     def __init__(self):
         self._jobs: Dict[str, HtmlJob] = {}
         self._lock = threading.RLock()
@@ -46,7 +50,6 @@ class JobManager:
                 self.add_log(job_id, f"JOB start kind={job.kind} id={job_id}")
                 return True
             return False
-
 
     def complete_job(self, job_id: str, result: Any):
         with self._lock:
@@ -107,6 +110,6 @@ class JobManager:
                 return job.status == "cancelled"
             return False
 
+
 # Global job manager instance
 job_manager = JobManager()
-

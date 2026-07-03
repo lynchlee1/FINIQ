@@ -13,55 +13,80 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from finiq.market_desk.web.disclosure_html import (
-    cancel_disclosure_html_download,
+from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
     write_disclosure_html_manifest_payload,
 )
-from finiq.market_desk.web.disclosure_html_parse import (
-    build_bond_parse_summary_payload,
+from finiq.market_desk.web.features.disclosures.html_common import cancel_disclosure_html_download
+from finiq.market_desk.web.features.disclosures.html_parse_changes import (
     build_parse_change_log_payload,
-    build_parse_export_xlsx,
-    build_parse_preview_payload,
-    cancel_disclosure_html_parse,
 )
-from finiq.market_desk.web.disclosure_html_sections import (
+from finiq.market_desk.web.features.disclosures.html_parse_common import cancel_disclosure_html_parse
+from finiq.market_desk.web.features.disclosures.html_parse_export import (
+    build_parse_export_xlsx,
+)
+from finiq.market_desk.web.features.disclosures.html_parse_preview import (
+    build_parse_preview_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_parse_summary import (
+    build_bond_parse_summary_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_sections import (
     inspect_disclosure_html_sections_payload,
     list_disclosure_html_section_sources_payload,
     split_disclosure_html_section_source_payload,
     summarize_disclosure_html_section_kinds_payload,
 )
 from finiq.market_desk.web.jobs import job_manager
-from finiq.market_desk.web.table_export import build_disclosure_table_payload
-
+from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 
 FilterDisclosuresPayload = Callable[..., dict[str, Any]]
 RunJobWorker = Callable[[str, str, dict[str, Any]], None]
 
 
-def _write_transfer_file(config: Any, payload: dict[str, Any], requested_path: str = "") -> dict[str, Any]:
+def _write_transfer_file(
+    config: Any, payload: dict[str, Any], requested_path: str = ""
+) -> dict[str, Any]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     if requested_path:
         transfer_path = Path(requested_path).expanduser().resolve()
         if transfer_path.suffix.lower() != ".json":
-            transfer_path = transfer_path / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
+            transfer_path = (
+                transfer_path
+                / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
+            )
     else:
-        transfer_dir = Path(config.output_root).expanduser().resolve() / ".finiq" / "transfers"
-        transfer_path = transfer_dir / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
+        transfer_dir = (
+            Path(config.output_root).expanduser().resolve() / ".finiq" / "transfers"
+        )
+        transfer_path = (
+            transfer_dir
+            / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
+        )
 
     transfer_path.parent.mkdir(parents=True, exist_ok=True)
-    transfer_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    transfer_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return {
         "format": payload.get("format", ""),
         "path": str(transfer_path),
-        "acpt_numbers": len(payload.get("html_download_acpt_numbers") or payload.get("acptNumbers") or []),
+        "acpt_numbers": len(
+            payload.get("html_download_acpt_numbers")
+            or payload.get("acptNumbers")
+            or []
+        ),
     }
 
 
-def _attach_html_download_transfer(config: Any, payload: dict[str, Any], requested_path: str = "") -> dict[str, Any]:
+def _attach_html_download_transfer(
+    config: Any, payload: dict[str, Any], requested_path: str = ""
+) -> dict[str, Any]:
     if payload.get("format") == "kind_disclosure_filter_v1":
-        payload["html_download_transfer"] = _write_transfer_file(config, payload, requested_path=requested_path)
+        payload["html_download_transfer"] = _write_transfer_file(
+            config, payload, requested_path=requested_path
+        )
     return payload
 
 
@@ -98,6 +123,7 @@ def create_workflows_router(
         body = await request.json()
         accept = request.headers.get("Accept", "")
         if "application/x-ndjson" in accept:
+
             def generate():
                 cancel_event = threading.Event()
                 events: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -106,13 +132,17 @@ def create_workflows_router(
                     try:
                         payload = filter_disclosures_payload(
                             body,
-                            progress_callback=lambda progress: events.put({"type": "progress", "progress": progress}),
+                            progress_callback=lambda progress: events.put(
+                                {"type": "progress", "progress": progress}
+                            ),
                             cancel_check=cancel_event.is_set,
                         )
                         _attach_html_download_transfer(
                             config,
                             payload,
-                            requested_path=str(body.get("html_transfer_path") or "").strip(),
+                            requested_path=str(
+                                body.get("html_transfer_path") or ""
+                            ).strip(),
                         )
                         events.put({"type": "result", "payload": payload})
                     except Exception as e:
@@ -133,7 +163,11 @@ def create_workflows_router(
             return StreamingResponse(generate(), media_type="application/x-ndjson")
         try:
             payload = filter_disclosures_payload(body)
-            _attach_html_download_transfer(config, payload, requested_path=str(body.get("html_transfer_path") or "").strip())
+            _attach_html_download_transfer(
+                config,
+                payload,
+                requested_path=str(body.get("html_transfer_path") or "").strip(),
+            )
             return payload
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -143,7 +177,9 @@ def create_workflows_router(
         return build_disclosure_table_payload(payload)
 
     @router.post("/api/disclosures/table/build/start")
-    async def start_build_disclosure_table(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_build_disclosure_table(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="table_build",
             payload=payload,
@@ -194,9 +230,10 @@ def create_workflows_router(
             raise HTTPException(status_code=404, detail="Job not found")
         return {"status": "success", "job_id": job_id}
 
-
     @router.post("/api/disclosures/html/download/start")
-    async def start_html_download(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_download(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="download",
             payload=payload,
@@ -223,7 +260,9 @@ def create_workflows_router(
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/download/compress/start")
-    async def start_html_external_compress(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_external_compress(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="external_compress",
             payload=payload,
@@ -232,7 +271,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/disclosures/html/content-download/start")
-    async def start_html_content_download(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_content_download(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="content_download",
             payload=payload,
@@ -266,7 +307,9 @@ def create_workflows_router(
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/content-download/merge/start")
-    async def start_html_content_merge(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_content_merge(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="content_merge",
             payload=payload,
@@ -275,7 +318,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/disclosures/html/parse/start")
-    async def start_html_parse(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_parse(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="parse",
             payload=payload,
@@ -284,7 +329,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/disclosures/html/sections/save/start")
-    async def start_html_section_save(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_section_save(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="section_save",
             payload=payload,
@@ -293,7 +340,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/disclosures/html/sections/inspect/start")
-    async def start_html_section_inspect(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_section_inspect(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="section_inspect",
             payload=payload,
@@ -302,7 +351,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/disclosures/html/sections/kinds/start")
-    async def start_html_section_kinds(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_html_section_kinds(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="section_kinds",
             payload=payload,
@@ -313,21 +364,27 @@ def create_workflows_router(
     @router.post("/api/disclosures/html/sections/inspect")
     async def inspect_html_sections(payload: dict[str, Any]):
         try:
-            return await run_in_threadpool(inspect_disclosure_html_sections_payload, payload)
+            return await run_in_threadpool(
+                inspect_disclosure_html_sections_payload, payload
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/sections/list")
     async def list_html_section_sources(payload: dict[str, Any]):
         try:
-            return await run_in_threadpool(list_disclosure_html_section_sources_payload, payload)
+            return await run_in_threadpool(
+                list_disclosure_html_section_sources_payload, payload
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/sections/kinds")
     async def summarize_html_section_kinds(payload: dict[str, Any]):
         try:
-            return await run_in_threadpool(summarize_disclosure_html_section_kinds_payload, payload)
+            return await run_in_threadpool(
+                summarize_disclosure_html_section_kinds_payload, payload
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -360,7 +417,9 @@ def create_workflows_router(
     @router.post("/api/disclosures/html/sections/source/split")
     async def split_html_section_source(payload: dict[str, Any]):
         try:
-            return await run_in_threadpool(split_disclosure_html_section_source_payload, payload)
+            return await run_in_threadpool(
+                split_disclosure_html_section_source_payload, payload
+            )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
@@ -406,7 +465,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/integrated-data/convert/start")
-    async def start_integrated_convert(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_integrated_convert(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="integrated_convert",
             payload=payload,
@@ -415,7 +476,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/integrated-data/merge/start")
-    async def start_integrated_merge(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_integrated_merge(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="integrated_merge",
             payload=payload,
@@ -424,7 +487,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/integrated-data/market-history/start")
-    async def start_integrated_market_history(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_integrated_market_history(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="integrated_market_history",
             payload=payload,
@@ -433,7 +498,9 @@ def create_workflows_router(
         )
 
     @router.post("/api/utility/partition-storage/start")
-    async def start_partition_storage(payload: dict[str, Any], background_tasks: BackgroundTasks):
+    async def start_partition_storage(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
         return _start_background_job(
             kind="utility_partition",
             payload=payload,

@@ -94,7 +94,9 @@ def _head_markup(document: html.HtmlElement) -> str:
     return "".join(_element_html(child) for child in head_nodes[0])
 
 
-def _section_title(heading: etree._Element, section_children: list[etree._Element]) -> str:
+def _section_title(
+    heading: etree._Element, section_children: list[etree._Element]
+) -> str:
     title = _clean_text(heading.text_content())
     if title:
         return title
@@ -163,8 +165,12 @@ def _xforms_leading_correction_section(
     return None
 
 
-def _xforms_title_sections(document: html.HtmlElement) -> list[tuple[str, list[etree._Element]]]:
-    title_nodes = document.xpath('//*[contains(concat(" ", normalize-space(@class), " "), " xforms_title ")]')
+def _xforms_title_sections(
+    document: html.HtmlElement,
+) -> list[tuple[str, list[etree._Element]]]:
+    title_nodes = document.xpath(
+        '//*[contains(concat(" ", normalize-space(@class), " "), " xforms_title ")]'
+    )
     sections: list[tuple[str, list[etree._Element]]] = []
     correction_parent_ids: set[int] = set()
     for title_node in title_nodes:
@@ -212,7 +218,9 @@ def _xforms_section_markup(section_children: list[etree._Element]) -> str:
 
 def _split_xforms_sections(document: html.HtmlElement) -> list[HtmlSection]:
     sections: list[HtmlSection] = []
-    for order, (title, section_children) in enumerate(_xforms_title_sections(document), start=1):
+    for order, (title, section_children) in enumerate(
+        _xforms_title_sections(document), start=1
+    ):
         section_markup = _xforms_section_markup(section_children)
         toc_id = f"toc_{order}"
         sections.append(
@@ -229,7 +237,9 @@ def _split_xforms_sections(document: html.HtmlElement) -> list[HtmlSection]:
 def _inspect_xforms_sections(document: html.HtmlElement) -> list[HtmlSectionSummary]:
     return [
         HtmlSectionSummary(toc_id=f"toc_{order}", index=order, title=title)
-        for order, (title, _section_children) in enumerate(_xforms_title_sections(document), start=1)
+        for order, (title, _section_children) in enumerate(
+            _xforms_title_sections(document), start=1
+        )
     ]
 
 
@@ -253,7 +263,11 @@ def split_content_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
 
     sections: list[HtmlSection] = []
     for order, (start, heading) in enumerate(heading_positions, start=1):
-        end = heading_positions[order][0] if order < len(heading_positions) else len(children)
+        end = (
+            heading_positions[order][0]
+            if order < len(heading_positions)
+            else len(children)
+        )
         toc_id = str(heading.get("id") or "").strip() or f"toc_{order}"
         section_children = children[start:end]
         section_markup = "".join(_element_html(child) for child in section_children)
@@ -288,7 +302,11 @@ def inspect_content_html_sections(html_markup: str | bytes) -> list[HtmlSectionS
 
     sections: list[HtmlSectionSummary] = []
     for order, (start, heading) in enumerate(heading_positions, start=1):
-        end = heading_positions[order][0] if order < len(heading_positions) else len(children)
+        end = (
+            heading_positions[order][0]
+            if order < len(heading_positions)
+            else len(children)
+        )
         toc_id = str(heading.get("id") or "").strip() or f"toc_{order}"
         sections.append(
             HtmlSectionSummary(
@@ -392,7 +410,9 @@ def _iter_html_files(input_directory: Path):
             yield child
 
 
-def _collect_html_file_page(input_directory: Path, page: int, page_size: int) -> tuple[list[Path], bool]:
+def _collect_html_file_page(
+    input_directory: Path, page: int, page_size: int
+) -> tuple[list[Path], bool]:
     start = (page - 1) * page_size
     stop = start + page_size + 1
     selected: list[Path] = []
@@ -413,7 +433,9 @@ def _source_document(input_directory: Path, source_file: Path) -> dict[str, str]
     }
 
 
-def _source_document_with_sections(input_directory: Path, source_file: Path) -> dict[str, Any]:
+def _source_document_with_sections(
+    input_directory: Path, source_file: Path
+) -> dict[str, Any]:
     sections = inspect_content_html_sections(source_file.read_bytes())
     return {
         **_source_document(input_directory, source_file),
@@ -425,7 +447,9 @@ def _source_document_with_sections(input_directory: Path, source_file: Path) -> 
     }
 
 
-def _source_document_with_section_count(input_directory: Path, source_file: Path) -> dict[str, str | int]:
+def _source_document_with_section_count(
+    input_directory: Path, source_file: Path
+) -> dict[str, str | int]:
     document = _source_document_with_sections(input_directory, source_file)
     return {
         "source_file": str(document["source_file"]),
@@ -437,7 +461,14 @@ def _source_document_with_section_count(input_directory: Path, source_file: Path
 
 def _section_signature(sections: list[dict[str, Any]]) -> str:
     return " ".join(
-        " ".join(part for part in [str(section.get("toc_id") or ""), str(section.get("title") or "")] if part).strip()
+        " ".join(
+            part
+            for part in [
+                str(section.get("toc_id") or ""),
+                str(section.get("title") or ""),
+            ]
+            if part
+        ).strip()
         for section in sections
     ).strip()
 
@@ -467,10 +498,19 @@ def _section_patterns(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 {
                     "source_file": str(document.get("source_file") or ""),
                     "source_name": str(document.get("source_name") or ""),
-                    "source_relative_path": str(document.get("source_relative_path") or ""),
+                    "source_relative_path": str(
+                        document.get("source_relative_path") or ""
+                    ),
                 }
             )
-    return sorted(counts.values(), key=lambda item: (-int(item["count"]), int(item["section_count"]), str(item["signature"])))
+    return sorted(
+        counts.values(),
+        key=lambda item: (
+            -int(item["count"]),
+            int(item["section_count"]),
+            str(item["signature"]),
+        ),
+    )
 
 
 def _section_save_rules(value: Any) -> dict[str, set[str]]:
@@ -481,18 +521,24 @@ def _section_save_rules(value: Any) -> dict[str, set[str]]:
         signature_text = str(signature or "").strip()
         if not signature_text or not isinstance(toc_ids, list):
             continue
-        rules[signature_text] = {str(toc_id).strip() for toc_id in toc_ids if str(toc_id).strip()}
+        rules[signature_text] = {
+            str(toc_id).strip() for toc_id in toc_ids if str(toc_id).strip()
+        }
     return rules
 
 
-def _section_dicts_from_split_sections(sections: list[HtmlSection]) -> list[dict[str, Any]]:
+def _section_dicts_from_split_sections(
+    sections: list[HtmlSection],
+) -> list[dict[str, Any]]:
     return [
         {"toc_id": section.toc_id, "index": section.index, "title": section.title}
         for section in sections
     ]
 
 
-def _resolve_html_source_file(input_directory_raw: str, source_name_raw: str) -> tuple[Path, Path]:
+def _resolve_html_source_file(
+    input_directory_raw: str, source_name_raw: str
+) -> tuple[Path, Path]:
     input_directory = Path(input_directory_raw).expanduser().resolve()
     source_name = source_name_raw.strip()
     source_file = (input_directory / source_name).resolve()
@@ -507,7 +553,9 @@ def _resolve_html_source_file(input_directory_raw: str, source_name_raw: str) ->
     return input_directory, source_file
 
 
-def list_disclosure_html_section_sources_payload(body: dict[str, Any]) -> dict[str, Any]:
+def list_disclosure_html_section_sources_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
     input_directory_raw = str(body.get("input_directory") or "").strip()
     if not input_directory_raw:
         msg = "input_directory is required"
@@ -519,7 +567,9 @@ def list_disclosure_html_section_sources_payload(body: dict[str, Any]) -> dict[s
 
     page = _parse_page(body.get("page"))
     page_size = _parse_page_size(body.get("page_size"))
-    html_files, has_next_page = _collect_html_file_page(input_directory, page, page_size)
+    html_files, has_next_page = _collect_html_file_page(
+        input_directory, page, page_size
+    )
     documents_with_sections = [
         _source_document_with_sections(input_directory, source_file)
         for source_file in html_files
@@ -579,7 +629,9 @@ def summarize_disclosure_html_section_kinds_payload(
             files_without_sections += 1
             continue
         documents.append(document)
-        if progress_callback is not None and (index == 1 or index == len(html_files) or index % 100 == 0):
+        if progress_callback is not None and (
+            index == 1 or index == len(html_files) or index % 100 == 0
+        ):
             progress_callback(f"목차 조합 확인 중: {index}/{len(html_files)}건 처리.")
 
     items = _section_patterns(documents)
@@ -597,7 +649,9 @@ def summarize_disclosure_html_section_kinds_payload(
     }
 
 
-def split_disclosure_html_section_source_payload(body: dict[str, Any]) -> dict[str, Any]:
+def split_disclosure_html_section_source_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
     input_directory, source_file = _resolve_html_source_file(
         str(body.get("input_directory") or "").strip(),
         str(body.get("source_name") or ""),
@@ -650,28 +704,44 @@ def inspect_disclosure_html_sections_payload(
         except Exception as exc:
             return {
                 "status": "read_failed",
-                "problem": {"kind": "read_failed", "source_file": str(source_file), "error": str(exc)},
+                "problem": {
+                    "kind": "read_failed",
+                    "source_file": str(source_file),
+                    "error": str(exc),
+                },
             }
         if not sections:
             return {
                 "status": "no_sections",
-                "problem": {"kind": "no_sections", "source_file": str(source_file), "error": ""},
+                "problem": {
+                    "kind": "no_sections",
+                    "source_file": str(source_file),
+                    "error": "",
+                },
             }
         return {
             "status": "ok",
             "document": {
                 "source_file": str(source_file),
                 "source_name": source_file.name,
-                "source_relative_path": _relative_source_path(input_directory, source_file),
+                "source_relative_path": _relative_source_path(
+                    input_directory, source_file
+                ),
                 "section_count": len(sections),
                 "sections": [
-                    {"toc_id": section.toc_id, "index": section.index, "title": section.title}
+                    {
+                        "toc_id": section.toc_id,
+                        "index": section.index,
+                        "title": section.title,
+                    }
                     for section in sections
                 ],
             },
         }
 
-    emit(f"목차 확인 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다.")
+    emit(
+        f"목차 확인 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다."
+    )
     results = _map_html_files(html_files, workers, inspect_one, cancel_check)
     documents: list[dict[str, Any]] = []
     problem_files: list[dict[str, str]] = []
@@ -782,7 +852,10 @@ def save_disclosure_html_sections_payload(
         if not sections:
             return {
                 "status": "no_sections",
-                "skipped": {"source_file": str(source_file), "error": "no sections found"},
+                "skipped": {
+                    "source_file": str(source_file),
+                    "error": "no sections found",
+                },
                 "saved": [],
             }
         signature = _section_signature(_section_dicts_from_split_sections(sections))
@@ -797,10 +870,18 @@ def save_disclosure_html_sections_payload(
         source_relative_path = source_file.relative_to(input_directory)
         output_path = output_directory / source_relative_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("\n".join(section.html for section in selected_sections), encoding="utf-8")
-        return {"status": "ok", "saved": [str(output_path)], "expected": [str(output_path)]}
+        output_path.write_text(
+            "\n".join(section.html for section in selected_sections), encoding="utf-8"
+        )
+        return {
+            "status": "ok",
+            "saved": [str(output_path)],
+            "expected": [str(output_path)],
+        }
 
-    emit(f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다.")
+    emit(
+        f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다."
+    )
     results = _map_html_files(html_files, workers, save_one, cancel_check)
     for index, result in enumerate(results, start=1):
         if _cancel_requested(cancel_check):
@@ -832,7 +913,8 @@ def save_disclosure_html_sections_payload(
             "saved_files": len(saved_files),
             "skipped_files": len(skipped_files),
             "expected_files": len(expected_files),
-            "integrity_ok": len(saved_files) == len(expected_files) and not missing_files,
+            "integrity_ok": len(saved_files) == len(expected_files)
+            and not missing_files,
             "missing_files": len(missing_files),
         },
         "saved_files": saved_files,

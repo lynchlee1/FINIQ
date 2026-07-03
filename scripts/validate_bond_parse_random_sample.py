@@ -15,7 +15,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from finiq.market_desk.web.disclosure_html_parse import (  # noqa: E402
+from finiq.market_desk.web.features.disclosures.html_parse_common import (  # noqa: E402
     _apply_manifest_metadata,
     _load_html_manifest_metadata_index,
 )

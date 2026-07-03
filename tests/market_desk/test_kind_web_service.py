@@ -15,36 +15,48 @@ from finiq.market_desk.analytics.quanti_market_history import (
     market_item_from_registry,
     market_value_map_from_registry,
 )
-from finiq.market_desk.web.service import (
-    DISCLOSURE_GROUP_OTHER,
-    _clean_search_text,
-    build_insight_payload,
+from finiq.market_desk.analytics.disclosure_groups import DISCLOSURE_GROUP_OTHER
+from finiq.market_desk.web.features.market_data.discovery import list_classification_files
+from finiq.market_desk.web.features.market_data.service_common import _clean_search_text
+from finiq.market_desk.web.features.market_data.service_insight import build_insight_payload
+from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
-    list_classification_files,
     load_company_index_payload,
 )
-from finiq.market_desk.web.disclosure_html import (
-    cancel_disclosure_html_download,
+from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
-    collect_acpt_numbers_from_json,
-    compress_disclosure_external_html_payload,
-    download_disclosure_html_contents_payload,
-    download_disclosure_html_payload,
-    merge_disclosure_content_html_payload,
     write_disclosure_html_manifest_payload,
 )
-from finiq.market_desk.web.download import inspect_download_output_directory_payload
-import finiq.market_desk.web.disclosure_html_sections as disclosure_html_sections
-from finiq.market_desk.web.disclosure_html_parse import (
-    PARSER_REGISTRY,
-    build_bond_parse_summary_payload,
+from finiq.market_desk.web.features.disclosures.html_common import (
+    cancel_disclosure_html_download,
+    collect_acpt_numbers_from_json,
+)
+from finiq.market_desk.web.features.disclosures.html_content_download import (
+    download_disclosure_html_contents_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_content_merge import merge_disclosure_content_html_payload
+from finiq.market_desk.web.features.disclosures.html_download import (
+    download_disclosure_html_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_external_compress import compress_disclosure_external_html_payload
+from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
+import finiq.market_desk.web.features.disclosures.html_sections as disclosure_html_sections
+from finiq.market_desk.web.features.disclosures.html_parse_changes import (
     build_parse_change_log_payload,
-    build_parse_preview_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_parse_common import (
+    PARSER_REGISTRY,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
-from finiq.market_desk.web.disclosure_html_sections import (
+from finiq.market_desk.web.features.disclosures.html_parse_preview import (
+    build_parse_preview_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_parse_summary import (
+    build_bond_parse_summary_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_sections import (
     DEFAULT_HTML_SECTION_WORKERS,
     HtmlSectionSummary,
     inspect_disclosure_html_sections_payload,
@@ -57,7 +69,7 @@ from finiq.market_desk.web.disclosure_html_sections import (
 )
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance
 from finiq.market_desk.web.html_parsers.common import expand_table, parse_html_document
-from finiq.market_desk.web.table_export import build_disclosure_table_payload
+from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 from finiq.market_desk.analytics.quanti import list_quanti_stock_codes
 from finiq.market_desk.web.html_parsers.rights_issuance import parse_rights_issuance
 
@@ -1112,7 +1124,7 @@ def test_download_disclosure_html_payload_uses_collected_acpt_numbers(tmp_path: 
     def fake_download(**kwargs):
         return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
 
     payload = download_disclosure_html_payload(
         {
@@ -1209,7 +1221,7 @@ def test_download_disclosure_html_contents_payload_saves_body_html(tmp_path: Pat
         kwargs["progress_callback"](f"Saved KIND content HTML to: {path}")
         return [path]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls", fake_download)
     external_dir = tmp_path / "viewer_html"
     external_dir.mkdir()
     (external_dir / "20250101000001.html").write_text(
@@ -1263,7 +1275,7 @@ def test_download_disclosure_html_contents_payload_accepts_compressed_json_file(
         calls.append((output_directory, targets))
         return [output_directory / f"{target['acpt_no']}.html" for target in targets]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls", fake_download)
 
     compressed_path = tmp_path / "compressed-external-html.json"
     compressed_path.write_text(
@@ -1303,7 +1315,7 @@ def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Pat
     def fake_download(**kwargs):
         return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
     source_json_path = tmp_path / "filtered-disclosures.json"
     source_json_path.write_text(
         json.dumps(
@@ -1363,7 +1375,7 @@ def test_download_disclosure_html_payload_accepts_result_directory_source_json_p
         calls.append(acpt_numbers)
         return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in acpt_numbers]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
     result_directory = tmp_path / "download_results"
     result_directory.mkdir()
     (result_directory / "001_post_page_00001.body").write_bytes(
@@ -1409,7 +1421,7 @@ def test_check_disclosure_html_output_directory_reports_existing_overlap(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from finiq.market_desk.web import disclosure_html
+    import finiq.market_desk.web.features.disclosures.html_common as disclosure_html
 
     used_workers: list[int] = []
     real_executor = disclosure_html.ThreadPoolExecutor
@@ -1451,7 +1463,7 @@ def test_check_disclosure_html_output_directory_uses_single_worker_for_single_ta
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from finiq.market_desk.web import disclosure_html
+    import finiq.market_desk.web.features.disclosures.html_common as disclosure_html
 
     def fail_executor(*args, **kwargs):
         raise AssertionError("single target should not start ThreadPoolExecutor")
@@ -1482,7 +1494,7 @@ def test_download_disclosure_html_payload_logs_existing_html_overlap(
         assert kwargs["skip_existing"] is False
         return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
     (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
@@ -1519,7 +1531,7 @@ def test_download_disclosure_html_payload_logs_when_no_existing_html_overlap(
         assert kwargs["skip_existing"] is False
         return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
 
@@ -1588,7 +1600,7 @@ def test_download_disclosure_html_payload_rejects_unexpected_resume_files(
         )
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls",
+        "finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls",
         fake_download,
     )
     output_directory = tmp_path / "viewer_html"
@@ -1721,7 +1733,7 @@ def test_clean_disclosure_html_output_directory_deletes_unexpected_content_files
     unexpected.write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.disclosure_html._collect_content_cleanup_targets_from_external_directory",
+        "finiq.market_desk.web.features.disclosures.html_content_download._collect_content_cleanup_targets_from_external_directory",
         lambda source, **kwargs: ([{"acpt_no": "20250101000001", "doc_no": "1"}], None),
     )
 
@@ -1805,7 +1817,7 @@ def test_download_disclosure_html_payload_resumes_split_files(
         calls.append((output_directory, acpt_numbers))
         return [output_directory / f"{acpt_no}.html" for acpt_no in acpt_numbers]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
 
     output_directory = tmp_path / "viewer_html"
     (output_directory / "2025").mkdir(parents=True)
@@ -2051,11 +2063,11 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
 
 
 def test_inspect_folder_job_cancellation(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import (
+    from finiq.market_desk.web.features.downloads.kind_common import DownloadCancelled
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
         start_inspect_folder_job,
         cancel_download_job,
         get_download_job,
-        DownloadCancelled,
     )
     import time
 
@@ -2067,7 +2079,7 @@ def test_inspect_folder_job_cancellation(tmp_path: Path, monkeypatch) -> None:
         return {"format": "kind_download_folder_cleanup_v1"}
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.download.inspect_download_output_directory_payload",
+        "finiq.market_desk.web.features.downloads.kind_jobs.inspect_download_output_directory_payload",
         blocking_inspect,
     )
 
@@ -2120,7 +2132,7 @@ def test_download_disclosure_html_contents_payload_reads_and_writes_split_files(
         calls.append((output_directory, targets))
         return [output_directory / f"{target['acpt_no']}.html" for target in targets]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls", fake_download)
 
     external_dir = tmp_path / "viewer_html"
     year_dir = external_dir / "2025"
@@ -2166,7 +2178,7 @@ def test_download_disclosure_html_contents_payload_allows_separate_source_and_ou
         calls.append((output_directory, targets))
         return [output_directory / f"{target['acpt_no']}.html" for target in targets]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls", fake_download)
 
     external_dir = tmp_path / "viewer_html"
     year_dir = external_dir / "2025"
@@ -2240,7 +2252,7 @@ def test_download_disclosure_html_contents_payload_prefers_compressed_external_j
         calls.append((output_directory, targets))
         return [output_directory / f"{target['acpt_no']}.html" for target in targets]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls", fake_download)
 
     external_dir = tmp_path / "viewer_html"
     external_dir.mkdir()
@@ -2288,7 +2300,7 @@ def test_download_disclosure_html_contents_payload_reads_compact_docs_json(
         calls.append((output_directory, targets))
         return [output_directory / f"{target['acpt_no']}.html" for target in targets]
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_content_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls", fake_download)
 
     external_dir = tmp_path / "viewer_html"
     external_dir.mkdir()
@@ -3181,7 +3193,7 @@ def test_check_disclosure_html_output_directory_ignores_compressed_json_split_by
         raise AssertionError("existing checks should not scan compressed JSON docs for doc_no")
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.disclosure_html._collect_content_targets_from_compressed_payload",
+        "finiq.market_desk.web.features.disclosures.html_content_download._collect_content_targets_from_compressed_payload",
         fail_full_target_scan,
     )
 
@@ -3265,7 +3277,7 @@ def test_download_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, m
             cancel_disclosure_html_download("cancel-test")
         return saved_paths
 
-    monkeypatch.setattr("finiq.market_desk.web.disclosure_html.download_disclosure_viewer_htmls", fake_download)
+    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
 
     payload = download_disclosure_html_payload(
         {
@@ -4829,7 +4841,7 @@ def test_build_insight_payload_groups_disclosures(tmp_path: Path, monkeypatch) -
     fixture_path = _write_classification_fixture(tmp_path)
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.service.fetch_stock_price_history",
+        "finiq.market_desk.web.features.market_data.service_insight.fetch_stock_price_history",
         lambda stock_code, start_date, end_date: [
             {"date": "2025-01-02", "open": 100, "high": 110, "low": 95, "close": 108, "volume": 1000},
             {"date": "2025-01-03", "open": 108, "high": 111, "low": 101, "close": 103, "volume": 1200},
@@ -4876,7 +4888,7 @@ def test_build_insight_payload_extends_visible_range_for_after_close_disclosure(
     ]
     fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(
-        "finiq.market_desk.web.service.fetch_stock_price_history",
+        "finiq.market_desk.web.features.market_data.service_insight.fetch_stock_price_history",
         lambda stock_code, start_date, end_date: [
             {"date": "2025-01-10", "open": 100, "high": 110, "low": 95, "close": 108, "volume": 1000},
             {"date": "2025-01-13", "open": 108, "high": 118, "low": 101, "close": 116, "volume": 1400},
@@ -4991,7 +5003,7 @@ def test_quanti_market_registry_helpers_load_market_item_and_values(tmp_path: Pa
 
 
 def test_check_existing_downloads_empty(tmp_path: Path) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
     res = check_existing_downloads(str(tmp_path / "non_existent"))
     assert res == {"has_existing": False}
 
@@ -5000,8 +5012,8 @@ def test_check_existing_downloads_empty(tmp_path: Path) -> None:
 
 
 def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
 
     folder1 = tmp_path / "20260101_20260501"
     folder1.mkdir()
@@ -5037,8 +5049,8 @@ def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_check_existing_downloads_single(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
 
     (tmp_path / "001_post_page_00001.body").write_bytes(
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
@@ -5058,8 +5070,8 @@ def test_check_existing_downloads_single(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_check_existing_downloads_validated(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5081,8 +5093,8 @@ def test_check_existing_downloads_validated(tmp_path: Path, monkeypatch) -> None
 
 
 def test_check_existing_downloads_stale(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 120)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 120)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5104,8 +5116,8 @@ def test_check_existing_downloads_stale(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_check_existing_downloads_unverified(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: None)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: None)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5127,8 +5139,8 @@ def test_check_existing_downloads_unverified(tmp_path: Path, monkeypatch) -> Non
 
 
 def test_check_existing_downloads_corrupted_local(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5149,8 +5161,8 @@ def test_check_existing_downloads_corrupted_local(tmp_path: Path, monkeypatch) -
 
 
 def test_check_existing_downloads_missing_pages(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 200)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 200)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5174,12 +5186,12 @@ def test_check_existing_downloads_missing_pages(tmp_path: Path, monkeypatch) -> 
 
 
 def test_check_existing_downloads_fast_validated(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
     
     # We monkeypatch get_current_kind_total_count to raise an error to prove it is NOT called
     def fail_if_called(snap):
         raise RuntimeError("Should not be called in fast validation mode")
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5202,12 +5214,12 @@ def test_check_existing_downloads_fast_validated(tmp_path: Path, monkeypatch) ->
 
 
 def test_check_existing_downloads_fast_missing_pages(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
     
     # We monkeypatch get_current_kind_total_count to raise an error to prove it is NOT called
     def fail_if_called(snap):
         raise RuntimeError("Should not be called in fast validation mode")
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5231,12 +5243,12 @@ def test_check_existing_downloads_fast_missing_pages(tmp_path: Path, monkeypatch
 
 
 def test_check_existing_downloads_fast_corrupted_local(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
     
     # We monkeypatch get_current_kind_total_count to raise an error to prove it is NOT called
     def fail_if_called(snap):
         raise RuntimeError("Should not be called in fast validation mode")
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5255,12 +5267,12 @@ def test_check_existing_downloads_fast_corrupted_local(tmp_path: Path, monkeypat
 
 
 def test_check_existing_downloads_fast_corrupted_non_last_page(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 
     # We monkeypatch get_current_kind_total_count to raise an error to prove it is NOT called
     def fail_if_called(snap):
         raise RuntimeError("Should not be called in fast validation mode")
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5336,12 +5348,12 @@ def test_check_existing_downloads_route_verify_with_kind_parsing(tmp_path: Path,
 
 
 def test_check_existing_downloads_fast_row_count_mismatch(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 
     # We monkeypatch get_current_kind_total_count to raise an error to prove it is NOT called
     def fail_if_called(snap):
         raise RuntimeError("Should not be called in fast validation mode")
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5386,7 +5398,7 @@ def test_check_existing_downloads_fast_row_count_mismatch(tmp_path: Path, monkey
 
 
 def test_check_existing_downloads_detects_metadata_missing(tmp_path: Path) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5403,13 +5415,13 @@ def test_check_existing_downloads_detects_metadata_missing(tmp_path: Path) -> No
 
 
 def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import detect_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import detect_existing_downloads
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("detect must not parse downloaded pages or call KIND")
 
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
-    monkeypatch.setattr("finiq.market_desk.web.download.inspect_download_directory_pages", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.inspect_download_directory_pages", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5440,9 +5452,9 @@ def test_inspect_folder_repairs_missing_metadata_when_current_payload_matches(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from finiq.market_desk.web.download import inspect_download_output_directory_payload
+    from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
 
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snapshot: 100)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snapshot: 100)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5476,9 +5488,9 @@ def test_inspect_folder_reports_download_needed_for_missing_metadata(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from finiq.market_desk.web.download import inspect_download_output_directory_payload
+    from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
 
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snapshot: 150)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snapshot: 150)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5513,12 +5525,12 @@ def test_check_existing_downloads_does_not_infer_missing_metadata_from_incomplet
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 
     def fail_if_called(snapshot):
         raise RuntimeError("Incomplete current payload must not be used for KIND validation")
 
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5540,12 +5552,12 @@ def test_check_existing_downloads_does_not_infer_missing_metadata_from_incomplet
 
 
 def test_check_existing_downloads_treats_obsolete_metadata_as_missing(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 
     def fail_if_called(snapshot):
         raise RuntimeError("Obsolete metadata must not be used for KIND validation")
 
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fail_if_called)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fail_if_called)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5569,14 +5581,14 @@ def test_check_existing_downloads_treats_obsolete_metadata_as_missing(tmp_path: 
 
 
 def test_check_existing_downloads_validates_missing_metadata_with_current_payload(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import DISCLOSURE_GROUPS, check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import DISCLOSURE_GROUPS, check_existing_downloads
 
     seen_snapshots = []
     def fake_kind_count(snapshot):
         seen_snapshots.append(snapshot)
         return 100
 
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fake_kind_count)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fake_kind_count)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5613,14 +5625,14 @@ def test_check_existing_downloads_validates_missing_metadata_with_current_payloa
 
 
 def test_check_existing_downloads_validates_obsolete_metadata_with_current_payload(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 
     seen_snapshots = []
     def fake_kind_count(snapshot):
         seen_snapshots.append(snapshot)
         return 100
 
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", fake_kind_count)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", fake_kind_count)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5659,10 +5671,10 @@ def test_check_existing_downloads_validates_obsolete_metadata_with_current_paylo
 
 
 def test_create_folder_metadata_success(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import create_folder_metadata
+    from finiq.market_desk.web.features.downloads.kind_existing import create_folder_metadata
     
     # Mock KIND live count to return 100
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5693,10 +5705,10 @@ def test_create_folder_metadata_success(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_create_folder_metadata_mismatch_and_force(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import create_folder_metadata
+    from finiq.market_desk.web.features.downloads.kind_existing import create_folder_metadata
     
     # Mock KIND live count to return 120 (local is 100)
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 120)
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 120)
 
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
@@ -5764,7 +5776,7 @@ def test_create_metadata_route(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_infer_page_size_from_files(tmp_path: Path) -> None:
-    from finiq.market_desk.web.download import _infer_page_size_from_files
+    from finiq.market_desk.web.features.downloads.kind_existing import _infer_page_size_from_files
 
     # 1. Empty folder
     assert _infer_page_size_from_files(tmp_path) == 100
@@ -5784,7 +5796,7 @@ def test_infer_page_size_from_files(tmp_path: Path) -> None:
 
 
 def test_infer_date_range_from_disclosures(tmp_path: Path) -> None:
-    from finiq.market_desk.web.download import _infer_date_range_from_disclosures
+    from finiq.market_desk.web.features.downloads.kind_existing import _infer_date_range_from_disclosures
 
     # Empty
     assert _infer_date_range_from_disclosures(tmp_path) is None
@@ -5815,8 +5827,8 @@ def test_infer_date_range_from_disclosures(tmp_path: Path) -> None:
 
 
 def test_check_existing_downloads_single_missing_metadata(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 100)
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
 
     html_content = """
     <table class="list">
@@ -5840,8 +5852,8 @@ def test_check_existing_downloads_single_missing_metadata(tmp_path: Path, monkey
 
 
 def test_create_folder_metadata_with_inferred_page_size(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import create_folder_metadata
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 150)
+    from finiq.market_desk.web.features.downloads.kind_existing import create_folder_metadata
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 150)
 
     # Local has 3 pages of page_size 50
     (tmp_path / "001_post_page_00001.body").write_bytes(
@@ -5878,8 +5890,8 @@ def test_create_folder_metadata_with_inferred_page_size(tmp_path: Path, monkeypa
 
 
 def test_create_folder_metadata_zero_items(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import create_folder_metadata
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 0)
+    from finiq.market_desk.web.features.downloads.kind_existing import create_folder_metadata
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 0)
 
     # Local has 1 page of page_size 100, but total_items is 0
     (tmp_path / "001_post_page_00001.body").write_bytes(
@@ -5911,8 +5923,8 @@ def test_create_folder_metadata_zero_items(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_create_folder_metadata_force_string(tmp_path: Path, monkeypatch) -> None:
-    from finiq.market_desk.web.download import create_folder_metadata
-    monkeypatch.setattr("finiq.market_desk.web.download.get_current_kind_total_count", lambda snap: 120)
+    from finiq.market_desk.web.features.downloads.kind_existing import create_folder_metadata
+    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 120)
 
     (tmp_path / "001_post_page_00001.body").write_bytes(
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 from typing import Any, Callable
-
 
 ProgressCallback = Callable[[str], None] | None
 
@@ -57,7 +56,12 @@ def _copy_flat_to_year_directories(
             skipped_invalid_year += 1
             continue
 
-        result = _transfer_file(source_path, output_directory / year / source_path.name, overwrite=overwrite, move=move)
+        result = _transfer_file(
+            source_path,
+            output_directory / year / source_path.name,
+            overwrite=overwrite,
+            move=move,
+        )
         years.add(year)
         if result == "copied":
             copied += 1
@@ -110,7 +114,12 @@ def _copy_year_directories_to_flat(
     for index, source_path in enumerate(files, start=1):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
-        result = _transfer_file(source_path, output_directory / source_path.name, overwrite=overwrite, move=move)
+        result = _transfer_file(
+            source_path,
+            output_directory / source_path.name,
+            overwrite=overwrite,
+            move=move,
+        )
         if result == "copied":
             copied += 1
         elif result == "moved":
@@ -164,20 +173,27 @@ def run_partition_storage_payload(
         raise ValueError(f"source_directory is not a directory: {source_directory}")
 
     root_year_files = [
-        path for path in source_directory.iterdir()
+        path
+        for path in source_directory.iterdir()
         if path.is_file() and _year_from_filename(path) is not None
     ]
     year_directory_files = [
         path
         for year_directory in source_directory.iterdir()
-        if year_directory.is_dir() and len(year_directory.name) == 4 and year_directory.name.isdigit()
+        if year_directory.is_dir()
+        and len(year_directory.name) == 4
+        and year_directory.name.isdigit()
         for path in year_directory.iterdir()
         if path.is_file()
     ]
     if mode == "split" and not root_year_files and year_directory_files:
-        raise ValueError("입력 경로가 이미 연도별 폴더 구조입니다. 일반 폴더로 만들려면 출력 구조를 일반 폴더로 선택하세요.")
+        raise ValueError(
+            "입력 경로가 이미 연도별 폴더 구조입니다. 일반 폴더로 만들려면 출력 구조를 일반 폴더로 선택하세요."
+        )
     if mode == "flatten" and not year_directory_files:
-        raise ValueError("일반 폴더 출력 대상 파일이 없습니다. 입력 경로에 연도별 폴더와 HTML 파일이 있는지 확인하세요.")
+        raise ValueError(
+            "일반 폴더 출력 대상 파일이 없습니다. 입력 경로에 연도별 폴더와 HTML 파일이 있는지 확인하세요."
+        )
 
     output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -205,13 +221,23 @@ def run_partition_storage_payload(
             cancel_check=cancel_check,
         )
 
-    handled_files = result["copied_files"] + result["moved_files"] + result["skipped_existing_files"]
+    handled_files = (
+        result["copied_files"]
+        + result["moved_files"]
+        + result["skipped_existing_files"]
+    )
     if handled_files == 0:
         if mode == "split":
             if result.get("source_year_directory_count"):
-                raise ValueError("입력 경로가 이미 연도별 폴더 구조입니다. 일반 폴더로 만들려면 출력 구조를 일반 폴더로 선택하세요.")
-            raise ValueError("연도별 폴더 출력 대상 파일이 없습니다. 입력 경로에 HTML 파일이 있는지 확인하세요.")
-        raise ValueError("일반 폴더 출력 대상 파일이 없습니다. 입력 경로에 연도별 폴더와 HTML 파일이 있는지 확인하세요.")
+                raise ValueError(
+                    "입력 경로가 이미 연도별 폴더 구조입니다. 일반 폴더로 만들려면 출력 구조를 일반 폴더로 선택하세요."
+                )
+            raise ValueError(
+                "연도별 폴더 출력 대상 파일이 없습니다. 입력 경로에 HTML 파일이 있는지 확인하세요."
+            )
+        raise ValueError(
+            "일반 폴더 출력 대상 파일이 없습니다. 입력 경로에 연도별 폴더와 HTML 파일이 있는지 확인하세요."
+        )
 
     if progress_callback:
         action_label = "이동" if move else "복사"
@@ -221,7 +247,6 @@ def run_partition_storage_payload(
             f"{result['skipped_existing_files']}개 기존 파일 건너뜀."
         )
     return result
-
 
 
 __all__ = ["run_partition_storage_payload"]

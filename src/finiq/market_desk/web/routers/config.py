@@ -10,13 +10,13 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from finiq.config import normalize_path, save_settings
-from finiq.market_desk.web.discovery import (
+from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
     list_price_source_files,
     resolve_default_classification,
     resolve_default_price_source,
 )
-from finiq.market_desk.web.service import (
+from finiq.market_desk.web.features.market_data.service_common import (
     DISPLAY_FREQUENCY_OPTIONS,
     INSIGHT_RANGE_OPTIONS,
     PRICE_SOURCE_FDR,

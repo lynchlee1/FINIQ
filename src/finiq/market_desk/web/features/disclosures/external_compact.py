@@ -101,7 +101,9 @@ def _compact_anchor_tag(anchor_tag: Tag) -> dict[str, Any]:
 
 
 def _compact_script_tag(script_tag: Tag) -> dict[str, Any]:
-    script_text = "" if script_tag.get("src") else _clean_text(script_tag.get_text() or "")
+    script_text = (
+        "" if script_tag.get("src") else _clean_text(script_tag.get_text() or "")
+    )
     return {
         "attrs": get_tag_attributes(script_tag),
         "text": script_text,
@@ -195,7 +197,8 @@ def _compact_external_viewer_html(html_markup: str | bytes) -> dict[str, Any]:
     return {
         "acpt_no": parsed.get("acpt_no"),
         "title": title,
-        "header": parsed.get("header") or (
+        "header": parsed.get("header")
+        or (
             _clean_text(header_tag.get_text(separator=" ", strip=True))
             if isinstance(header_tag, Tag)
             else ""
@@ -231,7 +234,9 @@ def _compact_external_viewer_html(html_markup: str | bytes) -> dict[str, Any]:
         ],
         "resources": [
             _compact_tag(resource_tag)
-            for resource_tag in soup.find_all(["link", "img", "object", "embed", "source"])
+            for resource_tag in soup.find_all(
+                ["link", "img", "object", "embed", "source"]
+            )
             if isinstance(resource_tag, Tag)
         ],
         "scripts": [
@@ -274,7 +279,9 @@ def _compact_document_options(selects: list[dict[str, Any]]) -> list[dict[str, A
     return documents
 
 
-def _compress_external_html_file(args: tuple[int, str, Path]) -> tuple[int, str, str, dict[str, Any]]:
+def _compress_external_html_file(
+    args: tuple[int, str, Path],
+) -> tuple[int, str, str, dict[str, Any]]:
     index, year, html_path = args
     parsed = _compact_external_viewer_html(html_path.read_bytes())
     acpt_no = str(parsed.get("acpt_no") or html_path.stem).strip()
@@ -324,7 +331,9 @@ def _verify_compressed_external_html_files(
             continue
         records = payload.get("records")
         if not isinstance(records, list):
-            invalid_files.append({"path": written_file, "error": "records is not a list"})
+            invalid_files.append(
+                {"path": written_file, "error": "records is not a list"}
+            )
             continue
         for record in records:
             if not isinstance(record, dict):
@@ -335,7 +344,9 @@ def _verify_compressed_external_html_files(
 
     verified = set(verified_acpt_numbers)
     verified_counts = Counter(verified_acpt_numbers)
-    duplicate_acpt_numbers = sorted(acpt_no for acpt_no, count in verified_counts.items() if count > 1)
+    duplicate_acpt_numbers = sorted(
+        acpt_no for acpt_no, count in verified_counts.items() if count > 1
+    )
     missing_acpt_numbers = sorted(expected - verified)
     unexpected_acpt_numbers = sorted(verified - expected)
     passed = (
@@ -359,4 +370,3 @@ def _verify_compressed_external_html_files(
         "unexpected_acpt_numbers": unexpected_acpt_numbers,
         "duplicate_acpt_numbers": duplicate_acpt_numbers,
     }
-

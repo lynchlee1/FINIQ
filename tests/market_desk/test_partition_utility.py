@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from finiq.market_desk.web.utility import run_partition_storage_payload
+from finiq.market_desk.web.features.storage.partition import run_partition_storage_payload
 
 
 def test_partition_storage_splits_flat_files_by_filename_year(tmp_path: Path) -> None:
