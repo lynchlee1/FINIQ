@@ -47,8 +47,7 @@ class RightsIssuanceExtractor:
         self.warnings: list[str] = []
 
     def is_bonus_issuance(self) -> bool:
-        title = str(self.context.record.get("title") or "")
-        return "무상증자" in title
+        return self.context.issuance_type == "bonus"
 
     def is_subsidiary_disclosure(self) -> bool:
         title = str(self.context.record.get("title") or "")
@@ -90,20 +89,16 @@ class RightsIssuanceExtractor:
         return value
 
     def get_payment_date(self) -> str | None:
-        value = self.rows.last_labeled_value("납입일")
+        value = self.rows.last_value("납입일")
         if not self.price_and_payment_are_optional():
             self._warn_if_missing("납입일", value)
         return value
 
     def get_delivery_date(self) -> str | None:
-        value = self.rows.last_labeled_value("신주권교부예정일")
-        return value
+        return self.rows.last_value("신주권교부예정일")
 
     def get_listing_date(self) -> str | None:
-        value = self.rows.last_labeled_value("신주의 상장 예정일")
-        if value is None:
-            value = self.rows.last_labeled_value("신주의 상장예정일")
-        return value
+        return self.rows.last_value("신주의 상장 예정일")
 
     def get_issue_targets(self) -> list[list[Any]]:
         """제3자 배정 대상자와 배정 주식 수를 추출한다."""
