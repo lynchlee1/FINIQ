@@ -119,3 +119,14 @@ test("html parse page defaults resume off and removes excel export controls", as
   assert.doesNotMatch(source, /\/api\/disclosures\/html\/parse\/export\.xlsx/);
   assert.match(source, /className="grid gap-3 md:grid-cols-2"/);
 });
+
+test("html parse page sends parallel worker count", async () => {
+  const source = await readFile(pagePath, "utf8");
+  const runHandler = source.match(/const handleRun = async \(\) => \{[\s\S]*?startJob\("\/api\/disclosures\/html\/parse\/start", payload\);[\s\S]*?\};/)?.[0] ?? "";
+  const settingsBlock = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
+
+  assert.match(source, /const \[parallelWorkers, setParallelWorkers\] = useState\(""\)/);
+  assert.match(runHandler, /parallel_workers: parallelWorkers \? Number\(parallelWorkers\) : null/);
+  assert.match(settingsBlock, /id: "parallelWorkers"[\s\S]*?label: "병렬 워커 수"/);
+  assert.match(settingsBlock, /help: "비워 두면 기존처럼 1개 워커로 실행합니다\."/);
+});

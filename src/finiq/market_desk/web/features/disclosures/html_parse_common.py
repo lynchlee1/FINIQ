@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -53,6 +54,7 @@ class ParseRequest:
     skip_errors: bool
     resume: bool
     progress_interval: int
+    parallel_workers: int
     cancel_token: str | None
 
 
@@ -485,6 +487,16 @@ def _parse_progress_interval(value: Any) -> int:
     return parsed
 
 
+def _parse_parallel_workers(value: Any, total_files: int) -> int:
+    if value in (None, ""):
+        return 1
+    try:
+        requested_workers = int(value)
+    except (TypeError, ValueError):
+        requested_workers = 1
+    return max(1, min(requested_workers, max(1, total_files)))
+
+
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
     files = sorted(path for path in input_directory.rglob("*.html") if path.is_file())
     return files[:limit] if limit is not None else files
@@ -519,17 +531,22 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
     limit = _parse_limit(body.get("limit"))
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
+    html_files = _collect_html_files(input_directory, limit)
+
     return ParseRequest(
         mode=mode,
         parser=parser,
         input_directory=input_directory,
         output_path=output_path,
-        html_files=_collect_html_files(input_directory, limit),
+        html_files=html_files,
         manifest_metadata_index=_load_html_manifest_metadata_index(input_directory),
         limit=limit,
         skip_errors=bool(body.get("skip_errors", True)),
         resume=bool(body.get("resume", True)),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
+        parallel_workers=_parse_parallel_workers(
+            body.get("parallel_workers", body.get("workers")), len(html_files)
+        ),
         cancel_token=cancel_token,
     )
 
@@ -759,6 +776,7 @@ def _emit_run_header(request: ParseRequest, state: ParseRunState) -> None:
     state.emit(f"파싱 모드: {request.mode}")
     state.emit(f"이어하기: {'예' if request.resume else '아니오'}")
     state.emit(f"진행 확인 간격: {request.progress_interval}건")
+    state.emit(f"병렬 처리: {request.parallel_workers}개 워커")
 
 
 def _should_skip_for_resume(
@@ -886,6 +904,143 @@ def _parse_one_html_file(
         )
 
 
+def _parse_html_file_for_worker(
+    request: ParseRequest,
+    *,
+    index: int,
+    html_file: Path,
+) -> dict[str, Any]:
+    source_file = str(html_file.resolve())
+    try:
+        parsed_record = _compact_record(
+            request.parser(html_file.read_bytes(), file_path=html_file)
+        )
+        return {
+            "kind": "record",
+            "index": index,
+            "html_file": html_file,
+            "source_file": source_file,
+            "record": _apply_manifest_metadata(
+                parsed_record,
+                request.manifest_metadata_index,
+                mode=request.mode,
+            ),
+            "warnings": _record_parse_warnings(parsed_record),
+        }
+    except Exception as exc:
+        return {
+            "kind": "error",
+            "index": index,
+            "html_file": html_file,
+            "source_file": source_file,
+            "error": exc,
+        }
+
+
+def _record_parallel_parse_result(
+    request: ParseRequest,
+    state: ParseRunState,
+    result: dict[str, Any],
+) -> None:
+    index = int(result["index"])
+    html_file = result["html_file"]
+    source_file = str(result["source_file"])
+    if result["kind"] == "record":
+        record = result["record"]
+        for warning in result["warnings"]:
+            _add_parse_warning(
+                request,
+                state,
+                index=index,
+                html_file=html_file,
+                source_file=source_file,
+                warning=warning,
+            )
+        state.records.append(record)
+        state.processed_files.add(source_file)
+    else:
+        exc = result["error"]
+        if not request.skip_errors:
+            msg = (
+                f"파싱 실패 {index}/{len(request.html_files)}: {html_file.name} "
+                f"({type(exc).__name__}) {exc}"
+            )
+            raise ValueError(msg) from exc
+        _add_parse_error(
+            request,
+            state,
+            index=index,
+            html_file=html_file,
+            source_file=source_file,
+            exc=exc,
+        )
+        state.processed_files.add(source_file)
+
+    state.processed_this_run += 1
+    if state.processed_this_run % request.progress_interval == 0:
+        _write_parse_payload(
+            _payload_from_state(request, state, cancelled=False), request.output_path
+        )
+        state.emit(
+            f"파싱 중간 확인: 이번 실행 {state.processed_this_run}건 처리, 결과 JSON 저장 완료."
+        )
+
+
+def _parse_html_files_parallel(request: ParseRequest, state: ParseRunState) -> None:
+    pending_items = [
+        (index, html_file)
+        for index, html_file in enumerate(request.html_files, start=1)
+        if not _should_skip_for_resume(
+            request,
+            state,
+            source_file=str(html_file.resolve()),
+            index=index,
+        )
+    ]
+    next_item = 0
+    next_result_index = 0
+    ready_results: dict[int, dict[str, Any]] = {}
+
+    def submit_next(executor: ThreadPoolExecutor, futures: dict[Any, int]) -> None:
+        nonlocal next_item
+        if next_item >= len(pending_items) or _is_cancelled(request.cancel_token):
+            return
+        index, html_file = pending_items[next_item]
+        next_item += 1
+        future = executor.submit(
+            _parse_html_file_for_worker,
+            request,
+            index=index,
+            html_file=html_file,
+        )
+        futures[future] = index
+
+    with ThreadPoolExecutor(max_workers=request.parallel_workers) as executor:
+        futures: dict[Any, int] = {}
+        for _ in range(request.parallel_workers):
+            submit_next(executor, futures)
+        while futures:
+            done, _pending = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                futures.pop(future)
+                result = future.result()
+                ready_results[int(result["index"])] = result
+                submit_next(executor, futures)
+
+            while next_result_index < len(pending_items):
+                expected_index = pending_items[next_result_index][0]
+                result = ready_results.pop(expected_index, None)
+                if result is None:
+                    break
+                _record_parallel_parse_result(request, state, result)
+                next_result_index += 1
+    if _is_cancelled(request.cancel_token):
+        state.emit(
+            f"중지 요청으로 파싱을 멈췄습니다. "
+            f"처리 완료 {len(state.records)}/{len(request.html_files)}건."
+        )
+
+
 def _emit_resume_footer(request: ParseRequest, state: ParseRunState) -> None:
     if (
         state.skipped_resume_count
@@ -908,14 +1063,17 @@ def parse_disclosure_html_payload(
     _emit_run_header(request, state)
 
     try:
-        for index, html_file in enumerate(request.html_files, start=1):
-            if _is_cancelled(request.cancel_token):
-                state.emit(
-                    f"중지 요청으로 파싱을 멈췄습니다. "
-                    f"처리 완료 {len(state.records)}/{len(request.html_files)}건."
-                )
-                break
-            _parse_one_html_file(request, state, index=index, html_file=html_file)
+        if request.parallel_workers > 1:
+            _parse_html_files_parallel(request, state)
+        else:
+            for index, html_file in enumerate(request.html_files, start=1):
+                if _is_cancelled(request.cancel_token):
+                    state.emit(
+                        f"중지 요청으로 파싱을 멈췄습니다. "
+                        f"처리 완료 {len(state.records)}/{len(request.html_files)}건."
+                    )
+                    break
+                _parse_one_html_file(request, state, index=index, html_file=html_file)
         cancelled = _is_cancelled(request.cancel_token)
     finally:
         _clear_cancel_token(request.cancel_token)

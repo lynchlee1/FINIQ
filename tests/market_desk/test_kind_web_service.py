@@ -4186,6 +4186,42 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
     assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
 
 
+def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for index in range(3):
+        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "progress_interval": 2,
+            "parallel_workers": 2,
+        }
+    )
+
+    assert payload["summary"]["parsed_files"] == 3
+    assert [record["acpt_no"] for record in payload["records"]] == [
+        "20250101000000",
+        "20250101000001",
+        "20250101000002",
+    ]
+    assert "병렬 처리: 2개 워커" in payload["progress_log"]
+    assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
+
+
 def test_parse_disclosure_html_payload_reports_failed_file_when_not_skipping(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
