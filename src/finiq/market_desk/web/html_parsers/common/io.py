@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from lxml import html
 
 
 def decode_html_markup(html_markup: str | bytes) -> str:
     """HTML 마크업을 문자열로 디코딩한다.
 
-    과거 KIND 공시는 레거시 인코딩(euc-kr 등)인 경우가 많다. 
+    과거 KIND 공시는 레거시 인코딩(euc-kr 등)인 경우가 많다.
     일부 바이트 손실이 있더라도 전체 파싱이 중단되지 않도록 여러 인코딩을 순차적으로 시도한다.
     """
     if isinstance(html_markup, str):
@@ -25,7 +26,7 @@ def decode_html_markup(html_markup: str | bytes) -> str:
 def parse_html_document(html_markup: str | bytes) -> html.HtmlElement:
     """불완전한 구조의 HTML을 lxml 문서 객체로 파싱한다.
 
-    뷰어 HTML은 유효한 마크업이 아닐 수 있으므로 `recover=True` 옵션을 통해 
+    뷰어 HTML은 유효한 마크업이 아닐 수 있으므로 `recover=True` 옵션을 통해
     최대한 유연하게 텍스트 및 테이블을 추출한다.
     """
     parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
