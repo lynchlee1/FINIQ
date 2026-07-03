@@ -5,19 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .models import RightsIssuanceRecord
+from ..common import fetch_selected_viewer_body
 from .extractor import RightsIssuanceExtractor
-from .utils import _main_rights_rows
+from .models import RightsIssuanceRecord
+from .utils import MODE, _build_rights_parse_context, _main_rights_rows
 
-from ..common import build_base_record, fetch_selected_viewer_body
-
-MODE = "rights_issuance"
 
 def parse_rights_issuance(
     html_text: str | bytes, *, file_path: str | Path
 ) -> dict[str, Any]:
     """증자 HTML을 파싱한다."""
-    record = build_base_record(html_text, file_path=file_path, mode=MODE)
+    context = _build_rights_parse_context(html_text, file_path=file_path)
+    record = context.record
     rows = _main_rights_rows(record["raw_tables"])
     if not rows:
         # 뷰어 HTML에는 문서 선택기 및 메타데이터만 존재하고 본문이 누락될 수 있다.
@@ -28,7 +27,8 @@ def parse_rights_issuance(
             original_correction_families = record.get("correction_families")
             original_rcept_no = record.get("rcept_no")
             original_acpt_no = record.get("acpt_no")
-            record = build_base_record(body_html, file_path=file_path, mode=MODE)
+            context = _build_rights_parse_context(body_html, file_path=file_path)
+            record = context.record
             if not record.get("title"):
                 record["title"] = original_title
             if not record.get("correction_families") and original_correction_families:
@@ -43,7 +43,7 @@ def parse_rights_issuance(
             "유무상증자 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
         ]
 
-    extractor = RightsIssuanceExtractor(record["raw_tables"] if rows else [])
+    extractor = RightsIssuanceExtractor(context)
 
     schema_record = RightsIssuanceRecord(
         신주의_종류와_수=extractor.get_stock_types_and_counts(),
@@ -59,4 +59,9 @@ def parse_rights_issuance(
     )
 
     record.update(schema_record.to_dict())
+    if extractor.warnings:
+        record["parse_warnings"] = [
+            *record.get("parse_warnings", []),
+            *extractor.warnings,
+        ]
     return record
