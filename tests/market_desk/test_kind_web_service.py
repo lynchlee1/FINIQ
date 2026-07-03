@@ -4393,6 +4393,30 @@ def test_expand_table_expands_rowspan_and_colspan() -> None:
     assert grid[0][1]["colspan"] == 2
 
 
+def test_expand_table_expands_cell_with_rowspan_and_colspan() -> None:
+    document = parse_html_document(
+        """
+        <html><body>
+          <table>
+            <tr><td rowspan="2" colspan="2">Group</td><td>First</td></tr>
+            <tr><td>Second</td></tr>
+          </table>
+        </body></html>
+        """
+    )
+
+    grid = expand_table(document.xpath("//table")[0])
+
+    assert [[slot["text"] for slot in row] for row in grid] == [
+        ["Group", "Group", "First"],
+        ["Group", "Group", "Second"],
+    ]
+    assert grid[0][0]["rowspan"] == 2
+    assert grid[0][0]["colspan"] == 2
+    assert grid[1][0]["from_span"] is True
+    assert grid[1][1]["from_span"] is True
+
+
 def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     fixture_path = TESTS_DIR / "fixtures" / "kind_bond_issuance_20260508000643.html"
 
