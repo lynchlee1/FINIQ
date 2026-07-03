@@ -8,16 +8,16 @@ from typing import Any
 
 from ..common import (
     build_base_record,
+    last_int,
+    last_value,
     row_containing,
+    row_contains,
     row_with_label,
     value_after,
-    last_value,
-    last_int,
-    row_contains,
-    is_correction_chapter,
 )
 
 MODE = "bond_issuance"
+_MAIN_BOND_TABLE_LABELS = ("사채의 종류", "사채의 권면", "자금조달의 목적")
 
 
 @dataclass(frozen=True)
@@ -73,15 +73,12 @@ def _build_bond_parse_context(
 
 
 def _main_bond_rows(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
-    """정정 공시가 아닌 사채 발행 결정의 메인 테이블을 찾는다."""
+    """사채 발행 결정의 메인 테이블을 찾는다."""
     for table in raw_tables:
-        if is_correction_chapter(table):
-            continue
         rows = table.get("logical_rows") or []
-        if (
-            any(row_contains(row, "사채의 종류") for row in rows)
-            and any(row_contains(row, "사채의 권면") for row in rows)
-            and any(row_contains(row, "자금조달의 목적") for row in rows)
+        if all(
+            any(row_contains(row, label) for row in rows)
+            for label in _MAIN_BOND_TABLE_LABELS
         ):
             return rows
     return []

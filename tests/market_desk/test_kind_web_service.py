@@ -4705,6 +4705,52 @@ def test_parse_bond_issuance_collects_multiple_issue_targets() -> None:
     assert "발행대상자세부엔티티" not in parsed
 
 
+def test_parse_bond_issuance_reads_legacy_warrant_price_label(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20090615000351.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1"><p class="SECTION-1">신주인수권부사채 발행결정</p></h2>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>10</td><td>종류</td><td>무기명 무보증 신주인수권부사채</td></tr>
+        <tr><td>2. 사채의 권면총액(원)</td><td>4,000,000,000원</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금(원)</td><td>4,000,000,000원</td></tr>
+        <tr><td>5. 사채만기일</td><td>2012-06-16</td></tr>
+        <tr><td>9. 신주인수권 증권에 관한 사항</td><td>행사가격 (원/주)</td><td>1,450원</td></tr>
+        <tr><td>9. 신주인수권 증권에 관한 사항</td><td>권리행사기간</td><td>시작일</td><td>2010-06-16</td></tr>
+        <tr><td>9. 신주인수권 증권에 관한 사항</td><td>권리행사기간</td><td>종료일</td><td>2012-05-16</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["행사가액"] == 1_450
+
+
+def test_parse_bond_issuance_reads_legacy_warrant_exercise_period_label(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20111206000056.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1"><p class="SECTION-1">해외신주인수권부사채 발행 결정</p></h2>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무기명식 무보증 해외 신주인수권부사채</td></tr>
+        <tr><td>2. 사채의 권면총액</td><td>원화기준 (원)</td><td>3,150,000,000</td></tr>
+        <tr><td>4. 자금조달의 목적</td><td>시설자금 (원)</td><td>3,150,000,000</td></tr>
+        <tr><td>10. 신주인수권에 관한 사항</td><td>행사가액 (원/주)</td><td>2,874</td></tr>
+        <tr><td>10. 신주인수권에 관한 사항</td><td>행사기간</td><td>시작일</td><td>2005년 01월 15일</td></tr>
+        <tr><td>10. 신주인수권에 관한 사항</td><td>행사기간</td><td>종료일</td><td>2011년 12월 13일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["행사시작일"] == "2005년 01월 15일"
+    assert parsed["행사종료일"] == "2011년 12월 13일"
+
+
 def test_parse_rights_issuance_extracts_kind_stockissue_fields(monkeypatch) -> None:
     fixture_path = Path("20240822000349.html")
     wrapper_html = "<html><body><select id='mainDoc'><option value='DOC001|Y' selected>main</option></select></body></html>"
