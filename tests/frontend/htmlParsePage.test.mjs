@@ -26,13 +26,17 @@ test("html parse notification panel lists warning reports and reasons", async ()
   assert.match(source, /const warningSourceUrl = \(sourceFile: string, inputDirectory: string\) =>/);
   assert.match(source, /\/api\/disclosures\/html\/sections\/source\?/);
   assert.match(source, /return fileUrl\(sourceFile\)/);
+  assert.match(source, /const WARNING_OPEN_PAGE_SIZE = 20/);
   assert.match(source, /onSuccess: \(result\) => \{[\s\S]*?setLatestParseResult\(result\)/);
   assert.match(source, /setLatestParseResult\(null\)/);
   assert.match(source, /const warningReports = buildWarningReports/);
   assert.match(source, /const warningSourceFiles = Array\.from\(new Set\(warningReports\.map/);
-  assert.match(source, /const handleOpenWarningFiles = \(\) => \{[\s\S]*?window\.open\(warningSourceUrl\(sourceFile, inputDirectory\), "_blank", "noopener,noreferrer"\)/);
+  assert.match(source, /const warningPageSourceFiles = warningSourceFiles\.slice\(warningPageStartIndex, warningPageStartIndex \+ WARNING_OPEN_PAGE_SIZE\)/);
+  assert.match(source, /const handleOpenWarningFiles = \(\) => \{[\s\S]*?warningPageSourceFiles\.forEach[\s\S]*?window\.open\(warningSourceUrl\(sourceFile, inputDirectory\), "_blank", "noopener,noreferrer"\)/);
   assert.match(notificationContent, /경고 리포트/);
-  assert.match(notificationContent, /경고 파일 모두 열기/);
+  assert.match(notificationContent, /현재 페이지 열기/);
+  assert.match(notificationContent, /이전/);
+  assert.match(notificationContent, /다음/);
   assert.match(notificationContent, /disabled=\{!warningSourceFiles\.length\}/);
   assert.match(notificationContent, /warningReports\.map/);
   assert.match(notificationContent, /report\.sourceName/);
@@ -124,6 +128,8 @@ test("html parse page normalizes auto generated output paths", async () => {
 
   assert.match(source, /const buildParseOutputPath = \(inputDirectory: string, mode: string\)/);
   assert.match(source, /trimmedInputDirectory\.replace\(\/\\\/\+\$\/, ""\)/);
+  assert.match(source, /normalizedInputDirectory\.endsWith\("\/kind_html_contents_grouped_sections"\)/);
+  assert.match(source, /"kind_html_contents_grouped_sections"\.length/);
   assert.doesNotMatch(source, /`\$\{input\}\/parsed-\$\{mode\}\.json`/);
   assert.doesNotMatch(source, /`\$\{initialInput\}\/parsed-/);
 });

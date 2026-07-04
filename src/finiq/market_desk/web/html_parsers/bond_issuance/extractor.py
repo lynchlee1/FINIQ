@@ -88,14 +88,24 @@ class BondIssuanceExtractor:
         return None
 
     def extract_issue_amount_from_bond_face_value_row(self) -> int | None:
-        row = self.rows.containing("사채의 권면")
+        row = self._issue_amount_row()
         value = self._last_int_after_first_cell(row)
         self._warn_if_missing("발행금액", value)
         return value
 
+    def _issue_amount_row(self) -> list[str]:
+        rows = [row for row in self.rows.values if row_contains(row, "사채의 권면")]
+        for row in rows:
+            if row_contains(row, "원화기준"):
+                return row
+        for row in rows:
+            if row_contains(row, "(원)"):
+                return row
+        return rows[0] if rows else []
+
     def _last_int_after_first_cell(self, row: list[str]) -> int | None:
         for cell in reversed(row[1:]):
-            parsed = parse_int(cell)
+            parsed = parse_int(cell, dash_as_zero=True)
             if parsed is not None:
                 return parsed
         return None
