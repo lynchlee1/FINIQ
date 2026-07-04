@@ -14,7 +14,30 @@ test("html parse page does not render warning or step guide boxes", async () => 
   assert.doesNotMatch(source, /title="작동 원리와 파싱 방식"/);
   assert.doesNotMatch(source, /PARSING_RULES/);
   assert.doesNotMatch(source, /Label className="dark:text-slate-300">파싱 경고/);
-  assert.match(source, /notificationActive=\{isErrorStatus\}/);
+  assert.match(source, /notificationActive=\{isErrorStatus \|\| warningReports\.length > 0\}/);
+});
+
+test("html parse notification panel lists warning reports and reasons", async () => {
+  const source = await readFile(pagePath, "utf8");
+  const notificationContent = source.match(/notificationContent=\{[\s\S]*?settingsTitle="시스템 설정"/)?.[0] ?? "";
+
+  assert.match(source, /type ParseWarningItem =/);
+  assert.match(source, /const buildWarningReports = \(warnings: ParseWarningItem\[\]\): WarningReport\[\] =>/);
+  assert.match(source, /const warningSourceUrl = \(sourceFile: string, inputDirectory: string\) =>/);
+  assert.match(source, /\/api\/disclosures\/html\/sections\/source\?/);
+  assert.match(source, /return fileUrl\(sourceFile\)/);
+  assert.match(source, /onSuccess: \(result\) => \{[\s\S]*?setLatestParseResult\(result\)/);
+  assert.match(source, /setLatestParseResult\(null\)/);
+  assert.match(source, /const warningReports = buildWarningReports/);
+  assert.match(source, /const warningSourceFiles = Array\.from\(new Set\(warningReports\.map/);
+  assert.match(source, /const handleOpenWarningFiles = \(\) => \{[\s\S]*?window\.open\(warningSourceUrl\(sourceFile, inputDirectory\), "_blank", "noopener,noreferrer"\)/);
+  assert.match(notificationContent, /경고 리포트/);
+  assert.match(notificationContent, /경고 파일 모두 열기/);
+  assert.match(notificationContent, /disabled=\{!warningSourceFiles\.length\}/);
+  assert.match(notificationContent, /warningReports\.map/);
+  assert.match(notificationContent, /report\.sourceName/);
+  assert.match(notificationContent, /report\.sourceFile/);
+  assert.match(notificationContent, /report\.warnings\.map/);
 });
 
 test("html parse page uses standard two-row data path card", async () => {
@@ -141,9 +164,18 @@ test("html parse page renders bond issue method filters in separate options card
   assert.match(source, /const BOND_ISSUE_METHOD_FILTER_FIELD = "사채발행방법"/);
   assert.match(source, /const \[selectedIssueMethods, setSelectedIssueMethods\] = useState<string\[\]>\(\[\]\)/);
   assert.doesNotMatch(modeCardContent, /실행 옵션/);
-  assert.match(optionsCardContent, /사채발행방법/);
+  assert.match(optionsCardContent, /BOND_ISSUE_METHOD_FILTER_FIELD/);
   assert.doesNotMatch(optionsCardContent, />추가</);
   assert.doesNotMatch(optionsCardContent, /placeholder="예: 공모"/);
+  assert.doesNotMatch(optionsCardContent, /불러오기를 누르면 입력 경로 전체에서 발견된 후보를 선택할 수 있습니다/);
+  assert.doesNotMatch(optionsCardContent, /선택한 사채발행방법이 없으면 전체를 변환합니다/);
+  assert.doesNotMatch(optionsCardContent, /후보가 표시됩니다/);
+  assert.doesNotMatch(optionsCardContent, /selectedIssueMethods\.map/);
+  assert.doesNotMatch(optionsCardContent, /max-h-72/);
+  assert.match(optionsCardContent, /className="flex justify-end"/);
+  assert.match(optionsCardContent, /className="grid gap-2 lg:grid-cols-2"/);
+  assert.match(optionsCardContent, /lg:col-span-2/);
+  assert.match(optionsCardContent, /max-h-44/);
   assert.match(optionsCardContent, /불러오기/);
   assert.match(optionsCardContent, /handleToggleIssueMethod/);
   assert.match(source, /\/api\/disclosures\/html\/parse\/filter-candidates/);

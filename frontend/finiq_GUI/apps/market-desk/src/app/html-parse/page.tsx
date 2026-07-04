@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { Eye, Loader2, Play, RefreshCw, Square } from "lucide-react";
+import { ExternalLink, Eye, Loader2, Play, RefreshCw, Square } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
@@ -64,6 +64,64 @@ type FilterCandidate = {
   count: number;
 };
 
+type ParseWarningItem = {
+  source_file?: string;
+  source_name?: string;
+  warning?: string;
+};
+
+type WarningReport = {
+  sourceFile: string;
+  sourceName: string;
+  warnings: string[];
+};
+
+const buildWarningReports = (warnings: ParseWarningItem[]): WarningReport[] => {
+  const reportMap = new Map<string, WarningReport>();
+
+  warnings.forEach((item) => {
+    const warning = String(item.warning || "").trim();
+    if (!warning) return;
+
+    const sourceFile = String(item.source_file || "").trim();
+    const sourceName = String(item.source_name || "").trim() || sourceFile.split("/").pop() || "리포트";
+    const key = sourceFile || sourceName;
+    const report = reportMap.get(key) || {
+      sourceFile,
+      sourceName,
+      warnings: [],
+    };
+
+    report.warnings.push(warning);
+    reportMap.set(key, report);
+  });
+
+  return Array.from(reportMap.values());
+};
+
+const normalizePath = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "");
+
+const fileUrl = (path: string) => `file://${encodeURI(path)}`;
+
+const warningSourceUrl = (sourceFile: string, inputDirectory: string) => {
+  const normalizedSourceFile = normalizePath(sourceFile);
+  const normalizedInputDirectory = normalizePath(inputDirectory.trim());
+
+  if (normalizedSourceFile && normalizedInputDirectory) {
+    const prefix = `${normalizedInputDirectory}/`;
+    if (normalizedSourceFile === normalizedInputDirectory || normalizedSourceFile.startsWith(prefix)) {
+      const sourceName = normalizedSourceFile.slice(prefix.length);
+      const params = new URLSearchParams({
+        input_directory: inputDirectory,
+        source_name: sourceName,
+      });
+      return `/api/disclosures/html/sections/source?${params.toString()}`;
+    }
+  }
+
+  return fileUrl(sourceFile);
+};
+
 export default function HtmlParsePage() {
   const {
     fetchSettings,
@@ -73,6 +131,7 @@ export default function HtmlParsePage() {
   } = useSettingsStore();
 
   const [loading, setLoading] = useState(true);
+  const [latestParseResult, setLatestParseResult] = useState<any>(null);
 
   const formatStatus = useCallback((data: any) => {
     const statusLbl = (s: string) => {
@@ -114,6 +173,9 @@ export default function HtmlParsePage() {
   } = useJobPolling({
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     formatStatus,
+    onSuccess: (result) => {
+      setLatestParseResult(result);
+    },
   });
 
   const isJobActive = !!activeJobId;
@@ -230,6 +292,7 @@ export default function HtmlParsePage() {
     ] : [];
     const cancelToken = window.crypto.randomUUID();
     setActiveCancelToken(cancelToken);
+    setLatestParseResult(null);
 
     const payload = {
       input_directory: inputDirectory,
@@ -260,6 +323,14 @@ export default function HtmlParsePage() {
       setStatus(err.message);
       setIsErrorStatus(true);
     }
+  };
+
+  const handleOpenWarningFiles = () => {
+    warningSourceFiles.forEach((sourceFile) => {
+      window.open(warningSourceUrl(sourceFile, inputDirectory), "_blank", "noopener,noreferrer");
+    });
+    setStatus(`경고 파일 ${formatInteger(warningSourceFiles.length)}개 열기를 요청했습니다.`);
+    setIsErrorStatus(false);
   };
 
   const handleToggleIssueMethod = (value: string, checked: boolean) => {
@@ -424,6 +495,9 @@ export default function HtmlParsePage() {
   const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputPath");
   const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputPath");
   const selectedParseMode = PARSE_MODES.find((mode) => mode.key === parseMode) || PARSE_MODES[0];
+  const warningReports = buildWarningReports(Array.isArray(latestParseResult?.warnings) ? latestParseResult.warnings : []);
+  const warningSourceFiles = Array.from(new Set(warningReports.map((report) => report.sourceFile).filter(Boolean)));
+  const warningCount = warningReports.reduce((total, report) => total + report.warnings.length, 0);
   const parsedValueTableClassName = "w-full table-auto border-collapse text-left text-[11px] leading-5";
   const parsedValueCellClassName = "border-b border-slate-100 px-3 py-2 align-top text-left font-normal text-slate-700 dark:border-[#30363d] dark:text-slate-300";
   const parsedValueHeaderClassName = "w-44 border-b border-slate-200 bg-slate-50 px-3 py-2 align-top text-left text-[11px] font-semibold leading-5 text-slate-600 dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300";
@@ -572,53 +646,37 @@ export default function HtmlParsePage() {
                 <CardTitle className="dark:text-white">실행 옵션</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-md border border-slate-200 bg-slate-50/60 p-4 dark:border-[#30363d] dark:bg-[#0d1117]">
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-900 dark:text-slate-100">{BOND_ISSUE_METHOD_FILTER_FIELD}</Label>
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                      불러오기를 누르면 입력 경로 전체에서 발견된 후보를 선택할 수 있습니다.
-                    </p>
-                    <Button variant="outline" className="h-10 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleLoadIssueMethodCandidates} disabled={filterCandidatesLoading}>
-                      {filterCandidatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                      불러오기
-                    </Button>
-                  </div>
-                </div>
+            <CardContent className="space-y-2">
+              <div className="flex justify-end">
+                <Button variant="outline" className="h-9 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleLoadIssueMethodCandidates} disabled={filterCandidatesLoading}>
+                  {filterCandidatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  불러오기
+                </Button>
+              </div>
 
-                <div className="mt-4 flex min-h-10 flex-wrap gap-2">
-                  {selectedIssueMethods.length ? (
-                    selectedIssueMethods.map((value) => (
-                      <span key={value} className="inline-flex max-w-full items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-200">
-                        <span className="truncate">{value}</span>
-                      </span>
-                    ))
-                  ) : (
-                    <p className="self-center text-sm text-slate-500 dark:text-slate-400">선택한 사채발행방법이 없으면 전체를 변환합니다.</p>
-                  )}
-                </div>
+              <div className="grid gap-2 lg:grid-cols-2">
+                <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-50/60 dark:border-[#30363d] dark:bg-[#0d1117] lg:col-span-2">
+                  <div className="flex min-h-9 items-center px-3 py-2">
+                    <Label className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">{BOND_ISSUE_METHOD_FILTER_FIELD}</Label>
+                  </div>
 
-                {issueMethodCandidates.length ? (
-                  <div className="mt-4 max-h-72 overflow-auto rounded-md border border-slate-200 bg-white dark:border-[#30363d] dark:bg-[#161b22]">
-                    {issueMethodCandidates.map((candidate) => {
-                      const checked = selectedIssueMethods.includes(candidate.value);
-                      return (
-                        <label key={candidate.value} className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0 dark:border-[#30363d]">
-                          <span className="flex min-w-0 items-center gap-3">
-                            <Checkbox checked={checked} onCheckedChange={(value) => handleToggleIssueMethod(candidate.value, !!value)} className="dark:border-[#30363d]" />
-                            <span className="truncate text-sm text-slate-700 dark:text-slate-200">{candidate.value}</span>
-                          </span>
-                          <span className="shrink-0 text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatInteger(candidate.count)}건</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-4 rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
-                    불러오기를 누르면 입력 경로 전체에서 발견된 사채발행방법 후보가 표시됩니다.
-                  </div>
-                )}
+                  {issueMethodCandidates.length ? (
+                    <div className="max-h-44 overflow-auto border-t border-slate-200 bg-white dark:border-[#30363d] dark:bg-[#161b22]">
+                      {issueMethodCandidates.map((candidate) => {
+                        const checked = selectedIssueMethods.includes(candidate.value);
+                        return (
+                          <label key={candidate.value} className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-1.5 last:border-b-0 dark:border-[#30363d]">
+                            <span className="flex min-w-0 items-center gap-3">
+                              <Checkbox checked={checked} onCheckedChange={(value) => handleToggleIssueMethod(candidate.value, !!value)} className="dark:border-[#30363d]" />
+                              <span className="truncate text-sm text-slate-700 dark:text-slate-200">{candidate.value}</span>
+                            </span>
+                            <span className="shrink-0 text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatInteger(candidate.count)}건</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -695,11 +753,40 @@ export default function HtmlParsePage() {
               onCancel={handleCancel}
             />
           }
-          notificationActive={isErrorStatus}
+          notificationActive={isErrorStatus || warningReports.length > 0}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (
                 <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+              ) : warningReports.length ? (
+                <div className="space-y-3">
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                    경고 리포트 {formatInteger(warningReports.length)}건, 경고 {formatInteger(warningCount)}건
+                  </div>
+                  <Button type="button" variant="outline" className="h-9 w-full justify-center dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleOpenWarningFiles} disabled={!warningSourceFiles.length}>
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    경고 파일 모두 열기
+                  </Button>
+                  <div className="max-h-[60vh] space-y-3 overflow-auto pr-1">
+                    {warningReports.map((report, reportIndex) => (
+                      <div key={`${report.sourceFile}-${report.sourceName}-${reportIndex}`} className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
+                        <div className="min-w-0">
+                          <p className="break-all text-sm font-semibold text-slate-900 dark:text-slate-100">{report.sourceName}</p>
+                          {report.sourceFile ? (
+                            <p className="mt-1 break-all text-[11px] text-slate-500 dark:text-slate-400">{report.sourceFile}</p>
+                          ) : null}
+                        </div>
+                        <ul className="mt-2 space-y-1.5">
+                          {report.warnings.map((warning, warningIndex) => (
+                            <li key={`${warning}-${warningIndex}`} className="text-xs leading-5 text-slate-700 dark:text-slate-300">
+                              {warning}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ) : (
                 <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
               )}
