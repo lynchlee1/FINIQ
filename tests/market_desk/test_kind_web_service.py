@@ -69,7 +69,11 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
     summarize_disclosure_html_section_kinds_payload,
 )
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance
-from finiq.market_desk.web.html_parsers.common import expand_table, parse_html_document
+from finiq.market_desk.web.html_parsers.common import (
+    expand_table,
+    parse_html_document,
+    parse_int,
+)
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 from finiq.market_desk.analytics.quanti import list_quanti_stock_codes
 from finiq.market_desk.web.html_parsers.rights_issuance import parse_rights_issuance
@@ -3507,6 +3511,44 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     assert record["투자자"] == [["테스트조합", 1_000_000_000]]
 
 
+def test_parse_disclosure_html_payload_normalizes_legacy_nested_auto_output_path(
+    tmp_path: Path,
+) -> None:
+    bond_dir = tmp_path / "bond_issuance"
+    input_dir = bond_dir / "kind_html_contents_grouped_sections"
+    year_dir = input_dir / "2025"
+    year_dir.mkdir(parents=True)
+    (year_dir / "20250102000002.html").write_text(
+        """
+        <html>
+          <body>
+            <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
+            <table>
+              <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+              <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+              <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+            </table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    legacy_output_path = input_dir / "parsed-bond_issuance.json"
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_dir),
+            "output_path": str(legacy_output_path),
+            "mode": "bond_issuance",
+            "resume": False,
+        }
+    )
+
+    assert payload["output_path"] == str(bond_dir / "parsed-bond_issuance.json")
+    assert (bond_dir / "parsed-bond_issuance.json").is_file()
+    assert not legacy_output_path.exists()
+
+
 def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -4579,6 +4621,11 @@ def test_expand_table_expands_cell_with_rowspan_and_colspan() -> None:
     assert grid[1][1]["from_span"] is True
 
 
+def test_parse_int_ignores_spaces_inside_comma_grouped_numbers() -> None:
+    assert parse_int("4,000,000,00 0") == 4_000_000_000
+    assert parse_int("13, 000,00 0,000") == 13_000_000_000
+
+
 def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     fixture_path = TESTS_DIR / "fixtures" / "kind_bond_issuance_20260508000643.html"
 
@@ -4615,6 +4662,116 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
         "납입방법",
     ):
         assert removed_field not in parsed
+
+
+@pytest.mark.parametrize(
+    ("acpt_no", "expected_issue_amount", "expected_purposes"),
+    [
+        (
+            "20190315001473",
+            4_000_000_000,
+            [
+                ["시설자금", 0],
+                ["운영자금", 4_000_000_000],
+                ["타법인 증권 취득자금", 0],
+                ["기타자금", 0],
+            ],
+        ),
+        (
+            "20210201001008",
+            9_000_000_000,
+            [
+                ["시설자금", 4_500_000_000],
+                ["영업양수자금", 0],
+                ["운영자금", 4_500_000_000],
+                ["채무상환자금", 0],
+                ["타법인 증권 취득자금", 0],
+                ["기타자금", 0],
+            ],
+        ),
+        (
+            "20210208001133",
+            9_000_000_000,
+            [
+                ["시설자금", 4_500_000_000],
+                ["영업양수자금", 0],
+                ["운영자금", 4_500_000_000],
+                ["채무상환자금", 0],
+                ["타법인 증권 취득자금", 0],
+                ["기타자금", 0],
+            ],
+        ),
+        (
+            "20210331002135",
+            13_000_000_000,
+            [
+                ["시설자금", 0],
+                ["영업양수자금", 0],
+                ["운영자금", 13_000_000_000],
+                ["채무상환자금", 0],
+                ["타법인 증권 취득자금", 0],
+                ["기타자금", 0],
+            ],
+        ),
+        (
+            "20221115000002",
+            13_000_000_000,
+            [
+                ["시설자금", 0],
+                ["영업양수자금", 0],
+                ["운영자금", 0],
+                ["채무상환자금", 0],
+                ["타법인 증권 취득자금", 13_000_000_000],
+                ["기타자금", 0],
+            ],
+        ),
+        (
+            "20250407001007",
+            4_500_000_000,
+            [
+                ["시설자금", 0],
+                ["영업양수자금", 0],
+                ["운영자금", 4_500_000_000],
+                ["채무상환자금", 0],
+                ["타법인 증권 취득자금", 0],
+                ["기타자금", 0],
+            ],
+        ),
+        (
+            "20250724000675",
+            5_001_000_000,
+            [
+                ["시설자금", 0],
+                ["영업양수자금", 0],
+                ["운영자금", 4_001_000_000],
+                ["채무상환자금", 1_000_000_000],
+                ["타법인 증권 취득자금", 0],
+                ["기타자금", 0],
+            ],
+        ),
+    ],
+)
+def test_parse_bond_issuance_reads_split_span_amounts_without_sum_warning(
+    acpt_no: str, expected_issue_amount: int, expected_purposes: list[list[object]]
+) -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "resources"
+        / "KIND"
+        / "bond_issuance"
+        / "kind_html_contents_grouped_sections"
+        / acpt_no[:4]
+        / f"{acpt_no}.html"
+    )
+
+    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["발행금액"] == expected_issue_amount
+    assert parsed["발행목적"] == expected_purposes
+    assert not any(
+        "자금조달 목적 합계" in warning
+        for warning in parsed.get("parse_warnings", [])
+    )
 
 
 def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path) -> None:
