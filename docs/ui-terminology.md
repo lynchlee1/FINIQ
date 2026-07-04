@@ -127,4 +127,5 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | --- | --- | --- |
 | Activity panel | 실행 현황 | Use for the right dock activity button and panel title across pages. |
 | Notification panel | 알림 | Use only for errors, warnings, confirmations, or user action required. |
+| Notification clear action | 지우기 | Button in the right-side `알림` panel that clears the currently accumulated notification display. |
 | Settings panel | 설정 | Use as the generic right dock settings title unless a page-specific settings title is already established. |

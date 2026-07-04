@@ -153,9 +153,8 @@ def load_company_classification_company(
 
 
 def load_company_classification_file(file_path: str | Path) -> dict[str, Any]:
-    """Load a prebuilt company-classification JSON file."""
+    """Load a prebuilt company-classification artifact."""
     target = Path(file_path).resolve()
-    from finiq.data_scraper.storage.classification_store import company_classification_artifact_complete
     if not company_classification_artifact_complete(target):
         msg = f"Classification artifact not found or incomplete: {target}"
         raise FileNotFoundError(msg)
@@ -163,14 +162,11 @@ def load_company_classification_file(file_path: str | Path) -> dict[str, Any]:
 
 
 def load_company_classification_index_file(file_path: str | Path) -> dict[str, Any]:
-    """Load only the metadata/index portion of a prebuilt classification file."""
+    """Load only the metadata/index portion of a prebuilt classification artifact."""
     target = Path(file_path).resolve()
-    if not target.exists():
-        msg = f"Classification JSON not found: {target}"
+    if not company_classification_artifact_complete(target):
+        msg = f"Classification artifact not found or incomplete: {target}"
         raise FileNotFoundError(msg)
-    if not target.is_file():
-        msg = f"Classification JSON is not a file: {target}"
-        raise IsADirectoryError(msg)
     return load_company_classification_index_artifact(target)
 
 
@@ -178,14 +174,11 @@ def load_company_classification_company_file(
     file_path: str | Path,
     company_key: str,
 ) -> dict[str, Any]:
-    """Load one company disclosure bundle from a prebuilt classification file."""
+    """Load one company disclosure bundle from a prebuilt classification artifact."""
     target = Path(file_path).resolve()
-    if not target.exists():
-        msg = f"Classification JSON not found: {target}"
+    if not company_classification_artifact_complete(target):
+        msg = f"Classification artifact not found or incomplete: {target}"
         raise FileNotFoundError(msg)
-    if not target.is_file():
-        msg = f"Classification JSON is not a file: {target}"
-        raise IsADirectoryError(msg)
     return load_company_classification_company_artifact(target, company_key)
 
 

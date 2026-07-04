@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Activity, Bell, Settings, X } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 
@@ -30,7 +30,15 @@ export function ActionDock({
   settingsActive = true,
 }: ActionDockProps) {
   const [openPanel, setOpenPanel] = useState<DockPanel>(null);
+  const [notificationDismissed, setNotificationDismissed] = useState(false);
   const hasSettingsContent = settingsContent !== undefined && settingsContent !== null;
+  const visibleNotificationActive = notificationActive && !notificationDismissed;
+
+  useEffect(() => {
+    if (!notificationActive) {
+      setNotificationDismissed(false);
+    }
+  }, [notificationActive]);
 
   const togglePanel = (panel: DockPanel) => {
     setOpenPanel((current) => current === panel ? null : panel);
@@ -51,23 +59,41 @@ export function ActionDock({
 
   const renderPanel = (panel: DockPanel, title: string, content: ReactNode) => {
     if (openPanel !== panel) return null;
+    const isNotificationPanel = panel === "notification";
+    const panelContent = isNotificationPanel && notificationDismissed
+      ? <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
+      : content;
     return (
       <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)] dark:bg-[#161b22] dark:border-[#30363d]">
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="dark:text-white">{title}</CardTitle>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setOpenPanel(null)}
-              className="h-8 w-8 dark:hover:bg-[#21262d]"
-              title={`${title} 닫기`}
-            >
-              <X className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              {isNotificationPanel && visibleNotificationActive && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setNotificationDismissed(true)}
+                  className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200"
+                  title="누적 알림 지우기"
+                >
+                  지우기
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setOpenPanel(null)}
+                className="h-8 w-8 dark:hover:bg-[#21262d]"
+                title={`${title} 닫기`}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </CardHeader>
-        <CardContent className={panel === "settings" ? "action-dock-settings-panel space-y-4" : "space-y-4"}>{content}</CardContent>
+        <CardContent className={panel === "settings" ? "action-dock-settings-panel space-y-4" : "space-y-4"}>{panelContent}</CardContent>
       </Card>
     );
   };
@@ -90,11 +116,11 @@ export function ActionDock({
           variant="outline"
           size="icon"
           onClick={() => togglePanel("notification")}
-          className={iconClass(notificationActive, openPanel === "notification", "amber")}
+          className={iconClass(visibleNotificationActive, openPanel === "notification", "amber")}
           title={openPanel === "notification" ? `${notificationTitle} 닫기` : `${notificationTitle} 열기`}
         >
           <Bell className="h-5 w-5" />
-          {notificationActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-300" />}
+          {visibleNotificationActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-300" />}
         </Button>
 
         {hasSettingsContent && (

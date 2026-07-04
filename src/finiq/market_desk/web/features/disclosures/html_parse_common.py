@@ -557,11 +557,8 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
 
-    output_path_raw = str(body.get("output_path") or "").strip()
-    output_path = (
-        Path(output_path_raw).expanduser().resolve()
-        if output_path_raw
-        else _default_parse_output_path(input_directory, mode)
+    output_path = _parse_output_path(
+        input_directory, mode, str(body.get("output_path") or "").strip()
     )
     limit = _parse_limit(body.get("limit"))
     cancel_token = str(body.get("cancel_token") or "").strip() or None
@@ -594,6 +591,21 @@ def _default_parse_output_path(input_directory: Path, mode: str) -> Path:
         else input_directory
     )
     return output_directory / f"parsed-{mode}.json"
+
+
+def _parse_output_path(input_directory: Path, mode: str, output_path_raw: str) -> Path:
+    default_output_path = _default_parse_output_path(input_directory, mode)
+    if not output_path_raw:
+        return default_output_path
+
+    output_path = Path(output_path_raw).expanduser().resolve()
+    legacy_auto_path = input_directory / f"parsed-{mode}.json"
+    if (
+        input_directory.name == HTML_PARSE_SOURCE_OUTPUT_DIRECTORY
+        and output_path == legacy_auto_path
+    ):
+        return default_output_path
+    return output_path
 
 
 def _load_existing_parse_payload(output_path: Path, mode: str) -> dict[str, Any] | None:
