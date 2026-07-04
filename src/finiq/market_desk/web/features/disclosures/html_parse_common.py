@@ -31,6 +31,7 @@ _CANCEL_LOCK = Lock()
 _PARSE_CACHE: dict[str, dict[str, Any]] = {}
 _CACHE_LOCK = Lock()
 SUPPORTED_RECORD_FILTER_OPERATORS = {"contains", "equals", "exists", "in"}
+HTML_PARSE_SOURCE_OUTPUT_DIRECTORY = "kind_html_contents_grouped_sections"
 
 PARSER_REGISTRY = {
     "bond_issuance": parse_bond_issuance,
@@ -560,7 +561,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
     output_path = (
         Path(output_path_raw).expanduser().resolve()
         if output_path_raw
-        else input_directory / f"parsed-{mode}.json"
+        else _default_parse_output_path(input_directory, mode)
     )
     limit = _parse_limit(body.get("limit"))
     cancel_token = str(body.get("cancel_token") or "").strip() or None
@@ -584,6 +585,15 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         cancel_token=cancel_token,
         record_filters=_parse_record_filters(body.get("record_filters")),
     )
+
+
+def _default_parse_output_path(input_directory: Path, mode: str) -> Path:
+    output_directory = (
+        input_directory.parent
+        if input_directory.name == HTML_PARSE_SOURCE_OUTPUT_DIRECTORY
+        else input_directory
+    )
+    return output_directory / f"parsed-{mode}.json"
 
 
 def _load_existing_parse_payload(output_path: Path, mode: str) -> dict[str, Any] | None:
@@ -663,14 +673,24 @@ def _resolve_correction_family_acpt_numbers(
     return resolved_records
 
 
-def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, int]:
-    report_counts: dict[str, int] = {}
+def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    report_counts: dict[str, dict[str, Any]] = {}
     for warning in warnings:
         source_name = str(warning.get("source_name") or "").strip()
         report_no = Path(source_name).stem if source_name else ""
         if not report_no:
             continue
-        report_counts[report_no] = report_counts.get(report_no, 0) + 1
+        report = report_counts.setdefault(
+            report_no,
+            {
+                "count": 0,
+                "warnings": [],
+            },
+        )
+        report["count"] += 1
+        warning_message = str(warning.get("warning") or "").strip()
+        if warning_message:
+            report["warnings"].append(warning_message)
     return report_counts
 
 
@@ -821,7 +841,16 @@ def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
         if _record_matches_filters(resolved_record, request.record_filters)
     ]
     state.errors = list(existing_payload.get("errors") or [])
-    state.warnings = list(existing_payload.get("warnings") or [])
+    record_source_files = {
+        str(record.get("source_file") or "").strip()
+        for record in state.records
+        if str(record.get("source_file") or "").strip()
+    }
+    state.warnings = [
+        warning
+        for warning in list(existing_payload.get("warnings") or [])
+        if str(warning.get("source_file") or "").strip() in record_source_files
+    ]
     state.processed_files = _processed_source_files(state.records, state.errors)
     state.resumed_files = len(state.processed_files)
     state.emit(f"기존 파싱 결과에서 {state.resumed_files}건을 이어받았습니다.")
@@ -882,15 +911,6 @@ def _record_matches_filter(record: dict[str, Any], record_filter: dict[str, Any]
 
 def _record_matches_filters(record: dict[str, Any], filters: list[dict[str, Any]]) -> bool:
     return all(_record_matches_filter(record, record_filter) for record_filter in filters)
-
-
-def _append_record_if_matching(
-    request: ParseRequest,
-    state: ParseRunState,
-    record: dict[str, Any],
-) -> None:
-    if _record_matches_filters(record, request.record_filters):
-        state.records.append(record)
 
 
 def _add_parse_warning(
@@ -956,24 +976,22 @@ def _parse_one_html_file(
         parsed_record = _compact_record(
             request.parser(html_file.read_bytes(), file_path=html_file)
         )
-        for warning in _record_parse_warnings(parsed_record):
-            _add_parse_warning(
-                request,
-                state,
-                index=index,
-                html_file=html_file,
-                source_file=source_file,
-                warning=warning,
-            )
-        _append_record_if_matching(
-            request,
-            state,
-            _apply_manifest_metadata(
-                parsed_record,
-                request.manifest_metadata_index,
-                mode=request.mode,
-            ),
+        record = _apply_manifest_metadata(
+            parsed_record,
+            request.manifest_metadata_index,
+            mode=request.mode,
         )
+        if _record_matches_filters(record, request.record_filters):
+            for warning in _record_parse_warnings(parsed_record):
+                _add_parse_warning(
+                    request,
+                    state,
+                    index=index,
+                    html_file=html_file,
+                    source_file=source_file,
+                    warning=warning,
+                )
+            state.records.append(record)
         state.processed_files.add(source_file)
     except Exception as exc:
         if not request.skip_errors:
@@ -1045,16 +1063,17 @@ def _record_parallel_parse_result(
     source_file = str(result["source_file"])
     if result["kind"] == "record":
         record = result["record"]
-        for warning in result["warnings"]:
-            _add_parse_warning(
-                request,
-                state,
-                index=index,
-                html_file=html_file,
-                source_file=source_file,
-                warning=warning,
-            )
-        _append_record_if_matching(request, state, record)
+        if _record_matches_filters(record, request.record_filters):
+            for warning in result["warnings"]:
+                _add_parse_warning(
+                    request,
+                    state,
+                    index=index,
+                    html_file=html_file,
+                    source_file=source_file,
+                    warning=warning,
+                )
+            state.records.append(record)
         state.processed_files.add(source_file)
     else:
         exc = result["error"]

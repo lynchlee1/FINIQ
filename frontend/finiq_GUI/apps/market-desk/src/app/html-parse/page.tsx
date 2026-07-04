@@ -54,11 +54,16 @@ const PARSE_MODES = [
 const buildParseOutputPath = (inputDirectory: string, mode: string) => {
   const trimmedInputDirectory = inputDirectory.trim();
   const normalizedInputDirectory = trimmedInputDirectory === "/" ? trimmedInputDirectory : trimmedInputDirectory.replace(/\/+$/, "");
-  return normalizedInputDirectory ? `${normalizedInputDirectory}/parsed-${mode}.json` : "";
+  if (!normalizedInputDirectory) return "";
+  const outputDirectory = normalizedInputDirectory.endsWith("/kind_html_contents_grouped_sections")
+    ? normalizedInputDirectory.slice(0, -"kind_html_contents_grouped_sections".length).replace(/\/+$/, "") || "/"
+    : normalizedInputDirectory;
+  return `${outputDirectory}/parsed-${mode}.json`;
 };
 
 const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
 const BOND_ISSUE_METHOD_FILTER_FIELD = "사채발행방법";
+const WARNING_OPEN_PAGE_SIZE = 20;
 type FilterCandidate = {
   value: string;
   count: number;
@@ -132,6 +137,7 @@ export default function HtmlParsePage() {
 
   const [loading, setLoading] = useState(true);
   const [latestParseResult, setLatestParseResult] = useState<any>(null);
+  const [warningOpenPage, setWarningOpenPage] = useState(0);
 
   const formatStatus = useCallback((data: any) => {
     const statusLbl = (s: string) => {
@@ -293,6 +299,7 @@ export default function HtmlParsePage() {
     const cancelToken = window.crypto.randomUUID();
     setActiveCancelToken(cancelToken);
     setLatestParseResult(null);
+    setWarningOpenPage(0);
 
     const payload = {
       input_directory: inputDirectory,
@@ -326,10 +333,12 @@ export default function HtmlParsePage() {
   };
 
   const handleOpenWarningFiles = () => {
-    warningSourceFiles.forEach((sourceFile) => {
+    warningPageSourceFiles.forEach((sourceFile) => {
       window.open(warningSourceUrl(sourceFile, inputDirectory), "_blank", "noopener,noreferrer");
     });
-    setStatus(`경고 파일 ${formatInteger(warningSourceFiles.length)}개 열기를 요청했습니다.`);
+    const startIndex = warningOpenPage * WARNING_OPEN_PAGE_SIZE + 1;
+    const endIndex = startIndex + warningPageSourceFiles.length - 1;
+    setStatus(`경고 파일 ${formatInteger(startIndex)}-${formatInteger(endIndex)}번 열기를 요청했습니다.`);
     setIsErrorStatus(false);
   };
 
@@ -497,6 +506,11 @@ export default function HtmlParsePage() {
   const selectedParseMode = PARSE_MODES.find((mode) => mode.key === parseMode) || PARSE_MODES[0];
   const warningReports = buildWarningReports(Array.isArray(latestParseResult?.warnings) ? latestParseResult.warnings : []);
   const warningSourceFiles = Array.from(new Set(warningReports.map((report) => report.sourceFile).filter(Boolean)));
+  const warningOpenPageCount = Math.max(1, Math.ceil(warningSourceFiles.length / WARNING_OPEN_PAGE_SIZE));
+  const safeWarningOpenPage = Math.min(warningOpenPage, warningOpenPageCount - 1);
+  const warningPageStartIndex = safeWarningOpenPage * WARNING_OPEN_PAGE_SIZE;
+  const warningPageSourceFiles = warningSourceFiles.slice(warningPageStartIndex, warningPageStartIndex + WARNING_OPEN_PAGE_SIZE);
+  const warningPageEndIndex = warningPageStartIndex + warningPageSourceFiles.length;
   const warningCount = warningReports.reduce((total, report) => total + report.warnings.length, 0);
   const parsedValueTableClassName = "w-full table-auto border-collapse text-left text-[11px] leading-5";
   const parsedValueCellClassName = "border-b border-slate-100 px-3 py-2 align-top text-left font-normal text-slate-700 dark:border-[#30363d] dark:text-slate-300";
@@ -578,6 +592,12 @@ export default function HtmlParsePage() {
       </table>
     );
   };
+
+  useEffect(() => {
+    if (warningOpenPage !== safeWarningOpenPage) {
+      setWarningOpenPage(safeWarningOpenPage);
+    }
+  }, [safeWarningOpenPage, warningOpenPage]);
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
@@ -765,8 +785,19 @@ export default function HtmlParsePage() {
                   </div>
                   <Button type="button" variant="outline" className="h-9 w-full justify-center dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleOpenWarningFiles} disabled={!warningSourceFiles.length}>
                     <ExternalLink className="mr-2 h-4 w-4" />
-                    경고 파일 모두 열기
+                    현재 페이지 열기
                   </Button>
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <Button type="button" variant="outline" size="sm" className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => setWarningOpenPage((page) => Math.max(0, page - 1))} disabled={safeWarningOpenPage === 0}>
+                      이전
+                    </Button>
+                    <span className="text-center">
+                      {warningSourceFiles.length ? `${formatInteger(warningPageStartIndex + 1)}-${formatInteger(warningPageEndIndex)} / ${formatInteger(warningSourceFiles.length)}` : "0 / 0"}
+                    </span>
+                    <Button type="button" variant="outline" size="sm" className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => setWarningOpenPage((page) => Math.min(warningOpenPageCount - 1, page + 1))} disabled={safeWarningOpenPage >= warningOpenPageCount - 1}>
+                      다음
+                    </Button>
+                  </div>
                   <div className="max-h-[60vh] space-y-3 overflow-auto pr-1">
                     {warningReports.map((report, reportIndex) => (
                       <div key={`${report.sourceFile}-${report.sourceName}-${reportIndex}`} className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">

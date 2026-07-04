@@ -3487,6 +3487,9 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     )
 
     assert payload["summary"]["found_files"] == 1
+    assert payload["output_path"] == str(bond_dir / "parsed-bond_issuance.json")
+    assert (bond_dir / "parsed-bond_issuance.json").is_file()
+    assert not (input_dir / "parsed-bond_issuance.json").exists()
     record = payload["records"][0]
     assert record["acpt_no"] == "20250102000002"
     assert record["title"] == "전환사채권 발행결정"
@@ -4042,7 +4045,10 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
     assert payload["summary"]["parsed_files"] == 1
     assert payload["summary"]["failed_files"] == 0
     assert payload["warning_report_counts"] == {
-        "20250101000001": len(payload["warnings"])
+        "20250101000001": {
+            "count": len(payload["warnings"]),
+            "warnings": [item["warning"] for item in payload["warnings"]],
+        }
     }
     assert payload["warnings"][0] == {
         "index": 1,
@@ -4251,6 +4257,7 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
             "mode": "security_transaction",
             "title": "",
             "사채발행방법": issue_methods[acpt_no],
+            "parse_warnings": [f"{acpt_no} warning"],
             "raw_rows": [],
         }
 
@@ -4270,6 +4277,15 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
     assert payload["summary"]["found_files"] == 3
     assert payload["summary"]["parsed_files"] == 1
     assert [record["acpt_no"] for record in payload["records"]] == ["20250101000001"]
+    assert [warning["source_name"] for warning in payload["warnings"]] == [
+        "20250101000001.html"
+    ]
+    assert payload["warning_report_counts"] == {
+        "20250101000001": {
+            "count": 1,
+            "warnings": ["20250101000001 warning"],
+        }
+    }
     assert payload["filter_settings"] == {
         "record_filters": [
             {"field": "사채발행방법", "operator": "in", "value": ["공모"]},
@@ -4710,7 +4726,7 @@ def test_parse_bond_issuance_warns_when_funding_purpose_sum_differs(
     )
 
 
-def test_parse_bond_issuance_does_not_read_section_number_as_issue_amount(
+def test_parse_bond_issuance_reads_dash_issue_amount_as_zero(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20090720000320.html"
@@ -4731,17 +4747,14 @@ def test_parse_bond_issuance_does_not_read_section_number_as_issue_amount(
 
     parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["발행금액"] is None
+    assert parsed["발행금액"] == 0
     assert parsed["발행목적"] == [
         ["시설자금", 0],
         ["운영자금", 0],
         ["타법인 증권 취득자금", 0],
         ["기타자금", 0],
     ]
-    assert any(
-        warning.startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed["parse_warnings"]
-    )
+    assert not any("발행금액" in warning for warning in parsed["parse_warnings"])
     assert not any(
         "자금조달 목적 합계" in warning for warning in parsed["parse_warnings"]
     )
@@ -4994,6 +5007,27 @@ def test_parse_bond_issuance_reads_legacy_warrant_exercise_period_label(
     assert any(
         warning.startswith("투자자: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
+    )
+
+
+def test_parse_bond_issuance_prefers_krw_face_value_for_overseas_issue() -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "resources"
+        / "KIND"
+        / "bond_issuance"
+        / "kind_html_contents_grouped_sections"
+        / "2011"
+        / "20111206000056.html"
+    )
+
+    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["발행금액"] == 3_150_000_000
+    assert parsed["사채발행방법"] == "공모"
+    assert not any(
+        "자금조달 목적 합계" in warning
+        for warning in parsed.get("parse_warnings", [])
     )
 
 
