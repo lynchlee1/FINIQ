@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { apiGet, apiPost } from "@/api/client";
 
 interface SettingsState {
+  parallel_worker_count: number;
+  runtime_info_loaded: boolean;
   output_root: string;
   quanti_dir: string;
   price_root_directory: string;
@@ -39,13 +41,16 @@ interface SettingsState {
   condition_presets: any[];
   
   // Actions
-  updateSettings: (newSettings: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "saveSetting" | "saveSettings">>) => void;
+  updateSettings: (newSettings: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings">>) => void;
   fetchSettings: () => Promise<any>;
-  saveSetting: (key: keyof Omit<SettingsState, "updateSettings" | "fetchSettings" | "saveSetting" | "saveSettings">, value: any) => Promise<void>;
-  saveSettings: (payload: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "saveSetting" | "saveSettings">>) => Promise<void>;
+  fetchRuntimeInfo: () => Promise<any>;
+  saveSetting: (key: keyof Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">, value: any) => Promise<void>;
+  saveSettings: (payload: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">>) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
+  parallel_worker_count: 1,
+  runtime_info_loaded: false,
   output_root: "",
   quanti_dir: "",
   price_root_directory: "",
@@ -87,10 +92,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fetchSettings: async () => {
     try {
       const config = await apiGet<any>("/api/config");
-      set((state) => ({ ...state, ...config }));
+      set((state) => ({ ...state, ...config, runtime_info_loaded: true }));
       return config;
     } catch (err) {
       console.error("Failed to fetch settings:", err);
+    }
+  },
+
+  fetchRuntimeInfo: async () => {
+    const state = get();
+    if (state.runtime_info_loaded) {
+      return {
+        parallel_worker_count: state.parallel_worker_count,
+      };
+    }
+    try {
+      const config = await apiGet<any>("/api/config");
+      set((current) => ({
+        ...current,
+        parallel_worker_count: Number(config.parallel_worker_count || 1),
+        runtime_info_loaded: true,
+      }));
+      return config;
+    } catch (err) {
+      console.error("Failed to fetch runtime info:", err);
     }
   },
 

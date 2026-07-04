@@ -7,14 +7,18 @@ import { Sun, Moon } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { getActiveNavItem, getPageTitle, NAV_ITEMS } from "@/config/navigation";
+import { useSettingsStore } from "@/store/useSettingsStore";
 
 export function Topbar() {
   const pathname = usePathname();
+  const { fetchRuntimeInfo } = useSettingsStore();
   const [isDark, setIsDark] = useState(false);
   const activeItem = getActiveNavItem(pathname);
   const pageTitle = getPageTitle(pathname) || activeItem?.label || "Ontology";
 
   useEffect(() => {
+    fetchRuntimeInfo();
+
     // Initial check
     const isDarkMode = document.documentElement.classList.contains("dark") || 
                        localStorage.getItem("finiq_theme") === "dark" ||
@@ -24,7 +28,7 @@ export function Topbar() {
       document.documentElement.classList.add("dark");
       setIsDark(true);
     }
-  }, []);
+  }, [fetchRuntimeInfo]);
 
   useEffect(() => {
     document.title = `${pageTitle} | FINIQ MarketDesk`;

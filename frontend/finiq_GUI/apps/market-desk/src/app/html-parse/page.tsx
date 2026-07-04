@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { Eye, Loader2, Play, Square } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
+import { Eye, Loader2, Play, RefreshCw, Square } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -58,10 +58,16 @@ const buildParseOutputPath = (inputDirectory: string, mode: string) => {
 };
 
 const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
+const BOND_ISSUE_METHOD_FILTER_FIELD = "사채발행방법";
+type FilterCandidate = {
+  value: string;
+  count: number;
+};
 
 export default function HtmlParsePage() {
   const {
     fetchSettings,
+    parallel_worker_count: defaultParallelWorkers,
     saveSetting,
     saveSettings,
   } = useSettingsStore();
@@ -123,6 +129,9 @@ export default function HtmlParsePage() {
   const [resumeParse, setResumeParse] = useState(false);
   const [progressInterval, setProgressInterval] = useState("10");
   const [parallelWorkers, setParallelWorkers] = useState("");
+  const [selectedIssueMethods, setSelectedIssueMethods] = useState<string[]>([]);
+  const [issueMethodCandidates, setIssueMethodCandidates] = useState<FilterCandidate[]>([]);
+  const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
 
@@ -164,13 +173,16 @@ export default function HtmlParsePage() {
         const initialInput = config.html_content_output_directory || config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : "");
         setOutputPath(buildParseOutputPath(initialInput, config.html_parse_mode || "bond_issuance"));
       }
+
+      const configuredParallelWorkers = Number(config.parallel_worker_count || defaultParallelWorkers || 1);
+      setParallelWorkers(String(configuredParallelWorkers));
     }).catch(err => {
       setStatus(err.message);
       setIsErrorStatus(true);
     }).finally(() => {
       setLoading(false);
     });
-  }, [fetchSettings, setStatus, setIsErrorStatus]);
+  }, [defaultParallelWorkers, fetchSettings, setStatus, setIsErrorStatus]);
 
   const handleInputDirectoryChange = (val: string) => {
     const nextOutputPath = buildParseOutputPath(val, parseMode);
@@ -209,6 +221,13 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
       return;
     }
+    const activeRecordFilters = selectedIssueMethods.length ? [
+      {
+        field: BOND_ISSUE_METHOD_FILTER_FIELD,
+        operator: "in",
+        value: selectedIssueMethods,
+      },
+    ] : [];
     const cancelToken = window.crypto.randomUUID();
     setActiveCancelToken(cancelToken);
 
@@ -221,6 +240,7 @@ export default function HtmlParsePage() {
       resume: resumeParse,
       progress_interval: Number(progressInterval),
       parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
+      record_filters: activeRecordFilters,
       cancel_token: cancelToken,
     };
 
@@ -239,6 +259,54 @@ export default function HtmlParsePage() {
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
+    }
+  };
+
+  const handleToggleIssueMethod = (value: string, checked: boolean) => {
+    setSelectedIssueMethods((current) => {
+      if (checked) return current.includes(value) ? current : [...current, value];
+      return current.filter((item) => item !== value);
+    });
+  };
+
+  const handleLoadIssueMethodCandidates = async () => {
+    if (!inputDirectory) {
+      setStatus("입력 데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    setFilterCandidatesLoading(true);
+    setIsErrorStatus(false);
+    try {
+      const response = await fetch("/api/disclosures/html/parse/filter-candidates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input_directory: inputDirectory,
+          mode: parseMode,
+          field: BOND_ISSUE_METHOD_FILTER_FIELD,
+          parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        let message = text;
+        try {
+          const detail = JSON.parse(text);
+          message = detail.detail || detail.message || text;
+        } catch {
+          message = text;
+        }
+        throw new Error(message || "필터 후보를 불러오지 못했습니다.");
+      }
+      const data = await response.json();
+      setIssueMethodCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setStatus(`사채발행방법 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
+    } catch (err: any) {
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    } finally {
+      setFilterCandidatesLoading(false);
     }
   };
 
@@ -330,8 +398,8 @@ export default function HtmlParsePage() {
       kind: "input",
       type: "number",
       label: "병렬 워커 수",
-      help: "비워 두면 기존처럼 1개 워커로 실행합니다.",
-      placeholder: "1",
+      help: "앱 최초 접속 시 확인한 CPU 기준 기본값을 사용합니다.",
+      placeholder: String(defaultParallelWorkers || 1),
       value: parallelWorkers,
       onChange: setParallelWorkers,
       span: 2,
@@ -493,6 +561,64 @@ export default function HtmlParsePage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Execution Options</p>
+                <CardTitle className="dark:text-white">실행 옵션</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-md border border-slate-200 bg-slate-50/60 p-4 dark:border-[#30363d] dark:bg-[#0d1117]">
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold text-slate-900 dark:text-slate-100">{BOND_ISSUE_METHOD_FILTER_FIELD}</Label>
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      불러오기를 누르면 입력 경로 전체에서 발견된 후보를 선택할 수 있습니다.
+                    </p>
+                    <Button variant="outline" className="h-10 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleLoadIssueMethodCandidates} disabled={filterCandidatesLoading}>
+                      {filterCandidatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                      불러오기
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex min-h-10 flex-wrap gap-2">
+                  {selectedIssueMethods.length ? (
+                    selectedIssueMethods.map((value) => (
+                      <span key={value} className="inline-flex max-w-full items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-200">
+                        <span className="truncate">{value}</span>
+                      </span>
+                    ))
+                  ) : (
+                    <p className="self-center text-sm text-slate-500 dark:text-slate-400">선택한 사채발행방법이 없으면 전체를 변환합니다.</p>
+                  )}
+                </div>
+
+                {issueMethodCandidates.length ? (
+                  <div className="mt-4 max-h-72 overflow-auto rounded-md border border-slate-200 bg-white dark:border-[#30363d] dark:bg-[#161b22]">
+                    {issueMethodCandidates.map((candidate) => {
+                      const checked = selectedIssueMethods.includes(candidate.value);
+                      return (
+                        <label key={candidate.value} className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0 dark:border-[#30363d]">
+                          <span className="flex min-w-0 items-center gap-3">
+                            <Checkbox checked={checked} onCheckedChange={(value) => handleToggleIssueMethod(candidate.value, !!value)} className="dark:border-[#30363d]" />
+                            <span className="truncate text-sm text-slate-700 dark:text-slate-200">{candidate.value}</span>
+                          </span>
+                          <span className="shrink-0 text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatInteger(candidate.count)}건</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+                    불러오기를 누르면 입력 경로 전체에서 발견된 사채발행방법 후보가 표시됩니다.
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

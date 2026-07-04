@@ -51,6 +51,7 @@ from finiq.market_desk.web.features.disclosures.html_parse_common import (
     parse_disclosure_html_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_preview import (
+    build_parse_filter_candidates_payload,
     build_parse_preview_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_summary import (
@@ -4230,6 +4231,95 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
     assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
 
 
+def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for name in ("20250101000001", "20250101000002", "20250101000003"):
+        (viewer_dir / f"{name}.html").write_text("<html></html>", encoding="utf-8")
+
+    issue_methods = {
+        "20250101000001": "공모",
+        "20250101000002": "사모",
+        "20250101000003": "",
+    }
+
+    def fake_parser(html_text, *, file_path):
+        acpt_no = Path(file_path).stem
+        return {
+            "acpt_no": acpt_no,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "사채발행방법": issue_methods[acpt_no],
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "parallel_workers": 2,
+            "record_filters": [
+                {"field": "사채발행방법", "operator": "in", "value": ["공모"]},
+            ],
+        }
+    )
+
+    assert payload["summary"]["found_files"] == 3
+    assert payload["summary"]["parsed_files"] == 1
+    assert [record["acpt_no"] for record in payload["records"]] == ["20250101000001"]
+    assert payload["filter_settings"] == {
+        "record_filters": [
+            {"field": "사채발행방법", "operator": "in", "value": ["공모"]},
+        ],
+    }
+    assert "필드 필터: 1개 조건 적용" in payload["progress_log"]
+
+
+def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for name in ("20250101000001", "20250101000002", "20250101000003"):
+        (viewer_dir / f"{name}.html").write_text("<html></html>", encoding="utf-8")
+
+    issue_methods = {
+        "20250101000001": "공모",
+        "20250101000002": "사모",
+        "20250101000003": "공모",
+    }
+
+    def fake_parser(html_text, *, file_path):
+        acpt_no = Path(file_path).stem
+        return {
+            "acpt_no": acpt_no,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "사채발행방법": issue_methods[acpt_no],
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = build_parse_filter_candidates_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "field": "사채발행방법",
+        }
+    )
+
+    assert payload["format"] == "finiq_parse_filter_candidates_v1"
+    assert payload["field"] == "사채발행방법"
+    assert payload["summary"] == {"records": 3, "candidates": 2, "errors": 0}
+    assert payload["candidates"] == [
+        {"value": "공모", "count": 2},
+        {"value": "사모", "count": 1},
+    ]
+
+
 def test_parse_disclosure_html_payload_reports_failed_file_when_not_skipping(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
@@ -4481,6 +4571,14 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     assert parsed["회차"] == "16"
     assert parsed["종류"] == "CB"
     assert parsed["발행금액"] == 40_000_000_000
+    assert parsed["발행목적"] == [
+        ["시설자금", 0],
+        ["영업양수자금", 0],
+        ["운영자금", 8_000_000_000],
+        ["채무상환자금", 32_000_000_000],
+        ["타법인 증권 취득자금", 0],
+        ["기타자금", 0],
+    ]
     assert parsed["상장구분"] is None
     assert parsed["만기일"] == "2031년 05월 08일"
     assert parsed["사채발행방법"] == "사모"
@@ -4491,7 +4589,15 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     assert parsed["납입일"] == "2026년 05월 08일"
     assert parsed["투자자"] == [["아이티씨홀딩스(유)", 40_000_000_000]]
     assert "발행대상자세부엔티티" not in parsed
-    for removed_field in ("발행목적", "할증률(%)", "행사대상", "전환시작일", "전환종료일", "리픽싱(%)", "청약일", "납입방법"):
+    for removed_field in (
+        "할증률(%)",
+        "행사대상",
+        "전환시작일",
+        "전환종료일",
+        "리픽싱(%)",
+        "청약일",
+        "납입방법",
+    ):
         assert removed_field not in parsed
 
 
@@ -4554,6 +4660,7 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
     assert parsed["종류"] == "EB"
     assert parsed["기업명(행사대상)"] == "테스트타겟"
     assert parsed["발행금액"] == 5_000_000_000
+    assert parsed["발행목적"] == [["운영자금", 5_000_000_000]]
     assert parsed["행사가액"] == 12_500
     assert parsed["납입일"] == "2025년 01월 02일"
     assert parsed["만기일"] == "2028년 01월 02일"
@@ -4566,6 +4673,78 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
         for warning in parsed["parse_warnings"]
     )
     assert not any("발행대상자세부엔티티" in warning for warning in parsed["parse_warnings"])
+
+
+def test_parse_bond_issuance_warns_when_funding_purpose_sum_differs(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000006.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>연구개발자금 (원)</td><td>3,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>해외인수자금 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>5. 사채만기일</td><td>2028년 01월 02일</td></tr>
+        <tr><td>8. 사채발행방법</td><td>사모</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환가액 (원/주)</td><td>12,500</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환청구기간</td><td>시작일</td><td>2026년 01월 02일</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환청구기간</td><td>종료일</td><td>2027년 12월 02일</td></tr>
+        <tr><td>12. 납입일</td><td>2025년 01월 02일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행목적"] == [
+        ["연구개발자금", 3_000_000_000],
+        ["해외인수자금", 1_000_000_000],
+    ]
+    assert any(
+        warning
+        == "발행목적: 자금조달 목적 합계(4,000,000,000)가 발행금액(5,000,000,000)과 일치하지 않습니다."
+        for warning in parsed["parse_warnings"]
+    )
+
+
+def test_parse_bond_issuance_does_not_read_section_number_as_issue_amount(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20090720000320.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>-</td><td>종류</td><td>-</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>-</td></tr>
+        <tr><td>2-1 (해외발행)</td><td>권면총액 (통화단위)</td><td>-</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>시설자금 (원)</td><td>-</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>-</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>타법인 증권 취득자금 (원)</td><td>-</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>기타자금 (원)</td><td>-</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행금액"] is None
+    assert parsed["발행목적"] == [
+        ["시설자금", 0],
+        ["운영자금", 0],
+        ["타법인 증권 취득자금", 0],
+        ["기타자금", 0],
+    ]
+    assert any(
+        warning.startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+    assert not any(
+        "자금조달 목적 합계" in warning for warning in parsed["parse_warnings"]
+    )
 
 
 def test_parse_bond_issuance_cleans_standalone_stock_suffix_from_target_company(tmp_path: Path) -> None:

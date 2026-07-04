@@ -21,6 +21,7 @@ def test_api_config(tmp_path: Path):
     data = response.json()
     assert "output_root" in data
     assert "quanti_dir" in data
+    assert data["parallel_worker_count"] >= 1
 
 def test_api_settings(tmp_path: Path):
     settings_path = tmp_path / "settings.json"

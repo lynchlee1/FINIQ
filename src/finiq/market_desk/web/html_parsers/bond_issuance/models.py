@@ -19,6 +19,7 @@ class BondIssuanceRecord:
     기업명_행사대상: str | None
     상장구분: str | Any | None
     발행금액: int | None
+    발행목적: list[list[Any]]
     행사가액: int | None
     납입일: str | None
     만기일: str | None
@@ -36,6 +37,7 @@ class BondIssuanceRecord:
             "기업명(행사대상)": self.기업명_행사대상,
             "상장구분": self.상장구분,
             "발행금액": self.발행금액,
+            "발행목적": self.발행목적,
             "행사가액": self.행사가액,
             "납입일": self.납입일,
             "만기일": self.만기일,

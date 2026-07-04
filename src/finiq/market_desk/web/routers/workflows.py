@@ -27,6 +27,7 @@ from finiq.market_desk.web.features.disclosures.html_parse_export import (
     build_parse_export_xlsx,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_preview import (
+    build_parse_filter_candidates_payload,
     build_parse_preview_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_summary import (
@@ -437,6 +438,13 @@ def create_workflows_router(
     async def parse_preview_route(payload: dict[str, Any]):
         try:
             return await run_in_threadpool(build_parse_preview_payload, payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/parse/filter-candidates")
+    async def parse_filter_candidates_route(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(build_parse_filter_candidates_payload, payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
