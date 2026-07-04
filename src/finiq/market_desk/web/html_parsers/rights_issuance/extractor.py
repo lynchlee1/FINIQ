@@ -46,20 +46,8 @@ class RightsIssuanceExtractor:
         self.rows = context.rows
         self.warnings: list[str] = []
 
-    def is_bonus_issuance(self) -> bool:
-        return self.context.issuance_type == "bonus"
-
-    def is_subsidiary_disclosure(self) -> bool:
-        title = str(self.context.record.get("title") or "")
-        return "종속회사" in title
-
-    def has_not_applicable_issue_method(self) -> bool:
-        return self.rows.last_value("증자방식") == "해당사항없음"
-
-    def price_and_payment_are_optional(self) -> bool:
-        return self.is_bonus_issuance() or self.has_not_applicable_issue_method()
-
     def get_stock_types_and_counts(self) -> list[list[Any]]:
+        """신주의 종류별 발행 수량을 보통주/기타주식 순서로 추출한다."""
         return self._stock_values("신주의 종류와 수", warn_when_all_missing=True)
 
     def get_funding_purposes(self) -> list[list[Any]]:
@@ -72,32 +60,44 @@ class RightsIssuanceExtractor:
         return purposes
 
     def get_issue_prices(self) -> list[list[Any]]:
+        """신주 발행가액을 주식 종류별로 추출한다."""
         return self._stock_values(
             "신주 발행가액",
             warning_field_name="발행가액",
-            warn_when_all_missing=not self.price_and_payment_are_optional(),
+            warn_when_all_missing=not (
+                self.context.issuance_type == "bonus"
+                or self.rows.last_value("증자방식") == "해당사항없음"
+            ),
         )
 
     def get_base_prices(self) -> list[list[Any]]:
+        """기준주가를 주식 종류별로 추출한다."""
         return self._stock_values("기준주가")
 
     def get_issue_method(self) -> str | None:
+        """증자방식을 추출하고 무상증자 공시는 제목 기반 분류값으로 보완한다."""
         value = self.rows.last_value("증자방식")
-        if value is None and self.is_bonus_issuance():
+        if value is None and self.context.issuance_type == "bonus":
             value = "무상증자"
         self._warn_if_missing("증자방식", value)
         return value
 
     def get_payment_date(self) -> str | None:
+        """납입일을 추출하되 선택 필드인 공시에서는 누락 경고를 생략한다."""
         value = self.rows.last_value("납입일")
-        if not self.price_and_payment_are_optional():
+        if not (
+            self.context.issuance_type == "bonus"
+            or self.rows.last_value("증자방식") == "해당사항없음"
+        ):
             self._warn_if_missing("납입일", value)
         return value
 
     def get_delivery_date(self) -> str | None:
+        """신주권교부예정일을 추출한다."""
         return self.rows.last_value("신주권교부예정일")
 
     def get_listing_date(self) -> str | None:
+        """신주의 상장 예정일을 추출한다."""
         return self.rows.last_value("신주의 상장 예정일")
 
     def get_issue_targets(self) -> list[list[Any]]:
@@ -120,10 +120,11 @@ class RightsIssuanceExtractor:
                     targets.append([row[0], amount])
             return targets
         issue_method = self.get_issue_method()
+        title = str(self.context.record.get("title") or "")
         if (
             issue_method
             and "제3자배정" in issue_method
-            and not self.is_subsidiary_disclosure()
+            and "종속회사" not in title
         ):
             self._warn_if_missing("발행대상자", None)
         return []
@@ -150,6 +151,7 @@ class RightsIssuanceExtractor:
     def _stock_value(
         self, section_label: str, source_labels: tuple[str, ...]
     ) -> int | None:
+        """지정 구간에서 주식 종류 라벨 바로 다음 값을 숫자로 변환한다."""
         dash_seen = False
         for row in self.rows.values:
             if not row_contains(row, section_label):

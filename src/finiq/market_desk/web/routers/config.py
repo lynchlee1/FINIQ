@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -138,6 +139,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
     def config_payload(*, include_discovery: bool = False) -> dict[str, Any]:
         price_root = config.price_root_directory or str(Path(config.quanti_dir).expanduser().parent)
         payload = {
+            "parallel_worker_count": max(1, os.cpu_count() or 1),
             "output_root": config.output_root,
             "quanti_dir": config.quanti_dir,
             "price_root_directory": price_root,

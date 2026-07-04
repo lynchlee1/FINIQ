@@ -5,14 +5,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..common import clean_text, last_int, non_correction_tables, row_contains
+from ..common import clean_text, last_int, non_correction_tables, parse_int, row_contains
 from .utils import _BondParseContext
 
 BOND_FIELD_EXTRACTION_RULES = {
     "회차": "메인 표 > '1. 사채의 종류' 행 > '회차' 오른쪽 셀",
     "종류": "제목 > '전환사채'|'교환사채'|'신주인수권부사채' 포함 여부",
     "기업명(행사대상)": "메인 표 > 교환/전환/인수권 행사 대상 주식 종류 행 > 마지막 값",
-    "발행금액": "메인 표 > '사채의 권면' 행 > 마지막 숫자",
+    "발행금액": "메인 표 > '사채의 권면' 행 > 라벨 오른쪽 값 셀의 마지막 숫자",
+    "발행목적": "메인 표 > '자금조달의 목적' 행 > 목적명 + 마지막 숫자",
     "행사가액": "메인 표 > '전환가액'|'교환가액'|'행사가액'|'행사가격' 행 > 마지막 숫자",
     "납입일": "메인 표 > '납입일' 라벨 행 > 마지막 값",
     "만기일": "메인 표 > '사채만기일'|'사채만기' 행 > 마지막 값",
@@ -87,9 +88,68 @@ class BondIssuanceExtractor:
         return None
 
     def extract_issue_amount_from_bond_face_value_row(self) -> int | None:
-        value = self.rows.last_int("사채의 권면")
+        row = self.rows.containing("사채의 권면")
+        value = self._last_int_after_first_cell(row)
         self._warn_if_missing("발행금액", value)
         return value
+
+    def _last_int_after_first_cell(self, row: list[str]) -> int | None:
+        for cell in reversed(row[1:]):
+            parsed = parse_int(cell)
+            if parsed is not None:
+                return parsed
+        return None
+
+    def extract_funding_purposes_from_funding_purpose_rows(
+        self, issue_amount: int | None
+    ) -> list[list[Any]]:
+        """자금조달 목적 행에 적힌 목적명과 금액을 표에 나온 순서대로 추출한다."""
+        purposes: list[list[Any]] = []
+        for row in self.rows.values:
+            if not row_contains(row, "자금조달의 목적"):
+                continue
+            label = self._funding_purpose_label(row)
+            amount = self._funding_purpose_amount(row)
+            if label and amount is not None:
+                purposes.append([label, amount])
+
+        self._warn_if_missing("발행목적", purposes)
+        if purposes and issue_amount is not None:
+            total = sum(amount for _, amount in purposes)
+            if total != issue_amount:
+                self._append_warning(
+                    f"발행목적: 자금조달 목적 합계({total:,})가 발행금액({issue_amount:,})과 일치하지 않습니다."
+                )
+        return purposes
+
+    def _funding_purpose_label(self, row: list[str]) -> str | None:
+        purpose_index = self._funding_purpose_index(row)
+        if purpose_index is None or purpose_index + 1 >= len(row):
+            return None
+        return self._clean_funding_purpose_label(row[purpose_index + 1])
+
+    def _funding_purpose_index(self, row: list[str]) -> int | None:
+        for index, cell in enumerate(row):
+            if row_contains([cell], "자금조달의 목적"):
+                return index
+        return None
+
+    def _clean_funding_purpose_label(self, value: str) -> str | None:
+        label = clean_text(value)
+        label = re.sub(r"\(\s*원\s*\)", "", label)
+        label = re.sub(r"\s*원$", "", label)
+        label = clean_text(label.strip(" -_/·,"))
+        return label or None
+
+    def _funding_purpose_amount(self, row: list[str]) -> int | None:
+        purpose_index = self._funding_purpose_index(row)
+        if purpose_index is None:
+            return None
+        for cell in reversed(row[purpose_index + 2 :]):
+            parsed = parse_int(cell, dash_as_zero=True)
+            if parsed is not None:
+                return parsed
+        return None
 
     def extract_exercise_price_from_conversion_exchange_or_warrant_price_row(
         self,
@@ -168,5 +228,8 @@ class BondIssuanceExtractor:
             return
         rule = BOND_FIELD_EXTRACTION_RULES[field_name]
         warning = f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다. 출처: {rule}"
+        self._append_warning(warning)
+
+    def _append_warning(self, warning: str) -> None:
         if warning not in self.warnings:
             self.warnings.append(warning)

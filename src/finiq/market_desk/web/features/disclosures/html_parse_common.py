@@ -30,6 +30,7 @@ _CANCELLED_PARSES: set[str] = set()
 _CANCEL_LOCK = Lock()
 _PARSE_CACHE: dict[str, dict[str, Any]] = {}
 _CACHE_LOCK = Lock()
+SUPPORTED_RECORD_FILTER_OPERATORS = {"contains", "equals", "exists", "in"}
 
 PARSER_REGISTRY = {
     "bond_issuance": parse_bond_issuance,
@@ -56,6 +57,7 @@ class ParseRequest:
     progress_interval: int
     parallel_workers: int
     cancel_token: str | None
+    record_filters: list[dict[str, Any]]
 
 
 @dataclass
@@ -503,6 +505,37 @@ def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
     return files[:limit] if limit is not None else files
 
 
+def _parse_record_filters(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    filters: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "").strip()
+        if not field:
+            continue
+        operator = str(item.get("operator") or "contains").strip()
+        if operator not in SUPPORTED_RECORD_FILTER_OPERATORS:
+            operator = "contains"
+        raw_value = item.get("value")
+        if operator == "in":
+            values = [
+                str(candidate).strip()
+                for candidate in raw_value
+                if str(candidate).strip()
+            ] if isinstance(raw_value, list) else []
+            if not values:
+                continue
+            filters.append({"field": field, "operator": operator, "value": values})
+            continue
+        filter_value = str(raw_value or "").strip()
+        if operator != "exists" and not filter_value:
+            continue
+        filters.append({"field": field, "operator": operator, "value": filter_value})
+    return filters
+
+
 def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
     mode = str(body.get("mode") or "").strip()
     if not mode:
@@ -549,6 +582,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
             body.get("parallel_workers", body.get("workers")), len(html_files)
         ),
         cancel_token=cancel_token,
+        record_filters=_parse_record_filters(body.get("record_filters")),
     )
 
 
@@ -652,6 +686,7 @@ def _build_payload(
     warnings: list[dict[str, Any]],
     progress_log: list[str],
     resumed_files: int,
+    record_filters: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "format": "finiq_disclosure_html_parse_v1",
@@ -659,6 +694,9 @@ def _build_payload(
         "input_directory": str(input_directory),
         "output_path": str(output_path),
         "cancelled": cancelled,
+        "filter_settings": {
+            "record_filters": record_filters,
+        },
         "warning_report_counts": _build_warning_report_counts(warnings),
         "summary": {
             "found_files": len(html_files),
@@ -697,6 +735,7 @@ def _payload_from_state(
         warnings=state.warnings,
         progress_log=state.progress_log,
         resumed_files=state.resumed_files,
+        record_filters=request.record_filters,
     )
 
 
@@ -769,13 +808,17 @@ def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
         return
 
     state.records = [
-        _apply_manifest_metadata(
-            record,
-            request.manifest_metadata_index,
-            mode=request.mode,
-        )
+        resolved_record
         for record in list(existing_payload.get("records") or [])
         if isinstance(record, dict)
+        for resolved_record in [
+            _apply_manifest_metadata(
+                record,
+                request.manifest_metadata_index,
+                mode=request.mode,
+            )
+        ]
+        if _record_matches_filters(resolved_record, request.record_filters)
     ]
     state.errors = list(existing_payload.get("errors") or [])
     state.warnings = list(existing_payload.get("warnings") or [])
@@ -787,6 +830,8 @@ def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
 def _emit_run_header(request: ParseRequest, state: ParseRunState) -> None:
     state.emit(f"파싱 대상 HTML {len(request.html_files)}건을 찾았습니다.")
     state.emit(f"파싱 모드: {request.mode}")
+    if request.record_filters:
+        state.emit(f"필드 필터: {len(request.record_filters)}개 조건 적용")
     state.emit(f"이어하기: {'예' if request.resume else '아니오'}")
     state.emit(f"진행 확인 간격: {request.progress_interval}건")
     state.emit(f"병렬 처리: {request.parallel_workers}개 워커")
@@ -808,6 +853,44 @@ def _should_skip_for_resume(
             f"(현재 위치 {index}/{len(request.html_files)})."
         )
     return True
+
+
+def _stringify_filter_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _record_matches_filter(record: dict[str, Any], record_filter: dict[str, Any]) -> bool:
+    value = record.get(record_filter["field"])
+    operator = record_filter["operator"]
+    if operator == "exists":
+        return value not in (None, "", [], {})
+    actual = _stringify_filter_value(value)
+    if operator == "in":
+        expected_values = record_filter.get("value")
+        if not isinstance(expected_values, list):
+            return False
+        return actual in {str(expected) for expected in expected_values}
+    expected = record_filter["value"]
+    if operator == "equals":
+        return actual == expected
+    return expected in actual
+
+
+def _record_matches_filters(record: dict[str, Any], filters: list[dict[str, Any]]) -> bool:
+    return all(_record_matches_filter(record, record_filter) for record_filter in filters)
+
+
+def _append_record_if_matching(
+    request: ParseRequest,
+    state: ParseRunState,
+    record: dict[str, Any],
+) -> None:
+    if _record_matches_filters(record, request.record_filters):
+        state.records.append(record)
 
 
 def _add_parse_warning(
@@ -882,12 +965,14 @@ def _parse_one_html_file(
                 source_file=source_file,
                 warning=warning,
             )
-        state.records.append(
+        _append_record_if_matching(
+            request,
+            state,
             _apply_manifest_metadata(
                 parsed_record,
                 request.manifest_metadata_index,
                 mode=request.mode,
-            )
+            ),
         )
         state.processed_files.add(source_file)
     except Exception as exc:
@@ -969,7 +1054,7 @@ def _record_parallel_parse_result(
                 source_file=source_file,
                 warning=warning,
             )
-        state.records.append(record)
+        _append_record_if_matching(request, state, record)
         state.processed_files.add(source_file)
     else:
         exc = result["error"]

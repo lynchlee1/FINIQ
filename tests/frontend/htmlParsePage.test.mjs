@@ -128,5 +128,25 @@ test("html parse page sends parallel worker count", async () => {
   assert.match(source, /const \[parallelWorkers, setParallelWorkers\] = useState\(""\)/);
   assert.match(runHandler, /parallel_workers: parallelWorkers \? Number\(parallelWorkers\) : null/);
   assert.match(settingsBlock, /id: "parallelWorkers"[\s\S]*?label: "병렬 워커 수"/);
-  assert.match(settingsBlock, /help: "비워 두면 기존처럼 1개 워커로 실행합니다\."/);
+  assert.match(settingsBlock, /help: "앱 최초 접속 시 확인한 CPU 기준 기본값을 사용합니다\."/);
+  assert.match(source, /parallel_worker_count: defaultParallelWorkers/);
+});
+
+test("html parse page renders bond issue method filters in separate options card", async () => {
+  const source = await readFile(pagePath, "utf8");
+  const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?<\/CardContent>\s*<\/Card>/)?.[0] ?? "";
+  const optionsCardContent = source.match(/<CardTitle className="dark:text-white">실행 옵션<\/CardTitle>[\s\S]*?<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>/)?.[0] ?? "";
+  const runHandler = source.match(/const handleRun = async \(\) => \{[\s\S]*?startJob\("\/api\/disclosures\/html\/parse\/start", payload\);[\s\S]*?\};/)?.[0] ?? "";
+
+  assert.match(source, /const BOND_ISSUE_METHOD_FILTER_FIELD = "사채발행방법"/);
+  assert.match(source, /const \[selectedIssueMethods, setSelectedIssueMethods\] = useState<string\[\]>\(\[\]\)/);
+  assert.doesNotMatch(modeCardContent, /실행 옵션/);
+  assert.match(optionsCardContent, /사채발행방법/);
+  assert.doesNotMatch(optionsCardContent, />추가</);
+  assert.doesNotMatch(optionsCardContent, /placeholder="예: 공모"/);
+  assert.match(optionsCardContent, /불러오기/);
+  assert.match(optionsCardContent, /handleToggleIssueMethod/);
+  assert.match(source, /\/api\/disclosures\/html\/parse\/filter-candidates/);
+  assert.match(runHandler, /record_filters: activeRecordFilters/);
+  assert.match(runHandler, /operator: "in"/);
 });

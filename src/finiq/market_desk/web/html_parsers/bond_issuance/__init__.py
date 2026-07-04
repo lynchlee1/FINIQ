@@ -23,6 +23,7 @@ def parse_bond_issuance(
     extractor = BondIssuanceExtractor(context)
     title = record_dict.get("title") or ""
     listing_market = record_dict.pop("상장시장", None)
+    issue_amount = extractor.extract_issue_amount_from_bond_face_value_row()
 
     schema_record = BondIssuanceRecord(
         기업명_발행사=record_dict.get("기업명(발행사)"),
@@ -32,7 +33,10 @@ def parse_bond_issuance(
             extractor.extract_target_company_name_from_exercise_target_stock_row()
         ),
         상장구분=listing_market,
-        발행금액=extractor.extract_issue_amount_from_bond_face_value_row(),
+        발행금액=issue_amount,
+        발행목적=extractor.extract_funding_purposes_from_funding_purpose_rows(
+            issue_amount
+        ),
         행사가액=(
             extractor.extract_exercise_price_from_conversion_exchange_or_warrant_price_row()
         ),
