@@ -112,38 +112,29 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _structured_bond_issue_method_candidate(html_bytes: bytes) -> str | None:
+def _structured_row_field_candidate(html_bytes: bytes, field: str) -> str | None:
     try:
         document = lxml_html.fromstring(html_bytes.decode("utf-8", errors="ignore"))
     except Exception:
         return None
-    for row in document.xpath(".//tr[contains(., '사채발행방법')]"):
+    compact_field = field.replace(" ", "")
+    for row in document.xpath(f".//tr[contains(., '{field}')]"):
         values = [
             clean_text(element_text(cell))
             for cell in row.xpath("./th|./td")
         ]
         values = [value for value in values if value]
         for value in reversed(values):
-            if "사채발행방법" not in value.replace(" ", ""):
+            if compact_field not in value.replace(" ", ""):
                 return value
     return None
 
 
-def _structured_rights_issue_method_candidate(html_bytes: bytes) -> str | None:
-    try:
-        document = lxml_html.fromstring(html_bytes.decode("utf-8", errors="ignore"))
-    except Exception:
-        return None
-    for row in document.xpath(".//tr[contains(., '증자방식')]"):
-        values = [
-            clean_text(element_text(cell))
-            for cell in row.xpath("./th|./td")
-        ]
-        values = [value for value in values if value]
-        for value in reversed(values):
-            if "증자방식" not in value.replace(" ", ""):
-                return value
-    return None
+def _configured_fast_filter_fields(requested_mode: str) -> set[str]:
+    config = PARSE_MODE_CONFIGS.get(requested_mode)
+    if config is None:
+        return set()
+    return {filter_config.field for filter_config in config.filters}
 
 
 def _filter_candidate_workers(value: Any, total_files: int) -> int:
@@ -165,10 +156,10 @@ def _extract_filter_candidate_from_file(
     metadata_index: dict[str, dict[str, Any]],
 ) -> str | list[Any] | None:
     html_bytes = html_file.read_bytes()
-    if requested_mode == "bond_issuance" and field == "사채발행방법":
-        return _structured_bond_issue_method_candidate(html_bytes)
-    if requested_mode == "rights_issuance" and field == "증자방식":
-        return _structured_rights_issue_method_candidate(html_bytes)
+    if field in _configured_fast_filter_fields(requested_mode):
+        structured_value = _structured_row_field_candidate(html_bytes, field)
+        if structured_value:
+            return structured_value
     record = _apply_manifest_metadata(
         _compact_record(parser(html_bytes, file_path=html_file)),
         metadata_index,
