@@ -4895,6 +4895,23 @@ def test_parse_bond_issuance_reads_dash_issue_amount_as_zero(
     )
 
 
+def test_parse_bond_issuance_reads_resource_dash_issue_amount_as_zero() -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "resources"
+        / "KIND"
+        / "bond_issuance"
+        / "kind_html_contents_grouped_sections"
+        / "2009"
+        / "20090720000320.html"
+    )
+
+    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["발행금액"] == 0
+    assert not any("발행금액" in warning for warning in parsed.get("parse_warnings", []))
+
+
 def test_parse_bond_issuance_cleans_standalone_stock_suffix_from_target_company(tmp_path: Path) -> None:
     fixture_path = tmp_path / "20250102000003.html"
     body_html = """

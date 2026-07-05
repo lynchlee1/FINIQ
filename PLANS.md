@@ -31,3 +31,15 @@ Verification:
 - `.venv/bin/pytest tests/market_desk/test_kind_web_service.py -q` (Passed, 188 tests)
 - `.venv/bin/pytest tests/market_desk/test_classification_sqlite.py tests/market_desk/test_kind_web_service.py -q` (Passed, 191 tests)
 - `.venv/bin/python -m py_compile src/finiq/market_desk/web/features/market_data/service_sources.py src/finiq/data_scraper/storage/classification_store.py` (Passed)
+
+## 2026-07-05 - Bond Issuance Dash Issue Amount Parse Result
+
+Purpose: Ensure bond issuance rows with an explicit `-` face value are treated as a zero issue amount, not as a missing-source warning.
+
+Implementation summary:
+- Added a resource-backed regression test for `20090720000320.html`, where `2. 사채의 권면총액 (원)` has a literal `-` value.
+- Regenerated the local ignored `resources/KIND/bond_issuance/parsed-bond_issuance.json` with the current parser so explicit dash values are reflected as `0`.
+
+Verification:
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/market_desk/test_kind_web_service.py -k 'dash_issue_amount' -q` (Passed, 2 tests)
+- `resources/KIND/bond_issuance/parsed-bond_issuance.json` check: `20090720000320.html` has `발행금액 == 0`, no `발행금액` warning, and total `발행금액: 정해진 출처` warnings are `0`.
