@@ -31,6 +31,9 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Content HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | HTML parse report preview | 리포트 미리보기 | Separate box below `모드별 기능` that shows a few parsed report results as HTML tables for the selected parse mode. |
 | HTML parse warning files page open action | 현재 페이지 열기 | Button in the right-side `알림` panel on `공시원문 변환` that opens the current page of source HTML files with parse warnings. Pages contain 20 files. |
+| HTML parse weak warning level | 약한 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
+| HTML parse medium warning level | 일반 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
+| HTML parse strong warning level | 강한 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
 | HTML parse issue method filter option | 사채발행방법 | Execution option in a separate `실행 옵션` box below `모드별 기능` for filtering `사채발행파싱` results by issue method. |
 | HTML parse rights issue method filter option | 증자방식 | Execution option in a separate `실행 옵션` box below `모드별 기능` for filtering `유무상증자파싱` results by issue method. |
 | HTML parse execution option examples action | 예시 | Row action next to an execution option candidate count that shows sample matching `acpt_no` values in `알림`. |
