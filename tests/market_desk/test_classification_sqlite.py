@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from finiq.data.common import find_company_classification_files
 from finiq.data_scraper.storage.classification_store import write_company_classification_artifact
 from finiq.market_desk.data.facade import (
+    load_company_classification,
     load_company_classification_company_file,
     load_company_classification_index_file,
 )
@@ -62,6 +65,11 @@ def test_market_desk_finds_and_loads_sqlite_company_classification(tmp_path: Pat
     company_payload = load_company_classification_company_file(output_path, "T001")
     assert company_payload["company_name"] == "테스트회사"
     assert company_payload["disclosures"][0]["acpt_no"] == "20260101000001"
+
+
+def test_market_desk_classification_loader_rejects_force_refresh(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="force_refresh is not supported"):
+        load_company_classification(tmp_path, force_refresh=True)
 
 
 def test_recursive_find_company_classification_files(tmp_path: Path) -> None:

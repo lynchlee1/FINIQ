@@ -44,19 +44,6 @@ def _build_company_index_entry(
         "shard": shard,
     }
 
-def _normalize_company_index_entry(company: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "company_key": str(company.get("company_key") or _company_key(company)),
-        "company_name": company.get("company_name"),
-        "company_id": company.get("company_id"),
-        "market": company.get("market"),
-        "badges": list(company.get("badges") or []),
-        "disclosure_count": int(company.get("disclosure_count") or 0),
-        "first_disclosed_at": company.get("first_disclosed_at"),
-        "last_disclosed_at": company.get("last_disclosed_at"),
-        "shard": company.get("shard"),
-    }
-
 def company_classification_shard_dir(index_path: str | Path) -> Path:
     # Kept for backward compatibility signatures if needed, but not actively used in SQLite logic
     target = Path(index_path).resolve()
@@ -236,22 +223,6 @@ def write_company_classification_artifact(
 def load_company_classification_artifact(index_path: str | Path) -> dict[str, Any]:
     target_sqlite = _sqlite_path(index_path)
     if not target_sqlite.exists():
-        # Fallback to legacy JSON format loading if SQLite doesn't exist
-        old_target = Path(index_path).resolve()
-        if old_target.exists():
-            payload = json.loads(old_target.read_text(encoding="utf-8"))
-            companies = []
-            for shard_entry in payload.get("shards") or []:
-                relative_file = str(shard_entry.get("file") or "").strip()
-                if not relative_file: continue
-                shard_path = (old_target.parent / relative_file).resolve()
-                if shard_path.exists():
-                    shard_payload = json.loads(shard_path.read_text(encoding="utf-8"))
-                    companies.extend(list(shard_payload.get("companies") or []))
-            return {
-                "summary": dict(payload.get("summary") or {}),
-                "companies": companies,
-            }
         return {}
         
     with sqlite3.connect(target_sqlite) as conn:
@@ -272,17 +243,6 @@ def load_company_classification_artifact(index_path: str | Path) -> dict[str, An
 def load_company_classification_index(index_path: str | Path) -> dict[str, Any]:
     target_sqlite = _sqlite_path(index_path)
     if not target_sqlite.exists():
-        old_target = Path(index_path).resolve()
-        if old_target.exists():
-            payload = json.loads(old_target.read_text(encoding="utf-8"))
-            return {
-                "summary": dict(payload.get("summary") or {}),
-                "companies": [
-                    _normalize_company_index_entry(company)
-                    for company in list(payload.get("companies") or [])
-                ],
-                "shards": list(payload.get("shards") or []),
-            }
         return {}
 
     with sqlite3.connect(target_sqlite) as conn:
@@ -317,17 +277,6 @@ def load_company_classification_company(
         raise ValueError("company_key must not be empty")
 
     if not target_sqlite.exists():
-        old_target = Path(index_path).resolve()
-        if old_target.exists():
-            payload = json.loads(old_target.read_text(encoding="utf-8"))
-            # simplified legacy loading loop
-            for shard_entry in payload.get("shards") or []:
-                shard_path = (old_target.parent / str(shard_entry.get("file"))).resolve()
-                if shard_path.exists():
-                    shard_payload = json.loads(shard_path.read_text(encoding="utf-8"))
-                    for c in shard_payload.get("companies", []):
-                        if _company_key(c) == normalized_key:
-                            return c
         raise KeyError(f"Company not found in classification index: {normalized_key}")
         
     with sqlite3.connect(target_sqlite) as conn:
@@ -340,22 +289,7 @@ def load_company_classification_company(
 
 def company_classification_artifact_complete(index_path: str | Path) -> bool:
     target_sqlite = _sqlite_path(index_path)
-    if target_sqlite.exists():
-        return True
-        
-    old_target = Path(index_path).resolve()
-    if not old_target.exists() or not old_target.is_file():
-        return False
-    try:
-        payload = json.loads(old_target.read_text(encoding="utf-8"))
-        if payload.get("format") != CLASSIFICATION_INDEX_FORMAT:
-            return True
-        for shard_entry in payload.get("shards", []):
-            shard_path = (old_target.parent / str(shard_entry.get("file"))).resolve()
-            if not shard_path.exists(): return False
-        return True
-    except Exception:
-        return False
+    return target_sqlite.is_file()
 
 __all__ = [
     "CLASSIFICATION_INDEX_FORMAT",

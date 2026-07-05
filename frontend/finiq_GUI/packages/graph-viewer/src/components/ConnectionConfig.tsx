@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, Button } from '@finiq/ui'
-import { Database, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Database, RefreshCw } from 'lucide-react'
 import { apiClient } from '../utils/apiClient'
 
 interface ConnectionConfigProps {
@@ -9,7 +9,6 @@ interface ConnectionConfigProps {
 
 export function ConnectionConfig({ onRefreshGraph }: ConnectionConfigProps) {
   const [isSeeding, setIsSeeding] = useState(false)
-  const connectionStatus = apiClient.getMode()
 
   const handleSeedData = async () => {
     setIsSeeding(true)
@@ -33,20 +32,14 @@ export function ConnectionConfig({ onRefreshGraph }: ConnectionConfigProps) {
             Database Manager (API Mode)
           </h2>
           <p className="text-xs text-muted-foreground">
-            Connects to the backend FastAPI service which manages Neo4j data and local fallback safely.
+            Connects to the backend FastAPI service which manages Neo4j data.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          {connectionStatus === 'api' ? (
-            <div className="flex items-center gap-1 bg-green-500/10 text-green-500 border border-green-500/30 px-3 py-1 rounded-full text-xs font-bold shadow-sm">
-              <CheckCircle className="w-3.5 h-3.5" /> API Connected
-            </div>
-          ) : (
-            <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-3 py-1 rounded-full text-xs font-bold shadow-sm">
-              <AlertTriangle className="w-3.5 h-3.5 animate-pulse" /> Local Fallback Mode
-            </div>
-          )}
+          <div className="flex items-center gap-1 bg-green-500/10 text-green-500 border border-green-500/30 px-3 py-1 rounded-full text-xs font-bold shadow-sm">
+            API Required
+          </div>
         </div>
       </div>
 

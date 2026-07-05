@@ -16,14 +16,11 @@ export function GraphViewerExample() {
   const viewer = useGraphViewer()
   const [activeTab, setActiveTab] = useState<'network' | 'splc' | 'rmap' | 'kogrid' | 'database'>('network')
   const [focusEntityId, setFocusEntityId] = useState<string>('samsung-elec')
-  const [dbMode, setDbMode] = useState<'api' | 'fallback'>(apiClient.getMode())
 
-  // Force a graph load (from fallback or backend API)
   const refreshGraphData = useCallback(async () => {
     try {
       const dbGraph = await apiClient.fetchGraph()
       viewer.replaceGraph(dbGraph)
-      setDbMode(apiClient.getMode())
     } catch (e) {
       console.error('Failed to sync graph with database service:', e)
     }
@@ -72,17 +69,10 @@ export function GraphViewerExample() {
             <h1 className="text-base font-extrabold tracking-tight">Systemic Relationship Visualizer</h1>
           </div>
 
-          {/* Database Mode Badge */}
           <div className="ml-2">
-            {dbMode === 'api' ? (
-              <span className="text-[10px] bg-green-500/10 text-green-500 border border-green-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 select-none">
-                <Database className="w-3 h-3" /> API Live
-              </span>
-            ) : (
-              <span className="text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 select-none">
-                <Database className="w-3 h-3" /> Local Mode
-              </span>
-            )}
+            <span className="text-[10px] bg-green-500/10 text-green-500 border border-green-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 select-none">
+              <Database className="w-3 h-3" /> API Live
+            </span>
           </div>
         </div>
 

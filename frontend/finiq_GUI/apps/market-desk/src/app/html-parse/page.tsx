@@ -235,12 +235,8 @@ export default function HtmlParsePage() {
         setParseMode(config.html_parse_mode);
       }
 
-      if (config.html_parse_result_path) {
-        setOutputPath(config.html_parse_result_path);
-      } else {
-        const initialInput = config.html_content_output_directory || config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : "");
-        setOutputPath(buildParseOutputPath(initialInput, config.html_parse_mode || "bond_issuance"));
-      }
+      const initialInput = config.html_content_output_directory || config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : "");
+      setOutputPath(buildParseOutputPath(initialInput, config.html_parse_mode || "bond_issuance"));
 
       const configuredParallelWorkers = Number(config.parallel_worker_count || defaultParallelWorkers || 1);
       setParallelWorkers(String(configuredParallelWorkers));

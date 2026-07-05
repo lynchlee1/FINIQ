@@ -9,7 +9,7 @@ def _looks_like_sqlite_manifest(path: Path) -> bool:
         return False
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
     return payload.get("format") == "finiq_disclosure_table_manifest_v1"
 

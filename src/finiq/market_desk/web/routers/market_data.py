@@ -30,7 +30,6 @@ from finiq.market_desk.web.features.market_data.discovery import (
 from finiq.market_desk.web.features.market_data.service_common import PRICE_SOURCE_QUANTI
 from finiq.market_desk.web.features.market_data.service_integrated import (
     build_company_list_export,
-    list_integrated_providers,
 )
 from finiq.market_desk.web.features.market_data.service_insight import (
     build_insight_payload,
@@ -83,10 +82,6 @@ def create_market_data_router(config: Any) -> APIRouter:
             "price_files": list_price_source_files(root),
             "selected_price_path": resolve_default_price_source(root, selected_path or ""),
         }
-
-    @router.get("/api/integrated-data/providers")
-    async def get_integrated_providers_route():
-        return {"providers": list_integrated_providers()}
 
     @router.get("/api/ontology/status")
     async def get_ontology_status(
