@@ -62,6 +62,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Project-Specific Notes
 
+- Do not execute project code without explicit user permission in the current turn. This includes scripts, parsers, tests, dev servers, package commands, migrations, data conversion jobs, direct Python/Node function calls, and any command that can create or modify runtime output. If verification would normally require executing code, stop and ask first; if permission is not granted, report verification as not run. Read-only inspection of files is allowed for analysis, but do not cross from inspection into execution or generation.
 - Always use `PLANS.md` to record the purpose, implementation summary, and verification result for completed code changes.
 - Before adding or changing UI labels, button names, page titles, status text, or feature names, consult `docs/ui-terminology.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to the glossary in the same change and keep UI/tests aligned with it.
 - Do not add four meaningless info boxes just to fill space; summary cards must carry decision-making value or be omitted.

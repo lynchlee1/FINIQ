@@ -10,6 +10,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev:graph-viewer": "npm run dev -w @finiq/app-graph-viewer --",
+    "predev:market-desk": "node scripts/check-market-desk-api.mjs",
     "dev:market-desk": "npm run dev -w @finiq/app-market-desk --",
     "start:graph-viewer": "npm run start -w @finiq/app-graph-viewer --",
     "start:market-desk": "npm run start -w @finiq/app-market-desk --",
