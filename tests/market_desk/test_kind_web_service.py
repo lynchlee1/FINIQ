@@ -4090,6 +4090,47 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
     assert stored["warnings"] == payload["warnings"]
 
 
+def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path: Path) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    html_path = viewer_dir / "20250101000001.html"
+    html_path.write_text(
+        """
+        <html>
+          <head><title>Other Report</title></head>
+          <body><table><tr><td>Field</td><td>Value</td></tr></table></body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "rights_issuance",
+            "resume": False,
+        }
+    )
+
+    assert payload["mode"] == "rights_issuance"
+    assert payload["warnings"]
+    assert payload["warnings"][0] == {
+        "index": 1,
+        "total": 1,
+        "mode": "rights_issuance",
+        "source_file": str(html_path.resolve()),
+        "source_name": "20250101000001.html",
+        "warning": "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
+    }
+    assert payload["warning_report_counts"] == {
+        "20250101000001": {
+            "count": len(payload["warnings"]),
+            "warnings": [item["warning"] for item in payload["warnings"]],
+        }
+    }
+    assert any("파싱 경고 1/1: 20250101000001.html" in line for line in payload["progress_log"])
+
+
 def test_parse_disclosure_html_payload_checkpoints_and_resumes(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()

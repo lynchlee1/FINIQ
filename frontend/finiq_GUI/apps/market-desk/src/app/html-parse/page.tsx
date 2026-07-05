@@ -18,36 +18,54 @@ import {
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 
-const PARSE_MODES = [
+type ParseExecutionOptionConfig = {
+  field: string;
+  statusLabel: string;
+};
+
+type ParseModeConfig = {
+  key: string;
+  label: string;
+  status: string;
+  description: string;
+  executionOptions: ParseExecutionOptionConfig[];
+};
+
+const DISCLOSURE_PARSE_MODES: ParseModeConfig[] = [
   {
     key: "bond_issuance",
     label: "사채발행파싱",
     status: "상세 필드 지원",
     description: "메자닌 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+    executionOptions: [{ field: "사채발행방법", statusLabel: "사채발행방법" }],
   },
   {
     key: "rights_issuance",
     label: "유무상증자파싱",
     status: "상세 필드 지원",
     description: "유상증자 및 무상증자 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+    executionOptions: [{ field: "증자방식", statusLabel: "증자방식" }],
   },
   {
     key: "shareholder_meeting",
     label: "주주총회파싱",
     status: "원본 테이블 구조 지원",
     description: "주주총회 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+    executionOptions: [],
   },
   {
     key: "asset_transaction",
     label: "유무형자산거래파싱",
     status: "원본 테이블 구조 지원",
     description: "유형자산 및 무형자산 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+    executionOptions: [],
   },
   {
     key: "security_transaction",
     label: "발행증권거래파싱",
     status: "원본 테이블 구조 지원",
     description: "발행증권 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+    executionOptions: [],
   },
 ];
 
@@ -62,18 +80,7 @@ const buildParseOutputPath = (inputDirectory: string, mode: string) => {
 };
 
 const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
-const BOND_ISSUE_METHOD_FILTER_FIELD = "사채발행방법";
-const RIGHTS_ISSUE_METHOD_FILTER_FIELD = "증자방식";
-const PARSE_EXECUTION_OPTION_CONFIGS: Record<string, { field: string; statusLabel: string }> = {
-  bond_issuance: {
-    field: BOND_ISSUE_METHOD_FILTER_FIELD,
-    statusLabel: "사채발행방법",
-  },
-  rights_issuance: {
-    field: RIGHTS_ISSUE_METHOD_FILTER_FIELD,
-    statusLabel: "증자방식",
-  },
-};
+const PARSE_MODE_CONFIGS = Object.fromEntries(DISCLOSURE_PARSE_MODES.map((mode) => [mode.key, mode])) as Record<string, ParseModeConfig>;
 const WARNING_OPEN_PAGE_SIZE = 20;
 type FilterCandidate = {
   value: string;
@@ -263,7 +270,8 @@ export default function HtmlParsePage() {
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
-  const executionOptionConfig = PARSE_EXECUTION_OPTION_CONFIGS[parseMode] || null;
+  const selectedParseMode = PARSE_MODE_CONFIGS[parseMode] || DISCLOSURE_PARSE_MODES[0];
+  const executionOptionConfig = selectedParseMode.executionOptions[0] || null;
 
   const startJob = useCallback(async (endpoint: string, payload: any) => {
     try {
@@ -578,7 +586,6 @@ export default function HtmlParsePage() {
   ];
   const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputPath");
   const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputPath");
-  const selectedParseMode = PARSE_MODES.find((mode) => mode.key === parseMode) || PARSE_MODES[0];
   const warningReports = buildWarningReports(Array.isArray(latestParseResult?.warnings) ? latestParseResult.warnings : []);
   const warningSourceFiles = Array.from(new Set(warningReports.map((report) => report.sourceFile).filter(Boolean)));
   const warningOpenPageCount = Math.max(1, Math.ceil(warningSourceFiles.length / WARNING_OPEN_PAGE_SIZE));
@@ -701,7 +708,7 @@ export default function HtmlParsePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3">
-                {PARSE_MODES.map(mode => (
+                {DISCLOSURE_PARSE_MODES.map(mode => (
                   <div
                     key={mode.key}
                     onClick={() => handleParseModeChange(mode.key)}

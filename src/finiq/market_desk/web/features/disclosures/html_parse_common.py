@@ -33,12 +33,68 @@ _CACHE_LOCK = Lock()
 SUPPORTED_RECORD_FILTER_OPERATORS = {"contains", "equals", "exists", "in"}
 HTML_PARSE_SOURCE_OUTPUT_DIRECTORY = "kind_html_contents_grouped_sections"
 
+@dataclass(frozen=True)
+class ParseFilterConfig:
+    """One reusable parsed-field filter exposed by 공시원문 변환."""
+
+    field: str
+    status_label: str
+
+
+@dataclass(frozen=True)
+class ParseModeConfig:
+    """Mode metadata shared by parse, preview, filters, and UI-facing payloads."""
+
+    key: str
+    label: str
+    status: str
+    description: str
+    parser: ParseFunction
+    filters: tuple[ParseFilterConfig, ...] = ()
+
+
+PARSE_MODE_CONFIGS = {
+    "bond_issuance": ParseModeConfig(
+        key="bond_issuance",
+        label="사채발행파싱",
+        status="상세 필드 지원",
+        description="메자닌 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+        parser=parse_bond_issuance,
+        filters=(ParseFilterConfig(field="사채발행방법", status_label="사채발행방법"),),
+    ),
+    "rights_issuance": ParseModeConfig(
+        key="rights_issuance",
+        label="유무상증자파싱",
+        status="상세 필드 지원",
+        description="유상증자 및 무상증자 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+        parser=parse_rights_issuance,
+        filters=(ParseFilterConfig(field="증자방식", status_label="증자방식"),),
+    ),
+    "shareholder_meeting": ParseModeConfig(
+        key="shareholder_meeting",
+        label="주주총회파싱",
+        status="원본 테이블 구조 지원",
+        description="주주총회 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+        parser=parse_shareholder_meeting,
+    ),
+    "asset_transaction": ParseModeConfig(
+        key="asset_transaction",
+        label="유무형자산거래파싱",
+        status="원본 테이블 구조 지원",
+        description="유형자산 및 무형자산 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+        parser=parse_asset_transaction,
+    ),
+    "security_transaction": ParseModeConfig(
+        key="security_transaction",
+        label="발행증권거래파싱",
+        status="원본 테이블 구조 지원",
+        description="발행증권 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
+        parser=parse_security_transaction,
+    ),
+}
+
 PARSER_REGISTRY = {
-    "bond_issuance": parse_bond_issuance,
-    "rights_issuance": parse_rights_issuance,
-    "shareholder_meeting": parse_shareholder_meeting,
-    "asset_transaction": parse_asset_transaction,
-    "security_transaction": parse_security_transaction,
+    key: config.parser for key, config in PARSE_MODE_CONFIGS.items()
 }
 
 
