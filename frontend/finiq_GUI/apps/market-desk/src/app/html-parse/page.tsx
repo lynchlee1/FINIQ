@@ -63,10 +63,22 @@ const buildParseOutputPath = (inputDirectory: string, mode: string) => {
 
 const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
 const BOND_ISSUE_METHOD_FILTER_FIELD = "사채발행방법";
+const RIGHTS_ISSUE_METHOD_FILTER_FIELD = "증자방식";
+const PARSE_EXECUTION_OPTION_CONFIGS: Record<string, { field: string; statusLabel: string }> = {
+  bond_issuance: {
+    field: BOND_ISSUE_METHOD_FILTER_FIELD,
+    statusLabel: "사채발행방법",
+  },
+  rights_issuance: {
+    field: RIGHTS_ISSUE_METHOD_FILTER_FIELD,
+    statusLabel: "증자방식",
+  },
+};
 const WARNING_OPEN_PAGE_SIZE = 20;
 type FilterCandidate = {
   value: string;
   count: number;
+  examples?: string[];
 };
 
 type ParseWarningItem = {
@@ -197,11 +209,13 @@ export default function HtmlParsePage() {
   const [resumeParse, setResumeParse] = useState(false);
   const [progressInterval, setProgressInterval] = useState("10");
   const [parallelWorkers, setParallelWorkers] = useState("");
-  const [selectedIssueMethods, setSelectedIssueMethods] = useState<string[]>([]);
-  const [issueMethodCandidates, setIssueMethodCandidates] = useState<FilterCandidate[]>([]);
+  const [selectedExecutionOptionValues, setSelectedExecutionOptionValues] = useState<string[]>([]);
+  const [executionOptionCandidates, setExecutionOptionCandidates] = useState<FilterCandidate[]>([]);
+  const [executionOptionExampleNotice, setExecutionOptionExampleNotice] = useState("");
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
+  const executionOptionConfig = PARSE_EXECUTION_OPTION_CONFIGS[parseMode] || null;
 
   const startJob = useCallback(async (endpoint: string, payload: any) => {
     try {
@@ -267,6 +281,9 @@ export default function HtmlParsePage() {
     const nextOutputPath = buildParseOutputPath(inputDirectory, val);
     setParseMode(val);
     setOutputPath(nextOutputPath);
+    setSelectedExecutionOptionValues([]);
+    setExecutionOptionCandidates([]);
+    setExecutionOptionExampleNotice("");
     saveSettings({
       html_parse_mode: val,
       html_parse_result_path: nextOutputPath,
@@ -285,11 +302,11 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
       return;
     }
-    const activeRecordFilters = selectedIssueMethods.length ? [
+    const activeRecordFilters = executionOptionConfig && selectedExecutionOptionValues.length ? [
       {
-        field: BOND_ISSUE_METHOD_FILTER_FIELD,
+        field: executionOptionConfig.field,
         operator: "in",
-        value: selectedIssueMethods,
+        value: selectedExecutionOptionValues,
       },
     ] : [];
     const cancelToken = window.crypto.randomUUID();
@@ -338,14 +355,25 @@ export default function HtmlParsePage() {
     setIsErrorStatus(false);
   };
 
-  const handleToggleIssueMethod = (value: string, checked: boolean) => {
-    setSelectedIssueMethods((current) => {
+  const handleToggleExecutionOptionValue = (value: string, checked: boolean) => {
+    setSelectedExecutionOptionValues((current) => {
       if (checked) return current.includes(value) ? current : [...current, value];
       return current.filter((item) => item !== value);
     });
   };
 
-  const handleLoadIssueMethodCandidates = async () => {
+  const handleShowExecutionOptionExamples = (candidate: FilterCandidate) => {
+    const examples = Array.isArray(candidate.examples) ? candidate.examples : [];
+    const title = `${executionOptionConfig?.field || "실행 옵션"}: ${candidate.value}`;
+    const exampleText = examples.length
+      ? examples.map((example) => `- ${example}`).join("\n")
+      : "표시할 예시 acpt_no가 없습니다.";
+    setExecutionOptionExampleNotice(`${title}\n${formatInteger(candidate.count)}건 중 예시 ${formatInteger(examples.length)}건\n${exampleText}`);
+    setIsErrorStatus(false);
+  };
+
+  const handleLoadExecutionOptionCandidates = async () => {
+    if (!executionOptionConfig) return;
     if (!inputDirectory) {
       setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
@@ -360,7 +388,7 @@ export default function HtmlParsePage() {
         body: JSON.stringify({
           input_directory: inputDirectory,
           mode: parseMode,
-          field: BOND_ISSUE_METHOD_FILTER_FIELD,
+          field: executionOptionConfig.field,
           parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
         }),
       });
@@ -376,8 +404,9 @@ export default function HtmlParsePage() {
         throw new Error(message || "필터 후보를 불러오지 못했습니다.");
       }
       const data = await response.json();
-      setIssueMethodCandidates(Array.isArray(data.candidates) ? data.candidates : []);
-      setStatus(`사채발행방법 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
+      setExecutionOptionCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setExecutionOptionExampleNotice("");
+      setStatus(`${executionOptionConfig.statusLabel} 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);
@@ -655,47 +684,54 @@ export default function HtmlParsePage() {
             </CardContent>
           </Card>
 
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">
-              <div className="min-w-0 space-y-1">
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Execution Options</p>
-                <CardTitle className="dark:text-white">실행 옵션</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex justify-end">
-                <Button variant="outline" className="h-9 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleLoadIssueMethodCandidates} disabled={filterCandidatesLoading}>
-                  {filterCandidatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  불러오기
-                </Button>
-              </div>
-
-              <div className="grid gap-2 lg:grid-cols-2">
-                <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-50/60 dark:border-[#30363d] dark:bg-[#0d1117] lg:col-span-2">
-                  <div className="flex min-h-9 items-center px-3 py-2">
-                    <Label className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">{BOND_ISSUE_METHOD_FILTER_FIELD}</Label>
-                  </div>
-
-                  {issueMethodCandidates.length ? (
-                    <div className="max-h-44 overflow-auto border-t border-slate-200 bg-white dark:border-[#30363d] dark:bg-[#161b22]">
-                      {issueMethodCandidates.map((candidate) => {
-                        const checked = selectedIssueMethods.includes(candidate.value);
-                        return (
-                          <label key={candidate.value} className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-1.5 last:border-b-0 dark:border-[#30363d]">
-                            <span className="flex min-w-0 items-center gap-3">
-                              <Checkbox checked={checked} onCheckedChange={(value) => handleToggleIssueMethod(candidate.value, !!value)} className="dark:border-[#30363d]" />
-                              <span className="truncate text-sm text-slate-700 dark:text-slate-200">{candidate.value}</span>
-                            </span>
-                            <span className="shrink-0 text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatInteger(candidate.count)}건</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+          {executionOptionConfig ? (
+            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+              <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">
+                <div className="min-w-0 space-y-1">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Execution Options</p>
+                  <CardTitle className="dark:text-white">실행 옵션</CardTitle>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex justify-end">
+                  <Button variant="outline" className="h-9 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleLoadExecutionOptionCandidates} disabled={filterCandidatesLoading}>
+                    {filterCandidatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    불러오기
+                  </Button>
+                </div>
+
+                <div className="grid gap-2 lg:grid-cols-2">
+                  <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-50/60 dark:border-[#30363d] dark:bg-[#0d1117] lg:col-span-2">
+                    <div className="flex min-h-9 items-center px-3 py-2">
+                      <Label className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">{executionOptionConfig.field}</Label>
+                    </div>
+
+                    {executionOptionCandidates.length ? (
+                      <div className="max-h-44 overflow-auto border-t border-slate-200 bg-white dark:border-[#30363d] dark:bg-[#161b22]">
+                        {executionOptionCandidates.map((candidate) => {
+                          const checked = selectedExecutionOptionValues.includes(candidate.value);
+                          return (
+                            <div key={candidate.value} className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-1.5 last:border-b-0 dark:border-[#30363d]">
+                              <label className="flex min-w-0 cursor-pointer items-center gap-3">
+                                <Checkbox checked={checked} onCheckedChange={(value) => handleToggleExecutionOptionValue(candidate.value, !!value)} className="dark:border-[#30363d]" />
+                                <span className="truncate text-sm text-slate-700 dark:text-slate-200">{candidate.value}</span>
+                              </label>
+                              <span className="flex shrink-0 items-center gap-2">
+                                <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatInteger(candidate.count)}건</span>
+                                <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => handleShowExecutionOptionExamples(candidate)}>
+                                  예시
+                                </Button>
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">
@@ -769,11 +805,13 @@ export default function HtmlParsePage() {
               onCancel={handleCancel}
             />
           }
-          notificationActive={isErrorStatus || warningReports.length > 0}
+          notificationActive={isErrorStatus || !!executionOptionExampleNotice || warningReports.length > 0}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (
                 <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+              ) : executionOptionExampleNotice ? (
+                <div className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{executionOptionExampleNotice}</div>
               ) : warningReports.length ? (
                 <div className="space-y-3">
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">

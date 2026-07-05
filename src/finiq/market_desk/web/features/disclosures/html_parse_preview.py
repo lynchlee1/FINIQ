@@ -129,6 +129,23 @@ def _structured_bond_issue_method_candidate(html_bytes: bytes) -> str | None:
     return None
 
 
+def _structured_rights_issue_method_candidate(html_bytes: bytes) -> str | None:
+    try:
+        document = lxml_html.fromstring(html_bytes.decode("utf-8", errors="ignore"))
+    except Exception:
+        return None
+    for row in document.xpath(".//tr[contains(., '증자방식')]"):
+        values = [
+            clean_text(element_text(cell))
+            for cell in row.xpath("./th|./td")
+        ]
+        values = [value for value in values if value]
+        for value in reversed(values):
+            if "증자방식" not in value.replace(" ", ""):
+                return value
+    return None
+
+
 def _filter_candidate_workers(value: Any, total_files: int) -> int:
     if value in (None, ""):
         return min(8, max(1, total_files))
@@ -150,6 +167,8 @@ def _extract_filter_candidate_from_file(
     html_bytes = html_file.read_bytes()
     if requested_mode == "bond_issuance" and field == "사채발행방법":
         return _structured_bond_issue_method_candidate(html_bytes)
+    if requested_mode == "rights_issuance" and field == "증자방식":
+        return _structured_rights_issue_method_candidate(html_bytes)
     record = _apply_manifest_metadata(
         _compact_record(parser(html_bytes, file_path=html_file)),
         metadata_index,
@@ -189,15 +208,19 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         body.get("parallel_workers", body.get("workers")), len(html_files)
     )
     candidate_counts: dict[str, int] = {}
+    candidate_examples: dict[str, list[str]] = {}
     errors: list[dict[str, Any]] = []
     indexed_files = list(enumerate(html_files, start=1))
 
-    def record_value(value: Any) -> None:
+    def record_value(value: Any, html_file: Path) -> None:
         values = value if isinstance(value, list) else [value]
         for candidate in values:
             text = str(candidate or "").strip()
             if text:
                 candidate_counts[text] = candidate_counts.get(text, 0) + 1
+                examples = candidate_examples.setdefault(text, [])
+                if len(examples) < 20:
+                    examples.append(html_file.stem)
 
     def record_error(index: int, html_file: Path, exc: Exception) -> None:
         errors.append(
@@ -224,7 +247,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
             for future in as_completed(futures):
                 index, html_file = futures[future]
                 try:
-                    record_value(future.result())
+                    record_value(future.result(), html_file)
                 except Exception as exc:
                     record_error(index, html_file, exc)
     else:
@@ -237,13 +260,14 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                         field=field,
                         parser=parser,
                         metadata_index=metadata_index,
-                    )
+                    ),
+                    html_file,
                 )
             except Exception as exc:
                 record_error(index, html_file, exc)
 
     candidates = [
-        {"value": value, "count": count}
+        {"value": value, "count": count, "examples": candidate_examples.get(value, [])}
         for value, count in sorted(
             candidate_counts.items(), key=lambda item: (-item[1], item[0])
         )

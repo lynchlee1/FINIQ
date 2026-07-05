@@ -34,7 +34,7 @@ FUNDING_PURPOSE_LABELS = [
 ]
 STOCK_LABELS = {
     "보통주식": ("보통주식", "보통주"),
-    "기타주식": ("기타주식", "기타주", "우선주식", "우선주"),
+    "기타주식": ("기타주식", "기타주", "우선주식", "우선주", "종류주식", "종류주"),
 }
 
 
@@ -118,14 +118,11 @@ class RightsIssuanceExtractor:
                 )
                 if amount is not None:
                     targets.append([row[0], amount])
-            return targets
+            if targets:
+                return targets
         issue_method = self.get_issue_method()
         title = str(self.context.record.get("title") or "")
-        if (
-            issue_method
-            and "제3자배정" in issue_method
-            and "종속회사" not in title
-        ):
+        if issue_method and "제3자배정" in issue_method and "종속회사" not in title:
             self._warn_if_missing("발행대상자", None)
         return []
 
