@@ -14,7 +14,7 @@ test("html parse page does not render warning or step guide boxes", async () => 
   assert.doesNotMatch(source, /title="작동 원리와 파싱 방식"/);
   assert.doesNotMatch(source, /PARSING_RULES/);
   assert.doesNotMatch(source, /Label className="dark:text-slate-300">파싱 경고/);
-  assert.match(source, /notificationActive=\{isErrorStatus \|\| warningReports\.length > 0\}/);
+  assert.match(source, /notificationActive=\{isErrorStatus \|\| !!executionOptionExampleNotice \|\| warningReports\.length > 0\}/);
 });
 
 test("html parse notification panel lists warning reports and reasons", async () => {
@@ -163,16 +163,23 @@ test("html parse page sends parallel worker count", async () => {
   assert.match(source, /parallel_worker_count: defaultParallelWorkers/);
 });
 
-test("html parse page renders bond issue method filters in separate options card", async () => {
+test("html parse page renders parse-mode specific filters in separate options card", async () => {
   const source = await readFile(pagePath, "utf8");
   const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?<\/CardContent>\s*<\/Card>/)?.[0] ?? "";
   const optionsCardContent = source.match(/<CardTitle className="dark:text-white">실행 옵션<\/CardTitle>[\s\S]*?<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>/)?.[0] ?? "";
   const runHandler = source.match(/const handleRun = async \(\) => \{[\s\S]*?startJob\("\/api\/disclosures\/html\/parse\/start", payload\);[\s\S]*?\};/)?.[0] ?? "";
+  const modeHandler = source.match(/const handleParseModeChange = \(val: string\) => \{[\s\S]*?\};/)?.[0] ?? "";
 
   assert.match(source, /const BOND_ISSUE_METHOD_FILTER_FIELD = "사채발행방법"/);
-  assert.match(source, /const \[selectedIssueMethods, setSelectedIssueMethods\] = useState<string\[\]>\(\[\]\)/);
+  assert.match(source, /const RIGHTS_ISSUE_METHOD_FILTER_FIELD = "증자방식"/);
+  assert.match(source, /const PARSE_EXECUTION_OPTION_CONFIGS: Record<string, \{ field: string; statusLabel: string \}> = \{/);
+  assert.match(source, /bond_issuance:[\s\S]*?field: BOND_ISSUE_METHOD_FILTER_FIELD/);
+  assert.match(source, /rights_issuance:[\s\S]*?field: RIGHTS_ISSUE_METHOD_FILTER_FIELD/);
+  assert.match(source, /const \[selectedExecutionOptionValues, setSelectedExecutionOptionValues\] = useState<string\[\]>\(\[\]\)/);
+  assert.match(source, /const \[executionOptionExampleNotice, setExecutionOptionExampleNotice\] = useState\(""\)/);
+  assert.match(source, /const executionOptionConfig = PARSE_EXECUTION_OPTION_CONFIGS\[parseMode\] \|\| null/);
   assert.doesNotMatch(modeCardContent, /실행 옵션/);
-  assert.match(optionsCardContent, /BOND_ISSUE_METHOD_FILTER_FIELD/);
+  assert.match(optionsCardContent, /executionOptionConfig\.field/);
   assert.doesNotMatch(optionsCardContent, />추가</);
   assert.doesNotMatch(optionsCardContent, /placeholder="예: 공모"/);
   assert.doesNotMatch(optionsCardContent, /불러오기를 누르면 입력 경로 전체에서 발견된 후보를 선택할 수 있습니다/);
@@ -185,8 +192,16 @@ test("html parse page renders bond issue method filters in separate options card
   assert.match(optionsCardContent, /lg:col-span-2/);
   assert.match(optionsCardContent, /max-h-44/);
   assert.match(optionsCardContent, /불러오기/);
-  assert.match(optionsCardContent, /handleToggleIssueMethod/);
+  assert.match(optionsCardContent, /예시/);
+  assert.match(optionsCardContent, /handleToggleExecutionOptionValue/);
+  assert.match(optionsCardContent, /handleShowExecutionOptionExamples\(candidate\)/);
   assert.match(source, /\/api\/disclosures\/html\/parse\/filter-candidates/);
+  assert.match(modeHandler, /setSelectedExecutionOptionValues\(\[\]\)/);
+  assert.match(modeHandler, /setExecutionOptionCandidates\(\[\]\)/);
+  assert.match(modeHandler, /setExecutionOptionExampleNotice\(""\)/);
+  assert.match(source, /notificationActive=\{isErrorStatus \|\| !!executionOptionExampleNotice \|\| warningReports\.length > 0\}/);
+  assert.match(source, /executionOptionExampleNotice \? \(/);
   assert.match(runHandler, /record_filters: activeRecordFilters/);
+  assert.match(runHandler, /field: executionOptionConfig\.field/);
   assert.match(runHandler, /operator: "in"/);
 });

@@ -32,6 +32,8 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | HTML parse report preview | 리포트 미리보기 | Separate box below `모드별 기능` that shows a few parsed report results as HTML tables for the selected parse mode. |
 | HTML parse warning files page open action | 현재 페이지 열기 | Button in the right-side `알림` panel on `공시원문 변환` that opens the current page of source HTML files with parse warnings. Pages contain 20 files. |
 | HTML parse issue method filter option | 사채발행방법 | Execution option in a separate `실행 옵션` box below `모드별 기능` for filtering `사채발행파싱` results by issue method. |
+| HTML parse rights issue method filter option | 증자방식 | Execution option in a separate `실행 옵션` box below `모드별 기능` for filtering `유무상증자파싱` results by issue method. |
+| HTML parse execution option examples action | 예시 | Row action next to an execution option candidate count that shows sample matching `acpt_no` values in `알림`. |
 | Viewer HTML save mode/button | 외부 HTML 저장 | Top mode button in 공시원문 외부 저장. |
 | Viewer HTML compression mode/button | 외부 HTML 압축 | Use for the compact JSON creation from saved viewer HTML. |
 | Content HTML save mode/button | 내부 HTML 저장 | Top mode button in 공시원문 내부 저장. |

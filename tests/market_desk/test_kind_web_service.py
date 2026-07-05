@@ -4344,6 +4344,7 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
             "input_directory": str(viewer_dir),
             "mode": "security_transaction",
             "field": "사채발행방법",
+            "parallel_workers": 1,
         }
     )
 
@@ -4351,8 +4352,57 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
     assert payload["field"] == "사채발행방법"
     assert payload["summary"] == {"records": 3, "candidates": 2, "errors": 0}
     assert payload["candidates"] == [
-        {"value": "공모", "count": 2},
-        {"value": "사모", "count": 1},
+        {
+            "value": "공모",
+            "count": 2,
+            "examples": ["20250101000001", "20250101000003"],
+        },
+        {"value": "사모", "count": 1, "examples": ["20250101000002"]},
+    ]
+
+
+def test_build_parse_filter_candidates_payload_loads_rights_issue_methods_without_full_parse(
+    tmp_path: Path, monkeypatch
+) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    (viewer_dir / "20250101000001.html").write_text(
+        "<table><tr><td>5. 증자방식</td><td>제3자배정증자</td></tr></table>",
+        encoding="utf-8",
+    )
+    (viewer_dir / "20250101000002.html").write_text(
+        "<table><tr><td>5. 증자방식</td><td>일반공모증자</td></tr></table>",
+        encoding="utf-8",
+    )
+    (viewer_dir / "20250101000003.html").write_text(
+        "<table><tr><td>5. 증자방식</td><td>제3자배정증자</td></tr></table>",
+        encoding="utf-8",
+    )
+
+    def failing_parser(html_text, *, file_path):
+        raise RuntimeError("full parser should not run")
+
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", failing_parser)
+
+    payload = build_parse_filter_candidates_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "rights_issuance",
+            "field": "증자방식",
+            "parallel_workers": 1,
+        }
+    )
+
+    assert payload["format"] == "finiq_parse_filter_candidates_v1"
+    assert payload["field"] == "증자방식"
+    assert payload["summary"] == {"records": 3, "candidates": 2, "errors": 0}
+    assert payload["candidates"] == [
+        {
+            "value": "제3자배정증자",
+            "count": 2,
+            "examples": ["20250101000001", "20250101000003"],
+        },
+        {"value": "일반공모증자", "count": 1, "examples": ["20250101000002"]},
     ]
 
 
@@ -5277,6 +5327,23 @@ def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
     assert parsed.get("parse_warnings") is None
 
 
+def test_parse_rights_issuance_maps_kind_stock_labels_to_other_stock() -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "resources"
+        / "KIND"
+        / "rights_issuance"
+        / "kind_html_contents_sections"
+        / "20171212000184.html"
+    )
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 2_000_000]]
+    assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", 5_000]]
+    assert parsed.get("parse_warnings") is None
+
+
 def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     fixture_path = (
         REPO_ROOT
@@ -5296,6 +5363,26 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     assert parsed["신주권교부예정일"] == "2008년 10월 01일"
     assert parsed["상장예정일"] == "2008년 10월 02일"
     assert parsed.get("parse_warnings") is None
+
+
+def test_parse_rights_issuance_warns_when_third_party_target_table_is_empty() -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "resources"
+        / "KIND"
+        / "rights_issuance"
+        / "kind_html_contents_sections"
+        / "20230224000621.html"
+    )
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["증자방식"] == "제3자배정증자"
+    assert parsed["발행대상자"] == []
+    assert any(
+        warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed.get("parse_warnings", [])
+    )
 
 
 def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
