@@ -4355,9 +4355,30 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
         {
             "value": "공모",
             "count": 2,
-            "examples": ["20250101000001", "20250101000003"],
+            "examples": [
+                {
+                    "acpt_no": "20250101000001",
+                    "source_name": "20250101000001.html",
+                    "source_file": str((viewer_dir / "20250101000001.html").resolve()),
+                },
+                {
+                    "acpt_no": "20250101000003",
+                    "source_name": "20250101000003.html",
+                    "source_file": str((viewer_dir / "20250101000003.html").resolve()),
+                },
+            ],
         },
-        {"value": "사모", "count": 1, "examples": ["20250101000002"]},
+        {
+            "value": "사모",
+            "count": 1,
+            "examples": [
+                {
+                    "acpt_no": "20250101000002",
+                    "source_name": "20250101000002.html",
+                    "source_file": str((viewer_dir / "20250101000002.html").resolve()),
+                },
+            ],
+        },
     ]
 
 
@@ -4400,9 +4421,30 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods_withou
         {
             "value": "제3자배정증자",
             "count": 2,
-            "examples": ["20250101000001", "20250101000003"],
+            "examples": [
+                {
+                    "acpt_no": "20250101000001",
+                    "source_name": "20250101000001.html",
+                    "source_file": str((viewer_dir / "20250101000001.html").resolve()),
+                },
+                {
+                    "acpt_no": "20250101000003",
+                    "source_name": "20250101000003.html",
+                    "source_file": str((viewer_dir / "20250101000003.html").resolve()),
+                },
+            ],
         },
-        {"value": "일반공모증자", "count": 1, "examples": ["20250101000002"]},
+        {
+            "value": "일반공모증자",
+            "count": 1,
+            "examples": [
+                {
+                    "acpt_no": "20250101000002",
+                    "source_name": "20250101000002.html",
+                    "source_file": str((viewer_dir / "20250101000002.html").resolve()),
+                },
+            ],
+        },
     ]
 
 

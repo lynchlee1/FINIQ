@@ -13,6 +13,7 @@ type ActionDockProps = {
   notificationTitle?: string;
   notificationContent?: ReactNode;
   notificationActive?: boolean;
+  notificationResetKey?: string | number | boolean | null;
   settingsTitle?: string;
   settingsContent?: ReactNode;
   settingsActive?: boolean;
@@ -25,6 +26,7 @@ export function ActionDock({
   notificationTitle = "알림",
   notificationContent,
   notificationActive = false,
+  notificationResetKey = null,
   settingsTitle = "설정",
   settingsContent,
   settingsActive = true,
@@ -39,6 +41,12 @@ export function ActionDock({
       setNotificationDismissed(false);
     }
   }, [notificationActive]);
+
+  useEffect(() => {
+    if (notificationActive) {
+      setNotificationDismissed(false);
+    }
+  }, [notificationActive, notificationResetKey]);
 
   const togglePanel = (panel: DockPanel) => {
     setOpenPanel((current) => current === panel ? null : panel);

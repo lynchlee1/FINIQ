@@ -78,7 +78,19 @@ const WARNING_OPEN_PAGE_SIZE = 20;
 type FilterCandidate = {
   value: string;
   count: number;
-  examples?: string[];
+  examples?: Array<string | FilterCandidateExample>;
+};
+
+type FilterCandidateExample = {
+  acpt_no: string;
+  source_name?: string;
+  source_file?: string;
+};
+
+type ExecutionOptionExampleNotice = {
+  title: string;
+  count: number;
+  examples: FilterCandidateExample[];
 };
 
 type ParseWarningItem = {
@@ -137,6 +149,41 @@ const warningSourceUrl = (sourceFile: string, inputDirectory: string) => {
   }
 
   return fileUrl(sourceFile);
+};
+
+const executionOptionExampleUrl = (example: FilterCandidateExample, inputDirectory: string) => {
+  const sourceName = String(example.source_name || "").trim();
+  if (sourceName) {
+    const params = new URLSearchParams({
+      input_directory: inputDirectory,
+      source_name: sourceName,
+    });
+    return `/api/disclosures/html/sections/source?${params.toString()}`;
+  }
+
+  const sourceFile = String(example.source_file || "").trim();
+  if (sourceFile) {
+    return warningSourceUrl(sourceFile, inputDirectory);
+  }
+
+  const normalizedInputDirectory = normalizePath(inputDirectory.trim());
+  return fileUrl(`${normalizedInputDirectory}/${example.acpt_no}.html`);
+};
+
+const normalizeFilterCandidateExamples = (
+  examples: FilterCandidate["examples"],
+): FilterCandidateExample[] => {
+  if (!Array.isArray(examples)) return [];
+  return examples.map((example) => {
+    if (typeof example === "string") {
+      return { acpt_no: example };
+    }
+    return {
+      acpt_no: String(example.acpt_no || "").trim(),
+      source_name: String(example.source_name || "").trim() || undefined,
+      source_file: String(example.source_file || "").trim() || undefined,
+    };
+  }).filter((example) => example.acpt_no);
 };
 
 export default function HtmlParsePage() {
@@ -211,7 +258,8 @@ export default function HtmlParsePage() {
   const [parallelWorkers, setParallelWorkers] = useState("");
   const [selectedExecutionOptionValues, setSelectedExecutionOptionValues] = useState<string[]>([]);
   const [executionOptionCandidates, setExecutionOptionCandidates] = useState<FilterCandidate[]>([]);
-  const [executionOptionExampleNotice, setExecutionOptionExampleNotice] = useState("");
+  const [executionOptionExampleNotice, setExecutionOptionExampleNotice] = useState<ExecutionOptionExampleNotice | null>(null);
+  const [notificationResetKey, setNotificationResetKey] = useState(0);
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
@@ -283,7 +331,7 @@ export default function HtmlParsePage() {
     setOutputPath(nextOutputPath);
     setSelectedExecutionOptionValues([]);
     setExecutionOptionCandidates([]);
-    setExecutionOptionExampleNotice("");
+    setExecutionOptionExampleNotice(null);
     saveSettings({
       html_parse_mode: val,
       html_parse_result_path: nextOutputPath,
@@ -363,12 +411,14 @@ export default function HtmlParsePage() {
   };
 
   const handleShowExecutionOptionExamples = (candidate: FilterCandidate) => {
-    const examples = Array.isArray(candidate.examples) ? candidate.examples : [];
+    const examples = normalizeFilterCandidateExamples(candidate.examples);
     const title = `${executionOptionConfig?.field || "실행 옵션"}: ${candidate.value}`;
-    const exampleText = examples.length
-      ? examples.map((example) => `- ${example}`).join("\n")
-      : "표시할 예시 acpt_no가 없습니다.";
-    setExecutionOptionExampleNotice(`${title}\n${formatInteger(candidate.count)}건 중 예시 ${formatInteger(examples.length)}건\n${exampleText}`);
+    setExecutionOptionExampleNotice({
+      title,
+      count: candidate.count,
+      examples,
+    });
+    setNotificationResetKey((current) => current + 1);
     setIsErrorStatus(false);
   };
 
@@ -405,7 +455,7 @@ export default function HtmlParsePage() {
       }
       const data = await response.json();
       setExecutionOptionCandidates(Array.isArray(data.candidates) ? data.candidates : []);
-      setExecutionOptionExampleNotice("");
+      setExecutionOptionExampleNotice(null);
       setStatus(`${executionOptionConfig.statusLabel} 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
     } catch (err: any) {
       setStatus(err.message);
@@ -806,12 +856,40 @@ export default function HtmlParsePage() {
             />
           }
           notificationActive={isErrorStatus || !!executionOptionExampleNotice || warningReports.length > 0}
+          notificationResetKey={notificationResetKey}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (
                 <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
               ) : executionOptionExampleNotice ? (
-                <div className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{executionOptionExampleNotice}</div>
+                <div className="space-y-3">
+                  <div className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{executionOptionExampleNotice.title}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {formatInteger(executionOptionExampleNotice.count)}건 중 예시 {formatInteger(executionOptionExampleNotice.examples.length)}건
+                    </p>
+                  </div>
+                  {executionOptionExampleNotice.examples.length ? (
+                    <div className="max-h-[60vh] space-y-2 overflow-auto pr-1">
+                      {executionOptionExampleNotice.examples.map((example, exampleIndex) => (
+                        <div key={`${example.acpt_no}-${example.source_name || example.source_file || exampleIndex}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
+                          <div className="min-w-0">
+                            <p className="break-all text-sm font-semibold text-slate-900 dark:text-slate-100">{example.acpt_no}</p>
+                            <p className="mt-1 break-all text-[11px] text-slate-500 dark:text-slate-400">{example.source_name || example.source_file || `${example.acpt_no}.html`}</p>
+                          </div>
+                          <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => window.open(executionOptionExampleUrl(example, inputDirectory), "_blank", "noopener,noreferrer")}>
+                            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                            열기
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+                      표시할 예시 파일이 없습니다.
+                    </div>
+                  )}
+                </div>
               ) : warningReports.length ? (
                 <div className="space-y-3">
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
