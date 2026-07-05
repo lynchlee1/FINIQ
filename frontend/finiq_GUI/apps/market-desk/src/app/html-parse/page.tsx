@@ -124,6 +124,16 @@ const WARNING_LEVEL_LABELS: Record<WarningLevel, string> = {
 };
 
 const WARNING_LEVELS: WarningLevel[] = ["weak_warning", "medium_warning", "strong_warning"];
+const INITIAL_WARNING_OPEN_PAGES: Record<WarningLevel, number> = {
+  weak_warning: 0,
+  medium_warning: 0,
+  strong_warning: 0,
+};
+const emptyWarningSourceFiles = (): Record<WarningLevel, string[]> => ({
+  weak_warning: [],
+  medium_warning: [],
+  strong_warning: [],
+});
 
 const normalizeWarningLevel = (level?: string): WarningLevel => (
   WARNING_LEVELS.includes(level as WarningLevel) ? level as WarningLevel : "medium_warning"
@@ -224,7 +234,7 @@ export default function HtmlParsePage() {
 
   const [loading, setLoading] = useState(true);
   const [latestParseResult, setLatestParseResult] = useState<any>(null);
-  const [warningOpenPage, setWarningOpenPage] = useState(0);
+  const [warningOpenPages, setWarningOpenPages] = useState<Record<WarningLevel, number>>(INITIAL_WARNING_OPEN_PAGES);
 
   const formatStatus = useCallback((data: any) => {
     const statusLbl = (s: string) => {
@@ -389,7 +399,7 @@ export default function HtmlParsePage() {
     const cancelToken = window.crypto.randomUUID();
     setActiveCancelToken(cancelToken);
     setLatestParseResult(null);
-    setWarningOpenPage(0);
+    setWarningOpenPages(INITIAL_WARNING_OPEN_PAGES);
 
     const payload = {
       input_directory: inputDirectory,
@@ -422,13 +432,12 @@ export default function HtmlParsePage() {
     }
   };
 
-  const handleOpenWarningFiles = () => {
-    warningPageSourceFiles.forEach((sourceFile) => {
+  const handleOpenWarningFiles = (level: WarningLevel) => {
+    const pageInfo = warningPageInfoByLevel[level];
+    pageInfo.sourceFiles.forEach((sourceFile) => {
       window.open(warningSourceUrl(sourceFile, inputDirectory), "_blank", "noopener,noreferrer");
     });
-    const startIndex = warningOpenPage * WARNING_OPEN_PAGE_SIZE + 1;
-    const endIndex = startIndex + warningPageSourceFiles.length - 1;
-    setStatus(`경고 파일 ${formatInteger(startIndex)}-${formatInteger(endIndex)}번 열기를 요청했습니다.`);
+    setStatus(`${WARNING_LEVEL_LABELS[level]} 파일 ${formatInteger(pageInfo.startIndex + 1)}-${formatInteger(pageInfo.endIndex)}번 열기를 요청했습니다.`);
     setIsErrorStatus(false);
   };
 
@@ -608,12 +617,38 @@ export default function HtmlParsePage() {
   const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputPath");
   const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputPath");
   const warningReports = buildWarningReports(Array.isArray(latestParseResult?.warnings) ? latestParseResult.warnings : []);
-  const warningSourceFiles = Array.from(new Set(warningReports.map((report) => report.sourceFile).filter(Boolean)));
-  const warningOpenPageCount = Math.max(1, Math.ceil(warningSourceFiles.length / WARNING_OPEN_PAGE_SIZE));
-  const safeWarningOpenPage = Math.min(warningOpenPage, warningOpenPageCount - 1);
-  const warningPageStartIndex = safeWarningOpenPage * WARNING_OPEN_PAGE_SIZE;
-  const warningPageSourceFiles = warningSourceFiles.slice(warningPageStartIndex, warningPageStartIndex + WARNING_OPEN_PAGE_SIZE);
-  const warningPageEndIndex = warningPageStartIndex + warningPageSourceFiles.length;
+  const warningSourceFilesByLevel = WARNING_LEVELS.reduce((filesByLevel, level) => {
+    filesByLevel[level] = Array.from(new Set(
+      warningReports
+        .filter((report) => report.warningsByLevel[level].length)
+        .map((report) => report.sourceFile)
+        .filter(Boolean),
+    ));
+    return filesByLevel;
+  }, emptyWarningSourceFiles());
+  const warningPageInfoByLevel = WARNING_LEVELS.reduce((infoByLevel, level) => {
+    const sourceFiles = warningSourceFilesByLevel[level];
+    const pageCount = Math.max(1, Math.ceil(sourceFiles.length / WARNING_OPEN_PAGE_SIZE));
+    const safePage = Math.min(warningOpenPages[level] || 0, pageCount - 1);
+    const startIndex = safePage * WARNING_OPEN_PAGE_SIZE;
+    const pageSourceFiles = sourceFiles.slice(startIndex, startIndex + WARNING_OPEN_PAGE_SIZE);
+    infoByLevel[level] = {
+      pageCount,
+      safePage,
+      startIndex,
+      endIndex: startIndex + pageSourceFiles.length,
+      sourceFiles: pageSourceFiles,
+      totalSourceFiles: sourceFiles.length,
+    };
+    return infoByLevel;
+  }, {} as Record<WarningLevel, {
+    pageCount: number;
+    safePage: number;
+    startIndex: number;
+    endIndex: number;
+    sourceFiles: string[];
+    totalSourceFiles: number;
+  }>);
   const warningCount = warningReports.reduce(
     (total, report) => total + WARNING_LEVELS.reduce((levelTotal, level) => levelTotal + report.warningsByLevel[level].length, 0),
     0,
@@ -700,10 +735,24 @@ export default function HtmlParsePage() {
   };
 
   useEffect(() => {
-    if (warningOpenPage !== safeWarningOpenPage) {
-      setWarningOpenPage(safeWarningOpenPage);
-    }
-  }, [safeWarningOpenPage, warningOpenPage]);
+    setWarningOpenPages((current) => {
+      let changed = false;
+      const next = { ...current };
+      WARNING_LEVELS.forEach((level) => {
+        const pageCount = Math.max(1, Math.ceil(warningSourceFilesByLevel[level].length / WARNING_OPEN_PAGE_SIZE));
+        const safePage = Math.min(current[level] || 0, pageCount - 1);
+        if (current[level] !== safePage) {
+          next[level] = safePage;
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [
+    warningSourceFilesByLevel.weak_warning.length,
+    warningSourceFilesByLevel.medium_warning.length,
+    warningSourceFilesByLevel.strong_warning.length,
+  ]);
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
@@ -926,20 +975,38 @@ export default function HtmlParsePage() {
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                     경고 리포트 {formatInteger(warningReports.length)}건, 경고 {formatInteger(warningCount)}건
                   </div>
-                  <Button type="button" variant="outline" className="h-9 w-full justify-center dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleOpenWarningFiles} disabled={!warningSourceFiles.length}>
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    현재 페이지 열기
-                  </Button>
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-                    <Button type="button" variant="outline" size="sm" className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => setWarningOpenPage((page) => Math.max(0, page - 1))} disabled={safeWarningOpenPage === 0}>
-                      이전
-                    </Button>
-                    <span className="text-center">
-                      {warningSourceFiles.length ? `${formatInteger(warningPageStartIndex + 1)}-${formatInteger(warningPageEndIndex)} / ${formatInteger(warningSourceFiles.length)}` : "0 / 0"}
-                    </span>
-                    <Button type="button" variant="outline" size="sm" className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => setWarningOpenPage((page) => Math.min(warningOpenPageCount - 1, page + 1))} disabled={safeWarningOpenPage >= warningOpenPageCount - 1}>
-                      다음
-                    </Button>
+                  <div className="space-y-2">
+                    {WARNING_LEVELS.map((level) => {
+                      const pageInfo = warningPageInfoByLevel[level];
+                      const levelWarningCount = warningReports.reduce((total, report) => total + report.warningsByLevel[level].length, 0);
+                      return (
+                        <div key={level} className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="font-semibold text-slate-700 dark:text-slate-200">
+                              {WARNING_LEVEL_LABELS[level]} {formatInteger(levelWarningCount)}건
+                            </span>
+                            <span className="text-slate-500 dark:text-slate-400">
+                              {pageInfo.totalSourceFiles ? `${formatInteger(pageInfo.startIndex + 1)}-${formatInteger(pageInfo.endIndex)} / ${formatInteger(pageInfo.totalSourceFiles)}` : "0 / 0"}
+                            </span>
+                          </div>
+                          <Button type="button" variant="outline" className="mt-2 h-9 w-full justify-center dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => handleOpenWarningFiles(level)} disabled={!pageInfo.sourceFiles.length}>
+                            <ExternalLink className="mr-2 h-4 w-4" />
+                            현재 페이지 열기
+                          </Button>
+                          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                            <Button type="button" variant="outline" size="sm" className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => setWarningOpenPages((pages) => ({ ...pages, [level]: Math.max(0, (pages[level] || 0) - 1) }))} disabled={pageInfo.safePage === 0}>
+                              이전
+                            </Button>
+                            <span className="text-center">
+                              {formatInteger(pageInfo.safePage + 1)} / {formatInteger(pageInfo.pageCount)}
+                            </span>
+                            <Button type="button" variant="outline" size="sm" className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => setWarningOpenPages((pages) => ({ ...pages, [level]: Math.min(pageInfo.pageCount - 1, (pages[level] || 0) + 1) }))} disabled={pageInfo.safePage >= pageInfo.pageCount - 1}>
+                              다음
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="max-h-[60vh] space-y-3 overflow-auto pr-1">
                     {warningReports.map((report, reportIndex) => (

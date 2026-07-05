@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ..common import (
     build_base_record,
+    clean_text,
     last_int,
     last_value,
     row_containing,
@@ -18,6 +20,45 @@ from ..common import (
 
 MODE = "bond_issuance"
 _MAIN_BOND_TABLE_LABELS = ("사채의 종류", "사채의 권면", "자금조달의 목적")
+_EXERCISE_TARGET_COMPANY_NAME_REPLACEMENTS = (
+    r"\(주\)",
+    r"㈜",
+    r"주식회사",
+    r"기명식",
+    r"무기명식",
+    r"보통주식?",
+    r"보통주?",
+    r"주식",
+)
+
+
+def _clean_exercise_target_company_name(value: str) -> str | None:
+    cleaned = clean_text(value)
+    if not cleaned:
+        return None
+    for pattern in _EXERCISE_TARGET_COMPANY_NAME_REPLACEMENTS:
+        cleaned = re.sub(pattern, " ", cleaned)
+    cleaned = clean_text(cleaned.strip(" -_/·,"))
+    return cleaned or clean_text(value)
+
+
+def _clean_funding_purpose_label(value: str) -> str | None:
+    label = clean_text(value)
+    label = re.sub(r"\(\s*원\s*\)", "", label)
+    label = re.sub(r"\s*원$", "", label)
+    label = clean_text(label.strip(" -_/·,"))
+    return label or None
+
+
+def _issue_amount_row(rows: list[list[str]]) -> list[str]:
+    amount_rows = [row for row in rows if row_contains(row, "사채의 권면")]
+    for row in amount_rows:
+        if row_contains(row, "원화기준"):
+            return row
+    for row in amount_rows:
+        if row_contains(row, "(원)"):
+            return row
+    return amount_rows[0] if amount_rows else []
 
 
 @dataclass(frozen=True)
