@@ -3527,6 +3527,40 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     assert record["투자자"] == [["테스트조합", 1_000_000_000]]
 
 
+def test_parse_disclosure_html_payload_writes_sections_parse_to_parent_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    rights_dir = tmp_path / "rights_issuance"
+    input_dir = rights_dir / "kind_html_contents_sections"
+    input_dir.mkdir(parents=True)
+    html_file = input_dir / "20250102000002.html"
+    html_file.write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "rcept_no": "20250102009999",
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "rights_issuance",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_dir),
+            "mode": "rights_issuance",
+            "resume": False,
+        }
+    )
+
+    assert payload["output_path"] == str(rights_dir / "parsed-rights_issuance.json")
+    assert (rights_dir / "parsed-rights_issuance.json").is_file()
+    assert not (input_dir / "parsed-rights_issuance.json").exists()
+
+
 def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -3586,6 +3620,175 @@ def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
             {"sequence": 0, "acpt_no": "20250101000001", "rcept_no": "20250101009999"},
             {"sequence": 1, "acpt_no": "20250102000002", "rcept_no": "20250102009999"},
         ]
+
+
+def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_corrections(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_dir = tmp_path / "rights_issuance" / "kind_html_contents_sections"
+    input_dir.mkdir(parents=True)
+    first = input_dir / "20081210000626.html"
+    second = input_dir / "20081211000252.html"
+    first.write_text("<html></html>", encoding="utf-8")
+    second.write_text("<html></html>", encoding="utf-8")
+    (input_dir.parent / "filtered.json").write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "company_key": "03679",
+                        "acpt_no": "20081210000626",
+                        "company_name": "자강",
+                        "market": "코스닥",
+                        "disclosed_at": "2008-12-10 18:16",
+                        "title": "유상증자결정",
+                        "title_base": "유상증자결정",
+                        "title_display": "유상증자결정",
+                        "is_correction_report": False,
+                        "has_later_correction": True,
+                    },
+                    {
+                        "company_key": "03679",
+                        "acpt_no": "20081211000252",
+                        "company_name": "자강",
+                        "market": "코스닥",
+                        "disclosed_at": "2008-12-11 15:45",
+                        "title": "[정정]유상증자결정(제3자배정)",
+                        "title_base": "유상증자결정(제3자배정)",
+                        "title_display": "[정정]유상증자결정(제3자배정)",
+                        "is_correction_report": True,
+                        "has_later_correction": False,
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    main_docs = [
+        {
+            "select_id": "mainDoc",
+            "option_index": 1,
+            "doc_no": "20081210001405",
+            "text": "유상증자결정 (2008.12.10)",
+            "value": "20081210001405|N",
+            "latest_flag": "N",
+            "selected": False,
+        },
+        {
+            "select_id": "mainDoc",
+            "option_index": 2,
+            "doc_no": "20081211000613",
+            "text": "[정정]유상증자결정 (2008.12.11)",
+            "value": "20081211000613|Y",
+            "latest_flag": "Y",
+            "selected": False,
+        },
+        {
+            "select_id": "attachedDoc",
+            "option_index": 1,
+            "doc_no": "20081211000614",
+            "text": "[정정]이사회의사록 (2008.12.11)",
+            "selected": False,
+        },
+    ]
+    (input_dir.parent / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20081210000626",
+                        "title": "[자강] 유상증자결정",
+                        "header": "자강 (036790)",
+                        "selected_main_doc_no": "20081210001405",
+                        "docs": [
+                            {
+                                **doc,
+                                "selected": doc["doc_no"] == "20081210001405",
+                            }
+                            for doc in main_docs
+                        ],
+                        "metadata": {
+                            "acpt_no": "20081210000626",
+                            "company_name": "자강",
+                            "market": "코스닥",
+                            "disclosed_at": "2008-12-10 18:16",
+                            "title": "유상증자결정",
+                        },
+                    },
+                    {
+                        "acpt_no": "20081211000252",
+                        "title": "[자강] 유상증자결정",
+                        "header": "자강 (036790)",
+                        "selected_main_doc_no": "20081211000613",
+                        "docs": [
+                            {
+                                **doc,
+                                "selected": doc["doc_no"] == "20081211000613",
+                            }
+                            for doc in main_docs
+                        ],
+                        "metadata": {
+                            "acpt_no": "20081211000252",
+                            "company_name": "자강",
+                            "market": "코스닥",
+                            "disclosed_at": "2008-12-11 15:45",
+                            "title": "[정정]유상증자결정(제3자배정)",
+                        },
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_parser(html_text, *, file_path):
+        acpt_no = Path(file_path).stem
+        return {
+            "correction_families": {},
+            "rcept_no": None,
+            "acpt_no": acpt_no,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "rights_issuance",
+            "title": "유상증자 결정",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_dir),
+            "mode": "rights_issuance",
+            "resume": False,
+        }
+    )
+
+    records = {record["acpt_no"]: record for record in payload["records"]}
+    family = records["20081210000626"]["correction_families"]["20081211000252"]
+    assert family["current_sequence"] == 0
+    assert family["members"] == [
+        {
+            "sequence": 0,
+            "acpt_no": "20081210000626",
+            "doc_no": "20081210001405",
+            "title": "유상증자결정",
+            "disclosed_at": "2008-12-10 18:16",
+            "is_correction_report": False,
+        },
+        {
+            "sequence": 1,
+            "acpt_no": "20081211000252",
+            "doc_no": "20081211000613",
+            "title": "[정정]유상증자결정(제3자배정)",
+            "disclosed_at": "2008-12-11 15:45",
+            "is_correction_report": True,
+        },
+    ]
+    assert all(
+        member["doc_no"] != "20081211000614" for member in family["members"]
+    )
 
 
 def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
@@ -4260,6 +4463,34 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
     assert not any("파싱 중 1/3:" in line for line in payload["progress_log"])
     assert not any("파싱 완료 1/3:" in line for line in payload["progress_log"])
     assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
+
+
+def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(
+    tmp_path: Path, monkeypatch
+) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+        }
+    )
+
+    assert "진행 확인 간격: 1000건" in payload["progress_log"]
 
 
 def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, monkeypatch) -> None:
