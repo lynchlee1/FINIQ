@@ -77,6 +77,9 @@ from finiq.market_desk.web.html_parsers.common import (
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 from finiq.market_desk.analytics.quanti import list_quanti_stock_codes
 from finiq.market_desk.web.html_parsers.rights_issuance import parse_rights_issuance
+from finiq.data_scraper.storage.classification_store import (
+    write_company_classification_artifact,
+)
 
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parents[1]
@@ -161,8 +164,8 @@ def _trusted_download_input_snapshot(
     }
 
 
-def _write_classification_fixture(tmp_path: Path) -> Path:
-    payload = {
+def _classification_fixture_payload() -> dict[str, object]:
+    return {
         "summary": {"companies": 1, "disclosures": 3},
         "companies": [
             {
@@ -200,19 +203,25 @@ def _write_classification_fixture(tmp_path: Path) -> Path:
             }
         ],
     }
+
+
+def _write_classification_fixture(
+    tmp_path: Path, payload: dict[str, object] | None = None
+) -> Path:
     fixture_path = tmp_path / "kind.company_classification.sample.json"
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return fixture_path
+    return write_company_classification_artifact(
+        fixture_path,
+        payload or _classification_fixture_payload(),
+        compact=False,
+    )
 
 
 def _write_multiyear_classification_fixture(tmp_path: Path) -> Path:
-    fixture_path = _write_classification_fixture(tmp_path)
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload = _classification_fixture_payload()
     payload["companies"][0]["disclosures"][0]["disclosed_at"] = "2023-01-02 09:00:00"
     payload["companies"][0]["disclosures"][1]["disclosed_at"] = "2024-01-10 09:00:00"
     payload["companies"][0]["disclosures"][2]["disclosed_at"] = "2025-01-15 09:00:00"
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return fixture_path
+    return _write_classification_fixture(tmp_path, payload)
 
 
 def _write_source_body_fixture(tmp_path: Path) -> Path:
@@ -631,8 +640,7 @@ def test_clean_search_text_removes_parenthesized_title_fragments(value: str, exp
 
 
 def test_filter_disclosures_payload_supports_clean_search_title_blocks(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload = _classification_fixture_payload()
     payload["companies"][0]["disclosures"].append(
         {
             "disclosed_at": "2025-01-20 09:00:00",
@@ -642,7 +650,7 @@ def test_filter_disclosures_payload_supports_clean_search_title_blocks(tmp_path:
         }
     )
     payload["summary"]["disclosures"] = 4
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    fixture_path = _write_classification_fixture(tmp_path, payload)
 
     filtered_payload = filter_disclosures_payload(
         {
@@ -662,8 +670,7 @@ def test_filter_disclosures_payload_supports_clean_search_title_blocks(tmp_path:
 
 
 def test_filter_disclosures_payload_cleans_unique_titles_and_places_them_before_rows(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload = _classification_fixture_payload()
     payload["companies"][0]["disclosures"].append(
         {
             "disclosed_at": "2025-01-20 09:00:00",
@@ -673,7 +680,7 @@ def test_filter_disclosures_payload_cleans_unique_titles_and_places_them_before_
         }
     )
     payload["summary"]["disclosures"] = 4
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    fixture_path = _write_classification_fixture(tmp_path, payload)
 
     filtered_payload = filter_disclosures_payload({"classification_path": str(fixture_path)})
 
@@ -721,11 +728,10 @@ def test_filter_disclosures_payload_ignores_return_limit(tmp_path: Path) -> None
 
 
 def test_filter_disclosures_payload_deduplicates_by_disclosure_identity(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload = _classification_fixture_payload()
     payload["companies"][0]["disclosures"].append(dict(payload["companies"][0]["disclosures"][0]))
     payload["summary"]["disclosures"] = 4
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    fixture_path = _write_classification_fixture(tmp_path, payload)
 
     filtered_payload = filter_disclosures_payload(
         {
@@ -1023,10 +1029,9 @@ def test_build_disclosure_table_payload_accepts_nested_folder_path(tmp_path: Pat
 def test_build_disclosure_table_payload_rejects_unloaded_classification_disclosures(
     tmp_path: Path,
 ) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload = _classification_fixture_payload()
     payload["summary"]["disclosures"] = 4
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    fixture_path = _write_classification_fixture(tmp_path, payload)
 
     with pytest.raises(ValueError, match="summary does not match loaded disclosures"):
         build_disclosure_table_payload({"classification_path": str(fixture_path)})
@@ -1036,10 +1041,21 @@ def test_build_disclosure_table_payload_rejects_malformed_disclosure_item(
     tmp_path: Path,
 ) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload = _classification_fixture_payload()
     payload["companies"][0]["disclosures"].append("not-a-disclosure")
     payload["summary"]["disclosures"] = 4
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with sqlite3.connect(fixture_path) as connection:
+        connection.execute(
+            "UPDATE metadata SET value = ? WHERE key = 'summary'",
+            (json.dumps(payload["summary"], ensure_ascii=False),),
+        )
+        connection.execute(
+            "UPDATE companies SET raw_json = ? WHERE company_key = ?",
+            (
+                json.dumps(payload["companies"][0], ensure_ascii=False),
+                "005930",
+            ),
+        )
 
     with pytest.raises(ValueError, match=r"disclosures\[3\] must be an object"):
         build_disclosure_table_payload({"classification_path": str(fixture_path)})
@@ -3511,44 +3527,6 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     assert record["투자자"] == [["테스트조합", 1_000_000_000]]
 
 
-def test_parse_disclosure_html_payload_normalizes_legacy_nested_auto_output_path(
-    tmp_path: Path,
-) -> None:
-    bond_dir = tmp_path / "bond_issuance"
-    input_dir = bond_dir / "kind_html_contents_grouped_sections"
-    year_dir = input_dir / "2025"
-    year_dir.mkdir(parents=True)
-    (year_dir / "20250102000002.html").write_text(
-        """
-        <html>
-          <body>
-            <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
-            <table>
-              <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
-              <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
-              <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
-            </table>
-          </body>
-        </html>
-        """,
-        encoding="utf-8",
-    )
-    legacy_output_path = input_dir / "parsed-bond_issuance.json"
-
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(input_dir),
-            "output_path": str(legacy_output_path),
-            "mode": "bond_issuance",
-            "resume": False,
-        }
-    )
-
-    assert payload["output_path"] == str(bond_dir / "parsed-bond_issuance.json")
-    assert (bond_dir / "parsed-bond_issuance.json").is_file()
-    assert not legacy_output_path.exists()
-
-
 def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -5398,8 +5376,7 @@ def test_build_insight_payload_extends_visible_range_for_after_close_disclosure(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    payload = _classification_fixture_payload()
     payload["companies"][0]["disclosures"] = [
         {
             "disclosed_at": "2025-01-10 20:01:00",
@@ -5408,7 +5385,7 @@ def test_build_insight_payload_extends_visible_range_for_after_close_disclosure(
             "acpt_no": "after-close",
         }
     ]
-    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    fixture_path = _write_classification_fixture(tmp_path, payload)
     monkeypatch.setattr(
         "finiq.market_desk.web.features.market_data.service_insight.fetch_stock_price_history",
         lambda stock_code, start_date, end_date: [

@@ -130,6 +130,8 @@ test("html parse page normalizes auto generated output paths", async () => {
   assert.match(source, /trimmedInputDirectory\.replace\(\/\\\/\+\$\/, ""\)/);
   assert.match(source, /normalizedInputDirectory\.endsWith\("\/kind_html_contents_grouped_sections"\)/);
   assert.match(source, /"kind_html_contents_grouped_sections"\.length/);
+  assert.doesNotMatch(source, /if \(config\.html_parse_result_path\)/);
+  assert.doesNotMatch(source, /setOutputPath\(config\.html_parse_result_path\)/);
   assert.doesNotMatch(source, /`\$\{input\}\/parsed-\$\{mode\}\.json`/);
   assert.doesNotMatch(source, /`\$\{initialInput\}\/parsed-/);
 });

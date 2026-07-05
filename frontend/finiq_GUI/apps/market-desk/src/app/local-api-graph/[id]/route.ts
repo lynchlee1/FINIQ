@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { exampleGraphData } from '@/app/company/[id]/exampleGraphData';
 import fs from 'fs';
 import path from 'path';
 
@@ -18,14 +17,15 @@ export async function GET(
       return NextResponse.json({ success: true, data: jsonData });
     }
   } catch (err) {
-    console.error('Failed to read parsed JSON, falling back to dummy data', err);
+    console.error('Failed to read parsed JSON', err);
+    return NextResponse.json(
+      { success: false, error: 'Failed to read graph data.' },
+      { status: 500 },
+    );
   }
 
-  // Simulate network delay for fallback
-  await new Promise((resolve) => setTimeout(resolve, 600));
-
-  return NextResponse.json({
-    success: true,
-    data: exampleGraphData,
-  });
+  return NextResponse.json(
+    { success: false, error: `Graph data not found for company: ${id}` },
+    { status: 404 },
+  );
 }

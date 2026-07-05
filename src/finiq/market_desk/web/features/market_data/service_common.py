@@ -37,7 +37,6 @@ from finiq.market_desk.analytics.disclosure_groups import (
     disclosure_group_color_map,
     disclosure_group_marker_style,
 )
-from finiq.market_desk.analytics.integrated_engine import ProviderRegistry
 from finiq.market_desk.analytics.quanti import fetch_quanti_ohlcv
 from finiq.market_desk.analytics.quanti_market_history import (
     build_quanti_market_history,

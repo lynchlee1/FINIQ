@@ -2,7 +2,32 @@
 
 from __future__ import annotations
 
-from finiq.market_desk.web.features.market_data.service_insight import *
+from pathlib import Path
+from typing import Any, Callable
+
+from finiq.market_desk.analytics.company import (
+    build_company_list_xlsx,
+    extract_unique_company_list_rows,
+)
+from finiq.market_desk.analytics.quanti_integrated import (
+    convert_quanti_excel_to_parquet,
+    merge_quanti_by_item_datasets,
+)
+from finiq.market_desk.analytics.quanti_market_history import (
+    build_quanti_market_history,
+    load_quanti_item_registry,
+    market_item_from_registry,
+    market_value_map_from_registry,
+)
+from finiq.market_desk.web.features.market_data.service_payloads import load_company_index_payload
+
+ProgressCallback = Callable[[str], None]
+
+
+def _emit(callback: ProgressCallback | None, message: str) -> None:
+    if callback:
+        callback(message)
+
 
 def build_company_list_export(
     classification_path: str | Path,
@@ -19,20 +44,17 @@ def build_company_list_export(
     return build_company_list_xlsx(rows)
 
 
-def list_integrated_providers() -> list[dict[str, Any]]:
-    return ProviderRegistry.list_providers()
-
-
 def run_integrated_convert_payload(
     payload: dict[str, Any],
     *,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    provider_id = str(payload.get("provider_id") or "quantiwise").strip()
-    provider = ProviderRegistry.get(provider_id)
-    return provider.convert(
-        payload, progress_callback=progress_callback, cancel_check=cancel_check
+    return convert_quanti_excel_to_parquet(
+        payload.get("source_directory", ""),
+        payload.get("output_directory", ""),
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
     )
 
 
@@ -42,10 +64,14 @@ def run_integrated_merge_payload(
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    provider_id = str(payload.get("provider_id") or "quantiwise").strip()
-    provider = ProviderRegistry.get(provider_id)
-    return provider.merge(
-        payload, progress_callback=progress_callback, cancel_check=cancel_check
+    input_dirs = payload.get("input_directories")
+    if not input_dirs:
+        input_dirs = [payload.get("input_directory", "")]
+    return merge_quanti_by_item_datasets(
+        input_dirs,
+        payload.get("output_directory", ""),
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
     )
 
 

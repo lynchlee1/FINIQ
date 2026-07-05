@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { GraphCanvas, SettingsPanel, useGraphViewer, DEFAULT_STYLE, DEFAULT_LAYOUT, STYLE_PRESETS } from '@finiq/graph-viewer'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Button } from '@finiq/ui'
-import { fetchCompanyGraphData } from './exampleGraphData'
+import { fetchCompanyGraphData } from './companyGraphData'
 import { PageLoadingSpinner } from '@/components/ui/PageLoadingSpinner'
 import { Search, X, Save, Download, Unlock } from 'lucide-react'
 import { ActionDock } from '@/components/ui/ActionDock'
@@ -25,6 +25,7 @@ export function CompanyGraphViewer({
   heightClassName,
 }: CompanyGraphViewerProps) {
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [simulationRunning, setSimulationRunning] = useState(true)
   const [searchValue, setSearchValue] = useState('')
 
@@ -60,6 +61,7 @@ export function CompanyGraphViewer({
   useEffect(() => {
     let mounted = true;
     setLoading(true);
+    setLoadError(null);
     fetchCompanyGraphData(companyId).then(data => {
       if (mounted) {
         replaceGraph(data as any);
@@ -67,7 +69,11 @@ export function CompanyGraphViewer({
       }
     }).catch(err => {
       console.error(err);
-      setLoading(false);
+      if (mounted) {
+        setLoadError(err instanceof Error ? err.message : 'Graph View 데이터를 불러오지 못했습니다.');
+        replaceGraph({ nodes: [], edges: [] } as any);
+        setLoading(false);
+      }
     });
     return () => { mounted = false; };
   }, [companyId, replaceGraph]);
@@ -123,6 +129,15 @@ export function CompanyGraphViewer({
     return (
       <Card className="dark:bg-[#161b22] dark:border-[#30363d] flex flex-col h-[700px] items-center justify-center">
         <PageLoadingSpinner message="관계망 데이터를 분석 중입니다..." />
+      </Card>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <Card className="dark:bg-[#161b22] dark:border-[#30363d] flex flex-col h-[700px] items-center justify-center gap-3 text-center">
+        <CardTitle className="dark:text-white">Graph View 데이터를 불러오지 못했습니다.</CardTitle>
+        <CardDescription className="max-w-md">{loadError}</CardDescription>
       </Card>
     )
   }
