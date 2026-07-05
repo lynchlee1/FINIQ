@@ -31,20 +31,29 @@ class BondIssuanceExtractor:
         self.context = context
         self.rows = context.rows
         self.warnings: list[str] = []
+        self.weak_warnings: list[str] = []
+        self.medium_warnings: list[str] = []
+        self.strong_warnings: list[str] = []
+        self.field_parse_status: dict[str, str] = {}
 
     def extract_round_from_bond_type_row(self) -> str | None:
         value = self.rows.value_after("사채의 종류", "회차")
         self._warn_if_missing("회차", value)
+        if value is not None:
+            self._set_field_status("회차", "parsed")
         return value
 
     def extract_security_type_from_title(self, title: str) -> str | None:
         """공시 제목을 기반으로 CB/EB/BW 여부를 판별한다."""
         text = title
         if "신주인수권부사채" in text:
+            self._set_field_status("종류", "parsed")
             return "BW"
         if "교환사채" in text:
+            self._set_field_status("종류", "parsed")
             return "EB"
         if "전환사채" in text:
+            self._set_field_status("종류", "parsed")
             return "CB"
         self._warn_if_missing("종류", None)
         return None
@@ -56,6 +65,7 @@ class BondIssuanceExtractor:
         if not text:
             self._warn_if_missing("기업명(행사대상)", None)
             return None
+        self._set_field_status("기업명(행사대상)", "parsed")
         cleaned = text
         replacements = (
             r"\(주\)",
@@ -91,6 +101,10 @@ class BondIssuanceExtractor:
         row = self._issue_amount_row()
         value = self._last_int_after_first_cell(row)
         self._warn_if_missing("발행금액", value)
+        if value is not None:
+            self._set_field_status(
+                "발행금액", "explicit_zero" if value == 0 else "parsed"
+            )
         return value
 
     def _issue_amount_row(self) -> list[str]:
@@ -115,20 +129,29 @@ class BondIssuanceExtractor:
     ) -> list[list[Any]]:
         """자금조달 목적 행에 적힌 목적명과 금액을 표에 나온 순서대로 추출한다."""
         purposes: list[list[Any]] = []
+        found_purpose_amount = False
         for row in self.rows.values:
             if not row_contains(row, "자금조달의 목적"):
                 continue
             label = self._funding_purpose_label(row)
             amount = self._funding_purpose_amount(row)
             if label and amount is not None:
+                found_purpose_amount = True
+            if label and amount:
                 purposes.append([label, amount])
 
-        self._warn_if_missing("발행목적", purposes)
+        if not found_purpose_amount:
+            self._warn_if_missing("발행목적", None)
+        else:
+            self._set_field_status(
+                "발행목적", "parsed" if purposes else "explicit_zero"
+            )
         if purposes and issue_amount is not None:
             total = sum(amount for _, amount in purposes)
             if total != issue_amount:
                 self._append_warning(
-                    f"발행목적: 자금조달 목적 합계({total:,})가 발행금액({issue_amount:,})과 일치하지 않습니다."
+                    f"발행목적: 자금조달 목적 합계({total:,})가 발행금액({issue_amount:,})과 일치하지 않습니다.",
+                    level="weak",
                 )
         return purposes
 
@@ -168,6 +191,7 @@ class BondIssuanceExtractor:
         for price_label in ("전환가액", "교환가액", "행사가액", "행사가격"):
             value = self.rows.last_int(price_label, "원")
             if value is not None:
+                self._set_field_status("행사가액", "parsed")
                 return value
         self._warn_if_missing("행사가액", None)
         return None
@@ -175,6 +199,8 @@ class BondIssuanceExtractor:
     def extract_payment_date_from_payment_date_row(self) -> str | None:
         value = self.rows.last_labeled_value("납입일")
         self._warn_if_missing("납입일", value)
+        if value is not None:
+            self._set_field_status("납입일", "parsed")
         return value
 
     def extract_maturity_date_from_bond_maturity_row(self) -> str | None:
@@ -182,21 +208,29 @@ class BondIssuanceExtractor:
         if value is None:
             value = self.rows.last_value("사채만기")
         self._warn_if_missing("만기일", value)
+        if value is not None:
+            self._set_field_status("만기일", "parsed")
         return value
 
     def extract_issue_method_from_bond_issue_method_row(self) -> str | None:
         value = self.rows.last_value("사채발행방법")
         self._warn_if_missing("사채발행방법", value)
+        if value is not None:
+            self._set_field_status("사채발행방법", "parsed")
         return value
 
     def extract_exercise_period_start_from_claim_period_row(self) -> str | None:
         value = self._extract_exercise_period_value_from_claim_period_row("시작일")
         self._warn_if_missing("행사시작일", value)
+        if value is not None:
+            self._set_field_status("행사시작일", "parsed")
         return value
 
     def extract_exercise_period_end_from_claim_period_row(self) -> str | None:
         value = self._extract_exercise_period_value_from_claim_period_row("종료일")
         self._warn_if_missing("행사종료일", value)
+        if value is not None:
+            self._set_field_status("행사종료일", "parsed")
         return value
 
     def _extract_exercise_period_value_from_claim_period_row(
@@ -229,6 +263,7 @@ class BondIssuanceExtractor:
                 amount = last_int(row)
                 if amount is not None:
                     targets.append([row[0], amount])
+            self._set_field_status("투자자", "parsed" if targets else "explicit_zero")
             return targets
         self._warn_if_missing("투자자", None)
         return []
@@ -238,8 +273,19 @@ class BondIssuanceExtractor:
             return
         rule = BOND_FIELD_EXTRACTION_RULES[field_name]
         warning = f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다. 출처: {rule}"
-        self._append_warning(warning)
+        self._set_field_status(field_name, "source_not_found")
+        self._append_warning(warning, level="medium")
 
-    def _append_warning(self, warning: str) -> None:
+    def _set_field_status(self, field_name: str, status: str) -> None:
+        self.field_parse_status[field_name] = status
+
+    def _append_warning(self, warning: str, *, level: str) -> None:
+        target = {
+            "weak": self.weak_warnings,
+            "medium": self.medium_warnings,
+            "strong": self.strong_warnings,
+        }[level]
+        if warning not in target:
+            target.append(warning)
         if warning not in self.warnings:
             self.warnings.append(warning)
