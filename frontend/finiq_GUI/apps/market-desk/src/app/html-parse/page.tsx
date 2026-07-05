@@ -106,13 +106,28 @@ type ParseWarningItem = {
   source_file?: string;
   source_name?: string;
   warning?: string;
+  level?: string;
 };
+
+type WarningLevel = "weak_warning" | "medium_warning" | "strong_warning";
 
 type WarningReport = {
   sourceFile: string;
   sourceName: string;
-  warnings: string[];
+  warningsByLevel: Record<WarningLevel, string[]>;
 };
+
+const WARNING_LEVEL_LABELS: Record<WarningLevel, string> = {
+  weak_warning: "약한 에러",
+  medium_warning: "일반 에러",
+  strong_warning: "강한 에러",
+};
+
+const WARNING_LEVELS: WarningLevel[] = ["weak_warning", "medium_warning", "strong_warning"];
+
+const normalizeWarningLevel = (level?: string): WarningLevel => (
+  WARNING_LEVELS.includes(level as WarningLevel) ? level as WarningLevel : "medium_warning"
+);
 
 const buildWarningReports = (warnings: ParseWarningItem[]): WarningReport[] => {
   const reportMap = new Map<string, WarningReport>();
@@ -127,10 +142,14 @@ const buildWarningReports = (warnings: ParseWarningItem[]): WarningReport[] => {
     const report = reportMap.get(key) || {
       sourceFile,
       sourceName,
-      warnings: [],
+      warningsByLevel: {
+        weak_warning: [],
+        medium_warning: [],
+        strong_warning: [],
+      },
     };
 
-    report.warnings.push(warning);
+    report.warningsByLevel[normalizeWarningLevel(item.level)].push(warning);
     reportMap.set(key, report);
   });
 
@@ -595,7 +614,10 @@ export default function HtmlParsePage() {
   const warningPageStartIndex = safeWarningOpenPage * WARNING_OPEN_PAGE_SIZE;
   const warningPageSourceFiles = warningSourceFiles.slice(warningPageStartIndex, warningPageStartIndex + WARNING_OPEN_PAGE_SIZE);
   const warningPageEndIndex = warningPageStartIndex + warningPageSourceFiles.length;
-  const warningCount = warningReports.reduce((total, report) => total + report.warnings.length, 0);
+  const warningCount = warningReports.reduce(
+    (total, report) => total + WARNING_LEVELS.reduce((levelTotal, level) => levelTotal + report.warningsByLevel[level].length, 0),
+    0,
+  );
   const parsedValueTableClassName = "w-full table-auto border-collapse text-left text-[11px] leading-5";
   const parsedValueCellClassName = "border-b border-slate-100 px-3 py-2 align-top text-left font-normal text-slate-700 dark:border-[#30363d] dark:text-slate-300";
   const parsedValueHeaderClassName = "w-44 border-b border-slate-200 bg-slate-50 px-3 py-2 align-top text-left text-[11px] font-semibold leading-5 text-slate-600 dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300";
@@ -928,13 +950,26 @@ export default function HtmlParsePage() {
                             <p className="mt-1 break-all text-[11px] text-slate-500 dark:text-slate-400">{report.sourceFile}</p>
                           ) : null}
                         </div>
-                        <ul className="mt-2 space-y-1.5">
-                          {report.warnings.map((warning, warningIndex) => (
-                            <li key={`${warning}-${warningIndex}`} className="text-xs leading-5 text-slate-700 dark:text-slate-300">
-                              {warning}
-                            </li>
-                          ))}
-                        </ul>
+                        <div className="mt-2 space-y-2">
+                          {WARNING_LEVELS.map((level) => {
+                            const levelWarnings = report.warningsByLevel[level];
+                            if (!levelWarnings.length) return null;
+                            return (
+                              <div key={level} className="space-y-1">
+                                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                  {WARNING_LEVEL_LABELS[level]} {formatInteger(levelWarnings.length)}건
+                                </p>
+                                <ul className="space-y-1.5">
+                                  {levelWarnings.map((warning, warningIndex) => (
+                                    <li key={`${warning}-${warningIndex}`} className="text-xs leading-5 text-slate-700 dark:text-slate-300">
+                                      {warning}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     ))}
                   </div>

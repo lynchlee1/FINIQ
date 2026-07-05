@@ -814,14 +814,34 @@ def _resolve_correction_family_acpt_numbers(
     return resolved_records
 
 
-def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    report_counts: dict[str, dict[str, Any]] = {}
+WARNING_LEVEL_KEYS = ("weak_warning", "medium_warning", "strong_warning")
+
+
+def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, Any]:
+    report_counts: dict[str, Any] = {
+        "count": 0,
+        "report_count": 0,
+        "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
+        "medium_warning": {"count": 0, "report_count": 0, "reports": {}},
+        "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
+    }
+    report_numbers: set[str] = set()
     for warning in warnings:
         source_name = str(warning.get("source_name") or "").strip()
         report_no = Path(source_name).stem if source_name else ""
         if not report_no:
             continue
-        report = report_counts.setdefault(
+        warning_message = str(warning.get("warning") or "").strip()
+        if not warning_message:
+            continue
+        level = str(warning.get("level") or "medium_warning").strip()
+        if level not in WARNING_LEVEL_KEYS:
+            level = "medium_warning"
+        report_numbers.add(report_no)
+        report_counts["count"] += 1
+        level_counts = report_counts[level]
+        level_counts["count"] += 1
+        report = level_counts["reports"].setdefault(
             report_no,
             {
                 "count": 0,
@@ -829,9 +849,10 @@ def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, di
             },
         )
         report["count"] += 1
-        warning_message = str(warning.get("warning") or "").strip()
-        if warning_message:
-            report["warnings"].append(warning_message)
+        report["warnings"].append(warning_message)
+    report_counts["report_count"] = len(report_numbers)
+    for level in WARNING_LEVEL_KEYS:
+        report_counts[level]["report_count"] = len(report_counts[level]["reports"])
     return report_counts
 
 
@@ -954,22 +975,38 @@ def _build_preview_record(
     }
 
 
-def _record_parse_warnings(record: dict[str, Any]) -> list[str]:
-    collected: list[str] = []
-    for key in (
-        "parse_warnings",
-        "weak_warning",
-        "medium_warning",
-        "strong_warning",
-    ):
+def _record_parse_warning_items(record: dict[str, Any]) -> list[dict[str, str]]:
+    level_by_warning: dict[str, str] = {}
+    for key in WARNING_LEVEL_KEYS:
         warnings = record.get(key)
         if not isinstance(warnings, list):
             continue
         for warning in warnings:
             text = str(warning).strip()
-            if text and text not in collected:
-                collected.append(text)
+            if text and text not in level_by_warning:
+                level_by_warning[text] = key
+
+    collected: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for key in ("parse_warnings", *WARNING_LEVEL_KEYS):
+        warnings = record.get(key)
+        if not isinstance(warnings, list):
+            continue
+        for warning in warnings:
+            text = str(warning).strip()
+            if text and text not in seen:
+                seen.add(text)
+                collected.append(
+                    {
+                        "warning": text,
+                        "level": level_by_warning.get(text, "medium_warning"),
+                    }
+                )
     return collected
+
+
+def _record_parse_warnings(record: dict[str, Any]) -> list[str]:
+    return [item["warning"] for item in _record_parse_warning_items(record)]
 
 
 def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
@@ -1073,6 +1110,7 @@ def _add_parse_warning(
     html_file: Path,
     source_file: str,
     warning: str,
+    level: str,
 ) -> None:
     warning_info = {
         "index": index,
@@ -1081,6 +1119,7 @@ def _add_parse_warning(
         "source_file": source_file,
         "source_name": html_file.name,
         "warning": warning,
+        "level": level,
     }
     state.warnings.append(warning_info)
     state.emit(
@@ -1134,14 +1173,15 @@ def _parse_one_html_file(
             mode=request.mode,
         )
         if _record_matches_filters(record, request.record_filters):
-            for warning in _record_parse_warnings(parsed_record):
+            for warning_item in _record_parse_warning_items(parsed_record):
                 _add_parse_warning(
                     request,
                     state,
                     index=index,
                     html_file=html_file,
                     source_file=source_file,
-                    warning=warning,
+                    warning=warning_item["warning"],
+                    level=warning_item["level"],
                 )
             state.records.append(record)
         state.processed_files.add(source_file)
@@ -1193,7 +1233,7 @@ def _parse_html_file_for_worker(
                 request.manifest_metadata_index,
                 mode=request.mode,
             ),
-            "warnings": _record_parse_warnings(parsed_record),
+            "warnings": _record_parse_warning_items(parsed_record),
         }
     except Exception as exc:
         return {
@@ -1216,14 +1256,15 @@ def _record_parallel_parse_result(
     if result["kind"] == "record":
         record = result["record"]
         if _record_matches_filters(record, request.record_filters):
-            for warning in result["warnings"]:
+            for warning_item in result["warnings"]:
                 _add_parse_warning(
                     request,
                     state,
                     index=index,
                     html_file=html_file,
                     source_file=source_file,
-                    warning=warning,
+                    warning=warning_item["warning"],
+                    level=warning_item["level"],
                 )
             state.records.append(record)
         state.processed_files.add(source_file)

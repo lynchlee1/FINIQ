@@ -41,7 +41,11 @@ test("html parse notification panel lists warning reports and reasons", async ()
   assert.match(notificationContent, /warningReports\.map/);
   assert.match(notificationContent, /report\.sourceName/);
   assert.match(notificationContent, /report\.sourceFile/);
-  assert.match(notificationContent, /report\.warnings\.map/);
+  assert.match(notificationContent, /WARNING_LEVEL_LABELS/);
+  assert.match(notificationContent, /report\.warningsByLevel\[level\]/);
+  assert.match(source, /약한 에러/);
+  assert.match(source, /일반 에러/);
+  assert.match(source, /강한 에러/);
 });
 
 test("html parse page uses standard two-row data path card", async () => {

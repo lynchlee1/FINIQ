@@ -4270,10 +4270,20 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
     assert payload["summary"]["parsed_files"] == 1
     assert payload["summary"]["failed_files"] == 0
     assert payload["warning_report_counts"] == {
-        "20250101000001": {
+        "count": len(payload["warnings"]),
+        "report_count": 1,
+        "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
+        "medium_warning": {
             "count": len(payload["warnings"]),
-            "warnings": [item["warning"] for item in payload["warnings"]],
-        }
+            "report_count": 1,
+            "reports": {
+                "20250101000001": {
+                    "count": len(payload["warnings"]),
+                    "warnings": [item["warning"] for item in payload["warnings"]],
+                }
+            },
+        },
+        "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
     }
     assert payload["warnings"][0] == {
         "index": 1,
@@ -4282,6 +4292,7 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         "source_file": str(html_path.resolve()),
         "source_name": "20250101000001.html",
         "warning": "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.",
+        "level": "medium_warning",
     }
     assert any(
         item["warning"].startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
@@ -4326,12 +4337,23 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
         "source_file": str(html_path.resolve()),
         "source_name": "20250101000001.html",
         "warning": "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
+        "level": "medium_warning",
     }
     assert payload["warning_report_counts"] == {
-        "20250101000001": {
+        "count": len(payload["warnings"]),
+        "report_count": 1,
+        "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
+        "medium_warning": {
             "count": len(payload["warnings"]),
-            "warnings": [item["warning"] for item in payload["warnings"]],
-        }
+            "report_count": 1,
+            "reports": {
+                "20250101000001": {
+                    "count": len(payload["warnings"]),
+                    "warnings": [item["warning"] for item in payload["warnings"]],
+                }
+            },
+        },
+        "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
     }
     assert any("파싱 경고 1/1: 20250101000001.html" in line for line in payload["progress_log"])
 
@@ -4531,6 +4553,75 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
     assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
 
 
+def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    html_path = viewer_dir / "20250101000001.html"
+    html_path.write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "",
+            "parse_warnings": ["weak warning", "medium warning", "strong warning"],
+            "weak_warning": ["weak warning"],
+            "medium_warning": ["medium warning"],
+            "strong_warning": ["strong warning"],
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+        }
+    )
+
+    assert [(item["warning"], item["level"]) for item in payload["warnings"]] == [
+        ("weak warning", "weak_warning"),
+        ("medium warning", "medium_warning"),
+        ("strong warning", "strong_warning"),
+    ]
+    assert payload["warning_report_counts"] == {
+        "count": 3,
+        "report_count": 1,
+        "weak_warning": {
+            "count": 1,
+            "report_count": 1,
+            "reports": {
+                "20250101000001": {
+                    "count": 1,
+                    "warnings": ["weak warning"],
+                }
+            },
+        },
+        "medium_warning": {
+            "count": 1,
+            "report_count": 1,
+            "reports": {
+                "20250101000001": {
+                    "count": 1,
+                    "warnings": ["medium warning"],
+                }
+            },
+        },
+        "strong_warning": {
+            "count": 1,
+            "report_count": 1,
+            "reports": {
+                "20250101000001": {
+                    "count": 1,
+                    "warnings": ["strong warning"],
+                }
+            },
+        },
+    }
+
+
 def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
@@ -4575,10 +4666,20 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
         "20250101000001.html"
     ]
     assert payload["warning_report_counts"] == {
-        "20250101000001": {
+        "count": 1,
+        "report_count": 1,
+        "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
+        "medium_warning": {
             "count": 1,
-            "warnings": ["20250101000001 warning"],
-        }
+            "report_count": 1,
+            "reports": {
+                "20250101000001": {
+                    "count": 1,
+                    "warnings": ["20250101000001 warning"],
+                }
+            },
+        },
+        "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
     }
     assert payload["filter_settings"] == {
         "record_filters": [
@@ -5653,6 +5754,100 @@ def test_parse_rights_issuance_classifies_consistency_warnings_by_level(tmp_path
     assert any("배정주식수 합계" in warning for warning in parsed["weak_warning"])
     assert any("자금조달 목적 합계" in warning for warning in parsed["weak_warning"])
     assert any("0이 아닌 주식 종류가 둘 이상" in warning for warning in parsed["medium_warning"])
+
+
+def test_parse_rights_issuance_excludes_bottom_duplicate_total_issue_target(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20080908000527.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>5,806,443</td></tr>
+        <tr><td>기타주식 (주)</td><td>0</td></tr>
+        <tr><td rowspan="1">4. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000</td></tr>
+        <tr><td colspan="2">5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr>
+          <th>제3자배정 대상자</th><th>회사 또는 최대주주와의 관계</th><th>선정경위</th>
+          <th>증자결정 전후 6월이내 거래내역 및 계획</th><th>배정주식수 (주)</th><th>비 고</th>
+        </tr>
+        <tr><td>테스트조합</td><td>-</td><td>투자 의향과 납입능력을 고려해 선정</td><td>-</td><td>5,806,443</td><td>-</td></tr>
+        <tr><td>인수금액 총계</td><td>-</td><td>-</td><td>-</td><td>5,806,443</td><td>-</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행대상자"] == [["테스트조합", 5_806_443]]
+    assert not any(
+        "배정주식수 합계" in warning and "일치하지 않습니다" in warning
+        for warning in parsed.get("parse_warnings", [])
+    )
+
+
+def test_parse_rights_issuance_keeps_duplicate_total_when_not_bottom_issue_target(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20250102000011.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>5,806,443</td></tr>
+        <tr><td>기타주식 (주)</td><td>0</td></tr>
+        <tr><td colspan="2">5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr>
+          <th>제3자배정 대상자</th><th>회사 또는 최대주주와의 관계</th><th>선정경위</th>
+          <th>증자결정 전후 6월이내 거래내역 및 계획</th><th>배정주식수 (주)</th><th>비 고</th>
+        </tr>
+        <tr><td>인수금액 총계</td><td>-</td><td>-</td><td>-</td><td>5,806,443</td><td>-</td></tr>
+        <tr><td>테스트조합</td><td>-</td><td>투자 의향과 납입능력을 고려해 선정</td><td>-</td><td>5,806,443</td><td>-</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행대상자"] == [
+        ["인수금액 총계", 5_806_443],
+        ["테스트조합", 5_806_443],
+    ]
+    assert any(
+        "배정주식수 합계" in warning
+        for warning in parsed.get("parse_warnings", [])
+    )
+
+
+def test_parse_rights_issuance_keeps_unsplit_total_like_bottom_issue_target(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20250102000012.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>5,806,443</td></tr>
+        <tr><td>기타주식 (주)</td><td>0</td></tr>
+        <tr><td colspan="2">5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
+        <tr><td>테스트조합</td><td>5,806,443</td></tr>
+        <tr><td>인수금액총계</td><td>5,806,443</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행대상자"] == [
+        ["테스트조합", 5_806_443],
+        ["인수금액총계", 5_806_443],
+    ]
+    assert any(
+        "배정주식수 합계" in warning
+        for warning in parsed.get("parse_warnings", [])
+    )
 
 
 def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(

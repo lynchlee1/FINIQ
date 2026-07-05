@@ -31,7 +31,7 @@ def parse_rights_issuance(
     payment_date = extractor.get_payment_date()
     delivery_date = extractor.get_delivery_date()
     listing_date = extractor.get_listing_date()
-    issue_targets = extractor.get_issue_targets()
+    issue_targets = extractor.get_issue_targets(stock_counts=stock_counts)
     extractor.validate_consistency(
         stock_counts=stock_counts,
         funding_purposes=funding_purposes,

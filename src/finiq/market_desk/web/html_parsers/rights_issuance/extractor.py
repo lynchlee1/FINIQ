@@ -37,6 +37,7 @@ STOCK_LABELS = {
     "보통주식": ("보통주식", "보통주"),
     "기타주식": ("기타주식", "기타주", "우선주식", "우선주", "종류주식", "종류주"),
 }
+ISSUE_TARGET_TOTAL_LABEL_TOKENS = {"계", "합계", "소계", "총계"}
 
 
 class RightsIssuanceExtractor:
@@ -179,7 +180,7 @@ class RightsIssuanceExtractor:
         )
         return value
 
-    def get_issue_targets(self) -> list[list[Any]]:
+    def get_issue_targets(self, *, stock_counts: list[list[Any]]) -> list[list[Any]]:
         """제3자 배정 대상자와 배정 주식 수를 추출한다."""
         for table in non_correction_tables(self.context.raw_tables):
             rows = table.get("logical_rows") or []
@@ -194,13 +195,20 @@ class RightsIssuanceExtractor:
             for row in data_rows:
                 if not row or row[0] == "-":
                     continue
+                amount_from_declared_column = (
+                    amount_idx is not None and amount_idx < len(row)
+                )
                 amount = (
                     parse_int(row[amount_idx])
-                    if amount_idx is not None and amount_idx < len(row)
+                    if amount_from_declared_column
                     else last_int(row)
                 )
                 if amount is not None:
                     targets.append([row[0], amount])
+            targets = self._exclude_bottom_duplicate_total_target(
+                targets,
+                stock_total=self._sum_amounts(stock_counts),
+            )
             if targets:
                 self._set_field_status("발행대상자", "parsed")
                 return targets
@@ -228,6 +236,28 @@ class RightsIssuanceExtractor:
             if amount is not None:
                 return False
         return True
+
+    def _exclude_bottom_duplicate_total_target(
+        self,
+        targets: list[list[Any]],
+        *,
+        stock_total: int,
+    ) -> list[list[Any]]:
+        if len(targets) < 2 or stock_total <= 0:
+            return targets
+        if not self._has_issue_target_total_label_token(targets[-1][0]):
+            return targets
+        target_total = self._sum_amounts(targets)
+        bottom_amount = self._item_amount(targets[-1])
+        if target_total == stock_total * 2 and bottom_amount == stock_total:
+            return targets[:-1]
+        return targets
+
+    def _has_issue_target_total_label_token(self, value: object) -> bool:
+        return any(
+            token in ISSUE_TARGET_TOTAL_LABEL_TOKENS
+            for token in str(value).strip().split()
+        )
 
     def _stock_values(
         self,
