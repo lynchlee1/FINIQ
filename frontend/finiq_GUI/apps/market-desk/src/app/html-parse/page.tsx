@@ -73,8 +73,10 @@ const buildParseOutputPath = (inputDirectory: string, mode: string) => {
   const trimmedInputDirectory = inputDirectory.trim();
   const normalizedInputDirectory = trimmedInputDirectory === "/" ? trimmedInputDirectory : trimmedInputDirectory.replace(/\/+$/, "");
   if (!normalizedInputDirectory) return "";
-  const outputDirectory = normalizedInputDirectory.endsWith("/kind_html_contents_grouped_sections")
-    ? normalizedInputDirectory.slice(0, -"kind_html_contents_grouped_sections".length).replace(/\/+$/, "") || "/"
+  const htmlContentDirectory = ["kind_html_contents_grouped_sections", "kind_html_contents_sections"]
+    .find((directoryName) => normalizedInputDirectory.endsWith(`/${directoryName}`));
+  const outputDirectory = htmlContentDirectory
+    ? normalizedInputDirectory.slice(0, -htmlContentDirectory.length).replace(/\/+$/, "") || "/"
     : normalizedInputDirectory;
   return `${outputDirectory}/parsed-${mode}.json`;
 };
@@ -261,7 +263,7 @@ export default function HtmlParsePage() {
   const [limit, setLimit] = useState("");
   const [skipErrors, setSkipErrors] = useState(true);
   const [resumeParse, setResumeParse] = useState(false);
-  const [progressInterval, setProgressInterval] = useState("10");
+  const [progressInterval, setProgressInterval] = useState("1000");
   const [parallelWorkers, setParallelWorkers] = useState("");
   const [selectedExecutionOptionValues, setSelectedExecutionOptionValues] = useState<string[]>([]);
   const [executionOptionCandidates, setExecutionOptionCandidates] = useState<FilterCandidate[]>([]);

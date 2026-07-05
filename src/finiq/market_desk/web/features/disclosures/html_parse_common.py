@@ -31,7 +31,10 @@ _CANCEL_LOCK = Lock()
 _PARSE_CACHE: dict[str, dict[str, Any]] = {}
 _CACHE_LOCK = Lock()
 SUPPORTED_RECORD_FILTER_OPERATORS = {"contains", "equals", "exists", "in"}
-HTML_PARSE_SOURCE_OUTPUT_DIRECTORY = "kind_html_contents_grouped_sections"
+HTML_PARSE_SOURCE_OUTPUT_DIRECTORIES = {
+    "kind_html_contents_grouped_sections",
+    "kind_html_contents_sections",
+}
 
 @dataclass(frozen=True)
 class ParseFilterConfig:
@@ -255,17 +258,24 @@ def _load_html_manifest_metadata_index(
             _merge_metadata_index(
                 metadata_index,
                 _load_compressed_external_html_metadata_index(compressed_path),
+                prefer_correction_families=True,
             )
     return metadata_index
 
 
 def _merge_metadata_index(
-    target: dict[str, dict[str, Any]], source: dict[str, dict[str, Any]]
+    target: dict[str, dict[str, Any]],
+    source: dict[str, dict[str, Any]],
+    *,
+    prefer_correction_families: bool = False,
 ) -> None:
     for acpt_no, metadata in source.items():
         current = target.setdefault(acpt_no, {})
         for key, value in metadata.items():
             if value:
+                if key == "correction_families" and prefer_correction_families:
+                    current[key] = value
+                    continue
                 if key in {"rcept_no", "correction_families"} and current.get(key):
                     continue
                 current[key] = value
@@ -442,15 +452,92 @@ def _load_compressed_external_html_metadata_index(
         ) from exc
     if not isinstance(payload, dict):
         return {}
+    records = [item for item in payload.get("records") or [] if isinstance(item, dict)]
+    selected_doc_to_record = {
+        str(item.get("selected_main_doc_no") or "").strip(): item
+        for item in records
+        if str(item.get("selected_main_doc_no") or "").strip()
+    }
     metadata_index: dict[str, dict[str, Any]] = {}
-    for item in payload.get("records") or []:
+    for item in records:
         if not isinstance(item, dict):
             continue
         parsed = _metadata_item(item)
         if parsed is not None:
             acpt_no, metadata = parsed
+            family = _external_html_correction_family(item, selected_doc_to_record)
+            if family:
+                metadata["correction_families"] = family
             metadata_index[acpt_no] = metadata
     return metadata_index
+
+
+def _external_html_correction_family(
+    item: dict[str, Any],
+    selected_doc_to_record: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    main_docs = [
+        doc
+        for doc in item.get("docs") or []
+        if isinstance(doc, dict)
+        and str(doc.get("select_id") or "").strip() == "mainDoc"
+        and str(doc.get("doc_no") or "").strip()
+    ]
+    if len(main_docs) < 2:
+        return None
+
+    members: list[dict[str, Any]] = []
+    for sequence, doc in enumerate(sorted(main_docs, key=_external_main_doc_sort_key)):
+        doc_no = str(doc.get("doc_no") or "").strip()
+        member_record = selected_doc_to_record.get(doc_no)
+        if member_record is None:
+            return None
+        metadata = member_record.get("metadata") or {}
+        title = str(
+            metadata.get("title") or member_record.get("title") or doc.get("text") or ""
+        ).strip()
+        members.append(
+            {
+                "sequence": sequence,
+                "acpt_no": str(member_record.get("acpt_no") or "").strip(),
+                "doc_no": doc_no,
+                "title": title,
+                "disclosed_at": str(metadata.get("disclosed_at") or "").strip(),
+                "is_correction_report": _external_doc_is_correction(doc, title),
+            }
+        )
+
+    current_doc_no = str(item.get("selected_main_doc_no") or "").strip()
+    current_sequence = next(
+        (
+            member["sequence"]
+            for member in members
+            if str(member.get("doc_no") or "") == current_doc_no
+        ),
+        None,
+    )
+    family_id = str(members[-1].get("acpt_no") or "").strip()
+    if current_sequence is None or not family_id:
+        return None
+    return {
+        family_id: {
+            "current_sequence": current_sequence,
+            "members": members,
+        }
+    }
+
+
+def _external_main_doc_sort_key(doc: dict[str, Any]) -> tuple[int, str]:
+    try:
+        option_index = int(doc.get("option_index"))
+    except (TypeError, ValueError):
+        option_index = 0
+    return (option_index, str(doc.get("doc_no") or ""))
+
+
+def _external_doc_is_correction(doc: dict[str, Any], title: str) -> bool:
+    text = str(doc.get("text") or "")
+    return "정정" in text or "정정" in title
 
 
 def _apply_manifest_metadata(
@@ -539,7 +626,7 @@ def _parse_limit(value: Any) -> int | None:
 
 def _parse_progress_interval(value: Any) -> int:
     if value in (None, ""):
-        return 10
+        return 1000
     parsed = int(value)
     if parsed < 1:
         msg = "progress_interval must be >= 1"
@@ -646,7 +733,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
 def _default_parse_output_path(input_directory: Path, mode: str) -> Path:
     output_directory = (
         input_directory.parent
-        if input_directory.name == HTML_PARSE_SOURCE_OUTPUT_DIRECTORY
+        if input_directory.name in HTML_PARSE_SOURCE_OUTPUT_DIRECTORIES
         else input_directory
     )
     return output_directory / f"parsed-{mode}.json"

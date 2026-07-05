@@ -128,8 +128,9 @@ test("html parse page normalizes auto generated output paths", async () => {
 
   assert.match(source, /const buildParseOutputPath = \(inputDirectory: string, mode: string\)/);
   assert.match(source, /trimmedInputDirectory\.replace\(\/\\\/\+\$\/, ""\)/);
-  assert.match(source, /normalizedInputDirectory\.endsWith\("\/kind_html_contents_grouped_sections"\)/);
-  assert.match(source, /"kind_html_contents_grouped_sections"\.length/);
+  assert.match(source, /\["kind_html_contents_grouped_sections", "kind_html_contents_sections"\]/);
+  assert.match(source, /normalizedInputDirectory\.endsWith\(`\/\$\{directoryName\}`\)/);
+  assert.match(source, /normalizedInputDirectory\.slice\(0, -htmlContentDirectory\.length\)/);
   assert.doesNotMatch(source, /if \(config\.html_parse_result_path\)/);
   assert.doesNotMatch(source, /setOutputPath\(config\.html_parse_result_path\)/);
   assert.doesNotMatch(source, /`\$\{input\}\/parsed-\$\{mode\}\.json`/);
@@ -157,6 +158,7 @@ test("html parse page sends parallel worker count", async () => {
   const settingsBlock = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
 
   assert.match(source, /const \[parallelWorkers, setParallelWorkers\] = useState\(""\)/);
+  assert.match(source, /const \[progressInterval, setProgressInterval\] = useState\("1000"\)/);
   assert.match(runHandler, /parallel_workers: parallelWorkers \? Number\(parallelWorkers\) : null/);
   assert.match(settingsBlock, /id: "parallelWorkers"[\s\S]*?label: "병렬 워커 수"/);
   assert.match(settingsBlock, /help: "앱 최초 접속 시 확인한 CPU 기준 기본값을 사용합니다\."/);
