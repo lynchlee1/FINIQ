@@ -208,7 +208,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         body.get("parallel_workers", body.get("workers")), len(html_files)
     )
     candidate_counts: dict[str, int] = {}
-    candidate_examples: dict[str, list[str]] = {}
+    candidate_examples: dict[str, list[dict[str, str]]] = {}
     errors: list[dict[str, Any]] = []
     indexed_files = list(enumerate(html_files, start=1))
 
@@ -220,7 +220,13 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                 candidate_counts[text] = candidate_counts.get(text, 0) + 1
                 examples = candidate_examples.setdefault(text, [])
                 if len(examples) < 20:
-                    examples.append(html_file.stem)
+                    examples.append(
+                        {
+                            "acpt_no": html_file.stem,
+                            "source_name": html_file.relative_to(input_directory).as_posix(),
+                            "source_file": str(html_file),
+                        }
+                    )
 
     def record_error(index: int, html_file: Path, exc: Exception) -> None:
         errors.append(
