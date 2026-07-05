@@ -14,6 +14,7 @@ class RightsIssuanceRecord:
     """
 
     신주의_종류와_수: list[list[Any]]
+    증자_전_발행주식총수: list[list[Any]]
     발행목적: list[list[Any]]
     발행가액: list[list[Any]]
     기준주가: list[list[Any]]
@@ -27,6 +28,7 @@ class RightsIssuanceRecord:
         """추출된 데이터를 기존 파이프라인에서 기대하는 dict 키 형태로 매핑합니다."""
         return {
             "신주의 종류와 수": self.신주의_종류와_수,
+            "증자 전 발행주식총수": self.증자_전_발행주식총수,
             "발행목적": self.발행목적,
             "발행가액": self.발행가액,
             "기준주가": self.기준주가,

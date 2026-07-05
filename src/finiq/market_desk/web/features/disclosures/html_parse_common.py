@@ -174,6 +174,7 @@ CHANGE_LOG_FIELDS = {
     "rights_issuance": (
         "상장시장",
         "신주의 종류와 수",
+        "증자 전 발행주식총수",
         "발행목적",
         "발행가액",
         "기준주가",
@@ -201,6 +202,7 @@ MAJOR_CHANGE_FIELDS = {
     },
     "rights_issuance": {
         "신주의 종류와 수",
+        "증자 전 발행주식총수",
         "발행목적",
         "발행가액",
         "기준주가",
@@ -554,7 +556,6 @@ def _apply_manifest_metadata(
     rcept_no = metadata.get("rcept_no")
     doc_no = metadata.get("doc_no")
     selected_main_doc_no = metadata.get("selected_main_doc_no")
-    docs = metadata.get("docs")
     correction_families = metadata.get("correction_families")
     if (
         not market
@@ -563,7 +564,6 @@ def _apply_manifest_metadata(
         and not rcept_no
         and not doc_no
         and not selected_main_doc_no
-        and not docs
         and not correction_families
     ):
         return record
@@ -576,8 +576,6 @@ def _apply_manifest_metadata(
         updated_record["doc_no"] = doc_no
     if selected_main_doc_no and not updated_record.get("selected_main_doc_no"):
         updated_record["selected_main_doc_no"] = selected_main_doc_no
-    if docs and not updated_record.get("docs"):
-        updated_record["docs"] = docs
     if correction_families:
         updated_record["correction_families"] = correction_families
     if mode == "bond_issuance":
@@ -957,10 +955,21 @@ def _build_preview_record(
 
 
 def _record_parse_warnings(record: dict[str, Any]) -> list[str]:
-    warnings = record.get("parse_warnings")
-    if not isinstance(warnings, list):
-        return []
-    return [str(warning).strip() for warning in warnings if str(warning).strip()]
+    collected: list[str] = []
+    for key in (
+        "parse_warnings",
+        "weak_warning",
+        "medium_warning",
+        "strong_warning",
+    ):
+        warnings = record.get(key)
+        if not isinstance(warnings, list):
+            continue
+        for warning in warnings:
+            text = str(warning).strip()
+            if text and text not in collected:
+                collected.append(text)
+    return collected
 
 
 def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
