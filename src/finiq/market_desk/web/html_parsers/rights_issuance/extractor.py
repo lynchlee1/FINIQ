@@ -11,7 +11,7 @@ from ..common import (
     parse_int,
     row_contains,
 )
-from .utils import _RightsParseContext
+from .utils import STOCK_LABELS, _RightsParseContext
 
 RIGHTS_FIELD_EXTRACTION_RULES = {
     "신주의 종류와 수": "메인 표 > '신주의 종류와 수' 행 > 주식 종류별 마지막 숫자",
@@ -33,10 +33,6 @@ FUNDING_PURPOSE_LABELS = [
     "타법인 증권 취득자금",
     "기타자금",
 ]
-STOCK_LABELS = {
-    "보통주식": ("보통주식", "보통주"),
-    "기타주식": ("기타주식", "기타주", "우선주식", "우선주", "종류주식", "종류주"),
-}
 ISSUE_TARGET_TOTAL_LABEL_TOKENS = {"계", "합계", "소계", "총계"}
 
 

@@ -14,6 +14,10 @@ from ..common import (
 )
 
 MODE = "rights_issuance"
+STOCK_LABELS = {
+    "보통주식": ("보통주식", "보통주"),
+    "기타주식": ("기타주식", "기타주", "우선주식", "우선주", "종류주식", "종류주"),
+}
 
 
 def _rights_issuance_type(title: str) -> str:

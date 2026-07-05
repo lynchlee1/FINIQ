@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
-from ..common import clean_text, last_int, non_correction_tables, parse_int, row_contains
-from .utils import _BondParseContext
+from ..common import (
+    clean_text,
+    last_int,
+    non_correction_tables,
+    parse_int,
+    row_contains,
+)
+from .utils import (
+    _BondParseContext,
+    _clean_exercise_target_company_name,
+    _clean_funding_purpose_label,
+    _issue_amount_row,
+)
 
 BOND_FIELD_EXTRACTION_RULES = {
     "회차": "메인 표 > '1. 사채의 종류' 행 > '회차' 오른쪽 셀",
@@ -66,21 +76,7 @@ class BondIssuanceExtractor:
             self._warn_if_missing("기업명(행사대상)", None)
             return None
         self._set_field_status("기업명(행사대상)", "parsed")
-        cleaned = text
-        replacements = (
-            r"\(주\)",
-            r"㈜",
-            r"주식회사",
-            r"기명식",
-            r"무기명식",
-            r"보통주식?",
-            r"보통주?",
-            r"주식",
-        )
-        for pattern in replacements:
-            cleaned = re.sub(pattern, " ", cleaned)
-        cleaned = clean_text(cleaned.strip(" -_/·,"))
-        return cleaned or text
+        return _clean_exercise_target_company_name(text) or text
 
     def _extract_exercise_target_stock_text_from_main_rows(self) -> str | None:
         """전환/교환/신주인수권 행사로 발행될 대상 주식 관련 문구를 추출한다."""
@@ -108,14 +104,7 @@ class BondIssuanceExtractor:
         return value
 
     def _issue_amount_row(self) -> list[str]:
-        rows = [row for row in self.rows.values if row_contains(row, "사채의 권면")]
-        for row in rows:
-            if row_contains(row, "원화기준"):
-                return row
-        for row in rows:
-            if row_contains(row, "(원)"):
-                return row
-        return rows[0] if rows else []
+        return _issue_amount_row(self.rows.values)
 
     def _last_int_after_first_cell(self, row: list[str]) -> int | None:
         for cell in reversed(row[1:]):
@@ -168,11 +157,7 @@ class BondIssuanceExtractor:
         return None
 
     def _clean_funding_purpose_label(self, value: str) -> str | None:
-        label = clean_text(value)
-        label = re.sub(r"\(\s*원\s*\)", "", label)
-        label = re.sub(r"\s*원$", "", label)
-        label = clean_text(label.strip(" -_/·,"))
-        return label or None
+        return _clean_funding_purpose_label(value)
 
     def _funding_purpose_amount(self, row: list[str]) -> int | None:
         purpose_index = self._funding_purpose_index(row)
