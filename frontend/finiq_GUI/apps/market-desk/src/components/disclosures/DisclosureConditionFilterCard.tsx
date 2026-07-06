@@ -1,6 +1,6 @@
 "use client"
 
-import { Pencil, Plus, Save, Trash2 } from "lucide-react";
+import { Pencil, Plus, Save, Trash2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 
@@ -186,7 +186,7 @@ export function DisclosureConditionFilterCard({
                 onSavePreset();
               }
             }} placeholder="프리셋 이름" className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-            <Button variant="outline" onClick={onLoadPresetFromJson}>불러오기</Button>
+            <Button variant="outline" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>
             <Button onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
             <Button variant="outline" onClick={onRenamePreset} disabled={!selectedPreset}><Pencil className="mr-2 h-4 w-4" />수정</Button>
             <Button variant="outline" onClick={onDeletePreset} disabled={!selectedPreset}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>

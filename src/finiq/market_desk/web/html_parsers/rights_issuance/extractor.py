@@ -7,7 +7,6 @@ from typing import Any
 from ..common import (
     column_index,
     last_int,
-    non_correction_tables,
     parse_int,
     row_contains,
 )
@@ -34,6 +33,12 @@ FUNDING_PURPOSE_LABELS = [
     "기타자금",
 ]
 ISSUE_TARGET_TOTAL_LABEL_TOKENS = {"계", "합계", "소계", "총계"}
+ISSUANCE_TYPE_LABELS = {
+    "paid": "유상증자",
+    "bonus": "무상증자",
+    "mixed": "유무상증자",
+    "unknown": "unknown",
+}
 
 
 class RightsIssuanceExtractor:
@@ -74,6 +79,8 @@ class RightsIssuanceExtractor:
             self._set_field_status(
                 "발행목적", "parsed" if purposes else "explicit_zero"
             )
+        elif self.context.issuance_type == "bonus":
+            self._set_field_status("발행목적", "not_applicable")
         else:
             self._warn_if_missing("발행목적", None)
         return purposes
@@ -131,11 +138,14 @@ class RightsIssuanceExtractor:
         return self._stock_values(
             "신주 발행가액",
             warning_field_name="발행가액",
+            warn_when_all_missing=self.context.issuance_type != "bonus",
         )
 
     def get_base_prices(self) -> list[list[Any]]:
         """기준주가를 주식 종류별로 추출한다."""
-        return self._stock_values("기준주가")
+        return self._stock_values(
+            "기준주가", warn_when_all_missing=self.context.issuance_type != "bonus"
+        )
 
     def get_issue_method(self) -> str | None:
         """증자방식을 추출하고 무상증자 공시는 제목 기반 분류값으로 보완한다."""
@@ -150,6 +160,9 @@ class RightsIssuanceExtractor:
     def get_payment_date(self) -> str | None:
         """납입일을 추출한다."""
         value = self.rows.last_value("납입일")
+        if value is None and self.context.issuance_type == "bonus":
+            self._set_field_status("납입일", "not_applicable")
+            return None
         self._warn_if_missing("납입일", value)
         self._set_field_status(
             "납입일", "parsed" if value is not None else "source_not_found"
@@ -176,7 +189,10 @@ class RightsIssuanceExtractor:
 
     def get_issue_targets(self, *, stock_counts: list[list[Any]]) -> list[list[Any]]:
         """제3자 배정 대상자와 배정 주식 수를 추출한다."""
-        for table in non_correction_tables(self.context.raw_tables):
+        stock_total = self._sum_amounts(stock_counts)
+        fallback_targets: list[list[Any]] | None = None
+        found_empty_target_table = False
+        for table in self.context.extraction_tables:
             rows = table.get("logical_rows") or []
             if not rows or not row_contains(rows[0], "제3자배정 대상자", "배정주식수"):
                 continue
@@ -201,11 +217,20 @@ class RightsIssuanceExtractor:
                     targets.append([row[0], amount])
             targets = self._exclude_bottom_duplicate_total_target(
                 targets,
-                stock_total=self._sum_amounts(stock_counts),
+                stock_total=stock_total,
             )
             if targets:
-                self._set_field_status("발행대상자", "parsed")
-                return targets
+                if self._sum_amounts(targets) == stock_total:
+                    self._set_field_status("발행대상자", "parsed")
+                    return targets
+                if fallback_targets is None:
+                    fallback_targets = targets
+                continue
+            found_empty_target_table = True
+        if fallback_targets is not None:
+            self._set_field_status("발행대상자", "parsed")
+            return fallback_targets
+        if found_empty_target_table:
             self._set_field_status("발행대상자", "source_found_empty")
             return []
         issue_method = self.get_issue_method()
@@ -213,6 +238,65 @@ class RightsIssuanceExtractor:
         if issue_method and "제3자배정" in issue_method and "종속회사" not in title:
             self._warn_if_missing("발행대상자", None)
         return []
+
+    def build_type_details(
+        self,
+        *,
+        stock_counts: list[list[Any]],
+        pre_issuance_stock_counts: list[list[Any]],
+        funding_purposes: list[list[Any]],
+        issue_prices: list[list[Any]],
+        issue_method: str | None,
+        payment_date: str | None,
+        delivery_date: str | None,
+        listing_date: str | None,
+        issue_targets: list[list[Any]],
+    ) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
+        """증자 유형별 상세 블록을 기존 flat 필드와 별도로 구성한다."""
+        issuance_type = self.context.issuance_type
+        issuance_label = ISSUANCE_TYPE_LABELS[issuance_type]
+        paid_detail = None
+        bonus_detail = None
+        if issuance_type in {"paid", "mixed"}:
+            paid_rows = self._rows_for_issuance_section("paid")
+            paid_detail = {
+                "신주의 종류와 수": stock_counts,
+                "증자 전 발행주식총수": pre_issuance_stock_counts,
+                "발행목적": funding_purposes,
+                "발행가액": issue_prices,
+                "증자방식": issue_method,
+                "신주배정기준일": self._section_last_value(paid_rows, "신주배정기준일"),
+                "1주당 신주배정주식수": self._section_stock_text_values(
+                    paid_rows, "1주당 신주배정"
+                ),
+                "납입일": payment_date,
+                "신주권교부예정일": delivery_date,
+                "상장예정일": listing_date,
+                "발행대상자": issue_targets,
+            }
+        if issuance_type in {"bonus", "mixed"}:
+            bonus_rows = self._rows_for_issuance_section("bonus")
+            bonus_detail = {
+                "신주의 종류와 수": self._section_stock_int_values(
+                    bonus_rows, "신주의 종류와 수"
+                ),
+                "증자 전 발행주식총수": self._section_stock_int_values(
+                    bonus_rows, "증자전 발행주식총수"
+                ),
+                "신주배정기준일": self._section_last_value(
+                    bonus_rows, "신주배정기준일"
+                ),
+                "1주당 신주배정주식수": self._section_stock_text_values(
+                    bonus_rows, "1주당 신주배정"
+                ),
+                "신주권교부예정일": self._section_last_value(
+                    bonus_rows, "신주권교부예정일"
+                ),
+                "상장예정일": self._section_last_value(
+                    bonus_rows, "신주의 상장 예정일"
+                ),
+            }
+        return issuance_label, paid_detail, bonus_detail
 
     def _is_undisclosed_issue_target_rows(
         self, data_rows: list[list[str]], amount_idx: int | None
@@ -253,6 +337,98 @@ class RightsIssuanceExtractor:
             for token in str(value).strip().split()
         )
 
+    def _rows_for_issuance_section(self, section: str) -> list[list[str]]:
+        rows = self.rows.values
+        if self.context.issuance_type == "mixed":
+            bonus_index = self._bonus_section_index(rows)
+            if bonus_index is None:
+                return rows if section == "paid" else []
+            if section == "paid":
+                return rows[:bonus_index]
+            return rows[bonus_index + 1 :]
+        if self.context.issuance_type == section:
+            return rows
+        return []
+
+    def _bonus_section_index(self, rows: list[list[str]]) -> int | None:
+        for index, row in enumerate(rows):
+            if row_contains(row, "무상증자") and not row_contains(row, "유무상증자"):
+                return index
+        return None
+
+    def _section_last_value(self, rows: list[list[str]], *needles: str) -> str | None:
+        for row in rows:
+            if row_contains(row, *needles):
+                return row[-1]
+        return None
+
+    def _section_stock_int_values(
+        self, rows: list[list[str]], section_label: str
+    ) -> list[list[Any]]:
+        values: list[list[Any]] = []
+        for output_label, source_labels in STOCK_LABELS.items():
+            parsed = self._section_stock_int_value(rows, section_label, source_labels)
+            values.append([output_label, 0 if parsed is None else parsed])
+        return values
+
+    def _section_stock_int_value(
+        self,
+        rows: list[list[str]],
+        section_label: str,
+        source_labels: tuple[str, ...],
+    ) -> int | None:
+        dash_seen = False
+        for row in rows:
+            if not row_contains(row, section_label):
+                continue
+            for index, cell in enumerate(row):
+                if not any(label in cell.replace(" ", "") for label in source_labels):
+                    continue
+                if index + 1 >= len(row):
+                    continue
+                parsed = parse_int(row[index + 1], dash_as_zero=True)
+                if parsed is None:
+                    continue
+                if parsed == 0:
+                    dash_seen = True
+                    continue
+                return parsed
+        return 0 if dash_seen else None
+
+    def _section_stock_text_values(
+        self, rows: list[list[str]], section_label: str
+    ) -> list[list[Any]]:
+        by_label = {
+            output_label: self._section_stock_text_value(
+                rows, section_label, source_labels
+            )
+            for output_label, source_labels in STOCK_LABELS.items()
+        }
+        if all(value is None for value in by_label.values()):
+            fallback = self._section_last_value(rows, section_label)
+            if fallback not in (None, "", "-"):
+                by_label["보통주식"] = fallback
+        return [[label, by_label[label]] for label in STOCK_LABELS]
+
+    def _section_stock_text_value(
+        self,
+        rows: list[list[str]],
+        section_label: str,
+        source_labels: tuple[str, ...],
+    ) -> str | None:
+        for row in rows:
+            if not row_contains(row, section_label):
+                continue
+            for index, cell in enumerate(row):
+                if not any(label in cell.replace(" ", "") for label in source_labels):
+                    continue
+                if index + 1 >= len(row):
+                    continue
+                value = row[index + 1].strip()
+                if value and value != "-":
+                    return value
+        return None
+
     def _stock_values(
         self,
         section_label: str,
@@ -273,6 +449,8 @@ class RightsIssuanceExtractor:
             self._set_field_status(field_name, "parsed")
         elif missing_count < len(STOCK_LABELS):
             self._set_field_status(field_name, "explicit_zero")
+        elif not warn_when_all_missing:
+            self._set_field_status(field_name, "not_applicable")
         else:
             self._set_field_status(field_name, "source_not_found")
         if warn_when_all_missing and missing_count == len(STOCK_LABELS):

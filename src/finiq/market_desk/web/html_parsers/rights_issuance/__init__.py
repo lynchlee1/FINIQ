@@ -38,8 +38,20 @@ def parse_rights_issuance(
         base_prices=base_prices,
         issue_targets=issue_targets,
     )
+    issuance_type, paid_detail, bonus_detail = extractor.build_type_details(
+        stock_counts=stock_counts,
+        pre_issuance_stock_counts=pre_issuance_stock_counts,
+        funding_purposes=funding_purposes,
+        issue_prices=issue_prices,
+        issue_method=issue_method,
+        payment_date=payment_date,
+        delivery_date=delivery_date,
+        listing_date=listing_date,
+        issue_targets=issue_targets,
+    )
 
     schema_record = RightsIssuanceRecord(
+        증자유형=issuance_type,
         신주의_종류와_수=stock_counts,
         증자_전_발행주식총수=pre_issuance_stock_counts,
         발행목적=funding_purposes,
@@ -50,6 +62,8 @@ def parse_rights_issuance(
         신주권교부예정일=delivery_date,
         상장예정일=listing_date,
         발행대상자=issue_targets,
+        유상증자=paid_detail,
+        무상증자=bonus_detail,
     )
 
     record.update(schema_record.to_dict())

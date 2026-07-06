@@ -66,5 +66,17 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Always use `PLANS.md` to record the purpose, implementation summary, and verification result for completed code changes.
 - Before adding or changing UI labels, button names, page titles, status text, or feature names, consult `docs/ui-terminology.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to the glossary in the same change and keep UI/tests aligned with it.
 - Do not add four meaningless info boxes just to fill space; summary cards must carry decision-making value or be omitted.
-- For assets Excel conversion work, follow `docs/assets-excel-conversion.md`. It records the implemented feature surface and the user's explicit rules for Wide Format + Parquet output, date range metadata, segment merging, and conflict handling.
 - Our goal is to minimize fallback logic to keep the codebase maintainable. Remove any fallback mechanism when eliminating it does not change the resulting behavior or output. Retain fallbacks only when they are necessary to preserve correctness, reliability, or meaningful edge-case handling.
+
+## Doc Routing
+
+To minimize token use, do not read all files under `docs/` by default. Open only
+the document that matches the current task:
+
+- UI labels, button names, page titles, status text, or feature names: `docs/ui-terminology.md`.
+- Quantiwise Excel, Wide Format, Parquet conversion, preview, merge, duplicate cleanup, account mapping, or date-range metadata: `docs/quantiwise-parquet-conversion.md`.
+- KIND disclosure identifiers, `acpt_no`, `doc_no`, `rcept_no`, `mainDoc`, `filtered.json`, `compressed-external-html.json`, or correction families: `docs/kind-disclosure-identifiers.md`.
+- Disclosure HTML parser architecture or cross-mode extraction behavior: `docs/disclosure-html-parser-logic.md`.
+- Editing KIND HTML parser rules, labels, warnings, correction-table filtering, or parser verification expectations: `docs/disclosure-html-parser-rules.md`.
+- Bond issuance parser field extraction, metadata, title extraction, listing market, or fallback decisions: `docs/bond-issuance-parser-logic-rules.md`.
+- Rights issuance parser field extraction or type handling for 유상증자, 무상증자, or 유무상증자: `docs/rights-issuance-parser-logic-rules.md`.
