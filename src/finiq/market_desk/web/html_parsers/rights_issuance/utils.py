@@ -9,6 +9,7 @@ from typing import Any
 from ..common import (
     build_base_record,
     last_value,
+    non_correction_tables,
     row_contains,
     row_containing,
 )
@@ -105,7 +106,7 @@ def _rights_extraction_tables(raw_tables: list[dict[str, Any]]) -> list[dict[str
     """필드 추출에 필요한 라벨이나 표 헤더가 있는 table만 선택한다."""
     return [
         table
-        for table in raw_tables
+        for table in non_correction_tables(raw_tables)
         if _is_rights_extraction_table(table.get("logical_rows") or [])
     ]
 

@@ -13,10 +13,12 @@ from ..common import (
 )
 from .utils import (
     _BondParseContext,
+    _BondRows,
     _clean_exercise_target_company_name,
     _clean_funding_purpose_label,
-    _issue_amount_row,
 )
+
+_MAIN_BOND_TABLE_LABELS = ("사채의 종류", "사채의 권면", "자금조달의 목적")
 
 BOND_FIELD_EXTRACTION_RULES = {
     "회차": "메인 표 > '1. 사채의 종류' 행 > '회차' 오른쪽 셀",
@@ -39,7 +41,7 @@ class BondIssuanceExtractor:
 
     def __init__(self, context: _BondParseContext):
         self.context = context
-        self.rows = context.rows
+        self.rows = _BondRows(_main_bond_rows(context.raw_tables))
         self.warnings: list[str] = []
         self.weak_warnings: list[str] = []
         self.medium_warnings: list[str] = []
@@ -274,3 +276,26 @@ class BondIssuanceExtractor:
             target.append(warning)
         if warning not in self.warnings:
             self.warnings.append(warning)
+
+
+def _main_bond_rows(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
+    """사채 발행 결정의 메인 테이블을 찾는다."""
+    for table in non_correction_tables(raw_tables):
+        rows = table.get("logical_rows") or []
+        if all(
+            any(row_contains(row, label) for row in rows)
+            for label in _MAIN_BOND_TABLE_LABELS
+        ):
+            return rows
+    return []
+
+
+def _issue_amount_row(rows: list[list[str]]) -> list[str]:
+    amount_rows = [row for row in rows if row_contains(row, "사채의 권면")]
+    for row in amount_rows:
+        if row_contains(row, "원화기준"):
+            return row
+    for row in amount_rows:
+        if row_contains(row, "(원)"):
+            return row
+    return amount_rows[0] if amount_rows else []

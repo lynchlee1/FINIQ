@@ -13,13 +13,11 @@ from ..common import (
     last_int,
     last_value,
     row_containing,
-    row_contains,
     row_with_label,
     value_after,
 )
 
 MODE = "bond_issuance"
-_MAIN_BOND_TABLE_LABELS = ("사채의 종류", "사채의 권면", "자금조달의 목적")
 _EXERCISE_TARGET_COMPANY_NAME_REPLACEMENTS = (
     r"\(주\)",
     r"㈜",
@@ -50,27 +48,14 @@ def _clean_funding_purpose_label(value: str) -> str | None:
     return label or None
 
 
-def _issue_amount_row(rows: list[list[str]]) -> list[str]:
-    amount_rows = [row for row in rows if row_contains(row, "사채의 권면")]
-    for row in amount_rows:
-        if row_contains(row, "원화기준"):
-            return row
-    for row in amount_rows:
-        if row_contains(row, "(원)"):
-            return row
-    return amount_rows[0] if amount_rows else []
-
-
 @dataclass(frozen=True)
 class _BondParseContext:
     """사채 필드 추출에 사용되는 준비된 데이터.
 
     `record`: 공통 메타데이터와 원본 테이블.
-    `rows`: span 병합이 해제되어 정규화된 사채 발행 주요 테이블.
     """
 
     record: dict[str, Any]
-    rows: "_BondRows"
 
     @property
     def raw_tables(self) -> list[dict[str, Any]]:
@@ -109,17 +94,4 @@ def _build_bond_parse_context(
 ) -> _BondParseContext:
     """공통 메타데이터를 생성하고 본문 HTML의 주요 행 데이터를 구성한다."""
     record = build_base_record(html_text, file_path=file_path, mode=MODE)
-    rows = _main_bond_rows(record["raw_tables"])
-    return _BondParseContext(record=record, rows=_BondRows(rows))
-
-
-def _main_bond_rows(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
-    """사채 발행 결정의 메인 테이블을 찾는다."""
-    for table in raw_tables:
-        rows = table.get("logical_rows") or []
-        if all(
-            any(row_contains(row, label) for row in rows)
-            for label in _MAIN_BOND_TABLE_LABELS
-        ):
-            return rows
-    return []
+    return _BondParseContext(record=record)
