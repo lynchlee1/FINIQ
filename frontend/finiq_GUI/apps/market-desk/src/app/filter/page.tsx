@@ -165,6 +165,35 @@ export default function FilterPage() {
     applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
   };
 
+  const renamePreset = () => {
+    if (!selectedPreset) return;
+    const name = presetName.trim();
+    if (!name) {
+      setStatus("수정할 프리셋 이름을 입력하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const preset = (presets || []).find((item: any) => item.name === selectedPreset);
+    if (!preset) {
+      setStatus("선택한 프리셋을 찾을 수 없습니다.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (name !== selectedPreset && (presets || []).some((item: any) => item.name === name)) {
+      setStatus(`이미 같은 이름의 프리셋이 있습니다: ${name}`);
+      setIsErrorStatus(true);
+      return;
+    }
+    const next = (presets || []).map((item: any) => item.name === selectedPreset ? { ...item, name } : item);
+    next.sort((a: any, b: any) => a.name.localeCompare(b.name, "ko"));
+
+    saveSetting("condition_presets", next);
+    setSelectedPreset(name);
+    setPresetName(name);
+    setStatus(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${name}`);
+    setIsErrorStatus(false);
+  };
+
   const loadFilterPresetFromJson = async () => {
     try {
       const sourceJsonPath = await pickPath({
@@ -240,6 +269,7 @@ export default function FilterPage() {
             onLoadPreset={loadPreset}
             onLoadPresetFromJson={loadFilterPresetFromJson}
             onSavePreset={savePreset}
+            onRenamePreset={renamePreset}
             onDeletePreset={deletePreset}
           />
 
