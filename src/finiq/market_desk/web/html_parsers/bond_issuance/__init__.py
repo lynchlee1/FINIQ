@@ -16,12 +16,12 @@ def parse_bond_issuance(
     """사채 발행 HTML을 파싱한다."""
     context = _build_bond_parse_context(html_text, file_path=file_path)
     record_dict = context.record
-    if not context.rows.values:
+    extractor = BondIssuanceExtractor(context)
+    if not extractor.rows.values:
         warning = "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
         record_dict["parse_warnings"] = [warning]
         record_dict["strong_warning"] = [warning]
 
-    extractor = BondIssuanceExtractor(context)
     title = record_dict.get("title") or ""
     listing_market = record_dict.pop("상장시장", None)
     issue_amount = extractor.extract_issue_amount_from_bond_face_value_row()

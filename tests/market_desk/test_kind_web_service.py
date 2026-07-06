@@ -6323,6 +6323,33 @@ def test_parse_rights_issuance_excludes_correction_history_table_in_same_section
     assert len(parsed["raw_tables"]) == 5
 
 
+def test_parse_rights_issuance_excludes_correction_table_with_multiple_field_labels(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000014.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자 결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td>5. 증자방식</td><td>일반공모증자</td></tr>
+      </table>
+      <table>
+        <tr><td>정정일자</td><td>정정사유</td><td>정정전</td><td>정정후</td></tr>
+        <tr><td>기준주가 보통주식</td><td>기재정정</td><td>999</td><td>888</td></tr>
+        <tr><td>납입일</td><td>기재정정</td><td>2025년 01월 01일</td><td>2025년 01월 02일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["기준주가"] == [["보통주식", 0], ["기타주식", 0]]
+    assert parsed["field_parse_status"]["기준주가"] == "source_not_found"
+    assert parsed["납입일"] is None
+    assert parsed["field_parse_status"]["납입일"] == "source_not_found"
+
+
 def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_warning(
     tmp_path: Path,
 ) -> None:
