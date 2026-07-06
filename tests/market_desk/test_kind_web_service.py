@@ -83,6 +83,169 @@ from finiq.data_scraper.storage.classification_store import (
 
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parents[1]
+KIND_RESOURCES_DIR = REPO_ROOT / "resources" / "KIND"
+HAS_KIND_RESOURCES = KIND_RESOURCES_DIR.is_dir()
+RIGHTS_GROUPED_DIR = (
+    KIND_RESOURCES_DIR
+    / "rights_issuance"
+    / "kind_html_contents_sections_grouped"
+)
+PAID_RIGHTS_ISSUANCE_50_EXAMPLES = [
+    "2008/20080825000060.html",
+    "2008/20080825000143.html",
+    "2008/20080825000155.html",
+    "2008/20080825000248.html",
+    "2008/20080825000324.html",
+    "2008/20080825000337.html",
+    "2008/20080825000370.html",
+    "2008/20080825000389.html",
+    "2008/20080825000448.html",
+    "2008/20080826000077.html",
+    "2008/20080826000107.html",
+    "2008/20080826000122.html",
+    "2008/20080826000223.html",
+    "2008/20080826000259.html",
+    "2008/20080826000345.html",
+    "2008/20080826000364.html",
+    "2008/20080827000043.html",
+    "2008/20080827000091.html",
+    "2008/20080827000095.html",
+    "2008/20080827000150.html",
+    "2008/20080827000199.html",
+    "2008/20080827000256.html",
+    "2008/20080827000278.html",
+    "2008/20080827000283.html",
+    "2008/20080827000336.html",
+    "2008/20080828000214.html",
+    "2008/20080828000319.html",
+    "2008/20080829000402.html",
+    "2008/20080901000151.html",
+    "2008/20080901000322.html",
+    "2008/20080901000445.html",
+    "2008/20080901000478.html",
+    "2008/20080901000589.html",
+    "2008/20080901000600.html",
+    "2008/20080902000110.html",
+    "2008/20080903000038.html",
+    "2008/20080903000175.html",
+    "2008/20080903000226.html",
+    "2008/20080903000313.html",
+    "2008/20080903000352.html",
+    "2008/20080903000373.html",
+    "2008/20080903000392.html",
+    "2008/20080904000001.html",
+    "2008/20080904000005.html",
+    "2008/20080904000007.html",
+    "2008/20080904000037.html",
+    "2008/20080904000117.html",
+    "2008/20080904000153.html",
+    "2008/20080904000418.html",
+    "2008/20080904000435.html",
+]
+BONUS_RIGHTS_ISSUANCE_50_EXAMPLES = [
+    "2008/20080825000072.html",
+    "2008/20080825000101.html",
+    "2008/20080827000089.html",
+    "2008/20080828000418.html",
+    "2008/20080919000057.html",
+    "2008/20080919000087.html",
+    "2008/20080923000111.html",
+    "2008/20081029000157.html",
+    "2008/20081031000493.html",
+    "2008/20081117000038.html",
+    "2008/20081201000375.html",
+    "2008/20081210000228.html",
+    "2008/20081215000486.html",
+    "2008/20081216000162.html",
+    "2008/20081216000201.html",
+    "2008/20081216000720.html",
+    "2008/20081217000448.html",
+    "2008/20081223000201.html",
+    "2008/20081226000094.html",
+    "2009/20090105000045.html",
+    "2009/20090119000330.html",
+    "2009/20090121000112.html",
+    "2009/20090202000321.html",
+    "2009/20090203000286.html",
+    "2009/20090217000556.html",
+    "2009/20090219000109.html",
+    "2009/20090220000358.html",
+    "2009/20090401000139.html",
+    "2009/20090407000077.html",
+    "2009/20090414002030.html",
+    "2009/20090415002672.html",
+    "2009/20090420004502.html",
+    "2009/20090422005524.html",
+    "2009/20090428008008.html",
+    "2009/20090429000500.html",
+    "2009/20090511000072.html",
+    "2009/20090519000038.html",
+    "2009/20090520000048.html",
+    "2009/20090601000077.html",
+    "2009/20090609000084.html",
+    "2009/20090609000120.html",
+    "2009/20090624000073.html",
+    "2009/20090723000068.html",
+    "2009/20090817000088.html",
+    "2009/20090820000048.html",
+    "2009/20090907000085.html",
+    "2009/20090908000063.html",
+    "2009/20090921000058.html",
+    "2009/20091006000054.html",
+    "2009/20091029000067.html",
+]
+MIXED_RIGHTS_ISSUANCE_50_EXAMPLES = [
+    "2008/20081020000088.html",
+    "2008/20081113000105.html",
+    "2009/20090115000258.html",
+    "2009/20090409000111.html",
+    "2009/20090414002100.html",
+    "2009/20090417003897.html",
+    "2009/20090421005143.html",
+    "2009/20090429000652.html",
+    "2009/20090512000386.html",
+    "2009/20090514000328.html",
+    "2009/20090518000215.html",
+    "2009/20090522000392.html",
+    "2009/20090522000408.html",
+    "2009/20090602000311.html",
+    "2009/20090603000064.html",
+    "2009/20090608000211.html",
+    "2009/20090609000059.html",
+    "2009/20090709000053.html",
+    "2009/20090710000644.html",
+    "2009/20090724000215.html",
+    "2009/20090814000048.html",
+    "2009/20090817000109.html",
+    "2009/20090824000080.html",
+    "2009/20090825000168.html",
+    "2009/20090908000304.html",
+    "2009/20091012000383.html",
+    "2009/20091019000369.html",
+    "2009/20091020000083.html",
+    "2009/20091105000359.html",
+    "2009/20091118000158.html",
+    "2009/20091119000019.html",
+    "2009/20091120000516.html",
+    "2009/20091204000460.html",
+    "2009/20091210000149.html",
+    "2010/20100113000108.html",
+    "2010/20100122000421.html",
+    "2010/20100303000087.html",
+    "2010/20100304000051.html",
+    "2010/20100324000212.html",
+    "2010/20100402000097.html",
+    "2010/20100416000054.html",
+    "2010/20100423000360.html",
+    "2010/20100614000199.html",
+    "2010/20100618000053.html",
+    "2010/20100730000385.html",
+    "2010/20100824000091.html",
+    "2010/20100824000166.html",
+    "2010/20100910000399.html",
+    "2010/20100927000095.html",
+    "2010/20101004000068.html",
+]
 HTML_PARSERS_DIR = REPO_ROOT / "src" / "finiq" / "market_desk" / "web" / "html_parsers"
 GUI_APP_DIR = REPO_ROOT / "frontend" / "finiq_GUI" / "apps" / "market-desk" / "src" / "app"
 GUI_HTML_DOWNLOAD_PAGE = GUI_APP_DIR / "html-download" / "page.tsx"
@@ -5314,6 +5477,7 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
         ),
     ],
 )
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_bond_issuance_reads_split_span_amounts_without_sum_warning(
     acpt_no: str, expected_issue_amount: int, expected_purposes: list[list[object]]
 ) -> None:
@@ -5479,6 +5643,7 @@ def test_parse_bond_issuance_reads_dash_issue_amount_as_zero(
     )
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_bond_issuance_reads_resource_dash_issue_amount_as_zero() -> None:
     fixture_path = (
         REPO_ROOT
@@ -5746,6 +5911,7 @@ def test_parse_bond_issuance_reads_legacy_warrant_exercise_period_label(
     )
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_bond_issuance_prefers_krw_face_value_for_overseas_issue() -> None:
     fixture_path = (
         REPO_ROOT
@@ -5835,6 +6001,89 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields() -> None:
     assert "발행대상자세부엔티티" not in parsed
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
+@pytest.mark.parametrize("relative_path", PAID_RIGHTS_ISSUANCE_50_EXAMPLES)
+def test_parse_rights_issuance_paid_examples_have_paid_detail(relative_path: str) -> None:
+    fixture_path = RIGHTS_GROUPED_DIR / relative_path
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["증자유형"] == "유상증자"
+    assert parsed["유상증자"] is not None
+    assert parsed["무상증자"] is None
+    assert parsed["유상증자"]["신주의 종류와 수"] == parsed["신주의 종류와 수"]
+    assert parsed["유상증자"]["발행가액"] == parsed["발행가액"]
+    assert parsed["유상증자"]["납입일"] == parsed["납입일"]
+
+
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
+@pytest.mark.parametrize("relative_path", BONUS_RIGHTS_ISSUANCE_50_EXAMPLES)
+def test_parse_rights_issuance_bonus_examples_have_bonus_detail(relative_path: str) -> None:
+    fixture_path = RIGHTS_GROUPED_DIR / relative_path
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["증자유형"] == "무상증자"
+    assert parsed["유상증자"] is None
+    assert parsed["무상증자"] is not None
+    assert parsed["증자방식"] == "무상증자"
+    assert parsed["무상증자"]["신주의 종류와 수"] == parsed["신주의 종류와 수"]
+    assert parsed["무상증자"]["신주배정기준일"]
+    assert parsed["무상증자"]["1주당 신주배정주식수"][0][1]
+    assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
+    assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
+    assert parsed["field_parse_status"]["납입일"] == "not_applicable"
+    assert not any(
+        warning.startswith(("발행목적:", "발행가액:", "납입일:"))
+        for warning in parsed.get("strong_warning", [])
+    )
+
+
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
+@pytest.mark.parametrize("relative_path", MIXED_RIGHTS_ISSUANCE_50_EXAMPLES)
+def test_parse_rights_issuance_mixed_examples_split_paid_and_bonus_details(
+    relative_path: str,
+) -> None:
+    fixture_path = RIGHTS_GROUPED_DIR / relative_path
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["증자유형"] == "유무상증자"
+    assert parsed["유상증자"] is not None
+    assert parsed["무상증자"] is not None
+    assert parsed["유상증자"]["신주의 종류와 수"] == parsed["신주의 종류와 수"]
+    assert parsed["유상증자"]["발행가액"] == parsed["발행가액"]
+    assert parsed["무상증자"]["신주의 종류와 수"][0][1] > 0
+    assert parsed["무상증자"]["신주배정기준일"]
+    assert parsed["무상증자"]["1주당 신주배정주식수"][0][1]
+
+
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
+def test_parse_rights_issuance_mixed_keeps_paid_flat_fields_and_bonus_section() -> None:
+    fixture_path = RIGHTS_GROUPED_DIR / "2008/20081020000088.html"
+
+    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+
+    assert parsed["증자유형"] == "유무상증자"
+    assert parsed["신주의 종류와 수"] == [["보통주식", 20_000_000], ["기타주식", 0]]
+    assert parsed["유상증자"]["신주의 종류와 수"] == [
+        ["보통주식", 20_000_000],
+        ["기타주식", 0],
+    ]
+    assert parsed["무상증자"]["신주의 종류와 수"] == [
+        ["보통주식", 26_253_328],
+        ["기타주식", 0],
+    ]
+    assert parsed["무상증자"]["신주배정기준일"] == "2008년 11월 18일"
+    assert parsed["무상증자"]["1주당 신주배정주식수"] == [
+        ["보통주식", "0.5000000"],
+        ["기타주식", None],
+    ]
+    assert parsed["무상증자"]["신주권교부예정일"] == "2008년 12월 05일"
+    assert parsed["무상증자"]["상장예정일"] == "2008년 12월 08일"
+
+
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
     fixture_path = (
         REPO_ROOT
@@ -5858,6 +6107,7 @@ def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
     assert parsed.get("parse_warnings")
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_rights_issuance_maps_kind_stock_labels_to_other_stock() -> None:
     fixture_path = (
         REPO_ROOT
@@ -6025,6 +6275,54 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
     )
 
 
+def test_parse_rights_issuance_excludes_correction_history_table_in_same_section(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000013.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자 결정</p>
+      <table>
+        <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td>기타주식 (주)</td><td>-</td></tr>
+        <tr><td rowspan="2">3. 증자전 발행주식총수 (주)</td><td>보통주식 (주)</td><td>100</td></tr>
+        <tr><td>기타주식 (주)</td><td>-</td></tr>
+        <tr><td>4. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000</td></tr>
+        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
+        <tr><td>9. 납입일</td><td>2025년 01월 02일</td></tr>
+        <tr><td>11. 신주권교부예정일</td><td>2025년 01월 03일</td></tr>
+        <tr><td>12. 신주의 상장 예정일</td><td>2025년 01월 04일</td></tr>
+      </table>
+      <table>
+        <tr><td>정정일자</td><td>정정사유</td><td>정정내역</td></tr>
+        <tr><td>정정일자</td><td>정정사유</td><td>정정과목</td><td>정정전</td><td>정정후</td></tr>
+        <tr>
+          <td>2025.01.01</td><td>기재정정</td><td>기준주가 보통주식</td>
+          <td>999</td><td>888</td>
+        </tr>
+      </table>
+      <table>
+        <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
+        <tr><td>과거조합</td><td>5</td></tr>
+      </table>
+      <table>
+        <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
+        <tr><td>테스트조합</td><td>10</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["기준주가"] == [["보통주식", 0], ["기타주식", 0]]
+    assert parsed["field_parse_status"]["기준주가"] == "source_not_found"
+    assert parsed["발행대상자"] == [["테스트조합", 10]]
+    assert len(parsed["raw_tables"]) == 5
+
+
 def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_warning(
     tmp_path: Path,
 ) -> None:
@@ -6049,6 +6347,7 @@ def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_war
     assert parsed["field_parse_status"]["발행목적"] == "explicit_zero"
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     fixture_path = (
         REPO_ROOT
@@ -6061,26 +6360,32 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
 
     parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
 
+    assert parsed["증자유형"] == "무상증자"
     assert parsed["신주의 종류와 수"] == [["보통주식", 3_560_000], ["기타주식", 0]]
     assert parsed["증자방식"] == "무상증자"
     assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", 0]]
     assert parsed["납입일"] is None
     assert parsed["신주권교부예정일"] == "2008년 10월 01일"
     assert parsed["상장예정일"] == "2008년 10월 02일"
-    assert any(
-        warning.startswith("발행목적: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed.get("strong_warning", [])
-    )
-    assert any(
-        warning.startswith("발행가액: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed.get("strong_warning", [])
-    )
-    assert any(
-        warning.startswith("납입일: 정해진 출처에서 값을 찾지 못했습니다.")
+    assert parsed["유상증자"] is None
+    assert parsed["무상증자"] == {
+        "신주의 종류와 수": [["보통주식", 3_560_000], ["기타주식", 0]],
+        "증자 전 발행주식총수": [["보통주식", 4_440_000], ["기타주식", 0]],
+        "신주배정기준일": "2008년 09월 11일",
+        "1주당 신주배정주식수": [["보통주식", "0.8149112"], ["기타주식", None]],
+        "신주권교부예정일": "2008년 10월 01일",
+        "상장예정일": "2008년 10월 02일",
+    }
+    assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
+    assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
+    assert parsed["field_parse_status"]["납입일"] == "not_applicable"
+    assert not any(
+        warning.startswith(("발행목적:", "발행가액:", "납입일:"))
         for warning in parsed.get("strong_warning", [])
     )
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_rights_issuance_marks_single_compressed_dash_target_row_as_undisclosed() -> None:
     fixture_path = (
         REPO_ROOT
@@ -6102,6 +6407,7 @@ def test_parse_rights_issuance_marks_single_compressed_dash_target_row_as_undisc
     )
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_rights_issuance_marks_single_dash_target_row_as_undisclosed() -> None:
     fixture_path = (
         REPO_ROOT
@@ -6146,6 +6452,7 @@ def test_parse_rights_issuance_marks_multiple_dash_target_rows_as_one_undisclose
     )
 
 
+@pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_rights_issuance_marks_real_multiple_dash_target_rows_as_one_undisclosed() -> None:
     fixture_path = (
         REPO_ROOT

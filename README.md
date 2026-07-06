@@ -61,7 +61,7 @@ Backend API는 `src/finiq/market_desk/web/app.py`에서 실행하며, 기본 포
 Python 테스트도 저장소 루트에서 실행합니다.
 
 ```bash
-python -m pytest
+.venv/bin/python -m pytest
 ```
 
 `resources/`는 로컬 생성 데이터 위치이며 Git에 올리지 않습니다. GitHub Desktop에서는 루트 저장소의 작업 상태와 커밋 범위를 확인합니다.
