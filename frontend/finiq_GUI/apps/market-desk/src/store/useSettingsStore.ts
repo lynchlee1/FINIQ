@@ -16,6 +16,7 @@ interface SettingsState {
   html_content_output_directory: string;
   html_section_split_output_directory: string;
   html_transfer_directory: string;
+  html_parse_output_directory: string;
   html_parse_result_path: string;
   html_parse_mode: string;
   integrated_merge_input_path: string;
@@ -63,6 +64,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   html_content_output_directory: "",
   html_section_split_output_directory: "",
   html_transfer_directory: "",
+  html_parse_output_directory: "",
   html_parse_result_path: "",
   html_parse_mode: "",
   integrated_merge_input_path: "",

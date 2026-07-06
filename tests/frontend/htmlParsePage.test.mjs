@@ -56,24 +56,27 @@ test("html parse page uses standard two-row data path card", async () => {
   const dataPathCard = source.match(/<HtmlWorkflowCard[\s\S]*?title="데이터 경로"[\s\S]*?>/)?.[0] ?? "";
 
   assert.match(pathFieldsBlock, /id: "inputDirectory"[\s\S]*?span: 4/);
-  assert.match(pathFieldsBlock, /id: "outputPath"[\s\S]*?span: 4/);
+  assert.match(pathFieldsBlock, /id: "outputDirectory"[\s\S]*?span: 4/);
   assert.match(source, /title="데이터 경로"/);
   assert.doesNotMatch(source, /title="공시원문 변환 경로"/);
   assert.doesNotMatch(dataPathCard, /description=/);
 });
 
-test("html parse page persists generated data paths", async () => {
+test("html parse page persists explicit parse directories without auto generated paths", async () => {
   const source = await readFile(pagePath, "utf8");
   const inputHandler = source.match(/const handleInputDirectoryChange =[\s\S]*?};/)?.[0] ?? "";
+  const outputHandler = source.match(/const handleOutputDirectoryChange =[\s\S]*?};/)?.[0] ?? "";
   const modeHandler = source.match(/const handleParseModeChange =[\s\S]*?};/)?.[0] ?? "";
 
-  assert.match(inputHandler, /const nextOutputPath = buildParseOutputPath\(val, parseMode\)/);
-  assert.match(inputHandler, /setOutputPath\(nextOutputPath\)/);
-  assert.match(inputHandler, /saveSettings\(\{\s*html_content_output_directory: val,\s*html_parse_result_path: nextOutputPath,\s*\}\)/);
+  assert.match(inputHandler, /setInputDirectory\(val\)/);
+  assert.match(inputHandler, /saveSetting\("html_section_split_output_directory", val\)/);
   assert.doesNotMatch(inputHandler, /html_output_directory/);
-  assert.match(modeHandler, /const nextOutputPath = buildParseOutputPath\(inputDirectory, val\)/);
-  assert.match(modeHandler, /setOutputPath\(nextOutputPath\)/);
-  assert.match(modeHandler, /saveSettings\(\{\s*html_parse_mode: val,\s*html_parse_result_path: nextOutputPath,\s*\}\)/);
+  assert.doesNotMatch(inputHandler, /html_content_output_directory/);
+  assert.doesNotMatch(inputHandler, /html_parse_result_path/);
+  assert.match(outputHandler, /setOutputDirectory\(val\)/);
+  assert.match(outputHandler, /saveSetting\("html_parse_output_directory", val\)/);
+  assert.match(modeHandler, /saveSetting\("html_parse_mode", val\)/);
+  assert.doesNotMatch(modeHandler, /html_parse_result_path/);
 });
 
 test("html parse mode cards render as full-width rows", async () => {
@@ -129,18 +132,20 @@ test("html parse page renders report preview box for selected mode", async () =>
   assert.doesNotMatch(source, /모드별 확인/);
 });
 
-test("html parse page normalizes auto generated output paths", async () => {
+test("html parse page does not auto generate output paths", async () => {
   const source = await readFile(pagePath, "utf8");
 
-  assert.match(source, /const buildParseOutputPath = \(inputDirectory: string, mode: string\)/);
-  assert.match(source, /trimmedInputDirectory\.replace\(\/\\\/\+\$\/, ""\)/);
-  assert.match(source, /\["kind_html_contents_grouped_sections", "kind_html_contents_sections"\]/);
-  assert.match(source, /normalizedInputDirectory\.endsWith\(`\/\$\{directoryName\}`\)/);
-  assert.match(source, /normalizedInputDirectory\.slice\(0, -htmlContentDirectory\.length\)/);
+  assert.doesNotMatch(source, /buildParseOutputPath/);
+  assert.doesNotMatch(source, /parsed-\$\{mode\}\.json/);
   assert.doesNotMatch(source, /if \(config\.html_parse_result_path\)/);
-  assert.doesNotMatch(source, /setOutputPath\(config\.html_parse_result_path\)/);
+  assert.doesNotMatch(source, /setOutputPath/);
   assert.doesNotMatch(source, /`\$\{input\}\/parsed-\$\{mode\}\.json`/);
   assert.doesNotMatch(source, /`\$\{initialInput\}\/parsed-/);
+  assert.doesNotMatch(source, /output_root \? `\$\{config\.output_root\}\/viewer_html`/);
+  assert.match(source, /setOutputDirectory\(config\.html_parse_output_directory \|\| ""\)/);
+  assert.match(source, /setInputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
+  assert.match(source, /output_directory: outputDirectory/);
+  assert.doesNotMatch(source, /output_path: output/);
 });
 
 test("html parse page defaults resume off and removes excel export controls", async () => {

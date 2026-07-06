@@ -12,7 +12,9 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
     if not output_path_raw:
         msg = "output_path is required"
         raise ValueError(msg)
-    output_path = Path(output_path_raw).expanduser().resolve()
+    output_path = _resolve_parse_result_path(
+        Path(output_path_raw).expanduser().resolve(), "bond_issuance"
+    )
     payload = _load_parse_payload(output_path)
     if payload.get("mode") != "bond_issuance":
         msg = "parse result mode must be bond_issuance"
