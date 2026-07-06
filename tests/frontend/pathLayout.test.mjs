@@ -6,6 +6,7 @@ const htmlSectionSplitPath = "frontend/finiq_GUI/apps/market-desk/src/app/html-s
 const tablePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/table/page.tsx";
 const htmlWorkflowTemplatePath = "frontend/finiq_GUI/apps/market-desk/src/components/html-workflow/HtmlWorkflowTemplate.tsx";
 const filterPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/filter/page.tsx";
+const disclosureConditionCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureConditionFilterCard.tsx";
 const utilityPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/utility/page.tsx";
 const assetsExcelViewPath = "frontend/finiq_GUI/apps/market-desk/src/features/assets-excel/AssetExcelUtilityView.tsx";
 const graphWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/OntologyGraphWorkspace.tsx";
@@ -149,6 +150,20 @@ test("data path cards keep the same vertical field rhythm across workflow pages"
   assert.doesNotMatch(utilityPathCard, /md:grid-cols-2/);
   assert.match(assetsDataPathCard, /<CardContent className="space-y-4">/);
   assert.doesNotMatch(assetsDataPathCard, /pt-6 space-y-5/);
+});
+
+test("disclosure filter loads saved JSON filters and auto-applies selected presets", async () => {
+  const source = await readFile(filterPagePath, "utf8");
+  const conditionCardSource = await readFile(disclosureConditionCardPath, "utf8");
+
+  assert.match(source, /pickPath\(\{[\s\S]*?title: "필터 결과 JSON 선택"/);
+  assert.match(source, /apiPost<DisclosureConditionPresetPayload>\("\/api\/disclosures\/filter\/preset"/);
+  assert.match(source, /source_json_path: sourceJsonPath/);
+  assert.match(source, /onLoadPresetFromJson=\{loadFilterPresetFromJson\}/);
+  assert.match(conditionCardSource, /<Button variant="outline" onClick=\{onLoadPresetFromJson\}>불러오기<\/Button>/);
+  assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
+  assert.doesNotMatch(source, /<Label className="dark:text-slate-300">필터 결과 JSON<\/Label>/);
+  assert.doesNotMatch(source, /onClick=\{loadPreset\} disabled=\{!selectedPreset\}>불러오기/);
 });
 
 test("graph card typography follows standard card sizing", async () => {

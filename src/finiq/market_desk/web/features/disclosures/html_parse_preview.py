@@ -24,6 +24,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg)
 
     limit = _parse_limit(body.get("limit")) or 3
+    filter_blocks = _parse_filter_blocks(body.get("filter_blocks"))
     output_path_raw = str(
         body.get("output_path") or body.get("parse_result_path") or ""
     ).strip()
@@ -42,14 +43,19 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
                 for record in list(payload.get("records") or [])
                 if isinstance(record, dict)
             ]
-            visible_records = records[:limit]
+            filtered_records = [
+                record
+                for record in records
+                if _record_matches_filter_blocks(record, filter_blocks)
+            ]
+            visible_records = filtered_records[:limit]
             return {
                 "format": "finiq_parse_preview_v1",
                 "mode": mode,
                 "source_kind": "result_json",
                 "source_path": str(output_path),
                 "summary": {
-                    "records": len(records),
+                    "records": len(filtered_records),
                     "visible_records": len(visible_records),
                 },
                 "records": [
@@ -67,21 +73,23 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
 
-    html_files = _collect_html_files(input_directory, limit)
+    html_files = _collect_html_files(input_directory, None)
     metadata_index = _load_html_manifest_metadata_index(input_directory)
     records: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for index, html_file in enumerate(html_files, start=1):
         try:
-            records.append(
-                _apply_manifest_metadata(
-                    _compact_record(
-                        parser(html_file.read_bytes(), file_path=html_file)
-                    ),
-                    metadata_index,
-                    mode=requested_mode,
-                )
+            record = _apply_manifest_metadata(
+                _compact_record(
+                    parser(html_file.read_bytes(), file_path=html_file)
+                ),
+                metadata_index,
+                mode=requested_mode,
             )
+            if _record_matches_filter_blocks(record, filter_blocks):
+                records.append(record)
+                if len(records) >= limit:
+                    break
         except Exception as exc:
             errors.append(
                 {

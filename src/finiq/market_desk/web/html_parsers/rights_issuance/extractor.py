@@ -75,7 +75,7 @@ class RightsIssuanceExtractor:
                 "발행목적", "parsed" if purposes else "explicit_zero"
             )
         else:
-            self._set_field_status("발행목적", "source_not_found")
+            self._warn_if_missing("발행목적", None)
         return purposes
 
     def validate_consistency(
@@ -116,10 +116,14 @@ class RightsIssuanceExtractor:
                 f"신주의 종류와 수: 0이 아닌 주식 종류가 둘 이상입니다. 종류: {labels}",
                 level="medium",
             )
-        if stock_counts and stock_total == 0:
+        if (
+            stock_counts
+            and stock_total == 0
+            and self.field_parse_status.get("신주의 종류와 수") == "explicit_zero"
+        ):
             self._append_warning(
                 "신주의 종류와 수: 모든 주식 종류의 수량이 0입니다.",
-                level="medium",
+                level="weak",
             )
 
     def get_issue_prices(self) -> list[list[Any]]:
@@ -127,10 +131,6 @@ class RightsIssuanceExtractor:
         return self._stock_values(
             "신주 발행가액",
             warning_field_name="발행가액",
-            warn_when_all_missing=not (
-                self.context.issuance_type == "bonus"
-                or self.rows.last_value("증자방식") == "해당사항없음"
-            ),
         )
 
     def get_base_prices(self) -> list[list[Any]]:
@@ -148,13 +148,9 @@ class RightsIssuanceExtractor:
         return value
 
     def get_payment_date(self) -> str | None:
-        """납입일을 추출하되 선택 필드인 공시에서는 누락 경고를 생략한다."""
+        """납입일을 추출한다."""
         value = self.rows.last_value("납입일")
-        if not (
-            self.context.issuance_type == "bonus"
-            or self.rows.last_value("증자방식") == "해당사항없음"
-        ):
-            self._warn_if_missing("납입일", value)
+        self._warn_if_missing("납입일", value)
         self._set_field_status(
             "납입일", "parsed" if value is not None else "source_not_found"
         )
@@ -163,6 +159,7 @@ class RightsIssuanceExtractor:
     def get_delivery_date(self) -> str | None:
         """신주권교부예정일을 추출한다."""
         value = self.rows.last_value("신주권교부예정일")
+        self._warn_if_missing("신주권교부예정일", value)
         self._set_field_status(
             "신주권교부예정일", "parsed" if value is not None else "source_not_found"
         )
@@ -171,6 +168,7 @@ class RightsIssuanceExtractor:
     def get_listing_date(self) -> str | None:
         """신주의 상장 예정일을 추출한다."""
         value = self.rows.last_value("신주의 상장 예정일")
+        self._warn_if_missing("상장예정일", value)
         self._set_field_status(
             "상장예정일", "parsed" if value is not None else "source_not_found"
         )
@@ -260,7 +258,7 @@ class RightsIssuanceExtractor:
         section_label: str,
         *,
         warning_field_name: str | None = None,
-        warn_when_all_missing: bool = False,
+        warn_when_all_missing: bool = True,
     ) -> list[list[Any]]:
         """보통주와 기타주식 값을 일관된 순서로 배열하여 반환한다."""
         values: list[list[Any]] = []
@@ -338,7 +336,7 @@ class RightsIssuanceExtractor:
         rule = RIGHTS_FIELD_EXTRACTION_RULES[field_name]
         warning = f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다. 출처: {rule}"
         self._set_field_status(field_name, "source_not_found")
-        self._append_warning(warning, level="medium")
+        self._append_warning(warning, level="strong")
 
     def _set_field_status(self, field_name: str, status: str) -> None:
         self.field_parse_status[field_name] = status

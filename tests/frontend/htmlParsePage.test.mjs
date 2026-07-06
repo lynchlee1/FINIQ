@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 const pagePath = path.resolve("frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx");
+const candidateCardPath = path.resolve("frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureFilterCandidateCard.tsx");
 
 test("html parse page does not render warning or step guide boxes", async () => {
   const source = await readFile(pagePath, "utf8");
@@ -30,14 +31,15 @@ test("html parse notification panel lists warning reports and reasons", async ()
   assert.match(source, /onSuccess: \(result\) => \{[\s\S]*?setLatestParseResult\(result\)/);
   assert.match(source, /setLatestParseResult\(null\)/);
   assert.match(source, /const warningReports = buildWarningReports/);
-  assert.match(source, /const warningSourceFiles = Array\.from\(new Set\(warningReports\.map/);
-  assert.match(source, /const warningPageSourceFiles = warningSourceFiles\.slice\(warningPageStartIndex, warningPageStartIndex \+ WARNING_OPEN_PAGE_SIZE\)/);
-  assert.match(source, /const handleOpenWarningFiles = \(\) => \{[\s\S]*?warningPageSourceFiles\.forEach[\s\S]*?window\.open\(warningSourceUrl\(sourceFile, inputDirectory\), "_blank", "noopener,noreferrer"\)/);
+  assert.match(source, /const warningSourceFilesByLevel = WARNING_LEVELS\.reduce/);
+  assert.match(source, /const warningPageInfoByLevel = WARNING_LEVELS\.reduce/);
+  assert.match(source, /const pageSourceFiles = sourceFiles\.slice\(startIndex, startIndex \+ WARNING_OPEN_PAGE_SIZE\)/);
+  assert.match(source, /const handleOpenWarningFiles = \(level: WarningLevel\) => \{[\s\S]*?const pageInfo = warningPageInfoByLevel\[level\][\s\S]*?pageInfo\.sourceFiles\.forEach[\s\S]*?window\.open\(warningSourceUrl\(sourceFile, inputDirectory\), "_blank", "noopener,noreferrer"\)/);
   assert.match(notificationContent, /경고 리포트/);
   assert.match(notificationContent, /현재 페이지 열기/);
   assert.match(notificationContent, /이전/);
   assert.match(notificationContent, /다음/);
-  assert.match(notificationContent, /disabled=\{!warningSourceFiles\.length\}/);
+  assert.match(notificationContent, /disabled=\{!pageInfo\.sourceFiles\.length\}/);
   assert.match(notificationContent, /warningReports\.map/);
   assert.match(notificationContent, /report\.sourceName/);
   assert.match(notificationContent, /report\.sourceFile/);
@@ -171,6 +173,7 @@ test("html parse page sends parallel worker count", async () => {
 
 test("html parse page renders parse-mode specific filters in separate options card", async () => {
   const source = await readFile(pagePath, "utf8");
+  const candidateCardSource = await readFile(candidateCardPath, "utf8");
   const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?<\/CardContent>\s*<\/Card>/)?.[0] ?? "";
   const optionsCardContent = source.match(/<CardTitle className="dark:text-white">실행 옵션<\/CardTitle>[\s\S]*?<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>/)?.[0] ?? "";
   const runHandler = source.match(/const handleRun = async \(\) => \{[\s\S]*?startJob\("\/api\/disclosures\/html\/parse\/start", payload\);[\s\S]*?\};/)?.[0] ?? "";
@@ -191,23 +194,40 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /const selectedParseMode = PARSE_MODE_CONFIGS\[parseMode\] \|\| DISCLOSURE_PARSE_MODES\[0\]/);
   assert.match(source, /const executionOptionConfig = selectedParseMode\.executionOptions\[0\] \|\| null/);
   assert.doesNotMatch(modeCardContent, /실행 옵션/);
-  assert.match(optionsCardContent, /executionOptionConfig\.field/);
+  assert.match(source, /DisclosureFilterCandidateCard/);
+  assert.match(source, /title="실행 옵션"/);
+  assert.match(source, /fieldLabel=\{executionOptionConfig\.field\}/);
+  assert.match(source, /candidates=\{executionOptionCandidates\}/);
+  assert.match(source, /selectedValues=\{selectedExecutionOptionValues\}/);
+  assert.match(source, /loading=\{filterCandidatesLoading\}/);
+  assert.match(source, /onLoadCandidates=\{handleLoadExecutionOptionCandidates\}/);
+  assert.match(source, /onToggleValue=\{handleToggleExecutionOptionValue\}/);
+  assert.match(source, /onShowExamples=\{handleShowExecutionOptionExamples\}/);
+  assert.match(candidateCardSource, /export function DisclosureFilterCandidateCard/);
+  assert.match(candidateCardSource, /eyebrow = "Execution Options"/);
+  assert.match(candidateCardSource, /<CardTitle className="dark:text-white">\{title\}<\/CardTitle>/);
+  assert.match(candidateCardSource, /<Label className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">\{fieldLabel\}<\/Label>/);
   assert.doesNotMatch(optionsCardContent, />추가</);
   assert.doesNotMatch(optionsCardContent, /placeholder="예: 공모"/);
   assert.doesNotMatch(optionsCardContent, /불러오기를 누르면 입력 경로 전체에서 발견된 후보를 선택할 수 있습니다/);
   assert.doesNotMatch(optionsCardContent, /선택한 사채발행방법이 없으면 전체를 변환합니다/);
   assert.doesNotMatch(optionsCardContent, /후보가 표시됩니다/);
   assert.doesNotMatch(optionsCardContent, /selectedIssueMethods\.map/);
-  assert.doesNotMatch(optionsCardContent, /max-h-72/);
-  assert.match(optionsCardContent, /className="flex justify-end"/);
-  assert.match(optionsCardContent, /className="grid gap-2 lg:grid-cols-2"/);
-  assert.match(optionsCardContent, /lg:col-span-2/);
-  assert.match(optionsCardContent, /max-h-44/);
-  assert.match(optionsCardContent, /불러오기/);
-  assert.match(optionsCardContent, /예시/);
-  assert.match(optionsCardContent, /handleToggleExecutionOptionValue/);
-  assert.match(optionsCardContent, /handleShowExecutionOptionExamples\(candidate\)/);
+  assert.doesNotMatch(candidateCardSource, /max-h-72/);
+  assert.match(candidateCardSource, /<CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">/);
+  assert.match(candidateCardSource, /rounded-lg border border-slate-200 bg-slate-50\/80/);
+  assert.match(candidateCardSource, /lg:grid-cols-\[minmax\(0,1fr\)_auto\]/);
+  assert.doesNotMatch(candidateCardSource, /선택한 후보/);
+  assert.doesNotMatch(candidateCardSource, /후보를 선택하세요/);
+  assert.match(candidateCardSource, /max-h-44/);
+  assert.match(candidateCardSource, /border-teal-200 bg-teal-50\/60/);
+  assert.match(candidateCardSource, /불러오기/);
+  assert.match(candidateCardSource, /예시/);
+  assert.match(candidateCardSource, /onToggleValue\(candidate\.value, !!value\)/);
+  assert.match(candidateCardSource, /onShowExamples\(candidate\)/);
   assert.match(source, /\/api\/disclosures\/html\/parse\/filter-candidates/);
+  assert.match(source, /DisclosureConditionFilterCard/);
+  assert.match(source, /filter_blocks: normalizeDisclosureConditionBlocks\(conditions\)/);
   assert.match(modeHandler, /setSelectedExecutionOptionValues\(\[\]\)/);
   assert.match(modeHandler, /setExecutionOptionCandidates\(\[\]\)/);
   assert.match(modeHandler, /setExecutionOptionExampleNotice\(null\)/);

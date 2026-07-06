@@ -3953,6 +3953,47 @@ def test_build_parse_preview_payload_loads_result_records_with_source_preview(tm
     assert payload["records"][0]["source_preview"]["tables"][0]["rows"][0] == ["1. 사채의 종류", "전환사채"]
 
 
+def test_build_parse_preview_payload_applies_filter_blocks(tmp_path: Path) -> None:
+    source_path = tmp_path / "20250102000002.html"
+    source_path.write_text("<html><body><table><tr><th>1. 사채의 종류</th><td>전환사채</td></tr></table></body></html>", encoding="utf-8")
+    parse_path = tmp_path / "parsed-bond_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "bond_issuance",
+                "records": [
+                    {
+                        "title": "전환사채권발행결정",
+                        "acpt_no": "20250102000002",
+                        "source_file": str(source_path),
+                    },
+                    {
+                        "title": "주주총회소집공고",
+                        "acpt_no": "20250103000003",
+                        "source_file": str(source_path),
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_preview_payload(
+        {
+            "output_path": str(parse_path),
+            "mode": "bond_issuance",
+            "filter_blocks": [
+                {"field": "title", "operator": "contains", "value": "전환사채"}
+            ],
+        }
+    )
+
+    assert payload["summary"] == {"records": 1, "visible_records": 1}
+    assert payload["records"][0]["acpt_no"] == "20250102000002"
+
+
 def test_build_parse_preview_payload_parses_input_directory_when_result_is_missing(tmp_path: Path) -> None:
     bond_dir = tmp_path / "bond_issuance"
     input_dir = bond_dir / "viewer_html"
@@ -4273,7 +4314,8 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         "count": len(payload["warnings"]),
         "report_count": 1,
         "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
-        "medium_warning": {
+        "medium_warning": {"count": 0, "report_count": 0, "reports": {}},
+        "strong_warning": {
             "count": len(payload["warnings"]),
             "report_count": 1,
             "reports": {
@@ -4283,7 +4325,6 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
                 }
             },
         },
-        "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
     }
     assert payload["warnings"][0] == {
         "index": 1,
@@ -4292,7 +4333,7 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         "source_file": str(html_path.resolve()),
         "source_name": "20250101000001.html",
         "warning": "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.",
-        "level": "medium_warning",
+        "level": "strong_warning",
     }
     assert any(
         item["warning"].startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
@@ -4337,23 +4378,28 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
         "source_file": str(html_path.resolve()),
         "source_name": "20250101000001.html",
         "warning": "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
-        "level": "medium_warning",
+        "level": "strong_warning",
     }
+    strong_warnings = [
+        item["warning"]
+        for item in payload["warnings"]
+        if item["level"] == "strong_warning"
+    ]
     assert payload["warning_report_counts"] == {
         "count": len(payload["warnings"]),
         "report_count": 1,
         "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
-        "medium_warning": {
-            "count": len(payload["warnings"]),
+        "medium_warning": {"count": 0, "report_count": 0, "reports": {}},
+        "strong_warning": {
+            "count": len(strong_warnings),
             "report_count": 1,
             "reports": {
                 "20250101000001": {
-                    "count": len(payload["warnings"]),
-                    "warnings": [item["warning"] for item in payload["warnings"]],
+                    "count": len(strong_warnings),
+                    "warnings": strong_warnings,
                 }
             },
         },
-        "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
     }
     assert any("파싱 경고 1/1: 20250101000001.html" in line for line in payload["progress_log"])
 
@@ -4682,11 +4728,100 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
         "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
     }
     assert payload["filter_settings"] == {
+        "filter_blocks": [],
         "record_filters": [
             {"field": "사채발행방법", "operator": "in", "value": ["공모"]},
         ],
     }
     assert "필드 필터: 1개 조건 적용" in payload["progress_log"]
+
+
+def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, monkeypatch) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for name in ("20250101000001", "20250101000002", "20250101000003"):
+        (viewer_dir / f"{name}.html").write_text("<html></html>", encoding="utf-8")
+
+    titles = {
+        "20250101000001": "전환사채권발행결정",
+        "20250101000002": "주주총회소집공고",
+        "20250101000003": "유상증자결정",
+    }
+
+    def fake_parser(html_text, *, file_path):
+        acpt_no = Path(file_path).stem
+        return {
+            "acpt_no": acpt_no,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": titles[acpt_no],
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "parallel_workers": 2,
+            "filter_blocks": [
+                {"field": "title", "operator": "contains", "value": "증자"}
+            ],
+        }
+    )
+
+    assert payload["summary"]["found_files"] == 3
+    assert payload["summary"]["parsed_files"] == 1
+    assert [record["acpt_no"] for record in payload["records"]] == ["20250101000003"]
+    assert payload["filter_settings"] == {
+        "filter_blocks": [
+            {"field": "title", "operator": "contains", "value": "증자"}
+        ],
+        "record_filters": [],
+    }
+    assert "공시 조건: 1개 조건 적용" in payload["progress_log"]
+
+
+def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progress(
+    tmp_path: Path, monkeypatch
+) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for index in range(3):
+        (viewer_dir / f"2025010100000{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "security_transaction",
+            "title": "주주총회소집공고",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "security_transaction",
+            "parallel_workers": 1,
+            "progress_interval": 2,
+            "filter_blocks": [
+                {"field": "title", "operator": "contains", "value": "증자"}
+            ],
+        }
+    )
+
+    assert payload["summary"]["found_files"] == 3
+    assert payload["summary"]["parsed_files"] == 0
+    assert any(
+        "파싱 중간 확인: 이번 실행 2건 처리" in line
+        for line in payload["progress_log"]
+    )
 
 
 def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path: Path, monkeypatch) -> None:
@@ -5705,7 +5840,8 @@ def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
         ["운영자금", 4_200_000_000],
         ["기타자금", 3_000_000_000],
     ]
-    assert parsed.get("parse_warnings") is None
+    assert parsed.get("strong_warning")
+    assert parsed.get("parse_warnings")
 
 
 def test_parse_rights_issuance_maps_kind_stock_labels_to_other_stock() -> None:
@@ -5722,7 +5858,8 @@ def test_parse_rights_issuance_maps_kind_stock_labels_to_other_stock() -> None:
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 2_000_000]]
     assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", 5_000]]
-    assert parsed.get("parse_warnings") is None
+    assert parsed.get("strong_warning")
+    assert parsed.get("parse_warnings")
 
 
 def test_parse_rights_issuance_classifies_consistency_warnings_by_level(tmp_path: Path) -> None:
@@ -5874,7 +6011,7 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
     )
 
 
-def test_parse_rights_issuance_classifies_all_zero_stock_counts_as_medium_warning(
+def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_warning(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000012.html"
@@ -5892,7 +6029,7 @@ def test_parse_rights_issuance_classifies_all_zero_stock_counts_as_medium_warnin
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert any("모든 주식 종류의 수량이 0" in warning for warning in parsed["medium_warning"])
+    assert any("모든 주식 종류의 수량이 0" in warning for warning in parsed["weak_warning"])
     assert parsed["field_parse_status"]["신주의 종류와 수"] == "explicit_zero"
     assert parsed["발행목적"] == []
     assert parsed["field_parse_status"]["발행목적"] == "explicit_zero"
@@ -5916,7 +6053,18 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     assert parsed["납입일"] is None
     assert parsed["신주권교부예정일"] == "2008년 10월 01일"
     assert parsed["상장예정일"] == "2008년 10월 02일"
-    assert parsed.get("parse_warnings") is None
+    assert any(
+        warning.startswith("발행목적: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed.get("strong_warning", [])
+    )
+    assert any(
+        warning.startswith("발행가액: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed.get("strong_warning", [])
+    )
+    assert any(
+        warning.startswith("납입일: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed.get("strong_warning", [])
+    )
 
 
 def test_parse_rights_issuance_marks_single_compressed_dash_target_row_as_undisclosed() -> None:

@@ -91,6 +91,28 @@ def _attach_html_download_transfer(
     return payload
 
 
+def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
+    source_path = Path(source_json_path).expanduser().resolve()
+    if source_path.suffix.lower() != ".json":
+        raise ValueError("필터 결과 JSON 파일을 선택하세요.")
+    if not source_path.is_file():
+        raise ValueError(f"필터 결과 JSON 파일을 찾을 수 없습니다: {source_path}")
+
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("필터 결과 JSON 형식이 올바르지 않습니다.")
+    filters = payload.get("filters")
+    filter_blocks = filters.get("filter_blocks") if isinstance(filters, dict) else None
+    if not isinstance(filter_blocks, list):
+        raise ValueError("필터 결과 JSON에 filters.filter_blocks가 없습니다.")
+    return {
+        "format": "kind_disclosure_filter_preset_v1",
+        "source_json_path": str(source_path),
+        "name": source_path.stem,
+        "condition_blocks": filter_blocks,
+    }
+
+
 def _job_snapshot(job_id: str) -> dict[str, Any]:
     snapshot = job_manager.get_snapshot(job_id)
     if not snapshot:
@@ -170,6 +192,16 @@ def create_workflows_router(
                 requested_path=str(body.get("html_transfer_path") or "").strip(),
             )
             return payload
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/filter/preset")
+    async def load_disclosure_filter_preset(payload: dict[str, Any]):
+        source_json_path = str(payload.get("source_json_path") or "").strip()
+        if not source_json_path:
+            raise HTTPException(status_code=400, detail="필터 결과 JSON 경로를 선택하세요.")
+        try:
+            return _load_filter_preset_file(source_json_path)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

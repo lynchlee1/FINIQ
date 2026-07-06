@@ -1,14 +1,25 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { ExternalLink, Eye, Loader2, Play, RefreshCw, Square } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Label } from "@finiq/ui";
+import { ExternalLink, Eye, Loader2, Play, Square } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { ActionDock } from "@/components/ui/ActionDock";
+import {
+  DisclosureFilterCandidateCard,
+  type DisclosureFilterCandidate,
+} from "@/components/disclosures/DisclosureFilterCandidateCard";
+import {
+  DisclosureConditionFilterCard,
+  makeEmptyDisclosureCondition,
+  normalizeDisclosureConditionBlocks,
+  type DisclosureConditionBlock,
+  type DisclosureConditionPresetPayload,
+} from "@/components/disclosures/DisclosureConditionFilterCard";
 import {
   HtmlWorkflowForm,
   HtmlWorkflowCard,
@@ -17,6 +28,8 @@ import {
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
+import { apiPost } from "@/api/client";
+import { pickPath } from "@/lib/fileDialog";
 
 type ParseExecutionOptionConfig = {
   field: string;
@@ -84,9 +97,7 @@ const buildParseOutputPath = (inputDirectory: string, mode: string) => {
 const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
 const PARSE_MODE_CONFIGS = Object.fromEntries(DISCLOSURE_PARSE_MODES.map((mode) => [mode.key, mode])) as Record<string, ParseModeConfig>;
 const WARNING_OPEN_PAGE_SIZE = 20;
-type FilterCandidate = {
-  value: string;
-  count: number;
+type FilterCandidate = DisclosureFilterCandidate & {
   examples?: Array<string | FilterCandidateExample>;
 };
 
@@ -226,6 +237,7 @@ const normalizeFilterCandidateExamples = (
 
 export default function HtmlParsePage() {
   const {
+    condition_presets: presets,
     fetchSettings,
     parallel_worker_count: defaultParallelWorkers,
     saveSetting,
@@ -299,6 +311,10 @@ export default function HtmlParsePage() {
   const [executionOptionExampleNotice, setExecutionOptionExampleNotice] = useState<ExecutionOptionExampleNotice | null>(null);
   const [notificationResetKey, setNotificationResetKey] = useState(0);
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
+  const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
+  const [presetName, setPresetName] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState("");
+  const [filterPresetPath, setFilterPresetPath] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
   const selectedParseMode = PARSE_MODE_CONFIGS[parseMode] || DISCLOSURE_PARSE_MODES[0];
@@ -377,6 +393,70 @@ export default function HtmlParsePage() {
     });
   };
 
+  const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
+    setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
+    if (preset.name) setPresetName(preset.name);
+    setStatus(statusMessage);
+    setIsErrorStatus(false);
+  }, [setIsErrorStatus, setStatus]);
+
+  const savePreset = () => {
+    const name = presetName.trim();
+    if (!name) {
+      setStatus("저장할 프리셋 이름을 입력하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const next = (presets || []).filter((item: any) => item.name !== name);
+    next.push({ name, condition_blocks: normalizeDisclosureConditionBlocks(conditions) });
+    next.sort((a: any, b: any) => a.name.localeCompare(b.name, "ko"));
+
+    saveSetting("condition_presets", next);
+    setSelectedPreset(name);
+    setStatus(`조건검색 프리셋을 저장했습니다: ${name}`);
+    setIsErrorStatus(false);
+  };
+
+  const loadPreset = (name: string) => {
+    const preset = (presets || []).find((item: any) => item.name === name);
+    if (!preset) {
+      setStatus("선택한 프리셋을 찾을 수 없습니다.");
+      setIsErrorStatus(true);
+      return;
+    }
+    applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
+  };
+
+  const loadFilterPresetFromJson = async () => {
+    try {
+      const sourceJsonPath = await pickPath({
+        mode: "file",
+        title: "필터 결과 JSON 선택",
+        defaultPath: filterPresetPath,
+      });
+      if (!sourceJsonPath) return;
+      setFilterPresetPath(sourceJsonPath);
+      const preset = await apiPost<DisclosureConditionPresetPayload>("/api/disclosures/filter/preset", {
+        source_json_path: sourceJsonPath,
+      });
+      setSelectedPreset("");
+      applyPreset(preset, `필터 결과 JSON에서 조건을 불러왔습니다: ${preset.source_json_path || sourceJsonPath}`);
+    } catch (err: any) {
+      setStatus(err.message || "필터 결과 JSON을 불러오지 못했습니다.");
+      setIsErrorStatus(true);
+    }
+  };
+
+  const deletePreset = () => {
+    if (!selectedPreset) return;
+    const next = (presets || []).filter((item: any) => item.name !== selectedPreset);
+    saveSetting("condition_presets", next);
+    setPresetName((value) => value === selectedPreset ? "" : value);
+    setSelectedPreset("");
+    setStatus(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
+    setIsErrorStatus(false);
+  };
+
   useEffect(() => {
     if (!isJobActive) {
       setActiveCancelToken(null);
@@ -410,6 +490,7 @@ export default function HtmlParsePage() {
       resume: resumeParse,
       progress_interval: Number(progressInterval),
       parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
+      filter_blocks: normalizeDisclosureConditionBlocks(conditions),
       record_filters: activeRecordFilters,
       cancel_token: cancelToken,
     };
@@ -522,6 +603,7 @@ export default function HtmlParsePage() {
           output_path: outputPath,
           mode: parseMode,
           limit: 3,
+          filter_blocks: normalizeDisclosureConditionBlocks(conditions),
         }),
       });
       if (!response.ok) {
@@ -815,53 +897,31 @@ export default function HtmlParsePage() {
           </Card>
 
           {executionOptionConfig ? (
-            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-              <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">
-                <div className="min-w-0 space-y-1">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Execution Options</p>
-                  <CardTitle className="dark:text-white">실행 옵션</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-end">
-                  <Button variant="outline" className="h-9 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={handleLoadExecutionOptionCandidates} disabled={filterCandidatesLoading}>
-                    {filterCandidatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                    불러오기
-                  </Button>
-                </div>
-
-                <div className="grid gap-2 lg:grid-cols-2">
-                  <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-50/60 dark:border-[#30363d] dark:bg-[#0d1117] lg:col-span-2">
-                    <div className="flex min-h-9 items-center px-3 py-2">
-                      <Label className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">{executionOptionConfig.field}</Label>
-                    </div>
-
-                    {executionOptionCandidates.length ? (
-                      <div className="max-h-44 overflow-auto border-t border-slate-200 bg-white dark:border-[#30363d] dark:bg-[#161b22]">
-                        {executionOptionCandidates.map((candidate) => {
-                          const checked = selectedExecutionOptionValues.includes(candidate.value);
-                          return (
-                            <div key={candidate.value} className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-1.5 last:border-b-0 dark:border-[#30363d]">
-                              <label className="flex min-w-0 cursor-pointer items-center gap-3">
-                                <Checkbox checked={checked} onCheckedChange={(value) => handleToggleExecutionOptionValue(candidate.value, !!value)} className="dark:border-[#30363d]" />
-                                <span className="truncate text-sm text-slate-700 dark:text-slate-200">{candidate.value}</span>
-                              </label>
-                              <span className="flex shrink-0 items-center gap-2">
-                                <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatInteger(candidate.count)}건</span>
-                                <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => handleShowExecutionOptionExamples(candidate)}>
-                                  예시
-                                </Button>
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <DisclosureFilterCandidateCard
+              title="실행 옵션"
+              fieldLabel={executionOptionConfig.field}
+              candidates={executionOptionCandidates}
+              selectedValues={selectedExecutionOptionValues}
+              loading={filterCandidatesLoading}
+              onLoadCandidates={handleLoadExecutionOptionCandidates}
+              onToggleValue={handleToggleExecutionOptionValue}
+              onShowExamples={handleShowExecutionOptionExamples}
+            />
           ) : null}
+
+          <DisclosureConditionFilterCard
+            conditions={conditions}
+            onConditionsChange={setConditions}
+            presets={presets || []}
+            presetName={presetName}
+            selectedPreset={selectedPreset}
+            onPresetNameChange={setPresetName}
+            onSelectedPresetChange={setSelectedPreset}
+            onLoadPreset={loadPreset}
+            onLoadPresetFromJson={loadFilterPresetFromJson}
+            onSavePreset={savePreset}
+            onDeletePreset={deletePreset}
+          />
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader className="flex flex-col gap-3 pb-4 md:flex-row md:items-start md:justify-between md:space-y-0">

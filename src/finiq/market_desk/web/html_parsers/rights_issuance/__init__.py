@@ -19,7 +19,7 @@ def parse_rights_issuance(
     if context.issuance_type == "unknown":
         warning = "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
         record["parse_warnings"] = [warning]
-        record["medium_warning"] = [warning]
+        record["strong_warning"] = [warning]
 
     extractor = RightsIssuanceExtractor(context)
     stock_counts = extractor.get_stock_types_and_counts()
@@ -66,7 +66,10 @@ def parse_rights_issuance(
             *extractor.medium_warnings,
         ]
     if extractor.strong_warnings:
-        record["strong_warning"] = extractor.strong_warnings
+        record["strong_warning"] = [
+            *record.get("strong_warning", []),
+            *extractor.strong_warnings,
+        ]
     if extractor.field_parse_status:
         record["field_parse_status"] = extractor.field_parse_status
     return record
