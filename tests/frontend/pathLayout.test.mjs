@@ -161,6 +161,8 @@ test("disclosure filter loads saved JSON filters and auto-applies selected prese
   assert.match(source, /source_json_path: sourceJsonPath/);
   assert.match(source, /onLoadPresetFromJson=\{loadFilterPresetFromJson\}/);
   assert.match(conditionCardSource, /<Button variant="outline" onClick=\{onLoadPresetFromJson\}>불러오기<\/Button>/);
+  assert.match(conditionCardSource, /onClick=\{onRenamePreset\} disabled=\{!selectedPreset\}/);
+  assert.match(conditionCardSource, /\/>수정<\/Button>/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
   assert.doesNotMatch(source, /<Label className="dark:text-slate-300">필터 결과 JSON<\/Label>/);
   assert.doesNotMatch(source, /onClick=\{loadPreset\} disabled=\{!selectedPreset\}>불러오기/);

@@ -1,6 +1,6 @@
 "use client"
 
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 
@@ -70,6 +70,7 @@ type DisclosureConditionFilterCardProps = {
   onLoadPreset: (name: string) => void;
   onLoadPresetFromJson: () => void;
   onSavePreset: () => void;
+  onRenamePreset: () => void;
   onDeletePreset: () => void;
 };
 
@@ -132,6 +133,7 @@ export function DisclosureConditionFilterCard({
   onLoadPreset,
   onLoadPresetFromJson,
   onSavePreset,
+  onRenamePreset,
   onDeletePreset,
 }: DisclosureConditionFilterCardProps) {
   const updateCondition = (index: number, patch: Partial<DisclosureConditionBlock>) => {
@@ -161,7 +163,7 @@ export function DisclosureConditionFilterCard({
       <CardContent className="space-y-5">
         <div className="grid gap-2">
           <Label className="dark:text-slate-300">조건검색 프리셋</Label>
-          <div className="grid gap-2 md:grid-cols-[minmax(180px,1.2fr)_minmax(180px,1fr)_auto_auto_auto]">
+          <div className="grid gap-2 md:grid-cols-[minmax(150px,1fr)_minmax(150px,.9fr)_auto_auto_auto_auto]">
             <select
               value={selectedPreset}
               onChange={(event) => {
@@ -186,6 +188,7 @@ export function DisclosureConditionFilterCard({
             }} placeholder="프리셋 이름" className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
             <Button variant="outline" onClick={onLoadPresetFromJson}>불러오기</Button>
             <Button onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
+            <Button variant="outline" onClick={onRenamePreset} disabled={!selectedPreset}><Pencil className="mr-2 h-4 w-4" />수정</Button>
             <Button variant="outline" onClick={onDeletePreset} disabled={!selectedPreset}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
           </div>
         </div>
