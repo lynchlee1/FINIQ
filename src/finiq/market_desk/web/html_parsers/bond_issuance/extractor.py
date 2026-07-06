@@ -259,7 +259,7 @@ class BondIssuanceExtractor:
         rule = BOND_FIELD_EXTRACTION_RULES[field_name]
         warning = f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다. 출처: {rule}"
         self._set_field_status(field_name, "source_not_found")
-        self._append_warning(warning, level="medium")
+        self._append_warning(warning, level="strong")
 
     def _set_field_status(self, field_name: str, status: str) -> None:
         self.field_parse_status[field_name] = status

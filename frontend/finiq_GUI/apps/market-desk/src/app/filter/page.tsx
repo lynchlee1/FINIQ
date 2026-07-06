@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Play, Plus, Save, Trash2, Loader2, RefreshCw } from "lucide-react";
+import { Play, Loader2, RefreshCw } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { cn } from "@finiq/ui/utils";
@@ -13,58 +13,18 @@ import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
+import { apiPost } from "@/api/client";
+import { pickPath } from "@/lib/fileDialog";
+import {
+  DisclosureConditionFilterCard,
+  makeEmptyDisclosureCondition,
+  normalizeDisclosureConditionBlocks,
+  type DisclosureConditionBlock,
+  type DisclosureConditionPresetPayload,
+} from "@/components/disclosures/DisclosureConditionFilterCard";
 
 const TRANSFER_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const PAGE_SIZE = 20;
-
-const FIELD_OPTIONS = [
-  ["title", "제목"],
-  ["company_name", "회사명"],
-  ["submitter", "제출인"],
-  ["market", "시장"],
-  ["disclosed_date", "공시일"],
-  ["acpt_no", "접수번호"],
-  ["company_id", "회사코드"],
-] as const;
-
-const OPERATOR_OPTIONS = [
-  ["contains", "contains"],
-  ["not_contains", "not contains"],
-  ["exact_match", "exact match"],
-  ["equals", "equals"],
-  ["not_equals", "not equals"],
-  ["starts_with", "starts with"],
-  ["ends_with", "ends with"],
-  ["in", "in"],
-  ["before", "before"],
-  ["after", "after"],
-  ["on_or_before", "<="],
-  ["on_or_after", ">="],
-  ["between", "between"],
-  ["exists", "exists"],
-  ["empty", "is empty"],
-] as const;
-
-type FieldKey = (typeof FIELD_OPTIONS)[number][0];
-type OperatorKey = (typeof OPERATOR_OPTIONS)[number][0];
-type Connector = "" | "AND" | "OR";
-
-type ConditionBlock = {
-  connector: Connector;
-  open_count: number;
-  not: boolean;
-  ignore_spaces: boolean;
-  clean_search: boolean;
-  field: FieldKey;
-  operator: OperatorKey;
-  value: string;
-  close_count: number;
-};
-
-type Preset = {
-  name: string;
-  condition_blocks: ConditionBlock[];
-};
 
 type FilterResult = {
   summary?: {
@@ -79,53 +39,6 @@ type FilterResult = {
   };
 };
 
-function makeEmptyCondition(connector: Connector = ""): ConditionBlock {
-  return {
-    connector,
-    open_count: 0,
-    not: false,
-    ignore_spaces: false,
-    clean_search: false,
-    field: "title",
-    operator: "contains",
-    value: "",
-    close_count: 0,
-  };
-}
-
-function countParens(value: string, paren: "(" | ")") {
-  return [...String(value || "")].filter((char) => char === paren).length;
-}
-
-function normalizeConditionBlocks(value: unknown): ConditionBlock[] {
-  if (!Array.isArray(value)) return [makeEmptyCondition()];
-  const blocks = value.map((item, index) => {
-    const row = item as Partial<ConditionBlock>;
-    const connector = String(row.connector || "AND").toUpperCase();
-    const field = FIELD_OPTIONS.some(([key]) => key === row.field) ? row.field as FieldKey : "title";
-    const operator = OPERATOR_OPTIONS.some(([key]) => key === row.operator) ? row.operator as OperatorKey : "contains";
-    return {
-      ...makeEmptyCondition(index === 0 || (connector !== "AND" && connector !== "OR") ? "" : connector as Connector),
-      open_count: Math.max(0, Math.floor(Number(row.open_count || 0))),
-      not: !!row.not,
-      ignore_spaces: !!row.ignore_spaces,
-      clean_search: !!row.clean_search,
-      field,
-      operator,
-      value: String(row.value || ""),
-      close_count: Math.max(0, Math.floor(Number(row.close_count || 0))),
-    };
-  }).filter((row) => row.value.trim() || row.operator === "exists" || row.operator === "empty");
-  return blocks.length ? blocks : [makeEmptyCondition()];
-}
-
-function fieldLabel(field: FieldKey) {
-  return FIELD_OPTIONS.find(([key]) => key === field)?.[1] || field;
-}
-
-function operatorLabel(operator: OperatorKey) {
-  return OPERATOR_OPTIONS.find(([key]) => key === operator)?.[1] || operator;
-}
 
 function getKindDisclosureUrl(acptNo: string) {
   return `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=${encodeURIComponent(acptNo)}&docno=&viewerhost=&viewerport=`;
@@ -143,9 +56,10 @@ export default function FilterPage() {
   const { status, setStatus, isErrorStatus, setIsErrorStatus, isStreaming, streamJob, abortJob, appendStatus } = useJobStreaming();
 
   const [loading, setLoading] = useState(true);
-  const [conditions, setConditions] = useState<ConditionBlock[]>([makeEmptyCondition()]);
+  const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
+  const [filterPresetPath, setFilterPresetPath] = useState("");
   const [limitUnlimited, setLimitUnlimited] = useState(true);
   const [limit, setLimit] = useState("1000");
   const [filterWorkers, setFilterWorkers] = useState("8");
@@ -160,26 +74,12 @@ export default function FilterPage() {
     });
   }, [fetchSettings, setStatus]);
 
-  const updateCondition = (index: number, patch: Partial<ConditionBlock>) => {
-    setConditions((previous) => {
-      const next = previous.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row);
-      if (next[0]) next[0].connector = "";
-      return next;
-    });
-  };
-
-  const removeCondition = (index: number) => {
-    setConditions((previous) => {
-      const next = previous.filter((_, rowIndex) => rowIndex !== index);
-      if (!next.length) return [makeEmptyCondition()];
-      next[0].connector = "";
-      return next;
-    });
-  };
-
-  const conditionPreview = useMemo(() => {
-    return conditions.filter((row) => row.value.trim() || row.operator === "exists" || row.operator === "empty");
-  }, [conditions]);
+  const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
+    setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
+    if (preset.name) setPresetName(preset.name);
+    setStatus(statusMessage);
+    setIsErrorStatus(false);
+  }, [setIsErrorStatus, setStatus]);
 
   const pageCount = Math.max(1, Math.ceil((result?.disclosures?.length || 0) / PAGE_SIZE));
   const pageRows = useMemo(() => {
@@ -191,7 +91,7 @@ export default function FilterPage() {
   const buildPayload = () => ({
     root_directory: rootDirectory,
     html_transfer_path: htmlTransferPath,
-    filter_blocks: normalizeConditionBlocks(conditions),
+    filter_blocks: normalizeDisclosureConditionBlocks(conditions),
     title_expression: "",
     limit: limitUnlimited ? null : Number(limit || 1000),
     limit_unlimited: limitUnlimited,
@@ -246,7 +146,7 @@ export default function FilterPage() {
       return;
     }
     const next = (presets || []).filter((item: any) => item.name !== name);
-    next.push({ name, condition_blocks: normalizeConditionBlocks(conditions) });
+    next.push({ name, condition_blocks: normalizeDisclosureConditionBlocks(conditions) });
     next.sort((a: any, b: any) => a.name.localeCompare(b.name, "ko"));
     
     saveSetting("condition_presets", next);
@@ -255,17 +155,34 @@ export default function FilterPage() {
     setIsErrorStatus(false);
   };
 
-  const loadPreset = () => {
-    const preset = (presets || []).find((item: any) => item.name === selectedPreset);
+  const loadPreset = (name: string) => {
+    const preset = (presets || []).find((item: any) => item.name === name);
     if (!preset) {
       setStatus("선택한 프리셋을 찾을 수 없습니다.");
       setIsErrorStatus(true);
       return;
     }
-    setConditions(normalizeConditionBlocks(preset.condition_blocks));
-    setPresetName(preset.name);
-    setStatus(`조건검색 프리셋을 불러왔습니다: ${preset.name}`);
-    setIsErrorStatus(false);
+    applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
+  };
+
+  const loadFilterPresetFromJson = async () => {
+    try {
+      const sourceJsonPath = await pickPath({
+        mode: "file",
+        title: "필터 결과 JSON 선택",
+        defaultPath: filterPresetPath,
+      });
+      if (!sourceJsonPath) return;
+      setFilterPresetPath(sourceJsonPath);
+      const preset = await apiPost<DisclosureConditionPresetPayload>("/api/disclosures/filter/preset", {
+        source_json_path: sourceJsonPath,
+      });
+      setSelectedPreset("");
+      applyPreset(preset, `필터 결과 JSON에서 조건을 불러왔습니다: ${preset.source_json_path || sourceJsonPath}`);
+    } catch (err: any) {
+      setStatus(err.message || "필터 결과 JSON을 불러오지 못했습니다.");
+      setIsErrorStatus(true);
+    }
   };
 
   const deletePreset = () => {
@@ -312,127 +229,19 @@ export default function FilterPage() {
         </CardContent>
           </Card>
 
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Filters</p>
-          <CardTitle className="dark:text-white">공시 조건</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-2">
-            <Label className="dark:text-slate-300">조건검색 프리셋</Label>
-            <div className="grid gap-2 md:grid-cols-[minmax(180px,1.2fr)_minmax(180px,1fr)_auto_auto_auto]">
-              <select
-                value={selectedPreset}
-                onChange={(event) => {
-                  setSelectedPreset(event.target.value);
-                  setPresetName(event.target.value);
-                }}
-                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-                aria-label="조건검색 프리셋 선택"
-              >
-                <option value="">프리셋 선택</option>
-                {(presets || []).map((preset: any) => (
-                  <option key={preset.name} value={preset.name}>{preset.name}</option>
-                ))}
-              </select>
-              <Input value={presetName} onChange={(event) => setPresetName(event.target.value)} onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  savePreset();
-                }
-              }} placeholder="프리셋 이름" className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-              <Button variant="outline" onClick={loadPreset} disabled={!selectedPreset}>불러오기</Button>
-              <Button onClick={savePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
-              <Button variant="outline" onClick={deletePreset} disabled={!selectedPreset}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
-            </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label className="dark:text-slate-300">조건 블록</Label>
-            <div className="flex min-h-[52px] flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
-              {conditionPreview.length ? conditionPreview.map((condition, index) => (
-                <div key={`${condition.field}-${index}`} className="flex flex-wrap items-center gap-2">
-                  {index > 0 && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-teal-900/30 dark:border-teal-900/50 dark:text-teal-300">{condition.connector || "AND"}</span>}
-                  {condition.open_count > 0 && <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-bold dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-300">{"(".repeat(condition.open_count)}</span>}
-                  {condition.not && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-teal-900/30 dark:border-teal-900/50 dark:text-teal-300">NOT</span>}
-                  <span className="inline-flex min-h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-100">
-                    <span className="text-teal-700 dark:text-teal-300">{fieldLabel(condition.field)}</span>
-                    <em className="not-italic text-slate-500 dark:text-slate-400">{operatorLabel(condition.operator)}</em>
-                    {condition.operator !== "exists" && condition.operator !== "empty" && <strong>{condition.value}</strong>}
-                    {condition.ignore_spaces && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-[#21262d] dark:text-slate-300">공백무시</span>}
-                    {condition.clean_search && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-[#21262d] dark:text-slate-300">Clean</span>}
-                  </span>
-                  {condition.close_count > 0 && <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-bold dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-300">{")".repeat(condition.close_count)}</span>}
-                </div>
-              )) : <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-500 dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-400">조건 블록을 추가하세요.</span>}
-            </div>
-
-            <div className="grid gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50/80 p-2 dark:bg-[#0d1117] dark:border-[#30363d]">
-              {conditions.map((condition, index) => (
-                <div key={index} className="grid min-w-[980px] items-center gap-2 rounded-lg border border-slate-200 bg-white/80 p-2 dark:bg-[#161b22] dark:border-[#30363d] lg:grid-cols-[96px_minmax(0,1fr)_58px]">
-                  <select
-                    value={condition.connector}
-                    disabled={index === 0}
-                    onChange={(event) => updateCondition(index, { connector: event.target.value as Connector })}
-                    className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 disabled:text-teal-700 disabled:opacity-100 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300 dark:disabled:text-teal-300"
-                    aria-label="연결 조건"
-                  >
-                    <option value="">START</option>
-                    <option value="AND">AND</option>
-                    <option value="OR">OR</option>
-                  </select>
-                  <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[36px_68px_86px_72px_minmax(84px,.45fr)_minmax(112px,.55fr)_minmax(240px,3fr)_36px]">
-                    <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-cyan-50 border-cyan-300 dark:bg-cyan-900/20" : "")} />
-                    <label className="flex h-9 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                      <input type="checkbox" checked={condition.not} onChange={(event) => updateCondition(index, { not: event.target.checked })} />
-                      NOT
-                    </label>
-                    <label className="flex h-9 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                      <input type="checkbox" checked={condition.ignore_spaces} onChange={(event) => updateCondition(index, { ignore_spaces: event.target.checked })} />
-                      공백무시
-                    </label>
-                    <label className="flex h-9 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                      <input type="checkbox" checked={condition.clean_search} onChange={(event) => updateCondition(index, { clean_search: event.target.checked })} />
-                      Clean
-                    </label>
-                    <select value={condition.field} onChange={(event) => updateCondition(index, { field: event.target.value as FieldKey })} aria-label="필드" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                      {FIELD_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                    </select>
-                    <select value={condition.operator} onChange={(event) => updateCondition(index, { operator: event.target.value as OperatorKey })} aria-label="연산자" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                      {OPERATOR_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                    </select>
-                    <Input value={condition.value} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="값" className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                    <Input value={")".repeat(condition.close_count)} onChange={(event) => updateCondition(index, { close_count: countParens(event.target.value, ")") })} aria-label="그룹 끝" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.close_count ? "bg-cyan-50 border-cyan-300 dark:bg-cyan-900/20" : "")} />
-                  </div>
-                  <Button variant="ghost" onClick={() => removeCondition(index)} className="h-8 px-2 text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-300">삭제</Button>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => setConditions((previous) => [...previous, makeEmptyCondition(previous.length ? "AND" : "")])}>
-                <Plus className="mr-2 h-4 w-4" />
-                조건 추가
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setConditions((previous) => [
-                  ...previous,
-                  {
-                    ...makeEmptyCondition(previous.length ? "OR" : ""),
-                    open_count: 1,
-                    close_count: 1,
-                  },
-                ])}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                그룹 조건 추가
-              </Button>
-            </div>
-          </div>
-
-          </CardContent>
-          </Card>
+          <DisclosureConditionFilterCard
+            conditions={conditions}
+            onConditionsChange={setConditions}
+            presets={presets || []}
+            presetName={presetName}
+            selectedPreset={selectedPreset}
+            onPresetNameChange={setPresetName}
+            onSelectedPresetChange={setSelectedPreset}
+            onLoadPreset={loadPreset}
+            onLoadPresetFromJson={loadFilterPresetFromJson}
+            onSavePreset={savePreset}
+            onDeletePreset={deletePreset}
+          />
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>

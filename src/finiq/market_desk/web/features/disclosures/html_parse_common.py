@@ -12,6 +12,9 @@ from threading import Lock
 from typing import Any, Callable
 
 from finiq.market_desk.web.features.disclosures.html_common import HTML_MANIFEST_FILENAME
+from finiq.market_desk.web.features.market_data.service_common import (
+    _record_filter_blocks_match,
+)
 from finiq.market_desk.web.html_parsers import (
     parse_asset_transaction,
     parse_bond_issuance,
@@ -117,6 +120,7 @@ class ParseRequest:
     progress_interval: int
     parallel_workers: int
     cancel_token: str | None
+    filter_blocks: list[dict[str, Any]]
     record_filters: list[dict[str, Any]]
 
 
@@ -678,6 +682,18 @@ def _parse_record_filters(value: Any) -> list[dict[str, Any]]:
     return filters
 
 
+def _parse_filter_blocks(value: Any) -> list[dict[str, Any]]:
+    return value if isinstance(value, list) else []
+
+
+def _record_matches_filter_blocks(
+    record: dict[str, Any], filter_blocks: list[dict[str, Any]]
+) -> bool:
+    if not filter_blocks:
+        return True
+    return _record_filter_blocks_match(record, filter_blocks)
+
+
 def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
     mode = str(body.get("mode") or "").strip()
     if not mode:
@@ -724,6 +740,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
             body.get("parallel_workers", body.get("workers")), len(html_files)
         ),
         cancel_token=cancel_token,
+        filter_blocks=_parse_filter_blocks(body.get("filter_blocks")),
         record_filters=_parse_record_filters(body.get("record_filters")),
     )
 
@@ -868,6 +885,7 @@ def _build_payload(
     warnings: list[dict[str, Any]],
     progress_log: list[str],
     resumed_files: int,
+    filter_blocks: list[dict[str, Any]],
     record_filters: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -877,6 +895,7 @@ def _build_payload(
         "output_path": str(output_path),
         "cancelled": cancelled,
         "filter_settings": {
+            "filter_blocks": filter_blocks,
             "record_filters": record_filters,
         },
         "warning_report_counts": _build_warning_report_counts(warnings),
@@ -917,6 +936,7 @@ def _payload_from_state(
         warnings=state.warnings,
         progress_log=state.progress_log,
         resumed_files=state.resumed_files,
+        filter_blocks=request.filter_blocks,
         record_filters=request.record_filters,
     )
 
@@ -1028,6 +1048,7 @@ def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
             )
         ]
         if _record_matches_filters(resolved_record, request.record_filters)
+        and _record_matches_filter_blocks(resolved_record, request.filter_blocks)
     ]
     state.errors = list(existing_payload.get("errors") or [])
     record_source_files = {
@@ -1048,6 +1069,8 @@ def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
 def _emit_run_header(request: ParseRequest, state: ParseRunState) -> None:
     state.emit(f"파싱 대상 HTML {len(request.html_files)}건을 찾았습니다.")
     state.emit(f"파싱 모드: {request.mode}")
+    if request.filter_blocks:
+        state.emit(f"공시 조건: {len(request.filter_blocks)}개 조건 적용")
     if request.record_filters:
         state.emit(f"필드 필터: {len(request.record_filters)}개 조건 적용")
     state.emit(f"이어하기: {'예' if request.resume else '아니오'}")
@@ -1172,7 +1195,9 @@ def _parse_one_html_file(
             request.manifest_metadata_index,
             mode=request.mode,
         )
-        if _record_matches_filters(record, request.record_filters):
+        if _record_matches_filters(
+            record, request.record_filters
+        ) and _record_matches_filter_blocks(record, request.filter_blocks):
             for warning_item in _record_parse_warning_items(parsed_record):
                 _add_parse_warning(
                     request,
@@ -1255,7 +1280,7 @@ def _record_parallel_parse_result(
     source_file = str(result["source_file"])
     if result["kind"] == "record":
         record = result["record"]
-        if _record_matches_filters(record, request.record_filters):
+        if _record_matches_filters(record, request.record_filters) and _record_matches_filter_blocks(record, request.filter_blocks):
             for warning_item in result["warnings"]:
                 _add_parse_warning(
                     request,

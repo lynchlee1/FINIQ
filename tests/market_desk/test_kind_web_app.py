@@ -287,6 +287,41 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     assert transfer_path.parent == transfer_dir.resolve()
 
 
+def test_load_disclosure_filter_preset_reads_result_json_filters(tmp_path: Path) -> None:
+    source_path = tmp_path / "filtered-disclosures.json"
+    filter_blocks = [
+        {
+            "field": "title",
+            "operator": "contains",
+            "value": "전환사채",
+        }
+    ]
+    source_path.write_text(
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "filters": {"filter_blocks": filter_blocks},
+                "disclosures": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/filter/preset",
+        json={"source_json_path": str(source_path)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["format"] == "kind_disclosure_filter_preset_v1"
+    assert payload["name"] == "filtered-disclosures"
+    assert payload["source_json_path"] == str(source_path.resolve())
+    assert payload["condition_blocks"] == filter_blocks
+
+
 def test_html_download_inspect_folder_route_deletes_unexpected_file(tmp_path: Path) -> None:
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()

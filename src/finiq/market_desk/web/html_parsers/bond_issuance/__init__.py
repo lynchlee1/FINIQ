@@ -19,7 +19,7 @@ def parse_bond_issuance(
     if not context.rows.values:
         warning = "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
         record_dict["parse_warnings"] = [warning]
-        record_dict["medium_warning"] = [warning]
+        record_dict["strong_warning"] = [warning]
 
     extractor = BondIssuanceExtractor(context)
     title = record_dict.get("title") or ""
@@ -60,7 +60,10 @@ def parse_bond_issuance(
             *extractor.medium_warnings,
         ]
     if extractor.strong_warnings:
-        record_dict["strong_warning"] = extractor.strong_warnings
+        record_dict["strong_warning"] = [
+            *record_dict.get("strong_warning", []),
+            *extractor.strong_warnings,
+        ]
     if extractor.field_parse_status:
         record_dict["field_parse_status"] = extractor.field_parse_status
     return record_dict
