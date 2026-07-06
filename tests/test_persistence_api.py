@@ -32,6 +32,21 @@ def test_persistence(tmp_path: Path):
     assert verified_config.get("html_parse_result_path") == str(test_path.resolve())
 
 
+def test_html_parse_output_directory_persists(tmp_path: Path):
+    config.settings_path = str(tmp_path / "settings.json")
+    client = TestClient(app)
+    output_directory = tmp_path / "parse_output"
+
+    resp = client.post("/api/settings", json={"html_parse_output_directory": str(output_directory)})
+
+    assert resp.status_code == 200
+    assert resp.json()["html_parse_output_directory"] == str(output_directory.resolve())
+
+    resp = client.get("/api/config")
+    assert resp.status_code == 200
+    assert resp.json()["html_parse_output_directory"] == str(output_directory.resolve())
+
+
 def test_html_download_settings_persist(tmp_path: Path):
     config.settings_path = str(tmp_path / "settings.json")
     client = TestClient(app)

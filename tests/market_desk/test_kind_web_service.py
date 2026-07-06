@@ -3344,12 +3344,12 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         encoding="utf-8",
     )
     (viewer_dir / "ignore.txt").write_text("not html", encoding="utf-8")
-    output_path = tmp_path / "parsed.json"
+    output_path = tmp_path / "parsed-bond_issuance.json"
 
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
-            "output_path": str(output_path),
+            "output_directory": str(tmp_path),
             "mode": "bond_issuance",
         }
     )
@@ -3402,6 +3402,7 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "bond_issuance",
             "resume": False,
         }
@@ -3427,6 +3428,7 @@ def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path:
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "bond_issuance",
             "resume": False,
         }
@@ -3501,6 +3503,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(input_dir),
+            "output_directory": str(bond_dir),
             "mode": "bond_issuance",
             "resume": False,
         }
@@ -3527,11 +3530,12 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     assert record["투자자"] == [["테스트조합", 1_000_000_000]]
 
 
-def test_parse_disclosure_html_payload_writes_sections_parse_to_parent_directory(
+def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
     tmp_path: Path, monkeypatch
 ) -> None:
     rights_dir = tmp_path / "rights_issuance"
     input_dir = rights_dir / "kind_html_contents_sections"
+    output_dir = tmp_path / "parse_output"
     input_dir.mkdir(parents=True)
     html_file = input_dir / "20250102000002.html"
     html_file.write_text("<html></html>", encoding="utf-8")
@@ -3551,14 +3555,77 @@ def test_parse_disclosure_html_payload_writes_sections_parse_to_parent_directory
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(input_dir),
+            "output_directory": str(output_dir),
             "mode": "rights_issuance",
             "resume": False,
         }
     )
 
-    assert payload["output_path"] == str(rights_dir / "parsed-rights_issuance.json")
-    assert (rights_dir / "parsed-rights_issuance.json").is_file()
+    assert payload["output_path"] == str(output_dir / "parsed-rights_issuance.json")
+    assert (output_dir / "parsed-rights_issuance.json").is_file()
     assert not (input_dir / "parsed-rights_issuance.json").exists()
+
+
+def test_parse_disclosure_html_payload_accepts_dotted_output_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_dir = tmp_path / "viewer_html"
+    output_dir = tmp_path / "project-1.0" / "out"
+    input_dir.mkdir()
+    (input_dir / "20250102000002.html").write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "rights_issuance",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_dir),
+            "output_directory": str(output_dir),
+            "mode": "rights_issuance",
+            "resume": False,
+        }
+    )
+
+    assert payload["output_path"] == str(output_dir / "parsed-rights_issuance.json")
+    assert (output_dir / "parsed-rights_issuance.json").is_file()
+
+
+def test_parse_disclosure_html_payload_requires_output_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_dir = tmp_path / "viewer_html_contents_sections"
+    input_dir.mkdir()
+    html_file = input_dir / "20250102000002.html"
+    html_file.write_text("<html></html>", encoding="utf-8")
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "rcept_no": "20250102009999",
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "rights_issuance",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
+
+    with pytest.raises(ValueError, match="output_directory is required"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(input_dir),
+                "mode": "rights_issuance",
+                "resume": False,
+            }
+        )
 
 
 def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
@@ -3609,6 +3676,7 @@ def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "resume": False,
         }
@@ -3760,6 +3828,7 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(input_dir),
+            "output_directory": str(tmp_path),
             "mode": "rights_issuance",
             "resume": False,
         }
@@ -3852,6 +3921,32 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
     assert "리픽싱(%)" not in payload["records"][0]["fields"]
 
 
+def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Path) -> None:
+    parse_path = tmp_path / "parsed-bond_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "bond_issuance",
+                "records": [
+                    {
+                        "title": "전환사채권발행결정",
+                        "acpt_no": "20250102000002",
+                        "source_file": "/tmp/20250102000002.html",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bond_parse_summary_payload({"output_path": str(tmp_path)})
+
+    assert payload["source_path"] == str(parse_path)
+    assert payload["summary"]["records"] == 1
+
+
 def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path) -> None:
     source_path = tmp_path / "20250102000002.html"
     source_path.write_text(
@@ -3902,99 +3997,7 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
     assert preview["tables"][0]["rows"][1] == ["2. 사채의 권면(전자등록)총액", "1,000,000,000"]
 
 
-def test_build_parse_preview_payload_loads_result_records_with_source_preview(tmp_path: Path) -> None:
-    source_path = tmp_path / "20250102000002.html"
-    source_path.write_text(
-        """
-        <html>
-          <head><title>전환사채권발행결정</title></head>
-          <body>
-            <table>
-              <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
-              <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
-            </table>
-          </body>
-        </html>
-        """,
-        encoding="utf-8",
-    )
-    parse_path = tmp_path / "parsed-bond_issuance.json"
-    parse_path.write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_html_parse_v1",
-                "mode": "bond_issuance",
-                "records": [
-                    {
-                        "title": "전환사채권발행결정",
-                        "acpt_no": "20250102000002",
-                        "source_file": str(source_path),
-                        "발행금액": 1_000_000_000,
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    payload = build_parse_preview_payload(
-        {
-            "output_path": str(parse_path),
-            "mode": "bond_issuance",
-            "limit": 2,
-        }
-    )
-
-    assert payload["format"] == "finiq_parse_preview_v1"
-    assert payload["source_kind"] == "result_json"
-    assert payload["summary"] == {"records": 1, "visible_records": 1}
-    assert payload["records"][0]["parsed_result"]["발행금액"] == 1_000_000_000
-    assert payload["records"][0]["source_preview"]["tables"][0]["rows"][0] == ["1. 사채의 종류", "전환사채"]
-
-
-def test_build_parse_preview_payload_applies_filter_blocks(tmp_path: Path) -> None:
-    source_path = tmp_path / "20250102000002.html"
-    source_path.write_text("<html><body><table><tr><th>1. 사채의 종류</th><td>전환사채</td></tr></table></body></html>", encoding="utf-8")
-    parse_path = tmp_path / "parsed-bond_issuance.json"
-    parse_path.write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_html_parse_v1",
-                "mode": "bond_issuance",
-                "records": [
-                    {
-                        "title": "전환사채권발행결정",
-                        "acpt_no": "20250102000002",
-                        "source_file": str(source_path),
-                    },
-                    {
-                        "title": "주주총회소집공고",
-                        "acpt_no": "20250103000003",
-                        "source_file": str(source_path),
-                    },
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    payload = build_parse_preview_payload(
-        {
-            "output_path": str(parse_path),
-            "mode": "bond_issuance",
-            "filter_blocks": [
-                {"field": "title", "operator": "contains", "value": "전환사채"}
-            ],
-        }
-    )
-
-    assert payload["summary"] == {"records": 1, "visible_records": 1}
-    assert payload["records"][0]["acpt_no"] == "20250102000002"
-
-
-def test_build_parse_preview_payload_parses_input_directory_when_result_is_missing(tmp_path: Path) -> None:
+def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> None:
     bond_dir = tmp_path / "bond_issuance"
     input_dir = bond_dir / "viewer_html"
     input_dir.mkdir(parents=True)
@@ -4082,7 +4085,6 @@ def test_build_parse_preview_payload_parses_input_directory_when_result_is_missi
     payload = build_parse_preview_payload(
         {
             "input_directory": str(input_dir),
-            "output_path": str(input_dir / "parsed-bond_issuance.json"),
             "mode": "bond_issuance",
             "limit": 1,
         }
@@ -4234,6 +4236,7 @@ def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monk
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "cancel_token": "parse-cancel-test",
         }
@@ -4250,7 +4253,7 @@ def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Pat
     viewer_dir.mkdir()
     html_path = viewer_dir / "20250101000001.html"
     html_path.write_text("<html></html>", encoding="utf-8")
-    output_path = tmp_path / "parsed.json"
+    output_path = tmp_path / "parsed-security_transaction.json"
 
     def fake_parser(html_text, *, file_path):
         raise RuntimeError("broken parser")
@@ -4260,7 +4263,7 @@ def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Pat
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
-            "output_path": str(output_path),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "skip_errors": True,
         }
@@ -4296,12 +4299,12 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         """,
         encoding="utf-8",
     )
-    output_path = tmp_path / "parsed.json"
+    output_path = tmp_path / "parsed-bond_issuance.json"
 
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
-            "output_path": str(output_path),
+            "output_directory": str(tmp_path),
             "mode": "bond_issuance",
             "resume": False,
         }
@@ -4364,6 +4367,7 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "rights_issuance",
             "resume": False,
         }
@@ -4411,7 +4415,7 @@ def test_parse_disclosure_html_payload_checkpoints_and_resumes(tmp_path: Path, m
     second = viewer_dir / "20250101000002.html"
     first.write_text("<html></html>", encoding="utf-8")
     second.write_text("<html></html>", encoding="utf-8")
-    output_path = tmp_path / "parsed.json"
+    output_path = tmp_path / "parsed-security_transaction.json"
     calls: list[str] = []
 
     def fake_parser(html_text, *, file_path):
@@ -4432,7 +4436,7 @@ def test_parse_disclosure_html_payload_checkpoints_and_resumes(tmp_path: Path, m
         parse_disclosure_html_payload(
             {
                 "input_directory": str(viewer_dir),
-                "output_path": str(output_path),
+                "output_directory": str(tmp_path),
                 "mode": "security_transaction",
                 "skip_errors": False,
                 "progress_interval": 1,
@@ -4449,7 +4453,7 @@ def test_parse_disclosure_html_payload_checkpoints_and_resumes(tmp_path: Path, m
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
-            "output_path": str(output_path),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "progress_interval": 1,
             "resume": True,
@@ -4467,7 +4471,7 @@ def test_parse_disclosure_html_payload_logs_resume_skips_by_interval(tmp_path: P
     viewer_dir.mkdir()
     for index in range(3):
         (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
-    output_path = tmp_path / "parsed.json"
+    output_path = tmp_path / "parsed-security_transaction.json"
     output_path.write_text(
         json.dumps(
             {
@@ -4492,7 +4496,7 @@ def test_parse_disclosure_html_payload_logs_resume_skips_by_interval(tmp_path: P
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
-            "output_path": str(output_path),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "progress_interval": 2,
             "resume": True,
@@ -4525,6 +4529,7 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "progress_interval": 2,
         }
@@ -4556,6 +4561,7 @@ def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
         }
     )
@@ -4583,6 +4589,7 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "progress_interval": 2,
             "parallel_workers": 2,
@@ -4623,6 +4630,7 @@ def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path:
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
         }
     )
@@ -4697,6 +4705,7 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "parallel_workers": 2,
             "record_filters": [
@@ -4763,6 +4772,7 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "parallel_workers": 2,
             "filter_blocks": [
@@ -4807,6 +4817,7 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "parallel_workers": 1,
             "progress_interval": 2,
@@ -4972,6 +4983,7 @@ def test_parse_disclosure_html_payload_reports_failed_file_when_not_skipping(tmp
         parse_disclosure_html_payload(
             {
                 "input_directory": str(viewer_dir),
+                "output_directory": str(tmp_path),
                 "mode": "security_transaction",
                 "skip_errors": False,
             }
@@ -4991,6 +5003,7 @@ def test_parse_disclosure_html_payload_applies_limit(tmp_path: Path) -> None:
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "shareholder_meeting",
             "limit": 2,
         }
@@ -5021,6 +5034,7 @@ def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkey
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
             "mode": "security_transaction",
         }
     )

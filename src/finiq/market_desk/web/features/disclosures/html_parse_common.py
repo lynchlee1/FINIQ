@@ -34,10 +34,6 @@ _CANCEL_LOCK = Lock()
 _PARSE_CACHE: dict[str, dict[str, Any]] = {}
 _CACHE_LOCK = Lock()
 SUPPORTED_RECORD_FILTER_OPERATORS = {"contains", "equals", "exists", "in"}
-HTML_PARSE_SOURCE_OUTPUT_DIRECTORIES = {
-    "kind_html_contents_grouped_sections",
-    "kind_html_contents_sections",
-}
 
 @dataclass(frozen=True)
 class ParseFilterConfig:
@@ -714,12 +710,15 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
 
-    output_path_raw = str(body.get("output_path") or "").strip()
-    output_path = (
-        Path(output_path_raw).expanduser().resolve()
-        if output_path_raw
-        else _default_parse_output_path(input_directory, mode)
-    )
+    output_directory_raw = str(body.get("output_directory") or "").strip()
+    if not output_directory_raw:
+        msg = "output_directory is required"
+        raise ValueError(msg)
+    output_directory = Path(output_directory_raw).expanduser().resolve()
+    if output_directory.is_file():
+        msg = "output_directory must be a directory path"
+        raise ValueError(msg)
+    output_path = output_directory / f"parsed-{mode}.json"
     limit = _parse_limit(body.get("limit"))
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
@@ -743,16 +742,6 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         filter_blocks=_parse_filter_blocks(body.get("filter_blocks")),
         record_filters=_parse_record_filters(body.get("record_filters")),
     )
-
-
-def _default_parse_output_path(input_directory: Path, mode: str) -> Path:
-    output_directory = (
-        input_directory.parent
-        if input_directory.name in HTML_PARSE_SOURCE_OUTPUT_DIRECTORIES
-        else input_directory
-    )
-    return output_directory / f"parsed-{mode}.json"
-
 
 def _load_existing_parse_payload(output_path: Path, mode: str) -> dict[str, Any] | None:
     if not output_path.is_file():
@@ -958,7 +947,6 @@ def _load_parse_payload(path: Path) -> dict[str, Any]:
 
 def _resolve_parse_result_path(path: Path, mode: str) -> Path:
     if path.is_dir():
-        # Try all supported modes if one is not active or if we want to be smart
         modes_to_try = (
             [mode] if mode in PARSER_REGISTRY else list(PARSER_REGISTRY.keys())
         )
@@ -967,7 +955,6 @@ def _resolve_parse_result_path(path: Path, mode: str) -> Path:
             if candidate.is_file():
                 return candidate
 
-        # Fallback to the requested mode's default name even if not exists (for error reporting)
         return path / f"parsed-{mode if mode else 'bond_issuance'}.json"
     return path
 

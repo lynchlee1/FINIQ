@@ -39,6 +39,7 @@ class SettingsUpdate(BaseModel):
     html_content_output_directory: Optional[str] = None
     html_section_split_output_directory: Optional[str] = None
     html_transfer_directory: Optional[str] = None
+    html_parse_output_directory: Optional[str] = None
     html_parse_result_path: Optional[str] = None
     html_parse_mode: Optional[str] = None
     integrated_merge_input_path: Optional[str] = None
@@ -150,6 +151,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "html_content_output_directory": config.html_content_output_directory or f"{config.output_root}/viewer_html_contents",
             "html_section_split_output_directory": config.html_section_split_output_directory,
             "html_transfer_directory": config.html_transfer_directory or f"{config.output_root}/.finiq/transfers",
+            "html_parse_output_directory": config.html_parse_output_directory,
             "html_parse_result_path": config.html_parse_result_path,
             "html_parse_mode": config.html_parse_mode,
             "price_files": [],

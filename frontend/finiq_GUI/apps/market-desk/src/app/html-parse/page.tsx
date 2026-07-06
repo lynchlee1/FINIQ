@@ -82,18 +82,6 @@ const DISCLOSURE_PARSE_MODES: ParseModeConfig[] = [
   },
 ];
 
-const buildParseOutputPath = (inputDirectory: string, mode: string) => {
-  const trimmedInputDirectory = inputDirectory.trim();
-  const normalizedInputDirectory = trimmedInputDirectory === "/" ? trimmedInputDirectory : trimmedInputDirectory.replace(/\/+$/, "");
-  if (!normalizedInputDirectory) return "";
-  const htmlContentDirectory = ["kind_html_contents_grouped_sections", "kind_html_contents_sections"]
-    .find((directoryName) => normalizedInputDirectory.endsWith(`/${directoryName}`));
-  const outputDirectory = htmlContentDirectory
-    ? normalizedInputDirectory.slice(0, -htmlContentDirectory.length).replace(/\/+$/, "") || "/"
-    : normalizedInputDirectory;
-  return `${outputDirectory}/parsed-${mode}.json`;
-};
-
 const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
 const PARSE_MODE_CONFIGS = Object.fromEntries(DISCLOSURE_PARSE_MODES.map((mode) => [mode.key, mode])) as Record<string, ParseModeConfig>;
 const WARNING_OPEN_PAGE_SIZE = 20;
@@ -241,7 +229,6 @@ export default function HtmlParsePage() {
     fetchSettings,
     parallel_worker_count: defaultParallelWorkers,
     saveSetting,
-    saveSettings,
   } = useSettingsStore();
 
   const [loading, setLoading] = useState(true);
@@ -299,7 +286,7 @@ export default function HtmlParsePage() {
 
   // Form State
   const [inputDirectory, setInputDirectory] = useState("");
-  const [outputPath, setOutputPath] = useState("");
+  const [outputDirectory, setOutputDirectory] = useState("");
   const [parseMode, setParseMode] = useState("bond_issuance");
   const [limit, setLimit] = useState("");
   const [skipErrors, setSkipErrors] = useState(true);
@@ -341,19 +328,12 @@ export default function HtmlParsePage() {
 
   useEffect(() => {
     fetchSettings().then((config) => {
-      if (config.html_content_output_directory) {
-        setInputDirectory(config.html_content_output_directory);
-      } else {
-        const defaultInput = config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : "");
-        setInputDirectory(defaultInput);
-      }
+      setInputDirectory(config.html_section_split_output_directory || "");
+      setOutputDirectory(config.html_parse_output_directory || "");
 
       if (config.html_parse_mode) {
         setParseMode(config.html_parse_mode);
       }
-
-      const initialInput = config.html_content_output_directory || config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : "");
-      setOutputPath(buildParseOutputPath(initialInput, config.html_parse_mode || "bond_issuance"));
 
       const configuredParallelWorkers = Number(config.parallel_worker_count || defaultParallelWorkers || 1);
       setParallelWorkers(String(configuredParallelWorkers));
@@ -366,31 +346,21 @@ export default function HtmlParsePage() {
   }, [defaultParallelWorkers, fetchSettings, setStatus, setIsErrorStatus]);
 
   const handleInputDirectoryChange = (val: string) => {
-    const nextOutputPath = buildParseOutputPath(val, parseMode);
     setInputDirectory(val);
-    setOutputPath(nextOutputPath);
-    saveSettings({
-      html_content_output_directory: val,
-      html_parse_result_path: nextOutputPath,
-    });
+    saveSetting("html_section_split_output_directory", val);
   };
 
-  const handleOutputPathChange = (val: string) => {
-    setOutputPath(val);
-    saveSetting("html_parse_result_path", val);
+  const handleOutputDirectoryChange = (val: string) => {
+    setOutputDirectory(val);
+    saveSetting("html_parse_output_directory", val);
   };
 
   const handleParseModeChange = (val: string) => {
-    const nextOutputPath = buildParseOutputPath(inputDirectory, val);
     setParseMode(val);
-    setOutputPath(nextOutputPath);
     setSelectedExecutionOptionValues([]);
     setExecutionOptionCandidates([]);
     setExecutionOptionExampleNotice(null);
-    saveSettings({
-      html_parse_mode: val,
-      html_parse_result_path: nextOutputPath,
-    });
+    saveSetting("html_parse_mode", val);
   };
 
   const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
@@ -498,6 +468,11 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
       return;
     }
+    if (!outputDirectory) {
+      setStatus("결과 데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
     const activeRecordFilters = executionOptionConfig && selectedExecutionOptionValues.length ? [
       {
         field: executionOptionConfig.field,
@@ -512,7 +487,7 @@ export default function HtmlParsePage() {
 
     const payload = {
       input_directory: inputDirectory,
-      output_path: outputPath,
+      output_directory: outputDirectory,
       mode: parseMode,
       limit: limit ? Number(limit) : null,
       skip_errors: skipErrors,
@@ -614,8 +589,8 @@ export default function HtmlParsePage() {
   };
 
   const handleLoadPreview = async () => {
-    if (!inputDirectory && !outputPath) {
-      setStatus("입력 데이터 경로 또는 결과 데이터 경로를 선택하세요.");
+    if (!inputDirectory) {
+      setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -629,7 +604,6 @@ export default function HtmlParsePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input_directory: inputDirectory,
-          output_path: outputPath,
           mode: parseMode,
           limit: 3,
           filter_blocks: normalizeDisclosureConditionBlocks(conditions),
@@ -669,12 +643,12 @@ export default function HtmlParsePage() {
       span: 4,
     },
     {
-      id: "outputPath",
+      id: "outputDirectory",
       kind: "path",
-      label: "결과 데이터 경로 (JSON)",
-      mode: "save",
-      value: outputPath,
-      onChange: handleOutputPathChange,
+      label: "결과 데이터 경로",
+      mode: "folder",
+      value: outputDirectory,
+      onChange: handleOutputDirectoryChange,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
     },
@@ -725,8 +699,8 @@ export default function HtmlParsePage() {
       span: 2,
     },
   ];
-  const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputPath");
-  const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputPath");
+  const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputDirectory");
+  const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputDirectory");
   const warningReports = buildWarningReports(Array.isArray(latestParseResult?.warnings) ? latestParseResult.warnings : []);
   const warningSourceFilesByLevel = WARNING_LEVELS.reduce((filesByLevel, level) => {
     filesByLevel[level] = Array.from(new Set(

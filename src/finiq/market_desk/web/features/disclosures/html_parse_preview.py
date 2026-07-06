@@ -25,48 +25,9 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
 
     limit = _parse_limit(body.get("limit")) or 3
     filter_blocks = _parse_filter_blocks(body.get("filter_blocks"))
-    output_path_raw = str(
-        body.get("output_path") or body.get("parse_result_path") or ""
-    ).strip()
-    if output_path_raw:
-        output_path = _resolve_parse_result_path(
-            Path(output_path_raw).expanduser().resolve(), requested_mode
-        )
-        if output_path.is_file():
-            payload = _get_cached_payload(output_path)
-            mode = str(payload.get("mode") or requested_mode)
-            if mode != requested_mode:
-                msg = f"parse result mode must be {requested_mode}"
-                raise ValueError(msg)
-            records = [
-                record
-                for record in list(payload.get("records") or [])
-                if isinstance(record, dict)
-            ]
-            filtered_records = [
-                record
-                for record in records
-                if _record_matches_filter_blocks(record, filter_blocks)
-            ]
-            visible_records = filtered_records[:limit]
-            return {
-                "format": "finiq_parse_preview_v1",
-                "mode": mode,
-                "source_kind": "result_json",
-                "source_path": str(output_path),
-                "summary": {
-                    "records": len(filtered_records),
-                    "visible_records": len(visible_records),
-                },
-                "records": [
-                    _build_preview_record(record, index=index, mode=mode)
-                    for index, record in enumerate(visible_records, start=1)
-                ],
-            }
-
     input_directory_raw = str(body.get("input_directory") or "").strip()
     if not input_directory_raw:
-        msg = "input_directory is required when output_path does not point to a result JSON"
+        msg = "input_directory is required"
         raise ValueError(msg)
     input_directory = Path(input_directory_raw).expanduser().resolve()
     if not input_directory.is_dir():
