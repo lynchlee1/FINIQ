@@ -821,6 +821,12 @@ def _resolve_correction_family_acpt_numbers(
 
 
 WARNING_LEVEL_KEYS = ("weak_warning", "medium_warning", "strong_warning")
+_BOND_MAIN_TABLE_MISSING_WARNING = (
+    "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
+)
+_RIGHTS_ISSUE_TYPE_MISSING_WARNING = (
+    "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+)
 
 
 def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1007,9 +1013,25 @@ def _record_parse_warning_items(record: dict[str, Any]) -> list[dict[str, str]]:
                     {
                         "warning": text,
                         "level": level_by_warning.get(text, "medium_warning"),
+                        "warning_code": _warning_code(text),
                     }
                 )
     return collected
+
+
+def _warning_code(warning: str) -> str:
+    if warning == _BOND_MAIN_TABLE_MISSING_WARNING:
+        return "bond_main_table_missing"
+    if warning == _RIGHTS_ISSUE_TYPE_MISSING_WARNING:
+        return "rights_issue_type_missing"
+    if warning.startswith("발행목적: 자금조달 목적 합계"):
+        return "bond_funding_purpose_sum_mismatch"
+    if warning.startswith("투자자: 발행권면총액 합계"):
+        return "bond_investor_sum_mismatch"
+    if ": 정해진 출처에서 값을 찾지 못했습니다." in warning:
+        field_name = warning.split(":", 1)[0].strip()
+        return f"source_not_found:{field_name}" if field_name else "source_not_found"
+    return "parse_warning"
 
 
 def _record_parse_warnings(record: dict[str, Any]) -> list[str]:
@@ -1145,6 +1167,7 @@ def _add_parse_warning(
     source_file: str,
     warning: str,
     level: str,
+    warning_code: str,
 ) -> None:
     warning_info = {
         "index": index,
@@ -1154,6 +1177,7 @@ def _add_parse_warning(
         "source_name": html_file.name,
         "warning": warning,
         "level": level,
+        "warning_code": warning_code,
     }
     state.warnings.append(warning_info)
     state.emit(
@@ -1218,6 +1242,7 @@ def _parse_one_html_file(
                     source_file=source_file,
                     warning=warning_item["warning"],
                     level=warning_item["level"],
+                    warning_code=warning_item["warning_code"],
                 )
             state.records.append(record)
         state.processed_files.add(source_file)
@@ -1301,6 +1326,7 @@ def _record_parallel_parse_result(
                     source_file=source_file,
                     warning=warning_item["warning"],
                     level=warning_item["level"],
+                    warning_code=warning_item["warning_code"],
                 )
             state.records.append(record)
         state.processed_files.add(source_file)
