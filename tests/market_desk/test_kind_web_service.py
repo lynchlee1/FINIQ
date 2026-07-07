@@ -91,6 +91,24 @@ RIGHTS_GROUPED_DIR = (
     / "rights_issuance"
     / "kind_html_contents_sections_grouped"
 )
+RIGHTS_FILTERED_PATH = KIND_RESOURCES_DIR / "rights_issuance" / "filtered.json"
+_RIGHTS_MANIFEST_TITLES: dict[str, str] | None = None
+
+
+def _rights_manifest_title(fixture_path: Path) -> str:
+    global _RIGHTS_MANIFEST_TITLES
+    assert RIGHTS_FILTERED_PATH.is_file()
+    if _RIGHTS_MANIFEST_TITLES is None:
+        payload = json.loads(RIGHTS_FILTERED_PATH.read_text(encoding="utf-8"))
+        _RIGHTS_MANIFEST_TITLES = {
+            str(row.get("acpt_no") or ""): str(row.get("title") or "").strip()
+            for row in payload["disclosures"]
+        }
+    title = _RIGHTS_MANIFEST_TITLES.get(fixture_path.stem.split("_", 1)[0])
+    assert title
+    return title
+
+
 PAID_RIGHTS_ISSUANCE_50_EXAMPLES = [
     "2008/20080825000060.html",
     "2008/20080825000143.html",
@@ -4547,7 +4565,7 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
         "mode": "rights_issuance",
         "source_file": str(html_path.resolve()),
         "source_name": "20250101000001.html",
-        "warning": "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
+        "warning": "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
         "level": "strong_warning",
     }
     strong_warnings = [
@@ -5624,6 +5642,94 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_bond_parser(
     )
 
 
+def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000010.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td>5. 증자방식</td><td>무상증자</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="[테스트] 무상증자결정",
+    )
+
+    assert parsed["title"] == "[테스트] 무상증자결정"
+    assert parsed["증자유형"] == "무상증자"
+    assert parsed["유상증자"] is None
+    assert parsed["무상증자"] is not None
+    assert "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다." not in (
+        parsed.get("strong_warning") or []
+    )
+
+
+def test_parse_disclosure_html_payload_injects_manifest_title_for_rights_parser(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    html_path = input_dir / "20250102000011.html"
+    html_path.write_text(
+        """
+        <html><body>
+          <table>
+            <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>20</td></tr>
+            <tr><td>5. 증자방식</td><td>주주배정후 실권주 일반공모</td></tr>
+          </table>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    (input_dir / HTML_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250102000011",
+                        "title": "[테스트] 유상증자결정",
+                        "company_name": "테스트회사",
+                        "market": "코스닥",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "mode": "rights_issuance",
+            "input_directory": str(input_dir),
+            "output_directory": str(output_dir),
+            "resume": False,
+        }
+    )
+
+    assert payload["summary"]["parsed_files"] == 1
+    record = payload["records"][0]
+    assert record["title"] == "[테스트] 유상증자결정"
+    assert record["상장구분"] == "코스닥"
+    assert "상장시장" not in record
+    assert record["증자유형"] == "유상증자"
+    assert record["유상증자"] is not None
+    assert record["무상증자"] is None
+    assert not any(
+        "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다."
+        in warning["warning"]
+        for warning in payload["warnings"]
+    )
+
+
 def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_path: Path) -> None:
     fixture_path = tmp_path / "20250102000002.html"
     body_html = """
@@ -6125,7 +6231,11 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields() -> None:
 def test_parse_rights_issuance_paid_examples_have_paid_detail(relative_path: str) -> None:
     fixture_path = RIGHTS_GROUPED_DIR / relative_path
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["증자유형"] == "유상증자"
     assert parsed["유상증자"] is not None
@@ -6140,7 +6250,11 @@ def test_parse_rights_issuance_paid_examples_have_paid_detail(relative_path: str
 def test_parse_rights_issuance_bonus_examples_have_bonus_detail(relative_path: str) -> None:
     fixture_path = RIGHTS_GROUPED_DIR / relative_path
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["증자유형"] == "무상증자"
     assert parsed["유상증자"] is None
@@ -6165,7 +6279,11 @@ def test_parse_rights_issuance_mixed_examples_split_paid_and_bonus_details(
 ) -> None:
     fixture_path = RIGHTS_GROUPED_DIR / relative_path
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["증자유형"] == "유무상증자"
     assert parsed["유상증자"] is not None
@@ -6181,7 +6299,11 @@ def test_parse_rights_issuance_mixed_examples_split_paid_and_bonus_details(
 def test_parse_rights_issuance_mixed_keeps_paid_flat_fields_and_bonus_section() -> None:
     fixture_path = RIGHTS_GROUPED_DIR / "2008/20081020000088.html"
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["증자유형"] == "유무상증자"
     assert parsed["신주의 종류와 수"] == [["보통주식", 20_000_000], ["기타주식", 0]]
@@ -6213,7 +6335,11 @@ def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
         / "20120419000357.html"
     )
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 3_600_000], ["기타주식", 0]]
     assert parsed["증자 전 발행주식총수"] == [["보통주식", 12_635_511], ["기타주식", 0]]
@@ -6237,7 +6363,11 @@ def test_parse_rights_issuance_maps_kind_stock_labels_to_other_stock() -> None:
         / "20171212000184.html"
     )
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 2_000_000]]
     assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", 5_000]]
@@ -6504,7 +6634,11 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
         / "20080825000072.html"
     )
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["증자유형"] == "무상증자"
     assert parsed["신주의 종류와 수"] == [["보통주식", 3_560_000], ["기타주식", 0]]
@@ -6542,7 +6676,11 @@ def test_parse_rights_issuance_marks_single_compressed_dash_target_row_as_undisc
         / "20230224000621.html"
     )
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["증자방식"] == "제3자배정증자"
     assert parsed["발행대상자"] == [["-", 0]]
@@ -6564,7 +6702,11 @@ def test_parse_rights_issuance_marks_single_dash_target_row_as_undisclosed() -> 
         / "20100219000571.html"
     )
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["발행대상자"] == [["-", 0]]
     assert parsed["field_parse_status"]["발행대상자"] == "explicit_zero"
@@ -6609,7 +6751,11 @@ def test_parse_rights_issuance_marks_real_multiple_dash_target_rows_as_one_undis
         / "20161004000005.html"
     )
 
-    parsed = parse_rights_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title=_rights_manifest_title(fixture_path),
+    )
 
     assert parsed["발행대상자"] == [["-", 0]]
     assert parsed["field_parse_status"]["발행대상자"] == "explicit_zero"
@@ -6724,7 +6870,7 @@ def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
     assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 0]]
     assert parsed["증자방식"] is None
     assert parsed["parse_warnings"][0] == (
-        "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+        "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
     )
     assert any(
         warning.startswith("신주의 종류와 수: 정해진 출처에서 값을 찾지 못했습니다.")
@@ -6755,7 +6901,7 @@ def test_parse_rights_issuance_does_not_infer_bonus_type_from_table(
 
     assert parsed["증자방식"] is None
     assert parsed["parse_warnings"][0] == (
-        "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+        "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
     )
     assert any(
         warning.startswith("발행가액: 정해진 출처에서 값을 찾지 못했습니다.")

@@ -82,7 +82,7 @@ def build_base_record(
         "source_file": str(Path(file_path).resolve()),
         "mode": mode,
         "title": title_extractor(document),
-        "상장시장": None,
+        "상장구분": None,
         "raw_tables": raw_tables,
         "raw_rows": [row for table in raw_tables for row in table["logical_rows"]],
     }

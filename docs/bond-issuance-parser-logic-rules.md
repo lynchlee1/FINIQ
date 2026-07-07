@@ -54,15 +54,14 @@
 | 필드 | 출처 | 기본값 |
 | --- | --- | --- |
 | `correction_families` | `filtered.json`의 공시 행을 기준으로 만든 원공시/정정공시 묶음 | `{}` |
-| `rcept_no` | 없음. DART 접수번호용 예약 필드이며 KIND HTML 워크플로우에서는 만들지 않음 | `null` |
+| `rcept_no` | KIND HTML 워크플로우에서는 사용하지 않음 | `null` |
 | `기업명(발행사)` | 다운로드 manifest, `filtered.json`, `compressed-external-html.json` | `null` |
 | `상장구분` | 다운로드 manifest, `filtered.json`, `compressed-external-html.json` | `null` |
 
 메모:
 
 - KIND HTML 워크플로우의 기준 식별자는 `acpt_no`다.
-- `rcept_no`를 채우는 보존 로직은 남아 있지만, 현재 KIND 입력 경로에서는 값을
-  만들거나 보강하지 않는다.
+- KIND HTML 워크플로우는 DART `rcept_no`를 만들거나 보강하지 않는다.
 - `mainDoc` 값은 viewer 안의 문서 선택 번호로만 다루며, DART 접수번호로
   해석하지 않는다.
 - KIND HTML 본문, viewer HTML, `filtered.json`, `compressed-external-html.json`만으로

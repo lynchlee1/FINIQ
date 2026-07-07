@@ -83,17 +83,20 @@ class _RightsRows:
 
 
 def _build_rights_parse_context(
-    html_text: str | bytes, *, file_path: str | Path
+    html_text: str | bytes, *, file_path: str | Path, title: str | None = None
 ) -> _RightsParseContext:
     """공통 메타데이터를 생성하고 본문 HTML의 주요 행 데이터를 구성한다."""
     record = build_base_record(html_text, file_path=file_path, mode=MODE)
+    supplied_title = str(title or "").strip()
+    if supplied_title:
+        record["title"] = supplied_title
     extraction_tables = _rights_extraction_tables(record["raw_tables"])
     rows = [
         row
         for table in extraction_tables
         for row in table.get("logical_rows") or []
     ]
-    issuance_type = _rights_issuance_type(str(record.get("title") or ""))
+    issuance_type = _rights_issuance_type(supplied_title)
     return _RightsParseContext(
         record=record,
         rows=_RightsRows(rows),
