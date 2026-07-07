@@ -35,6 +35,7 @@ class OntologyGraphQueryService:
                 self.adjacency = {}
                 self.company_to_node_id = {}
                 self.investor_to_node_id = {}
+                self.metadata = {}
 
         if self._initialized:
             return
@@ -54,6 +55,7 @@ class OntologyGraphQueryService:
             self.adjacency = {}
             self.company_to_node_id = {}
             self.investor_to_node_id = {}
+            self.metadata = {}
             self.is_loaded = False
             
         self._initialized = True
@@ -72,6 +74,7 @@ class OntologyGraphQueryService:
                 
             nodes_list = data.get("nodes", [])
             edges_list = data.get("edges", [])
+            self.metadata = data.get("metadata", {})
             
             self.nodes_index = {node["id"]: node for node in nodes_list}
             self.edges_index = edges_list
@@ -360,3 +363,83 @@ class OntologyGraphQueryService:
         edges = [edges_dict[eid] for eid in visited_edges if eid in edges_dict]
         
         return {"nodes": nodes, "edges": edges}
+
+    def search_investors_disambiguation(self, query_name: str) -> List[Dict[str, Any]]:
+        """Search for investors by name, returning detailed disambiguation context for homonyms."""
+        self.load_index()
+        norm_query = normalize_entity_name(query_name)
+        if not norm_query:
+            return []
+
+        matching_nids = []
+
+        # 1. Match in investor_to_node_id
+        for name, nids in self.investor_to_node_id.items():
+            if norm_query in normalize_entity_name(name):
+                matching_nids.extend(nids)
+
+        # 2. Match in company_to_node_id
+        for name, nid in self.company_to_node_id.items():
+            if norm_query in normalize_entity_name(name):
+                if nid not in matching_nids:
+                    matching_nids.append(nid)
+
+        results = []
+        for nid in set(matching_nids):
+            node = self.nodes_index.get(nid)
+            if not node:
+                continue
+
+            relations = []
+            for edge in self.adjacency.get(nid, []):
+                rel_type = edge["relation"]
+                src = edge["source"]
+                tgt = edge["target"]
+
+                other_nid = tgt if src == nid else src
+                other_node = self.nodes_index.get(other_nid, {})
+                other_label = other_node.get("label", "")
+                other_type = other_node.get("type", "")
+
+                company_context = ""
+                if other_nid.startswith("company_") and not other_nid.startswith("company_inv_"):
+                    company_context = other_label
+                elif rel_type == "ACQUIRED" and other_nid.startswith("security_"):
+                    # Find ISSUED edge: IssuanceEvent -> Security
+                    issuance_event_id = None
+                    for e in self.adjacency.get(other_nid, []):
+                        if e["relation"] == "ISSUED" and e["target"] == other_nid:
+                            issuance_event_id = e["source"]
+                            break
+                    if issuance_event_id:
+                        # Find EXECUTED edge: Company -> IssuanceEvent
+                        for e in self.adjacency.get(issuance_event_id, []):
+                            if e["relation"] == "EXECUTED" and e["target"] == issuance_event_id:
+                                company_nid = e["source"]
+                                company_context = self.nodes_index.get(company_nid, {}).get("label", "")
+                                break
+                elif other_nid.startswith("shareholder_meeting_"):
+                    # Find HELD edge: Company -> ShareholderMeeting
+                    for e in self.adjacency.get(other_nid, []):
+                        if e["relation"] == "HELD" and e["target"] == other_nid:
+                            company_nid = e["source"]
+                            company_context = self.nodes_index.get(company_nid, {}).get("label", "")
+                            break
+
+                relations.append({
+                    "relation": rel_type,
+                    "target_type": other_type,
+                    "target_label": other_label,
+                    "company_context": company_context,
+                    "date": edge.get("properties", {}).get("start_date") or edge.get("properties", {}).get("disclosed_date", "")
+                })
+
+            results.append({
+                "id": nid,
+                "label": node.get("label", ""),
+                "type": node.get("type", ""),
+                "properties": node.get("properties", {}),
+                "connections": relations
+            })
+
+        return results

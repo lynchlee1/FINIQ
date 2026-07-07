@@ -174,7 +174,7 @@ def test_build_ontology_graph(tmp_path: Path):
     sh_meeting_parsed.write_text(json.dumps(sh_meeting_parsed_data), encoding="utf-8")
 
     # Build graph
-    nodes, edges = build_ontology_graph(
+    nodes, edges, metadata = build_ontology_graph(
         rights_issuance_path=rights_parsed,
         rights_filtered_path=rights_filtered,
         bond_issuance_path=bond_parsed,
@@ -219,13 +219,24 @@ def test_build_ontology_graph(tmp_path: Path):
     
     # 6. Export to Web JSON
     out_web_json = tmp_path / "web_ontology.json"
-    export_ontology_to_web_json(nodes, edges, out_web_json)
+    export_ontology_to_web_json(nodes, edges, out_web_json, metadata)
     
     assert out_web_json.exists()
     web_data = json.loads(out_web_json.read_text(encoding="utf-8"))
+    assert "metadata" in web_data
+    assert web_data["metadata"]["total_nodes"] > 0
     assert "nodes" in web_data
     assert "edges" in web_data
     
+    # Verify that edges contain explainability evidence
+    for edge in web_data["edges"]:
+        # Verify evidence block exists
+        assert "evidence" in edge["properties"]
+        evidence = edge["properties"]["evidence"]
+        assert "document_title" in evidence
+        assert "acpt_no" in evidence
+        assert "source_file" in evidence
+
     # 6. Verify OntologyGraphQueryService & Collapsing minor investors
     from finiq.data.ontology_query import OntologyGraphQueryService
     
@@ -294,3 +305,74 @@ def test_build_ontology_graph(tmp_path: Path):
     abs_sample_path = PROJECT_ROOT / "resources" / "KIND" / "test.json"
     rel_sample_path = make_relative_path(abs_sample_path)
     assert rel_sample_path == "resources/KIND/test.json"
+
+    # 12. Verify Investor Search & Disambiguation context
+    search_results = query_service.search_investors_disambiguation(query_name="홍길동")
+    assert len(search_results) == 2
+    res_ids = {r["id"] for r in search_results}
+    assert "person_022180_홍길동" in res_ids
+    assert "person_005930_홍길동" in res_ids
+
+    # Check that each result contains rich connection context
+    for res in search_results:
+        assert "connections" in res
+        assert len(res["connections"]) > 0
+        connection = res["connections"][0]
+        assert "relation" in connection
+        assert "company_context" in connection
+        if res["id"] == "person_022180_홍길동":
+            assert connection["company_context"] == "지구홀딩스"
+        elif res["id"] == "person_005930_홍길동":
+            assert connection["company_context"] == "액티투오"
+
+    # Verify empty/whitespace queries return empty results
+    assert query_service.search_investors_disambiguation("") == []
+    assert query_service.search_investors_disambiguation("   ") == []
+
+
+
+def test_shareholder_meeting_no_title(tmp_path):
+    import json
+    from finiq.data.ontology_builder import build_ontology_graph, export_ontology_to_web_json
+
+    # Create temporary files
+    filtered_path = tmp_path / "shareholder_meeting_filtered.json"
+    parsed_path = tmp_path / "shareholder_meeting_parsed.json"
+
+    # Filtered disclosure with NO title key
+    filtered_data = {
+        "disclosures": [
+            {
+                "acpt_no": "2026000001",
+                "company_id": "022180",
+                "company_name": "NoTitleCo",
+                "disclosed_date": "2026-01-01"
+            }
+        ]
+    }
+    with open(filtered_path, "w", encoding="utf-8") as f:
+        json.dump(filtered_data, f)
+
+    # Empty parsed details
+    parsed_data = {"records": []}
+    with open(parsed_path, "w", encoding="utf-8") as f:
+        json.dump(parsed_data, f)
+
+    # Build ontology graph
+    nodes, edges, metadata = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    out_web_json = tmp_path / "ontology_web.json"
+    export_ontology_to_web_json(nodes, edges, out_web_json, metadata)
+
+    with open(out_web_json, "r", encoding="utf-8") as f:
+        web_data = json.load(f)
+
+    # Verify nodes and labels
+    web_nodes = web_data["nodes"]
+    assert any(n["id"] == "shareholder_meeting_2026000001" for n in web_nodes)
+    meeting_node = next(n for n in web_nodes if n["id"] == "shareholder_meeting_2026000001")
+    assert meeting_node["label"] == "주주총회"
+    assert meeting_node["properties"]["meeting_type"] == "주주총회"
