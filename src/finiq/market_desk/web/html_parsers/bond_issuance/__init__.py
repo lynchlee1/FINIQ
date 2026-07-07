@@ -12,13 +12,16 @@ from .utils import _build_bond_parse_context
 
 
 def parse_bond_issuance(
-    html_text: str | bytes, *, file_path: str | Path
+    html_text: str | bytes, *, file_path: str | Path, title: str | None = None
 ) -> dict[str, Any]:
     """사채 발행 HTML을 파싱한다."""
     context = _build_bond_parse_context(html_text, file_path=file_path)
     record_dict = context.record
     extractor = BondIssuanceExtractor(context)
 
+    supplied_title = str(title or "").strip()
+    if supplied_title:
+        record_dict["title"] = supplied_title
     title = record_dict.get("title") or ""
     listing_market = record_dict.pop("상장시장", None)
     issue_amount = extractor.extract_issue_amount_from_bond_face_value_row()

@@ -29,6 +29,7 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
+    HTML_MANIFEST_FILENAME,
     cancel_disclosure_html_download,
     collect_acpt_numbers_from_json,
 )
@@ -3678,7 +3679,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     assert not (input_dir / "parsed-bond_issuance.json").exists()
     record = payload["records"][0]
     assert record["acpt_no"] == "20250102000002"
-    assert record["title"] == "전환사채권 발행결정"
+    assert record["title"] == "[테스트발행사] 전환사채권발행결정"
     assert record["기업명(발행사)"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
     assert record["회차"] == "3"
@@ -5533,6 +5534,93 @@ def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path)
     assert any(
         warning.startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
+    )
+
+
+def test_parse_bond_issuance_uses_supplied_title_for_security_type(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000008.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="[테스트] 전환사채권 발행결정",
+    )
+
+    assert parsed["title"] == "[테스트] 전환사채권 발행결정"
+    assert parsed["종류"] == "CB"
+    assert parsed["field_parse_status"]["종류"] == "parsed"
+    assert not any(
+        warning.startswith("종류: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+
+
+def test_parse_disclosure_html_payload_injects_manifest_title_for_bond_parser(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    html_path = input_dir / "20250102000009.html"
+    html_path.write_text(
+        """
+        <html><body>
+          <table>
+            <tr><td>1. 사채의 종류</td><td>회차</td><td>2</td><td>종류</td><td>무기명식 무보증 교환사채</td></tr>
+            <tr><td>2. 사채의 권면총액 (원)</td><td>2,000,000,000</td></tr>
+            <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>2,000,000,000</td></tr>
+          </table>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    (input_dir / HTML_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250102000009",
+                        "title": "[테스트] 교환사채권 발행결정",
+                        "company_name": "테스트회사",
+                        "market": "코스닥",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "mode": "bond_issuance",
+            "input_directory": str(input_dir),
+            "output_directory": str(output_dir),
+            "resume": False,
+        }
+    )
+
+    assert payload["summary"]["parsed_files"] == 1
+    record = payload["records"][0]
+    assert record["title"] == "[테스트] 교환사채권 발행결정"
+    assert record["종류"] == "EB"
+    assert record["기업명(발행사)"] == "테스트회사"
+    assert record["상장구분"] == "코스닥"
+    assert not any(
+        warning["warning"].startswith("종류: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in payload["warnings"]
     )
 
 

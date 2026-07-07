@@ -138,7 +138,10 @@ def _unexpected_missing_fields(classification: dict[str, str]) -> list[str]:
 
 
 def _parse_one(path: Path, metadata_index: dict[str, dict[str, str]]) -> dict[str, Any]:
-    record = parse_bond_issuance(path.read_bytes(), file_path=path)
+    acpt_no = path.stem.split("_", 1)[0]
+    metadata = metadata_index.get(acpt_no) or {}
+    title = str(metadata.get("title") or "").strip() or None
+    record = parse_bond_issuance(path.read_bytes(), file_path=path, title=title)
     return _apply_manifest_metadata(record, metadata_index, mode="bond_issuance")
 
 
