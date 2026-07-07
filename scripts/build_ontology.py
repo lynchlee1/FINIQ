@@ -62,7 +62,7 @@ def main():
     args = parser.parse_args()
 
     print("Building ontology graph...")
-    nodes, edges = build_ontology_graph(
+    nodes, edges, metadata = build_ontology_graph(
         rights_issuance_path=args.rights_parsed,
         rights_filtered_path=args.rights_filtered,
         bond_issuance_path=args.bond_parsed,
@@ -80,7 +80,7 @@ def main():
 
     out_path = Path(args.output)
     print(f"Exporting to web-friendly format at: {out_path.resolve()}")
-    export_ontology_to_web_json(nodes, edges, out_path)
+    export_ontology_to_web_json(nodes, edges, out_path, metadata)
     print("Ontology build complete.")
 
 

@@ -950,3 +950,15 @@ def test_ontology_network_api_endpoint(tmp_path: Path, monkeypatch: pytest.Monke
     assert "edges" in chain
     assert len(chain["nodes"]) == 1
     assert chain["nodes"][0]["id"] == "company_005930"
+
+    # Verify metadata endpoint
+    response = client.get("/api/ontology/metadata")
+    assert response.status_code == 200
+    meta = response.json()
+    assert isinstance(meta, dict)
+
+    # Verify search endpoint
+    response = client.get("/api/ontology/search", params={"query_name": "홍길동"})
+    assert response.status_code == 200
+    search_res = response.json()
+    assert isinstance(search_res, list)

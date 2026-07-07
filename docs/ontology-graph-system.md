@@ -52,6 +52,15 @@ When a corporate event or security has a massive list of minor investors, render
 *   Individuals (Person) are assigned composite IDs scoped to their target company: `person_{company_id}_{normalized_name}`.
 *   This prevents false-positive global merges of individuals with identical names across unrelated companies, while correctly merging them across multiple events of the same issuer.
 
+### D. Edge Explainability & Evidence
+*   Every relationship edge contains an `evidence` object within its properties.
+*   **Fields**:
+    *   `document_title`: Title of the source disclosure (e.g. `유상증자결정`).
+    *   `acpt_no`: The official DART/KIND reception number.
+    *   `disclosed_date`: Date the disclosure was filed.
+    *   `source_file`: Relative file path to the project root where the raw disclosure is saved.
+    *   `details`: A dictionary mapping transaction-specific fields (such as share counts, monetary amounts, roles, outside director status, etc.).
+
 ---
 
 ## 3. High-Performance Query Service
@@ -96,6 +105,10 @@ The API is exposed via FastAPI routers in `src/finiq/market_desk/web/routers/mar
     *   Parameters: `source_id` (string), `target_id` (string), `max_depth` (int, default: 5).
 *   **GET `/api/ontology/control-chain`**: Trace control chain of a company.
     *   Parameters: `company_id` (string).
+*   **GET `/api/ontology/metadata`**: Get the latest graph manifest, freshness, and build health metadata.
+    *   Response: JSON containing build timestamp (`built_at`), file coverage (`source_coverage`), and parsed/skipped disclosure stats (`processed_count`, `validation_summary`).
+*   **GET `/api/ontology/search`**: Search for investors by name, returning detailed disambiguation context (connected companies, dates, relationship types) for resolving homonyms.
+    *   Parameters: `query_name` (string).
 
 ---
 

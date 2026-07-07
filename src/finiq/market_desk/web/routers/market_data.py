@@ -207,6 +207,28 @@ def create_market_data_router(config: Any) -> APIRouter:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
+    @router.get("/api/ontology/metadata")
+    async def get_ontology_metadata():
+        try:
+            from finiq.data.ontology_query import OntologyGraphQueryService
+            service = OntologyGraphQueryService()
+            service.load_index()
+            return service.metadata
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.get("/api/ontology/search")
+    async def search_ontology_investors(query_name: str):
+        try:
+            from finiq.data.ontology_query import OntologyGraphQueryService
+            service = OntologyGraphQueryService()
+            return await run_in_threadpool(
+                service.search_investors_disambiguation,
+                query_name=query_name,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     @router.post("/api/ontology/triple-barrier/run")
     async def post_triple_barrier_run(payload: TripleBarrierRunRequest):
         try:
