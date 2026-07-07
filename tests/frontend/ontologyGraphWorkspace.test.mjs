@@ -9,6 +9,7 @@ const chartPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/p
 const chartWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/OntologyChartWorkspace.tsx";
 const analysisPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/page.tsx";
 const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/DisclosureAnalysisWorkspace.tsx";
+const appFramePath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/AppFrame.tsx";
 const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts";
 const backtestPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureBacktests.ts";
 const terminologyPath = "docs/ui-terminology.md";
@@ -138,6 +139,14 @@ test("ontology graph workspace keeps the top selector graph-focused", async () =
   assert.doesNotMatch(source, /데이터 상태/);
 });
 
+test("ontology routes use a wider app frame for canvas and chart workspaces", async () => {
+  const source = await readFile(appFramePath, "utf8");
+
+  assert.match(source, /pathname === "\/" \|\| pathname\.startsWith\("\/graph"\)/);
+  assert.match(source, /isOntology \? "w-full max-w-\[96rem\]" : "max-w-7xl"/);
+  assert.match(source, /<Topbar \/>/);
+});
+
 test("ontology chart workspace defaults to full range and provides disclosure analysis", async () => {
   const [chartSource, analysisSource] = await Promise.all([
     readFile(chartWorkspacePath, "utf8"),
@@ -198,8 +207,8 @@ test("ontology chart workspace manages chart conditions in a top filter box", as
   assert.notEqual(conditionBoxStart, -1);
   assert.match(conditionBoxSource, /공시 조건/);
   assert.match(conditionBoxSource, /회사명/);
-  assert.match(conditionBoxSource, /공시내역/);
   assert.match(conditionBoxSource, /공시 선택/);
+  assert.match(conditionBoxSource, /ontology-page-card-content space-y-4/);
   assert.match(conditionBoxSource, /border-t border-slate-200/);
   assert.match(conditionBoxSource, /ontology-chart-disclosure-group/);
   assert.match(conditionBoxSource, /DISCLOSURE_GROUP_ALL/);
@@ -433,7 +442,7 @@ test("ontology chart settings expose per-disclosure marker styles in one compact
   assert.match(source, /색상/);
   assert.match(source, /크기/);
   assert.match(source, /선 두께/);
-  assert.match(source, /rounded-lg border border-slate-200\/70 bg-slate-50\/70/);
+  assert.match(source, /ontology-panel p-3/);
   assert.match(source, /flex flex-wrap items-end gap-2/);
   assert.match(source, /h-8 rounded-md/);
   assert.match(source, /aria-label="공시 마커 스타일 미리보기"/);

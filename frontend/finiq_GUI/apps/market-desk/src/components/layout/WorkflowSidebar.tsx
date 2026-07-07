@@ -16,7 +16,7 @@ export function WorkflowSidebar({ title, tabs = [], groups }: WorkflowSidebarPro
   const resolvedGroups = groups ?? [{ label: "Workflow", steps: tabs }];
 
   return (
-    <aside className="self-start rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:bg-[#161b22] dark:border-[#30363d]">
+    <aside className="w-full min-w-0 self-start rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:bg-[#161b22] dark:border-[#30363d]">
       <nav className="space-y-5" aria-label={title}>
         {resolvedGroups.map((group) => (
           <div key={group.label} className="space-y-1">

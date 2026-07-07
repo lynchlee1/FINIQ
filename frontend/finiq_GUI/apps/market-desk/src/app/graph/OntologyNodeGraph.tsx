@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { Download, Eye, LineChart, MapPin, Redo2, Save, Search, Undo2, Unlock, XCircle } from "lucide-react";
+import { Braces, Download, Eye, FileCode2, FileJson, ImageDown, LineChart, MapPin, Redo2, Save, Search, Undo2, Unlock, XCircle } from "lucide-react";
 import {
   DEFAULT_LAYOUT,
   DEFAULT_STYLE,
@@ -19,7 +19,7 @@ import {
   type GraphEdge,
   type GraphNode,
 } from "@finiq/graph-viewer";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@finiq/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Input } from "@finiq/ui";
 import { ActionDock } from "@/components/ui/ActionDock";
 import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
@@ -273,20 +273,15 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
   const selectedEdgeCount = selectedEdgeIds.size;
 
   return (
-    <div className="relative action-dock-host flex w-full flex-col gap-5 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
-    <Card className="min-h-[620px] rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-      <CardHeader className="border-b border-slate-200 pb-3 dark:border-[#30363d]">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 dark:text-white">
-              <LineChart className="h-5 w-5" />
+    <div className="relative action-dock-host flex w-full flex-col gap-4 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
+    <Card className="ontology-card">
+      <CardHeader className="ontology-page-card-header">
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <CardTitle className="ontology-card-title flex items-center gap-2">
+              <LineChart className="h-4 w-4" />
               공시 관계 그래프
             </CardTitle>
-            <CardDescription className="mt-2 dark:text-slate-400">
-              Obsidian-like 노드 그래프로 회사, 공시 그룹, 공시 이벤트 관계를 봅니다.
-            </CardDescription>
-          </div>
-          <div className="flex flex-col gap-2 lg:items-end">
             <div className="flex flex-wrap gap-1">
               {nodeTypes.map((type) => {
                 const isActive = filters.nodeTypes.length === 0 || filters.nodeTypes.includes(type);
@@ -304,59 +299,73 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
                 );
               })}
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-500" />
+          </div>
+          <div className="grid gap-3 xl:grid-cols-[minmax(240px,0.8fr)_minmax(320px,1fr)_auto_auto] xl:items-center">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="ontology-metric px-2 py-1.5">
+                <p className="ontology-muted">노드</p>
+                <p className="font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(visibleGraph.nodes.length)}</p>
+              </div>
+              <div className="ontology-metric px-2 py-1.5">
+                <p className="ontology-muted">엣지</p>
+                <p className="font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(visibleGraph.edges.length)}</p>
+              </div>
+              <div className="ontology-metric px-2 py-1.5">
+                <p className="ontology-muted">선택</p>
+                <p className="font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(selectedNodeCount + selectedEdgeCount)}</p>
+              </div>
+            </div>
+              <div className="relative min-w-0">
+                <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-500 dark:text-slate-400" />
                 <Input
                   aria-label="노드 검색"
                   placeholder="노드 검색"
                   value={searchValue}
                   onChange={handleSearchChange}
-                  className="h-8 pl-9 sm:w-64 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                  className="h-8 w-full pl-9 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
                 />
               </div>
-              <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-1 dark:border-[#30363d] dark:bg-[#0d1117]">
-                <Button type="button" variant="ghost" size="icon" className="h-6 w-6" title="실행 취소" onClick={undo} disabled={!canUndo}>
-                  <Undo2 className="h-4 w-4 text-slate-500 hover:text-blue-600" />
+              <div className="ontology-toolbar flex items-center gap-1 p-1">
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="실행 취소" onClick={undo} disabled={!canUndo}>
+                  <Undo2 className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-6 w-6" title="다시 실행" onClick={redo} disabled={!canRedo}>
-                  <Redo2 className="h-4 w-4 text-slate-500 hover:text-blue-600" />
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="다시 실행" onClick={redo} disabled={!canRedo}>
+                  <Redo2 className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-6 w-6" title="숨김 초기화" onClick={showAll}>
-                  <Eye className="h-4 w-4 text-slate-500 hover:text-blue-600" />
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="숨김 초기화" onClick={showAll}>
+                  <Eye className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-6 w-6" title="핀 해제" onClick={unpinAllNodes}>
-                  <Unlock className="h-4 w-4 text-slate-500 hover:text-blue-600" />
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="핀 해제" onClick={unpinAllNodes}>
+                  <Unlock className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-6 w-6" title="현재 레이아웃 저장" onClick={handleSaveLayout}>
-                  <Save className="h-4 w-4 text-slate-500 hover:text-blue-600" />
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="현재 레이아웃 저장" onClick={handleSaveLayout}>
+                  <Save className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-6 w-6" title="저장된 레이아웃 불러오기" onClick={handleLoadLayout}>
-                  <Download className="h-4 w-4 text-slate-500 hover:text-blue-600" />
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-1 dark:border-[#30363d] dark:bg-[#0d1117]">
-                <Button type="button" variant="ghost" size="xs" title="그래프 JSON 내보내기" onClick={() => exportGraphJson(graph, `ontology-graph-${layoutKeySuffix}.json`)}>
-                  JSON
-                </Button>
-                <Button type="button" variant="ghost" size="xs" title="스타일 JSON 내보내기" onClick={() => exportStyleJson(style, `ontology-graph-style-${layoutKeySuffix}.json`)}>
-                  Style
-                </Button>
-                <Button type="button" variant="ghost" size="xs" title="레이아웃 JSON 내보내기" onClick={() => exportLayoutJson(graph, `ontology-graph-layout-${layoutKeySuffix}.json`)}>
-                  Layout
-                </Button>
-                <Button type="button" variant="ghost" size="xs" title="SVG 내보내기" onClick={() => exportVisibleSvg(visibleGraph, 1280, 720, style.backgroundColor, `ontology-graph-${layoutKeySuffix}.svg`)}>
-                  SVG
-                </Button>
-                <Button type="button" variant="ghost" size="xs" title="PNG 내보내기" onClick={handleExportPng}>
-                  PNG
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="저장된 레이아웃 불러오기" onClick={handleLoadLayout}>
+                  <Download className="h-4 w-4" />
                 </Button>
               </div>
-            </div>
+              <div className="ontology-toolbar flex items-center gap-1 p-1">
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="그래프 JSON 내보내기" onClick={() => exportGraphJson(graph, `ontology-graph-${layoutKeySuffix}.json`)}>
+                  <FileJson className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="스타일 JSON 내보내기" onClick={() => exportStyleJson(style, `ontology-graph-style-${layoutKeySuffix}.json`)}>
+                  <Braces className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="레이아웃 JSON 내보내기" onClick={() => exportLayoutJson(graph, `ontology-graph-layout-${layoutKeySuffix}.json`)}>
+                  <FileCode2 className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="SVG 내보내기" onClick={() => exportVisibleSvg(visibleGraph, 1280, 720, style.backgroundColor, `ontology-graph-${layoutKeySuffix}.svg`)}>
+                  <FileCode2 className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-300" title="PNG 내보내기" onClick={handleExportPng}>
+                  <ImageDown className="h-4 w-4" />
+                </Button>
+              </div>
           </div>
         </div>
       </CardHeader>
-      <CardContent ref={graphFrameRef} className="relative h-[540px] overflow-hidden p-0">
+      <CardContent ref={graphFrameRef} className="relative h-[min(72vh,760px)] min-h-[560px] overflow-hidden p-0">
         <GraphCanvas
           graph={visibleGraph}
           degreeMap={visibleDegreeMap}

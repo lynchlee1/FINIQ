@@ -36,6 +36,13 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+  --ontology-surface: #ffffff;
+  --ontology-panel: #f8fafc;
+  --ontology-control: #ffffff;
+  --ontology-border: #e2e8f0;
+  --ontology-text: #0f172a;
+  --ontology-muted: #64748b;
+  --ontology-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.06);
   color-scheme: light;
   background-color: var(--background) !important;
   transition: background-color 0.3s ease, color 0.3s ease;
@@ -44,6 +51,13 @@
 :root.dark {
   --background: #0d1117;
   --foreground: #f0f6fc;
+  --ontology-surface: #161b22;
+  --ontology-panel: #0d1117;
+  --ontology-control: #0d1117;
+  --ontology-border: #30363d;
+  --ontology-text: #f0f6fc;
+  --ontology-muted: #8b949e;
+  --ontology-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --color-card: #161b22;
   --color-card-foreground: #f0f6fc;
   --color-border: #30363d;
@@ -61,6 +75,8 @@
 html, body {
   height: auto !important;
   min-height: 100% !important;
+  max-width: 100%;
+  overflow-x: hidden;
   background-color: var(--background) !important;
   color: var(--foreground) !important;
 }
@@ -68,7 +84,75 @@ html, body {
 *,
 *::before,
 *::after {
+  box-sizing: border-box;
   border-color: var(--color-border);
+}
+
+.ontology-card {
+  gap: 0;
+  overflow: hidden;
+  padding-block: 0;
+  border: 1px solid var(--ontology-border);
+  border-radius: 0.5rem;
+  background: var(--ontology-surface);
+  color: var(--ontology-text);
+  box-shadow: var(--ontology-shadow);
+  font-family: inherit;
+}
+
+.ontology-card-header {
+  border-bottom: 1px solid var(--ontology-border);
+  background: var(--ontology-surface);
+  padding: 0.75rem;
+}
+
+.ontology-page-card-header {
+  border-bottom: 1px solid var(--ontology-border);
+  background: var(--ontology-surface);
+  padding: 1.5rem;
+}
+
+.ontology-page-card-content {
+  padding: 1.5rem;
+}
+
+.ontology-card-title {
+  color: var(--ontology-text);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ontology-card-description {
+  color: var(--ontology-muted);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.ontology-panel {
+  border: 1px solid var(--ontology-border);
+  border-radius: 0.5rem;
+  background: var(--ontology-panel);
+  color: var(--ontology-text);
+  font-family: inherit;
+}
+
+.ontology-metric,
+.ontology-toolbar,
+.ontology-control {
+  border: 1px solid var(--ontology-border);
+  border-radius: 0.375rem;
+  background: var(--ontology-control);
+  color: var(--ontology-text);
+  font-family: inherit;
+}
+
+.ontology-muted {
+  color: var(--ontology-muted);
+}
+
+.ontology-card :where(button, input, select, textarea) {
+  font-family: inherit;
 }
 
 /* Ensure Tailwind dark utilities work with .dark class on html */
@@ -116,4 +200,33 @@ html, body {
 
 .action-dock-settings-panel :where([role="tabpanel"] > .flex, [data-slot="tabs-content"] > .flex) {
   flex-direction: column !important;
+}
+
+.action-dock-settings-panel :where([role="tablist"], [data-slot="tabs-list"]) {
+  height: auto !important;
+  min-height: 2rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.25rem;
+}
+
+.action-dock-settings-panel :where([role="tab"], [data-slot="tabs-trigger"]) {
+  min-width: 0;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.action-dock-settings-panel :where([data-slot="select-trigger"], select, input:not([type="color"])) {
+  min-width: 0;
+  background-color: var(--color-popover);
+  color: var(--color-popover-foreground);
+}
+
+.action-dock-settings-panel :where(label, span, p) {
+  color: inherit;
+}
+
+.action-dock-settings-panel :where(.text-muted-foreground) {
+  color: var(--color-muted-foreground) !important;
 }

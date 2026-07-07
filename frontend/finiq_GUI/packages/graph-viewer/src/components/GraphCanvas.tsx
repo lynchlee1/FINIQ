@@ -304,7 +304,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
   return (
     <div className="relative w-full h-full" style={{ background: style.backgroundColor }} onClick={closeContextMenu}>
       {showToolbar ? (
-        <div className="absolute top-4 left-4 z-10 flex gap-2 p-1.5 bg-card/80 backdrop-blur border rounded-lg shadow-xl">
+        <div className="absolute top-4 left-4 z-10 flex gap-2 rounded-lg border border-slate-600/70 bg-slate-950/80 p-1.5 shadow-xl backdrop-blur">
           <Button
             variant="outline"
             size="xs"
@@ -312,7 +312,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
               event.stopPropagation()
               fgRef.current?.zoomToFit(600, 50)
             }}
-            className="h-7 px-2 text-[11px] font-bold uppercase tracking-tight"
+            className="h-7 border-slate-500 bg-slate-900 px-2 text-[11px] font-bold uppercase tracking-tight text-slate-100 hover:bg-slate-800 hover:text-white"
           >
             Fit View
           </Button>
@@ -328,7 +328,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
                 void document.exitFullscreen()
               }
             }}
-            className="h-7 px-2 text-[11px] font-bold uppercase tracking-tight"
+            className="h-7 border-slate-500 bg-slate-900 px-2 text-[11px] font-bold uppercase tracking-tight text-slate-100 hover:bg-slate-800 hover:text-white"
           >
             Fullscreen
           </Button>
@@ -348,7 +348,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
                 }
                 fgRef.current?.d3ReheatSimulation()
               }}
-              className="h-7 px-2 text-[11px] font-bold uppercase tracking-tight"
+              className="h-7 border-slate-500 bg-slate-900 px-2 text-[11px] font-bold uppercase tracking-tight text-slate-100 hover:bg-slate-800 hover:text-white"
             >
               Unpin All
             </Button>

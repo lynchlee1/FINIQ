@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, LineChart, Loader2, Search } from "lucide-react";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@finiq/ui";
+import { AlertTriangle, Database, LineChart, Loader2, Search } from "lucide-react";
+import { Button, Card, CardContent, Input } from "@finiq/ui";
 import { apiGet } from "@/api/client";
 import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
 
@@ -19,7 +19,7 @@ const OntologyNodeGraph = dynamic<OntologyNodeGraphProps>(
   {
     ssr: false,
     loading: () => (
-      <Card className="min-h-[620px] rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
+      <Card className="ontology-card min-h-[620px]">
         <CardContent className="flex h-[620px] items-center justify-center">
           <PageLoadingSpinner message="관계 그래프를 준비하는 중입니다..." />
         </CardContent>
@@ -299,36 +299,38 @@ export function OntologyGraphWorkspace() {
     (!!selectedCompany && requestedPanelKey !== `${selectedCompany.stock_code}:${GRAPH_DISPLAY_FREQUENCY}`);
 
   return (
-    <div className="flex w-full flex-col gap-5">
-      <section>
-        <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 dark:text-white">
-              <LineChart className="h-5 w-5" />
+    <div className="flex w-full flex-col gap-4">
+      <section className="ontology-card ontology-page-card-content">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 sm:flex-1">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-500 dark:text-slate-400">
+              <LineChart className="h-4 w-4" />
               Graph View
-            </CardTitle>
-            <CardDescription className="mt-2 dark:text-slate-400">
-              {selectedCompanyLabel} · {graphRangeText}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            </div>
+            <h1 className="mt-1 truncate text-2xl font-semibold text-slate-950 dark:text-slate-50">{selectedCompanyLabel}</h1>
+            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+              <Database className="h-4 w-4" />
+              <span className="truncate">{graphRangeText}</span>
+            </p>
+          </div>
+          <div className="flex min-w-0 flex-col gap-2 sm:w-[min(28rem,45%)]">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
               <Input
                 id="ontology-stock-keyword"
                 aria-label="종목 선택"
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
                 placeholder="종목명 또는 A000000"
-                className="h-9 sm:max-w-sm"
+                className="h-10 min-w-0"
               />
-              <Button variant="outline" size="sm" className="h-9" onClick={loadCompanies} disabled={loadingCompanies}>
+              <Button variant="outline" size="sm" className="h-10" onClick={loadCompanies} disabled={loadingCompanies}>
                 {loadingCompanies ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                 검색
               </Button>
             </div>
             <MessageBox messages={statusMessages} />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </section>
 
       <section>
