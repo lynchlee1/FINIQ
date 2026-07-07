@@ -173,7 +173,7 @@ CHANGE_LOG_FIELDS = {
         "투자자",
     ),
     "rights_issuance": (
-        "상장시장",
+        "상장구분",
         "신주의 종류와 수",
         "증자 전 발행주식총수",
         "발행목적",
@@ -581,13 +581,10 @@ def _apply_manifest_metadata(
         updated_record["selected_main_doc_no"] = selected_main_doc_no
     if correction_families:
         updated_record["correction_families"] = correction_families
-    if mode == "bond_issuance":
-        if market:
-            updated_record["상장구분"] = market
-        if company_name:
-            updated_record["기업명(발행사)"] = company_name
-    elif market:
-        updated_record["상장시장"] = market
+    if market:
+        updated_record["상장구분"] = market
+    if mode == "bond_issuance" and company_name:
+        updated_record["기업명(발행사)"] = company_name
     return updated_record
 
 

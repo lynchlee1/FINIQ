@@ -11,13 +11,15 @@ from .utils import _build_rights_parse_context
 
 
 def parse_rights_issuance(
-    html_text: str | bytes, *, file_path: str | Path
+    html_text: str | bytes, *, file_path: str | Path, title: str | None = None
 ) -> dict[str, Any]:
     """증자 HTML을 파싱한다."""
-    context = _build_rights_parse_context(html_text, file_path=file_path)
+    context = _build_rights_parse_context(
+        html_text, file_path=file_path, title=title
+    )
     record = context.record
     if context.issuance_type == "unknown":
-        warning = "공시 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+        warning = "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
         record["parse_warnings"] = [warning]
         record["strong_warning"] = [warning]
 

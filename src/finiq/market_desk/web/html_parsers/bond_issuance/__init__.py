@@ -23,7 +23,7 @@ def parse_bond_issuance(
     if supplied_title:
         record_dict["title"] = supplied_title
     title = record_dict.get("title") or ""
-    listing_market = record_dict.pop("상장시장", None)
+    listing_market = record_dict.get("상장구분")
     issue_amount = extractor.extract_issue_amount_from_bond_face_value_row()
 
     schema_record = BondIssuanceRecord(

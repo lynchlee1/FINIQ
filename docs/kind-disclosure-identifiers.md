@@ -45,8 +45,7 @@ Fresh viewer HTML의 식별자 의미:
 ## 한계
 
 - KIND `acpt_no`와 DART `rcept_no`는 같은 개념이 아니다.
-- 현재 KIND HTML, viewer HTML, `filtered.json`, `compressed-external-html.json`만으로 DART `rcept_no`를 복원할 수 없다.
-- DART `rcept_no`가 필요하면 DART API, DART 원문 다운로드 이력, KIND-DART 매핑 데이터셋 같은 별도 source가 필요하다.
+- KIND HTML 워크플로우에서는 DART `rcept_no`를 복원하지 않는다.
 
 ## 관련 코드
 
