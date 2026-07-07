@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .models import BondIssuanceRecord
 from .extractor import BondIssuanceExtractor
+from .models import BondIssuanceRecord
+from .postprocess import apply_bond_issuance_postprocess
 from .utils import _build_bond_parse_context
 
 
@@ -17,10 +18,6 @@ def parse_bond_issuance(
     context = _build_bond_parse_context(html_text, file_path=file_path)
     record_dict = context.record
     extractor = BondIssuanceExtractor(context)
-    if not extractor.rows.values:
-        warning = "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
-        record_dict["parse_warnings"] = [warning]
-        record_dict["strong_warning"] = [warning]
 
     title = record_dict.get("title") or ""
     listing_market = record_dict.pop("상장시장", None)
@@ -35,9 +32,7 @@ def parse_bond_issuance(
         ),
         상장구분=listing_market,
         발행금액=issue_amount,
-        발행목적=extractor.extract_funding_purposes_from_funding_purpose_rows(
-            issue_amount
-        ),
+        발행목적=extractor.extract_funding_purposes_from_funding_purpose_rows(),
         행사가액=(
             extractor.extract_exercise_price_from_conversion_exchange_or_warrant_price_row()
         ),
@@ -50,20 +45,12 @@ def parse_bond_issuance(
     )
 
     record_dict.update(schema_record.to_dict())
-    if extractor.warnings:
-        record_dict.setdefault("parse_warnings", []).extend(extractor.warnings)
-    if extractor.weak_warnings:
-        record_dict["weak_warning"] = extractor.weak_warnings
-    if extractor.medium_warnings:
-        record_dict["medium_warning"] = [
-            *record_dict.get("medium_warning", []),
-            *extractor.medium_warnings,
-        ]
-    if extractor.strong_warnings:
-        record_dict["strong_warning"] = [
-            *record_dict.get("strong_warning", []),
-            *extractor.strong_warnings,
-        ]
-    if extractor.field_parse_status:
-        record_dict["field_parse_status"] = extractor.field_parse_status
+    apply_bond_issuance_postprocess(
+        record_dict,
+        main_rows=extractor.rows.values,
+        has_funding_purpose_amount_source=extractor.has_funding_purpose_amount_source(),
+        has_investor_source_table=(
+            extractor.has_specific_person_bond_issue_table_source()
+        ),
+    )
     return record_dict
