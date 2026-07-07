@@ -14,6 +14,7 @@ from .io import (
 from .metadata import (
     build_base_record,
     extract_acpt_no,
+    extract_section_title,
     extract_title,
     preserve_viewer_metadata,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "non_correction_tables",
     "non_correction_rows",
     "extract_title",
+    "extract_section_title",
     "extract_acpt_no",
     "preserve_viewer_metadata",
     "build_base_record",

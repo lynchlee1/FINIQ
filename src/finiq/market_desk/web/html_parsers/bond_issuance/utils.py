@@ -10,6 +10,7 @@ from typing import Any
 from ..common import (
     build_base_record,
     clean_text,
+    extract_section_title,
     last_int,
     last_value,
     row_containing,
@@ -93,5 +94,10 @@ def _build_bond_parse_context(
     html_text: str | bytes, *, file_path: str | Path
 ) -> _BondParseContext:
     """공통 메타데이터를 생성하고 본문 HTML의 주요 행 데이터를 구성한다."""
-    record = build_base_record(html_text, file_path=file_path, mode=MODE)
+    record = build_base_record(
+        html_text,
+        file_path=file_path,
+        mode=MODE,
+        title_extractor=extract_section_title,
+    )
     return _BondParseContext(record=record)

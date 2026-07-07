@@ -24,12 +24,17 @@ def _first_text(document: html.HtmlElement, xpath: str) -> str:
     return ""
 
 
-def extract_title(document: html.HtmlElement) -> str:
-    """공시 제목을 SECTION-1 후보와 HTML title에서 추출한다."""
+def extract_section_title(document: html.HtmlElement) -> str:
+    """공시 본문의 첫 SECTION-1 제목을 추출한다."""
     return _first_text(
         document,
         "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ')]",
-    ) or _first_text(document, "//title/text()")
+    )
+
+
+def extract_title(document: html.HtmlElement) -> str:
+    """공시 제목을 SECTION-1 후보와 HTML title에서 추출한다."""
+    return extract_section_title(document) or _first_text(document, "//title/text()")
 
 
 def extract_acpt_no(file_path: str | Path) -> str:
@@ -60,6 +65,7 @@ def build_base_record(
     *,
     file_path: str | Path,
     mode: str,
+    title_extractor=extract_title,
 ) -> dict[str, Any]:
     """공시 HTML 파일의 기초가 되는 공통 파싱 레코드를 생성한다.
 
@@ -75,7 +81,7 @@ def build_base_record(
         "acpt_no": acpt_no,
         "source_file": str(Path(file_path).resolve()),
         "mode": mode,
-        "title": extract_title(document),
+        "title": title_extractor(document),
         "상장시장": None,
         "raw_tables": raw_tables,
         "raw_rows": [row for table in raw_tables for row in table["logical_rows"]],
