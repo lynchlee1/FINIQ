@@ -37,6 +37,7 @@ def apply_bond_issuance_postprocess(
             _append_warning(record, warning, level="strong")
 
     _append_funding_purpose_sum_warning(record)
+    _append_investor_sum_warning(record)
 
 
 def _build_field_parse_status(
@@ -101,6 +102,21 @@ def _append_funding_purpose_sum_warning(record: dict[str, Any]) -> None:
     _append_warning(
         record,
         f"발행목적: 자금조달 목적 합계({total:,})가 발행금액({issue_amount:,})과 일치하지 않습니다.",
+        level="weak",
+    )
+
+
+def _append_investor_sum_warning(record: dict[str, Any]) -> None:
+    investors = record.get("투자자") or []
+    issue_amount = record.get("발행금액")
+    if not investors or issue_amount is None:
+        return
+    total = sum(amount for _, amount in investors)
+    if total == issue_amount:
+        return
+    _append_warning(
+        record,
+        f"투자자: 발행권면총액 합계({total:,})가 발행금액({issue_amount:,})과 일치하지 않습니다.",
         level="weak",
     )
 

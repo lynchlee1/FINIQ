@@ -6,7 +6,6 @@ from typing import Any
 
 from ..common import (
     clean_text,
-    last_int,
     non_correction_tables,
     parse_int,
     row_contains,
@@ -211,15 +210,21 @@ class BondIssuanceExtractor:
     ) -> list[list[Any]]:
         """사채 발행 대상자(인수자)와 배정 권면액을 추출한다."""
         for rows in self._specific_person_bond_issue_table_rows():
+            header = rows[0]
+            name_index = _first_header_index(header, "발행 대상자명")
+            amount_index = _first_header_index(header, "발행권면")
+            if name_index is None or amount_index is None:
+                continue
             targets: list[list[Any]] = []
             for row in rows[1:]:
-                if not row or row[0] in {"-", "합계", "총계", "계"}:
+                target_name = row[name_index] if name_index < len(row) else ""
+                target_name = clean_text(target_name)
+                if not row or target_name in {"", "-", "합계", "총계", "계"}:
                     continue
-                amount = last_int(row)
+                amount_cell = row[amount_index] if amount_index < len(row) else ""
+                amount = parse_int(amount_cell, dash_as_zero=True)
                 if amount is not None:
-                    targets.append([row[0], amount])
-                elif any(clean_text(cell) == "-" for cell in row[1:]):
-                    targets.append([row[0], 0])
+                    targets.append([target_name, amount])
             return targets
         return []
 
@@ -241,3 +246,10 @@ def _issue_amount_row(rows: list[list[str]]) -> list[str]:
         if row_contains(row, "원화기준"):
             return row
     return amount_rows[0] if amount_rows else []
+
+
+def _first_header_index(row: list[str], label: str) -> int | None:
+    for index, cell in enumerate(row):
+        if row_contains([cell], label):
+            return index
+    return None

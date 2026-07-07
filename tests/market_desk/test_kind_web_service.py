@@ -4521,6 +4521,7 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         "source_name": "20250101000001.html",
         "warning": "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.",
         "level": "strong_warning",
+        "warning_code": "bond_main_table_missing",
     }
     assert any(
         item["warning"].startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
@@ -4567,6 +4568,7 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
         "source_name": "20250101000001.html",
         "warning": "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
         "level": "strong_warning",
+        "warning_code": "rights_issue_type_missing",
     }
     strong_warnings = [
         item["warning"]
@@ -5801,6 +5803,31 @@ def test_parse_bond_issuance_keeps_investor_name_when_amount_is_dash(
     )
 
 
+def test_parse_bond_issuance_reads_investor_amount_from_face_value_column(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000008.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
+      </table>
+      <table>
+        <tr><th>발행 대상자명</th><th>회사 또는 최대주주와의 관계</th><th>발행권면총액 (원)</th><th>비고</th></tr>
+        <tr><td>테스트조합</td><td>2대주주</td><td>5,000,000,000</td><td>1</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["투자자"] == [["테스트조합", 5_000_000_000]]
+    assert not any("발행권면총액 합계" in warning for warning in parsed.get("weak_warning", []))
+
+
 def test_parse_bond_issuance_warns_when_funding_purpose_sum_differs(
     tmp_path: Path,
 ) -> None:
@@ -5832,6 +5859,35 @@ def test_parse_bond_issuance_warns_when_funding_purpose_sum_differs(
     assert any(
         warning
         == "발행목적: 자금조달 목적 합계(4,000,000,000)가 발행금액(5,000,000,000)과 일치하지 않습니다."
+        for warning in parsed["weak_warning"]
+    )
+
+
+def test_parse_bond_issuance_warns_when_investor_sum_differs(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000009.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
+      </table>
+      <table>
+        <tr><th>발행 대상자명</th><th>발행권면총액 (원)</th></tr>
+        <tr><td>테스트조합</td><td>4,000,000,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["투자자"] == [["테스트조합", 4_000_000_000]]
+    assert any(
+        warning
+        == "투자자: 발행권면총액 합계(4,000,000,000)가 발행금액(5,000,000,000)과 일치하지 않습니다."
         for warning in parsed["weak_warning"]
     )
 

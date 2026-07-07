@@ -31,6 +31,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Content HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | HTML parse report preview | 리포트 미리보기 | Separate box below `모드별 기능` that shows a few parsed report results as HTML tables for the selected parse mode. |
 | HTML parse warning files page open action | 현재 페이지 열기 | Button in the right-side `알림` panel on `공시원문 변환` that opens the current page of source HTML files with parse warnings. Pages contain 20 files. |
+| HTML parse warning code label | 오류코드 | Label in the right-side `알림` panel on `공시원문 변환` for grouping parse warnings by stable warning code. |
 | HTML parse weak warning level | 약한 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
 | HTML parse medium warning level | 일반 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
 | HTML parse strong warning level | 강한 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
