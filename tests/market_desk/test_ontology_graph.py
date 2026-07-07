@@ -890,3 +890,63 @@ def test_triple_barrier_api_omits_config_quanti_dir_when_payload_uses_default(
 
     assert response.status_code == 200
     assert captured["quanti_dir"] is None
+
+
+def test_ontology_network_api_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # Mock output file content
+    graph_data = {
+        "nodes": [
+            {
+                "id": "company_005930",
+                "label": "삼성전자",
+                "type": "Company",
+                "group": "Company",
+                "tags": ["Company"],
+                "properties": {"stock_code": "005930", "name": "삼성전자"}
+            }
+        ],
+        "edges": []
+    }
+
+    mock_json_file = tmp_path / "ontology_graph.json"
+    import json
+    mock_json_file.write_text(json.dumps(graph_data), encoding="utf-8")
+
+    # Patch the graph_json_path of OntologyGraphQueryService
+    from finiq.data.ontology_query import OntologyGraphQueryService
+    # Ensure the class points to our mock JSON file
+    query_service = OntologyGraphQueryService(graph_json_path=mock_json_file)
+    query_service.load_index(force=True)
+
+    # Mock service instance
+    monkeypatch.setattr("finiq.data.ontology_query.OntologyGraphQueryService", lambda *args, **kwargs: query_service)
+
+    api = FastAPI()
+    api.include_router(
+        create_market_data_router(
+            AppConfig(output_root=str(tmp_path), quanti_dir=str(tmp_path)),
+        )
+    )
+    client = TestClient(api)
+
+    response = client.get("/api/ontology/network", params={"company_id": "005930"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["nodes"]) == 1
+    assert data["nodes"][0]["id"] == "company_005930"
+
+    # Verify paths endpoint
+    response = client.get("/api/ontology/paths", params={"source_id": "company_005930", "target_id": "company_005930"})
+    assert response.status_code == 200
+    paths = response.json()
+    assert len(paths) == 1
+    assert paths[0]["nodes"][0]["id"] == "company_005930"
+
+    # Verify control-chain endpoint
+    response = client.get("/api/ontology/control-chain", params={"company_id": "005930"})
+    assert response.status_code == 200
+    chain = response.json()
+    assert "nodes" in chain
+    assert "edges" in chain
+    assert len(chain["nodes"]) == 1
+    assert chain["nodes"][0]["id"] == "company_005930"
