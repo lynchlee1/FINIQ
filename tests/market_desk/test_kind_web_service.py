@@ -5578,6 +5578,35 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
     assert not any("발행대상자세부엔티티" in warning for warning in parsed["parse_warnings"])
 
 
+def test_parse_bond_issuance_keeps_investor_name_when_amount_is_dash(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000007.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">전환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
+      </table>
+      <table>
+        <tr><th>발행 대상자명</th><th>회사 또는 최대주주와의 관계</th><th>발행권면총액 (원)</th></tr>
+        <tr><td>테스트조합</td><td>해당사항 없음</td><td>-</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["투자자"] == [["테스트조합", 0]]
+    assert parsed["field_parse_status"]["투자자"] == "parsed"
+    assert not any(
+        warning.startswith("투자자: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+
+
 def test_parse_bond_issuance_warns_when_funding_purpose_sum_differs(
     tmp_path: Path,
 ) -> None:

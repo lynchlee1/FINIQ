@@ -218,6 +218,8 @@ class BondIssuanceExtractor:
                 amount = last_int(row)
                 if amount is not None:
                     targets.append([row[0], amount])
+                elif any(clean_text(cell) == "-" for cell in row[1:]):
+                    targets.append([row[0], 0])
             return targets
         return []
 
@@ -237,8 +239,5 @@ def _issue_amount_row(rows: list[list[str]]) -> list[str]:
     amount_rows = [row for row in rows if row_contains(row, "사채의 권면")]
     for row in amount_rows:
         if row_contains(row, "원화기준"):
-            return row
-    for row in amount_rows:
-        if row_contains(row, "(원)"):
             return row
     return amount_rows[0] if amount_rows else []
