@@ -153,6 +153,60 @@ def create_market_data_router(config: Any) -> APIRouter:
             done_event.set()
             watch_task.cancel()
 
+    @router.get("/api/ontology/network")
+    async def get_ontology_network(
+        company_id: Optional[str] = None,
+        investor_name: Optional[str] = None,
+        depth: int = 2,
+        collapse_minor_threshold: Optional[int] = 10,
+        as_of_date: Optional[str] = None,
+    ):
+        try:
+            from finiq.data.ontology_query import OntologyGraphQueryService
+            service = OntologyGraphQueryService()
+            return await run_in_threadpool(
+                service.get_neighborhood,
+                company_id=company_id,
+                investor_name=investor_name,
+                depth=depth,
+                collapse_minor_threshold=collapse_minor_threshold,
+                as_of_date=as_of_date,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.get("/api/ontology/paths")
+    async def get_ontology_paths(
+        source_id: str,
+        target_id: str,
+        max_depth: int = 5,
+    ):
+        try:
+            from finiq.data.ontology_query import OntologyGraphQueryService
+            service = OntologyGraphQueryService()
+            return await run_in_threadpool(
+                service.find_connection_paths,
+                source_id=source_id,
+                target_id=target_id,
+                max_depth=max_depth,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.get("/api/ontology/control-chain")
+    async def get_ontology_control_chain(
+        company_id: str,
+    ):
+        try:
+            from finiq.data.ontology_query import OntologyGraphQueryService
+            service = OntologyGraphQueryService()
+            return await run_in_threadpool(
+                service.get_control_chain,
+                company_id=company_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     @router.post("/api/ontology/triple-barrier/run")
     async def post_triple_barrier_run(payload: TripleBarrierRunRequest):
         try:

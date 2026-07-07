@@ -36,6 +36,9 @@ logs/
 Archive.zip
 assets/quantiwise-xlsx/
 
+# Temp files
+tmp/
+
 # Skills
 .understand-anything/
 /.gemini
