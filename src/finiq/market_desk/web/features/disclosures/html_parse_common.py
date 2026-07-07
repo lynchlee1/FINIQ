@@ -7,6 +7,7 @@ import re
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime
+from inspect import signature
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
@@ -27,7 +28,7 @@ from finiq.market_desk.web.html_parsers.common import (
     fetch_selected_viewer_body,
 )
 
-ParseFunction = Callable[[str | bytes], dict[str, Any]]
+ParseFunction = Callable[..., dict[str, Any]]
 ProgressCallback = Callable[[str], None]
 _CANCELLED_PARSES: set[str] = set()
 _CANCEL_LOCK = Lock()
@@ -303,10 +304,12 @@ def _load_download_manifest_metadata_index(
         acpt_no = str(item.get("acpt_no") or "").strip()
         market = _normalize_listing_market(item.get("market"))
         company_name = str(item.get("company_name") or "").strip()
+        title = str(item.get("title") or "").strip()
         if acpt_no:
             metadata_index[acpt_no] = {
                 "market": market,
                 "company_name": company_name,
+                "title": title,
             }
     return metadata_index
 
@@ -1016,6 +1019,30 @@ def _record_parse_warnings(record: dict[str, Any]) -> list[str]:
     return [item["warning"] for item in _record_parse_warning_items(record)]
 
 
+def _metadata_title_for_file(
+    html_file: Path, metadata_index: dict[str, dict[str, Any]]
+) -> str | None:
+    acpt_no = html_file.stem.split("_", 1)[0]
+    metadata = metadata_index.get(acpt_no) or {}
+    title = str(metadata.get("title") or "").strip()
+    return title or None
+
+
+def _parser_accepts_title(parser: ParseFunction) -> bool:
+    try:
+        return "title" in signature(parser).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _parse_html_file_record(request: ParseRequest, html_file: Path) -> dict[str, Any]:
+    parser_kwargs: dict[str, Any] = {"file_path": html_file}
+    title = _metadata_title_for_file(html_file, request.manifest_metadata_index)
+    if title and _parser_accepts_title(request.parser):
+        parser_kwargs["title"] = title
+    return request.parser(html_file.read_bytes(), **parser_kwargs)
+
+
 def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
     if not request.resume:
         return
@@ -1175,7 +1202,7 @@ def _parse_one_html_file(
 
     try:
         parsed_record = _compact_record(
-            request.parser(html_file.read_bytes(), file_path=html_file)
+            _parse_html_file_record(request, html_file)
         )
         record = _apply_manifest_metadata(
             parsed_record,
@@ -1233,7 +1260,7 @@ def _parse_html_file_for_worker(
     source_file = str(html_file.resolve())
     try:
         parsed_record = _compact_record(
-            request.parser(html_file.read_bytes(), file_path=html_file)
+            _parse_html_file_record(request, html_file)
         )
         return {
             "kind": "record",
