@@ -3501,7 +3501,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         """
         <html>
           <head><title>Sample Disclosure</title></head>
-          <body><table><tr><th>Field</th><td>Value</td></tr></table></body>
+          <body><p class="SECTION-1">Sample Disclosure</p><table><tr><th>Field</th><td>Value</td></tr></table></body>
         </html>
         """,
         encoding="utf-8",
@@ -3540,7 +3540,7 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
         """
         <html>
           <head><title>Sample Disclosure</title></head>
-          <body>유가증권시장 <table><tr><th>Field</th><td>Value</td></tr></table></body>
+          <body><p class="SECTION-1">Sample Disclosure</p>유가증권시장 <table><tr><th>Field</th><td>Value</td></tr></table></body>
         </html>
         """,
         encoding="utf-8",
@@ -3582,7 +3582,7 @@ def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path:
         """
         <html>
           <head><title>Sample Disclosure</title></head>
-          <body>유가증권시장 <table><tr><th>Field</th><td>Value</td></tr></table></body>
+          <body><p class="SECTION-1">Sample Disclosure</p>유가증권시장 <table><tr><th>Field</th><td>Value</td></tr></table></body>
         </html>
         """,
         encoding="utf-8",
@@ -4117,6 +4117,7 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
         <html>
           <head><title>전환사채권발행결정</title></head>
           <body>
+            <p class="SECTION-1">전환사채권발행결정</p>
             <table>
               <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
               <tr><th>2. 사채의 권면(전자등록)총액</th><td>1,000,000,000</td></tr>
@@ -4169,6 +4170,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
         <html>
           <head><title>전환사채권발행결정</title></head>
           <body>
+            <p class="SECTION-1">전환사채권발행결정</p>
             <table>
               <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
               <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
@@ -4457,7 +4459,7 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         """
         <html>
           <head><title>Different Disclosure Form</title></head>
-          <body><table><tr><th>Field</th><td>Value</td></tr></table></body>
+          <body><p class="SECTION-1">Different Disclosure Form</p><table><tr><th>Field</th><td>Value</td></tr></table></body>
         </html>
         """,
         encoding="utf-8",
@@ -5517,11 +5519,11 @@ def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path)
 
     parsed = parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
 
-    assert parsed["title"] == "[에스브이에이치] [정정]전환사채발행결정"
+    assert parsed["title"] == ""
     assert parsed["rcept_no"] is None
     assert parsed["correction_families"] == {}
     assert parsed["회차"] is None
-    assert parsed["종류"] == "CB"
+    assert parsed["종류"] is None
     assert parsed["발행금액"] is None
     assert parsed["만기일"] is None
     assert parsed["투자자"] == []
