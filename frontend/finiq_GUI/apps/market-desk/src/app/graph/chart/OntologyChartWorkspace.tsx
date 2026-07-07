@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { AlertTriangle, FileText, LineChart, Loader2, Maximize2, RefreshCw, Search, X } from "lucide-react";
+import { AlertTriangle, FileText, LineChart, Loader2, Maximize2, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { apiGet } from "@/api/client";
@@ -293,7 +293,7 @@ export function OntologyChartWorkspace() {
   };
 
   const renderChartControls = () => (
-    <div className="flex flex-col gap-2 lg:items-end">
+    <div className="grid gap-2 xl:grid-cols-[auto_auto_auto] xl:items-start xl:justify-end">
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" onClick={() => setChartFullscreen(true)} disabled={chartIsLoading}>
           <Maximize2 className="h-4 w-4" />
@@ -304,28 +304,28 @@ export function OntologyChartWorkspace() {
           새로고침
         </Button>
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className="ontology-toolbar inline-flex w-fit flex-wrap gap-1 p-1">
         {CHART_TYPE_OPTIONS.map((option) => (
           <Button
             key={option.value}
             type="button"
             variant={chartType === option.value ? "default" : "outline"}
             size="sm"
-            className="h-8"
+            className="h-7"
             onClick={() => setChartType(option.value)}
           >
             {option.label}
           </Button>
         ))}
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className="ontology-toolbar inline-flex w-fit flex-wrap gap-1 p-1">
         {DISPLAY_FREQUENCY_OPTIONS.map((option) => (
           <Button
             key={option}
             type="button"
             variant={displayFrequency === option ? "default" : "outline"}
             size="sm"
-            className="h-8"
+            className="h-7"
             onClick={() => setDisplayFrequency(option)}
           >
             {option}
@@ -338,8 +338,8 @@ export function OntologyChartWorkspace() {
   const renderPriceChart = (expanded = false) => (
     <div
       className={cn(
-        "rounded-lg border border-slate-200 bg-white p-4 dark:border-[#30363d] dark:bg-[#0d1117]",
-        expanded ? "h-full min-h-0" : "h-[min(68vh,720px)] min-h-[520px]",
+        "ontology-panel p-3",
+        expanded ? "h-full min-h-0" : "h-[min(70vh,760px)] min-h-[540px]",
       )}
     >
       {chartIsLoading ? (
@@ -369,46 +369,45 @@ export function OntologyChartWorkspace() {
   );
 
   return (
-    <div className="relative action-dock-host flex w-full flex-col gap-5 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
-      <div className="flex w-full flex-col gap-5">
+    <div className="relative action-dock-host flex w-full flex-col gap-4 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
+      <div className="flex w-full flex-col gap-4">
         <section>
-          <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-            <CardHeader>
+          <Card className="ontology-card">
+            <CardHeader className="ontology-page-card-header">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                 FILTERS
               </p>
-              <CardTitle className="dark:text-white">공시 조건</CardTitle>
-              <CardDescription className="dark:text-slate-400">Chart View</CardDescription>
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                <CardTitle className="ontology-card-title">공시 조건</CardTitle>
+              </div>
+              <CardDescription className="ontology-card-description">Chart View · {chartMetaText}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="ontology-chart-stock-keyword" className="font-semibold dark:text-slate-200">
-                  회사명
-                </Label>
-                <div className="flex flex-col gap-2 sm:flex-row">
+            <CardContent className="ontology-page-card-content space-y-4">
+              <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.9fr)_minmax(320px,0.8fr)_minmax(0,1.2fr)] xl:items-end">
+                <div className="min-w-0 space-y-1.5">
+                  <Label htmlFor="ontology-chart-stock-keyword" className="font-semibold dark:text-slate-200">
+                    회사명
+                  </Label>
+                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                   <Input
                     id="ontology-chart-stock-keyword"
                     aria-label="종목 선택"
                     value={keyword}
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="종목명 또는 A000000"
-                    className="h-9 sm:max-w-sm"
+                    className="h-9 min-w-0"
                   />
                   <Button variant="outline" size="sm" className="h-9" onClick={loadCompanies} disabled={loadingCompanies}>
                     {loadingCompanies ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                     검색
                   </Button>
+                  </div>
                 </div>
-              </div>
-              <div className="border-t border-slate-200 pt-5 dark:border-[#30363d]">
-                <Label htmlFor="ontology-chart-disclosure-group" className="font-semibold dark:text-slate-200">
-                  공시내역
-                </Label>
-                <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                  <div className="space-y-1.5 lg:min-w-72">
+                <div className="min-w-0 space-y-1.5">
                     <Label
                       htmlFor="ontology-chart-disclosure-group"
-                      className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                    className="font-semibold dark:text-slate-200"
                     >
                       공시 선택
                     </Label>
@@ -416,7 +415,7 @@ export function OntologyChartWorkspace() {
                       id="ontology-chart-disclosure-group"
                       value={disclosureGroup}
                       onChange={(event) => setDisclosureGroup(event.target.value)}
-                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-950 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                      className="ontology-control h-9 w-full px-3 text-sm shadow-sm"
                     >
                       <option value={DISCLOSURE_GROUP_ALL}>{DISCLOSURE_GROUP_ALL}</option>
                       {disclosureGroups.map((group) => (
@@ -425,27 +424,23 @@ export function OntologyChartWorkspace() {
                         </option>
                       ))}
                     </select>
-                  </div>
-                  {renderChartControls()}
                 </div>
+                {renderChartControls()}
               </div>
-              <div className="border-t border-slate-200 pt-5 dark:border-[#30363d]">
-                <div className="rounded-lg border border-slate-200/70 bg-slate-50/70 p-3 dark:border-[#30363d] dark:bg-[#0d1117]/60">
-                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="border-t border-slate-200 pt-4 dark:border-[#30363d]">
+                <div className="ontology-panel p-3">
+                  <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-end">
                     <div>
                       <Label htmlFor="ontology-chart-marker-style-group" className="font-semibold dark:text-slate-200">
                         공시 마커 스타일
                       </Label>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        공시 종류를 고른 뒤 해당 마커만 조정합니다.
-                      </p>
                     </div>
                     <select
                       id="ontology-chart-marker-style-group"
                       value={activeMarkerStyleGroup}
                       onChange={(event) => setActiveMarkerStyleGroup(event.target.value)}
                       aria-label="스타일 대상"
-                      className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-950 shadow-sm sm:w-48 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                      className="ontology-control h-8 w-full px-2.5 text-sm shadow-sm sm:w-48"
                     >
                       {markerStyleGroups.map((group) => (
                         <option key={group} value={group}>
@@ -454,8 +449,8 @@ export function OntologyChartWorkspace() {
                       ))}
                     </select>
                   </div>
-                  <div className="flex flex-wrap items-end gap-2">
-                    <div className="min-w-36 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-end gap-2 sm:grid sm:grid-cols-2 lg:grid-cols-[minmax(140px,1fr)_minmax(140px,1fr)_112px_96px_96px] lg:items-end">
+                    <div className="min-w-0 space-y-1">
                       <Label htmlFor="ontology-chart-marker-shape" className="text-slate-600 dark:text-slate-300">
                         모양
                       </Label>
@@ -463,7 +458,7 @@ export function OntologyChartWorkspace() {
                         id="ontology-chart-marker-shape"
                         value={activeMarkerStyle.shape}
                         onChange={(event) => updateActiveMarkerStyle("shape", event.target.value as MarkerShapeOverride)}
-                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-950 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                        className="ontology-control h-8 w-full px-2.5 text-sm shadow-sm"
                       >
                         {MARKER_SHAPE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
@@ -472,7 +467,7 @@ export function OntologyChartWorkspace() {
                         ))}
                       </select>
                     </div>
-                    <div className="min-w-36 flex-1 space-y-1">
+                    <div className="min-w-0 space-y-1">
                       <Label htmlFor="ontology-chart-marker-placement" className="text-slate-600 dark:text-slate-300">
                         위치
                       </Label>
@@ -480,7 +475,7 @@ export function OntologyChartWorkspace() {
                         id="ontology-chart-marker-placement"
                         value={activeMarkerStyle.position}
                         onChange={(event) => updateActiveMarkerStyle("position", event.target.value as MarkerPlacementOverride)}
-                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-950 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                        className="ontology-control h-8 w-full px-2.5 text-sm shadow-sm"
                       >
                         {MARKER_PLACEMENT_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
@@ -489,11 +484,11 @@ export function OntologyChartWorkspace() {
                         ))}
                       </select>
                     </div>
-                    <div className="w-28 space-y-1">
+                    <div className="space-y-1">
                       <Label htmlFor="ontology-chart-marker-color" className="text-slate-600 dark:text-slate-300">
                         색상
                       </Label>
-                      <div className="flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 shadow-sm dark:border-[#30363d] dark:bg-[#0d1117]">
+                      <div className="ontology-control flex h-8 items-center gap-2 px-2 shadow-sm">
                         <span
                           aria-label="공시 마커 스타일 미리보기"
                           className="h-4 w-4 rounded-full border border-slate-300 dark:border-slate-600"
@@ -508,7 +503,7 @@ export function OntologyChartWorkspace() {
                         />
                       </div>
                     </div>
-                    <div className="w-24 space-y-1">
+                    <div className="space-y-1">
                       <Label htmlFor="ontology-chart-marker-size" className="text-slate-600 dark:text-slate-300">
                         크기
                       </Label>
@@ -523,7 +518,7 @@ export function OntologyChartWorkspace() {
                         className="h-8 rounded-md text-sm"
                       />
                     </div>
-                    <div className="w-24 space-y-1">
+                    <div className="space-y-1">
                       <Label htmlFor="ontology-chart-marker-line-width" className="text-slate-600 dark:text-slate-300">
                         선 두께
                       </Label>
@@ -547,37 +542,37 @@ export function OntologyChartWorkspace() {
         </section>
 
         <section>
-          <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 dark:text-white">
+          <Card className="ontology-card">
+            <CardHeader className="ontology-page-card-header">
+              <CardTitle className="ontology-card-title flex items-center gap-2">
                 <LineChart className="h-5 w-5" />
                 주가-공시 차트
               </CardTitle>
-              <CardDescription className="mt-2 dark:text-slate-400">
+              <CardDescription className="ontology-card-description mt-2">
                 {chartMetaText}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="ontology-page-card-content">
               {renderPriceChart()}
             </CardContent>
           </Card>
         </section>
 
         <section>
-          <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 dark:text-white">
+          <Card className="ontology-card">
+            <CardHeader className="ontology-page-card-header">
+              <CardTitle className="ontology-card-title flex items-center gap-2">
                 <FileText className="h-5 w-5" />
                 공시 타임라인
               </CardTitle>
-              <CardDescription className="dark:text-slate-400">차트에 표시된 전체 기간 공시</CardDescription>
+              <CardDescription className="ontology-card-description">차트에 표시된 전체 기간 공시</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="max-h-[460px] overflow-y-auto pr-1">
+            <CardContent className="ontology-page-card-content">
+              <div className="max-h-[460px] overflow-y-auto">
                 {panel?.timeline.length ? (
                   <div className="divide-y divide-slate-100 dark:divide-[#30363d]">
                     {panel.timeline.map((item) => (
-                      <div key={item.acpt_no} className="space-y-2 py-3">
+                      <div key={item.acpt_no} className="grid gap-3 px-3 py-3 lg:grid-cols-[10rem_minmax(0,1fr)_14rem]">
                         <div className="text-sm text-slate-500 dark:text-slate-400">
                           <p className="font-medium text-slate-700 dark:text-slate-300">{item.disclosed_at}</p>
                           <p className="mt-1 text-xs">마커 {item.trade_day || "-"}</p>
@@ -587,11 +582,11 @@ export function OntologyChartWorkspace() {
                           <p className="font-semibold leading-snug text-slate-950 dark:text-slate-100">{item.title}</p>
                           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.submitter}</p>
                         </div>
-                        <div className="text-left">
-                          <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-[#30363d] dark:text-slate-300">
+                        <div className="text-left lg:text-right">
+                          <span className="inline-block max-w-full truncate rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-[#30363d] dark:text-slate-300">
                             {item.group}
                           </span>
-                          <p className="mt-2 text-xs text-slate-400">{item.acpt_no}</p>
+                          <p className="mt-2 break-all font-mono text-xs text-slate-400">{item.acpt_no}</p>
                         </div>
                       </div>
                     ))}

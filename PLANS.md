@@ -6,3 +6,6 @@ No remaining review findings.
 - `pytest tests/data/test_ontology_builder.py tests/market_desk/test_ontology_graph.py` (28 passed)
 - `pytest` (798 passed)
 - `git diff --check` (passed)
+- `npm run build` in `frontend/finiq_GUI/apps/market-desk` (passed)
+- `node tests/frontend/navigation.test.mjs` (passed)
+

@@ -315,21 +315,21 @@ export function DisclosureAnalysisWorkspace() {
   const isResultsMode = selectedAnalysisMode === "results";
 
   return (
-    <div className="flex w-full flex-col gap-5">
+    <div className="flex w-full flex-col gap-4">
       <section>
-        <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-          <CardHeader>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Card className="ontology-card">
+          <CardHeader className="ontology-page-card-header">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
               <div>
-                <CardTitle className="flex items-center gap-2 dark:text-white">
+                <CardTitle className="ontology-card-title flex items-center gap-2">
                   <FileText className="h-5 w-5" />
                   공시 분석
                 </CardTitle>
-                <CardDescription className="mt-2 dark:text-slate-400">
+                <CardDescription className="ontology-card-description mt-2">
                   공시 이벤트 기준 Triple Barrier 라벨을 생성하고 저장합니다.
                 </CardDescription>
               </div>
-              <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+              <div className="ontology-toolbar inline-flex p-1">
                 {[
                   ["run", "실행 설정"],
                   ["results", "저장 결과"],
@@ -349,37 +349,39 @@ export function DisclosureAnalysisWorkspace() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="pt-0">
-            {error ? <p className="mt-3 text-sm text-red-600 dark:text-red-300">{error}</p> : null}
-          </CardContent>
+          {error ? (
+            <CardContent className="ontology-page-card-content">
+              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">{error}</p>
+            </CardContent>
+          ) : null}
         </Card>
       </section>
 
       <section>
-        <Card className="rounded-lg dark:border-[#30363d] dark:bg-[#161b22]">
-          <CardHeader>
-            <CardTitle className="dark:text-white">
+        <Card className="ontology-card">
+          <CardHeader className="ontology-page-card-header">
+            <CardTitle className="ontology-card-title">
               {isResultsMode ? "Triple Barrier 저장 결과" : "Triple Barrier 실행"}
             </CardTitle>
-            <CardDescription className="dark:text-slate-400">
+            <CardDescription className="ontology-card-description">
               {isResultsMode
                 ? `${selectedResultCompanyLabel} · 저장된 Triple Barrier 라벨을 검토합니다.`
                 : `${selectedRunCompanyLabel} · ${panel ? `${panel.range_start} - ${panel.range_end}` : "전체 기간"} · 공시 이벤트 기준 라벨을 계산해 저장합니다.`}
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="ontology-page-card-content space-y-4">
             {selectedAnalysisMode === "run" && loadingPanel ? (
               <PageLoadingSpinner message="공시 목록을 준비하는 중입니다..." />
             ) : (
               <>
                 {selectedAnalysisMode === "run" ? (
                   <>
-                    <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-[#30363d] dark:bg-[#0d1117]">
+                    <div className="ontology-panel space-y-3 p-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">1. 실행 대상</h3>
                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Triple Barrier 라벨을 계산할 종목을 먼저 고릅니다.</p>
                       </div>
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto_minmax(220px,0.8fr)] lg:items-end">
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <Label htmlFor="disclosure-analysis-run-keyword">실행 종목 선택</Label>
                           <Input
@@ -400,7 +402,7 @@ export function DisclosureAnalysisWorkspace() {
                             const nextStockCode = normalizeStockCode(event.target.value);
                             setSelectedRunCompany(runCompanies.find((company) => company.stock_code === nextStockCode) ?? null);
                           }}
-                          className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                          className="ontology-control h-9 px-2 text-sm"
                         >
                           <option value="">실행 종목 없음</option>
                           {runCompanies.map((company) => (
@@ -412,7 +414,7 @@ export function DisclosureAnalysisWorkspace() {
                       </div>
                     </div>
 
-                    <div className="space-y-3 rounded-lg border border-slate-200 p-4 dark:border-[#30363d]">
+                    <div className="ontology-panel space-y-3 p-3">
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">2. 공시 범위</h3>
@@ -444,9 +446,9 @@ export function DisclosureAnalysisWorkspace() {
                         </div>
                       </div>
 
-                      <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-[#30363d]">
-                        <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100">검사 대상 이벤트</div>
-                        <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 bg-white dark:divide-[#30363d] dark:bg-[#161b22]">
+                      <div className="ontology-panel overflow-hidden">
+                        <div className="border-b px-3 py-2 text-sm font-semibold">검사 대상 이벤트</div>
+                        <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-[#30363d]">
                           {markers.length ? markers.map((marker) => {
                             const disclosureId = marker.acpt_no || `${marker.time}-${marker.title}`;
                             return (
@@ -463,22 +465,22 @@ export function DisclosureAnalysisWorkspace() {
                       </div>
                     </div>
 
-                    <div className="space-y-3 rounded-lg border border-slate-200 p-4 dark:border-[#30363d]">
+                    <div className="ontology-panel space-y-3 p-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">3. Triple Barrier 설정</h3>
                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">이벤트 기준, 가격 판정 방식, barrier 값을 한 번에 확인한 뒤 실행합니다.</p>
                       </div>
-                      <div className="grid gap-3 md:grid-cols-6">
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(140px,1fr)_minmax(170px,1fr)_120px_120px_140px_minmax(160px,0.8fr)]">
                         <label className="space-y-1.5 text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">이벤트 기준일</span>
-                          <select value={eventTimeBasis} onChange={(event) => setEventTimeBasis(event.target.value)} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100">
+                          <select value={eventTimeBasis} onChange={(event) => setEventTimeBasis(event.target.value)} className="ontology-control h-9 w-full px-2 text-sm">
                             <option value="disclosed_date">공시일</option>
                             <option value="disclosed_at">공시시각</option>
                           </select>
                         </label>
                         <label className="space-y-1.5 text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">가격 기준</span>
-                          <select value={priceBasis} onChange={(event) => setPriceBasis(event.target.value)} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100">
+                          <select value={priceBasis} onChange={(event) => setPriceBasis(event.target.value)} className="ontology-control h-9 w-full px-2 text-sm">
                             <option value="close">종가 기준</option>
                             <option value="intraday">장중 고가/저가 기준</option>
                           </select>
@@ -493,7 +495,7 @@ export function DisclosureAnalysisWorkspace() {
                         </label>
                         <label className="space-y-1.5 text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">Vertical barrier</span>
-                          <select value={verticalDays} onChange={(event) => setVerticalDays(event.target.value)} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100">
+                          <select value={verticalDays} onChange={(event) => setVerticalDays(event.target.value)} className="ontology-control h-9 w-full px-2 text-sm">
                             <option value="5">5거래일</option>
                             <option value="10">10거래일</option>
                             <option value="20">20거래일</option>
@@ -511,7 +513,7 @@ export function DisclosureAnalysisWorkspace() {
                 ) : null}
 
                 {selectedAnalysisMode === "results" ? (
-                  <div className="rounded-lg border border-slate-200 p-3 dark:border-[#30363d]">
+                  <div className="ontology-panel p-3">
                     <div className="space-y-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">저장 결과 조회</h3>
@@ -521,7 +523,7 @@ export function DisclosureAnalysisWorkspace() {
                             : "결과 조회용 종목을 검색하고 선택하면 저장된 Triple Barrier 결과를 확인합니다."}
                         </p>
                       </div>
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto_minmax(220px,0.8fr)_auto] lg:items-end">
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <Label htmlFor="disclosure-analysis-result-keyword">결과 종목 선택</Label>
                           <Input
@@ -542,7 +544,7 @@ export function DisclosureAnalysisWorkspace() {
                             const nextStockCode = normalizeStockCode(event.target.value);
                             setSelectedResultCompany(resultCompanies.find((company) => company.stock_code === nextStockCode) ?? null);
                           }}
-                          className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-100"
+                          className="ontology-control h-9 px-2 text-sm"
                         >
                           <option value="">조회 종목 없음</option>
                           {resultCompanies.map((company) => (
@@ -557,13 +559,13 @@ export function DisclosureAnalysisWorkspace() {
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-3">
-                      <div className="rounded-md bg-slate-50 px-3 py-2 dark:bg-[#0d1117]">
+                      <div className="ontology-metric px-3 py-2">
                         조회 종목: <span className="font-medium text-slate-900 dark:text-slate-100">{selectedResultCompany?.stock_code ?? "-"}</span>
                       </div>
-                      <div className="rounded-md bg-slate-50 px-3 py-2 dark:bg-[#0d1117]">
+                      <div className="ontology-metric px-3 py-2">
                         결과 행: <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(rows.length)}</span>
                       </div>
-                      <div className="rounded-md bg-slate-50 px-3 py-2 dark:bg-[#0d1117]">
+                      <div className="ontology-metric px-3 py-2">
                         DB: <span className="font-medium text-slate-900 dark:text-slate-100">{tripleBarrierResult?.result_db_path ? "연결됨" : "-"}</span>
                       </div>
                     </div>
@@ -588,17 +590,17 @@ export function DisclosureAnalysisWorkspace() {
                       ["신규 저장", tripleBarrierResult?.summary.created ?? 0],
                       ["중복 제외", tripleBarrierResult?.summary.reused ?? 0],
                     ].map(([label, value]) => (
-                      <div key={label} className="rounded-lg border border-slate-200 px-3 py-2 dark:border-[#30363d]">
+                      <div key={label} className="ontology-metric px-3 py-2">
                         <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
                         <p className="mt-1 font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(Number(value))}</p>
                       </div>
                     ))}
                   </div>
 
-                  <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-[#30363d]">
-                    <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold dark:border-[#30363d] dark:text-slate-100">결과 테이블</div>
+                  <div className="ontology-panel overflow-x-auto">
+                    <div className="border-b px-3 py-2 text-sm font-semibold">결과 테이블</div>
                     <table className="min-w-[1280px] text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-500 dark:bg-[#0d1117] dark:text-slate-400">
+                      <thead className="ontology-muted">
                         <tr>
                           {["공시 ID", "종목코드", "종목명", "공시일", "이벤트 가격", "upper barrier 가격", "lower barrier 가격", "vertical barrier 날짜", "최초 도달 barrier", "최초 도달 날짜", "최초 도달 가격", "수익률", "label", "계산 상태", "에러 메시지"].map((header) => (
                             <th key={header} className="border-b border-slate-200 px-3 py-2 dark:border-[#30363d]">{header}</th>
