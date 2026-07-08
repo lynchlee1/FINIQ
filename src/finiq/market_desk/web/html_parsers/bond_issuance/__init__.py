@@ -27,7 +27,7 @@ def parse_bond_issuance(
     issue_amount = extractor.extract_issue_amount_from_bond_face_value_row()
 
     schema_record = BondIssuanceRecord(
-        기업명_발행사=record_dict.get("기업명(발행사)"),
+        corp_name=record_dict.get("corp_name"),
         회차=extractor.extract_round_from_bond_type_row(),
         종류=extractor.extract_security_type_from_title(title),
         기업명_행사대상=(

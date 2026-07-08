@@ -1,10 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Play, Loader2, RefreshCw } from "lucide-react";
+import { Play, Loader2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
-import { cn } from "@finiq/ui/utils";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -98,17 +97,6 @@ export default function FilterPage() {
     filter_workers: Number(filterWorkers || 8),
     progress_interval: Number(progressInterval || 100),
   });
-
-  const handleRefresh = async () => {
-    const config = await fetchSettings();
-    if (!config) {
-      setStatus("공시 소스 폴더 새로고침에 실패했습니다.");
-      setIsErrorStatus(true);
-      return;
-    }
-    setStatus("공시 소스 폴더를 새로고침했습니다.");
-    setIsErrorStatus(false);
-  };
 
   const handleFilter = async () => {
     if (!rootDirectory?.trim()) {
@@ -276,11 +264,7 @@ export default function FilterPage() {
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <Button variant="outline" onClick={handleRefresh} disabled={isStreaming} className="w-full">
-                  <RefreshCw className={cn("mr-2 h-4 w-4", isStreaming ? "animate-spin" : "")} />
-                  소스 새로고침
-                </Button>
+              <div className="grid gap-3 md:grid-cols-2">
                 <Button onClick={handleFilter} disabled={isStreaming} className="w-full">
                   {isStreaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행

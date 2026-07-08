@@ -150,11 +150,11 @@ test("html parse page does not auto generate output paths", async () => {
   assert.doesNotMatch(source, /output_path: output/);
 });
 
-test("html parse page defaults resume off and removes excel export controls", async () => {
+test("html parse page removes resume and excel export controls", async () => {
   const source = await readFile(pagePath, "utf8");
 
-  assert.match(source, /const \[resumeParse, setResumeParse\] = useState\(false\)/);
-  assert.doesNotMatch(source, /useState\(true\);\n\s*const \[progressInterval/);
+  assert.doesNotMatch(source, /resumeParse/);
+  assert.doesNotMatch(source, /이어하기/);
   assert.doesNotMatch(source, /exportLatestOnly/);
   assert.doesNotMatch(source, /최신버전만 보기/);
   assert.doesNotMatch(source, /Excel로 내보내기/);

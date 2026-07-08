@@ -43,7 +43,7 @@ DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "tmp" / "bond_parse_random_sample_report.js
 REQUIRED_FIELDS = (
     "acpt_no",
     "title",
-    "기업명(발행사)",
+    "corp_name",
     "회차",
     "종류",
     "기업명(행사대상)",
@@ -59,7 +59,7 @@ REQUIRED_FIELDS = (
 )
 
 FIELD_KEYWORDS = {
-    "기업명(발행사)": ("SECTION-1",),
+    "corp_name": ("SECTION-1",),
     "회차": ("사채의 종류", "회차"),
     "종류": ("SECTION-1", "사채의 종류"),
     "기업명(행사대상)": ("교환대상", "전환에 따라", "전환으로 발행할", "인수권행사에 따라"),

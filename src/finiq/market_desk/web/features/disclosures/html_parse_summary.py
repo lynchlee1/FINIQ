@@ -15,6 +15,14 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
     output_path = _resolve_parse_result_path(
         Path(output_path_raw).expanduser().resolve(), "bond_issuance"
     )
+    source_directory_raw = str(
+        body.get("source_directory") or body.get("input_directory") or ""
+    ).strip()
+    source_directory = (
+        Path(source_directory_raw).expanduser().resolve()
+        if source_directory_raw
+        else None
+    )
     payload = _load_parse_payload(output_path)
     if payload.get("mode") != "bond_issuance":
         msg = "parse result mode must be bond_issuance"
@@ -41,14 +49,17 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
             {
                 "index": index,
                 "title": record.get("title") or "",
-                "source_file": record.get("source_file") or "",
+                "source_file": _source_file_for_record(record, source_directory),
                 "acpt_no": record.get("acpt_no") or "",
                 "rcept_no": record.get("rcept_no") or "",
                 "family_id": family_id,
                 "current_sequence": current_sequence,
                 "family_member_count": member_count,
                 "fields": {field: record.get(field) for field in BOND_SUMMARY_FIELDS},
-                "source_preview": _load_source_preview(record, mode="bond_issuance"),
+                "source_preview": _load_source_preview(
+                    _record_with_source_file(record, source_directory),
+                    mode="bond_issuance",
+                ),
             }
         )
 
@@ -75,6 +86,39 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
         "families": families,
         "records": summary_records,
     }
+
+
+def _record_with_source_file(
+    record: dict[str, Any], source_directory: Path | None
+) -> dict[str, Any]:
+    if record.get("source_file"):
+        return record
+    source_file = _source_file_for_record(record, source_directory)
+    if not source_file:
+        return record
+    updated_record = dict(record)
+    updated_record["source_file"] = source_file
+    return updated_record
+
+
+def _source_file_for_record(
+    record: dict[str, Any], source_directory: Path | None
+) -> str:
+    source_file = str(record.get("source_file") or "").strip()
+    if source_file:
+        return source_file
+    if source_directory is None or not source_directory.is_dir():
+        return ""
+    acpt_no = str(record.get("acpt_no") or "").strip()
+    if not acpt_no:
+        return ""
+    exact_path = source_directory / f"{acpt_no}.html"
+    if exact_path.is_file():
+        return str(exact_path.resolve())
+    for path in sorted(source_directory.rglob(f"{acpt_no}*.html")):
+        if path.is_file() and path.stem.split("_", 1)[0] == acpt_no:
+            return str(path.resolve())
+    return ""
 
 
 

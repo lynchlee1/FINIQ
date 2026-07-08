@@ -3540,17 +3540,17 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
 
     assert payload["format"] == "finiq_disclosure_html_parse_v1"
     assert payload["mode"] == "bond_issuance"
-    assert payload["summary"] == {"found_files": 1, "parsed_files": 1, "failed_files": 0, "resumed_files": 0}
+    assert payload["summary"] == {"found_files": 1, "parsed_files": 1, "failed_files": 0}
     assert payload["cancelled"] is False
-    assert "파싱 대상 HTML 1건" in payload["progress_log"][0]
-    assert payload["progress_log"][-1].startswith("파싱 결과 JSON 저장 완료:")
+    assert "progress_log" not in payload
     assert payload["records"][0]["acpt_no"] == "20250101000001"
     assert payload["records"][0]["title"] == "Sample Disclosure"
+    assert "source_file" not in payload["records"][0]
     assert "raw_rows" not in payload["records"][0]
     assert "raw_tables" not in payload["records"][0]
     assert stored["format"] == payload["format"]
-    assert stored["records"][0]["source_file"] == payload["records"][0]["source_file"]
-    assert stored["progress_log"] == payload["progress_log"]
+    assert "source_file" not in stored["records"][0]
+    assert "progress_log" not in stored
 
 
 def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path: Path) -> None:
@@ -3587,12 +3587,11 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
-            "resume": False,
         }
     )
 
     assert payload["records"][0]["상장구분"] == "코스닥"
-    assert payload["records"][0]["기업명(발행사)"] == "테스트발행사"
+    assert payload["records"][0]["corp_name"] == "테스트발행사"
 
 
 def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path: Path) -> None:
@@ -3613,7 +3612,6 @@ def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path:
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
-            "resume": False,
         }
     )
 
@@ -3688,18 +3686,23 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
             "input_directory": str(input_dir),
             "output_directory": str(bond_dir),
             "mode": "bond_issuance",
-            "resume": False,
         }
     )
 
     assert payload["summary"]["found_files"] == 1
-    assert payload["output_path"] == str(bond_dir / "parsed-bond_issuance.json")
+    assert "input_directory" not in payload
+    assert "output_path" not in payload
     assert (bond_dir / "parsed-bond_issuance.json").is_file()
+    stored = json.loads(
+        (bond_dir / "parsed-bond_issuance.json").read_text(encoding="utf-8")
+    )
+    assert "input_directory" not in stored
+    assert "output_path" not in stored
     assert not (input_dir / "parsed-bond_issuance.json").exists()
     record = payload["records"][0]
     assert record["acpt_no"] == "20250102000002"
     assert record["title"] == "[테스트발행사] 전환사채권발행결정"
-    assert record["기업명(발행사)"] == "테스트발행사"
+    assert record["corp_name"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
     assert record["회차"] == "3"
     assert record["종류"] == "CB"
@@ -3740,11 +3743,11 @@ def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
             "mode": "rights_issuance",
-            "resume": False,
         }
     )
 
-    assert payload["output_path"] == str(output_dir / "parsed-rights_issuance.json")
+    assert "input_directory" not in payload
+    assert "output_path" not in payload
     assert (output_dir / "parsed-rights_issuance.json").is_file()
     assert not (input_dir / "parsed-rights_issuance.json").exists()
 
@@ -3773,11 +3776,11 @@ def test_parse_disclosure_html_payload_accepts_dotted_output_directory(
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
             "mode": "rights_issuance",
-            "resume": False,
         }
     )
 
-    assert payload["output_path"] == str(output_dir / "parsed-rights_issuance.json")
+    assert "input_directory" not in payload
+    assert "output_path" not in payload
     assert (output_dir / "parsed-rights_issuance.json").is_file()
 
 
@@ -3806,7 +3809,6 @@ def test_parse_disclosure_html_payload_requires_output_directory(
             {
                 "input_directory": str(input_dir),
                 "mode": "rights_issuance",
-                "resume": False,
             }
         )
 
@@ -3861,7 +3863,6 @@ def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
-            "resume": False,
         }
     )
 
@@ -4013,7 +4014,6 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
             "input_directory": str(input_dir),
             "output_directory": str(tmp_path),
             "mode": "rights_issuance",
-            "resume": False,
         }
     )
 
@@ -4066,7 +4066,7 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
                                 ],
                             }
                         },
-                        "기업명(발행사)": "발행사",
+                        "corp_name": "발행사",
                         "회차": "1",
                         "종류": "CB",
                         "기업명(행사대상)": "대상회사",
@@ -4159,8 +4159,7 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
                         "title": "전환사채권발행결정",
                         "acpt_no": "20250102000002",
                         "rcept_no": "20250102009999",
-                        "source_file": str(source_path),
-                        "기업명(발행사)": "발행사",
+                        "corp_name": "발행사",
                         "회차": "1",
                         "종류": "CB",
                         "발행금액": 1_000_000_000,
@@ -4172,7 +4171,9 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
         encoding="utf-8",
     )
 
-    payload = build_bond_parse_summary_payload({"output_path": str(parse_path)})
+    payload = build_bond_parse_summary_payload(
+        {"output_path": str(parse_path), "source_directory": str(tmp_path)}
+    )
 
     preview = payload["records"][0]["source_preview"]
     assert preview["available"] is True
@@ -4284,7 +4285,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
     assert record["doc_no"] == "20250102009999"
     assert record["selected_main_doc_no"] == "20250102009999"
     assert "docs" not in record
-    assert record["기업명(발행사)"] == "테스트발행사"
+    assert record["corp_name"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
     assert record["correction_families"] == {
         "20250102000002": {
@@ -4418,19 +4419,22 @@ def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monk
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "cancel_token": "parse-cancel-test",
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
     assert payload["cancelled"] is True
     assert payload["summary"]["found_files"] == 2
     assert payload["summary"]["parsed_files"] == 1
-    assert any("중지 요청" in line for line in payload["progress_log"])
+    assert "progress_log" not in payload
+    assert any("중지 요청" in line for line in progress_log)
 
 
 def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Path, monkeypatch) -> None:
@@ -4445,13 +4449,15 @@ def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Pat
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "skip_errors": True,
-        }
+        },
+        progress_callback=progress_log.append,
     )
     stored = json.loads(output_path.read_text(encoding="utf-8"))
 
@@ -4467,8 +4473,10 @@ def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Pat
             "error": "broken parser",
         }
     ]
-    assert any("20250101000001.html (RuntimeError) broken parser" in line for line in payload["progress_log"])
+    assert "progress_log" not in payload
+    assert any("20250101000001.html (RuntimeError) broken parser" in line for line in progress_log)
     assert stored["errors"] == payload["errors"]
+    assert "progress_log" not in stored
 
 
 def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_path: Path) -> None:
@@ -4486,13 +4494,14 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
     )
     output_path = tmp_path / "parsed-bond_issuance.json"
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
-            "resume": False,
-        }
+        },
+        progress_callback=progress_log.append,
     )
     stored = json.loads(output_path.read_text(encoding="utf-8"))
 
@@ -4531,9 +4540,11 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
     assert payload["records"][0]["parse_warnings"] == [
         item["warning"] for item in payload["warnings"]
     ]
-    assert any("파싱 경고 1/1: 20250101000001.html" in line for line in payload["progress_log"])
+    assert "progress_log" not in payload
+    assert any("파싱 경고 1/1: 20250101000001.html" in line for line in progress_log)
     assert stored["warning_report_counts"] == payload["warning_report_counts"]
     assert stored["warnings"] == payload["warnings"]
+    assert "progress_log" not in stored
 
 
 def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path: Path) -> None:
@@ -4550,13 +4561,14 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
         encoding="utf-8",
     )
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "rights_issuance",
-            "resume": False,
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
     assert payload["mode"] == "rights_issuance"
@@ -4592,108 +4604,8 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
             },
         },
     }
-    assert any("파싱 경고 1/1: 20250101000001.html" in line for line in payload["progress_log"])
-
-
-def test_parse_disclosure_html_payload_checkpoints_and_resumes(tmp_path: Path, monkeypatch) -> None:
-    viewer_dir = tmp_path / "viewer_html"
-    viewer_dir.mkdir()
-    first = viewer_dir / "20250101000001.html"
-    second = viewer_dir / "20250101000002.html"
-    first.write_text("<html></html>", encoding="utf-8")
-    second.write_text("<html></html>", encoding="utf-8")
-    output_path = tmp_path / "parsed-security_transaction.json"
-    calls: list[str] = []
-
-    def fake_parser(html_text, *, file_path):
-        calls.append(Path(file_path).name)
-        if Path(file_path).name == second.name and len(calls) == 2:
-            raise RuntimeError("stop after checkpoint")
-        return {
-            "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
-            "mode": "security_transaction",
-            "title": "",
-            "raw_rows": [],
-        }
-
-    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
-
-    try:
-        parse_disclosure_html_payload(
-            {
-                "input_directory": str(viewer_dir),
-                "output_directory": str(tmp_path),
-                "mode": "security_transaction",
-                "skip_errors": False,
-                "progress_interval": 1,
-            }
-        )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected ValueError")
-
-    checkpoint = json.loads(output_path.read_text(encoding="utf-8"))
-    assert [record["source_file"] for record in checkpoint["records"]] == [str(first.resolve())]
-
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(viewer_dir),
-            "output_directory": str(tmp_path),
-            "mode": "security_transaction",
-            "progress_interval": 1,
-            "resume": True,
-        }
-    )
-
-    assert payload["summary"]["resumed_files"] == 1
-    assert payload["summary"]["parsed_files"] == 2
-    assert calls == [first.name, second.name, second.name]
-    assert any("이어하기 건너뜀 중간 확인: 1/1건" in line for line in payload["progress_log"])
-
-
-def test_parse_disclosure_html_payload_logs_resume_skips_by_interval(tmp_path: Path, monkeypatch) -> None:
-    viewer_dir = tmp_path / "viewer_html"
-    viewer_dir.mkdir()
-    for index in range(3):
-        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
-    output_path = tmp_path / "parsed-security_transaction.json"
-    output_path.write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_html_parse_v1",
-                "mode": "security_transaction",
-                "records": [
-                    {"source_file": str((viewer_dir / "20250101000000.html").resolve())},
-                    {"source_file": str((viewer_dir / "20250101000001.html").resolve())},
-                    {"source_file": str((viewer_dir / "20250101000002.html").resolve())},
-                ],
-                "errors": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    def fake_parser(html_text, *, file_path):
-        raise AssertionError("resume should skip every file")
-
-    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
-
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(viewer_dir),
-            "output_directory": str(tmp_path),
-            "mode": "security_transaction",
-            "progress_interval": 2,
-            "resume": True,
-        }
-    )
-
-    assert not any("이어하기 건너뜀 1/3:" in line for line in payload["progress_log"])
-    assert not any("이어하기 건너뜀 2/3:" in line for line in payload["progress_log"])
-    assert any("이어하기 건너뜀 중간 확인: 2/3건" in line for line in payload["progress_log"])
-    assert any("이어하기 건너뜀 완료: 3/3건" in line for line in payload["progress_log"])
+    assert "progress_log" not in payload
+    assert any("파싱 경고 1/1: 20250101000001.html" in line for line in progress_log)
 
 
 def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_path: Path, monkeypatch) -> None:
@@ -4713,18 +4625,21 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
             "progress_interval": 2,
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
-    assert not any("파싱 중 1/3:" in line for line in payload["progress_log"])
-    assert not any("파싱 완료 1/3:" in line for line in payload["progress_log"])
-    assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
+    assert "progress_log" not in payload
+    assert not any("파싱 중 1/3:" in line for line in progress_log)
+    assert not any("파싱 완료 1/3:" in line for line in progress_log)
+    assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in progress_log)
 
 
 def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(
@@ -4745,15 +4660,18 @@ def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
-    assert "진행 확인 간격: 1000건" in payload["progress_log"]
+    assert "progress_log" not in payload
+    assert "진행 확인 간격: 1000건" in progress_log
 
 
 def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, monkeypatch) -> None:
@@ -4773,6 +4691,7 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
@@ -4780,7 +4699,8 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
             "mode": "security_transaction",
             "progress_interval": 2,
             "parallel_workers": 2,
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
     assert payload["summary"]["parsed_files"] == 3
@@ -4789,8 +4709,9 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
         "20250101000001",
         "20250101000002",
     ]
-    assert "병렬 처리: 2개 워커" in payload["progress_log"]
-    assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in payload["progress_log"])
+    assert "progress_log" not in payload
+    assert "병렬 처리: 2개 워커" in progress_log
+    assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in progress_log)
 
 
 def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path: Path, monkeypatch) -> None:
@@ -4889,6 +4810,7 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
@@ -4898,7 +4820,8 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
             "record_filters": [
                 {"field": "사채발행방법", "operator": "in", "value": ["공모"]},
             ],
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
     assert payload["summary"]["found_files"] == 3
@@ -4929,7 +4852,8 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
             {"field": "사채발행방법", "operator": "in", "value": ["공모"]},
         ],
     }
-    assert "필드 필터: 1개 조건 적용" in payload["progress_log"]
+    assert "progress_log" not in payload
+    assert "필드 필터: 1개 조건 적용" in progress_log
 
 
 def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, monkeypatch) -> None:
@@ -4956,6 +4880,7 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
@@ -4965,7 +4890,8 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
             "filter_blocks": [
                 {"field": "title", "operator": "contains", "value": "증자"}
             ],
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
     assert payload["summary"]["found_files"] == 3
@@ -4977,7 +4903,8 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
         ],
         "record_filters": [],
     }
-    assert "공시 조건: 1개 조건 적용" in payload["progress_log"]
+    assert "progress_log" not in payload
+    assert "공시 조건: 1개 조건 적용" in progress_log
 
 
 def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progress(
@@ -5001,6 +4928,7 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
+    progress_log: list[str] = []
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
@@ -5011,14 +4939,16 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
             "filter_blocks": [
                 {"field": "title", "operator": "contains", "value": "증자"}
             ],
-        }
+        },
+        progress_callback=progress_log.append,
     )
 
     assert payload["summary"]["found_files"] == 3
     assert payload["summary"]["parsed_files"] == 0
+    assert "progress_log" not in payload
     assert any(
         "파싱 중간 확인: 이번 실행 2건 처리" in line
-        for line in payload["progress_log"]
+        for line in progress_log
     )
 
 
@@ -5633,7 +5563,6 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_bond_parser(
             "mode": "bond_issuance",
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
-            "resume": False,
         }
     )
 
@@ -5641,7 +5570,7 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_bond_parser(
     record = payload["records"][0]
     assert record["title"] == "[테스트] 교환사채권 발행결정"
     assert record["종류"] == "EB"
-    assert record["기업명(발행사)"] == "테스트회사"
+    assert record["corp_name"] == "테스트회사"
     assert record["상장구분"] == "코스닥"
     assert not any(
         warning["warning"].startswith("종류: 정해진 출처에서 값을 찾지 못했습니다.")
@@ -5672,7 +5601,6 @@ def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
     assert parsed["증자유형"] == "무상증자"
     assert parsed["발행목적"] == "-"
     assert parsed["발행가액"] == "-"
-    assert parsed["기준주가"] == "-"
     assert parsed["증자방식"] == "-"
     assert parsed["납입일"] == "-"
     assert parsed["발행대상자"] == "-"
@@ -5680,10 +5608,11 @@ def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
     assert parsed["무상증자"] is not None
     assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
     assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
-    assert parsed["field_parse_status"]["기준주가"] == "not_applicable"
     assert parsed["field_parse_status"]["증자방식"] == "not_applicable"
     assert parsed["field_parse_status"]["납입일"] == "not_applicable"
     assert parsed["field_parse_status"]["발행대상자"] == "not_applicable"
+    assert "기준주가" not in parsed
+    assert "기준주가" not in parsed["field_parse_status"]
     assert "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다." not in (
         parsed.get("strong_warning") or []
     )
@@ -5730,7 +5659,6 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_rights_parser(
             "mode": "rights_issuance",
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
-            "resume": False,
         }
     )
 
@@ -6250,8 +6178,6 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields() -> None:
       <table>
         <tr><td rowspan="2">6. 신주 발행가액</td><td>보통주식 (원)</td><td>1,605</td></tr>
         <tr><td>기타주식 (원)</td><td>-</td></tr>
-        <tr><td rowspan="2">7. 기준주가</td><td>보통주식 (원)</td><td>1,783</td></tr>
-        <tr><td>기타주식 (원)</td><td>-</td></tr>
         <tr><td colspan="2">9. 납입일</td><td>2024년 08월 30일</td></tr>
         <tr><td colspan="2">11. 신주권교부예정일</td><td>2023년 10월 04일</td></tr>
         <tr><td colspan="2">12. 신주의 상장 예정일</td><td>2024년 10월 04일</td></tr>
@@ -6290,7 +6216,8 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields() -> None:
         ["운영자금", 2_002_499_918],
     ]
     assert parsed["발행가액"] == [["보통주식", 1_605], ["기타주식", 0]]
-    assert parsed["기준주가"] == [["보통주식", 1_783], ["기타주식", 0]]
+    assert "기준주가" not in parsed
+    assert "기준주가" not in parsed["field_parse_status"]
     assert parsed["증자방식"] == "제3자배정증자"
     assert parsed["납입일"] == "2024년 08월 30일"
     assert parsed["신주권교부예정일"] == "2023년 10월 04일"
@@ -6334,7 +6261,6 @@ def test_parse_rights_issuance_bonus_examples_have_bonus_detail(relative_path: s
     assert parsed["무상증자"] is not None
     assert parsed["발행목적"] == "-"
     assert parsed["발행가액"] == "-"
-    assert parsed["기준주가"] == "-"
     assert parsed["증자방식"] == "-"
     assert parsed["납입일"] == "-"
     assert parsed["발행대상자"] == "-"
@@ -6343,13 +6269,12 @@ def test_parse_rights_issuance_bonus_examples_have_bonus_detail(relative_path: s
     assert parsed["무상증자"]["1주당 신주배정주식수"][0][1]
     assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
     assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
-    assert parsed["field_parse_status"]["기준주가"] == "not_applicable"
     assert parsed["field_parse_status"]["증자방식"] == "not_applicable"
     assert parsed["field_parse_status"]["납입일"] == "not_applicable"
     assert parsed["field_parse_status"]["발행대상자"] == "not_applicable"
     assert not any(
         warning.startswith(
-            ("발행목적:", "발행가액:", "기준주가:", "증자방식:", "납입일:", "발행대상자:")
+            ("발행목적:", "발행가액:", "증자방식:", "납입일:", "발행대상자:")
         )
         for warning in parsed.get("strong_warning", [])
     )
@@ -6431,8 +6356,7 @@ def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
         ["운영자금", 4_200_000_000],
         ["기타자금", 3_000_000_000],
     ]
-    assert parsed.get("strong_warning")
-    assert parsed.get("parse_warnings")
+    assert "기준주가" not in parsed
 
 
 @pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
@@ -6471,8 +6395,6 @@ def test_parse_rights_issuance_classifies_consistency_warnings_by_level(tmp_path
         <tr><td rowspan="1">4. 자금조달의 목적</td><td>운영자금 (원)</td><td>2,000</td></tr>
         <tr><td colspan="2">5. 증자방식</td><td>제3자배정증자</td></tr>
         <tr><td rowspan="2">6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
-        <tr><td>기타주식 (원)</td><td>100</td></tr>
-        <tr><td rowspan="2">7. 기준주가</td><td>보통주식 (원)</td><td>100</td></tr>
         <tr><td>기타주식 (원)</td><td>100</td></tr>
       </table>
       <table>
@@ -6597,7 +6519,6 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
         <tr><td>4. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,009</td></tr>
         <tr><td>5. 증자방식</td><td>일반공모증자</td></tr>
         <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
-        <tr><td>7. 기준주가</td><td>보통주식 (원)</td><td>100</td></tr>
       </table>
     </body></html>
     """
@@ -6610,7 +6531,7 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
     )
 
 
-def test_parse_rights_issuance_checks_funding_total_with_issue_price_not_base_price(
+def test_parse_rights_issuance_checks_funding_total_with_issue_price(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000021.html"
@@ -6622,7 +6543,6 @@ def test_parse_rights_issuance_checks_funding_total_with_issue_price_not_base_pr
         <tr><td>4. 자금조달의 목적</td><td>타법인유가증권취득자금 (원)</td><td>1,000</td></tr>
         <tr><td>5. 증자방식</td><td>일반공모증자</td></tr>
         <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
-        <tr><td>7. 기준주가</td><td>보통주식 (원)</td><td>150</td></tr>
       </table>
     </body></html>
     """
@@ -6771,10 +6691,6 @@ def test_parse_rights_issuance_excludes_correction_history_table_in_same_section
       <table>
         <tr><td>정정일자</td><td>정정사유</td><td>정정내역</td></tr>
         <tr><td>정정일자</td><td>정정사유</td><td>정정과목</td><td>정정전</td><td>정정후</td></tr>
-        <tr>
-          <td>2025.01.01</td><td>기재정정</td><td>기준주가 보통주식</td>
-          <td>999</td><td>888</td>
-        </tr>
       </table>
       <table>
         <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
@@ -6789,8 +6705,6 @@ def test_parse_rights_issuance_excludes_correction_history_table_in_same_section
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["기준주가"] == [["보통주식", 0], ["기타주식", 0]]
-    assert parsed["field_parse_status"]["기준주가"] == "source_not_found"
     assert parsed["발행대상자"] == [["테스트조합", 10]]
     assert len(parsed["raw_tables"]) == 5
 
@@ -6808,7 +6722,6 @@ def test_parse_rights_issuance_excludes_correction_table_with_multiple_field_lab
       </table>
       <table>
         <tr><td>정정일자</td><td>정정사유</td><td>정정전</td><td>정정후</td></tr>
-        <tr><td>기준주가 보통주식</td><td>기재정정</td><td>999</td><td>888</td></tr>
         <tr><td>납입일</td><td>기재정정</td><td>2025년 01월 01일</td><td>2025년 01월 02일</td></tr>
       </table>
     </body></html>
@@ -6816,8 +6729,6 @@ def test_parse_rights_issuance_excludes_correction_table_with_multiple_field_lab
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["기준주가"] == [["보통주식", 0], ["기타주식", 0]]
-    assert parsed["field_parse_status"]["기준주가"] == "source_not_found"
     assert parsed["납입일"] is None
     assert parsed["field_parse_status"]["납입일"] == "source_not_found"
 
@@ -6856,6 +6767,64 @@ def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_war
     assert parsed["field_parse_status"]["발행목적"] == "explicit_zero"
 
 
+def test_parse_rights_issuance_tracks_stock_count_status_by_stock_type(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000023.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td>기타주식 (주)</td><td>-</td></tr>
+        <tr><td rowspan="2">3. 증자전 발행주식총수 (주)</td><td>보통주식 (주)</td><td>100</td></tr>
+        <tr><td>기타주식 (주)</td><td>0</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["field_parse_status"]["신주의 종류와 수"] == "parsed"
+    assert parsed["field_parse_status_detail"]["신주의 종류와 수"] == {
+        "보통주식": "parsed",
+        "기타주식": "explicit_zero",
+    }
+    assert parsed["field_parse_status"]["증자 전 발행주식총수"] == "parsed"
+    assert parsed["field_parse_status_detail"]["증자 전 발행주식총수"] == {
+        "보통주식": "parsed",
+        "기타주식": "explicit_zero",
+    }
+
+
+def test_parse_rights_issuance_strong_warns_for_zero_common_pre_issuance_stock(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000024.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td rowspan="2">3. 증자전 발행주식총수 (주)</td><td>보통주식 (주)</td><td>-</td></tr>
+        <tr><td>기타주식 (주)</td><td>20</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["field_parse_status"]["증자 전 발행주식총수"] == "parsed"
+    assert parsed["field_parse_status_detail"]["증자 전 발행주식총수"] == {
+        "보통주식": "explicit_zero",
+        "기타주식": "parsed",
+    }
+    assert any(
+        warning.startswith("증자 전 발행주식총수: 보통주식 수량")
+        for warning in parsed["strong_warning"]
+    )
+
+
 @pytest.mark.skipif(not HAS_KIND_RESOURCES, reason="Local KIND resources are absent")
 def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     fixture_path = (
@@ -6877,7 +6846,6 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     assert parsed["신주의 종류와 수"] == [["보통주식", 3_560_000], ["기타주식", 0]]
     assert parsed["발행목적"] == "-"
     assert parsed["발행가액"] == "-"
-    assert parsed["기준주가"] == "-"
     assert parsed["증자방식"] == "-"
     assert parsed["납입일"] == "-"
     assert parsed["발행대상자"] == "-"
@@ -6894,13 +6862,12 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     }
     assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
     assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
-    assert parsed["field_parse_status"]["기준주가"] == "not_applicable"
     assert parsed["field_parse_status"]["증자방식"] == "not_applicable"
     assert parsed["field_parse_status"]["납입일"] == "not_applicable"
     assert parsed["field_parse_status"]["발행대상자"] == "not_applicable"
     assert not any(
         warning.startswith(
-            ("발행목적:", "발행가액:", "기준주가:", "증자방식:", "납입일:", "발행대상자:")
+            ("발행목적:", "발행가액:", "증자방식:", "납입일:", "발행대상자:")
         )
         for warning in parsed.get("strong_warning", [])
     )
@@ -7111,6 +7078,9 @@ def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
     assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 0]]
     assert parsed["증자방식"] is None
     assert parsed["parse_warnings"][0] == (
+        "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+    )
+    assert parsed["strong_warning"][0] == (
         "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
     )
     assert any(

@@ -18,7 +18,6 @@ export const NUMERIC_FIELDS_CONFIG = [
   { field: "발행금액", default: 1 },
   { field: "발행가액", default: 1 },
   { field: "행사가액", default: 1 },
-  { field: "기준주가", default: 1 },
   { field: "신주의 종류와 수", default: 1 },
 ];
 

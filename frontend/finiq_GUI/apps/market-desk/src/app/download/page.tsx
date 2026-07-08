@@ -107,6 +107,7 @@ export default function DownloadPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+  const [previewResult, setPreviewResult] = useState<any>(null);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
@@ -438,14 +439,17 @@ export default function DownloadPage() {
 
   const handlePreview = async () => {
     try {
+      setPreviewResult(null);
       setStatus("미리보기 생성 중...");
       const data = await previewDownload(buildPayload());
-      setResult(data);
+      setPreviewResult(data);
+      setResult(null);
       setStatus("미리보기 완료");
       setNotificationPanelOpen(true);
       setDownloadPanelOpen(false);
       setSettingsPanelOpen(false);
     } catch (err: any) {
+      setPreviewResult(null);
       setStatus(err.message);
       setIsErrorStatus(true);
       setNotificationPanelOpen(true);
@@ -458,6 +462,7 @@ export default function DownloadPage() {
     const payload = capturedPayloadRef.current || buildPayload();
     capturedPayloadRef.current = null;
     const data = await startDownload(payload);
+    setPreviewResult(null);
     setResult(null);
     setDownloadPanelOpen(true);
     setNotificationPanelOpen(false);
@@ -516,6 +521,7 @@ export default function DownloadPage() {
       setInspectRunning(true);
       setIsErrorStatus(false);
       setStatus("폴더 검사 작업을 시작하는 중...");
+      setPreviewResult(null);
       isRunTriggeredRef.current = false;
       capturedPayloadRef.current = null;
       const data = await inspectExistingFiles(true);
@@ -545,6 +551,7 @@ export default function DownloadPage() {
       capturedPayloadRef.current = payload;
       isRunTriggeredRef.current = true;
       setIsErrorStatus(false);
+      setPreviewResult(null);
       setStatus("기존 다운로드 파일을 검사하는 중...");
       const data = await inspectExistingFiles(true, payload);
       startPolling(data.job_id);
@@ -574,6 +581,7 @@ export default function DownloadPage() {
       setInspectRunning(true);
       setIsErrorStatus(false);
       setStatus("확인된 기존 파일을 삭제하는 중...");
+      setPreviewResult(null);
       isRunTriggeredRef.current = false;
       const payload = capturedPayloadRef.current || buildPayload();
       const data = await inspectExistingFiles(false, payload);
@@ -985,14 +993,14 @@ export default function DownloadPage() {
                 setSettingsPanelOpen(false);
               }}
               className={
-                lastInspectionCandidateCount > 0 || isErrorStatus
+                lastInspectionCandidateCount > 0 || isErrorStatus || !!previewResult
                   ? "relative h-10 w-10 border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)] shadow-sm"
                   : "relative h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
               }
               title={notificationPanelOpen ? "알림 닫기" : "알림 열기"}
             >
               <Bell className="h-5 w-5" />
-              {(lastInspectionCandidateCount > 0 || isErrorStatus) && (
+              {(lastInspectionCandidateCount > 0 || isErrorStatus || !!previewResult) && (
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-warning)]" />
               )}
             </Button>
@@ -1040,6 +1048,15 @@ export default function DownloadPage() {
                   </div>
                 ) : null}
 
+                {previewResult && !isErrorStatus ? (
+                  <div className="space-y-2">
+                    <Label className="dark:text-slate-300">미리보기</Label>
+                    <pre className="text-caption max-h-72 overflow-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-[var(--tv-text)]">
+                      {JSON.stringify(previewResult, null, 2)}
+                    </pre>
+                  </div>
+                ) : null}
+
                 {lastInspectionCandidateCount > 0 && (
                   <div className="space-y-4 border-t border-[color:var(--tv-border)] pt-4">
                     <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
@@ -1075,7 +1092,7 @@ export default function DownloadPage() {
                   </div>
                 )}
 
-                {!isErrorStatus && lastInspectionCandidateCount === 0 && (
+                {!isErrorStatus && lastInspectionCandidateCount === 0 && !previewResult && (
                   <div className="text-body text-slate-500 dark:text-slate-400">알림 없음</div>
                 )}
               </CardContent>

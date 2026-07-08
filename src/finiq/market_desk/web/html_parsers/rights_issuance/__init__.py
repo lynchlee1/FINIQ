@@ -28,7 +28,6 @@ def parse_rights_issuance(
     pre_issuance_stock_counts = extractor.get_pre_issuance_stock_counts()
     funding_purposes = extractor.get_funding_purposes()
     issue_prices = extractor.get_issue_prices()
-    base_prices = extractor.get_base_prices()
     issue_method = extractor.get_issue_method()
     payment_date = extractor.get_payment_date()
     delivery_date = extractor.get_delivery_date()
@@ -59,7 +58,6 @@ def parse_rights_issuance(
         증자_전_발행주식총수=pre_issuance_stock_counts,
         발행목적=funding_purposes,
         발행가액=issue_prices,
-        기준주가=base_prices,
         증자방식=issue_method,
         납입일=payment_date,
         신주권교부예정일=delivery_date,
@@ -89,4 +87,6 @@ def parse_rights_issuance(
         ]
     if extractor.field_parse_status:
         record["field_parse_status"] = extractor.field_parse_status
+    if extractor.field_parse_status_detail:
+        record["field_parse_status_detail"] = extractor.field_parse_status_detail
     return record

@@ -25,7 +25,6 @@ _RIGHTS_FIELD_NEEDLES = {
     "funding_purposes": "자금조달의 목적",
     "issue_method": "증자방식",
     "issue_prices": "신주 발행가액",
-    "base_prices": "기준주가",
     "payment_date": "납입일",
     "delivery_date": "신주권교부예정일",
     "listing_date": "신주의 상장 예정일",

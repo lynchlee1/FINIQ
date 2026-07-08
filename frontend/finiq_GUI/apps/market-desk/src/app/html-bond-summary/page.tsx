@@ -26,7 +26,12 @@ export default function HtmlBondSummaryPage() {
   const [selectedBondKey, setSelectedBondKey] = useState<string>("");
 
   // Form State
-  const { html_parse_result_path: outputPath, fetchSettings, saveSetting } = useSettingsStore();
+  const {
+    html_parse_result_path: outputPath,
+    html_section_split_output_directory: sourceDirectory,
+    fetchSettings,
+    saveSetting,
+  } = useSettingsStore();
   const [bondSearch, setBondSearch] = useState("");
   const [bondCorrectionFilter, setBondCorrectionFilter] = useState("all");
   const [bondLimit, setBondLimit] = useState("20");
@@ -52,6 +57,7 @@ export default function HtmlBondSummaryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           output_path: outputPath,
+          source_directory: sourceDirectory,
           limit: bondLimit === "all" ? null : Number(bondLimit),
         }),
       });
@@ -107,7 +113,7 @@ export default function HtmlBondSummaryPage() {
   };
 
   const parsedFieldRows = (record: any) => [
-    ["기업명(발행사)", getField(record, "기업명(발행사)")],
+    ["회사명", getField(record, "corp_name")],
     ["회차", getField(record, "회차")],
     ["종류", getField(record, "종류")],
     ["기업명(행사대상)", getField(record, "기업명(행사대상)")],
@@ -135,7 +141,7 @@ export default function HtmlBondSummaryPage() {
           record.rcept_no,
           record.family_id,
           getField(record, "회차"),
-          getField(record, "기업명(발행사)"),
+          getField(record, "corp_name"),
           getField(record, "기업명(행사대상)"),
           getField(record, "납입일"),
           getField(record, "사채발행방법"),
@@ -161,6 +167,16 @@ export default function HtmlBondSummaryPage() {
   }, [filteredRecords, selectedBondKey]);
 
   const conditionFields: HtmlWorkflowField[] = [
+    {
+      id: "sourceDirectory",
+      kind: "path",
+      label: "입력 데이터 경로",
+      mode: "folder",
+      value: sourceDirectory || "",
+      onChange: (val) => saveSetting("html_section_split_output_directory", val),
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 2,
+    },
     {
       id: "outputPath",
       kind: "path",
@@ -211,8 +227,8 @@ export default function HtmlBondSummaryPage() {
       ),
     },
   ];
-  const pathFields = conditionFields.filter((field) => field.id === "outputPath");
-  const optionFields = conditionFields.filter((field) => field.id !== "outputPath");
+  const pathFields = conditionFields.filter((field) => field.kind === "path");
+  const optionFields = conditionFields.filter((field) => field.kind !== "path");
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;

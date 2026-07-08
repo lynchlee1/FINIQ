@@ -1,13 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react";
-import { Play, RefreshCw, Loader2 } from "lucide-react";
+import { Play, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { Input } from "@finiq/ui";
 import { Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
-import { cn } from "@finiq/ui/utils";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
@@ -98,18 +97,6 @@ export default function TablePage() {
     saveSetting("sqlite_source_path", val);
   };
 
-  const handleRefresh = async () => {
-    try {
-      setStatus("소스를 새로고침하는 중...");
-      const config = await fetchSettings();
-      await loadClassifications(config?.output_root || "", classificationPath);
-      setStatus("소스를 새로고침했습니다.");
-    } catch (err: any) {
-      setStatus(err.message);
-      setIsErrorStatus(true);
-    }
-  };
-
   const handleBuild = async () => {
     if (!classificationPath) {
       setStatus("Raw JSON을 선택하세요.");
@@ -188,11 +175,7 @@ export default function TablePage() {
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <Button variant="outline" onClick={handleRefresh} disabled={!!activeJobId} className="w-full">
-                  <RefreshCw className={cn("mr-2 h-4 w-4", !!activeJobId ? "animate-spin" : "")} />
-                  소스 새로고침
-                </Button>
+              <div className="grid gap-3 md:grid-cols-2">
                 <Button className="w-full" onClick={handleBuild} disabled={!!activeJobId}>
                   {!!activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
