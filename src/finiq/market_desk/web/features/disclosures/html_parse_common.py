@@ -113,7 +113,6 @@ class ParseRequest:
     manifest_metadata_index: dict[str, dict[str, Any]]
     limit: int | None
     skip_errors: bool
-    resume: bool
     progress_interval: int
     parallel_workers: int
     cancel_token: str | None
@@ -130,10 +129,7 @@ class ParseRunState:
     errors: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)
     progress_log: list[str] = field(default_factory=list)
-    processed_files: set[str] = field(default_factory=set)
-    resumed_files: int = 0
     processed_this_run: int = 0
-    skipped_resume_count: int = 0
 
     def emit(self, message: str) -> None:
         self.progress_log.append(message)
@@ -142,7 +138,7 @@ class ParseRunState:
 
 
 BOND_SUMMARY_FIELDS = (
-    "기업명(발행사)",
+    "corp_name",
     "회차",
     "종류",
     "기업명(행사대상)",
@@ -158,7 +154,7 @@ BOND_SUMMARY_FIELDS = (
 )
 CHANGE_LOG_FIELDS = {
     "bond_issuance": (
-        "기업명(발행사)",
+        "corp_name",
         "회차",
         "종류",
         "기업명(행사대상)",
@@ -178,7 +174,6 @@ CHANGE_LOG_FIELDS = {
         "증자 전 발행주식총수",
         "발행목적",
         "발행가액",
-        "기준주가",
         "증자방식",
         "납입일",
         "신주권교부예정일",
@@ -188,7 +183,7 @@ CHANGE_LOG_FIELDS = {
 }
 MAJOR_CHANGE_FIELDS = {
     "bond_issuance": {
-        "기업명(발행사)",
+        "corp_name",
         "종류",
         "기업명(행사대상)",
         "상장구분",
@@ -206,7 +201,6 @@ MAJOR_CHANGE_FIELDS = {
         "증자 전 발행주식총수",
         "발행목적",
         "발행가액",
-        "기준주가",
         "증자방식",
         "납입일",
         "신주권교부예정일",
@@ -584,7 +578,7 @@ def _apply_manifest_metadata(
     if market:
         updated_record["상장구분"] = market
     if mode == "bond_issuance" and company_name:
-        updated_record["기업명(발행사)"] = company_name
+        updated_record["corp_name"] = company_name
     return updated_record
 
 
@@ -733,7 +727,6 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         manifest_metadata_index=_load_html_manifest_metadata_index(input_directory),
         limit=limit,
         skip_errors=bool(body.get("skip_errors", True)),
-        resume=bool(body.get("resume", True)),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
         parallel_workers=_parse_parallel_workers(
             body.get("parallel_workers", body.get("workers")), len(html_files)
@@ -742,36 +735,6 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         filter_blocks=_parse_filter_blocks(body.get("filter_blocks")),
         record_filters=_parse_record_filters(body.get("record_filters")),
     )
-
-def _load_existing_parse_payload(output_path: Path, mode: str) -> dict[str, Any] | None:
-    if not output_path.is_file():
-        return None
-    try:
-        payload = json.loads(output_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"기존 파싱 결과 JSON을 읽을 수 없습니다: {output_path}"
-        ) from exc
-    if (
-        not isinstance(payload, dict)
-        or payload.get("format") != "finiq_disclosure_html_parse_v1"
-    ):
-        return None
-    if payload.get("mode") != mode:
-        return None
-    return payload
-
-
-def _processed_source_files(
-    records: list[dict[str, Any]], errors: list[dict[str, Any]]
-) -> set[str]:
-    processed: set[str] = set()
-    for item in [*records, *errors]:
-        source_file = str(item.get("source_file") or "").strip()
-        if source_file:
-            processed.add(str(Path(source_file).expanduser().resolve()))
-    return processed
-
 
 def _rcept_no_to_acpt_no(records: list[dict[str, Any]]) -> dict[str, str]:
     index: dict[str, str] = {}
@@ -871,23 +834,17 @@ def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, An
 def _build_payload(
     *,
     mode: str,
-    input_directory: Path,
-    output_path: Path,
     cancelled: bool,
     html_files: list[Path],
     records: list[dict[str, Any]],
     errors: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
-    progress_log: list[str],
-    resumed_files: int,
     filter_blocks: list[dict[str, Any]],
     record_filters: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "format": "finiq_disclosure_html_parse_v1",
         "mode": mode,
-        "input_directory": str(input_directory),
-        "output_path": str(output_path),
         "cancelled": cancelled,
         "filter_settings": {
             "filter_blocks": filter_blocks,
@@ -898,12 +855,10 @@ def _build_payload(
             "found_files": len(html_files),
             "parsed_files": len(records),
             "failed_files": len(errors),
-            "resumed_files": resumed_files,
         },
-        "records": _resolve_correction_family_acpt_numbers(records),
+        "records": _saved_records(records),
         "errors": errors,
         "warnings": warnings,
-        "progress_log": progress_log[-200:],
     }
 
 
@@ -922,15 +877,11 @@ def _payload_from_state(
 ) -> dict[str, Any]:
     return _build_payload(
         mode=request.mode,
-        input_directory=request.input_directory,
-        output_path=request.output_path,
         cancelled=cancelled,
         html_files=request.html_files,
         records=state.records,
         errors=state.errors,
         warnings=state.warnings,
-        progress_log=state.progress_log,
-        resumed_files=state.resumed_files,
         filter_blocks=request.filter_blocks,
         record_filters=request.record_filters,
     )
@@ -971,6 +922,17 @@ def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
         for key, value in record.items()
         if key not in {"raw_tables", "raw_rows"}
     }
+
+
+def _saved_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            key: value
+            for key, value in record.items()
+            if key != "source_file"
+        }
+        for record in _resolve_correction_family_acpt_numbers(records)
+    ]
 
 
 def _build_preview_record(
@@ -1062,43 +1024,6 @@ def _parse_html_file_record(request: ParseRequest, html_file: Path) -> dict[str,
     return request.parser(html_file.read_bytes(), **parser_kwargs)
 
 
-def _restore_resume_state(request: ParseRequest, state: ParseRunState) -> None:
-    if not request.resume:
-        return
-    existing_payload = _load_existing_parse_payload(request.output_path, request.mode)
-    if existing_payload is None:
-        return
-
-    state.records = [
-        resolved_record
-        for record in list(existing_payload.get("records") or [])
-        if isinstance(record, dict)
-        for resolved_record in [
-            _apply_manifest_metadata(
-                record,
-                request.manifest_metadata_index,
-                mode=request.mode,
-            )
-        ]
-        if _record_matches_filters(resolved_record, request.record_filters)
-        and _record_matches_filter_blocks(resolved_record, request.filter_blocks)
-    ]
-    state.errors = list(existing_payload.get("errors") or [])
-    record_source_files = {
-        str(record.get("source_file") or "").strip()
-        for record in state.records
-        if str(record.get("source_file") or "").strip()
-    }
-    state.warnings = [
-        warning
-        for warning in list(existing_payload.get("warnings") or [])
-        if str(warning.get("source_file") or "").strip() in record_source_files
-    ]
-    state.processed_files = _processed_source_files(state.records, state.errors)
-    state.resumed_files = len(state.processed_files)
-    state.emit(f"기존 파싱 결과에서 {state.resumed_files}건을 이어받았습니다.")
-
-
 def _emit_run_header(request: ParseRequest, state: ParseRunState) -> None:
     state.emit(f"파싱 대상 HTML {len(request.html_files)}건을 찾았습니다.")
     state.emit(f"파싱 모드: {request.mode}")
@@ -1106,27 +1031,8 @@ def _emit_run_header(request: ParseRequest, state: ParseRunState) -> None:
         state.emit(f"공시 조건: {len(request.filter_blocks)}개 조건 적용")
     if request.record_filters:
         state.emit(f"필드 필터: {len(request.record_filters)}개 조건 적용")
-    state.emit(f"이어하기: {'예' if request.resume else '아니오'}")
     state.emit(f"진행 확인 간격: {request.progress_interval}건")
     state.emit(f"병렬 처리: {request.parallel_workers}개 워커")
-
-
-def _should_skip_for_resume(
-    request: ParseRequest,
-    state: ParseRunState,
-    *,
-    source_file: str,
-    index: int,
-) -> bool:
-    if source_file not in state.processed_files:
-        return False
-    state.skipped_resume_count += 1
-    if state.skipped_resume_count % request.progress_interval == 0:
-        state.emit(
-            f"이어하기 건너뜀 중간 확인: {state.skipped_resume_count}/{state.resumed_files}건 "
-            f"(현재 위치 {index}/{len(request.html_files)})."
-        )
-    return True
 
 
 def _stringify_filter_value(value: Any) -> str:
@@ -1218,9 +1124,6 @@ def _parse_one_html_file(
     html_file: Path,
 ) -> None:
     source_file = str(html_file.resolve())
-    if _should_skip_for_resume(request, state, source_file=source_file, index=index):
-        return
-
     try:
         parsed_record = _compact_record(
             _parse_html_file_record(request, html_file)
@@ -1245,7 +1148,6 @@ def _parse_one_html_file(
                     warning_code=warning_item["warning_code"],
                 )
             state.records.append(record)
-        state.processed_files.add(source_file)
     except Exception as exc:
         if not request.skip_errors:
             msg = (
@@ -1261,7 +1163,6 @@ def _parse_one_html_file(
             source_file=source_file,
             exc=exc,
         )
-        state.processed_files.add(source_file)
 
     state.processed_this_run += 1
     if state.processed_this_run % request.progress_interval == 0:
@@ -1329,7 +1230,6 @@ def _record_parallel_parse_result(
                     warning_code=warning_item["warning_code"],
                 )
             state.records.append(record)
-        state.processed_files.add(source_file)
     else:
         exc = result["error"]
         if not request.skip_errors:
@@ -1346,7 +1246,6 @@ def _record_parallel_parse_result(
             source_file=source_file,
             exc=exc,
         )
-        state.processed_files.add(source_file)
 
     state.processed_this_run += 1
     if state.processed_this_run % request.progress_interval == 0:
@@ -1362,12 +1261,6 @@ def _parse_html_files_parallel(request: ParseRequest, state: ParseRunState) -> N
     pending_items = [
         (index, html_file)
         for index, html_file in enumerate(request.html_files, start=1)
-        if not _should_skip_for_resume(
-            request,
-            state,
-            source_file=str(html_file.resolve()),
-            index=index,
-        )
     ]
     next_item = 0
     next_result_index = 0
@@ -1413,16 +1306,6 @@ def _parse_html_files_parallel(request: ParseRequest, state: ParseRunState) -> N
         )
 
 
-def _emit_resume_footer(request: ParseRequest, state: ParseRunState) -> None:
-    if (
-        state.skipped_resume_count
-        and state.skipped_resume_count % request.progress_interval != 0
-    ):
-        state.emit(
-            f"이어하기 건너뜀 완료: {state.skipped_resume_count}/{state.resumed_files}건."
-        )
-
-
 def parse_disclosure_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
@@ -1431,7 +1314,6 @@ def parse_disclosure_html_payload(
     request = _build_parse_request(body)
     state = ParseRunState(progress_callback=progress_callback)
     _clear_cancel_token(request.cancel_token)
-    _restore_resume_state(request, state)
     _emit_run_header(request, state)
 
     try:
@@ -1450,7 +1332,6 @@ def parse_disclosure_html_payload(
     finally:
         _clear_cancel_token(request.cancel_token)
 
-    _emit_resume_footer(request, state)
     state.emit(f"파싱 결과 JSON 저장 중: {request.output_path}")
     state.emit(f"파싱 결과 JSON 저장 완료: {request.output_path}")
 

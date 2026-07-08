@@ -18,7 +18,6 @@ class RightsIssuanceRecord:
     증자_전_발행주식총수: list[list[Any]]
     발행목적: list[list[Any]] | str
     발행가액: list[list[Any]] | str
-    기준주가: list[list[Any]] | str
     증자방식: str | None
     납입일: str | None
     신주권교부예정일: str | None
@@ -35,7 +34,6 @@ class RightsIssuanceRecord:
             "증자 전 발행주식총수": self.증자_전_발행주식총수,
             "발행목적": self.발행목적,
             "발행가액": self.발행가액,
-            "기준주가": self.기준주가,
             "증자방식": self.증자방식,
             "납입일": self.납입일,
             "신주권교부예정일": self.신주권교부예정일,

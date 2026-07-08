@@ -251,11 +251,9 @@ export default function HtmlParsePage() {
 
     if (summary.found_files !== undefined) {
       lines.push(`대상 HTML: ${formatInteger(summary.found_files)}`);
-      lines.push(`이어받은 파일: ${formatInteger(summary.resumed_files)}`);
       lines.push(`파싱 성공: ${formatInteger(summary.parsed_files)}`);
       lines.push(`파싱 경고: ${formatInteger(warningCount)}`);
       lines.push(`파싱 실패: ${formatInteger(summary.failed_files)}`);
-      lines.push(`결과 데이터 경로: ${res.output_path || ""}`);
     }
 
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
@@ -289,7 +287,6 @@ export default function HtmlParsePage() {
   const [parseMode, setParseMode] = useState("bond_issuance");
   const [limit, setLimit] = useState("");
   const [skipErrors, setSkipErrors] = useState(true);
-  const [resumeParse, setResumeParse] = useState(false);
   const [progressInterval, setProgressInterval] = useState("1000");
   const [parallelWorkers, setParallelWorkers] = useState("");
   const [selectedExecutionOptionValues, setSelectedExecutionOptionValues] = useState<string[]>([]);
@@ -490,7 +487,6 @@ export default function HtmlParsePage() {
       mode: parseMode,
       limit: limit ? Number(limit) : null,
       skip_errors: skipErrors,
-      resume: resumeParse,
       progress_interval: Number(progressInterval),
       parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
       filter_blocks: normalizeDisclosureConditionBlocks(conditions),
@@ -683,14 +679,6 @@ export default function HtmlParsePage() {
       span: 2,
     },
     {
-      id: "resumeParse",
-      kind: "checkbox",
-      checked: resumeParse,
-      onChange: setResumeParse,
-      checkboxLabel: "기존 결과 JSON 이후부터 진행 (이어하기)",
-      span: 2,
-    },
-    {
       id: "skipErrors",
       kind: "checkbox",
       checked: skipErrors,
@@ -871,7 +859,7 @@ export default function HtmlParsePage() {
     <HtmlWorkflowPage
       eyebrow="HTML Parse Guide"
       title="공시원문 변환"
-      description="저장된 KIND HTML을 모드별 파서로 읽어 핵심 필드, 오류, 경고, 진행 로그를 하나의 JSON에 남깁니다. 결과 파일은 이어하기, 공시 정정내역 한눈에, 발행내역 한눈에, Excel 내보내기의 기준 데이터가 됩니다."
+      description="저장된 KIND HTML을 모드별 파서로 읽어 핵심 필드, 오류, 경고를 하나의 JSON에 남깁니다. 결과 파일은 공시 정정내역 한눈에, 발행내역 한눈에, Excel 내보내기의 기준 데이터가 됩니다."
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">

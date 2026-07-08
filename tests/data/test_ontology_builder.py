@@ -99,7 +99,7 @@ def test_build_ontology_graph(tmp_path: Path):
         "records": [
             {
                 "acpt_no": "20260501000123",
-                "기업명(발행사)": "액티투오",
+                "corp_name": "액티투오",
                 "회차": "3",
                 "종류": "BW",
                 "발행금액": 1000000000,

@@ -19,7 +19,6 @@ RIGHTS_FIELD_EXTRACTION_RULES = {
     "증자 전 발행주식총수": "메인 표 > '증자전 발행주식총수' 행 > 주식 종류별 마지막 숫자",
     "발행목적": "메인 표 > '자금조달의 목적' 행 > 목적별 마지막 숫자",
     "발행가액": "메인 표 > '신주 발행가액' 행 > 주식 종류별 마지막 숫자",
-    "기준주가": "메인 표 > '기준주가' 행 > 주식 종류별 마지막 숫자",
     "증자방식": "메인 표 > '증자방식' 행 > 마지막 값",
     "납입일": "메인 표 > '납입일' 라벨 행 > 마지막 값",
     "신주권교부예정일": "메인 표 > '신주권교부예정일' 라벨 행 > 마지막 값",
@@ -38,6 +37,7 @@ FUNDING_PURPOSE_LABELS = [
     ("기타자금", ("기타자금",)),
 ]
 ISSUE_TARGET_TOTAL_LABEL_TOKENS = {"계", "합계", "소계", "총계"}
+STOCK_STATUS_DETAIL_FIELDS = {"신주의 종류와 수", "증자 전 발행주식총수"}
 ISSUANCE_TYPE_LABELS = {
     "paid": "유상증자",
     "bonus": "무상증자",
@@ -57,6 +57,7 @@ class RightsIssuanceExtractor:
         self.medium_warnings: list[str] = []
         self.strong_warnings: list[str] = []
         self.field_parse_status: dict[str, str] = {}
+        self.field_parse_status_detail: dict[str, dict[str, str]] = {}
 
     def get_stock_types_and_counts(self) -> list[list[Any]]:
         """신주의 종류별 발행 수량을 보통주/기타주식 순서로 추출한다."""
@@ -155,6 +156,14 @@ class RightsIssuanceExtractor:
                 "증자 전 발행주식총수: 모든 주식 종류의 수량이 0입니다.",
                 level="weak",
             )
+        pre_issuance_status_detail = self.field_parse_status_detail.get(
+            "증자 전 발행주식총수", {}
+        )
+        if pre_issuance_status_detail.get("보통주식") == "explicit_zero":
+            self._append_warning(
+                "증자 전 발행주식총수: 보통주식 수량이 원문에서 0 또는 대시로 명시되었습니다.",
+                level="strong",
+            )
 
     def get_issue_prices(self) -> list[list[Any]] | str:
         """신주 발행가액을 주식 종류별로 추출한다."""
@@ -165,13 +174,6 @@ class RightsIssuanceExtractor:
             "신주 발행가액",
             warning_field_name="발행가액",
         )
-
-    def get_base_prices(self) -> list[list[Any]] | str:
-        """기준주가를 주식 종류별로 추출한다."""
-        if self.context.issuance_type == "bonus":
-            self._set_field_status("기준주가", "not_applicable")
-            return "-"
-        return self._stock_values("기준주가")
 
     def get_issue_method(self) -> str | None:
         """증자방식을 추출한다."""
@@ -477,22 +479,27 @@ class RightsIssuanceExtractor:
     ) -> list[list[Any]]:
         """보통주와 기타주식 값을 일관된 순서로 배열하여 반환한다."""
         values: list[list[Any]] = []
-        missing_count = 0
+        item_statuses: dict[str, str] = {}
         for output_label, source_labels in STOCK_LABELS.items():
-            parsed = self._stock_value(section_label, source_labels)
-            if parsed is None:
-                missing_count += 1
+            parsed, item_status = self._stock_value_with_status(
+                section_label, source_labels
+            )
+            item_statuses[output_label] = item_status
             values.append([output_label, 0 if parsed is None else parsed])
         field_name = warning_field_name or section_label
+        if field_name in STOCK_STATUS_DETAIL_FIELDS:
+            self.field_parse_status_detail[field_name] = item_statuses
         if any(value > 0 for _, value in values):
             self._set_field_status(field_name, "parsed")
-        elif missing_count < len(STOCK_LABELS):
+        elif any(status == "explicit_zero" for status in item_statuses.values()):
             self._set_field_status(field_name, "explicit_zero")
         elif not warn_when_all_missing:
             self._set_field_status(field_name, "not_applicable")
         else:
             self._set_field_status(field_name, "source_not_found")
-        if warn_when_all_missing and missing_count == len(STOCK_LABELS):
+        if warn_when_all_missing and all(
+            status == "source_not_found" for status in item_statuses.values()
+        ):
             self._warn_if_missing(field_name, None)
         return values
 
@@ -507,6 +514,12 @@ class RightsIssuanceExtractor:
         self, section_label: str, source_labels: tuple[str, ...]
     ) -> int | None:
         """지정 구간에서 주식 종류 라벨 바로 다음 값을 숫자로 변환한다."""
+        return self._stock_value_with_status(section_label, source_labels)[0]
+
+    def _stock_value_with_status(
+        self, section_label: str, source_labels: tuple[str, ...]
+    ) -> tuple[int | None, str]:
+        """지정 구간에서 주식 종류 라벨 바로 다음 값을 숫자와 상태로 변환한다."""
         dash_seen = False
         for row in self.rows.values:
             if not row_contains(row, section_label):
@@ -522,16 +535,18 @@ class RightsIssuanceExtractor:
                 if parsed == 0:
                     dash_seen = True
                     continue
-                return parsed
-        return 0 if dash_seen else None
+                return parsed, "parsed"
+        if dash_seen:
+            return 0, "explicit_zero"
+        return None, "source_not_found"
 
     def _stock_value_total(
-        self, stock_counts: list[list[Any]], base_prices: list[list[Any]] | str
+        self, stock_counts: list[list[Any]], issue_prices: list[list[Any]] | str
     ) -> int | None:
-        if isinstance(base_prices, str):
+        if isinstance(issue_prices, str):
             return None
-        base_price_by_label = {
-            str(item[0]): self._item_amount(item) for item in base_prices if item
+        issue_price_by_label = {
+            str(item[0]): self._item_amount(item) for item in issue_prices if item
         }
         total = 0
         matched = False
@@ -539,12 +554,12 @@ class RightsIssuanceExtractor:
             if not item:
                 continue
             label = str(item[0])
-            if label not in base_price_by_label:
+            if label not in issue_price_by_label:
                 continue
-            if base_price_by_label[label] <= 0:
+            if issue_price_by_label[label] <= 0:
                 continue
             matched = True
-            total += self._item_amount(item) * base_price_by_label[label]
+            total += self._item_amount(item) * issue_price_by_label[label]
         return total if matched else None
 
     def _sum_amounts(self, rows: list[list[Any]] | str) -> int:

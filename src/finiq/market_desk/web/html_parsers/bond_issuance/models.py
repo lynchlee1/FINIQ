@@ -13,7 +13,7 @@ class BondIssuanceRecord:
     어떤 필드들이 최종적으로 추출되는지 직관적으로 확인할 수 있습니다.
     """
 
-    기업명_발행사: str | Any | None
+    corp_name: str | Any | None
     회차: str | None
     종류: str | None
     기업명_행사대상: str | None
@@ -31,7 +31,7 @@ class BondIssuanceRecord:
     def to_dict(self) -> dict[str, Any]:
         """추출된 데이터를 기존 파이프라인에서 기대하는 dict 키 형태로 매핑합니다."""
         return {
-            "기업명(발행사)": self.기업명_발행사,
+            "corp_name": self.corp_name,
             "회차": self.회차,
             "종류": self.종류,
             "기업명(행사대상)": self.기업명_행사대상,
