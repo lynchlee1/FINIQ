@@ -79,6 +79,7 @@ html, body {
   overflow-x: hidden;
   background-color: var(--background) !important;
   color: var(--foreground) !important;
+  font-family: var(--font-sans);
 }
 
 *,
@@ -90,6 +91,7 @@ html, body {
 
 .ontology-card {
   gap: 0;
+  min-width: 0;
   overflow: hidden;
   padding-block: 0;
   border: 1px solid var(--ontology-border);
@@ -97,7 +99,7 @@ html, body {
   background: var(--ontology-surface);
   color: var(--ontology-text);
   box-shadow: var(--ontology-shadow);
-  font-family: inherit;
+  font-family: var(--font-sans);
 }
 
 .ontology-card-header {
@@ -117,42 +119,115 @@ html, body {
 }
 
 .ontology-card-title {
+  min-width: 0;
   color: var(--ontology-text);
   font-size: 1rem;
   font-weight: 600;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .ontology-card-description {
+  min-width: 0;
   color: var(--ontology-muted);
   font-size: 0.875rem;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .ontology-panel {
+  min-width: 0;
   border: 1px solid var(--ontology-border);
   border-radius: 0.5rem;
   background: var(--ontology-panel);
   color: var(--ontology-text);
-  font-family: inherit;
+  font-family: var(--font-sans);
+  overflow-wrap: anywhere;
 }
 
 .ontology-metric,
 .ontology-toolbar,
 .ontology-control {
+  min-width: 0;
   border: 1px solid var(--ontology-border);
   border-radius: 0.375rem;
   background: var(--ontology-control);
   color: var(--ontology-text);
-  font-family: inherit;
+  font-family: var(--font-sans);
+}
+
+.ontology-metric {
+  overflow-wrap: anywhere;
+}
+
+.ontology-toolbar {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.ontology-control {
+  max-width: 100%;
+}
+
+.ontology-panel-section {
+  padding: 0.75rem;
+}
+
+.ontology-card .ontology-panel-section {
+  padding: 0.75rem;
+}
+
+.ontology-form-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.ontology-form-grid {
+  display: grid;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.ontology-action-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ontology-text-wrap {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.ontology-mono-wrap {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.ontology-scroll-list {
+  max-height: 11rem;
+  overflow-y: auto;
 }
 
 .ontology-muted {
   color: var(--ontology-muted);
 }
 
-.ontology-card :where(button, input, select, textarea) {
-  font-family: inherit;
+.ontology-card :where(button, input, select, textarea, table),
+.ontology-card :where(.font-mono),
+.ontology-fullscreen :where(button, input, select, textarea, table, .font-mono) {
+  font-family: var(--font-sans);
+}
+
+@media (max-width: 640px) {
+  .ontology-page-card-header,
+  .ontology-page-card-content {
+    padding: 1rem;
+  }
 }
 
 /* Ensure Tailwind dark utilities work with .dark class on html */

@@ -307,10 +307,10 @@ export function OntologyGraphWorkspace() {
               <LineChart className="h-4 w-4" />
               Graph View
             </div>
-            <h1 className="mt-1 truncate text-2xl font-semibold text-slate-950 dark:text-slate-50">{selectedCompanyLabel}</h1>
-            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <h1 className="ontology-text-wrap mt-1 text-2xl font-semibold text-slate-950 dark:text-slate-50">{selectedCompanyLabel}</h1>
+            <p className="ontology-text-wrap mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Database className="h-4 w-4" />
-              <span className="truncate">{graphRangeText}</span>
+              <span>{graphRangeText}</span>
             </p>
           </div>
           <div className="flex min-w-0 flex-col gap-2 sm:w-[min(28rem,45%)]">

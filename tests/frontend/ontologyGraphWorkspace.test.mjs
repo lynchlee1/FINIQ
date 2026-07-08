@@ -142,7 +142,7 @@ test("ontology graph workspace keeps the top selector graph-focused", async () =
 test("ontology routes use a wider app frame for canvas and chart workspaces", async () => {
   const source = await readFile(appFramePath, "utf8");
 
-  assert.match(source, /pathname === "\/" \|\| pathname\.startsWith\("\/graph"\)/);
+  assert.match(source, /pathname === "\/" \|\| pathname\??\.startsWith\("\/graph"\)/);
   assert.match(source, /isOntology \? "w-full max-w-\[96rem\]" : "max-w-7xl"/);
   assert.match(source, /<Topbar \/>/);
 });
@@ -230,9 +230,13 @@ test("ontology chart workspace handles loading and frequency controls", async ()
   assert.match(source, /status\?\.disclosure_groups/);
   assert.match(source, /disclosure_group: disclosureGroup/);
   assert.match(source, /일봉/);
+  assert.match(source, /3일봉/);
   assert.match(source, /5일봉/);
+  assert.match(source, /7일봉/);
   assert.match(source, /20일봉/);
   assert.match(source, /월봉/);
+  assert.match(source, /<select\s+aria-label="일봉\/3일봉\/5일봉\/7일봉\/20일봉\/월봉"/);
+  assert.match(source, /setDisplayFrequency\(event\.target\.value as \(typeof DISPLAY_FREQUENCY_OPTIONS\)\[number\]\)/);
   assert.match(source, /display_frequency: displayFrequency/);
 });
 
@@ -292,6 +296,8 @@ test("ontology chart workspace offers a close-price line view", async () => {
   assert.match(source, /"line"/);
   assert.match(source, /캔들/);
   assert.match(source, /종가선/);
+  assert.match(source, /<select\s+aria-label="캔들\/종가선"/);
+  assert.match(source, /setChartType\(event\.target\.value as \(typeof CHART_TYPE_OPTIONS\)\[number\]\["value"\]\)/);
   assert.match(source, /chartType=\{chartType\}/);
 });
 
@@ -368,7 +374,9 @@ test("ontology disclosure analysis exposes result review and category-scoped exe
   assert.match(source, /검사 대상 이벤트/);
   assert.match(source, /공시 선택/);
   assert.match(source, /formatDisclosureGroupLabel/);
-  assert.match(source, /aria-pressed={disclosureGroup === group}/);
+  assert.match(source, /disclosure-analysis-disclosure-group/);
+  assert.match(source, /<option key={group} value={group}>/);
+  assert.match(source, /ontology-scroll-list/);
   assert.match(source, /disclosureGroup/);
   assert.match(source, /status\?\.disclosure_groups/);
   assert.match(source, /selectedAnalysisMode/);
@@ -406,7 +414,7 @@ test("ontology terminology documents the real-data workspace labels", async () =
   assert.match(source, /\| Ontology triple barrier event basis \| 이벤트 기준일 \|/);
   assert.match(source, /\| Ontology triple barrier price basis \| 가격 기준 \|/);
   assert.match(source, /\| Ontology triple barrier result table \| 결과 테이블 \|/);
-  assert.match(source, /\| Ontology chart frequency selector \| 일봉\/5일봉\/20일봉\/월봉 \|/);
+  assert.match(source, /\| Ontology chart frequency selector \| 일봉\/3일봉\/5일봉\/7일봉\/20일봉\/월봉 \|/);
   assert.match(source, /\| Ontology chart type selector \| 캔들\/종가선 \|/);
   assert.match(source, /\| Ontology final report marker \| 최종보고서 \|/);
   assert.match(source, /\| Ontology full date range \| 전체 기간 \|/);
@@ -442,8 +450,8 @@ test("ontology chart settings expose per-disclosure marker styles in one compact
   assert.match(source, /색상/);
   assert.match(source, /크기/);
   assert.match(source, /선 두께/);
-  assert.match(source, /ontology-panel p-3/);
-  assert.match(source, /flex flex-wrap items-end gap-2/);
+  assert.match(source, /ontology-panel ontology-panel-section/);
+  assert.match(source, /ontology-form-grid sm:grid-cols-2/);
   assert.match(source, /h-8 rounded-md/);
   assert.match(source, /aria-label="공시 마커 스타일 미리보기"/);
   assert.match(source, /value: "paneTop", label: "차트 상단"/);

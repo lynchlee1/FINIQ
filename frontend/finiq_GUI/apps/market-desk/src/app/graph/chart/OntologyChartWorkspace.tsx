@@ -39,7 +39,7 @@ type OntologyCompaniesPayload = {
   total: number;
 };
 
-const DISPLAY_FREQUENCY_OPTIONS = ["일봉", "5일봉", "20일봉", "월봉"] as const;
+const DISPLAY_FREQUENCY_OPTIONS = ["일봉", "3일봉", "5일봉", "7일봉", "20일봉", "월봉"] as const;
 const DISCLOSURE_GROUP_ALL = "전체";
 const MARKER_STYLE_GROUP_ALL = "전체";
 const CHART_TYPE_OPTIONS = [
@@ -293,8 +293,8 @@ export function OntologyChartWorkspace() {
   };
 
   const renderChartControls = () => (
-    <div className="grid gap-2 xl:grid-cols-[auto_auto_auto] xl:items-start xl:justify-end">
-      <div className="flex flex-wrap gap-2">
+    <div className="ontology-form-grid xl:grid-cols-[auto_minmax(7rem,9rem)_minmax(8rem,10rem)] xl:items-start xl:justify-end">
+      <div className="ontology-action-row">
         <Button variant="outline" size="sm" onClick={() => setChartFullscreen(true)} disabled={chartIsLoading}>
           <Maximize2 className="h-4 w-4" />
           전체화면
@@ -304,41 +304,37 @@ export function OntologyChartWorkspace() {
           새로고침
         </Button>
       </div>
-      <div className="ontology-toolbar inline-flex w-fit flex-wrap gap-1 p-1">
+      <select
+        aria-label="캔들/종가선"
+        value={chartType}
+        onChange={(event) => setChartType(event.target.value as (typeof CHART_TYPE_OPTIONS)[number]["value"])}
+        className="ontology-control h-9 w-full px-3 text-sm shadow-sm"
+      >
         {CHART_TYPE_OPTIONS.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            variant={chartType === option.value ? "default" : "outline"}
-            size="sm"
-            className="h-7"
-            onClick={() => setChartType(option.value)}
-          >
+          <option key={option.value} value={option.value}>
             {option.label}
-          </Button>
+          </option>
         ))}
-      </div>
-      <div className="ontology-toolbar inline-flex w-fit flex-wrap gap-1 p-1">
+      </select>
+      <select
+        aria-label="일봉/3일봉/5일봉/7일봉/20일봉/월봉"
+        value={displayFrequency}
+        onChange={(event) => setDisplayFrequency(event.target.value as (typeof DISPLAY_FREQUENCY_OPTIONS)[number])}
+        className="ontology-control h-9 w-full px-3 text-sm shadow-sm"
+      >
         {DISPLAY_FREQUENCY_OPTIONS.map((option) => (
-          <Button
-            key={option}
-            type="button"
-            variant={displayFrequency === option ? "default" : "outline"}
-            size="sm"
-            className="h-7"
-            onClick={() => setDisplayFrequency(option)}
-          >
+          <option key={option} value={option}>
             {option}
-          </Button>
+          </option>
         ))}
-      </div>
+      </select>
     </div>
   );
 
   const renderPriceChart = (expanded = false) => (
     <div
       className={cn(
-        "ontology-panel p-3",
+        "ontology-panel ontology-panel-section",
         expanded ? "h-full min-h-0" : "h-[min(70vh,760px)] min-h-[540px]",
       )}
     >
@@ -385,7 +381,7 @@ export function OntologyChartWorkspace() {
             </CardHeader>
             <CardContent className="ontology-page-card-content space-y-4">
               <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.9fr)_minmax(320px,0.8fr)_minmax(0,1.2fr)] xl:items-end">
-                <div className="min-w-0 space-y-1.5">
+                <div className="ontology-form-field">
                   <Label htmlFor="ontology-chart-stock-keyword" className="font-semibold dark:text-slate-200">
                     회사명
                   </Label>
@@ -404,7 +400,7 @@ export function OntologyChartWorkspace() {
                   </Button>
                   </div>
                 </div>
-                <div className="min-w-0 space-y-1.5">
+                <div className="ontology-form-field">
                     <Label
                       htmlFor="ontology-chart-disclosure-group"
                     className="font-semibold dark:text-slate-200"
@@ -428,7 +424,7 @@ export function OntologyChartWorkspace() {
                 {renderChartControls()}
               </div>
               <div className="border-t border-slate-200 pt-4 dark:border-[#30363d]">
-                <div className="ontology-panel p-3">
+                <div className="ontology-panel ontology-panel-section">
                   <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-end">
                     <div>
                       <Label htmlFor="ontology-chart-marker-style-group" className="font-semibold dark:text-slate-200">
@@ -449,8 +445,8 @@ export function OntologyChartWorkspace() {
                       ))}
                     </select>
                   </div>
-                  <div className="flex flex-wrap items-end gap-2 sm:grid sm:grid-cols-2 lg:grid-cols-[minmax(140px,1fr)_minmax(140px,1fr)_112px_96px_96px] lg:items-end">
-                    <div className="min-w-0 space-y-1">
+                  <div className="ontology-form-grid sm:grid-cols-2 lg:grid-cols-[minmax(140px,1fr)_minmax(140px,1fr)_112px_96px_96px]">
+                    <div className="ontology-form-field">
                       <Label htmlFor="ontology-chart-marker-shape" className="text-slate-600 dark:text-slate-300">
                         모양
                       </Label>
@@ -467,7 +463,7 @@ export function OntologyChartWorkspace() {
                         ))}
                       </select>
                     </div>
-                    <div className="min-w-0 space-y-1">
+                    <div className="ontology-form-field">
                       <Label htmlFor="ontology-chart-marker-placement" className="text-slate-600 dark:text-slate-300">
                         위치
                       </Label>
@@ -484,7 +480,7 @@ export function OntologyChartWorkspace() {
                         ))}
                       </select>
                     </div>
-                    <div className="space-y-1">
+                    <div className="ontology-form-field">
                       <Label htmlFor="ontology-chart-marker-color" className="text-slate-600 dark:text-slate-300">
                         색상
                       </Label>
@@ -503,7 +499,7 @@ export function OntologyChartWorkspace() {
                         />
                       </div>
                     </div>
-                    <div className="space-y-1">
+                    <div className="ontology-form-field">
                       <Label htmlFor="ontology-chart-marker-size" className="text-slate-600 dark:text-slate-300">
                         크기
                       </Label>
@@ -518,7 +514,7 @@ export function OntologyChartWorkspace() {
                         className="h-8 rounded-md text-sm"
                       />
                     </div>
-                    <div className="space-y-1">
+                    <div className="ontology-form-field">
                       <Label htmlFor="ontology-chart-marker-line-width" className="text-slate-600 dark:text-slate-300">
                         선 두께
                       </Label>
@@ -579,14 +575,14 @@ export function OntologyChartWorkspace() {
                           <p className="mt-1 text-xs">최종보고서 {item.final_report || "-"}</p>
                         </div>
                         <div className="min-w-0">
-                          <p className="font-semibold leading-snug text-slate-950 dark:text-slate-100">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.submitter}</p>
+                          <p className="ontology-text-wrap font-semibold leading-snug text-slate-950 dark:text-slate-100">{item.title}</p>
+                          <p className="ontology-text-wrap mt-1 text-sm text-slate-500 dark:text-slate-400">{item.submitter}</p>
                         </div>
                         <div className="text-left lg:text-right">
-                          <span className="inline-block max-w-full truncate rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-[#30363d] dark:text-slate-300">
+                          <span className="ontology-text-wrap inline-block max-w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-[#30363d] dark:text-slate-300">
                             {item.group}
                           </span>
-                          <p className="mt-2 break-all font-mono text-xs text-slate-400">{item.acpt_no}</p>
+                          <p className="ontology-mono-wrap mt-2 font-mono text-xs text-slate-400">{item.acpt_no}</p>
                         </div>
                       </div>
                     ))}
@@ -602,12 +598,12 @@ export function OntologyChartWorkspace() {
         </section>
 
         {chartFullscreen ? (
-          <div className="fixed inset-0 z-50 flex flex-col bg-white p-4 dark:bg-[#0d1117]">
+          <div className="ontology-fullscreen fixed inset-0 z-50 flex flex-col bg-white p-4 dark:bg-[#0d1117]">
             <div className="mb-3 flex flex-col gap-3 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between dark:border-[#30363d]">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">주가-공시 차트</p>
-                <h2 className="truncate text-xl font-bold text-slate-950 dark:text-slate-100">{selectedCompanyLabel}</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <h2 className="ontology-text-wrap text-xl font-bold text-slate-950 dark:text-slate-100">{selectedCompanyLabel}</h2>
+                <p className="ontology-text-wrap text-sm text-slate-500 dark:text-slate-400">
                   {chartRangeText}
                 </p>
               </div>
@@ -622,34 +618,30 @@ export function OntologyChartWorkspace() {
                     전체화면 닫기
                   </Button>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <select
+                  aria-label="캔들/종가선"
+                  value={chartType}
+                  onChange={(event) => setChartType(event.target.value as (typeof CHART_TYPE_OPTIONS)[number]["value"])}
+                  className="ontology-control h-9 w-full px-3 text-sm shadow-sm sm:w-32"
+                >
                   {CHART_TYPE_OPTIONS.map((option) => (
-                    <Button
-                      key={option.value}
-                      type="button"
-                      variant={chartType === option.value ? "default" : "outline"}
-                      size="sm"
-                      className="h-8"
-                      onClick={() => setChartType(option.value)}
-                    >
+                    <option key={option.value} value={option.value}>
                       {option.label}
-                    </Button>
+                    </option>
                   ))}
-                </div>
-                <div className="flex flex-wrap gap-1">
+                </select>
+                <select
+                  aria-label="일봉/3일봉/5일봉/7일봉/20일봉/월봉"
+                  value={displayFrequency}
+                  onChange={(event) => setDisplayFrequency(event.target.value as (typeof DISPLAY_FREQUENCY_OPTIONS)[number])}
+                  className="ontology-control h-9 w-full px-3 text-sm shadow-sm sm:w-40"
+                >
                   {DISPLAY_FREQUENCY_OPTIONS.map((option) => (
-                    <Button
-                      key={option}
-                      type="button"
-                      variant={displayFrequency === option ? "default" : "outline"}
-                      size="sm"
-                      className="h-8"
-                      onClick={() => setDisplayFrequency(option)}
-                    >
+                    <option key={option} value={option}>
                       {option}
-                    </Button>
+                    </option>
                   ))}
-                </div>
+                </select>
               </div>
             </div>
             <div className="min-h-0 flex-1">{renderPriceChart(true)}</div>
