@@ -13,7 +13,7 @@ export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
   const pathname = usePathname();
 
   return (
-    <nav className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white/85 p-1 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.55)] backdrop-blur transition-colors dark:border-slate-800 dark:bg-slate-900/85" aria-label="Workflow steps">
+    <nav className="overflow-x-auto rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-1 shadow-[var(--tv-shadow)] backdrop-blur transition-colors" aria-label="Workflow steps">
       <div className="flex min-w-max gap-1 lg:min-w-0">
         {tabs.map((tab) => {
           const isActive = pathname === tab.href;
@@ -22,17 +22,17 @@ export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
               key={tab.href}
               href={tab.href}
               className={cn(
-                "flex min-w-[132px] flex-1 items-center justify-center gap-3 rounded-xl px-4 py-3 transition-all",
+                "flex min-w-[132px] flex-1 items-center justify-center gap-3 rounded-lg px-4 py-3 transition-all",
                 isActive
-                  ? "bg-slate-950 text-white shadow-sm dark:bg-slate-100 dark:text-slate-950"
-                  : "text-slate-500 hover:bg-slate-100/80 hover:text-slate-950 dark:text-slate-500 dark:hover:bg-slate-800/75 dark:hover:text-slate-100"
+                  ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)] shadow-sm"
+                  : "text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
               )}
             >
               <span className={cn(
                 "flex h-6 w-6 items-center justify-center rounded-lg border text-xs font-semibold",
                 isActive
-                  ? "border-white bg-white text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  : "border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500"
+                  ? "border-[color:var(--tv-accent-foreground)] bg-[var(--tv-accent-foreground)] text-[var(--tv-accent)]"
+                  : "border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-muted)]"
               )}>
                 {tab.step}
               </span>

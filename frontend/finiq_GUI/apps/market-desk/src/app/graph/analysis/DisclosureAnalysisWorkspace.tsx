@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { FileText, Loader2, Search } from "lucide-react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { apiGet, apiPost } from "@/api/client";
-import { PageLoadingSpinner } from "@finiq/web-app";
+import { PageLoadingSpinner } from "@finiq/web-app/status";
 import { formatInteger } from "@/lib/format";
 
 type OntologyCompany = {

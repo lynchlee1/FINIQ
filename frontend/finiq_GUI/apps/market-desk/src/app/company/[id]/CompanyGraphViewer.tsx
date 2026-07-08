@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { GraphCanvas, SettingsPanel, useGraphViewer, DEFAULT_STYLE, DEFAULT_LAYOUT, STYLE_PRESETS } from '@finiq/graph-viewer'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Button } from '@finiq/ui'
 import { fetchCompanyGraphData } from './companyGraphData'
-import { ActionDock, JobStatusLogger, PageLoadingSpinner } from '@finiq/web-app'
+import { ActionDock, JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
 import { Search, X, Save, Download, Unlock } from 'lucide-react'
 import { formatInteger } from '@/lib/format'
 import { cn } from '@finiq/ui/utils'

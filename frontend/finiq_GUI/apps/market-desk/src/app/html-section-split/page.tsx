@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Play, Square } from "lucide-react";
 import { Button } from "@finiq/ui";
-import { PageLoadingSpinner } from "@finiq/web-app";
+import { PageLoadingSpinner } from "@finiq/web-app/status";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { UI_TEXT } from "@/config/uiText";

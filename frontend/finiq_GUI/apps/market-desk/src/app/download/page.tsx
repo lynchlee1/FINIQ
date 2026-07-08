@@ -12,8 +12,7 @@ import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-import { JobStatusLogger } from "@finiq/web-app";
-import { PageLoadingSpinner } from "@finiq/web-app";
+import { JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlInsetPanelClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
@@ -711,10 +710,13 @@ export default function DownloadPage() {
                       {/* Range List */}
                       <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                         {existingData?.ranges?.map((range, index) => {
+                          const metadataReady = range.status === "unverified" && !range.metadata_missing && range.metadata_status !== "mismatch";
+                          const statusTone = metadataReady ? "metadataOk" : range.status;
                           const statusColors = {
-                            validated: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up)]",
-                            stale: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down)]",
-                            unverified: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
+                            validated: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up-text)]",
+                            metadataOk: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up-text)]",
+                            stale: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down-text)]",
+                            unverified: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)]",
                           };
                           const statusLabels = {
                             validated: "검증 완료: KIND 건수 일치",
@@ -739,7 +741,7 @@ export default function DownloadPage() {
                                   로컬 건수: {range.local_count == null ? "-" : formatInteger(range.local_count)} | KIND 건수: {range.kind_count == null ? "-" : formatInteger(range.kind_count)}
                                 </p>
                                 {range.error_detail && (
-                                  <p className="text-caption flex items-center gap-1 font-medium text-[var(--tv-down)]">
+                                  <p className="text-caption flex items-center gap-1 font-medium text-[var(--tv-down-text)]">
                                     <AlertTriangle className="h-3.5 w-3.5" />
                                     {range.error_detail}
                                   </p>
@@ -757,7 +759,7 @@ export default function DownloadPage() {
                                   </button>
                                 )}
                               </div>
-                              <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${statusColors[range.status]}`}>
+                              <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${statusColors[statusTone]}`}>
                                 {statusLabels[range.status]}
                               </span>
                             </div>
@@ -767,7 +769,7 @@ export default function DownloadPage() {
 
                       {/* Warning message if stale ranges exist */}
                       {existingData?.ranges?.some(r => r.status === "stale") && (
-                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down)]">
+                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down-text)]">
                           <strong>경고:</strong> 기존 다운로드한 데이터 중 일부가 KIND의 현재 검색 결과와 일치하지 않습니다 (데이터 변경/정정/누락 가능성). 
                           무결성이 손상되었으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다. mismatch 폴더를 수동으로 검사/보완하거나 삭제 후 재실행해야 합니다.
                         </div>
@@ -775,7 +777,7 @@ export default function DownloadPage() {
 
                       {/* Warning message if filters mismatch */}
                       {!filtersMatch && existingData?.saved_filters && (
-                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down)]">
+                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down-text)]">
                           <strong>오류:</strong> 현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 폴더 내 데이터가 오염(mixed dataset)되는 것을 방지하기 위해 <strong>이어서 다운로드하기가 비활성화</strong>됩니다. 검색 필터를 메타데이터와 동일하게 일치시키거나 다른 경로를 선택해 주세요.
                           <div className="mt-2 space-y-1 border-l-2 border-[color:var(--tv-down)] pl-3 opacity-90">
                             {existingData.saved_filters.company_name.trim() !== companyName.trim() && (
@@ -810,7 +812,7 @@ export default function DownloadPage() {
                       )}
 
                       {existingData?.ranges?.some(r => r.status === "unverified") && !hasCompletedCurrentInspection && (
-                        <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                        <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                           <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
                           <strong>알림:</strong> 일부 다운로드 범위는 {existingData.ranges?.some(r => r.metadata_obsolete) ? "workflow 메타데이터가 구버전입니다" : existingData.ranges?.some(r => r.metadata_missing) ? "workflow 메타데이터가 없습니다" : "아직 무결성 검사를 하지 않았습니다"}. 실행 또는 폴더 검사하기를 누르면 현재 검색 설정을 기준으로 무결성 검사와 메타데이터 보정을 진행합니다.
                         </div>
@@ -952,7 +954,7 @@ export default function DownloadPage() {
         </section>
 
         <div className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-0 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
-          <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 shadow-[var(--tv-shadow)] md:h-auto md:w-16 md:flex-col">
+          <div className="flex h-14 items-center justify-center gap-2 rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 shadow-[var(--tv-shadow)] md:h-auto md:w-16 md:flex-col">
             <Button
               variant="outline"
               size="icon"
@@ -984,7 +986,7 @@ export default function DownloadPage() {
               }}
               className={
                 lastInspectionCandidateCount > 0 || isErrorStatus
-                  ? "relative h-10 w-10 border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)] shadow-sm"
+                  ? "relative h-10 w-10 border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)] shadow-sm"
                   : "relative h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
               }
               title={notificationPanelOpen ? "알림 닫기" : "알림 열기"}
@@ -1015,7 +1017,7 @@ export default function DownloadPage() {
           </div>
 
           {notificationPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">알림</CardTitle>
@@ -1040,7 +1042,7 @@ export default function DownloadPage() {
 
                 {lastInspectionCandidateCount > 0 && (
                   <div className="space-y-4 border-t border-[color:var(--tv-border)] pt-4">
-                    <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                    <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                       삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
                     </div>
                     <div className="flex items-center space-x-2">
@@ -1081,7 +1083,7 @@ export default function DownloadPage() {
           )}
 
           {settingsPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">다운로드 설정</CardTitle>
@@ -1157,7 +1159,7 @@ export default function DownloadPage() {
           )}
 
           {downloadPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">실행 현황</CardTitle>

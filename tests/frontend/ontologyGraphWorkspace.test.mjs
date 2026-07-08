@@ -10,6 +10,7 @@ const chartWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/ch
 const analysisPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/page.tsx";
 const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/DisclosureAnalysisWorkspace.tsx";
 const appFramePath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/AppFrame.tsx";
+const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
 const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts";
 const backtestPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureBacktests.ts";
 const terminologyPath = "docs/ui-terminology.md";
@@ -140,11 +141,13 @@ test("ontology graph workspace keeps the top selector graph-focused", async () =
 });
 
 test("ontology routes use a wider app frame for canvas and chart workspaces", async () => {
-  const source = await readFile(appFramePath, "utf8");
+  const [source, webAppFrameSource] = await Promise.all([
+    readFile(appFramePath, "utf8"),
+    readFile(webAppFramePath, "utf8"),
+  ]);
 
-  assert.match(source, /pathname === "\/" \|\| pathname\??\.startsWith\("\/graph"\)/);
-  assert.match(source, /isOntology \? "w-full max-w-\[96rem\]" : "max-w-7xl"/);
-  assert.match(source, /<Topbar \/>/);
+  assert.match(source, /<WebAppFrame topbar=\{<Topbar \/>}/);
+  assert.match(webAppFrameSource, /max-w-\[92rem\]/);
 });
 
 test("ontology chart workspace defaults to full range and provides disclosure analysis", async () => {

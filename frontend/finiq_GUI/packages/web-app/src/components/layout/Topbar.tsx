@@ -65,11 +65,11 @@ export function Topbar({
   };
 
   return (
-    <header className="mb-6 flex w-full max-w-full flex-col gap-4 overflow-hidden rounded-2xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-4 py-3 shadow-[var(--tv-shadow)] backdrop-blur transition-colors md:flex-row md:items-center md:justify-between md:gap-5 md:px-5">
+    <header className="mb-6 flex w-full max-w-full flex-col gap-4 overflow-hidden rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-4 py-3 shadow-[var(--tv-shadow)] backdrop-blur transition-colors md:flex-row md:items-center md:justify-between md:gap-5 md:px-5">
       <div className="flex w-full min-w-0 items-center justify-between gap-3 md:w-auto">
         <div className="min-w-0">
-          <p className="text-caption font-semibold text-[var(--tv-muted)]">{brandLabel}</p>
-          <h1 className="text-page-title mt-1 truncate font-semibold text-[var(--tv-text)]">
+          <p className="text-sm font-medium uppercase text-[var(--tv-muted)]">{brandLabel}</p>
+          <h1 className="mt-1 truncate text-2xl font-bold text-[var(--tv-text)]">
             {pageTitle}
           </h1>
         </div>
@@ -83,16 +83,16 @@ export function Topbar({
         </Button>
       </div>
 
-      <div className="grid w-full min-w-0 gap-3 md:flex md:w-auto md:flex-nowrap md:items-center md:gap-3">
-        <nav className="grid w-full min-w-0 grid-cols-2 gap-1 rounded-xl bg-[var(--tv-surface-muted)] p-1 sm:grid-cols-4 md:flex md:w-auto md:flex-nowrap" aria-label="주요 메뉴">
+      <div className="grid w-full min-w-0 gap-3 md:flex md:w-auto md:flex-nowrap md:items-center md:gap-4">
+        <nav className="grid w-full min-w-0 grid-cols-1 gap-2 md:flex md:w-auto md:flex-nowrap" aria-label="주요 메뉴">
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                "text-body min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg px-3 py-2 text-center font-medium transition-all md:px-4",
+                "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg px-3 py-2 text-center text-sm font-medium transition-all md:px-4",
                 activeItem?.href === item.href
-                  ? "bg-[var(--tv-accent)] text-white shadow-sm"
+                  ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)] shadow-sm"
                   : "text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
               )}
             >

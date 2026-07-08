@@ -1,4 +1,4 @@
-import { PathPickerInput as WebAppPathPickerInput } from "@finiq/web-app";
+import { PathPickerInput as WebAppPathPickerInput } from "@finiq/web-app/path";
 import { pickPath } from "@/lib/fileDialog";
 
 interface PathPickerInputProps {

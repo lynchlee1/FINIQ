@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Database, LineChart, Loader2, Search } from "lucide-react";
 import { Button, Card, CardContent, Input } from "@finiq/ui";
 import { apiGet } from "@/api/client";
-import { PageLoadingSpinner } from "@finiq/web-app";
+import { PageLoadingSpinner } from "@finiq/web-app/status";
 
 type OntologyNodeGraphProps = {
   selectedCompany: OntologyCompany | null;

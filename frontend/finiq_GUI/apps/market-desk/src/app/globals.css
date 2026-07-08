@@ -9,7 +9,7 @@
   --font-mono: var(--font-inter), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
 
   --color-primary: var(--tv-accent);
-  --color-primary-foreground: #ffffff;
+  --color-primary-foreground: var(--tv-accent-foreground);
   
   --color-secondary: var(--tv-surface-muted);
   --color-secondary-foreground: var(--tv-text);
@@ -45,16 +45,20 @@
   --tv-text: #131722;
   --tv-muted: #787b86;
   --tv-subtle: #b2b5be;
-  --tv-accent: #2962ff;
-  --tv-accent-hover: #1e53e5;
-  --tv-accent-soft: rgba(41, 98, 255, 0.1);
+  --tv-accent: #131722;
+  --tv-accent-hover: #2a2e39;
+  --tv-accent-foreground: #ffffff;
+  --tv-accent-soft: rgb(19 23 34 / 0.08);
   --tv-up: #22ab94;
+  --tv-up-text: #047857;
   --tv-up-soft: rgba(34, 171, 148, 0.12);
   --tv-down: #f23645;
+  --tv-down-text: #b91c1c;
   --tv-down-soft: rgba(242, 54, 69, 0.12);
   --tv-warning: #ff9800;
+  --tv-warning-text: #9a3412;
   --tv-warning-soft: rgba(255, 152, 0, 0.14);
-  --tv-shadow: 0 18px 45px -34px rgb(19 23 34 / 0.45);
+  --tv-shadow: 0 1px 2px rgb(19 23 34 / 0.08);
   --font-size-caption: 0.75rem;
   --font-size-body: 0.875rem;
   --font-size-title: 1rem;
@@ -84,16 +88,20 @@
   --tv-text: #d1d4dc;
   --tv-muted: #b2b5be;
   --tv-subtle: #787b86;
-  --tv-accent: #2962ff;
-  --tv-accent-hover: #3f74ff;
-  --tv-accent-soft: rgba(41, 98, 255, 0.18);
+  --tv-accent: #f0f3fa;
+  --tv-accent-hover: #d1d4dc;
+  --tv-accent-foreground: #131722;
+  --tv-accent-soft: rgb(240 243 250 / 0.14);
   --tv-up: #22ab94;
+  --tv-up-text: #5eead4;
   --tv-up-soft: rgba(34, 171, 148, 0.18);
   --tv-down: #f23645;
+  --tv-down-text: #fca5a5;
   --tv-down-soft: rgba(242, 54, 69, 0.18);
   --tv-warning: #ff9800;
+  --tv-warning-text: #fbbf24;
   --tv-warning-soft: rgba(255, 152, 0, 0.18);
-  --tv-shadow: 0 20px 55px -36px rgb(0 0 0 / 0.9);
+  --tv-shadow: 0 1px 2px rgb(0 0 0 / 0.36);
   --font-size-caption: 0.75rem;
   --font-size-body: 0.875rem;
   --font-size-title: 1rem;
@@ -133,7 +141,7 @@ html, body {
   overflow: hidden;
   padding-block: 0;
   border: 1px solid var(--ontology-border);
-  border-radius: 1rem;
+  border-radius: 0.75rem;
   background: var(--ontology-surface);
   color: var(--ontology-text);
   box-shadow: var(--ontology-shadow);
@@ -176,7 +184,7 @@ html, body {
 .ontology-panel {
   min-width: 0;
   border: 1px solid var(--ontology-border);
-  border-radius: 0.875rem;
+  border-radius: 0.625rem;
   background: var(--ontology-panel);
   color: var(--ontology-text);
   font-family: var(--font-sans);
@@ -308,8 +316,9 @@ html, body {
     grid-row: 1 / -1;
     align-self: start;
     margin-top: 0 !important;
-    position: sticky;
-    top: 0;
+    position: fixed;
+    right: max(1.5rem, calc((100vw - 92rem) / 2 + 2rem));
+    top: 8.75rem;
   }
 }
 

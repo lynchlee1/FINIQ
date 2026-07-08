@@ -132,7 +132,7 @@ test("workflow form typography matches standard card fields", async () => {
   const templateSource = await readFile(htmlWorkflowTemplatePath, "utf8");
 
   assert.match(templateSource, /<CardContent className="space-y-4">/);
-  assert.match(templateSource, /<Label className="text-slate-600 dark:text-slate-300">\{label\}<\/Label>/);
+  assert.match(templateSource, /<Label className="text-body text-\[var\(--tv-text\)\]">\{label\}<\/Label>/);
   assert.doesNotMatch(templateSource, /<Label className="text-xs font-semibold text-slate-600 dark:text-slate-300">/);
 });
 
@@ -160,7 +160,7 @@ test("disclosure filter loads saved JSON filters and auto-applies selected prese
   assert.match(source, /apiPost<DisclosureConditionPresetPayload>\("\/api\/disclosures\/filter\/preset"/);
   assert.match(source, /source_json_path: sourceJsonPath/);
   assert.match(source, /onLoadPresetFromJson=\{loadFilterPresetFromJson\}/);
-  assert.match(conditionCardSource, /<Button variant="outline" onClick=\{onLoadPresetFromJson\}>불러오기<\/Button>/);
+  assert.match(conditionCardSource, /<Button variant="outline" onClick=\{onLoadPresetFromJson\}>[\s\S]*?<Upload className="mr-2 h-4 w-4" \/>불러오기<\/Button>/);
   assert.match(conditionCardSource, /onClick=\{onRenamePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /\/>수정<\/Button>/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);

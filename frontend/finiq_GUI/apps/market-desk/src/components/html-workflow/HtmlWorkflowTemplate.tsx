@@ -5,7 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { WorkflowSidebar } from "@finiq/web-app";
+import { WorkflowSidebar } from "@finiq/web-app/workflow";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { getSidebarDefinition, type WorkflowId } from "@/config/navigation";
 

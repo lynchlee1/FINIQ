@@ -9,12 +9,17 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "build:web-app": "npm run build -w @finiq/web-app",
+    "build:market-desk": "npm run build -w @finiq/app-market-desk",
     "dev:graph-viewer": "npm run dev -w @finiq/app-graph-viewer --",
     "predev:market-desk": "node scripts/check-market-desk-api.mjs",
     "dev:market-desk": "npm run dev -w @finiq/app-market-desk --",
     "start:graph-viewer": "npm run start -w @finiq/app-graph-viewer --",
     "start:market-desk": "npm run start -w @finiq/app-market-desk --",
-    "lint:graph-viewer": "npm run lint -w @finiq/graph-viewer"
+    "lint:graph-viewer": "npm run lint -w @finiq/graph-viewer",
+    "test:frontend": "cd .. && node --test tests/frontend/*.mjs",
+    "verify:web-app": "npm run build:web-app && npm run test:frontend",
+    "verify:market-desk": "npm run build:market-desk && npm run test:frontend"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.0",
