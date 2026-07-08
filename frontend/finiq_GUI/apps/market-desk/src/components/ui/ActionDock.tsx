@@ -54,15 +54,15 @@ export function ActionDock({
 
   const iconClass = (active: boolean, selected: boolean, tone: "blue" | "amber" | "slate") => {
     if (selected) {
-      return "h-10 w-10 border-slate-400 bg-slate-100 text-slate-900 shadow-sm dark:border-slate-500 dark:bg-[#21262d] dark:text-slate-100";
+      return "h-10 w-10 border-slate-300 bg-slate-100 text-slate-950 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100";
     }
     if (active && tone === "blue") {
-      return "relative h-10 w-10 border-blue-300 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-500/60 dark:bg-blue-500/15 dark:text-blue-200";
+      return "relative h-10 w-10 border-blue-300 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-400/60 dark:bg-blue-400/15 dark:text-blue-200";
     }
     if (active && tone === "amber") {
       return "relative h-10 w-10 border-amber-300 bg-amber-50 text-amber-700 shadow-sm dark:border-amber-500/60 dark:bg-amber-500/15 dark:text-amber-200";
     }
-    return "relative h-10 w-10 border-slate-200 bg-white shadow-sm dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300";
+    return "relative h-10 w-10 border-slate-200 bg-white/90 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300";
   };
 
   const renderPanel = (panel: DockPanel, title: string, content: ReactNode) => {
@@ -72,7 +72,7 @@ export function ActionDock({
       ? <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
       : content;
     return (
-      <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)] dark:bg-[#161b22] dark:border-[#30363d]">
+      <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto shadow-2xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)] dark:border-slate-800 dark:bg-slate-900">
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="dark:text-white">{title}</CardTitle>
@@ -83,7 +83,7 @@ export function ActionDock({
                   variant="outline"
                   size="sm"
                   onClick={() => setNotificationDismissed(true)}
-                  className="h-8 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200"
+                  className="h-8 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                   title="누적 알림 지우기"
                 >
                   지우기
@@ -93,7 +93,7 @@ export function ActionDock({
                 variant="ghost"
                 size="icon"
                 onClick={() => setOpenPanel(null)}
-                className="h-8 w-8 dark:hover:bg-[#21262d]"
+                className="h-8 w-8 dark:hover:bg-slate-800"
                 title={`${title} 닫기`}
               >
                 <X className="h-4 w-4" />
@@ -107,8 +107,8 @@ export function ActionDock({
   };
 
   return (
-    <div className="action-dock-root relative z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-40 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
-      <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-lg md:h-auto md:w-16 md:flex-col dark:border-[#30363d] dark:bg-[#161b22]">
+    <div className="action-dock-root relative z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-28 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
+      <div className="flex h-14 items-center justify-center gap-2 rounded-2xl border border-slate-200/80 bg-white/85 p-2 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.55)] backdrop-blur md:h-auto md:w-16 md:flex-col dark:border-slate-800 dark:bg-slate-900/85">
         <Button
           variant="outline"
           size="icon"

@@ -36,8 +36,9 @@ def parse_rights_issuance(
     issue_targets = extractor.get_issue_targets(stock_counts=stock_counts)
     extractor.validate_consistency(
         stock_counts=stock_counts,
+        pre_issuance_stock_counts=pre_issuance_stock_counts,
         funding_purposes=funding_purposes,
-        base_prices=base_prices,
+        issue_prices=issue_prices,
         issue_targets=issue_targets,
     )
     issuance_type, paid_detail, bonus_detail = extractor.build_type_details(

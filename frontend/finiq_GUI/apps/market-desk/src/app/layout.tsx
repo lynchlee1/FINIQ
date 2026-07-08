@@ -1,9 +1,17 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppFrame } from "@/components/layout/AppFrame";
 
-const inter = Inter({ subsets: ["latin"] });
+const geistSans = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist-sans",
+});
+
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+});
 
 export const metadata: Metadata = {
   title: "FINIQ MarketDesk",
@@ -16,8 +24,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ko">
-      <body className={`${inter.className} antialiased`}>
+    <html lang="ko" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className="antialiased">
         <AppFrame>
           {children}
         </AppFrame>

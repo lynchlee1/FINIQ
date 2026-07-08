@@ -42,6 +42,7 @@ from .text import (
     element_text,
     parse_float,
     parse_int,
+    parse_ints,
 )
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
     "clean_text",
     "element_text",
     "parse_int",
+    "parse_ints",
     "parse_float",
     "parse_html_document",
     "fetch_selected_viewer_body",

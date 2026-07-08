@@ -28,15 +28,22 @@ def parse_int(value: str | None, *, dash_as_zero: bool = False) -> int | None:
     return int(match.group(0).replace(",", ""))
 
 
+def parse_ints(value: str | None) -> list[int]:
+    """문자열 안의 모든 쉼표 정수를 순서대로 반환한다."""
+    text = _remove_grouping_spaces(clean_text(value))
+    return [int(match.replace(",", "")) for match in re.findall(r"-?\d[\d,]*", text)]
+
+
 def _remove_grouping_spaces(value: str) -> str:
     """HTML span 분리로 생긴 쉼표 숫자 내부 공백만 제거한다."""
-    return re.sub(
-        r"-?\d[\d,\s]*\d",
-        lambda match: match.group(0).replace(" ", "")
-        if "," in match.group(0)
-        else match.group(0),
-        value,
-    )
+    def repl(match):
+        seq = match.group(0)
+        merged = seq.replace(" ", "")
+        if "," in seq and re.match(r"^-?\d{1,3}(,\d{3})+$", merged):
+            return merged
+        return seq
+
+    return re.sub(r"-?\d[\d,\s]*\d|-?\d", repl, value)
 
 
 def parse_float(value: str | None) -> float | None:
