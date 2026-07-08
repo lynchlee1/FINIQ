@@ -4,9 +4,31 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.tsx"
+    ".": {
+      "types": "./src/index.tsx",
+      "default": "./src/index.tsx"
+    },
+    "./layout": {
+      "types": "./src/layout.ts",
+      "default": "./src/layout.ts"
+    },
+    "./workflow": {
+      "types": "./src/workflow.ts",
+      "default": "./src/workflow.ts"
+    },
+    "./status": {
+      "types": "./src/status.ts",
+      "default": "./src/status.ts"
+    },
+    "./path": {
+      "types": "./src/path.ts",
+      "default": "./src/path.ts"
+    }
   },
   "types": "./src/index.tsx",
+  "scripts": {
+    "build": "tsc -p tsconfig.app.json"
+  },
   "dependencies": {
     "@finiq/ui": "0.1.0",
     "lucide-react": "^1.16.0",

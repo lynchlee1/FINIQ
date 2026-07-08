@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { WorkflowPageShell as WebAppWorkflowPageShell } from "@finiq/web-app";
+import { WorkflowPageShell as WebAppWorkflowPageShell } from "@finiq/web-app/workflow";
 import { getSidebarDefinition, getWorkflowTabs, type WorkflowId, type WorkflowTab } from "@/config/navigation";
 
 type WorkflowPageShellProps = {

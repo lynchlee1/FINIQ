@@ -6,8 +6,7 @@ import { AlertTriangle, FileText, LineChart, Loader2, Maximize2, RefreshCw, Sear
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { apiGet } from "@/api/client";
-import { ActionDock } from "@finiq/web-app";
-import { PageLoadingSpinner } from "@finiq/web-app";
+import { ActionDock, PageLoadingSpinner } from "@finiq/web-app/status";
 import type { OntologyCompany, OntologyPanel } from "../OntologyGraphWorkspace";
 
 const PriceChart = dynamic(() => import("@/components/PriceChart").then((mod) => mod.PriceChart), {

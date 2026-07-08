@@ -3,10 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AlertTriangle, FileJson, FolderOpen, Info, Play, Square, Loader2, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
-import { JobStatusLogger } from "@finiq/web-app";
+import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { PageLoadingSpinner } from "@finiq/web-app";
 import {
   HtmlWorkflowForm,
   HtmlWorkflowCard,
@@ -15,7 +14,6 @@ import {
   htmlInsetPanelClassName,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { ActionDock } from "@finiq/web-app";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 

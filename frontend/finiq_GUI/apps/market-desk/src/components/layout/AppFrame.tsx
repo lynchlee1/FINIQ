@@ -1,6 +1,6 @@
 "use client";
 
-import { AppFrame as WebAppFrame } from "@finiq/web-app";
+import { AppFrame as WebAppFrame } from "@finiq/web-app/layout";
 import { Topbar } from "./Topbar";
 
 type AppFrameProps = {

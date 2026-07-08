@@ -4,11 +4,10 @@ import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useStat
 import { AlertTriangle, Check, Eye, Loader2, Pencil, Play, Plus, Search, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
-import { JobStatusLogger } from "@finiq/web-app";
+import { JobStatusLogger, ActionDock } from "@finiq/web-app/status";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { ActionDock } from "@finiq/web-app";
 import { htmlTableFrameClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";

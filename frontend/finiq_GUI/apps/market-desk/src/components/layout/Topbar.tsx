@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { usePathname } from "next/navigation";
-import { Topbar as WebAppTopbar } from "@finiq/web-app";
+import { Topbar as WebAppTopbar } from "@finiq/web-app/layout";
 import { getActiveNavItem, getPageTitle, NAV_ITEMS } from "@/config/navigation";
 import { useSettingsStore } from "@/store/useSettingsStore";
 

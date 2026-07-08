@@ -11,8 +11,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { pickPath, type PathDialogMode } from "@/lib/fileDialog";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
-import { ActionDock } from "@finiq/web-app";
-import { JobStatusLogger } from "@finiq/web-app";
+import { ActionDock, JobStatusLogger } from "@finiq/web-app/status";
 
 interface ConfigFile {
   path: string;

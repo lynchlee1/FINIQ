@@ -10,7 +10,7 @@ import { Label } from "@finiq/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import dynamic from "next/dynamic";
 import { cn } from "@finiq/ui/utils";
-import { PageLoadingSpinner } from "@finiq/web-app";
+import { PageLoadingSpinner } from "@finiq/web-app/status";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@finiq/ui";
 import { Suspense } from "react";
 

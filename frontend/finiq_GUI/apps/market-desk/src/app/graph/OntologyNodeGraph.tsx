@@ -20,9 +20,7 @@ import {
   type GraphNode,
 } from "@finiq/graph-viewer";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input } from "@finiq/ui";
-import { ActionDock } from "@finiq/web-app";
-import { JobStatusLogger } from "@finiq/web-app";
-import { PageLoadingSpinner } from "@finiq/web-app";
+import { ActionDock, JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
 import { formatInteger } from "@/lib/format";
 import type { OntologyCompany, OntologyPanel } from "./OntologyGraphWorkspace";
 
