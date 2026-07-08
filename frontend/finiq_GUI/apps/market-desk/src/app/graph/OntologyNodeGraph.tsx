@@ -282,7 +282,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
               <LineChart className="h-4 w-4" />
               공시 관계 그래프
             </CardTitle>
-            <div className="flex flex-wrap gap-1">
+            <div className="ontology-action-row">
               {nodeTypes.map((type) => {
                 const isActive = filters.nodeTypes.length === 0 || filters.nodeTypes.includes(type);
                 return (
@@ -302,15 +302,15 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
           </div>
           <div className="grid gap-3 xl:grid-cols-[minmax(240px,0.8fr)_minmax(320px,1fr)_auto_auto] xl:items-center">
             <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="ontology-metric px-2 py-1.5">
+              <div className="ontology-metric ontology-panel-section py-1.5">
                 <p className="ontology-muted">노드</p>
                 <p className="font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(visibleGraph.nodes.length)}</p>
               </div>
-              <div className="ontology-metric px-2 py-1.5">
+              <div className="ontology-metric ontology-panel-section py-1.5">
                 <p className="ontology-muted">엣지</p>
                 <p className="font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(visibleGraph.edges.length)}</p>
               </div>
-              <div className="ontology-metric px-2 py-1.5">
+              <div className="ontology-metric ontology-panel-section py-1.5">
                 <p className="ontology-muted">선택</p>
                 <p className="font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(selectedNodeCount + selectedEdgeCount)}</p>
               </div>
@@ -424,7 +424,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
                   <p className="text-xs font-semibold uppercase text-slate-500">최단 경로</p>
                   <div className="mt-2 space-y-1 text-xs text-slate-200">
                     {selectedPath.map((nodeId) => (
-                      <p key={nodeId} className="truncate">{nodeId}</p>
+                      <p key={nodeId} className="ontology-mono-wrap">{nodeId}</p>
                     ))}
                   </div>
                 </div>
@@ -461,7 +461,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
                     {Object.entries(selectedNode.properties).map(([key, value]) => (
                       <div key={key}>
                         <dt className="text-xs text-slate-500">{key}</dt>
-                        <dd className="mt-0.5 break-all font-semibold text-slate-200">{String(value || "-")}</dd>
+                        <dd className="ontology-mono-wrap mt-0.5 font-semibold text-slate-200">{String(value || "-")}</dd>
                       </div>
                     ))}
                   </dl>
@@ -481,15 +481,15 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
                   <dl className="space-y-2">
                     <div>
                       <dt className="text-xs text-slate-500">source</dt>
-                      <dd className="mt-0.5 break-all font-semibold text-slate-200">{typeof selectedEdge.source === "string" ? selectedEdge.source : selectedEdge.source.id}</dd>
+                      <dd className="ontology-mono-wrap mt-0.5 font-semibold text-slate-200">{typeof selectedEdge.source === "string" ? selectedEdge.source : selectedEdge.source.id}</dd>
                     </div>
                     <div>
                       <dt className="text-xs text-slate-500">target</dt>
-                      <dd className="mt-0.5 break-all font-semibold text-slate-200">{typeof selectedEdge.target === "string" ? selectedEdge.target : selectedEdge.target.id}</dd>
+                      <dd className="ontology-mono-wrap mt-0.5 font-semibold text-slate-200">{typeof selectedEdge.target === "string" ? selectedEdge.target : selectedEdge.target.id}</dd>
                     </div>
                     <div>
                       <dt className="text-xs text-slate-500">weight</dt>
-                      <dd className="mt-0.5 break-all font-semibold text-slate-200">{selectedEdge.weight}</dd>
+                      <dd className="ontology-mono-wrap mt-0.5 font-semibold text-slate-200">{selectedEdge.weight}</dd>
                     </div>
                   </dl>
                   <Button type="button" variant="destructive" size="sm" onClick={() => handleDeleteSelectedEdge(selectedEdge.id)}>

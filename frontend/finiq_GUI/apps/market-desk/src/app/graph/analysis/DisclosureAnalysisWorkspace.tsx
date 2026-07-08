@@ -376,13 +376,13 @@ export function DisclosureAnalysisWorkspace() {
               <>
                 {selectedAnalysisMode === "run" ? (
                   <>
-                    <div className="ontology-panel space-y-3 p-3">
+                    <div className="ontology-panel ontology-panel-section space-y-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">1. 실행 대상</h3>
                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Triple Barrier 라벨을 계산할 종목을 먼저 고릅니다.</p>
                       </div>
-                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto_minmax(220px,0.8fr)] lg:items-end">
-                        <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="ontology-form-grid lg:grid-cols-[minmax(220px,1fr)_auto_minmax(220px,0.8fr)]">
+                        <div className="ontology-form-field">
                           <Label htmlFor="disclosure-analysis-run-keyword">실행 종목 선택</Label>
                           <Input
                             id="disclosure-analysis-run-keyword"
@@ -402,7 +402,7 @@ export function DisclosureAnalysisWorkspace() {
                             const nextStockCode = normalizeStockCode(event.target.value);
                             setSelectedRunCompany(runCompanies.find((company) => company.stock_code === nextStockCode) ?? null);
                           }}
-                          className="ontology-control h-9 px-2 text-sm"
+                          className="ontology-control h-9 w-full px-2 text-sm"
                         >
                           <option value="">실행 종목 없음</option>
                           {runCompanies.map((company) => (
@@ -414,7 +414,7 @@ export function DisclosureAnalysisWorkspace() {
                       </div>
                     </div>
 
-                    <div className="ontology-panel space-y-3 p-3">
+                    <div className="ontology-panel ontology-panel-section space-y-3">
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">2. 공시 범위</h3>
@@ -424,38 +424,34 @@ export function DisclosureAnalysisWorkspace() {
                           선택 {formatInteger(selectedDisclosureIds.length)}건
                         </p>
                       </div>
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">공시 선택</div>
-                        <div className="flex flex-wrap gap-2">
+                      <div className="ontology-form-field">
+                        <Label htmlFor="disclosure-analysis-disclosure-group" className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                          공시 선택
+                        </Label>
+                        <select
+                          id="disclosure-analysis-disclosure-group"
+                          value={disclosureGroup}
+                          onChange={(event) => setDisclosureGroup(event.target.value)}
+                          className="ontology-control h-9 w-full px-2 text-sm"
+                        >
                           {disclosureGroupOptions.map((group) => (
-                            <button
-                              key={group}
-                              type="button"
-                              aria-pressed={disclosureGroup === group}
-                              onClick={() => setDisclosureGroup(group)}
-                              className={[
-                                "h-8 rounded-md border px-3 text-sm font-medium transition",
-                                disclosureGroup === group
-                                  ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
-                                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-950 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300 dark:hover:text-white",
-                              ].join(" ")}
-                            >
+                            <option key={group} value={group}>
                               {formatDisclosureGroupLabel(group)}
-                            </button>
+                            </option>
                           ))}
-                        </div>
+                        </select>
                       </div>
 
                       <div className="ontology-panel overflow-hidden">
                         <div className="border-b px-3 py-2 text-sm font-semibold">검사 대상 이벤트</div>
-                        <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-[#30363d]">
+                        <div className="ontology-scroll-list divide-y divide-slate-100 dark:divide-[#30363d]">
                           {markers.length ? markers.map((marker) => {
                             const disclosureId = marker.acpt_no || `${marker.time}-${marker.title}`;
                             return (
-                              <label key={disclosureId} className="flex items-center gap-2 px-3 py-2 text-sm dark:text-slate-200">
+                              <label key={disclosureId} className="grid grid-cols-[auto_minmax(7rem,10rem)_minmax(0,1fr)] items-start gap-2 px-3 py-2 text-sm dark:text-slate-200">
                                 <input type="checkbox" checked={selectedDisclosureIds.includes(disclosureId)} onChange={() => toggleDisclosure(disclosureId)} />
-                                <span className="min-w-[9rem] font-mono text-xs">{disclosureId}</span>
-                                <span className="truncate">{marker.disclosed_at || marker.time} · {marker.title || "-"}</span>
+                                <span className="ontology-mono-wrap font-mono text-xs">{disclosureId}</span>
+                                <span className="ontology-text-wrap">{marker.disclosed_at || marker.time} · {marker.title || "-"}</span>
                               </label>
                             );
                           }) : (
@@ -465,35 +461,35 @@ export function DisclosureAnalysisWorkspace() {
                       </div>
                     </div>
 
-                    <div className="ontology-panel space-y-3 p-3">
+                    <div className="ontology-panel ontology-panel-section space-y-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">3. Triple Barrier 설정</h3>
                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">이벤트 기준, 가격 판정 방식, barrier 값을 한 번에 확인한 뒤 실행합니다.</p>
                       </div>
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(140px,1fr)_minmax(170px,1fr)_120px_120px_140px_minmax(160px,0.8fr)]">
-                        <label className="space-y-1.5 text-sm">
+                      <div className="ontology-form-grid md:grid-cols-2 xl:grid-cols-[minmax(140px,1fr)_minmax(170px,1fr)_120px_120px_140px_minmax(160px,0.8fr)]">
+                        <label className="ontology-form-field text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">이벤트 기준일</span>
                           <select value={eventTimeBasis} onChange={(event) => setEventTimeBasis(event.target.value)} className="ontology-control h-9 w-full px-2 text-sm">
                             <option value="disclosed_date">공시일</option>
                             <option value="disclosed_at">공시시각</option>
                           </select>
                         </label>
-                        <label className="space-y-1.5 text-sm">
+                        <label className="ontology-form-field text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">가격 기준</span>
                           <select value={priceBasis} onChange={(event) => setPriceBasis(event.target.value)} className="ontology-control h-9 w-full px-2 text-sm">
                             <option value="close">종가 기준</option>
                             <option value="intraday">장중 고가/저가 기준</option>
                           </select>
                         </label>
-                        <label className="space-y-1.5 text-sm">
+                        <label className="ontology-form-field text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">Upper barrier</span>
                           <Input value={upperPct} onChange={(event) => setUpperPct(event.target.value)} type="number" step="0.1" className="h-9" />
                         </label>
-                        <label className="space-y-1.5 text-sm">
+                        <label className="ontology-form-field text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">Lower barrier</span>
                           <Input value={lowerPct} onChange={(event) => setLowerPct(event.target.value)} type="number" step="0.1" className="h-9" />
                         </label>
-                        <label className="space-y-1.5 text-sm">
+                        <label className="ontology-form-field text-sm">
                           <span className="font-medium text-slate-700 dark:text-slate-300">Vertical barrier</span>
                           <select value={verticalDays} onChange={(event) => setVerticalDays(event.target.value)} className="ontology-control h-9 w-full px-2 text-sm">
                             <option value="5">5거래일</option>
@@ -513,7 +509,7 @@ export function DisclosureAnalysisWorkspace() {
                 ) : null}
 
                 {selectedAnalysisMode === "results" ? (
-                  <div className="ontology-panel p-3">
+                  <div className="ontology-panel ontology-panel-section">
                     <div className="space-y-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">저장 결과 조회</h3>
@@ -523,8 +519,8 @@ export function DisclosureAnalysisWorkspace() {
                             : "결과 조회용 종목을 검색하고 선택하면 저장된 Triple Barrier 결과를 확인합니다."}
                         </p>
                       </div>
-                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto_minmax(220px,0.8fr)_auto] lg:items-end">
-                        <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="ontology-form-grid lg:grid-cols-[minmax(220px,1fr)_auto_minmax(220px,0.8fr)_auto]">
+                        <div className="ontology-form-field">
                           <Label htmlFor="disclosure-analysis-result-keyword">결과 종목 선택</Label>
                           <Input
                             id="disclosure-analysis-result-keyword"
@@ -544,7 +540,7 @@ export function DisclosureAnalysisWorkspace() {
                             const nextStockCode = normalizeStockCode(event.target.value);
                             setSelectedResultCompany(resultCompanies.find((company) => company.stock_code === nextStockCode) ?? null);
                           }}
-                          className="ontology-control h-9 px-2 text-sm"
+                          className="ontology-control h-9 w-full px-2 text-sm"
                         >
                           <option value="">조회 종목 없음</option>
                           {resultCompanies.map((company) => (
@@ -559,13 +555,13 @@ export function DisclosureAnalysisWorkspace() {
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-3">
-                      <div className="ontology-metric px-3 py-2">
+                      <div className="ontology-metric ontology-panel-section py-2">
                         조회 종목: <span className="font-medium text-slate-900 dark:text-slate-100">{selectedResultCompany?.stock_code ?? "-"}</span>
                       </div>
-                      <div className="ontology-metric px-3 py-2">
+                      <div className="ontology-metric ontology-panel-section py-2">
                         결과 행: <span className="font-medium text-slate-900 dark:text-slate-100">{formatInteger(rows.length)}</span>
                       </div>
-                      <div className="ontology-metric px-3 py-2">
+                      <div className="ontology-metric ontology-panel-section py-2">
                         DB: <span className="font-medium text-slate-900 dark:text-slate-100">{tripleBarrierResult?.result_db_path ? "연결됨" : "-"}</span>
                       </div>
                     </div>
@@ -590,7 +586,7 @@ export function DisclosureAnalysisWorkspace() {
                       ["신규 저장", tripleBarrierResult?.summary.created ?? 0],
                       ["중복 제외", tripleBarrierResult?.summary.reused ?? 0],
                     ].map(([label, value]) => (
-                      <div key={label} className="ontology-metric px-3 py-2">
+                      <div key={label} className="ontology-metric ontology-panel-section py-2">
                         <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
                         <p className="mt-1 font-semibold tabular-nums text-slate-950 dark:text-slate-100">{formatInteger(Number(value))}</p>
                       </div>
