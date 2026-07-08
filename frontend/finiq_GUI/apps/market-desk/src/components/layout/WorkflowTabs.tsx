@@ -13,7 +13,7 @@ export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
   const pathname = usePathname();
 
   return (
-    <nav className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm transition-colors dark:bg-[#161b22] dark:border-[#30363d]" aria-label="Workflow steps">
+    <nav className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white/85 p-1 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.55)] backdrop-blur transition-colors dark:border-slate-800 dark:bg-slate-900/85" aria-label="Workflow steps">
       <div className="flex min-w-max gap-1 lg:min-w-0">
       {tabs.map((tab) => {
         const isActive = pathname === tab.href;
@@ -22,17 +22,17 @@ export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
               key={tab.href}
               href={tab.href}
               className={cn(
-                "flex min-w-[132px] flex-1 items-center justify-center gap-3 rounded-lg px-4 py-3 transition-all",
+                "flex min-w-[132px] flex-1 items-center justify-center gap-3 rounded-xl px-4 py-3 transition-all",
                 isActive 
-                  ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md" 
-                  : "text-slate-500 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-[#21262d] hover:text-slate-900 dark:hover:text-slate-100"
+                  ? "bg-slate-950 text-white shadow-sm dark:bg-slate-100 dark:text-slate-950"
+                  : "text-slate-500 hover:bg-slate-100/80 hover:text-slate-950 dark:text-slate-500 dark:hover:bg-slate-800/75 dark:hover:text-slate-100"
             )}
           >
             <span className={cn(
-              "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border",
+              "flex h-6 w-6 items-center justify-center rounded-lg border text-xs font-semibold",
               isActive 
-                ? "bg-white dark:bg-[#161b22] text-slate-900 dark:text-slate-100 border-white dark:border-[#30363d]" 
-                : "bg-slate-100 dark:bg-[#0d1117] text-slate-500 dark:text-slate-500 border-slate-200 dark:border-[#30363d]"
+                ? "border-white bg-white text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                : "border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500"
             )}>
               {tab.step}
             </span>

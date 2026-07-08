@@ -16,14 +16,14 @@ class RightsIssuanceRecord:
     증자유형: str
     신주의_종류와_수: list[list[Any]]
     증자_전_발행주식총수: list[list[Any]]
-    발행목적: list[list[Any]]
-    발행가액: list[list[Any]]
-    기준주가: list[list[Any]]
+    발행목적: list[list[Any]] | str
+    발행가액: list[list[Any]] | str
+    기준주가: list[list[Any]] | str
     증자방식: str | None
     납입일: str | None
     신주권교부예정일: str | None
     상장예정일: str | None
-    발행대상자: list[list[Any]]
+    발행대상자: list[list[Any]] | str
     유상증자: dict[str, Any] | None
     무상증자: dict[str, Any] | None
 

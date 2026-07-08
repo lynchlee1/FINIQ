@@ -13,7 +13,7 @@ export function WorkflowPageShell({ workflowId, tabs, children }: WorkflowPageSh
   const sidebar = workflowId ? getSidebarDefinition(workflowId) : { title: "작업 메뉴", groups: [{ label: "Workflow", steps: resolvedTabs }] };
 
   return (
-    <main className={resolvedTabs.length ? "grid w-full gap-6 lg:grid-cols-[220px_minmax(0,1fr)]" : "flex w-full flex-col gap-6"}>
+    <main className={resolvedTabs.length ? "grid w-full gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start" : "flex w-full flex-col gap-6"}>
       {resolvedTabs.length ? <WorkflowSidebar title={sidebar.title} groups={sidebar.groups} /> : null}
       <div className="min-w-0 flex flex-col gap-6">{children}</div>
     </main>

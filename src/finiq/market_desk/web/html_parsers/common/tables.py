@@ -178,7 +178,9 @@ def compress_repeated_texts(row: list[str]) -> list[str]:
     compressed: list[str] = []
     for value in row:
         cleaned = clean_text(value)
-        if not cleaned or (compressed and compressed[-1] == cleaned):
+        if not cleaned:
+            continue
+        if compressed and compressed[-1] == cleaned and cleaned != "상동":
             continue
         compressed.append(cleaned)
     return compressed

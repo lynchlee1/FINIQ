@@ -74,6 +74,7 @@ from finiq.market_desk.web.html_parsers.common import (
     expand_table,
     parse_html_document,
     parse_int,
+    parse_ints,
 )
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 from finiq.market_desk.analytics.quanti import list_quanti_stock_codes
@@ -5406,6 +5407,10 @@ def test_parse_int_ignores_spaces_inside_comma_grouped_numbers() -> None:
     assert parse_int("13, 000,00 0,000") == 13_000_000_000
 
 
+def test_parse_ints_keeps_adjacent_ungrouped_numbers_separate() -> None:
+    assert parse_ints("100 100") == [100, 100]
+
+
 def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     fixture_path = TESTS_DIR / "fixtures" / "kind_bond_issuance_20260508000643.html"
 
@@ -5665,8 +5670,20 @@ def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
 
     assert parsed["title"] == "[테스트] 무상증자결정"
     assert parsed["증자유형"] == "무상증자"
+    assert parsed["발행목적"] == "-"
+    assert parsed["발행가액"] == "-"
+    assert parsed["기준주가"] == "-"
+    assert parsed["증자방식"] == "-"
+    assert parsed["납입일"] == "-"
+    assert parsed["발행대상자"] == "-"
     assert parsed["유상증자"] is None
     assert parsed["무상증자"] is not None
+    assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
+    assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
+    assert parsed["field_parse_status"]["기준주가"] == "not_applicable"
+    assert parsed["field_parse_status"]["증자방식"] == "not_applicable"
+    assert parsed["field_parse_status"]["납입일"] == "not_applicable"
+    assert parsed["field_parse_status"]["발행대상자"] == "not_applicable"
     assert "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다." not in (
         parsed.get("strong_warning") or []
     )
@@ -6315,15 +6332,25 @@ def test_parse_rights_issuance_bonus_examples_have_bonus_detail(relative_path: s
     assert parsed["증자유형"] == "무상증자"
     assert parsed["유상증자"] is None
     assert parsed["무상증자"] is not None
-    assert parsed["증자방식"] == "무상증자"
+    assert parsed["발행목적"] == "-"
+    assert parsed["발행가액"] == "-"
+    assert parsed["기준주가"] == "-"
+    assert parsed["증자방식"] == "-"
+    assert parsed["납입일"] == "-"
+    assert parsed["발행대상자"] == "-"
     assert parsed["무상증자"]["신주의 종류와 수"] == parsed["신주의 종류와 수"]
     assert parsed["무상증자"]["신주배정기준일"]
     assert parsed["무상증자"]["1주당 신주배정주식수"][0][1]
     assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
     assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
+    assert parsed["field_parse_status"]["기준주가"] == "not_applicable"
+    assert parsed["field_parse_status"]["증자방식"] == "not_applicable"
     assert parsed["field_parse_status"]["납입일"] == "not_applicable"
+    assert parsed["field_parse_status"]["발행대상자"] == "not_applicable"
     assert not any(
-        warning.startswith(("발행목적:", "발행가액:", "납입일:"))
+        warning.startswith(
+            ("발행목적:", "발행가액:", "기준주가:", "증자방식:", "납입일:", "발행대상자:")
+        )
         for warning in parsed.get("strong_warning", [])
     )
 
@@ -6443,6 +6470,8 @@ def test_parse_rights_issuance_classifies_consistency_warnings_by_level(tmp_path
         <tr><td>기타주식 (주)</td><td>20</td></tr>
         <tr><td rowspan="1">4. 자금조달의 목적</td><td>운영자금 (원)</td><td>2,000</td></tr>
         <tr><td colspan="2">5. 증자방식</td><td>제3자배정증자</td></tr>
+        <tr><td rowspan="2">6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
+        <tr><td>기타주식 (원)</td><td>100</td></tr>
         <tr><td rowspan="2">7. 기준주가</td><td>보통주식 (원)</td><td>100</td></tr>
         <tr><td>기타주식 (원)</td><td>100</td></tr>
       </table>
@@ -6567,6 +6596,7 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
         <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
         <tr><td>4. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,009</td></tr>
         <tr><td>5. 증자방식</td><td>일반공모증자</td></tr>
+        <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
         <tr><td>7. 기준주가</td><td>보통주식 (원)</td><td>100</td></tr>
       </table>
     </body></html>
@@ -6576,6 +6606,143 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
 
     assert not any(
         "자금조달 목적 합계" in warning
+        for warning in parsed.get("weak_warning", [])
+    )
+
+
+def test_parse_rights_issuance_checks_funding_total_with_issue_price_not_base_price(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000021.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td>4. 자금조달의 목적</td><td>타법인유가증권취득자금 (원)</td><td>1,000</td></tr>
+        <tr><td>5. 증자방식</td><td>일반공모증자</td></tr>
+        <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
+        <tr><td>7. 기준주가</td><td>보통주식 (원)</td><td>150</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행목적"] == [["타법인 증권 취득자금", 1_000]]
+    assert not any(
+        "자금조달 목적 합계" in warning
+        for warning in parsed.get("weak_warning", [])
+    )
+
+
+def test_parse_rights_issuance_sums_multiple_target_amounts_in_one_cell(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000022.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>200,000</td></tr>
+        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
+        <tr><td>투자자A<br/>투자자B</td><td>100,000<br/>100,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행대상자"] == [["투자자A 투자자B", 200_000]]
+    assert not any(
+        "배정주식수 합계" in warning
+        for warning in parsed.get("weak_warning", [])
+    )
+
+
+def test_parse_rights_issuance_sums_ungrouped_target_amounts_in_one_cell(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000024.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>200</td></tr>
+        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
+        <tr><td>투자자A<br/>투자자B</td><td>100<br/>100</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행대상자"] == [["투자자A 투자자B", 200]]
+    assert not any(
+        "배정주식수 합계" in warning
+        for warning in parsed.get("weak_warning", [])
+    )
+
+
+def test_parse_rights_issuance_ignores_target_amount_percentage_annotation(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000025.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>100,000</td></tr>
+        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
+        <tr><td>투자자A</td><td>100,000 (100%)</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행대상자"] == [["투자자A", 100_000]]
+    assert not any(
+        "배정주식수 합계" in warning
+        for warning in parsed.get("weak_warning", [])
+    )
+
+
+def test_parse_rights_issuance_keeps_consecutive_ditto_columns_in_target_table(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000023.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>100,000</td></tr>
+        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
+      <table>
+        <tr>
+          <th>제3자배정 대상자</th><th>회사 또는 최대주주와의 관계</th><th>선정경위</th>
+          <th>증자결정 전후 6월이내 거래내역 및 계획</th><th>배정주식수 (주)</th><th>비 고</th>
+        </tr>
+        <tr><td>투자자A</td><td>상동</td><td>상동</td><td>상동</td><td>100,000</td><td>-</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["발행대상자"] == [["투자자A", 100_000]]
+    assert not any(
+        "배정주식수 합계" in warning
         for warning in parsed.get("weak_warning", [])
     )
 
@@ -6665,6 +6832,8 @@ def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_war
       <table>
         <tr><td rowspan="2">1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>-</td></tr>
         <tr><td>기타주식 (주)</td><td>-</td></tr>
+        <tr><td rowspan="2">3. 증자전 발행주식총수 (주)</td><td>보통주식 (주)</td><td>-</td></tr>
+        <tr><td>기타주식 (주)</td><td>-</td></tr>
         <tr><td>4. 자금조달의 목적</td><td>운영자금 (원)</td><td>-</td></tr>
         <tr><td>5. 증자방식</td><td>일반공모증자</td></tr>
       </table>
@@ -6673,8 +6842,16 @@ def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_war
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert any("모든 주식 종류의 수량이 0" in warning for warning in parsed["weak_warning"])
+    assert any(
+        warning.startswith("신주의 종류와 수:")
+        for warning in parsed["weak_warning"]
+    )
     assert parsed["field_parse_status"]["신주의 종류와 수"] == "explicit_zero"
+    assert any(
+        warning.startswith("증자 전 발행주식총수:")
+        for warning in parsed["weak_warning"]
+    )
+    assert parsed["field_parse_status"]["증자 전 발행주식총수"] == "explicit_zero"
     assert parsed["발행목적"] == []
     assert parsed["field_parse_status"]["발행목적"] == "explicit_zero"
 
@@ -6698,9 +6875,12 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
 
     assert parsed["증자유형"] == "무상증자"
     assert parsed["신주의 종류와 수"] == [["보통주식", 3_560_000], ["기타주식", 0]]
-    assert parsed["증자방식"] == "무상증자"
-    assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", 0]]
-    assert parsed["납입일"] is None
+    assert parsed["발행목적"] == "-"
+    assert parsed["발행가액"] == "-"
+    assert parsed["기준주가"] == "-"
+    assert parsed["증자방식"] == "-"
+    assert parsed["납입일"] == "-"
+    assert parsed["발행대상자"] == "-"
     assert parsed["신주권교부예정일"] == "2008년 10월 01일"
     assert parsed["상장예정일"] == "2008년 10월 02일"
     assert parsed["유상증자"] is None
@@ -6714,9 +6894,14 @@ def test_parse_rights_issuance_extracts_bonus_issuance() -> None:
     }
     assert parsed["field_parse_status"]["발행목적"] == "not_applicable"
     assert parsed["field_parse_status"]["발행가액"] == "not_applicable"
+    assert parsed["field_parse_status"]["기준주가"] == "not_applicable"
+    assert parsed["field_parse_status"]["증자방식"] == "not_applicable"
     assert parsed["field_parse_status"]["납입일"] == "not_applicable"
+    assert parsed["field_parse_status"]["발행대상자"] == "not_applicable"
     assert not any(
-        warning.startswith(("발행목적:", "발행가액:", "납입일:"))
+        warning.startswith(
+            ("발행목적:", "발행가액:", "기준주가:", "증자방식:", "납입일:", "발행대상자:")
+        )
         for warning in parsed.get("strong_warning", [])
     )
 
