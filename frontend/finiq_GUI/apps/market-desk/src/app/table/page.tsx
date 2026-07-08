@@ -11,9 +11,9 @@ import { cn } from "@finiq/ui/utils";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { ActionDock } from "@/components/ui/ActionDock";
+import { JobStatusLogger } from "@finiq/web-app";
+import { PageLoadingSpinner } from "@finiq/web-app";
+import { ActionDock } from "@finiq/web-app";
 import { UI_TEXT } from "@/config/uiText";
 
 export default function TablePage() {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Activity, Bell, X, Play, Search, Loader2, Trash2, FolderOpen, Settings, ChevronDown, ChevronRight } from "lucide-react";
+import { Activity, AlertTriangle, Bell, Info, X, Play, Search, Loader2, Trash2, FolderOpen, Settings, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
 import { Input } from "@finiq/ui";
@@ -12,9 +12,9 @@ import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { htmlInsetPanelClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { JobStatusLogger } from "@finiq/web-app";
+import { PageLoadingSpinner } from "@finiq/web-app";
+import { htmlControlClassName, htmlInsetPanelClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
 import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
@@ -645,7 +645,7 @@ export default function DownloadPage() {
     <WorkflowPageShell workflowId="disclosure-build">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4" onClick={() => setNotificationPanelOpen(false)}>
         <section className="min-w-0 space-y-6">
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
             <CardHeader>
               <CardTitle className="dark:text-white">검색 조건</CardTitle>
             </CardHeader>
@@ -662,12 +662,12 @@ export default function DownloadPage() {
               </div>
 
               {checkingExisting && !existingData && (
-                <div className={`${htmlInsetPanelClassName} space-y-3 text-sm animate-fade-in transition-all`}>
+                <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
                   <div className="flex items-start gap-3">
                     <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
                     <div className="space-y-1">
                       <p className="font-semibold text-slate-900 dark:text-slate-100">기존 다운로드 폴더 확인 중...</p>
-                      <p className="break-all text-xs text-slate-500 dark:text-slate-400">
+                      <p className="text-caption break-all text-slate-500 dark:text-slate-400">
                         선택한 데이터 경로의 폴더와 메타데이터 상태만 빠르게 확인하고 있습니다: {outputDirectory}
                       </p>
                     </div>
@@ -676,19 +676,20 @@ export default function DownloadPage() {
               )}
 
               {existingData && existingData.has_existing && (
-                <div className={`${htmlInsetPanelClassName} space-y-3 text-sm animate-fade-in transition-all`}>
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d]">
+                <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
+                      <div className="flex flex-col justify-between gap-3 border-b border-[color:var(--tv-border)] pb-3 md:flex-row md:items-center">
                         <div className="space-y-1">
-                          <p className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                            📂 기존 다운로드 시도 범위 감지됨
+                          <p className="text-body flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
+                            <FolderOpen className="h-4 w-4 text-[var(--tv-accent)]" />
+                            기존 다운로드 시도 범위 감지됨
                             {checkingExisting && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                              <span className="text-caption inline-flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
                                 <Loader2 className="h-3 w-3 animate-spin" />
                                 재확인 중
                               </span>
                             )}
                           </p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                          <p className="text-caption text-slate-500 dark:text-slate-400">
                             전체 범위: <span className="font-semibold">{existingData?.earliest_date}</span> ~ <span className="font-semibold">{existingData?.latest_date}</span>
                           </p>
                         </div>
@@ -696,7 +697,7 @@ export default function DownloadPage() {
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="h-8 shrink-0 self-start md:self-auto border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-[#21262d] dark:hover:text-slate-100"
+                          className="h-8 shrink-0 self-start border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] hover:text-[var(--tv-accent)] md:self-auto"
                           onClick={handleApplyUpdateRange}
                           disabled={
                             (existingData?.ranges?.some(r => r.status === "stale") ?? false) ||
@@ -711,9 +712,9 @@ export default function DownloadPage() {
                       <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                         {existingData?.ranges?.map((range, index) => {
                           const statusColors = {
-                            validated: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-900/40",
-                            stale: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-300 dark:border-rose-900/40",
-                            unverified: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
+                            validated: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up)]",
+                            stale: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down)]",
+                            unverified: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
                           };
                           const statusLabels = {
                             validated: "검증 완료: KIND 건수 일치",
@@ -728,18 +729,19 @@ export default function DownloadPage() {
                           return (
                             <div
                               key={index}
-                              className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded border dark:bg-[#0d1117] dark:border-[#30363d] gap-2 text-xs"
+                              className="text-caption flex flex-col justify-between gap-2 rounded border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 sm:flex-row sm:items-center"
                             >
                               <div className="space-y-0.5">
                                 <p className="font-medium text-slate-800 dark:text-slate-200">
                                   {range.folder_name} ({range.start_date} ~ {range.end_date})
                                 </p>
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                <p className="text-caption text-slate-500 dark:text-slate-400">
                                   로컬 건수: {range.local_count == null ? "-" : formatInteger(range.local_count)} | KIND 건수: {range.kind_count == null ? "-" : formatInteger(range.kind_count)}
                                 </p>
                                 {range.error_detail && (
-                                  <p className="text-[10px] text-rose-500 dark:text-rose-400 font-medium">
-                                    ⚠ {range.error_detail}
+                                  <p className="text-caption flex items-center gap-1 font-medium text-[var(--tv-down)]">
+                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                    {range.error_detail}
                                   </p>
                                 )}
                                 {range.metadata_missing && (
@@ -749,13 +751,13 @@ export default function DownloadPage() {
                                       e.stopPropagation();
                                       handleCreateMetadata(range);
                                     }}
-                                    className="mt-1.5 px-2 py-0.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded text-[10px] font-semibold transition-all dark:bg-blue-950/20 dark:text-blue-300 dark:border-blue-900/40 dark:hover:bg-blue-900/30"
+                                    className="text-caption mt-1.5 rounded border border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] px-2 py-0.5 font-semibold text-[var(--tv-accent)] transition-all"
                                   >
                                     현재 설정으로 메타데이터 작성
                                   </button>
                                 )}
                               </div>
-                              <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${statusColors[range.status]}`}>
+                              <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${statusColors[range.status]}`}>
                                 {statusLabels[range.status]}
                               </span>
                             </div>
@@ -765,17 +767,17 @@ export default function DownloadPage() {
 
                       {/* Warning message if stale ranges exist */}
                       {existingData?.ranges?.some(r => r.status === "stale") && (
-                        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                          <strong>⚠ 경고:</strong> 기존 다운로드한 데이터 중 일부가 KIND의 현재 검색 결과와 일치하지 않습니다 (데이터 변경/정정/누락 가능성). 
+                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down)]">
+                          <strong>경고:</strong> 기존 다운로드한 데이터 중 일부가 KIND의 현재 검색 결과와 일치하지 않습니다 (데이터 변경/정정/누락 가능성). 
                           무결성이 손상되었으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다. mismatch 폴더를 수동으로 검사/보완하거나 삭제 후 재실행해야 합니다.
                         </div>
                       )}
 
                       {/* Warning message if filters mismatch */}
                       {!filtersMatch && existingData?.saved_filters && (
-                        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                          <strong>⚠ 오류:</strong> 현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 폴더 내 데이터가 오염(mixed dataset)되는 것을 방지하기 위해 <strong>이어서 다운로드하기가 비활성화</strong>됩니다. 검색 필터를 메타데이터와 동일하게 일치시키거나 다른 경로를 선택해 주세요.
-                          <div className="mt-2 pl-3 border-l-2 border-rose-300 space-y-1 text-[11px] opacity-90">
+                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down)]">
+                          <strong>오류:</strong> 현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 폴더 내 데이터가 오염(mixed dataset)되는 것을 방지하기 위해 <strong>이어서 다운로드하기가 비활성화</strong>됩니다. 검색 필터를 메타데이터와 동일하게 일치시키거나 다른 경로를 선택해 주세요.
+                          <div className="mt-2 space-y-1 border-l-2 border-[color:var(--tv-down)] pl-3 opacity-90">
                             {existingData.saved_filters.company_name.trim() !== companyName.trim() && (
                               <p>• 회사명 불일치: (기존) &ldquo;{existingData.saved_filters.company_name}&rdquo; &harr; (현재) &ldquo;{companyName}&rdquo;</p>
                             )}
@@ -799,7 +801,7 @@ export default function DownloadPage() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="mt-3 h-8 border-rose-300 bg-white text-rose-800 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-900/30"
+                            className="mt-3 h-8 border-[color:var(--tv-down)] bg-[var(--tv-surface)] text-[var(--tv-down)]"
                             onClick={handleApplySavedFilters}
                           >
                             기존 메타데이터 기준으로 설정 맞추기
@@ -808,8 +810,9 @@ export default function DownloadPage() {
                       )}
 
                       {existingData?.ranges?.some(r => r.status === "unverified") && !hasCompletedCurrentInspection && (
-                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                          <strong>💡 알림:</strong> 일부 다운로드 범위는 {existingData.ranges?.some(r => r.metadata_obsolete) ? "workflow 메타데이터가 구버전입니다" : existingData.ranges?.some(r => r.metadata_missing) ? "workflow 메타데이터가 없습니다" : "아직 무결성 검사를 하지 않았습니다"}. 실행 또는 폴더 검사하기를 누르면 현재 검색 설정을 기준으로 무결성 검사와 메타데이터 보정을 진행합니다.
+                        <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                          <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
+                          <strong>알림:</strong> 일부 다운로드 범위는 {existingData.ranges?.some(r => r.metadata_obsolete) ? "workflow 메타데이터가 구버전입니다" : existingData.ranges?.some(r => r.metadata_missing) ? "workflow 메타데이터가 없습니다" : "아직 무결성 검사를 하지 않았습니다"}. 실행 또는 폴더 검사하기를 누르면 현재 검색 설정을 기준으로 무결성 검사와 메타데이터 보정을 진행합니다.
                         </div>
                       )}
                 </div>
@@ -818,29 +821,29 @@ export default function DownloadPage() {
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">시작일</Label>
-                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:[color-scheme:dark]" />
+                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={`${htmlControlClassName} dark:[color-scheme:dark]`} />
                 </div>
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">종료일</Label>
-                  <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:[color-scheme:dark]" />
+                  <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={`${htmlControlClassName} dark:[color-scheme:dark]`} />
                 </div>
               </div>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">회사명</Label>
-                  <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                  <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className={htmlControlClassName} />
                 </div>
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">제출인</Label>
-                  <Input value={submitterName} onChange={(e) => setSubmitterName(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                  <Input value={submitterName} onChange={(e) => setSubmitterName(e.target.value)} className={htmlControlClassName} />
                 </div>
               </div>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">시장</Label>
                   <Select value={marketLabel} onValueChange={setMarketLabel}>
-                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"><SelectValue /></SelectTrigger>
-                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
+                    <SelectTrigger className={htmlControlClassName}><SelectValue /></SelectTrigger>
+                    <SelectContent className={htmlSelectContentClassName}>
                       {options?.market_types.map(t => <SelectItem key={t.label} value={t.label}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -848,8 +851,8 @@ export default function DownloadPage() {
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">증권종류</Label>
                   <Select value={securitiesLabel} onValueChange={setSecuritiesLabel}>
-                    <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"><SelectValue /></SelectTrigger>
-                    <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
+                    <SelectTrigger className={htmlControlClassName}><SelectValue /></SelectTrigger>
+                    <SelectContent className={htmlSelectContentClassName}>
                       {options?.securities_types.map(t => <SelectItem key={t.label} value={t.label}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -858,20 +861,20 @@ export default function DownloadPage() {
             </CardContent>
           </Card>
 
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Disclosure Types</p>
+              <p className="text-caption font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Disclosure Types</p>
               <CardTitle className="dark:text-white">공시 종류</CardTitle>
               <CardDescription className="dark:text-slate-400">다운로드할 공시 종류를 선택하세요.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {options?.disclosure_groups.map((group) => (
-                <div key={group.suffix} className="border rounded-lg overflow-hidden dark:border-[#30363d]">
-                  <div className="bg-slate-50 dark:bg-[#0d1117] px-4 py-2 border-b dark:border-[#30363d] flex items-center justify-between gap-3">
+                <div key={group.suffix} className="overflow-hidden rounded-lg border border-[color:var(--tv-border)]">
+                  <div className="flex items-center justify-between gap-3 border-b border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-4 py-2">
                     <button
                       type="button"
                       onClick={() => toggleDisclosureGroup(group.suffix)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left font-semibold text-sm dark:text-slate-200"
+                      className="text-body flex min-w-0 flex-1 items-center gap-2 text-left font-semibold dark:text-slate-200"
                     >
                       {expandedDisclosureGroups[group.suffix] ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
                       <span className="truncate">{group.label} ({formatInteger(group.items.length)})</span>
@@ -880,7 +883,7 @@ export default function DownloadPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 text-xs dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-[#21262d]"
+                        className="text-caption h-7 text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
                         onClick={() => selectGroup(group.suffix, group.items)}
                       >
                         전체 선택
@@ -888,7 +891,7 @@ export default function DownloadPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 text-xs dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-[#21262d]"
+                        className="text-caption h-7 text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
                         onClick={() => clearGroup(group.suffix)}
                       >
                         전체 해제
@@ -903,11 +906,11 @@ export default function DownloadPage() {
                             id={`${group.suffix}-${item.code}`}
                             checked={selectedDisclosures[group.suffix]?.includes(item.code) || false}
                             onCheckedChange={() => toggleDisclosure(group.suffix, item.code)}
-                            className="dark:border-[#30363d]"
+                            className="border-[color:var(--tv-border)]"
                           />
                           <Label
                             htmlFor={`${group.suffix}-${item.code}`}
-                            className="text-xs cursor-pointer truncate dark:text-slate-400 dark:hover:text-slate-200"
+                            className="text-caption cursor-pointer truncate dark:text-slate-400 dark:hover:text-slate-200"
                             title={item.name}
                           >
                             {item.name}
@@ -921,7 +924,7 @@ export default function DownloadPage() {
             </CardContent>
           </Card>
 
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
             <CardHeader>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
@@ -948,8 +951,8 @@ export default function DownloadPage() {
           </Card>
         </section>
 
-        <div className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-40 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
-          <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-lg md:h-auto md:w-16 md:flex-col dark:border-[#30363d] dark:bg-[#161b22]">
+        <div className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-0 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
+          <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 shadow-[var(--tv-shadow)] md:h-auto md:w-16 md:flex-col">
             <Button
               variant="outline"
               size="icon"
@@ -960,14 +963,14 @@ export default function DownloadPage() {
               }}
               className={
                 activeJobId
-                  ? "relative h-10 w-10 border-blue-300 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-500/60 dark:bg-blue-500/15 dark:text-blue-200"
-                  : "relative h-10 w-10 border-slate-200 bg-white shadow-sm dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300"
+                  ? "relative h-10 w-10 border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)] shadow-sm"
+                  : "relative h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
               }
               title={downloadPanelOpen ? "실행 현황 닫기" : "실행 현황 열기"}
             >
               <Activity className="h-5 w-5" />
               {activeJobId && (
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500 dark:bg-blue-300" />
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-accent)]" />
               )}
             </Button>
 
@@ -981,14 +984,14 @@ export default function DownloadPage() {
               }}
               className={
                 lastInspectionCandidateCount > 0 || isErrorStatus
-                  ? "relative h-10 w-10 border-amber-300 bg-amber-50 text-amber-700 shadow-sm dark:border-amber-500/60 dark:bg-amber-500/15 dark:text-amber-200"
-                  : "relative h-10 w-10 border-slate-200 bg-white shadow-sm dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300"
+                  ? "relative h-10 w-10 border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)] shadow-sm"
+                  : "relative h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
               }
               title={notificationPanelOpen ? "알림 닫기" : "알림 열기"}
             >
               <Bell className="h-5 w-5" />
               {(lastInspectionCandidateCount > 0 || isErrorStatus) && (
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-300" />
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-warning)]" />
               )}
             </Button>
 
@@ -1002,8 +1005,8 @@ export default function DownloadPage() {
               }}
               className={
                 settingsPanelOpen
-                  ? "h-10 w-10 border-slate-400 bg-slate-100 text-slate-900 shadow-sm dark:border-slate-500 dark:bg-[#21262d] dark:text-slate-100"
-                  : "h-10 w-10 border-slate-200 bg-white shadow-sm dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-300"
+                  ? "h-10 w-10 border-[color:var(--tv-border-strong)] bg-[var(--tv-surface)] text-[var(--tv-text)] shadow-sm"
+                  : "h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
               }
               title={settingsPanelOpen ? "다운로드 설정 닫기" : "다운로드 설정 열기"}
             >
@@ -1012,7 +1015,7 @@ export default function DownloadPage() {
           </div>
 
           {notificationPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)] dark:bg-[#161b22] dark:border-[#30363d]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">알림</CardTitle>
@@ -1020,7 +1023,7 @@ export default function DownloadPage() {
                     variant="ghost"
                     size="icon"
                     onClick={() => setNotificationPanelOpen(false)}
-                    className="h-8 w-8 dark:hover:bg-[#21262d]"
+                    className="h-8 w-8 text-[var(--tv-text)] hover:text-[var(--tv-accent)]"
                     title="알림 닫기"
                   >
                     <X className="h-4 w-4" />
@@ -1036,13 +1039,13 @@ export default function DownloadPage() {
                 ) : null}
 
                 {lastInspectionCandidateCount > 0 && (
-                  <div className="space-y-4 border-t border-slate-200 pt-4 dark:border-[#30363d]">
-                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                  <div className="space-y-4 border-t border-[color:var(--tv-border)] pt-4">
+                    <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
                       삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Checkbox id="downloadDeleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="dark:border-[#30363d]" />
-                      <Label htmlFor="downloadDeleteConfirmed" className="cursor-pointer text-sm dark:text-slate-300">삭제 허가</Label>
+                      <Checkbox id="downloadDeleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="border-[color:var(--tv-border)]" />
+                      <Label htmlFor="downloadDeleteConfirmed" className="text-body cursor-pointer dark:text-slate-300">삭제 허가</Label>
                     </div>
                     <div className="space-y-2">
                       <Label className="dark:text-slate-300">확인 문구</Label>
@@ -1050,7 +1053,7 @@ export default function DownloadPage() {
                         value={deleteConfirmationText}
                         onChange={(e) => setDeleteConfirmationText(e.target.value)}
                         placeholder="확인했습니다."
-                        className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                        className={htmlControlClassName}
                       />
                     </div>
                     <Button
@@ -1071,14 +1074,14 @@ export default function DownloadPage() {
                 )}
 
                 {!isErrorStatus && lastInspectionCandidateCount === 0 && (
-                  <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
+                  <div className="text-body text-slate-500 dark:text-slate-400">알림 없음</div>
                 )}
               </CardContent>
             </Card>
           )}
 
           {settingsPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)] dark:bg-[#161b22] dark:border-[#30363d]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">다운로드 설정</CardTitle>
@@ -1086,7 +1089,7 @@ export default function DownloadPage() {
                     variant="ghost"
                     size="icon"
                     onClick={() => setSettingsPanelOpen(false)}
-                    className="h-8 w-8 dark:hover:bg-[#21262d]"
+                    className="h-8 w-8 text-[var(--tv-text)] hover:text-[var(--tv-accent)]"
                     title="다운로드 설정 닫기"
                   >
                     <X className="h-4 w-4" />
@@ -1095,58 +1098,58 @@ export default function DownloadPage() {
               </CardHeader>
               <CardContent className="space-y-5">
                 <div className="space-y-3">
-                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
+                  <div className="border-b border-[color:var(--tv-border)] pb-2">
+                    <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">페이지 크기</Label>
-                    <Input type="number" value={pageSize} onChange={(e) => setPageSize(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                    <Input type="number" value={pageSize} onChange={(e) => setPageSize(e.target.value)} className={htmlControlClassName} />
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">대기 시간 (초)</Label>
-                    <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                    <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className={htmlControlClassName} />
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">타임아웃 (초)</Label>
-                    <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                    <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className={htmlControlClassName} />
                   </div>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">작업 범위</p>
+                  <div className="border-b border-[color:var(--tv-border)] pb-2">
+                    <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">작업 범위</p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label className="dark:text-slate-300">시작 페이지</Label>
-                      <Input type="number" value={startPage} onChange={(e) => setStartPage(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                      <Input type="number" value={startPage} onChange={(e) => setStartPage(e.target.value)} className={htmlControlClassName} />
                     </div>
                     <div className="space-y-2">
                       <Label className="dark:text-slate-300">종료 페이지</Label>
-                      <Input type="number" placeholder="전체" value={endPage} onChange={(e) => setEndPage(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                      <Input type="number" placeholder="전체" value={endPage} onChange={(e) => setEndPage(e.target.value)} className={htmlControlClassName} />
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="lastReportOnly" checked={lastReportOnly} onCheckedChange={(v) => setLastReportOnly(!!v)} className="dark:border-[#30363d]" />
+                    <Checkbox id="lastReportOnly" checked={lastReportOnly} onCheckedChange={(v) => setLastReportOnly(!!v)} className="border-[color:var(--tv-border)]" />
                     <Label htmlFor="lastReportOnly" className="cursor-pointer dark:text-slate-300">최종보고서만</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="resumeYearly" checked={resumeYearly} onCheckedChange={(v) => setResumeYearly(!!v)} className="dark:border-[#30363d]" />
+                    <Checkbox id="resumeYearly" checked={resumeYearly} onCheckedChange={(v) => setResumeYearly(!!v)} className="border-[color:var(--tv-border)]" />
                     <Label htmlFor="resumeYearly" className="cursor-pointer dark:text-slate-300">연간 작업 재개</Label>
                   </div>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+                  <div className="border-b border-[color:var(--tv-border)] pb-2">
+                    <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">워커 수</Label>
-                    <Input type="number" value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                    <Input type="number" value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className={htmlControlClassName} />
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">로그 줄 수</Label>
-                    <Input type="number" value={logLimit} onChange={(e) => setLogLimit(e.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                    <Input type="number" value={logLimit} onChange={(e) => setLogLimit(e.target.value)} className={htmlControlClassName} />
                   </div>
                 </div>
               </CardContent>
@@ -1154,7 +1157,7 @@ export default function DownloadPage() {
           )}
 
           {downloadPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)] dark:bg-[#161b22] dark:border-[#30363d]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-xl md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">실행 현황</CardTitle>
@@ -1162,7 +1165,7 @@ export default function DownloadPage() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setDownloadPanelOpen(false)}
-                  className="h-8 w-8 dark:hover:bg-[#21262d]"
+                  className="h-8 w-8 text-[var(--tv-text)] hover:text-[var(--tv-accent)]"
                   title="실행 현황 닫기"
                 >
                   <X className="h-4 w-4" />
@@ -1178,9 +1181,9 @@ export default function DownloadPage() {
               />
 
               {result && (
-                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#30363d]">
+                <div className="space-y-2 border-t border-[color:var(--tv-border)] pt-4">
                   <Label className="dark:text-slate-300">실행 결과</Label>
-                  <pre className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#090d12] dark:text-blue-100">
+                  <pre className="text-caption max-h-72 overflow-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-[var(--tv-text)]">
                     {JSON.stringify(result, null, 2)}
                   </pre>
                 </div>

@@ -4,10 +4,10 @@ import { useMemo, useState } from "react";
 import { FolderTree, Loader2, Play } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
+import { JobStatusLogger } from "@finiq/web-app";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { ActionDock } from "@/components/ui/ActionDock";
+import { ActionDock } from "@finiq/web-app";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
-import { ActionDock } from "@/components/ui/ActionDock";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
+import { ActionDock } from "@finiq/web-app";
+import { JobStatusLogger } from "@finiq/web-app";
 import {
   HtmlWorkflowCard,
   HtmlWorkflowForm,

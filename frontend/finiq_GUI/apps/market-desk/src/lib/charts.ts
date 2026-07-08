@@ -6,6 +6,15 @@ const DEFAULT_TIME_SCALE_HEIGHT = 28;
 const DEFAULT_PADDING = 12;
 const DEFAULT_GRID_LINES = 5;
 const DEFAULT_TIME_TICKS = 6;
+const TV_CHART_COLORS = {
+  accent: "#2962ff",
+  axis: "#787b86",
+  grid: "#d1d4dc",
+  ink: "#131722",
+  up: "#22ab94",
+  down: "#f23645",
+  white: "#ffffff",
+};
 
 export const BarSeries = "BarSeries" as const;
 export const CandlestickSeries = "CandlestickSeries" as const;
@@ -25,7 +34,7 @@ function toNumber(value: any, fallback = 0) {
 
 function alphaColor(color: string, alphaHex: string) {
   if (typeof color !== "string") {
-    return "#94a3b866";
+    return `${TV_CHART_COLORS.axis}66`;
   }
   if (color.startsWith("#") && color.length === 7) {
     return `${color}${alphaHex}`;
@@ -689,7 +698,7 @@ export class ChartApi {
     const volumeSeries = this.getVolumeSeries();
 
     ctx.clearRect(0, 0, this.width, this.height);
-    ctx.fillStyle = this.options.layout?.background?.color || "#ffffff";
+    ctx.fillStyle = this.options.layout?.background?.color || TV_CHART_COLORS.white;
     ctx.fillRect(0, 0, this.width, this.height);
 
     this.drawGrid(ctx, layout, priceSeries);
@@ -710,7 +719,7 @@ export class ChartApi {
     const verticalCount: number = DEFAULT_TIME_TICKS;
     const horizontalCount: number = DEFAULT_GRID_LINES;
     ctx.save();
-    ctx.strokeStyle = this.options.grid?.horzLines?.color || "#e8e8e8";
+    ctx.strokeStyle = this.options.grid?.horzLines?.color || TV_CHART_COLORS.grid;
     ctx.lineWidth = 1;
 
     for (let i = 0; i < horizontalCount; i += 1) {
@@ -722,7 +731,7 @@ export class ChartApi {
       ctx.stroke();
     }
 
-    ctx.strokeStyle = this.options.grid?.vertLines?.color || "#efefef";
+    ctx.strokeStyle = this.options.grid?.vertLines?.color || TV_CHART_COLORS.grid;
     for (let i = 0; i < verticalCount; i += 1) {
       const ratio = verticalCount === 1 ? 0 : i / (verticalCount - 1);
       const x = layout.plotLeft + (layout.plotRight - layout.plotLeft) * ratio;
@@ -732,7 +741,7 @@ export class ChartApi {
       ctx.stroke();
     }
 
-    ctx.fillStyle = this.options.layout?.textColor || "#6b7280";
+    ctx.fillStyle = this.options.layout?.textColor || TV_CHART_COLORS.axis;
     ctx.font = "12px 'IBM Plex Sans KR', sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -751,7 +760,7 @@ export class ChartApi {
       return;
     }
     ctx.save();
-    ctx.fillStyle = this.options.layout?.textColor || "#6b7280";
+    ctx.fillStyle = this.options.layout?.textColor || TV_CHART_COLORS.axis;
     ctx.font = "12px 'IBM Plex Sans KR', sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -786,14 +795,14 @@ export class ChartApi {
     const tickCount: number = 2;
 
     ctx.save();
-    ctx.strokeStyle = this.options.grid?.horzLines?.color || "#e8e8e8";
+    ctx.strokeStyle = this.options.grid?.horzLines?.color || TV_CHART_COLORS.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(layout.plotLeft, volumeRect.top);
     ctx.lineTo(layout.plotRight, volumeRect.top);
     ctx.stroke();
 
-    ctx.fillStyle = this.options.layout?.textColor || "#6b7280";
+    ctx.fillStyle = this.options.layout?.textColor || TV_CHART_COLORS.axis;
     ctx.font = "12px 'IBM Plex Sans KR', sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -838,8 +847,8 @@ export class ChartApi {
       const closeY = this.priceToY(item.close, priceRange, priceRect);
       const isUp = item.close >= item.open;
       const stroke = isUp
-        ? (priceSeries.options.upColor || "#22ab94")
-        : (priceSeries.options.downColor || "#f23645");
+        ? (priceSeries.options.upColor || TV_CHART_COLORS.up)
+        : (priceSeries.options.downColor || TV_CHART_COLORS.down);
 
       if (priceSeries.type === CandlestickSeries) {
         const bodyWidth = clamp(step * 0.62, 4, 16);
@@ -892,7 +901,7 @@ export class ChartApi {
     ctx.rect(layout.plotLeft, priceRect.top, layout.plotRight - layout.plotLeft, priceRect.height);
     ctx.clip();
     ctx.lineWidth = toNumber(priceSeries.options.lineWidth, 2);
-    ctx.strokeStyle = priceSeries.options.color || "#2563eb";
+    ctx.strokeStyle = priceSeries.options.color || TV_CHART_COLORS.accent;
     ctx.beginPath();
     data.slice(visibleIndexes.startIndex, visibleIndexes.endIndex + 1).forEach((item, offset) => {
       const index = visibleIndexes.startIndex + offset;
@@ -928,7 +937,7 @@ export class ChartApi {
       const x = this.getX(index, data.length, layout);
       const height = (toNumber(item.value, 0) / Math.max(volumeRange.max, 1)) * volumeRect.height;
       const top = volumeRect.bottom - height;
-      ctx.fillStyle = item.color || alphaColor("#94a3b8", "66");
+      ctx.fillStyle = item.color || alphaColor(TV_CHART_COLORS.axis, "66");
       ctx.fillRect(x - barWidth / 2, top, barWidth, height);
     });
     ctx.restore();
@@ -984,8 +993,8 @@ export class ChartApi {
         y = clamp(y, priceRect.top + 6, priceRect.bottom - 6);
 
         const markerSize = clamp(toNumber(marker.size, 4), 2, 14);
-        ctx.fillStyle = marker.color || "#94a3b8";
-        ctx.strokeStyle = marker.color || "#94a3b8";
+        ctx.fillStyle = marker.color || TV_CHART_COLORS.axis;
+        ctx.strokeStyle = marker.color || TV_CHART_COLORS.axis;
         ctx.lineWidth = clamp(toNumber(marker.lineWidth, 1), 1, 6);
         if (marker.shape === "circle") {
           ctx.beginPath();
@@ -1014,7 +1023,7 @@ export class ChartApi {
         }
 
         if (marker.text) {
-          ctx.fillStyle = marker.color || "#94a3b8";
+          ctx.fillStyle = marker.color || TV_CHART_COLORS.axis;
           ctx.fillText(String(marker.text), x, y - markerSize - 8);
         }
       });
@@ -1038,7 +1047,7 @@ export class ChartApi {
     const priceLabel = this.yToPrice(y, priceRange, priceRect);
 
     ctx.save();
-    ctx.strokeStyle = "#94a3b8";
+    ctx.strokeStyle = TV_CHART_COLORS.axis;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -1054,18 +1063,18 @@ export class ChartApi {
 
     const priceText = Math.round(priceLabel).toLocaleString("ko-KR");
     const priceBoxWidth = ctx.measureText(priceText).width + 14;
-    ctx.fillStyle = "#0f172a";
+    ctx.fillStyle = TV_CHART_COLORS.ink;
     ctx.fillRect(this.width - priceBoxWidth - 6, y - 10, priceBoxWidth, 20);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = TV_CHART_COLORS.white;
     ctx.textAlign = "center";
     ctx.fillText(priceText, this.width - priceBoxWidth / 2 - 6, y);
 
     const timeText = String(label);
     const timeBoxWidth = ctx.measureText(timeText).width + 14;
     const timeX = clamp(x - timeBoxWidth / 2, 6, this.width - timeBoxWidth - 6);
-    ctx.fillStyle = "#0f172a";
+    ctx.fillStyle = TV_CHART_COLORS.ink;
     ctx.fillRect(timeX, layout.timeScaleTop + 4, timeBoxWidth, 20);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = TV_CHART_COLORS.white;
     ctx.fillText(timeText, timeX + timeBoxWidth / 2, layout.timeScaleTop + 14);
     ctx.restore();
   }

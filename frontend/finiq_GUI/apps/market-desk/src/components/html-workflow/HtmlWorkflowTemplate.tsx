@@ -5,16 +5,16 @@ import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { WorkflowSidebar } from "@/components/layout/WorkflowSidebar";
+import { WorkflowSidebar } from "@finiq/web-app";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { getSidebarDefinition, type WorkflowId } from "@/config/navigation";
 
-export const htmlControlClassName = "h-10 text-sm dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:placeholder:text-slate-600";
+export const htmlControlClassName = "text-body h-10 border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)] placeholder:text-[var(--tv-subtle)]";
 export const htmlSelectTriggerClassName = htmlControlClassName;
-export const htmlSelectContentClassName = "dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200";
-export const htmlPageNoticeClassName = "rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:bg-[#161b22] dark:border-[#30363d]";
-export const htmlInsetPanelClassName = "rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-[#30363d] dark:bg-[#161b22]";
-export const htmlTableFrameClassName = "max-h-80 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]";
+export const htmlSelectContentClassName = "border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)]";
+export const htmlPageNoticeClassName = "rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4";
+export const htmlInsetPanelClassName = "rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4";
+export const htmlTableFrameClassName = "max-h-80 overflow-auto rounded-md border border-[color:var(--tv-border)]";
 
 type HtmlWorkflowPageProps = {
   workflowId?: WorkflowId;
@@ -156,14 +156,14 @@ export function HtmlWorkflowCard({
   footer,
 }: HtmlWorkflowCardProps) {
   return (
-    <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+    <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
       <CardHeader className={cn(
         "flex flex-col md:flex-row md:items-start md:justify-between md:space-y-0",
         description ? "gap-3 pb-4" : "gap-0"
       )}>
         <div className="min-w-0 space-y-1">
-          <CardTitle className="dark:text-white">{title}</CardTitle>
-          {description ? <CardDescription className="dark:text-slate-400">{description}</CardDescription> : null}
+          <CardTitle className="text-title text-[var(--tv-text)]">{title}</CardTitle>
+          {description ? <CardDescription className="text-body text-[var(--tv-muted)]">{description}</CardDescription> : null}
         </div>
         {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
       </CardHeader>
@@ -200,9 +200,9 @@ export function HtmlField({
         className
       )}
     >
-      <Label className="text-slate-600 dark:text-slate-300">{label}</Label>
+      <Label className="text-body text-[var(--tv-text)]">{label}</Label>
       {children}
-      {help ? <p className="text-xs leading-5 text-slate-500 dark:text-slate-500">{help}</p> : null}
+      {help ? <p className="text-caption text-[var(--tv-muted)]">{help}</p> : null}
     </div>
   );
 }
@@ -213,12 +213,12 @@ export function HtmlStepGuide({ items }: HtmlStepGuideProps) {
       {items.map((item) => {
         const Icon = item.icon;
         return (
-          <div key={item.title} className="rounded-lg border border-slate-200 bg-white p-4 dark:bg-[#161b22] dark:border-[#30363d]">
-            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-slate-100 text-slate-700 dark:bg-[#21262d] dark:text-slate-200">
+          <div key={item.title} className="rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4">
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md border border-[color:var(--tv-border)] text-[var(--tv-accent)]">
               <Icon className="h-4 w-4" />
             </div>
-            <h2 className="text-sm font-bold text-slate-950 dark:text-white">{item.title}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{item.description}</p>
+            <h2 className="text-body font-bold text-[var(--tv-text)]">{item.title}</h2>
+            <p className="text-body mt-2 text-[var(--tv-muted)]">{item.description}</p>
           </div>
         );
       })}
@@ -267,7 +267,7 @@ function HtmlWorkflowFieldControl({ field }: { field: HtmlWorkflowField }) {
           field.className
         )}
       >
-        <Checkbox id={field.id} checked={field.checked} onCheckedChange={(value) => field.onChange(!!value)} className="dark:border-[#30363d]" />
+        <Checkbox id={field.id} checked={field.checked} onCheckedChange={(value) => field.onChange(!!value)} className="border-[color:var(--tv-border)]" />
         <Label htmlFor={field.id} className="cursor-pointer dark:text-slate-300">{field.checkboxLabel}</Label>
       </div>
     );

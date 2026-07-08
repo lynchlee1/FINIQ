@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-const componentPath = path.resolve("frontend/finiq_GUI/apps/market-desk/src/components/ui/ActionDock.tsx");
+const componentPath = path.resolve("frontend/finiq_GUI/packages/web-app/src/components/ui/ActionDock.tsx");
 
 test("action dock notification panel can clear accumulated notifications", async () => {
   const source = await readFile(componentPath, "utf8");

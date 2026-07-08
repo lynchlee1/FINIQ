@@ -1,0 +1,19 @@
+{
+  "name": "@finiq/web-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "types": "./src/index.tsx",
+  "dependencies": {
+    "@finiq/ui": "0.1.0",
+    "lucide-react": "^1.16.0",
+    "next": "^16.3.0-canary.6"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

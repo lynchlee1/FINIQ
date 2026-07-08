@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Loader2, Info, ExternalLink, FileText } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
+import { JobStatusLogger } from "@finiq/web-app";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { PageLoadingSpinner } from "@finiq/web-app";
 import {
   HtmlSearchInput,
   HtmlWorkflowForm,
@@ -14,7 +14,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { ActionDock } from "@/components/ui/ActionDock";
+import { ActionDock } from "@finiq/web-app";
 import { formatInteger } from "@/lib/format";
 
 export default function HtmlBondSummaryPage() {
