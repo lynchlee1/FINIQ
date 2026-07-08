@@ -3,9 +3,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { Loader2, FileSpreadsheet } from "lucide-react";
 import { Button, Label, Checkbox } from "@finiq/ui";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
+import { JobStatusLogger } from "@finiq/web-app";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { PageLoadingSpinner } from "@finiq/web-app";
 import { ChangeLogSidebar } from "@/components/html-change-log/ChangeLogSidebar";
 import { ChangeLogMatrix } from "@/components/html-change-log/ChangeLogMatrix";
 import { getChangedFields } from "@/utils/matrixUtils";
@@ -16,7 +16,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { ActionDock } from "@/components/ui/ActionDock";
+import { ActionDock } from "@finiq/web-app";
 import { formatInteger } from "@/lib/format";
 
 const PARSE_MODES = [

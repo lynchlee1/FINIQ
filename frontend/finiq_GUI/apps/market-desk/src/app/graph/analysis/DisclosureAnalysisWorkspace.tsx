@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { FileText, Loader2, Search } from "lucide-react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { apiGet, apiPost } from "@/api/client";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { PageLoadingSpinner } from "@finiq/web-app";
 import { formatInteger } from "@/lib/format";
 
 type OntologyCompany = {
@@ -379,7 +379,7 @@ export function DisclosureAnalysisWorkspace() {
                     <div className="ontology-panel ontology-panel-section space-y-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">1. 실행 대상</h3>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Triple Barrier 라벨을 계산할 종목을 먼저 고릅니다.</p>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Triple Barrier 라벨을 계산할 종목을 먼저 고릅니다.</p>
                       </div>
                       <div className="ontology-form-grid lg:grid-cols-[minmax(220px,1fr)_auto_minmax(220px,0.8fr)]">
                         <div className="ontology-form-field">
@@ -418,7 +418,7 @@ export function DisclosureAnalysisWorkspace() {
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">2. 공시 범위</h3>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">분류와 개별 이벤트를 같은 흐름에서 좁힙니다.</p>
+                          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">분류와 개별 이벤트를 같은 흐름에서 좁힙니다.</p>
                         </div>
                         <p className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
                           선택 {formatInteger(selectedDisclosureIds.length)}건
@@ -464,7 +464,7 @@ export function DisclosureAnalysisWorkspace() {
                     <div className="ontology-panel ontology-panel-section space-y-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">3. Triple Barrier 설정</h3>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">이벤트 기준, 가격 판정 방식, barrier 값을 한 번에 확인한 뒤 실행합니다.</p>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">이벤트 기준, 가격 판정 방식, barrier 값을 한 번에 확인한 뒤 실행합니다.</p>
                       </div>
                       <div className="ontology-form-grid md:grid-cols-2 xl:grid-cols-[minmax(140px,1fr)_minmax(170px,1fr)_120px_120px_140px_minmax(160px,0.8fr)]">
                         <label className="ontology-form-field text-sm">
@@ -513,7 +513,7 @@ export function DisclosureAnalysisWorkspace() {
                     <div className="space-y-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">저장 결과 조회</h3>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                           {selectedResultCompany
                             ? `${selectedResultCompany.company_name} (${selectedResultCompany.stock_code}) 저장 결과를 표시합니다.`
                             : "결과 조회용 종목을 검색하고 선택하면 저장된 Triple Barrier 결과를 확인합니다."}

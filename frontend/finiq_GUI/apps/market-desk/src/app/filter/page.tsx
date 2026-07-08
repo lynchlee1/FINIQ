@@ -6,11 +6,11 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { cn } from "@finiq/ui/utils";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
+import { JobStatusLogger } from "@finiq/web-app";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobStreaming } from "@/hooks/useJobStreaming";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
-import { ActionDock } from "@/components/ui/ActionDock";
+import { PageLoadingSpinner } from "@finiq/web-app";
+import { ActionDock } from "@finiq/web-app";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { apiPost } from "@/api/client";

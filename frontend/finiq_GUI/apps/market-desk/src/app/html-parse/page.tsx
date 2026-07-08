@@ -4,11 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import { ExternalLink, Eye, Loader2, Play, Square } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
+import { JobStatusLogger } from "@finiq/web-app";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { PageLoadingSpinner } from "@finiq/web-app";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { ActionDock } from "@/components/ui/ActionDock";
+import { ActionDock } from "@finiq/web-app";
 import {
   DisclosureFilterCandidateCard,
   type DisclosureFilterCandidate,

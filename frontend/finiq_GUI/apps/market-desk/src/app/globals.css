@@ -2,77 +2,111 @@
 @import "@finiq/theme/base.css";
 
 @source "../../../../packages/ui/src/**/*.tsx";
+@source "../../../../packages/web-app/src/**/*.tsx";
 
 @theme {
-  --font-sans: var(--font-geist-sans), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), "SFMono-Regular", Consolas, monospace;
+  --font-sans: var(--font-inter), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: var(--font-inter), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
 
-  --color-primary: #0f172a;
-  --color-primary-foreground: var(--color-slate-50);
+  --color-primary: var(--tv-accent);
+  --color-primary-foreground: #ffffff;
   
-  --color-secondary: var(--color-slate-100);
-  --color-secondary-foreground: var(--color-slate-900);
+  --color-secondary: var(--tv-surface-muted);
+  --color-secondary-foreground: var(--tv-text);
 
-  --color-accent: var(--color-slate-100);
-  --color-accent-foreground: var(--color-slate-900);
+  --color-accent: var(--tv-accent-soft);
+  --color-accent-foreground: var(--tv-accent);
 
-  --color-destructive: var(--color-red-600);
-  --color-destructive-foreground: var(--color-slate-50);
+  --color-destructive: var(--tv-down);
+  --color-destructive-foreground: #ffffff;
 
-  --color-muted: var(--color-slate-100);
-  --color-muted-foreground: var(--color-slate-500);
+  --color-muted: var(--tv-surface-muted);
+  --color-muted-foreground: var(--tv-muted);
 
-  --color-card: var(--color-white);
-  --color-card-foreground: var(--color-slate-900);
+  --color-card: var(--tv-surface);
+  --color-card-foreground: var(--tv-text);
 
-  --color-popover: var(--color-white);
-  --color-popover-foreground: var(--color-slate-900);
+  --color-popover: var(--tv-surface);
+  --color-popover-foreground: var(--tv-text);
 
-  --color-border: var(--color-slate-200);
-  --color-input: var(--color-slate-200);
-  --color-ring: var(--color-slate-900);
+  --color-border: var(--tv-border);
+  --color-input: var(--tv-border);
+  --color-ring: var(--tv-accent);
 }
 
 :root {
-  --background: #f4f7fb;
-  --foreground: #0f172a;
-  --ontology-surface: #ffffff;
-  --ontology-panel: #f8fafc;
-  --ontology-control: #ffffff;
-  --ontology-border: #dbe4ef;
-  --ontology-text: #0f172a;
-  --ontology-muted: #5f6f84;
-  --ontology-shadow: 0 18px 45px -34px rgb(15 23 42 / 0.55);
+  --tv-bg: #f0f3fa;
+  --tv-surface: #ffffff;
+  --tv-surface-muted: #f8f9fd;
+  --tv-surface-raised: #ffffff;
+  --tv-control: #ffffff;
+  --tv-border: #d1d4dc;
+  --tv-border-strong: #b2b5be;
+  --tv-text: #131722;
+  --tv-muted: #787b86;
+  --tv-subtle: #b2b5be;
+  --tv-accent: #2962ff;
+  --tv-accent-hover: #1e53e5;
+  --tv-accent-soft: rgba(41, 98, 255, 0.1);
+  --tv-up: #22ab94;
+  --tv-up-soft: rgba(34, 171, 148, 0.12);
+  --tv-down: #f23645;
+  --tv-down-soft: rgba(242, 54, 69, 0.12);
+  --tv-warning: #ff9800;
+  --tv-warning-soft: rgba(255, 152, 0, 0.14);
+  --tv-shadow: 0 18px 45px -34px rgb(19 23 34 / 0.45);
+  --font-size-caption: 0.75rem;
+  --font-size-body: 0.875rem;
+  --font-size-title: 1rem;
+  --font-size-page-title: 1.25rem;
+  --background: var(--tv-bg);
+  --foreground: var(--tv-text);
+  --ontology-surface: var(--tv-surface);
+  --ontology-panel: var(--tv-surface-muted);
+  --ontology-control: var(--tv-control);
+  --ontology-border: var(--tv-border);
+  --ontology-text: var(--tv-text);
+  --ontology-muted: var(--tv-muted);
+  --ontology-shadow: var(--tv-shadow);
   color-scheme: light;
   background-color: var(--background) !important;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 :root.dark {
-  --background: #0b1120;
-  --foreground: #e5edf7;
-  --ontology-surface: #111827;
-  --ontology-panel: #0b1220;
-  --ontology-control: #0f172a;
-  --ontology-border: #243244;
-  --ontology-text: #e5edf7;
-  --ontology-muted: #94a3b8;
-  --ontology-shadow: 0 20px 55px -36px rgb(0 0 0 / 0.85);
-  --color-card: #111827;
-  --color-card-foreground: #e5edf7;
-  --color-border: #243244;
-  --color-input: #243244;
-  --color-muted: #1e293b;
-  --color-muted-foreground: #94a3b8;
-  --color-primary: #dbeafe;
-  --color-primary-foreground: #0f172a;
-  --color-secondary: #1e293b;
-  --color-secondary-foreground: #e5edf7;
-  --color-accent: #1e293b;
-  --color-accent-foreground: #e5edf7;
-  --color-popover: #111827;
-  --color-popover-foreground: #e5edf7;
-  --color-ring: #93c5fd;
+  --tv-bg: #131722;
+  --tv-surface: #1e222d;
+  --tv-surface-muted: #171b26;
+  --tv-surface-raised: #2a2e39;
+  --tv-control: #131722;
+  --tv-border: #363a45;
+  --tv-border-strong: #434651;
+  --tv-text: #d1d4dc;
+  --tv-muted: #b2b5be;
+  --tv-subtle: #787b86;
+  --tv-accent: #2962ff;
+  --tv-accent-hover: #3f74ff;
+  --tv-accent-soft: rgba(41, 98, 255, 0.18);
+  --tv-up: #22ab94;
+  --tv-up-soft: rgba(34, 171, 148, 0.18);
+  --tv-down: #f23645;
+  --tv-down-soft: rgba(242, 54, 69, 0.18);
+  --tv-warning: #ff9800;
+  --tv-warning-soft: rgba(255, 152, 0, 0.18);
+  --tv-shadow: 0 20px 55px -36px rgb(0 0 0 / 0.9);
+  --font-size-caption: 0.75rem;
+  --font-size-body: 0.875rem;
+  --font-size-title: 1rem;
+  --font-size-page-title: 1.25rem;
+  --background: var(--tv-bg);
+  --foreground: var(--tv-text);
+  --ontology-surface: var(--tv-surface);
+  --ontology-panel: var(--tv-surface-muted);
+  --ontology-control: var(--tv-control);
+  --ontology-border: var(--tv-border);
+  --ontology-text: var(--tv-text);
+  --ontology-muted: var(--tv-muted);
+  --ontology-shadow: var(--tv-shadow);
   color-scheme: dark;
 }
 
@@ -237,6 +271,26 @@ html, body {
 /* Ensure Tailwind dark utilities work with .dark class on html */
 @custom-variant dark (&:where(.dark, .dark *));
 
+.text-caption {
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+}
+
+.text-body {
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+}
+
+.text-title {
+  font-size: var(--font-size-title);
+  line-height: 1.35;
+}
+
+.text-page-title {
+  font-size: var(--font-size-page-title);
+  line-height: 1.2;
+}
+
 @media (min-width: 768px) {
   .action-dock-host {
     display: grid;
@@ -255,7 +309,7 @@ html, body {
     align-self: start;
     margin-top: 0 !important;
     position: sticky;
-    top: 7rem;
+    top: 0;
   }
 }
 

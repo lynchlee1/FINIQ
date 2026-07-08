@@ -1,12 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { FolderOpen, FileJson, Play, Square, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, FileJson, FolderOpen, Info, Play, Square, Loader2, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
-import { JobStatusLogger } from "@/components/ui/JobStatusLogger";
+import { JobStatusLogger } from "@finiq/web-app";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { PageLoadingSpinner } from "@/components/ui/PageLoadingSpinner";
+import { PageLoadingSpinner } from "@finiq/web-app";
 import {
   HtmlWorkflowForm,
   HtmlWorkflowCard,
@@ -15,7 +15,7 @@ import {
   htmlInsetPanelClassName,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { ActionDock } from "@/components/ui/ActionDock";
+import { ActionDock } from "@finiq/web-app";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 
@@ -753,24 +753,24 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const existingStatus = existingData ? (() => {
     if (existingSplitMismatch) {
       return {
-        className: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-300 dark:border-rose-900/40",
+        className: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down)]",
         label: "분할저장 설정 불일치",
       };
     }
     if ((existingData.deletion_candidate_count || 0) > 0) {
       return {
-        className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
+        className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
         label: "폴더 검사 필요",
       };
     }
     if (existingAllSaved) {
       return {
-        className: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-900/40",
+        className: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up)]",
         label: "모두 저장됨",
       };
     }
     return {
-      className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40",
+      className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
       label: "신규 저장 대상 있음",
     };
   })() : null;
@@ -799,7 +799,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           ? "저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다."
           : variantConfig.description}
       actions={variant === "external" ? (
-        <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+        <div className="inline-flex rounded-md border border-[color:var(--tv-border)] p-1">
           <Button
             type="button"
             variant={externalTaskMode === "download" ? "default" : "ghost"}
@@ -822,7 +822,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           </Button>
         </div>
       ) : variant === "content" ? (
-        <div className="inline-flex rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+        <div className="inline-flex rounded-md border border-[color:var(--tv-border)] p-1">
           <Button
             type="button"
             variant={contentTaskMode === "download" ? "default" : "ghost"}
@@ -852,7 +852,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             <HtmlWorkflowCard
               title="데이터 경로"
               actions={variant === "content" ? (
-                <div className="inline-flex gap-1 rounded-md border border-slate-200 p-1 dark:border-[#30363d]">
+                <div className="inline-flex gap-1 rounded-md border border-[color:var(--tv-border)] p-1">
                   <Button
                     type="button"
                     variant={contentSourceInputMode === "folder" ? "default" : "ghost"}
@@ -878,36 +878,37 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             >
               <HtmlWorkflowForm fields={basePathFields} />
             {checkingExisting && !existingData && (
-              <div className={`${htmlInsetPanelClassName} text-sm`}>
+              <div className={`${htmlInsetPanelClassName} text-body`}>
                 <div className="flex items-start gap-3">
                   <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
                   <div className="space-y-1">
                     <p className="font-semibold text-slate-900 dark:text-slate-100">기존 원문 데이터 경로 자동 병렬 확인 중...</p>
-                    <p className="break-all text-xs text-slate-500 dark:text-slate-400">{outputDirectory}</p>
+                    <p className="text-caption break-all text-slate-500 dark:text-slate-400">{outputDirectory}</p>
                   </div>
                 </div>
               </div>
             )}
             {existingCheckError && !existingData && !checkingExisting && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+              <div className="text-body rounded-lg border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-4 text-[var(--tv-warning)]">
                 <p className="font-semibold">기존 원문 데이터 경로 재확인 실패</p>
-                <p className="mt-1 break-words text-xs">{existingCheckError}</p>
+                <p className="text-caption mt-1 break-words">{existingCheckError}</p>
               </div>
             )}
             {existingData && (
-              <div className={`${htmlInsetPanelClassName} space-y-3 text-sm animate-fade-in transition-all`}>
-                <div className="flex flex-col gap-3 border-b border-slate-200 pb-3 dark:border-[#30363d] md:flex-row md:items-center md:justify-between">
+              <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
+                <div className="flex flex-col gap-3 border-b border-[color:var(--tv-border)] pb-3 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
-                    <p className="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
-                      📂 기존 원문 저장 범위 감지됨
+                    <p className="text-body flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
+                      <FolderOpen className="h-4 w-4 text-[var(--tv-accent)]" />
+                      기존 원문 저장 범위 감지됨
                       {checkingExisting && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                        <span className="text-caption inline-flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
                           <Loader2 className="h-3 w-3 animate-spin" />
                           재확인 중
                         </span>
                       )}
                     </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <p className="text-caption text-slate-500 dark:text-slate-400">
                       저장됨: <span className="font-semibold">{formatInteger(existingData.existing_target_html_count || 0)}</span>건
                       {" "} / 대상: <span className="font-semibold">{formatInteger(existingData.requested_count || 0)}</span>건
                       {" "} / 신규 저장: <span className="font-semibold">{formatInteger(existingData.missing_target_html_count || 0)}</span>건
@@ -920,7 +921,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="h-8 shrink-0 self-start border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-[#21262d] dark:hover:text-slate-100 md:self-auto"
+                        className="h-8 shrink-0 self-start border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] hover:text-[var(--tv-accent)] md:self-auto"
                         onClick={handleInspectFolder}
                         disabled={isJobActive || inspectRunning}
                       >
@@ -931,13 +932,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex flex-col justify-between gap-2 rounded border p-2 text-xs dark:border-[#30363d] dark:bg-[#0d1117] sm:flex-row sm:items-center">
+                  <div className="text-caption flex flex-col justify-between gap-2 rounded border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 sm:flex-row sm:items-center">
                     <div className="space-y-0.5">
                       <p className="font-medium text-slate-800 dark:text-slate-200">{existingSummary}</p>
-                      <p className="break-all text-[10px] text-slate-500 dark:text-slate-400">{outputDirectory}</p>
+                      <p className="text-caption break-all text-slate-500 dark:text-slate-400">{outputDirectory}</p>
                     </div>
                     {existingStatus && (
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${existingStatus.className}`}>
+                      <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${existingStatus.className}`}>
                         {existingStatus.label}
                       </span>
                     )}
@@ -945,20 +946,23 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 </div>
 
                 {existingSplitMismatch && (
-                  <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                    <strong>⚠ 오류:</strong> 분할저장 설정이 기존 폴더 구조와 다릅니다. 폴더 내 데이터가 섞이지 않도록 데이터 경로의 분할저장 On/Off를 맞춘 뒤 실행하세요.
+                  <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down)]">
+                    <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
+                    <strong>오류:</strong> 분할저장 설정이 기존 폴더 구조와 다릅니다. 폴더 내 데이터가 섞이지 않도록 데이터 경로의 분할저장 On/Off를 맞춘 뒤 실행하세요.
                   </div>
                 )}
 
                 {(existingData.deletion_candidate_count || 0) > 0 && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                    <strong>💡 알림:</strong> {existingDetail}
+                  <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                    <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
+                    <strong>알림:</strong> {existingDetail}
                   </div>
                 )}
 
                 {existingCheckError && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                    <strong>⚠ 재확인 실패:</strong> {existingCheckError}
+                  <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                    <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
+                    <strong>재확인 실패:</strong> {existingCheckError}
                   </div>
                 )}
               </div>
@@ -976,7 +980,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           )}
 
           {isExternalCompressMode && (
-            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
               <CardHeader>
                 <CardTitle className="dark:text-white">작업 실행</CardTitle>
               </CardHeader>
@@ -1009,7 +1013,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           )}
 
           {showSaveWorkflow && (
-            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+            <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
               <CardHeader>
                 <CardTitle className="dark:text-white">작업 실행</CardTitle>
               </CardHeader>
@@ -1048,12 +1052,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             <>
               {lastInspectionCandidateCount > 0 && (
                 <div className="space-y-3">
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                  <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
                     삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="dark:border-[#30363d]" />
-                    <Label htmlFor="deleteConfirmed" className="cursor-pointer text-sm dark:text-slate-300">삭제 허가</Label>
+                    <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="border-[color:var(--tv-border)]" />
+                    <Label htmlFor="deleteConfirmed" className="text-body cursor-pointer dark:text-slate-300">삭제 허가</Label>
                   </div>
                   <Input value={deleteConfirmationText} onChange={(e) => setDeleteConfirmationText(e.target.value)} placeholder="확인했습니다." className={htmlControlClassName} />
                   <Button
@@ -1068,23 +1072,23 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 </div>
               )}
               {lastInspectionResult && (
-                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#30363d]">
+                <div className="space-y-2 border-t border-[color:var(--tv-border)] pt-4">
                   <Label className="dark:text-slate-300">폴더 검사 결과</Label>
-                  <pre className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#090d12] dark:text-blue-100">
+                  <pre className="text-caption max-h-72 overflow-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-[var(--tv-text)]">
                     {JSON.stringify(lastInspectionResult, null, 2)}
                   </pre>
                 </div>
               )}
               {!lastInspectionCandidateCount && !lastInspectionResult && isErrorStatus && (
-                <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+                <div className="text-body whitespace-pre-wrap text-[var(--tv-down)]">{status || "오류 내용을 확인할 수 없습니다."}</div>
               )}
               {!lastInspectionCandidateCount && !lastInspectionResult && !isErrorStatus && existingCheckError && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
                   {existingCheckError}
                 </div>
               )}
               {!lastInspectionCandidateCount && !lastInspectionResult && !isErrorStatus && !existingCheckError && (
-                <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>
+                <div className="text-body text-slate-500 dark:text-slate-400">알림 없음</div>
               )}
             </>
           }
@@ -1092,35 +1096,35 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           settingsContent={
             isExternalCompressMode ? (
               <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">압축 처리</p>
+                <div className="border-b border-[color:var(--tv-border)] pb-2">
+                  <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">압축 처리</p>
                 </div>
                 <HtmlWorkflowForm fields={compressionSettingFields} />
               </div>
             ) : isContentMergeMode ? (
               <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
+                <div className="border-b border-[color:var(--tv-border)] pb-2">
+                  <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
                 </div>
                 <HtmlWorkflowForm fields={testOptionFields} />
               </div>
             ) : (
               <div className="space-y-5">
                 <div className="space-y-3">
-                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
+                  <div className="border-b border-[color:var(--tv-border)] pb-2">
+                    <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
                   </div>
                   <HtmlWorkflowForm fields={requestOptionFields} />
                 </div>
                 <div className="space-y-3">
-                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
+                  <div className="border-b border-[color:var(--tv-border)] pb-2">
+                    <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                   </div>
                   <HtmlWorkflowForm fields={executionOptionFields} />
                 </div>
                 <div className="space-y-3">
-                  <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
+                  <div className="border-b border-[color:var(--tv-border)] pb-2">
+                    <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
                   </div>
                   <HtmlWorkflowForm fields={testOptionFields} />
                 </div>
