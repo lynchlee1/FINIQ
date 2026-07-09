@@ -1,7 +1,7 @@
 # 유무상증자 파서 로직 규칙
 
 작성일: 2026-07-06
-최종 업데이트: 2026-07-08
+최종 업데이트: 2026-07-09
 
 공통 KIND HTML 파서 계약은
 [HTML 파서 공통 로직 규칙](./common-html-parser-logic-rules.md)을 따른다.
@@ -23,9 +23,9 @@
 | 공통 항목 | 유무상증자 규칙 |
 | --- | --- |
 | `mode` | `rights_issuance` |
-| `title` fallback | 주입 제목이 없으면 첫 `SECTION-1` 문단, 둘 다 없으면 `<title>` 태그, 모두 없으면 빈 문자열 |
+| `title` 원천 | 주입 제목만 사용한다. 주입 제목이 없으면 빈 문자열과 `strong_warning`을 남긴다. |
 | 판정용 제목 | 증자 유형 판정은 주입 제목만 사용 |
-| HTML 본문 제목 | 출력 `title` fallback에는 쓸 수 있지만 증자 유형 판정에는 쓰지 않음 |
+| HTML 본문 제목 | 출력 `title`이나 증자 유형 판정에 쓰지 않음 |
 | 원문 행 사용 | 전체 행이 아니라 `raw_tables`에서 고른 추출 대상 표의 행 기준 |
 | 추가 상태 코드 | `not_applicable`, `source_found_empty` |
 | 추가 출력 필드 | `field_parse_status_detail` |
@@ -74,7 +74,8 @@ flowchart TD
 | 필드 | 값 |
 | --- | --- |
 | `mode` | `rights_issuance` |
-| `title` | 주입 제목. 없으면 첫 `SECTION-1` 문단, 둘 다 없으면 `<title>` 태그, 모두 없으면 빈 문자열 |
+| `title` | 주입 제목. 없으면 빈 문자열과 `strong_warning` |
+| `corp_name` | 주변 metadata의 공시 회사명. 있으면 저장 |
 
 ### 제목과 타입 판정
 
@@ -93,7 +94,7 @@ flowchart TD
 | 항목 | 규칙 |
 | --- | --- |
 | 판정 순서 | `유무상증자`를 먼저 확인한다. 이 순서가 아니면 `무상증자` 문구에 먼저 걸릴 수 있다. |
-| 주입 제목 없음 | 출력 `title`에 HTML 본문 제목이 남아 있어도 증자 유형은 `unknown` |
+| 주입 제목 없음 | 출력 `title`은 빈 문자열이고 `strong_warning`을 남기며 증자 유형은 `unknown` |
 | `unknown` | 최상위 공통 필드 추출은 계속한다. |
 | `mixed` 섹션 분리 | `무상증자`를 포함하고 `유무상증자`를 포함하지 않는 첫 행을 기준으로 유상/무상 섹션을 나눈다. |
 | `mixed` 기준 행 없음 | 유상 섹션은 전체 추출 대상 행, 무상 섹션은 빈 목록 |

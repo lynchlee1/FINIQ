@@ -3526,6 +3526,21 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         """,
         encoding="utf-8",
     )
+    (viewer_dir / HTML_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "title": "Sample Disclosure",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     (viewer_dir / "ignore.txt").write_text("not html", encoding="utf-8")
     output_path = tmp_path / "parsed-bond_issuance.json"
 
@@ -3714,6 +3729,63 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     assert record["행사시작일"] == "2026년 01월 02일"
     assert record["행사종료일"] == "2027년 12월 02일"
     assert record["투자자"] == [["테스트조합", 1_000_000_000]]
+
+
+def test_parse_disclosure_html_payload_does_not_fallback_to_metadata_display_title(
+    tmp_path: Path,
+) -> None:
+    bond_dir = tmp_path / "bond_issuance"
+    input_dir = bond_dir / "kind_html_contents_grouped_sections"
+    input_dir.mkdir(parents=True)
+    (input_dir / "20250102000003.html").write_text(
+        """
+        <html>
+          <body>
+            <table>
+              <tr><td>1. 사채의 종류</td><td>회차</td><td>3</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+              <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+              <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+            </table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    (bond_dir / "filtered.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250102000003",
+                        "company_name": "테스트발행사",
+                        "market": "코스닥",
+                        "title": "",
+                        "title_display": "[정정]전환사채권발행결정",
+                        "title_attr": "전환사채권발행결정",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_dir),
+            "output_directory": str(bond_dir),
+            "mode": "bond_issuance",
+        }
+    )
+
+    record = payload["records"][0]
+    assert record["title"] == ""
+    assert record["corp_name"] == "테스트발행사"
+    assert record["상장구분"] == "코스닥"
+    assert any(
+        warning["warning"] == "주입 제목이 없습니다."
+        for warning in payload["warnings"]
+    )
 
 
 def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
@@ -4026,7 +4098,7 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
             "sequence": 0,
             "acpt_no": "20081210000626",
             "doc_no": "20081210001405",
-            "title": "유상증자결정",
+            "title": "유상증자결정 (2008.12.10)",
             "disclosed_at": "2008-12-10 18:16",
             "is_correction_report": False,
         },
@@ -4034,7 +4106,7 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
             "sequence": 1,
             "acpt_no": "20081211000252",
             "doc_no": "20081211000613",
-            "title": "[정정]유상증자결정(제3자배정)",
+            "title": "[정정]유상증자결정 (2008.12.11)",
             "disclosed_at": "2008-12-11 15:45",
             "is_correction_report": True,
         },
@@ -4278,12 +4350,12 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
 
     assert payload["source_kind"] == "input_directory"
     assert payload["summary"] == {"records": 1, "visible_records": 1, "errors": 0}
-    assert payload["records"][0]["title"] == "전환사채권발행결정"
+    assert payload["records"][0]["title"] == "[테스트발행사] 전환사채권발행결정"
     record = payload["records"][0]["parsed_result"]
     assert record["acpt_no"] == "20250102000002"
     assert record["rcept_no"] is None
     assert record["doc_no"] == "20250102009999"
-    assert record["selected_main_doc_no"] == "20250102009999"
+    assert "selected_main_doc_no" not in record
     assert "docs" not in record
     assert record["corp_name"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
@@ -4573,16 +4645,28 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
 
     assert payload["mode"] == "rights_issuance"
     assert payload["warnings"]
-    assert payload["warnings"][0] == {
-        "index": 1,
-        "total": 1,
-        "mode": "rights_issuance",
-        "source_file": str(html_path.resolve()),
-        "source_name": "20250101000001.html",
-        "warning": "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
-        "level": "strong_warning",
-        "warning_code": "rights_issue_type_missing",
-    }
+    assert payload["warnings"][:2] == [
+        {
+            "index": 1,
+            "total": 1,
+            "mode": "rights_issuance",
+            "source_file": str(html_path.resolve()),
+            "source_name": "20250101000001.html",
+            "warning": "주입 제목이 없습니다.",
+            "level": "strong_warning",
+            "warning_code": "parse_warning",
+        },
+        {
+            "index": 1,
+            "total": 1,
+            "mode": "rights_issuance",
+            "source_file": str(html_path.resolve()),
+            "source_name": "20250101000001.html",
+            "warning": "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
+            "level": "strong_warning",
+            "warning_code": "rights_issue_type_missing",
+        },
+    ]
     strong_warnings = [
         item["warning"]
         for item in payload["warnings"]
@@ -5020,6 +5104,41 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
     ]
 
 
+def test_build_parse_filter_candidates_payload_injects_manifest_title(
+    tmp_path: Path,
+) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (viewer_dir / HTML_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "title": "전환사채권발행결정",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_filter_candidates_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "mode": "bond_issuance",
+            "field": "종류",
+            "parallel_workers": 1,
+        }
+    )
+
+    assert payload["summary"] == {"records": 1, "candidates": 1, "errors": 0}
+    assert payload["candidates"][0]["value"] == "CB"
+
+
 def test_build_parse_filter_candidates_payload_loads_rights_issue_methods_without_full_parse(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -5332,6 +5451,50 @@ def test_expand_table_expands_cell_with_rowspan_and_colspan() -> None:
     assert grid[1][1]["from_span"] is True
 
 
+def test_expand_table_defaults_missing_span_attributes_to_one() -> None:
+    document = parse_html_document(
+        """
+        <html><body>
+          <table>
+            <tr><td>Label</td><td>Value</td></tr>
+          </table>
+        </body></html>
+        """
+    )
+
+    grid = expand_table(document.xpath("//table")[0])
+
+    assert grid[0][0]["rowspan"] == 1
+    assert grid[0][0]["colspan"] == 1
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("rowspan", ""),
+        ("rowspan", "abc"),
+        ("rowspan", "0"),
+        ("colspan", "2.0"),
+        ("colspan", "-1"),
+    ],
+)
+def test_expand_table_rejects_invalid_span_attributes(
+    attribute: str, value: str
+) -> None:
+    document = parse_html_document(
+        f"""
+        <html><body>
+          <table>
+            <tr><td {attribute}="{value}">Broken</td></tr>
+          </table>
+        </body></html>
+        """
+    )
+
+    with pytest.raises(ValueError, match=f"invalid {attribute}"):
+        expand_table(document.xpath("//table")[0])
+
+
 def test_parse_int_ignores_spaces_inside_comma_grouped_numbers() -> None:
     assert parse_int("4,000,000,00 0") == 4_000_000_000
     assert parse_int("13, 000,00 0,000") == 13_000_000_000
@@ -5344,7 +5507,11 @@ def test_parse_ints_keeps_adjacent_ungrouped_numbers_separate() -> None:
 def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     fixture_path = TESTS_DIR / "fixtures" / "kind_bond_issuance_20260508000643.html"
 
-    parsed = parse_bond_issuance(fixture_path.read_bytes(), file_path=fixture_path)
+    parsed = parse_bond_issuance(
+        fixture_path.read_bytes(),
+        file_path=fixture_path,
+        title="전환사채권발행결정",
+    )
 
     assert parsed["회차"] == "16"
     assert parsed["종류"] == "CB"
@@ -5578,6 +5745,54 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_bond_parser(
     )
 
 
+def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    html_path = input_dir / "20250102000012.html"
+    html_path.write_text("<html><body></body></html>", encoding="utf-8")
+    (input_dir / HTML_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250102000012",
+                        "title": "[테스트] 전환사채권 발행결정",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def parser_ignoring_title(html_text, *, file_path, title=None):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "mode": "bond_issuance",
+            "title": "",
+            "rcept_no": None,
+            "correction_families": {},
+            "상장구분": None,
+            "source_file": str(Path(file_path).resolve()),
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", parser_ignoring_title)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "mode": "bond_issuance",
+            "input_directory": str(input_dir),
+            "output_directory": str(output_dir),
+        }
+    )
+
+    assert payload["records"][0]["title"] == ""
+
+
 def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
     tmp_path: Path,
 ) -> None:
@@ -5665,6 +5880,7 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_rights_parser(
     assert payload["summary"]["parsed_files"] == 1
     record = payload["records"][0]
     assert record["title"] == "[테스트] 유상증자결정"
+    assert record["corp_name"] == "테스트회사"
     assert record["상장구분"] == "코스닥"
     assert "상장시장" not in record
     assert record["증자유형"] == "유상증자"
@@ -5697,7 +5913,11 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
     </body></html>
     """
 
-    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="교환사채권 발행결정",
+    )
 
     assert parsed["회차"] == "2"
     assert parsed["종류"] == "EB"
@@ -5911,7 +6131,9 @@ def test_parse_bond_issuance_cleans_standalone_stock_suffix_from_target_company(
     assert parsed["기업명(행사대상)"] == "테스트타겟"
 
 
-def test_parse_bond_issuance_reads_legacy_section_title_anchor(tmp_path: Path) -> None:
+def test_parse_bond_issuance_does_not_read_legacy_section_title_anchor(
+    tmp_path: Path,
+) -> None:
     fixture_path = tmp_path / "20081118000345.html"
     body_html = """
     <html><body>
@@ -5926,8 +6148,10 @@ def test_parse_bond_issuance_reads_legacy_section_title_anchor(tmp_path: Path) -
 
     parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["title"] == "신주인수권부사채 발행결정"
-    assert parsed["종류"] == "BW"
+    assert parsed["title"] == ""
+    assert parsed["종류"] is None
+    assert "주입 제목이 없습니다." in parsed["strong_warning"]
+    assert "주입 제목이 없습니다." in parsed["parse_warnings"]
 
 
 def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path: Path) -> None:
@@ -5945,7 +6169,11 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path
     </body></html>
     """
 
-    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="전환사채발행결정",
+    )
 
     assert parsed["기업명(행사대상)"] == "아이에스이커머스"
 
@@ -6063,7 +6291,16 @@ def test_parse_bond_issuance_maps_kind_warrant_resource_examples(
 ) -> None:
     fixture_path = tmp_path / f"{acpt_no}.html"
 
-    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    title_by_type = {
+        "BW": "신주인수권부사채발행결정",
+        "EB": "교환사채발행결정",
+        "CB": "전환사채발행결정",
+    }
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title=title_by_type[str(expected["종류"])],
+    )
 
     assert parsed["acpt_no"] == acpt_no
     for key, value in expected.items():
@@ -6667,7 +6904,7 @@ def test_parse_rights_issuance_keeps_consecutive_ditto_columns_in_target_table(
     )
 
 
-def test_parse_rights_issuance_excludes_correction_history_table_in_same_section(
+def test_parse_rights_issuance_keeps_valid_target_table_after_correction_history_marker(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000013.html"
@@ -6709,7 +6946,7 @@ def test_parse_rights_issuance_excludes_correction_history_table_in_same_section
     assert len(parsed["raw_tables"]) == 5
 
 
-def test_parse_rights_issuance_excludes_correction_table_with_multiple_field_labels(
+def test_parse_rights_issuance_ignores_non_extraction_correction_history_table(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000014.html"
@@ -7075,13 +7312,18 @@ def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
+    assert parsed["title"] == ""
     assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 0]]
     assert parsed["증자방식"] is None
-    assert parsed["parse_warnings"][0] == (
+    assert "주입 제목이 없습니다." in parsed["parse_warnings"]
+    assert "주입 제목이 없습니다." in parsed["strong_warning"]
+    assert (
         "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+        in parsed["parse_warnings"]
     )
-    assert parsed["strong_warning"][0] == (
+    assert (
         "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+        in parsed["strong_warning"]
     )
     assert any(
         warning.startswith("신주의 종류와 수: 정해진 출처에서 값을 찾지 못했습니다.")
@@ -7111,8 +7353,10 @@ def test_parse_rights_issuance_does_not_infer_bonus_type_from_table(
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
     assert parsed["증자방식"] is None
-    assert parsed["parse_warnings"][0] == (
+    assert "주입 제목이 없습니다." in parsed["parse_warnings"]
+    assert (
         "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
+        in parsed["parse_warnings"]
     )
     assert any(
         warning.startswith("발행가액: 정해진 출처에서 값을 찾지 못했습니다.")

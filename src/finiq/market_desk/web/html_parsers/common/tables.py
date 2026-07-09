@@ -10,13 +10,19 @@ from .text import clean_text, element_text
 
 
 def _span_size(cell: etree._Element, attribute_name: str) -> int:
-    """셀의 rowspan 또는 colspan 속성값을 양의 정수로 읽어온다. 오류 시 1로 간주한다."""
+    """셀의 rowspan 또는 colspan 속성값을 양의 정수로 읽어온다."""
     raw_value = cell.get(attribute_name)
-    try:
-        value = int(str(raw_value or "1"))
-    except ValueError:
+    if raw_value is None:
         return 1
-    return max(value, 1)
+    try:
+        value = int(str(raw_value).strip())
+    except ValueError:
+        msg = f"invalid {attribute_name}: {raw_value!r}"
+        raise ValueError(msg) from None
+    if value < 1:
+        msg = f"invalid {attribute_name}: {raw_value!r}"
+        raise ValueError(msg)
+    return value
 
 
 def _cell_slot(
@@ -236,14 +242,7 @@ def _nearest_chapter_title(table: etree._Element) -> str:
 def is_correction_chapter(table: dict[str, Any]) -> bool:
     """테이블이 정정 신고 섹션에 포함되어 있는지 확인한다."""
     chapter_title = clean_text(str(table.get("chapter_title") or "")).replace(" ", "")
-    if "정정신고" in chapter_title:
-        return True
-    table_text = " ".join(
-        " ".join(row) for row in table.get("logical_rows") or []
-    ).replace(" ", "")
-    return (
-        "정정사유" in table_text and "정정전" in table_text and "정정후" in table_text
-    )
+    return "정정신고" in chapter_title
 
 
 def non_correction_tables(raw_tables: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -20,8 +20,7 @@ def parse_bond_issuance(
     extractor = BondIssuanceExtractor(context)
 
     supplied_title = str(title or "").strip()
-    if supplied_title:
-        record_dict["title"] = supplied_title
+    record_dict["title"] = supplied_title
     title = record_dict.get("title") or ""
     listing_market = record_dict.get("상장구분")
     issue_amount = extractor.extract_issue_amount_from_bond_face_value_row()
@@ -56,4 +55,13 @@ def parse_bond_issuance(
             extractor.has_specific_person_bond_issue_table_source()
         ),
     )
+    if not supplied_title:
+        _append_strong_warning(record_dict, "주입 제목이 없습니다.")
     return record_dict
+
+
+def _append_strong_warning(record: dict[str, Any], warning: str) -> None:
+    for key in ("strong_warning", "parse_warnings"):
+        values = record.setdefault(key, [])
+        if warning not in values:
+            values.append(warning)

@@ -16,8 +16,9 @@ This package contains parser entrypoints for downloaded KIND disclosure viewer H
 
 - All modes should use the common HTML helpers in `common.py`.
 - Tables must be parsed through the span-aware grid utilities so `rowspan` and `colspan` values are expanded before field extraction.
-- Mode-specific parsers may use `raw_tables` and `raw_rows` internally, but saved web parse results should keep only common metadata
-  (`acpt_no`, `mode`, `title`) plus extracted target fields.
+- Mode-specific parsers may use `raw_tables` and `raw_rows` internally, but saved web parse results must not keep them.
+- Saved web parse results keep the injected `title`, KIND identifiers such as `acpt_no` and conditional `doc_no`, common workflow metadata such as `rcept_no`, `correction_families`, `상장구분`, and mode-specific extracted fields.
+- `bond_issuance` and `rights_issuance` also store `corp_name` when surrounding metadata provides the filing company name.
 
 ## Web Parse Flow
 

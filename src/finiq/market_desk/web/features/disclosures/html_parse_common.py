@@ -169,6 +169,7 @@ CHANGE_LOG_FIELDS = {
         "투자자",
     ),
     "rights_issuance": (
+        "corp_name",
         "상장구분",
         "신주의 종류와 수",
         "증자 전 발행주식총수",
@@ -197,6 +198,7 @@ MAJOR_CHANGE_FIELDS = {
         "투자자",
     },
     "rights_issuance": {
+        "corp_name",
         "신주의 종류와 수",
         "증자 전 발행주식총수",
         "발행목적",
@@ -317,12 +319,7 @@ def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     metadata = {
         "market": _normalize_listing_market(item.get("market")),
         "company_name": str(item.get("company_name") or "").strip(),
-        "title": str(
-            item.get("title")
-            or item.get("title_display")
-            or item.get("title_attr")
-            or ""
-        ).strip(),
+        "title": str(item.get("title") or "").strip(),
         "doc_no": doc_no,
         "selected_main_doc_no": selected_main_doc_no,
     }
@@ -492,9 +489,7 @@ def _external_html_correction_family(
         if member_record is None:
             return None
         metadata = member_record.get("metadata") or {}
-        title = str(
-            metadata.get("title") or member_record.get("title") or doc.get("text") or ""
-        ).strip()
+        title = str(doc.get("text") or "").strip()
         members.append(
             {
                 "sequence": sequence,
@@ -549,35 +544,27 @@ def _apply_manifest_metadata(
     metadata = metadata_index.get(acpt_no) or {}
     market = metadata.get("market")
     company_name = metadata.get("company_name")
-    title = metadata.get("title")
     rcept_no = metadata.get("rcept_no")
     doc_no = metadata.get("doc_no")
-    selected_main_doc_no = metadata.get("selected_main_doc_no")
     correction_families = metadata.get("correction_families")
     if (
         not market
         and not company_name
-        and not title
         and not rcept_no
         and not doc_no
-        and not selected_main_doc_no
         and not correction_families
     ):
         return record
     updated_record = dict(record)
-    if title and not updated_record.get("title"):
-        updated_record["title"] = title
     if rcept_no and not updated_record.get("rcept_no"):
         updated_record["rcept_no"] = rcept_no
     if doc_no and not updated_record.get("doc_no"):
         updated_record["doc_no"] = doc_no
-    if selected_main_doc_no and not updated_record.get("selected_main_doc_no"):
-        updated_record["selected_main_doc_no"] = selected_main_doc_no
     if correction_families:
         updated_record["correction_families"] = correction_families
     if market:
         updated_record["상장구분"] = market
-    if mode == "bond_issuance" and company_name:
+    if mode in {"bond_issuance", "rights_issuance"} and company_name:
         updated_record["corp_name"] = company_name
     return updated_record
 
