@@ -3530,10 +3530,10 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         """,
         encoding="utf-8",
     )
-    (tmp_path / "filtered.json").write_text(
+    (tmp_path / "compressed-external-html.json").write_text(
         json.dumps(
             {
-                "disclosures": [
+                "records": [
                     {
                         "acpt_no": "20250101000001",
                         "title": "Sample Disclosure",
@@ -4075,7 +4075,7 @@ def test_parse_disclosure_html_payload_drops_rcept_no_fields(
     ]
 
 
-def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_rows(
+def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_disclosures(
     tmp_path: Path, monkeypatch
 ) -> None:
     input_dir = tmp_path / "rights_issuance" / "kind_html_contents_sections"
@@ -4091,7 +4091,7 @@ def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_rows(
     (input_dir.parent / "filtered.json").write_text(
         json.dumps(
             {
-                "rows": [
+                "disclosures": [
                     {
                         "acpt_no": "20250101000001",
                         "company_name": "회사명만있는회사",
@@ -4175,7 +4175,7 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
     (input_dir.parent / "filtered.json").write_text(
         json.dumps(
             {
-                "rows": [
+                "disclosures": [
                     {
                         "company_key": "03679",
                         "acpt_no": "20081210000626",
@@ -4506,7 +4506,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
     (bond_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "rows": [
+                "disclosures": [
                     {
                         "company_key": "TEST",
                         "acpt_no": "20250101000001",
@@ -5343,7 +5343,14 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
         ("20250101000003", "공모"),
     ):
         (viewer_dir / f"{name}.html").write_text(
-            f"<table><tr><td>사채발행방법</td><td>{issue_method}</td></tr></table>",
+            (
+                "<table>"
+                "<tr><td>사채의 종류</td><td>회차</td><td>1</td></tr>"
+                "<tr><td>사채의 권면</td><td>총액</td><td>100</td></tr>"
+                "<tr><td>자금조달의 목적</td><td>운영자금</td><td>100</td></tr>"
+                f"<tr><td>사채발행방법</td><td>{issue_method}</td></tr>"
+                "</table>"
+            ),
             encoding="utf-8",
         )
 
@@ -5390,31 +5397,19 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
     ]
 
 
-def test_build_parse_filter_candidates_payload_uses_title_for_bonus_rights_issue_method(
+def test_build_parse_filter_candidates_payload_uses_parser_returned_value(
     tmp_path: Path, monkeypatch
 ) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
-    (tmp_path / "filtered.json").write_text(
-        json.dumps(
-            {
-                "disclosures": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "title": "[테스트] 무상증자결정",
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    calls = []
 
-    def failing_parser(html_text, *, file_path):
-        raise RuntimeError("full parser should not run")
+    def fake_parser(html_text, *, file_path):
+        calls.append(Path(file_path).name)
+        return {"증자방식": "-"}
 
-    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", failing_parser)
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
 
     payload = build_parse_filter_candidates_payload(
         {
@@ -5427,10 +5422,11 @@ def test_build_parse_filter_candidates_payload_uses_title_for_bonus_rights_issue
 
     assert payload["summary"] == {"records": 1, "candidates": 1, "errors": 0}
     assert payload["candidates"][0]["value"] == "-"
+    assert calls == ["20250101000001.html"]
 
 
-def test_build_parse_filter_candidates_payload_loads_rights_issue_methods_without_full_parse(
-    tmp_path: Path, monkeypatch
+def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
+    tmp_path: Path,
 ) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
@@ -5446,11 +5442,6 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods_withou
         "<table><tr><td>5. 증자방식</td><td>제3자배정증자</td></tr></table>",
         encoding="utf-8",
     )
-
-    def failing_parser(html_text, *, file_path):
-        raise RuntimeError("full parser should not run")
-
-    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", failing_parser)
 
     payload = build_parse_filter_candidates_payload(
         {
@@ -5980,7 +5971,7 @@ def test_parse_bond_issuance_uses_supplied_title_for_security_type(
     )
 
 
-def test_parse_disclosure_html_payload_injects_filtered_title_for_bond_parser(
+def test_parse_disclosure_html_payload_injects_compressed_title_for_bond_parser(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "input"
@@ -6005,9 +5996,22 @@ def test_parse_disclosure_html_payload_injects_filtered_title_for_bond_parser(
                 "disclosures": [
                     {
                         "acpt_no": "20250102000009",
-                        "title": "[테스트] 교환사채권 발행결정",
                         "company_name": "테스트회사",
                         "market": "코스닥",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250102000009",
+                        "title": "[테스트] 교환사채권 발행결정",
                     }
                 ]
             },
@@ -6044,10 +6048,10 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
     input_dir.mkdir()
     html_path = input_dir / "20250102000012.html"
     html_path.write_text("<html><body></body></html>", encoding="utf-8")
-    (tmp_path / "filtered.json").write_text(
+    (tmp_path / "compressed-external-html.json").write_text(
         json.dumps(
             {
-                "disclosures": [
+                "records": [
                     {
                         "acpt_no": "20250102000012",
                         "title": "[테스트] 전환사채권 발행결정",
@@ -6122,7 +6126,7 @@ def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
     )
 
 
-def test_parse_disclosure_html_payload_injects_filtered_title_for_rights_parser(
+def test_parse_disclosure_html_payload_injects_compressed_title_for_rights_parser(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "input"
@@ -6146,11 +6150,24 @@ def test_parse_disclosure_html_payload_injects_filtered_title_for_rights_parser(
                 "disclosures": [
                     {
                         "acpt_no": "20250102000011",
-                        "title": "[테스트] 유상증자결정",
                         "company_name": "테스트회사",
                         "market": "코스닥",
                     }
                 ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250102000011",
+                        "title": "[테스트] 유상증자결정",
+                    }
+                ]
             },
             ensure_ascii=False,
         ),
@@ -6649,6 +6666,58 @@ def test_parse_bond_issuance_reads_legacy_warrant_price_label(tmp_path: Path) ->
     parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
     assert parsed["행사가액"] == 1_450
+
+
+def test_parse_bond_issuance_uses_symmetric_cb_eb_bw_target_priority(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20260709000001.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환에 따라 발행할 주식의 종류</td><td>교환 대상 주식</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환에 따라 발행할 주식의 종류</td><td>전환 대상 주식</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환가액 (원/주)</td><td>1,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="전환사채발행결정",
+    )
+
+    assert parsed["기업명(행사대상)"] == "전환 대상 주식"
+
+
+def test_parse_bond_issuance_reads_price_from_strict_numeric_value_cells(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20260709000002.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>교환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환가액 결정방법</td><td>1) 전환가액 조정 후 70% 이상</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환가액 (원/주)</td><td>3.17원/주</td></tr>
+        <tr><td>9. 신주인수권에 관한 사항</td><td>행사가액 (원/주)</td><td>2,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="교환사채발행결정",
+    )
+
+    assert parsed["행사가액"] == 3.17
 
 
 def test_parse_bond_issuance_reads_legacy_warrant_exercise_period_label(
