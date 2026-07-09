@@ -12,9 +12,10 @@
 - 공시원문 변환 metadata는 `filtered.json`과 `compressed-external-html.json`만 사용한다. `kind_disclosure_html_manifest.json`에 의존하지 않는다.
 - 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
 - 원문 미리보기는 record의 `source_file`을 이용해 파싱한다. wrapper HTML은 사용하지 않는다.
+- skip_errors=True인 경우 에러가 발생해도 파싱을 계속한다. 
 
 ### 정정공시 핸들링
-- 정정공시 member 제목은 `compressed-external-html.json`의 `mainDoc.text`를 `title`에 저장하며, `title_display` · `title_base` · `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
+- 정정공시 내 제목은 `compressed-external-html.json`의 `mainDoc.text`를 `title`에 저장하며, `title_display` · `title_base` · `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
 - 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에 명시된 관계로 만든다. `filtered.json`의 `company_key` · `title_base` · `title_display` · `title`로 묶음을 추론하는 fallback 로직을 만들지 않는다.
 
 ## Intended fallbacks
