@@ -8,6 +8,7 @@
 - 공시 제목은 외부 소스로부터 주입한 제목을 단일 SoC로 사용하며, `SECTION-1` · `<title>`을 사용한 fallback 로직을 만들지 않는다.
 - 메타데이터 제목은 `title` 단일 필드만 사용하며, `title_display` · `title_attr`을 사용한 fallback 로직을 만들지 않는다.
 - 정정공시 목록 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
+- 필터 후보 추출은 설정된 원문 row와 명시적인 title 계약만 사용하며, 후보값 보강을 위해 전체 parser를 fallback으로 실행하지 않는다.
 
 ## 워크플로우 메타데이터
 

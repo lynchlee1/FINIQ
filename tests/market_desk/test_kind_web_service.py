@@ -51,6 +51,9 @@ from finiq.market_desk.web.features.disclosures.html_parse_common import (
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
+from finiq.market_desk.web.features.disclosures.html_parse_export import (
+    build_parse_export_xlsx,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_preview import (
     build_parse_filter_candidates_payload,
     build_parse_preview_payload,
@@ -4159,7 +4162,7 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    payload = build_bond_parse_summary_payload({"output_path": str(parse_path)})
+    payload = build_bond_parse_summary_payload({"output_path": str(tmp_path)})
 
     assert payload["format"] == "finiq_bond_parse_summary_v1"
     assert payload["summary"] == {
@@ -4200,6 +4203,15 @@ def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Pat
 
     assert payload["source_path"] == str(parse_path)
     assert payload["summary"]["records"] == 1
+
+
+def test_build_bond_parse_summary_payload_rejects_missing_result_file_path(tmp_path: Path) -> None:
+    result_path = tmp_path / "parsed-bond_issuance.json"
+
+    with pytest.raises(ValueError, match="output_path must be a directory path"):
+        build_bond_parse_summary_payload({"output_path": str(result_path)})
+
+    assert not result_path.exists()
 
 
 def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path) -> None:
@@ -4244,7 +4256,7 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
     )
 
     payload = build_bond_parse_summary_payload(
-        {"output_path": str(parse_path), "source_directory": str(tmp_path)}
+        {"output_path": str(tmp_path), "source_directory": str(tmp_path)}
     )
 
     preview = payload["records"][0]["source_preview"]
@@ -4443,7 +4455,9 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
         encoding="utf-8",
     )
 
-    payload = build_parse_change_log_payload({"output_path": str(parse_path)})
+    payload = build_parse_change_log_payload(
+        {"output_path": str(tmp_path), "mode": "rights_issuance"}
+    )
 
     assert payload["format"] == "finiq_parse_change_log_v1"
     assert payload["mode"] == "rights_issuance"
@@ -4471,6 +4485,44 @@ def test_build_parse_change_log_payload_accepts_result_folder(tmp_path: Path) ->
     payload = build_parse_change_log_payload({"output_path": str(tmp_path), "mode": "rights_issuance"})
 
     assert payload["source_path"] == str(parse_path.resolve())
+
+
+def test_build_parse_change_log_payload_requires_mode_for_result_folder(tmp_path: Path) -> None:
+    parse_path = tmp_path / "parsed-bond_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "bond_issuance",
+                "records": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="mode is required"):
+        build_parse_change_log_payload({"output_path": str(tmp_path)})
+
+
+def test_build_parse_change_log_payload_rejects_missing_result_file_path(tmp_path: Path) -> None:
+    result_path = tmp_path / "parsed-bond_issuance.json"
+
+    with pytest.raises(ValueError, match="output_path must be a directory path"):
+        build_parse_change_log_payload(
+            {"output_path": str(result_path), "mode": "bond_issuance"}
+        )
+
+    assert not result_path.exists()
+
+
+def test_build_parse_export_xlsx_rejects_missing_result_file_path(tmp_path: Path) -> None:
+    result_path = tmp_path / "parsed-bond_issuance.json"
+
+    with pytest.raises(ValueError, match="output_path must be a directory path"):
+        build_parse_export_xlsx(str(result_path), "bond_issuance")
+
+    assert not result_path.exists()
 
 
 def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
@@ -5036,35 +5088,23 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
     )
 
 
-def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path: Path, monkeypatch) -> None:
+def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    for name in ("20250101000001", "20250101000002", "20250101000003"):
-        (viewer_dir / f"{name}.html").write_text("<html></html>", encoding="utf-8")
-
-    issue_methods = {
-        "20250101000001": "공모",
-        "20250101000002": "사모",
-        "20250101000003": "공모",
-    }
-
-    def fake_parser(html_text, *, file_path):
-        acpt_no = Path(file_path).stem
-        return {
-            "acpt_no": acpt_no,
-            "source_file": str(Path(file_path).resolve()),
-            "mode": "security_transaction",
-            "title": "",
-            "사채발행방법": issue_methods[acpt_no],
-            "raw_rows": [],
-        }
-
-    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+    for name, issue_method in (
+        ("20250101000001", "공모"),
+        ("20250101000002", "사모"),
+        ("20250101000003", "공모"),
+    ):
+        (viewer_dir / f"{name}.html").write_text(
+            f"<table><tr><td>사채발행방법</td><td>{issue_method}</td></tr></table>",
+            encoding="utf-8",
+        )
 
     payload = build_parse_filter_candidates_payload(
         {
             "input_directory": str(viewer_dir),
-            "mode": "security_transaction",
+            "mode": "bond_issuance",
             "field": "사채발행방법",
             "parallel_workers": 1,
         }
@@ -5104,8 +5144,8 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
     ]
 
 
-def test_build_parse_filter_candidates_payload_injects_manifest_title(
-    tmp_path: Path,
+def test_build_parse_filter_candidates_payload_uses_title_for_bonus_rights_issue_method(
+    tmp_path: Path, monkeypatch
 ) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
@@ -5117,7 +5157,7 @@ def test_build_parse_filter_candidates_payload_injects_manifest_title(
                 "disclosures": [
                     {
                         "acpt_no": "20250101000001",
-                        "title": "전환사채권발행결정",
+                        "title": "[테스트] 무상증자결정",
                     }
                 ],
             },
@@ -5126,17 +5166,22 @@ def test_build_parse_filter_candidates_payload_injects_manifest_title(
         encoding="utf-8",
     )
 
+    def failing_parser(html_text, *, file_path):
+        raise RuntimeError("full parser should not run")
+
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", failing_parser)
+
     payload = build_parse_filter_candidates_payload(
         {
             "input_directory": str(viewer_dir),
-            "mode": "bond_issuance",
-            "field": "종류",
+            "mode": "rights_issuance",
+            "field": "증자방식",
             "parallel_workers": 1,
         }
     )
 
     assert payload["summary"] == {"records": 1, "candidates": 1, "errors": 0}
-    assert payload["candidates"][0]["value"] == "CB"
+    assert payload["candidates"][0]["value"] == "-"
 
 
 def test_build_parse_filter_candidates_payload_loads_rights_issue_methods_without_full_parse(

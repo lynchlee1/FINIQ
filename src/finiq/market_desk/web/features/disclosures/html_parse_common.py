@@ -889,18 +889,18 @@ def _load_parse_payload(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _resolve_parse_result_path(path: Path, mode: str) -> Path:
-    if path.is_dir():
-        modes_to_try = (
-            [mode] if mode in PARSER_REGISTRY else list(PARSER_REGISTRY.keys())
-        )
-        for m in modes_to_try:
-            candidate = path / f"parsed-{m}.json"
-            if candidate.is_file():
-                return candidate
-
-        return path / f"parsed-{mode if mode else 'bond_issuance'}.json"
-    return path
+def _resolve_parse_result_path(output_directory: Path, mode: str) -> Path:
+    if not mode:
+        msg = "mode is required"
+        raise ValueError(msg)
+    if mode not in PARSER_REGISTRY:
+        supported_modes = ", ".join(sorted(PARSER_REGISTRY))
+        msg = f"unsupported mode: {mode!r}. supported modes: {supported_modes}"
+        raise ValueError(msg)
+    if output_directory.is_file() or output_directory.suffix.lower() == ".json":
+        msg = "output_path must be a directory path"
+        raise ValueError(msg)
+    return output_directory / f"parsed-{mode}.json"
 
 
 def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
