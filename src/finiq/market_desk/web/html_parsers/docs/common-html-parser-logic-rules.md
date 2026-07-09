@@ -7,8 +7,18 @@
 - `rowspan` · `colspan`에 잘못된 값이 있는 경우 조용히 보정하지 않고 실패 또는 경고로 드러낸다.
 - 공시 제목은 외부 소스로부터 주입한 제목을 단일 SoC로 사용하며, `SECTION-1` · `<title>`을 사용한 fallback 로직을 만들지 않는다.
 - 메타데이터 제목은 `title` 단일 필드만 사용하며, `title_display` · `title_attr`을 사용한 fallback 로직을 만들지 않는다.
+- `doc_no`는 `selected_main_doc_no` 단일 필드만 사용하며, `item.doc_no`를 사용한 fallback 로직을 만들지 않는다.
 - 정정공시 목록 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
-- 필터 후보 추출은 설정된 원문 row와 명시적인 title 계약만 사용하며, 후보값 보강을 위해 전체 parser를 fallback으로 실행하지 않는다.
+- 공시원문 변환 metadata는 `filtered.json`과 `compressed-external-html.json`만 사용한다. `kind_disclosure_html_manifest.json`에 의존하지 않는다.
+- 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
+- 원문 미리보기는 record의 `source_file`을 이용해 파싱한다. wrapper HTML은 사용하지 않는다.
+
+## Intended fallbacks
+- HTML 파싱시 디코딩을 utf-8 -> cp949 -> euc-kr -> utf-8(errors="replace") 순서로 시도.
+- lxml.HTMLParser(recover=True)로 깨진 HTML 복구.
+- 공시원문 변환시 절대로 `kind_disclosure_html_manifest.json`을 참고해서는 안됨. 외부 데이터 보강은 온전히 `filtered.json` · `compressed-external-html.json`에만 의존해야 함.
+
+- 만기일: 사채만기일 -> 사채만기 순서로 확인
 
 ## 워크플로우 메타데이터
 
@@ -29,7 +39,8 @@
 | KIND 기준 식별자 | `acpt_no` |
 | DART 접수번호 | KIND HTML 워크플로우는 DART `rcept_no`를 만들거나 보강하지 않는다. |
 | `mainDoc` | viewer 안의 문서 선택 번호로만 다루며, DART 접수번호로 해석하지 않는다. |
-| `selected_main_doc_no` | `doc_no` 산출에만 사용하고 parsed record에는 저장하지 않는다. |
+| `selected_main_doc_no` | `doc_no`의 단일 출처로 사용하고 parsed record에는 저장하지 않는다. |
+| `doc_no` | `selected_main_doc_no` 값만 저장한다. 다른 `doc_no` 필드로 대체하지 않는다. |
 | 복원 금지 | KIND HTML 본문, viewer HTML, `filtered.json`, `compressed-external-html.json`만으로 DART `rcept_no`를 복원하지 않는다. |
 
 ## 저장 record 계약

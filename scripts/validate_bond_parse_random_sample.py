@@ -16,8 +16,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from finiq.market_desk.web.features.disclosures.html_parse_common import (  # noqa: E402
-    _apply_manifest_metadata,
-    _load_html_manifest_metadata_index,
+    _apply_parse_metadata,
+    _load_html_parse_metadata_index,
 )
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance  # noqa: E402
 from finiq.market_desk.web.html_parsers.common import (  # noqa: E402
@@ -142,7 +142,7 @@ def _parse_one(path: Path, metadata_index: dict[str, dict[str, str]]) -> dict[st
     metadata = metadata_index.get(acpt_no) or {}
     title = str(metadata.get("title") or "").strip() or None
     record = parse_bond_issuance(path.read_bytes(), file_path=path, title=title)
-    return _apply_manifest_metadata(record, metadata_index, mode="bond_issuance")
+    return _apply_parse_metadata(record, metadata_index, mode="bond_issuance")
 
 
 def validate_sample(
@@ -158,7 +158,7 @@ def validate_sample(
 
     rng = random.Random(seed)
     sample = rng.sample(html_files, sample_size)
-    metadata_index = _load_html_manifest_metadata_index(input_directory)
+    metadata_index = _load_html_parse_metadata_index(input_directory)
 
     records: list[dict[str, Any]] = []
     missing_records: list[dict[str, Any]] = []

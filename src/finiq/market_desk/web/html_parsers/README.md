@@ -25,9 +25,9 @@ This package contains parser entrypoints for downloaded KIND disclosure viewer H
 The web endpoint in `disclosure_html_parse.py` follows this order:
 
 1. Validate request options and resolve the parser from `PARSER_REGISTRY`.
-2. Collect `.html` files from the input folder and load optional download manifest metadata.
+2. Collect `.html` files from the input folder and load parse metadata from `filtered.json` and `compressed-external-html.json`.
 3. Parse each file with the selected mode parser.
-4. Apply manifest metadata, collect `parse_warnings`, checkpoint periodically, and write the final JSON.
+4. Apply parse metadata, collect `parse_warnings`, checkpoint periodically, and write the final JSON.
 
 When investigating a user bug report, start with the saved JSON:
 

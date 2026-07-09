@@ -12,7 +12,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 
-from finiq.market_desk.web.features.disclosures.html_common import HTML_MANIFEST_FILENAME
 from finiq.market_desk.web.features.market_data.service_common import (
     _record_filter_blocks_match,
 )
@@ -25,7 +24,6 @@ from finiq.market_desk.web.html_parsers import (
 )
 from finiq.market_desk.web.html_parsers.common import (
     build_base_record,
-    fetch_selected_viewer_body,
 )
 
 ParseFunction = Callable[..., dict[str, Any]]
@@ -110,7 +108,7 @@ class ParseRequest:
     input_directory: Path
     output_path: Path
     html_files: list[Path]
-    manifest_metadata_index: dict[str, dict[str, Any]]
+    metadata_index: dict[str, dict[str, Any]]
     limit: int | None
     skip_errors: bool
     progress_interval: int
@@ -233,15 +231,10 @@ def _normalize_listing_market(value: Any) -> str:
     return market
 
 
-def _load_html_manifest_metadata_index(
+def _load_html_parse_metadata_index(
     input_directory: Path,
 ) -> dict[str, dict[str, Any]]:
     metadata_index: dict[str, dict[str, Any]] = {}
-    manifest_path = input_directory / HTML_MANIFEST_FILENAME
-    if manifest_path.is_file():
-        _merge_metadata_index(
-            metadata_index, _load_download_manifest_metadata_index(manifest_path)
-        )
     for directory in (
         input_directory,
         input_directory.parent,
@@ -280,47 +273,16 @@ def _merge_metadata_index(
                 current[key] = value
 
 
-def _load_download_manifest_metadata_index(
-    manifest_path: Path,
-) -> dict[str, dict[str, Any]]:
-    if not manifest_path.is_file():
-        return {}
-    try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"HTML 메타데이터 manifest를 읽을 수 없습니다: {manifest_path}"
-        ) from exc
-    if not isinstance(payload, dict):
-        return {}
-    metadata_index: dict[str, dict[str, Any]] = {}
-    for item in payload.get("disclosures") or []:
-        if not isinstance(item, dict):
-            continue
-        acpt_no = str(item.get("acpt_no") or "").strip()
-        market = _normalize_listing_market(item.get("market"))
-        company_name = str(item.get("company_name") or "").strip()
-        title = str(item.get("title") or "").strip()
-        if acpt_no:
-            metadata_index[acpt_no] = {
-                "market": market,
-                "company_name": company_name,
-                "title": title,
-            }
-    return metadata_index
-
-
 def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
         return None
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
-    doc_no = str(item.get("doc_no") or selected_main_doc_no or "").strip()
     metadata = {
         "market": _normalize_listing_market(item.get("market")),
         "company_name": str(item.get("company_name") or "").strip(),
         "title": str(item.get("title") or "").strip(),
-        "doc_no": doc_no,
+        "doc_no": selected_main_doc_no,
         "selected_main_doc_no": selected_main_doc_no,
     }
     docs = item.get("docs")
@@ -534,7 +496,7 @@ def _external_doc_is_correction(doc: dict[str, Any], title: str) -> bool:
     return "정정" in text or "정정" in title
 
 
-def _apply_manifest_metadata(
+def _apply_parse_metadata(
     record: dict[str, Any],
     metadata_index: dict[str, dict[str, Any]],
     *,
@@ -711,7 +673,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         input_directory=input_directory,
         output_path=output_path,
         html_files=html_files,
-        manifest_metadata_index=_load_html_manifest_metadata_index(input_directory),
+        metadata_index=_load_html_parse_metadata_index(input_directory),
         limit=limit,
         skip_errors=bool(body.get("skip_errors", True)),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
@@ -1007,7 +969,7 @@ def _parser_accepts_title(parser: ParseFunction) -> bool:
 
 def _parse_html_file_record(request: ParseRequest, html_file: Path) -> dict[str, Any]:
     parser_kwargs: dict[str, Any] = {"file_path": html_file}
-    title = _metadata_title_for_file(html_file, request.manifest_metadata_index)
+    title = _metadata_title_for_file(html_file, request.metadata_index)
     if title and _parser_accepts_title(request.parser):
         parser_kwargs["title"] = title
     return request.parser(html_file.read_bytes(), **parser_kwargs)
@@ -1117,9 +1079,9 @@ def _parse_one_html_file(
         parsed_record = _compact_record(
             _parse_html_file_record(request, html_file)
         )
-        record = _apply_manifest_metadata(
+        record = _apply_parse_metadata(
             parsed_record,
-            request.manifest_metadata_index,
+            request.metadata_index,
             mode=request.mode,
         )
         if _record_matches_filters(
@@ -1179,9 +1141,9 @@ def _parse_html_file_for_worker(
             "index": index,
             "html_file": html_file,
             "source_file": source_file,
-            "record": _apply_manifest_metadata(
+            "record": _apply_parse_metadata(
                 parsed_record,
-                request.manifest_metadata_index,
+                request.metadata_index,
                 mode=request.mode,
             ),
             "warnings": _record_parse_warning_items(parsed_record),

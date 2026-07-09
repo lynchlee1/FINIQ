@@ -13,7 +13,6 @@ from ..common import (
 from .utils import (
     _BondParseContext,
     _BondRows,
-    _clean_exercise_target_company_name,
     _clean_funding_purpose_label,
 )
 
@@ -77,12 +76,12 @@ class BondIssuanceExtractor:
         return None
 
     def extract_target_company_name_from_exercise_target_stock_row(self) -> str | None:
-        """대상 주식 문구에서 불필요한 법인/주식 표현을 제거한다."""
+        """대상 주식 문구를 원문 기준으로 추출한다."""
         target_text = self._extract_exercise_target_stock_text_from_main_rows()
         text = clean_text(target_text)
         if not text:
             return None
-        return _clean_exercise_target_company_name(text) or text
+        return text
 
     def _extract_exercise_target_stock_text_from_main_rows(self) -> str | None:
         """전환/교환/신주인수권 행사로 발행될 대상 주식 관련 문구를 추출한다."""
