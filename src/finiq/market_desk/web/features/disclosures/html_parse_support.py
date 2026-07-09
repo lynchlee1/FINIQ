@@ -98,7 +98,6 @@ def _build_preview_record(
         "index": index,
         "title": record.get("title") or "",
         "acpt_no": record.get("acpt_no") or "",
-        "rcept_no": record.get("rcept_no") or "",
         "source_file": record.get("source_file") or "",
         "source_preview": _load_source_preview(record, mode=mode),
         "parsed_result": compact_record,
@@ -120,7 +119,6 @@ def _record_reference(record: dict[str, Any], *, index: int) -> dict[str, Any]:
         "title": record.get("title") or "",
         "source_file": record.get("source_file") or "",
         "acpt_no": record.get("acpt_no") or "",
-        "rcept_no": record.get("rcept_no") or "",
         "family_id": family_id,
         "current_sequence": current_sequence,
         "family_member_count": member_count,
@@ -130,7 +128,7 @@ def _record_reference(record: dict[str, Any], *, index: int) -> dict[str, Any]:
 def _sequence_sort_key(record: dict[str, Any]) -> tuple[int, str]:
     _, current_sequence, _ = _record_family_info(record)
     sequence = current_sequence if current_sequence is not None else 0
-    return (sequence, str(record.get("rcept_no") or record.get("acpt_no") or ""))
+    return (sequence, str(record.get("acpt_no") or ""))
 
 
 def _get_all_value_fields(records: list[dict[str, Any]]) -> list[str]:

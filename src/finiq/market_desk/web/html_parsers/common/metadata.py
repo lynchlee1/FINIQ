@@ -54,8 +54,6 @@ def preserve_viewer_metadata(
         "correction_families"
     ):
         record["correction_families"] = viewer_record["correction_families"]
-    if not record.get("rcept_no") and viewer_record.get("rcept_no"):
-        record["rcept_no"] = viewer_record["rcept_no"]
     if viewer_record.get("acpt_no"):
         record["acpt_no"] = viewer_record["acpt_no"]
 
@@ -77,7 +75,6 @@ def build_base_record(
     acpt_no = extract_acpt_no(file_path)
     return {
         "correction_families": {},
-        "rcept_no": None,
         "acpt_no": acpt_no,
         "source_file": str(Path(file_path).resolve()),
         "mode": mode,

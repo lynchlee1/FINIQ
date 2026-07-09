@@ -31,12 +31,7 @@ def _date_part(value: object) -> str:
 
 
 def _company_key(company: dict[str, Any]) -> str:
-    return str(
-        company.get("company_key")
-        or company.get("company_id")
-        or company.get("company_name")
-        or ""
-    ).strip()
+    return str(company.get("company_key") or "").strip()
 
 
 def _summary_disclosure_count(payload: dict[str, Any]) -> int | None:
@@ -267,10 +262,8 @@ def _collect_classification_rows_by_year(
                 "disclosed_date": _date_part(disclosed_at),
                 "title": disclosure.get("title"),
                 "title_attr": disclosure.get("title_attr"),
-                "title_base": disclosure.get("title_base")
-                or disclosure.get("title_attr"),
-                "title_display": disclosure.get("title_display")
-                or disclosure.get("title"),
+                "title_base": disclosure.get("title_base"),
+                "title_display": disclosure.get("title_display"),
                 "title_flags_json": json.dumps(
                     list(disclosure.get("title_flags") or []), ensure_ascii=False
                 ),
@@ -315,7 +308,7 @@ def _collect_source_folder_rows_by_year(
             disclosed_at = record.get("disclosed_at")
             row = {
                 "row_no": record.get("row_no"),
-                "company_key": record.get("company_key") or _company_key(record),
+                "company_key": record.get("company_key"),
                 "company_name": record.get("company_name"),
                 "company_id": record.get("company_id"),
                 "market": record.get("market"),
@@ -326,8 +319,8 @@ def _collect_source_folder_rows_by_year(
                 "disclosed_date": _date_part(disclosed_at),
                 "title": record.get("title"),
                 "title_attr": record.get("title_attr"),
-                "title_base": record.get("title_base") or record.get("title_attr"),
-                "title_display": record.get("title_display") or record.get("title"),
+                "title_base": record.get("title_base"),
+                "title_display": record.get("title_display"),
                 "title_flags_json": json.dumps(
                     list(record.get("title_flags") or []), ensure_ascii=False
                 ),

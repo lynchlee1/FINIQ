@@ -213,7 +213,6 @@ MAJOR_CHANGE_FIELDS = {
 METADATA_FIELDS = {
     "title",
     "acpt_no",
-    "rcept_no",
     "source_file",
     "correction_families",
     "raw_tables",
@@ -232,27 +231,41 @@ def _normalize_listing_market(value: Any) -> str:
 
 
 def _load_html_parse_metadata_index(
-    input_directory: Path,
+    html_files: list[Path],
 ) -> dict[str, dict[str, Any]]:
     metadata_index: dict[str, dict[str, Any]] = {}
-    for directory in (
-        input_directory,
-        input_directory.parent,
-        input_directory.parent.parent,
-    ):
-        filtered_path = directory / "filtered.json"
-        if filtered_path.is_file():
-            _merge_metadata_index(
-                metadata_index, _load_filtered_metadata_index(filtered_path)
-            )
-        compressed_path = directory / "compressed-external-html.json"
-        if compressed_path.is_file():
-            _merge_metadata_index(
-                metadata_index,
-                _load_compressed_external_html_metadata_index(compressed_path),
-                prefer_correction_families=True,
-            )
+    seen_directories: set[Path] = set()
+    for html_file in html_files:
+        for directory in (html_file.parent, html_file.parent.parent):
+            if directory in seen_directories:
+                continue
+            seen_directories.add(directory)
+            _merge_parse_metadata_from_directory(metadata_index, directory)
     return metadata_index
+
+
+def _merge_parse_metadata_from_directory(
+    metadata_index: dict[str, dict[str, Any]],
+    directory: Path,
+) -> None:
+    directory_metadata_index: dict[str, dict[str, Any]] = {}
+    filtered_path = directory / "filtered.json"
+    if filtered_path.is_file():
+        _merge_metadata_index(
+            directory_metadata_index, _load_filtered_metadata_index(filtered_path)
+        )
+    compressed_path = directory / "compressed-external-html.json"
+    if compressed_path.is_file():
+        _merge_metadata_index(
+            directory_metadata_index,
+            _load_compressed_external_html_metadata_index(compressed_path),
+            prefer_correction_families=True,
+        )
+    _merge_metadata_index(
+        metadata_index,
+        directory_metadata_index,
+        prefer_existing=True,
+    )
 
 
 def _merge_metadata_index(
@@ -260,15 +273,18 @@ def _merge_metadata_index(
     source: dict[str, dict[str, Any]],
     *,
     prefer_correction_families: bool = False,
+    prefer_existing: bool = False,
 ) -> None:
     for acpt_no, metadata in source.items():
         current = target.setdefault(acpt_no, {})
         for key, value in metadata.items():
             if value:
+                if prefer_existing and current.get(key):
+                    continue
                 if key == "correction_families" and prefer_correction_families:
                     current[key] = value
                     continue
-                if key in {"rcept_no", "correction_families"} and current.get(key):
+                if key == "correction_families" and current.get(key):
                     continue
                 current[key] = value
 
@@ -295,10 +311,8 @@ def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
 
 
 def _filtered_correction_group_key(item: dict[str, Any]) -> tuple[str, str]:
-    company_key = str(item.get("company_key") or item.get("company_name") or "").strip()
-    title_base = str(
-        item.get("title_base") or item.get("title_attr") or item.get("title") or ""
-    ).strip()
+    company_key = str(item.get("company_key") or "").strip()
+    title_base = str(item.get("title_base") or "").strip()
     return (company_key, title_base)
 
 
@@ -357,7 +371,7 @@ def _store_filtered_correction_family(
                 "sequence": sequence,
                 "acpt_no": acpt_no,
                 "doc_no": doc_no,
-                "title": row.get("title_display") or row.get("title") or "",
+                "title": row.get("title_display") or "",
                 "disclosed_at": row.get("disclosed_at") or "",
                 "is_correction_report": bool(row.get("is_correction_report")),
             }
@@ -506,20 +520,16 @@ def _apply_parse_metadata(
     metadata = metadata_index.get(acpt_no) or {}
     market = metadata.get("market")
     company_name = metadata.get("company_name")
-    rcept_no = metadata.get("rcept_no")
     doc_no = metadata.get("doc_no")
     correction_families = metadata.get("correction_families")
     if (
         not market
         and not company_name
-        and not rcept_no
         and not doc_no
         and not correction_families
     ):
         return record
     updated_record = dict(record)
-    if rcept_no and not updated_record.get("rcept_no"):
-        updated_record["rcept_no"] = rcept_no
     if doc_no and not updated_record.get("doc_no"):
         updated_record["doc_no"] = doc_no
     if correction_families:
@@ -673,7 +683,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         input_directory=input_directory,
         output_path=output_path,
         html_files=html_files,
-        metadata_index=_load_html_parse_metadata_index(input_directory),
+        metadata_index=_load_html_parse_metadata_index(html_files),
         limit=limit,
         skip_errors=bool(body.get("skip_errors", True)),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
@@ -684,53 +694,6 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         filter_blocks=_parse_filter_blocks(body.get("filter_blocks")),
         record_filters=_parse_record_filters(body.get("record_filters")),
     )
-
-def _rcept_no_to_acpt_no(records: list[dict[str, Any]]) -> dict[str, str]:
-    index: dict[str, str] = {}
-    for record in records:
-        rcept_no = str(record.get("rcept_no") or "").strip()
-        acpt_no = str(record.get("acpt_no") or "").strip()
-        if rcept_no and acpt_no:
-            index.setdefault(rcept_no, acpt_no)
-    return index
-
-
-def _resolve_correction_family_acpt_numbers(
-    records: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    rcept_to_acpt = _rcept_no_to_acpt_no(records)
-    resolved_records: list[dict[str, Any]] = []
-    for record in records:
-        resolved_record = dict(record)
-        families = record.get("correction_families")
-        if not isinstance(families, dict):
-            resolved_records.append(resolved_record)
-            continue
-
-        resolved_families: dict[str, Any] = {}
-        for family_id, family in families.items():
-            if not isinstance(family, dict):
-                resolved_families[str(family_id)] = family
-                continue
-            resolved_family = dict(family)
-            members = family.get("members")
-            if isinstance(members, list):
-                resolved_members = []
-                for member in members:
-                    if not isinstance(member, dict):
-                        resolved_members.append(member)
-                        continue
-                    resolved_member = dict(member)
-                    rcept_no = str(resolved_member.get("rcept_no") or "").strip()
-                    if rcept_no and not resolved_member.get("acpt_no"):
-                        resolved_member["acpt_no"] = rcept_to_acpt.get(rcept_no)
-                    resolved_members.append(resolved_member)
-                resolved_family["members"] = resolved_members
-            resolved_families[str(family_id)] = resolved_family
-        resolved_record["correction_families"] = resolved_families
-        resolved_records.append(resolved_record)
-    return resolved_records
-
 
 WARNING_LEVEL_KEYS = ("weak_warning", "medium_warning", "strong_warning")
 _BOND_MAIN_TABLE_MISSING_WARNING = (
@@ -868,10 +831,21 @@ def _resolve_parse_result_path(output_directory: Path, mode: str) -> Path:
 
 
 def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
+    def compact_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: compact_value(nested_value)
+                for key, nested_value in value.items()
+                if key != "rcept_no"
+            }
+        if isinstance(value, list):
+            return [compact_value(item) for item in value]
+        return value
+
     return {
-        key: value
+        key: compact_value(value)
         for key, value in record.items()
-        if key not in {"raw_tables", "raw_rows"}
+        if key not in {"raw_tables", "raw_rows", "rcept_no"}
     }
 
 
@@ -882,7 +856,7 @@ def _saved_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for key, value in record.items()
             if key != "source_file"
         }
-        for record in _resolve_correction_family_acpt_numbers(records)
+        for record in records
     ]
 
 
@@ -894,7 +868,6 @@ def _build_preview_record(
         "index": index,
         "title": record.get("title") or "",
         "acpt_no": record.get("acpt_no") or "",
-        "rcept_no": record.get("rcept_no") or "",
         "source_file": record.get("source_file") or "",
         "source_preview": _load_source_preview(record, mode=mode),
         "parsed_result": compact_record,
