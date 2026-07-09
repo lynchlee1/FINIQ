@@ -34,7 +34,7 @@ export default function HtmlChangeLogPage() {
   const [selectedFamilyId, setSelectedFamilyId] = useState<string>("");
   const [familyDetails, setFamilyDetails] = useState<Record<string, any>>({});
 
-  const { html_parse_result_path: outputPath, html_parse_mode: changeMode, fetchSettings, saveSetting } = useSettingsStore();
+  const { html_parse_output_directory: outputPath, html_parse_mode: changeMode, fetchSettings, saveSetting } = useSettingsStore();
   const [changeSearch, setChangeSearch] = useState("");
   const [showOnlyChanges, setShowOnlyChanges] = useState(false);
   const [changeLimit, setChangeLimit] = useState("50");
@@ -174,9 +174,9 @@ export default function HtmlChangeLogPage() {
       id: "outputPath",
       kind: "path",
       label: "파싱 결과 데이터 경로",
-      mode: "file",
+      mode: "folder",
       value: outputPath || "",
-      onChange: (val) => saveSetting("html_parse_result_path", val),
+      onChange: (val) => saveSetting("html_parse_output_directory", val),
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 2,
     },

@@ -141,7 +141,6 @@ def _extract_filter_candidate_from_file(
     html_file: Path,
     requested_mode: str,
     field: str,
-    parser: ParseFunction,
     metadata_index: dict[str, dict[str, Any]],
 ) -> str | list[Any] | None:
     html_bytes = html_file.read_bytes()
@@ -149,19 +148,16 @@ def _extract_filter_candidate_from_file(
         structured_value = _structured_row_field_candidate(html_bytes, field)
         if structured_value:
             return structured_value
-    record = _apply_manifest_metadata(
-        _compact_record(
-            _parse_with_manifest_title(
-                parser,
-                html_bytes,
-                html_file=html_file,
-                metadata_index=metadata_index,
-            )
-        ),
-        metadata_index,
-        mode=requested_mode,
-    )
-    return record.get(field)
+        title = _metadata_title_for_file(html_file, metadata_index) or ""
+        compact_title = title.replace(" ", "")
+        if (
+            requested_mode == "rights_issuance"
+            and field == "증자방식"
+            and "무상증자" in compact_title
+            and "유무상증자" not in compact_title
+        ):
+            return "-"
+    return None
 
 
 def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any]:
@@ -232,7 +228,6 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                     html_file=html_file,
                     requested_mode=requested_mode,
                     field=field,
-                    parser=parser,
                     metadata_index=metadata_index,
                 ): (index, html_file)
                 for index, html_file in indexed_files
@@ -251,7 +246,6 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                         html_file=html_file,
                         requested_mode=requested_mode,
                         field=field,
-                        parser=parser,
                         metadata_index=metadata_index,
                     ),
                     html_file,

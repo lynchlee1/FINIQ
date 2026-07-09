@@ -27,7 +27,7 @@ export default function HtmlBondSummaryPage() {
 
   // Form State
   const {
-    html_parse_result_path: outputPath,
+    html_parse_output_directory: outputPath,
     html_section_split_output_directory: sourceDirectory,
     fetchSettings,
     saveSetting,
@@ -181,9 +181,9 @@ export default function HtmlBondSummaryPage() {
       id: "outputPath",
       kind: "path",
       label: "파싱 결과 데이터 경로",
-      mode: "file",
+      mode: "folder",
       value: outputPath || "",
-      onChange: (val) => saveSetting("html_parse_result_path", val),
+      onChange: (val) => saveSetting("html_parse_output_directory", val),
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 2,
     },
