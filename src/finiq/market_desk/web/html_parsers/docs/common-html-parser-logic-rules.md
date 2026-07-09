@@ -15,7 +15,7 @@
 
 ### 정정공시 핸들링
 - 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
-- 정정공시 묶음은 `filtered.json`에서 `company_key` · `title_base`가 모두 일치하는 공시끼리만 만들고, 다른 fallback 로직을 추가하지 않는다. 
+- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에 관계가 명시된 경우에만 만들고, `filtered.json`의 회사명·제목·정정 여부로 추정해서 묶지 않는다.
 
 ## Intended fallbacks
 ### HTML 파싱
@@ -43,7 +43,7 @@
 
 | 필드 | 출처 | 설명 |
 | --- | --- | --- |
-| `correction_families` | `filtered.json` | 정정공시 목록 |
+| `correction_families` | `compressed-external-html.json` | 외부 HTML `mainDoc` 선택지에 명시된 정정공시 묶음 |
 | `doc_no` | `compressed-external-html.json` | KIND viewer 본문 문서 선택 번호 |
 | `corp_name` | `filtered.json`, `compressed-external-html.json` | 공시 회사명. 현재 `bond_issuance`, `rights_issuance` 저장 record에 보강 |
 | `상장구분` | `filtered.json`, `compressed-external-html.json` | 코스피, 코스닥, 코넥스, 기타 |
