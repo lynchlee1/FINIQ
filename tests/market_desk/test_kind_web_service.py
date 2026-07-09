@@ -4074,7 +4074,7 @@ def test_parse_disclosure_html_payload_drops_rcept_no_fields(
         ]
 
 
-def test_parse_disclosure_html_payload_does_not_fallback_filtered_family_fields(
+def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_rows(
     tmp_path: Path, monkeypatch
 ) -> None:
     input_dir = tmp_path / "rights_issuance" / "kind_html_contents_sections"
@@ -4155,8 +4155,8 @@ def test_parse_disclosure_html_payload_does_not_fallback_filtered_family_fields(
     records = {record["acpt_no"]: record for record in payload["records"]}
     assert records["20250101000001"]["correction_families"] == {}
     assert records["20250102000002"]["correction_families"] == {}
-    family = records["20250103000003"]["correction_families"]["20250104000004"]
-    assert [member["title"] for member in family["members"]] == ["", ""]
+    assert records["20250103000003"]["correction_families"] == {}
+    assert records["20250104000004"]["correction_families"] == {}
 
 
 def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_corrections(
@@ -4582,29 +4582,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
     assert "docs" not in record
     assert record["corp_name"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
-    assert record["correction_families"] == {
-        "20250102000002": {
-            "current_sequence": 1,
-            "members": [
-                {
-                    "sequence": 0,
-                    "acpt_no": "20250101000001",
-                    "doc_no": None,
-                    "title": "전환사채권발행결정",
-                    "disclosed_at": "2025-01-01 09:00",
-                    "is_correction_report": False,
-                },
-                {
-                    "sequence": 1,
-                    "acpt_no": "20250102000002",
-                    "doc_no": None,
-                    "title": "[정정]전환사채권발행결정",
-                    "disclosed_at": "2025-01-02 09:00",
-                    "is_correction_report": True,
-                },
-            ],
-        }
-    }
+    assert record["correction_families"] == {}
     assert payload["records"][0]["source_preview"]["available"] is True
 
 
