@@ -4,18 +4,17 @@
 
 
 ## Fallback 최소화 원칙
+- 공시원문 변환 관련 fallback을 새로 만들기 전에는 사용자 승인을 먼저 받는다.
 - `rowspan` · `colspan`에 잘못된 값이 있는 경우 조용히 보정하지 않고 실패 또는 경고로 드러낸다.
 - 공시 제목은 외부 소스로부터 주입한 제목을 단일 SoC로 사용하며, `SECTION-1` · `<title>`을 사용한 fallback 로직을 만들지 않는다.
 - 메타데이터 제목은 `title` 단일 필드만 사용하며, `title_display` · `title_attr`을 사용한 fallback 로직을 만들지 않는다.
 - `doc_no`는 `selected_main_doc_no` 단일 필드만 사용하며, `item.doc_no`를 사용한 fallback 로직을 만들지 않는다.
-- DART 공시코드인 `rcept_no`는 parser base record, workflow metadata, 저장 record, preview, summary, change-log, export 어디에서도 만들거나 보존하거나 표시하지 않는다.
-- 공시원문 변환 metadata는 `filtered.json`과 `compressed-external-html.json`만 사용한다. `kind_disclosure_html_manifest.json`에 의존하지 않는다.
+- 공시원문 변환 metadata는 `filtered.json`과 `compressed-external-html.json`만 사용하며, `kind_disclosure_html_manifest.json`에 의존하지 않는다.
+- 원문 미리보기는 원본 HTML 파일을 직접 읽어 테이블 preview를 만든다. wrapper HTML은 사용하지 않는다.
 - 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
-- 원문 미리보기는 record의 `source_file`을 이용해 파싱한다. wrapper HTML은 사용하지 않는다.
-- skip_errors=True인 경우 에러가 발생해도 파싱을 계속한다. 
-- `acpt_no`는 입력 디렉토리 내에서 유일하므로 디렉토리 간 같은 `acpt_no`의 기존 값을 보호하거나 우선순위로 덮어쓰는 fallback을 만들지 않는다.
-- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc`에서만 만들고 parsed JSON 최상위 `families`에 한 번만 저장한다. record마다 묶음 전체를 복사하거나 `filtered.json`으로 묶음을 추론하는 fallback을 만들지 않는다.
-- change-log 비교 대상 필드는 공시 유형별 `CHANGE_LOG_COMPARISON_FIELDS`에 명시되어 있으므로, 필드 목록이 없을 때 record 전체 필드를 동적으로 탐색하는 fallback을 만들지 않는다.
+- `acpt_no`는 metadata 병합 key로 사용하며, 나중에 읽은 metadata가 같은 key의 값을 덮어쓴다.
+- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc`에서만 만들고 parsed JSON 최상위 `families`에 한 번만 저장한다.
+- change-log 비교 대상 필드는 공시 유형별 `CHANGE_LOG_COMPARISON_FIELDS`에 명시한다.
 
 ### 정정공시 핸들링
 - 정정공시 내 제목은 `compressed-external-html.json`의 `mainDoc.text`를 `title`에 저장하며, `title_display` · `title_base` · `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
@@ -25,21 +24,39 @@
 ### HTML 파싱
 - 디코딩을 utf-8 -> cp949 -> euc-kr -> utf-8(errors="replace") 순서로 시도한다.
 - lxml.HTMLParser(recover=True)로 깨진 HTML을 복구한다.
-- DART 공시코드인 rcept_no는 저장 및 사용하지 않는다.
 
 ### 공시원문 변환
-- 공시원문 변환시 절대로 `kind_disclosure_html_manifest.json`을 참고해서는 안된다.
-  - 외부 데이터 보강은 온전히 `filtered.json` · `compressed-external-html.json`에만 의존해야 한다.
-  - 메타데이터는 공시원문을 연도별로 저장한 경우(`dir/yyyy/<acpt_no>.html`) grandparent 디렉토리에 존재하며, 한번에 저장한 경우(`dir/<acpt_no>.html`) parent 디렉토리에 존재한다.
-  - 따라서, 메타데이터 파일 탐색은 parent -> grandparent 순서로 `filtered.json` · `compressed-external-html.json`을 찾는다. (input -> parent -> grandparent 순서가 아님에 유의하라.)
+- 공시원문 변환 metadata 보강은 `kind_disclosure_html_manifest.json`을 읽지 않는다.
+  - 외부 데이터 보강은 `filtered.json` · `compressed-external-html.json`에만 의존한다.
+  - metadata 파일 탐색은 각 HTML 파일 기준 `html_file.parent` -> `html_file.parent.parent` 순서로 수행한다.
+  - 각 디렉토리 안에서는 `filtered.json`을 먼저 읽고 `compressed-external-html.json`을 나중에 읽는다.
+  - 같은 `acpt_no`와 같은 metadata key가 여러 번 발견되면 나중에 병합한 값이 저장된다.
+- DART 공시코드인 `rcept_no`는 parser base record, 저장 record, preview, summary, change-log, export에 저장하지 않는다.
+- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에서 만든다.
+  - member 제목은 `mainDoc.text`를 `title`로 저장한다.
+  - parsed JSON 최상위 `families`에는 family별 `members`만 저장한다.
+  - 각 record에는 `family_id`, `current_sequence`, `family_member_count`만 저장한다.
+- 저장 record에는 `source_file`을 저장하지 않는다. 실행 중 preview, errors, warnings, job status에서는 진단용으로 사용할 수 있다.
+- 저장 결과 summary에서 원문 preview가 필요하면 요청의 `source_directory`와 record의 `acpt_no`로 원본 HTML 파일을 찾는다.
+  - 먼저 `source_directory/<acpt_no>.html`을 확인한다.
+  - 없으면 `source_directory` 아래에서 `<acpt_no>*.html`을 찾고, 파일 stem의 `_` 앞부분이 `acpt_no`와 같은 첫 파일을 사용한다.
 - skip_errors=True인 경우 파싱 실패 시 전체 작업을 중단하지 않고 errors에 기록한다.
+- change-log는 `CHANGE_LOG_COMPARISON_FIELDS`에 정의된 필드만 비교한다. 정의가 없는 mode는 비교 필드가 빈 목록이다.
 
 #### 사채발행파싱 (bond_issuance)
 - 사채 발행금액 행에서 `원화기준 포함` 행을 우선하고, 없으면 첫 `사채의 권면` 행을 사용한다.
   - 해외발행의 경우에서 원화기준 권면을 우선하기 위함이다.
+- 행사 대상 주식 관련 문구는 `교환대상` 행을 먼저 확인하고, 없으면 `전환에 따라` · `전환으로 발행할` · `인수권행사에 따라`와 `종류`가 함께 있는 행을 확인한다.
+- 행사가액은 `전환가액` -> `교환가액` -> `행사가액` -> `행사가격` 순서로 확인한다.
+- 만기일은 `사채만기일` -> `사채만기` 순서로 확인한다.
+- 행사기간은 `전환청구기간` -> `교환청구기간` -> `권리행사기간` -> `행사기간` 순서로 확인한다.
 
-
-- 만기일: 사채만기일 -> 사채만기 순서로 확인
+#### 유무상증자파싱 (rights_issuance)
+- 제3자배정 대상자 표에서 `배정주식수` 열을 찾지 못하면 행의 마지막 숫자를 배정주식수로 읽는다.
+- 후보 대상자 표가 여러 개이고 신주 합계와 일치하는 표가 없으면, 값이 있는 첫 후보 표를 사용하고 합계 불일치 경고로 드러낸다.
+- 유무상증자(`mixed`)에서 무상증자 섹션 기준 행을 찾지 못하면 유상 상세 객체는 전체 추출 대상 행을 사용하고 무상 상세 객체는 빈 행 목록을 사용한다.
+- 상세 객체의 `1주당 신주배정주식수`는 주식 종류별 값을 찾지 못한 경우 해당 행의 마지막 값을 `보통주식` 값으로 저장한다.
+- 주식 수량형 상세 필드는 원천 값을 찾지 못하면 0을 저장하고, 원문에서 0 또는 대시를 읽은 경우 `explicit_zero` 상태로 기록한다.
 
 ## 워크플로우 메타데이터
 
@@ -49,7 +66,7 @@
 | --- | --- | --- |
 | `families` | `compressed-external-html.json` | 외부 HTML `mainDoc` 선택지에 명시된 정정공시 묶음. parsed JSON 최상위에 한 번만 저장하며, member 제목은 `mainDoc.text`를 `title`로 저장 |
 | `family_id` / `current_sequence` / `family_member_count` | `families` | record가 어떤 정정 묶음의 몇 번째 공시인지 표시하는 얇은 참조 필드 |
-| `doc_no` | `compressed-external-html.json` | KIND viewer 본문 문서 선택 번호 |
+| `doc_no` | `filtered.json`, `compressed-external-html.json` | `selected_main_doc_no`에서 읽은 KIND viewer 본문 문서 선택 번호 |
 | `corp_name` | `filtered.json`, `compressed-external-html.json` | 공시 회사명. 현재 `bond_issuance`, `rights_issuance` 저장 record에 보강 |
 | `상장구분` | `filtered.json`, `compressed-external-html.json` | 코스피, 코스닥, 코넥스, 기타 |
 
