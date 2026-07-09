@@ -897,7 +897,9 @@ def _resolve_parse_result_path(output_directory: Path, mode: str) -> Path:
         supported_modes = ", ".join(sorted(PARSER_REGISTRY))
         msg = f"unsupported mode: {mode!r}. supported modes: {supported_modes}"
         raise ValueError(msg)
-    if output_directory.is_file() or output_directory.suffix.lower() == ".json":
+    if output_directory.is_file() or (
+        not output_directory.exists() and output_directory.suffix
+    ):
         msg = "output_path must be a directory path"
         raise ValueError(msg)
     return output_directory / f"parsed-{mode}.json"

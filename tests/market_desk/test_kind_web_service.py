@@ -4205,8 +4205,11 @@ def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Pat
     assert payload["summary"]["records"] == 1
 
 
-def test_build_bond_parse_summary_payload_rejects_missing_result_file_path(tmp_path: Path) -> None:
-    result_path = tmp_path / "parsed-bond_issuance.json"
+@pytest.mark.parametrize("suffix", [".json", ".txt"])
+def test_build_bond_parse_summary_payload_rejects_missing_result_file_path(
+    tmp_path: Path, suffix: str
+) -> None:
+    result_path = tmp_path / f"parsed-bond_issuance{suffix}"
 
     with pytest.raises(ValueError, match="output_path must be a directory path"):
         build_bond_parse_summary_payload({"output_path": str(result_path)})
@@ -4505,8 +4508,11 @@ def test_build_parse_change_log_payload_requires_mode_for_result_folder(tmp_path
         build_parse_change_log_payload({"output_path": str(tmp_path)})
 
 
-def test_build_parse_change_log_payload_rejects_missing_result_file_path(tmp_path: Path) -> None:
-    result_path = tmp_path / "parsed-bond_issuance.json"
+@pytest.mark.parametrize("suffix", [".json", ".txt"])
+def test_build_parse_change_log_payload_rejects_missing_result_file_path(
+    tmp_path: Path, suffix: str
+) -> None:
+    result_path = tmp_path / f"parsed-bond_issuance{suffix}"
 
     with pytest.raises(ValueError, match="output_path must be a directory path"):
         build_parse_change_log_payload(
@@ -4516,8 +4522,11 @@ def test_build_parse_change_log_payload_rejects_missing_result_file_path(tmp_pat
     assert not result_path.exists()
 
 
-def test_build_parse_export_xlsx_rejects_missing_result_file_path(tmp_path: Path) -> None:
-    result_path = tmp_path / "parsed-bond_issuance.json"
+@pytest.mark.parametrize("suffix", [".json", ".txt"])
+def test_build_parse_export_xlsx_rejects_missing_result_file_path(
+    tmp_path: Path, suffix: str
+) -> None:
+    result_path = tmp_path / f"parsed-bond_issuance{suffix}"
 
     with pytest.raises(ValueError, match="output_path must be a directory path"):
         build_parse_export_xlsx(str(result_path), "bond_issuance")
