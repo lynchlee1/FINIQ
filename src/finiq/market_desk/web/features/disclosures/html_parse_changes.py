@@ -62,12 +62,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             continue
         family_records.setdefault(family_id, []).append((index, record))
 
-    # Determine fields to compare: use defined ones or discover from data
-    if mode in CHANGE_LOG_FIELDS:
-        comparison_fields = list(CHANGE_LOG_FIELDS[mode])
-    else:
-        # Dynamic discovery for generic modes (like shareholder_meeting)
-        comparison_fields = _get_all_value_fields(all_records)
+    comparison_fields = list(CHANGE_LOG_COMPARISON_FIELDS.get(mode, ()))
 
     families: list[dict[str, Any]] = []
     # Sort families by family_id descending (latest first) for better responsiveness and early exit

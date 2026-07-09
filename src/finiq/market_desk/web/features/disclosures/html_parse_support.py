@@ -5,20 +5,14 @@ from __future__ import annotations
 from finiq.market_desk.web.features.disclosures.html_parse_common import *
 
 def _record_family_info(record: dict[str, Any]) -> tuple[str, int | None, int | None]:
-    families = record.get("correction_families")
-    if not isinstance(families, dict) or not families:
-        return ("", None, None)
-    family_id = str(next(iter(families)))
-    family = families.get(family_id)
-    if not isinstance(family, dict):
-        return (family_id, None, None)
-    current_sequence_raw = family.get("current_sequence")
-    current_sequence = (
-        current_sequence_raw if isinstance(current_sequence_raw, int) else None
+    family_id = str(record.get("family_id") or "").strip()
+    current_sequence = record.get("current_sequence")
+    member_count = record.get("family_member_count")
+    return (
+        family_id,
+        current_sequence if isinstance(current_sequence, int) else None,
+        member_count if isinstance(member_count, int) else None,
     )
-    members = family.get("members")
-    member_count = len(members) if isinstance(members, list) else None
-    return (family_id, current_sequence, member_count)
 
 
 def _compact_source_tables(
@@ -94,6 +88,7 @@ def _build_preview_record(
     record: dict[str, Any], *, index: int, mode: str
 ) -> dict[str, Any]:
     compact_record = _compact_record(record)
+    compact_record.pop("correction_families", None)
     return {
         "index": index,
         "title": record.get("title") or "",
@@ -131,17 +126,6 @@ def _sequence_sort_key(record: dict[str, Any]) -> tuple[int, str]:
     return (sequence, str(record.get("acpt_no") or ""))
 
 
-def _get_all_value_fields(records: list[dict[str, Any]]) -> list[str]:
-    """Dynamically discover all fields present in the records, excluding metadata."""
-    all_fields = set()
-    for record in records:
-        all_fields.update(record.keys())
-
-    # Filter out metadata and sort for consistency
-    value_fields = sorted([f for f in all_fields if f not in METADATA_FIELDS])
-    return value_fields
-
-
 def _build_record_change(
     *,
     mode: str,
@@ -151,13 +135,8 @@ def _build_record_change(
     after_index: int,
     fields: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    # Use provided fields or fallback to mode-specific or discover dynamic
     if not fields:
-        fields = list(
-            CHANGE_LOG_FIELDS.get(
-                mode, _get_all_value_fields([before_record, after_record])
-            )
-        )
+        fields = list(CHANGE_LOG_COMPARISON_FIELDS.get(mode, ()))
 
     changes: list[dict[str, Any]] = []
     major_fields = MAJOR_CHANGE_FIELDS.get(mode, set())
