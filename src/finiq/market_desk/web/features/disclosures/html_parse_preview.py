@@ -9,7 +9,7 @@ from lxml import html as lxml_html
 from finiq.market_desk.web.features.disclosures.html_parse_support import *
 from finiq.market_desk.web.html_parsers.common import clean_text, element_text
 
-def _parse_with_manifest_title(
+def _parse_with_metadata_title(
     parser: ParseFunction,
     html_bytes: bytes,
     *,
@@ -49,15 +49,15 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, None)
-    metadata_index = _load_html_manifest_metadata_index(input_directory)
+    metadata_index = _load_html_parse_metadata_index(input_directory)
     records: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for index, html_file in enumerate(html_files, start=1):
         try:
             html_bytes = html_file.read_bytes()
-            record = _apply_manifest_metadata(
+            record = _apply_parse_metadata(
                 _compact_record(
-                    _parse_with_manifest_title(
+                    _parse_with_metadata_title(
                         parser,
                         html_bytes,
                         html_file=html_file,
@@ -186,7 +186,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, None)
-    metadata_index = _load_html_manifest_metadata_index(input_directory)
+    metadata_index = _load_html_parse_metadata_index(input_directory)
     worker_count = _filter_candidate_workers(
         body.get("parallel_workers", body.get("workers")), len(html_files)
     )

@@ -51,12 +51,6 @@ def _compact_source_tables(
     return tables, max(total_rows - included_rows, 0)
 
 
-def _logical_row_count(record: dict[str, Any]) -> int:
-    return sum(
-        len(table.get("logical_rows") or []) for table in record.get("raw_tables") or []
-    )
-
-
 def _load_source_preview(record: dict[str, Any], *, mode: str) -> dict[str, Any]:
     source_file = str(record.get("source_file") or "").strip()
     if not source_file:
@@ -77,11 +71,6 @@ def _load_source_preview(record: dict[str, Any], *, mode: str) -> dict[str, Any]
     try:
         source_bytes = path.read_bytes()
         source_record = build_base_record(source_bytes, file_path=path, mode=mode)
-        body_bytes = fetch_selected_viewer_body(source_bytes, file_path=path)
-        if body_bytes is not None:
-            body_record = build_base_record(body_bytes, file_path=path, mode=mode)
-            if _logical_row_count(body_record) > _logical_row_count(source_record):
-                source_record = body_record
 
         tables, omitted_rows = _compact_source_tables(
             source_record.get("raw_tables") or []

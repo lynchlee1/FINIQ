@@ -29,7 +29,6 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
-    HTML_MANIFEST_FILENAME,
     cancel_disclosure_html_download,
     collect_acpt_numbers_from_json,
 )
@@ -3529,10 +3528,9 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         """,
         encoding="utf-8",
     )
-    (viewer_dir / HTML_MANIFEST_FILENAME).write_text(
+    (viewer_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250101000001",
@@ -3571,7 +3569,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
     assert "progress_log" not in stored
 
 
-def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path: Path) -> None:
+def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     (viewer_dir / "20250101000001.html").write_text(
@@ -3583,10 +3581,9 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
         """,
         encoding="utf-8",
     )
-    (viewer_dir / "kind_disclosure_html_manifest.json").write_text(
+    (viewer_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250101000001",
@@ -3610,6 +3607,56 @@ def test_parse_disclosure_html_payload_prefers_download_manifest_market(tmp_path
 
     assert payload["records"][0]["상장구분"] == "코스닥"
     assert payload["records"][0]["corp_name"] == "테스트발행사"
+
+
+def test_parse_disclosure_html_payload_ignores_download_manifest_metadata(tmp_path: Path) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    (viewer_dir / "20250101000001.html").write_text(
+        """
+        <html>
+          <body>
+            <table>
+              <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무기명식 무보증 전환사채</td></tr>
+              <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+              <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+            </table>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    (viewer_dir / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "title": "[테스트] 전환사채권 발행결정",
+                        "market": "코스닥",
+                        "company_name": "테스트발행사",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
+            "mode": "bond_issuance",
+        }
+    )
+
+    record = payload["records"][0]
+    assert record["title"] == ""
+    assert record["종류"] is None
+    assert record["상장구분"] is None
+    assert record["corp_name"] is None
 
 
 def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path: Path) -> None:
@@ -4330,6 +4377,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
                         "acpt_no": "20250102000002",
                         "title": "[테스트발행사] 전환사채권발행결정",
                         "header": "테스트발행사 (123456)",
+                        "doc_no": "00000000835386",
                         "selected_main_doc_no": "20250102009999",
                         "docs": [
                             {
@@ -5159,10 +5207,9 @@ def test_build_parse_filter_candidates_payload_uses_title_for_bonus_rights_issue
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
-    (viewer_dir / HTML_MANIFEST_FILENAME).write_text(
+    (viewer_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250101000001",
@@ -5581,7 +5628,7 @@ def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     assert parsed["만기일"] == "2031년 05월 08일"
     assert parsed["사채발행방법"] == "사모"
     assert parsed["행사가액"] == 54_315
-    assert parsed["기업명(행사대상)"] == "아이티센글로벌"
+    assert parsed["기업명(행사대상)"] == "주식회사 아이티센글로벌 기명식 보통주"
     assert parsed["행사시작일"] == "2027년 05월 08일"
     assert parsed["행사종료일"] == "2031년 04월 29일"
     assert parsed["납입일"] == "2026년 05월 08일"
@@ -5742,7 +5789,7 @@ def test_parse_bond_issuance_uses_supplied_title_for_security_type(
     )
 
 
-def test_parse_disclosure_html_payload_injects_manifest_title_for_bond_parser(
+def test_parse_disclosure_html_payload_injects_filtered_title_for_bond_parser(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "input"
@@ -5761,10 +5808,9 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_bond_parser(
         """,
         encoding="utf-8",
     )
-    (input_dir / HTML_MANIFEST_FILENAME).write_text(
+    (input_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250102000009",
@@ -5807,10 +5853,9 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
     input_dir.mkdir()
     html_path = input_dir / "20250102000012.html"
     html_path.write_text("<html><body></body></html>", encoding="utf-8")
-    (input_dir / HTML_MANIFEST_FILENAME).write_text(
+    (input_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250102000012",
@@ -5887,7 +5932,7 @@ def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
     )
 
 
-def test_parse_disclosure_html_payload_injects_manifest_title_for_rights_parser(
+def test_parse_disclosure_html_payload_injects_filtered_title_for_rights_parser(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "input"
@@ -5905,10 +5950,9 @@ def test_parse_disclosure_html_payload_injects_manifest_title_for_rights_parser(
         """,
         encoding="utf-8",
     )
-    (input_dir / HTML_MANIFEST_FILENAME).write_text(
+    (input_dir / "filtered.json").write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250102000011",
@@ -5975,7 +6019,7 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
 
     assert parsed["회차"] == "2"
     assert parsed["종류"] == "EB"
-    assert parsed["기업명(행사대상)"] == "테스트타겟"
+    assert parsed["기업명(행사대상)"] == "주식회사 테스트타겟 기명식 보통주"
     assert parsed["발행금액"] == 5_000_000_000
     assert parsed["발행목적"] == [["운영자금", 5_000_000_000]]
     assert parsed["field_parse_status"]["투자자"] == "source_not_found"
@@ -6161,7 +6205,7 @@ def test_parse_bond_issuance_reads_resource_dash_issue_amount_as_zero() -> None:
     assert not any("발행금액" in warning for warning in parsed.get("parse_warnings", []))
 
 
-def test_parse_bond_issuance_cleans_standalone_stock_suffix_from_target_company(tmp_path: Path) -> None:
+def test_parse_bond_issuance_preserves_standalone_stock_suffix_in_target_company(tmp_path: Path) -> None:
     fixture_path = tmp_path / "20250102000003.html"
     body_html = """
     <html><body>
@@ -6182,7 +6226,28 @@ def test_parse_bond_issuance_cleans_standalone_stock_suffix_from_target_company(
 
     parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["기업명(행사대상)"] == "테스트타겟"
+    assert parsed["기업명(행사대상)"] == "테스트타겟 주식"
+
+
+def test_parse_bond_issuance_preserves_stock_word_inside_target_company(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "20250102000013.html"
+    body_html = """
+    <html><body>
+      <h2 class="SECTION-1" id="toc_2"></h2><p class="SECTION-1">교환사채권 발행결정</p>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>2</td><td>종류</td><td>무기명식 무보증 교환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>5,000,000,000</td></tr>
+        <tr><td>5. 사채만기일</td><td>2028년 01월 02일</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환가액 (원/주)</td><td>12,500</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환대상</td><td>맛있는주식 주식회사 기명식 보통주</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["기업명(행사대상)"] == "맛있는주식 주식회사 기명식 보통주"
 
 
 def test_parse_bond_issuance_does_not_read_legacy_section_title_anchor(
@@ -6229,7 +6294,7 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path
         title="전환사채발행결정",
     )
 
-    assert parsed["기업명(행사대상)"] == "아이에스이커머스"
+    assert parsed["기업명(행사대상)"] == "(주)아이에스이커머스 기명식 보통주"
 
 
 @pytest.mark.parametrize(
@@ -6333,7 +6398,7 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path
             {
                 "종류": "EB",
                 "행사가액": 12500,
-                "기업명(행사대상)": "테스트타겟",
+                "기업명(행사대상)": "주식회사 테스트타겟 기명식 보통주",
                 "행사시작일": "2026년 01월 01일",
                 "행사종료일": "2028년 01월 01일",
             },
