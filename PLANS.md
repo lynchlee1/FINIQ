@@ -3,7 +3,7 @@
 ## 2026-07-10 공시원문 변환 metadata SoC 분리
 
 - Purpose: 공시원문 변환 metadata 로드에서 `filtered.json` 값을 읽은 뒤 `compressed-external-html.json` 값으로 덮어쓰는 숨은 fallback을 제거하고, 실제 resources 구조에 맞춰 필드별 SoC를 분리한다.
-- Implementation: `filtered.json`은 `disclosures` 목록만 읽고 `company_name`/`market`만 제공하도록 제한했다. `compressed-external-html.json`은 `title`/`selected_main_doc_no`/정정 family만 제공하도록 분리했다. 공통 병합 helper를 제거하고, 서로 다른 필드 책임을 가진 metadata dict만 합치도록 바꿨다. 관련 테스트 fixture를 새 계약에 맞췄다. 공통 parser 규칙 문서는 사용자 직접 수정 대상으로 남겼다.
+- Implementation: `filtered.json`은 `disclosures` 목록만 읽고 `company_name`/`market`만 제공하도록 제한했다. `compressed-external-html.json`은 `title`/`selected_main_doc_no`/정정 family만 제공하도록 분리했다. 공통 병합 helper를 제거하고, 서로 다른 필드 책임을 가진 metadata dict만 합치도록 바꿨다. 관련 테스트 fixture를 새 계약에 맞췄다. 사용자 승인 후 공통 parser 규칙 문서도 같은 SoC 계약에 맞췄다.
 - Verification: `python3 -m py_compile src/finiq/market_desk/web/features/disclosures/html_parse_common.py src/finiq/market_desk/web/features/disclosures/html_parse_preview.py` 통과. metadata/후보 관련 `python3 -m pytest tests/market_desk/test_kind_web_service.py -q -k "parses_html_files_and_writes_result or metadata_market or metadata_display_title or compressed_title or external_html_main_docs or filtered_disclosures or filter_candidates"` 통과(10 passed, 393 deselected). 실제 `resources/KIND/bond_issuance` metadata index는 records 19,175건, title/doc_no 15,176건, company_name/market 19,175건으로 분리 로드됨을 확인했다. 실제 `resources/KIND/rights_issuance` metadata index는 records 27,461건, title/doc_no 19,975건, company_name/market 27,461건으로 분리 로드됨을 확인했다. 전체 `tests/market_desk/test_kind_web_service.py`는 402 passed, 1 failed이며, 잔여 실패는 기존 사채발행 `기업명(행사대상)` 추출 테스트다.
 
 ## 2026-07-10 공시원문 변환 필터 후보 fallback 제거

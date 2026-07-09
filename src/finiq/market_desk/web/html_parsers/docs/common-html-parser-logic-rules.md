@@ -1,5 +1,5 @@
 # 공통 로직 규칙
-최종 업데이트: 2026-07-09
+최종 업데이트: 2026-07-10
 
 ### 문서 작성 규칙
 1. **이번 패치에서 명시적으로 수정 대상으로 지정되지 않은 문서 내 내용은 변경하지 않는다.**
@@ -15,6 +15,7 @@
 1. **기본 규칙**
 - 외부 HTML 데이터를 이용한 필드 보강은 필드별로 정해진 `filtered.json` 또는 `compressed-external-html.json`을 유일한 SoC로 사용한다.
   - 절대로 `kind_disclosure_html_manifest.json`에 의존하지 않는다.
+- `filtered.json`은 `disclosures` 목록만 읽는다. `rows`를 fallback으로 읽지 않는다.
 - `filtered.json`·`compressed-external-html.json`는 입력 디렉토리보다 한 단계 위에 있는 부모 디렉토리에 존재한다. 
 - DART 공시코드인 `rcept_no`는 저장하거나 사용하지 않는다.
 2. **공시 제목**
@@ -29,10 +30,10 @@
 - `corp_name`은 `filtered.json`의 `company_name`을 유일한 SoC로 사용한다.
   - `compressed-external-html.json`·`header`를 사용한 fallback 로직을 만들지 않는다.
 - `상장구분`은 `filtered.json`의 `market`을 사용한다.
+  - `유가증권`은 `코스피`로 정규화한다.
 5. **정정공시**
-- 정정공시 내 제목은 `compressed-external-html.json`의 `mainDoc.text`를 `title`에 저장한다.
-  - `title_display`·`title_base`·`metadata.title`·`record.title`을 사용한 fallback 로직을 만들지 않는다.
-- 정정공시 묶음 내 각 제목들은 `compressed-external-html.json`의 `mainDoc.text`를 유일한 SoC로 사용한다.
+- 정정공시 record의 `title`은 `compressed-external-html.json.title` 단일 필드를 유일한 SoC로 사용한다.
+- 정정공시 묶음의 각 `members[].title`은 `compressed-external-html.json`의 `mainDoc.text`를 유일한 SoC로 사용한다.
   - `filtered.json`의 `company_key`·`title_base`·`title_display`·`title`을 사용한 fallback 로직을 만들지 않는다.
 
 ### 내부 HTML 파싱 규칙
@@ -98,9 +99,9 @@
 
 | 필드 | 값 |
 | --- | --- |
-| `acpt_no` | 확장자를 뺀 파일명에서 `_` 앞에 있는 숫자 부분. 숫자로 시작하지 않으면 빈 문자열 |
+| `acpt_no` | 확장자를 제거한 파일명의 `_` 앞 문자열이 모두 숫자인 경우 그 값을 사용하고, 아니면 빈 문자열 |
 | `mode` | parser별 mode 값 |
-| `title` | 웹 파싱 저장 record에서는 호출자가 parser에 주입한 제목만 사용한다. metadata 보강 단계에서 빈 제목을 다시 채우지 않는다. 주입 제목이 없으면 빈 문자열과 `strong_warning`을 남긴다. |
+| `title` | 현재 `bond_issuance`와 `rights_issuance`의 웹 파싱 저장 record에서는 호출자가 parser에 주입한 제목만 사용한다. metadata 보강 단계에서 빈 제목을 다시 채우지 않는다. 주입 제목이 없으면 빈 문자열과 `strong_warning`을 남긴다. |
 | `family_id` | 정정공시 묶음에 속한 경우 최상위 `families`의 키 |
 | `current_sequence` | 정정공시 묶음 안에서 현재 record의 순번 |
 | `family_member_count` | 정정공시 묶음의 전체 member 수 |
