@@ -49,7 +49,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, None)
-    metadata_index = _load_html_parse_metadata_index(input_directory)
+    metadata_index = _load_html_parse_metadata_index(html_files)
     records: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for index, html_file in enumerate(html_files, start=1):
@@ -92,10 +92,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         },
         "records": [
             _build_preview_record(record, index=index, mode=requested_mode)
-            for index, record in enumerate(
-                _resolve_correction_family_acpt_numbers(records),
-                start=1,
-            )
+            for index, record in enumerate(records, start=1)
         ],
         "errors": errors,
     }
@@ -186,7 +183,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, None)
-    metadata_index = _load_html_parse_metadata_index(input_directory)
+    metadata_index = _load_html_parse_metadata_index(html_files)
     worker_count = _filter_candidate_workers(
         body.get("parallel_workers", body.get("workers")), len(html_files)
     )

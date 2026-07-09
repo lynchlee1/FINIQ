@@ -29,9 +29,10 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg)
 
     limit = _parse_limit(body.get("limit"))
-    records = _resolve_correction_family_acpt_numbers(
-        list(payload.get("records") or [])
-    )
+    records = [
+        _compact_record(record) if isinstance(record, dict) else record
+        for record in list(payload.get("records") or [])
+    ]
     total_count = len(records)
     if limit is not None:
         records = records[:limit]
@@ -51,7 +52,6 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
                 "title": record.get("title") or "",
                 "source_file": _source_file_for_record(record, source_directory),
                 "acpt_no": record.get("acpt_no") or "",
-                "rcept_no": record.get("rcept_no") or "",
                 "family_id": family_id,
                 "current_sequence": current_sequence,
                 "family_member_count": member_count,

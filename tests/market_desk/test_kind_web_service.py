@@ -3609,6 +3609,82 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
     assert payload["records"][0]["corp_name"] == "테스트발행사"
 
 
+def test_parse_disclosure_html_payload_uses_html_file_parent_metadata_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_root = tmp_path / "input"
+    source_dir = input_root / "source"
+    year_dir = source_dir / "2025"
+    year_dir.mkdir(parents=True)
+    (source_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (year_dir / "20250102000002.html").write_text("<html></html>", encoding="utf-8")
+    (input_root / "filtered.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "market": "유가증권",
+                        "company_name": "잘못된루트회사",
+                    },
+                    {
+                        "acpt_no": "20250102000002",
+                        "market": "유가증권",
+                        "company_name": "잘못된루트회사",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (source_dir / "filtered.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "market": "코스닥",
+                        "company_name": "일반저장회사",
+                    },
+                    {
+                        "acpt_no": "20250102000002",
+                        "market": "코스닥",
+                        "company_name": "연도별저장회사",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "bond_issuance",
+            "title": "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_root),
+            "output_directory": str(tmp_path / "output"),
+            "mode": "bond_issuance",
+        }
+    )
+
+    records = {record["acpt_no"]: record for record in payload["records"]}
+    assert records["20250101000001"]["상장구분"] == "코스닥"
+    assert records["20250101000001"]["corp_name"] == "일반저장회사"
+    assert records["20250102000002"]["상장구분"] == "코스닥"
+    assert records["20250102000002"]["corp_name"] == "연도별저장회사"
+
+
 def test_parse_disclosure_html_payload_ignores_download_manifest_metadata(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
@@ -3714,7 +3790,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
         """,
         encoding="utf-8",
     )
-    (bond_dir / "filtered.json").write_text(
+    (input_dir / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [
@@ -3730,7 +3806,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
         ),
         encoding="utf-8",
     )
-    (bond_dir / "compressed-external-html.json").write_text(
+    (input_dir / "compressed-external-html.json").write_text(
         json.dumps(
             {
                 "records": [
@@ -3851,7 +3927,6 @@ def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "rcept_no": "20250102009999",
             "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
             "title": "",
@@ -3917,7 +3992,6 @@ def test_parse_disclosure_html_payload_requires_output_directory(
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "rcept_no": "20250102009999",
             "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
             "title": "",
@@ -3935,7 +4009,7 @@ def test_parse_disclosure_html_payload_requires_output_directory(
         )
 
 
-def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
+def test_parse_disclosure_html_payload_drops_rcept_no_fields(
     tmp_path: Path, monkeypatch
 ) -> None:
     viewer_dir = tmp_path / "viewer_html"
@@ -3947,14 +4021,10 @@ def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
 
     def fake_parser(html_text, *, file_path):
         acpt_no = Path(file_path).stem
-        rcept_no = {
-            "20250101000001": "20250101009999",
-            "20250102000002": "20250102009999",
-        }[acpt_no]
         current_sequence = 0 if acpt_no == "20250101000001" else 1
         return {
             "correction_families": {
-                "20250102009999": {
+                "20250102000002": {
                     "current_sequence": current_sequence,
                     "members": [
                         {
@@ -3970,7 +4040,7 @@ def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
                     ],
                 }
             },
-            "rcept_no": rcept_no,
+            "rcept_no": "20250102009999",
             "acpt_no": acpt_no,
             "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
@@ -3989,11 +4059,104 @@ def test_parse_disclosure_html_payload_resolves_correction_family_acpt_numbers(
     )
 
     for record in payload["records"]:
-        family = record["correction_families"]["20250102009999"]
+        assert "rcept_no" not in record
+        family = record["correction_families"]["20250102000002"]
+        is_first_record = record["acpt_no"] == "20250101000001"
         assert family["members"] == [
-            {"sequence": 0, "acpt_no": "20250101000001", "rcept_no": "20250101009999"},
-            {"sequence": 1, "acpt_no": "20250102000002", "rcept_no": "20250102009999"},
+            {
+                "sequence": 0,
+                "acpt_no": "20250101000001" if is_first_record else None,
+            },
+            {
+                "sequence": 1,
+                "acpt_no": None if is_first_record else "20250102000002",
+            },
         ]
+
+
+def test_parse_disclosure_html_payload_does_not_fallback_filtered_family_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_dir = tmp_path / "rights_issuance" / "kind_html_contents_sections"
+    input_dir.mkdir(parents=True)
+    for acpt_no in (
+        "20250101000001",
+        "20250102000002",
+        "20250103000003",
+        "20250104000004",
+    ):
+        (input_dir / f"{acpt_no}.html").write_text("<html></html>", encoding="utf-8")
+
+    (input_dir.parent / "filtered.json").write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "company_name": "회사명만있는회사",
+                        "title": "유상증자결정",
+                        "title_attr": "유상증자결정",
+                        "disclosed_at": "2025-01-01 09:00",
+                        "is_correction_report": False,
+                    },
+                    {
+                        "acpt_no": "20250102000002",
+                        "company_name": "회사명만있는회사",
+                        "title": "[정정]유상증자결정",
+                        "title_attr": "유상증자결정",
+                        "disclosed_at": "2025-01-02 09:00",
+                        "is_correction_report": True,
+                    },
+                    {
+                        "acpt_no": "20250103000003",
+                        "company_key": "STRICT",
+                        "company_name": "계약필드회사",
+                        "title": "유상증자결정",
+                        "title_base": "유상증자결정",
+                        "disclosed_at": "2025-01-03 09:00",
+                        "is_correction_report": False,
+                    },
+                    {
+                        "acpt_no": "20250104000004",
+                        "company_key": "STRICT",
+                        "company_name": "계약필드회사",
+                        "title": "[정정]유상증자결정",
+                        "title_base": "유상증자결정",
+                        "disclosed_at": "2025-01-04 09:00",
+                        "is_correction_report": True,
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_parser(html_text, *, file_path, title=None):
+        return {
+            "correction_families": {},
+            "acpt_no": Path(file_path).stem,
+            "source_file": str(Path(file_path).resolve()),
+            "mode": "rights_issuance",
+            "title": title or "",
+            "raw_rows": [],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_dir),
+            "output_directory": str(tmp_path),
+            "mode": "rights_issuance",
+        }
+    )
+
+    records = {record["acpt_no"]: record for record in payload["records"]}
+    assert records["20250101000001"]["correction_families"] == {}
+    assert records["20250102000002"]["correction_families"] == {}
+    family = records["20250103000003"]["correction_families"]["20250104000004"]
+    assert [member["title"] for member in family["members"]] == ["", ""]
 
 
 def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_corrections(
@@ -4121,7 +4284,6 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
         acpt_no = Path(file_path).stem
         return {
             "correction_families": {},
-            "rcept_no": None,
             "acpt_no": acpt_no,
             "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
@@ -4177,14 +4339,13 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
                     {
                         "title": "[정정]전환사채권발행결정",
                         "acpt_no": "20250102000002",
-                        "rcept_no": "20250102009999",
                         "source_file": "/tmp/20250102000002.html",
                         "correction_families": {
-                            "20250102009999": {
+                            "20250102000002": {
                                 "current_sequence": 1,
                                 "members": [
-                                    {"sequence": 0, "acpt_no": None, "rcept_no": "20250101009999"},
-                                    {"sequence": 1, "acpt_no": "20250102000002", "rcept_no": "20250102009999"},
+                                    {"sequence": 0, "acpt_no": None},
+                                    {"sequence": 1, "acpt_no": "20250102000002"},
                                 ],
                             }
                         },
@@ -4219,7 +4380,7 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
         "correction_records": 1,
         "latest_records": 1,
     }
-    assert payload["records"][0]["family_id"] == "20250102009999"
+    assert payload["records"][0]["family_id"] == "20250102000002"
     assert payload["records"][0]["fields"]["발행금액"] == 1_000_000_000
     assert payload["records"][0]["fields"]["사채발행방법"] == "사모"
     assert payload["records"][0]["fields"]["투자자"] == [["테스트조합", 1_000_000_000]]
@@ -4292,7 +4453,6 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
                     {
                         "title": "전환사채권발행결정",
                         "acpt_no": "20250102000002",
-                        "rcept_no": "20250102009999",
                         "corp_name": "발행사",
                         "회차": "1",
                         "종류": "CB",
@@ -4416,7 +4576,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
     assert payload["records"][0]["title"] == "[테스트발행사] 전환사채권발행결정"
     record = payload["records"][0]["parsed_result"]
     assert record["acpt_no"] == "20250102000002"
-    assert record["rcept_no"] is None
+    assert "rcept_no" not in record
     assert record["doc_no"] == "20250102009999"
     assert "selected_main_doc_no" not in record
     assert "docs" not in record
@@ -4464,14 +4624,13 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
                     {
                         "title": "유상증자결정",
                         "acpt_no": "20240822000001",
-                        "rcept_no": "20240822009999",
                         "source_file": "/tmp/20240822000001.html",
                         "correction_families": {
-                            "20240829009999": {
+                            "20240829000001": {
                                 "current_sequence": 0,
                                 "members": [
-                                    {"sequence": 0, "acpt_no": "20240822000001", "rcept_no": "20240822009999"},
-                                    {"sequence": 1, "acpt_no": "20240829000001", "rcept_no": "20240829009999"},
+                                    {"sequence": 0, "acpt_no": "20240822000001"},
+                                    {"sequence": 1, "acpt_no": "20240829000001"},
                                 ],
                             }
                         },
@@ -4483,14 +4642,13 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
                     {
                         "title": "[정정]유상증자결정",
                         "acpt_no": "20240829000001",
-                        "rcept_no": "20240829009999",
                         "source_file": "/tmp/20240829000001.html",
                         "correction_families": {
-                            "20240829009999": {
+                            "20240829000001": {
                                 "current_sequence": 1,
                                 "members": [
-                                    {"sequence": 0, "acpt_no": "20240822000001", "rcept_no": "20240822009999"},
-                                    {"sequence": 1, "acpt_no": "20240829000001", "rcept_no": "20240829009999"},
+                                    {"sequence": 0, "acpt_no": "20240822000001"},
+                                    {"sequence": 1, "acpt_no": "20240829000001"},
                                 ],
                             }
                         },
@@ -5744,7 +5902,7 @@ def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path)
     parsed = parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
 
     assert parsed["title"] == ""
-    assert parsed["rcept_no"] is None
+    assert "rcept_no" not in parsed
     assert parsed["correction_families"] == {}
     assert parsed["회차"] is None
     assert parsed["종류"] is None
@@ -5873,7 +6031,6 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
             "acpt_no": Path(file_path).stem,
             "mode": "bond_issuance",
             "title": "",
-            "rcept_no": None,
             "correction_families": {},
             "상장구분": None,
             "source_file": str(Path(file_path).resolve()),

@@ -960,7 +960,7 @@ export default function HtmlParsePage() {
                         <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">{record.source_file}</p>
                       </div>
                       <code className="rounded bg-slate-100 px-2 py-1 text-[10px] text-slate-500 dark:bg-[#161b22] dark:text-slate-400">
-                        {record.acpt_no || record.rcept_no || `#${record.index}`}
+                        {record.acpt_no || `#${record.index}`}
                       </code>
                     </div>
 

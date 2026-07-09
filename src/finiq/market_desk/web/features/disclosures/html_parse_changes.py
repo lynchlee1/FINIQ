@@ -40,7 +40,10 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     numeric_thresholds = app_config.change_log_numeric_thresholds or {}
 
     # Get records
-    all_records = list(payload.get("records") or [])
+    all_records = [
+        _compact_record(record) if isinstance(record, dict) else record
+        for record in list(payload.get("records") or [])
+    ]
 
     # Identify which records belong to which families
     family_records: dict[str, list[tuple[int, dict[str, Any]]]] = {}
@@ -65,36 +68,6 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     else:
         # Dynamic discovery for generic modes (like shareholder_meeting)
         comparison_fields = _get_all_value_fields(all_records)
-
-    # If we need details, resolve acpt_numbers ONLY for the relevant records
-    if not summary_only or requested_family_id:
-        rcept_to_acpt = _rcept_no_to_acpt_no(all_records)
-        for family_id in family_records:
-            resolved_list = []
-            for index, record in family_records[family_id]:
-                resolved_record = dict(record)
-                families_data = record.get("correction_families")
-                if isinstance(families_data, dict):
-                    resolved_families = {}
-                    for fid, fdoc in families_data.items():
-                        resolved_fdoc = dict(fdoc)
-                        members = fdoc.get("members")
-                        if isinstance(members, list):
-                            resolved_members = []
-                            for m in members:
-                                if isinstance(m, dict):
-                                    rm = dict(m)
-                                    r_no = str(rm.get("rcept_no") or "").strip()
-                                    if r_no and not rm.get("acpt_no"):
-                                        rm["acpt_no"] = rcept_to_acpt.get(r_no)
-                                    resolved_members.append(rm)
-                                else:
-                                    resolved_members.append(m)
-                            resolved_fdoc["members"] = resolved_members
-                        resolved_families[str(fid)] = resolved_fdoc
-                    resolved_record["correction_families"] = resolved_families
-                resolved_list.append((index, resolved_record))
-            family_records[family_id] = resolved_list
 
     families: list[dict[str, Any]] = []
     # Sort families by family_id descending (latest first) for better responsiveness and early exit

@@ -8,15 +8,30 @@
 - 공시 제목은 외부 소스로부터 주입한 제목을 단일 SoC로 사용하며, `SECTION-1` · `<title>`을 사용한 fallback 로직을 만들지 않는다.
 - 메타데이터 제목은 `title` 단일 필드만 사용하며, `title_display` · `title_attr`을 사용한 fallback 로직을 만들지 않는다.
 - `doc_no`는 `selected_main_doc_no` 단일 필드만 사용하며, `item.doc_no`를 사용한 fallback 로직을 만들지 않는다.
-- 정정공시 목록 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
 - 공시원문 변환 metadata는 `filtered.json`과 `compressed-external-html.json`만 사용한다. `kind_disclosure_html_manifest.json`에 의존하지 않는다.
 - 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
 - 원문 미리보기는 record의 `source_file`을 이용해 파싱한다. wrapper HTML은 사용하지 않는다.
 
+### 정정공시 핸들링
+- 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
+
 ## Intended fallbacks
-- HTML 파싱시 디코딩을 utf-8 -> cp949 -> euc-kr -> utf-8(errors="replace") 순서로 시도.
-- lxml.HTMLParser(recover=True)로 깨진 HTML 복구.
-- 공시원문 변환시 절대로 `kind_disclosure_html_manifest.json`을 참고해서는 안됨. 외부 데이터 보강은 온전히 `filtered.json` · `compressed-external-html.json`에만 의존해야 함.
+### HTML 파싱
+- 디코딩을 utf-8 -> cp949 -> euc-kr -> utf-8(errors="replace") 순서로 시도한다.
+- lxml.HTMLParser(recover=True)로 깨진 HTML을 복구한다.
+- DART 공시코드인 rcept_no는 저장 및 사용하지 않는다.
+
+### 공시원문 변환
+- 공시원문 변환시 절대로 `kind_disclosure_html_manifest.json`을 참고해서는 안된다.
+  - 외부 데이터 보강은 온전히 `filtered.json` · `compressed-external-html.json`에만 의존해야 한다.
+  - 메타데이터는 공시원문을 연도별로 저장한 경우(`dir/yyyy/<acpt_no>.html`) grandparent 디렉토리에 존재하며, 한번에 저장한 경우(`dir/<acpt_no>.html`) parent 디렉토리에 존재한다.
+  - 따라서, 메타데이터 파일 탐색은 parent -> grandparent 순서로 `filtered.json` · `compressed-external-html.json`을 찾는다. (input -> parent -> grandparent 순서가 아님에 유의하라.)
+- skip_errors=True인 경우 파싱 실패 시 전체 작업을 중단하지 않고 errors에 기록한다.
+
+#### 사채발행파싱 (bond_issuance)
+- 사채 발행금액 행에서 `원화기준 포함` 행을 우선하고, 없으면 첫 `사채의 권면` 행을 사용한다.
+  - 해외발행의 경우에서 원화기준 권면을 우선하기 위함이다.
+
 
 - 만기일: 사채만기일 -> 사채만기 순서로 확인
 
@@ -27,7 +42,6 @@
 | 필드 | 출처 | 설명 |
 | --- | --- | --- |
 | `correction_families` | `filtered.json` | 정정공시 목록 |
-| `rcept_no` | - | DART 내부 공시 코드 |
 | `doc_no` | `compressed-external-html.json` | KIND viewer 본문 문서 선택 번호 |
 | `corp_name` | `filtered.json`, `compressed-external-html.json` | 공시 회사명. 현재 `bond_issuance`, `rights_issuance` 저장 record에 보강 |
 | `상장구분` | `filtered.json`, `compressed-external-html.json` | 코스피, 코스닥, 코넥스, 기타 |
@@ -52,7 +66,6 @@
 | `acpt_no` | 확장자를 뺀 파일명에서 `_` 앞에 있는 숫자 부분. 숫자로 시작하지 않으면 빈 문자열 |
 | `mode` | parser별 mode 값 |
 | `title` | 웹 파싱 저장 record에서는 호출자가 parser에 주입한 제목만 사용한다. metadata 보강 단계에서 빈 제목을 다시 채우지 않는다. 주입 제목이 없으면 빈 문자열과 `strong_warning`을 남긴다. |
-| `rcept_no` | KIND HTML 워크플로우에서는 `null` |
 | `correction_families` | 정정공시 묶음. 없으면 빈 객체 |
 | `상장구분` | 주변 metadata에서 보강. 없으면 `null` |
 | `doc_no` | 주변 metadata에서 산출되는 경우에만 저장 |
