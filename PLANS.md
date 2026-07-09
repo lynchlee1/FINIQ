@@ -1,5 +1,11 @@
 # Completed Changes
 
+## 2026-07-09 공시원문 변환 회사명 SoC 고정
+
+- Purpose: `corp_name` 보강을 `filtered.json.company_name` 단일 출처로 고정하고, `compressed-external-html.json` 또는 `header` 기반 회사명 fallback을 제거한다.
+- Implementation: HTML parse metadata 탐색을 입력 디렉토리의 한 단계 위 디렉토리로 고정하고, `filtered.json` 로드에서만 `company_name`을 읽도록 분리했다. `compressed-external-html.json` 로드는 정정 family/doc metadata만 보강하며 회사명은 읽지 않는다. preview/filter 후보 metadata 로드 호출부와 공통 파서 규칙 문서를 같은 계약으로 맞췄다.
+- Verification: `python3 -m py_compile src/finiq/market_desk/web/features/disclosures/html_parse_common.py src/finiq/market_desk/web/features/disclosures/html_parse_preview.py` 통과. 실제 `resources/KIND/bond_issuance/kind_html_contents_grouped_sections` 15,175건과 `resources/KIND/rights_issuance/kind_html_contents_sections` 19,975건 기준으로 metadata 회사명이 모두 채워지는 것을 확인했고, 문제 예시 `20080924000347`, `20111216000861`, `20150513000264`, `20171228000858`의 `corp_name`이 각각 `filtered.json.company_name` 값으로 반영되는 것을 확인했다.
+
 ## 2026-07-09 공시원문 변환 공통 fallback 문서 갱신
 
 - Purpose: fallback 제거 후 현재 공시원문 변환 로직만 설명하도록 공통 HTML 파서 규칙 문서를 최신화한다.

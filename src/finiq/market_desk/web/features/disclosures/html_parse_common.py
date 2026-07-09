@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from inspect import signature
@@ -233,16 +232,10 @@ def _normalize_listing_market(value: Any) -> str:
 
 
 def _load_html_parse_metadata_index(
-    html_files: list[Path],
+    input_directory: Path,
 ) -> dict[str, dict[str, Any]]:
     metadata_index: dict[str, dict[str, Any]] = {}
-    seen_directories: set[Path] = set()
-    for html_file in html_files:
-        for directory in (html_file.parent, html_file.parent.parent):
-            if directory in seen_directories:
-                continue
-            seen_directories.add(directory)
-            _merge_parse_metadata_from_directory(metadata_index, directory)
+    _merge_parse_metadata_from_directory(metadata_index, input_directory.parent)
     return metadata_index
 
 
@@ -276,24 +269,24 @@ def _merge_metadata_index(
                 current[key] = value
 
 
-def _metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+def _metadata_item(
+    item: dict[str, Any], *, include_company_name: bool
+) -> tuple[str, dict[str, Any]] | None:
     acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
         return None
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
     metadata = {
         "market": _normalize_listing_market(item.get("market")),
-        "company_name": str(item.get("company_name") or "").strip(),
         "title": str(item.get("title") or "").strip(),
         "doc_no": selected_main_doc_no,
         "selected_main_doc_no": selected_main_doc_no,
     }
+    if include_company_name:
+        metadata["company_name"] = str(item.get("company_name") or "").strip()
     docs = item.get("docs")
     if isinstance(docs, list):
         metadata["docs"] = [doc for doc in docs if isinstance(doc, dict)]
-    header = str(item.get("header") or "").strip()
-    if header and not metadata["company_name"]:
-        metadata["company_name"] = re.sub(r"\s*\([^)]*\)\s*$", "", header).strip()
     return acpt_no, metadata
 
 
@@ -313,7 +306,7 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, An
     for item in rows:
         if not isinstance(item, dict):
             continue
-        parsed = _metadata_item(item)
+        parsed = _metadata_item(item, include_company_name=True)
         if parsed is not None:
             acpt_no, metadata = parsed
             metadata_index[acpt_no] = metadata
@@ -341,7 +334,7 @@ def _load_compressed_external_html_metadata_index(
     for item in records:
         if not isinstance(item, dict):
             continue
-        parsed = _metadata_item(item)
+        parsed = _metadata_item(item, include_company_name=False)
         if parsed is not None:
             acpt_no, metadata = parsed
             family = _external_html_correction_family(item, selected_doc_to_record)
@@ -590,7 +583,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         input_directory=input_directory,
         output_path=output_path,
         html_files=html_files,
-        metadata_index=_load_html_parse_metadata_index(html_files),
+        metadata_index=_load_html_parse_metadata_index(input_directory),
         limit=limit,
         skip_errors=bool(body.get("skip_errors", True)),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
