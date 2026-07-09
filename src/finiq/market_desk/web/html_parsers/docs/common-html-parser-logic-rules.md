@@ -25,9 +25,10 @@
   - `item.doc_no`를 사용한 fallback 로직을 만들지 않는다.
 - `acpt_no`는 입력 HTML 파일명을 유일한 SoC로 사용한다.
 - `filtered.json`·`compressed-external-html.json`의 `acpt_no`는 메타데이터를 연결할 key로만 사용하며, record의 `acpt_no`에 영향을 주지 않는다. 
-4. **기업명**
+4. **기업 정보**
 - `corp_name`은 `filtered.json`의 `company_name`을 유일한 SoC로 사용한다.
   - `compressed-external-html.json`·`header`를 사용한 fallback 로직을 만들지 않는다.
+- `상장구분`은 `filtered.json`의 `market`을 사용한다.
 5. **정정공시**
 - 정정공시 내 제목은 `compressed-external-html.json`의 `mainDoc.text`를 `title`에 저장한다.
   - `title_display`·`title_base`·`metadata.title`·`record.title`을 사용한 fallback 로직을 만들지 않는다.
@@ -38,28 +39,19 @@
 1. **기본 규칙**
 - `rowspan`·`colspan`에 잘못된 값이 있는 경우 조용히 보정하지 않고 실패로 드러낸다.
 - 원문 미리보기는 원본 HTML 파일을 직접 읽어 테이블 preview를 만든다.
+- 원문 미리보기는 `source_directory`와 record의 `acpt_no`로 원본 HTML 파일을 찾는다.
+  - 먼저 `source_directory/<acpt_no>.html`을 확인한다.
+  - 없으면 `source_directory/<YYYY>/<acpt_no>.html`을 확인한다.
 - change-log 비교 대상 필드는 공시 유형별 `CHANGE_LOG_COMPARISON_FIELDS`에 명시한다.
+- skip_errors=True인 경우 파싱 실패 시 전체 작업을 중단하지 않고 errors에 기록한다.
+- change-log는 `CHANGE_LOG_COMPARISON_FIELDS`에 정의된 필드만 비교한다. 정의가 없는 mode는 비교 필드가 빈 목록이다.
 2. **디코딩**
 - 디코딩은 utf-8, cp949, euc-kr, utf-8(errors="replace") 순서로 시도한다.
 - lxml.html.HTMLParser(recover=True)로 깨진 HTML을 복구한다.
+
 ### 공시원문 변환
-- `상장구분`은 `filtered.json`의 `market`을 사용한다.
+1. **기본 규칙**
 - 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
-- 공시원문 변환 metadata 보강은 `kind_disclosure_html_manifest.json`을 읽지 않는다.
-  - 메타데이터 파일은 항상 입력 디렉토리의 한 단계 위 디렉토리에 둔다.
-  - 예: `bond_issuance/kind_html_contents_grouped_sections`를 입력하면 `bond_issuance/filtered.json`과 `bond_issuance/compressed-external-html.json`만 읽는다.
-  - 각 디렉토리 안에서는 `filtered.json`을 먼저 읽고 `compressed-external-html.json`을 나중에 읽는다.
-  - 같은 `acpt_no`와 같은 metadata key가 여러 번 발견되면 나중에 병합한 값이 저장된다.
-- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에서 만든다.
-  - member 제목은 `mainDoc.text`를 `title`로 저장한다.
-  - parsed JSON 최상위 `families`에는 family별 `members`만 저장한다.
-  - 각 record에는 `family_id`, `current_sequence`, `family_member_count`만 저장한다.
-- 저장 record에는 `source_file`을 저장하지 않는다. 실행 중 preview, errors, warnings, job status에서는 진단용으로 사용할 수 있다.
-- 저장 결과 summary에서 원문 preview가 필요하면 요청의 `source_directory`와 record의 `acpt_no`로 원본 HTML 파일을 찾는다.
-  - 먼저 `source_directory/<acpt_no>.html`을 확인한다.
-  - 없으면 `source_directory` 아래에서 `<acpt_no>*.html`을 찾고, 파일 stem의 `_` 앞부분이 `acpt_no`와 같은 첫 파일을 사용한다.
-- skip_errors=True인 경우 파싱 실패 시 전체 작업을 중단하지 않고 errors에 기록한다.
-- change-log는 `CHANGE_LOG_COMPARISON_FIELDS`에 정의된 필드만 비교한다. 정의가 없는 mode는 비교 필드가 빈 목록이다.
 
 #### 사채발행파싱 (bond_issuance)
 - 사채 발행금액 행에서 `원화기준 포함` 행을 우선하고, 없으면 첫 `사채의 권면` 행을 사용한다.

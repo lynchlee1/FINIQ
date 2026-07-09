@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from lxml import html
 
 
@@ -33,20 +31,3 @@ def parse_html_document(html_markup: str | bytes) -> html.HtmlElement:
     decoded = decode_html_markup(html_markup)
     document = html.fromstring(decoded, parser=parser)
     return document
-
-
-def fetch_selected_viewer_body(
-    html_text: str | bytes, *, file_path: str | Path | None = None
-) -> bytes | None:
-    """뷰어 HTML과 짝을 이루는 실제 본문 HTML 바이트를 로컬 디렉터리에서 찾는다."""
-    if not file_path:
-        return None
-
-    path = Path(file_path).resolve()
-    content_directory_names = ("viewer_html_contents", "kind_html_contents")
-    for content_directory_name in content_directory_names:
-        content_path = path.parent.parent / content_directory_name / path.name
-        if content_path.is_file():
-            return content_path.read_bytes()
-
-    return None

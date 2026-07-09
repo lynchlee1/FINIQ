@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from .io import (
     decode_html_markup,
-    fetch_selected_viewer_body,
     parse_html_document,
 )
 from .metadata import (
@@ -16,7 +15,6 @@ from .metadata import (
     extract_acpt_no,
     extract_section_title,
     extract_title,
-    preserve_viewer_metadata,
 )
 from .rows import (
     column_index,
@@ -53,7 +51,6 @@ __all__ = [
     "parse_ints",
     "parse_float",
     "parse_html_document",
-    "fetch_selected_viewer_body",
     "row_contains",
     "row_containing",
     "normalize_label",
@@ -72,6 +69,5 @@ __all__ = [
     "extract_title",
     "extract_section_title",
     "extract_acpt_no",
-    "preserve_viewer_metadata",
     "build_base_record",
 ]
