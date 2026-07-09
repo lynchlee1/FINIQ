@@ -20,7 +20,7 @@ class BondIssuanceRecord:
     상장구분: str | Any | None
     발행금액: int | None
     발행목적: list[list[Any]]
-    행사가액: int | None
+    행사가액: int | float | None
     납입일: str | None
     만기일: str | None
     사채발행방법: str | None

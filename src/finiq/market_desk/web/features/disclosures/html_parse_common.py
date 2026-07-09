@@ -243,51 +243,45 @@ def _merge_parse_metadata_from_directory(
     metadata_index: dict[str, dict[str, Any]],
     directory: Path,
 ) -> None:
-    directory_metadata_index: dict[str, dict[str, Any]] = {}
+    filtered_metadata_index: dict[str, dict[str, Any]] = {}
+    compressed_metadata_index: dict[str, dict[str, Any]] = {}
     filtered_path = directory / "filtered.json"
     if filtered_path.is_file():
-        _merge_metadata_index(
-            directory_metadata_index, _load_filtered_metadata_index(filtered_path)
-        )
+        filtered_metadata_index = _load_filtered_metadata_index(filtered_path)
     compressed_path = directory / "compressed-external-html.json"
     if compressed_path.is_file():
-        _merge_metadata_index(
-            directory_metadata_index,
-            _load_compressed_external_html_metadata_index(compressed_path),
+        compressed_metadata_index = _load_compressed_external_html_metadata_index(
+            compressed_path
         )
-    _merge_metadata_index(metadata_index, directory_metadata_index)
+    for acpt_no in sorted(set(filtered_metadata_index) | set(compressed_metadata_index)):
+        metadata: dict[str, Any] = {}
+        metadata.update(filtered_metadata_index.get(acpt_no, {}))
+        metadata.update(compressed_metadata_index.get(acpt_no, {}))
+        metadata_index[acpt_no] = metadata
 
 
-def _merge_metadata_index(
-    target: dict[str, dict[str, Any]],
-    source: dict[str, dict[str, Any]],
-) -> None:
-    for acpt_no, metadata in source.items():
-        current = target.setdefault(acpt_no, {})
-        for key, value in metadata.items():
-            if value:
-                current[key] = value
+def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    acpt_no = str(item.get("acpt_no") or "").strip()
+    if not acpt_no:
+        return None
+    return acpt_no, {
+        "market": _normalize_listing_market(item.get("market")),
+        "company_name": str(item.get("company_name") or "").strip(),
+    }
 
 
-def _metadata_item(
-    item: dict[str, Any], *, include_company_name: bool
+def _compressed_external_html_metadata_item(
+    item: dict[str, Any]
 ) -> tuple[str, dict[str, Any]] | None:
     acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
         return None
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
-    metadata = {
-        "market": _normalize_listing_market(item.get("market")),
+    return acpt_no, {
         "title": str(item.get("title") or "").strip(),
         "doc_no": selected_main_doc_no,
         "selected_main_doc_no": selected_main_doc_no,
     }
-    if include_company_name:
-        metadata["company_name"] = str(item.get("company_name") or "").strip()
-    docs = item.get("docs")
-    if isinstance(docs, list):
-        metadata["docs"] = [doc for doc in docs if isinstance(doc, dict)]
-    return acpt_no, metadata
 
 
 def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, Any]]:
@@ -298,15 +292,13 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, An
     if not isinstance(payload, dict):
         return {}
     metadata_index: dict[str, dict[str, Any]] = {}
-    rows = [
-        item
-        for item in [*(payload.get("rows") or []), *(payload.get("disclosures") or [])]
-        if isinstance(item, dict)
+    disclosures = [
+        item for item in payload.get("disclosures") or [] if isinstance(item, dict)
     ]
-    for item in rows:
+    for item in disclosures:
         if not isinstance(item, dict):
             continue
-        parsed = _metadata_item(item, include_company_name=True)
+        parsed = _filtered_metadata_item(item)
         if parsed is not None:
             acpt_no, metadata = parsed
             metadata_index[acpt_no] = metadata
@@ -334,7 +326,7 @@ def _load_compressed_external_html_metadata_index(
     for item in records:
         if not isinstance(item, dict):
             continue
-        parsed = _metadata_item(item, include_company_name=False)
+        parsed = _compressed_external_html_metadata_item(item)
         if parsed is not None:
             acpt_no, metadata = parsed
             family = _external_html_correction_family(item, selected_doc_to_record)

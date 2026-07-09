@@ -13,16 +13,16 @@
 
 ### 외부 HTML 연결 규칙
 1. **기본 규칙**
-- 외부 HTML 데이터를 이용한 필드 보강은 `filtered.json`과 `compressed-external-html.json`을 유일한 SoC로 사용한다.
-- 절대로 `kind_disclosure_html_manifest.json`에 의존하지 않는다.
+- 외부 HTML 데이터를 이용한 필드 보강은 필드별로 정해진 `filtered.json` 또는 `compressed-external-html.json`을 유일한 SoC로 사용한다.
+  - 절대로 `kind_disclosure_html_manifest.json`에 의존하지 않는다.
 - `filtered.json`·`compressed-external-html.json`는 입력 디렉토리보다 한 단계 위에 있는 부모 디렉토리에 존재한다. 
 - DART 공시코드인 `rcept_no`는 저장하거나 사용하지 않는다.
 2. **공시 제목**
-- 공시 제목은 외부 소스로부터 주입한 `filtered.json.title` 단일 필드를 유일한 SoC로 사용한다.
-  - `title_display`·`title_attr`을 사용한 fallback 로직을 만들지 않는다.
+- 공시 제목은 외부 소스로부터 주입한 `compressed-external-html.json.title` 단일 필드를 유일한 SoC로 사용한다.
+  - `filtered.json.title`·`title_display`·`title_attr`을 사용한 fallback 로직을 만들지 않는다.
 3. **공시 코드**
-- `doc_no`는 `selected_main_doc_no` 단일 필드만 사용한다. 
-  - `item.doc_no`를 사용한 fallback 로직을 만들지 않는다.
+- `doc_no`는 `compressed-external-html.json.selected_main_doc_no` 단일 필드만 사용한다.
+  - `filtered.json.selected_main_doc_no`·`item.doc_no`를 사용한 fallback 로직을 만들지 않는다.
 - `acpt_no`는 입력 HTML 파일명을 유일한 SoC로 사용한다.
 - `filtered.json`·`compressed-external-html.json`의 `acpt_no`는 메타데이터를 연결할 key로만 사용하며, record의 `acpt_no`에 영향을 주지 않는다. 
 4. **기업 정보**
@@ -54,12 +54,14 @@
 - 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
 
 #### 사채발행파싱 (bond_issuance)
-- 사채 발행금액 행에서 `원화기준 포함` 행을 우선하고, 없으면 첫 `사채의 권면` 행을 사용한다.
+1. **사채 발행금액** 
+- `원화기준 포함` 행을 우선하고, 없으면 첫 `사채의 권면` 행을 사용한다. 
   - 해외발행의 경우에서 원화기준 권면을 우선하기 위함이다.
-- 행사 대상 주식 관련 문구는 `교환대상` 행을 먼저 확인하고, 없으면 `전환에 따라`·`전환으로 발행할`·`인수권행사에 따라`와 `종류`가 함께 있는 행을 확인한다.
-- 행사가액은 `전환가액` -> `교환가액` -> `행사가액` -> `행사가격` 순서로 확인한다.
-- 만기일은 `사채만기일` -> `사채만기` 순서로 확인한다.
-- 행사기간은 `전환청구기간` -> `교환청구기간` -> `권리행사기간` -> `행사기간` 순서로 확인한다.
+2. **행사대상주식** 
+- `전환대상`, `교환대상`, `인수권행사대상`, `전환에 따라`, `교환에 따라`, `인수권행사에 따라`, `전환으로 발행할`, `교환으로 발행할`, `인수권행사로 발행할` 순서로 확인한다. 구조화된 행은 라벨 오른쪽 셀을 읽고, 긴 문단 안에서는 `주식의 종류:` 또는 `유가증권:` 뒤의 짧은 값만 읽는다.
+- 행사가액은 `전환가액`, `교환가액`, `행사가액`, `전환가격`, `교환가격`, `행사가격` 순서로 확인하고, 라벨 오른쪽 셀이 숫자와 단위만으로 구성된 경우에만 값으로 읽는다.
+- 만기일은 `사채만기일`, `사채만기` 순서로 확인한다.
+- 행사기간은 `전환청구기간`, `교환청구기간`, `권리행사기간`, `행사기간` 순서로 확인한다.
 
 #### 유무상증자파싱 (rights_issuance)
 - 제3자배정 대상자 표에서 `배정주식수` 열을 찾지 못하면 행의 마지막 숫자를 배정주식수로 읽는다.
@@ -69,16 +71,15 @@
 - 주식 수량형 필드는 원천 값을 찾지 못하면 0을 저장하고, 원문에서 0 또는 대시를 읽은 경우 상태가 있는 필드에는 `explicit_zero`로 기록한다.
 
 ## 워크플로우 메타데이터
-
 이 필드들은 HTML 본문 표에서 직접 추출하지 않고 사전 추출된 데이터로 보강하는 항목이다.
 
 | 필드 | 출처 | 설명 |
 | --- | --- | --- |
 | `families` | `compressed-external-html.json` | 외부 HTML `mainDoc` 선택지에 명시된 정정공시 묶음. parsed JSON 최상위에 한 번만 저장하며, member 제목은 `mainDoc.text`를 `title`로 저장 |
 | `family_id` / `current_sequence` / `family_member_count` | `families` | record가 어떤 정정 묶음의 몇 번째 공시인지 표시하는 얇은 참조 필드 |
-| `doc_no` | `filtered.json`, `compressed-external-html.json` | `selected_main_doc_no`에서 읽은 KIND viewer 본문 문서 선택 번호 |
+| `doc_no` | `compressed-external-html.json` | `selected_main_doc_no`에서 읽은 KIND viewer 본문 문서 선택 번호 |
+| `상장구분` | `filtered.json` | 코스피, 코스닥, 코넥스, 기타 |
 | `corp_name` | `filtered.json` | 공시 회사명. 현재 `bond_issuance`, `rights_issuance` 저장 record에 보강 |
-| `상장구분` | `filtered.json`, `compressed-external-html.json` | 코스피, 코스닥, 코넥스, 기타 |
 
 식별자 계약:
 

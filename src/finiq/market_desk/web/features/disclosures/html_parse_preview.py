@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from lxml import html as lxml_html
-
 from finiq.market_desk.web.features.disclosures.html_parse_support import *
-from finiq.market_desk.web.html_parsers.common import clean_text, element_text
 
 def _parse_with_metadata_title(
     parser: ParseFunction,
@@ -98,31 +95,6 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _structured_row_field_candidate(html_bytes: bytes, field: str) -> str | None:
-    try:
-        document = lxml_html.fromstring(html_bytes.decode("utf-8", errors="ignore"))
-    except Exception:
-        return None
-    compact_field = field.replace(" ", "")
-    for row in document.xpath(f".//tr[contains(., '{field}')]"):
-        values = [
-            clean_text(element_text(cell))
-            for cell in row.xpath("./th|./td")
-        ]
-        values = [value for value in values if value]
-        for value in reversed(values):
-            if compact_field not in value.replace(" ", ""):
-                return value
-    return None
-
-
-def _configured_fast_filter_fields(requested_mode: str) -> set[str]:
-    config = PARSE_MODE_CONFIGS.get(requested_mode)
-    if config is None:
-        return set()
-    return {filter_config.field for filter_config in config.filters}
-
-
 def _filter_candidate_workers(value: Any, total_files: int) -> int:
     if value in (None, ""):
         return min(8, max(1, total_files))
@@ -136,25 +108,25 @@ def _filter_candidate_workers(value: Any, total_files: int) -> int:
 def _extract_filter_candidate_from_file(
     *,
     html_file: Path,
+    parser: ParseFunction,
     requested_mode: str,
     field: str,
     metadata_index: dict[str, dict[str, Any]],
 ) -> str | list[Any] | None:
     html_bytes = html_file.read_bytes()
-    if field in _configured_fast_filter_fields(requested_mode):
-        structured_value = _structured_row_field_candidate(html_bytes, field)
-        if structured_value:
-            return structured_value
-        title = _metadata_title_for_file(html_file, metadata_index) or ""
-        compact_title = title.replace(" ", "")
-        if (
-            requested_mode == "rights_issuance"
-            and field == "증자방식"
-            and "무상증자" in compact_title
-            and "유무상증자" not in compact_title
-        ):
-            return "-"
-    return None
+    record = _apply_parse_metadata(
+        _compact_record(
+            _parse_with_metadata_title(
+                parser,
+                html_bytes,
+                html_file=html_file,
+                metadata_index=metadata_index,
+            )
+        ),
+        metadata_index,
+        mode=requested_mode,
+    )
+    return record.get(field)
 
 
 def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any]:
@@ -223,6 +195,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                 executor.submit(
                     _extract_filter_candidate_from_file,
                     html_file=html_file,
+                    parser=parser,
                     requested_mode=requested_mode,
                     field=field,
                     metadata_index=metadata_index,
@@ -241,6 +214,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                 record_value(
                     _extract_filter_candidate_from_file(
                         html_file=html_file,
+                        parser=parser,
                         requested_mode=requested_mode,
                         field=field,
                         metadata_index=metadata_index,
