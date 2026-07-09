@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
+import zipfile
 
 import pandas as pd
 import pytest
@@ -3609,15 +3611,15 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
     assert payload["records"][0]["corp_name"] == "테스트발행사"
 
 
-def test_parse_disclosure_html_payload_uses_html_file_parent_metadata_paths(
+def test_parse_disclosure_html_payload_uses_html_grandparent_metadata(
     tmp_path: Path, monkeypatch
 ) -> None:
     input_root = tmp_path / "input"
     source_dir = input_root / "source"
-    year_dir = source_dir / "2025"
-    year_dir.mkdir(parents=True)
-    (source_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
-    (year_dir / "20250102000002.html").write_text("<html></html>", encoding="utf-8")
+    input_dir = source_dir / "viewer_html"
+    input_dir.mkdir(parents=True)
+    (input_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (input_dir / "20250102000002.html").write_text("<html></html>", encoding="utf-8")
     (input_root / "filtered.json").write_text(
         json.dumps(
             {
@@ -3625,12 +3627,12 @@ def test_parse_disclosure_html_payload_uses_html_file_parent_metadata_paths(
                     {
                         "acpt_no": "20250101000001",
                         "market": "유가증권",
-                        "company_name": "잘못된루트회사",
+                        "company_name": "루트회사",
                     },
                     {
                         "acpt_no": "20250102000002",
                         "market": "유가증권",
-                        "company_name": "잘못된루트회사",
+                        "company_name": "루트회사",
                     },
                 ],
             },
@@ -4029,12 +4031,12 @@ def test_parse_disclosure_html_payload_drops_rcept_no_fields(
                     "members": [
                         {
                             "sequence": 0,
-                            "acpt_no": acpt_no if current_sequence == 0 else None,
+                            "acpt_no": "20250101000001",
                             "rcept_no": "20250101009999",
                         },
                         {
                             "sequence": 1,
-                            "acpt_no": acpt_no if current_sequence == 1 else None,
+                            "acpt_no": "20250102000002",
                             "rcept_no": "20250102009999",
                         },
                     ],
@@ -4060,18 +4062,17 @@ def test_parse_disclosure_html_payload_drops_rcept_no_fields(
 
     for record in payload["records"]:
         assert "rcept_no" not in record
-        family = record["correction_families"]["20250102000002"]
-        is_first_record = record["acpt_no"] == "20250101000001"
-        assert family["members"] == [
-            {
-                "sequence": 0,
-                "acpt_no": "20250101000001" if is_first_record else None,
-            },
-            {
-                "sequence": 1,
-                "acpt_no": None if is_first_record else "20250102000002",
-            },
-        ]
+        assert "correction_families" not in record
+    assert payload["families"]["20250102000002"]["members"] == [
+        {
+            "sequence": 0,
+            "acpt_no": "20250101000001",
+        },
+        {
+            "sequence": 1,
+            "acpt_no": "20250102000002",
+        },
+    ]
 
 
 def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_rows(
@@ -4155,10 +4156,11 @@ def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_rows(
     )
 
     records = {record["acpt_no"]: record for record in payload["records"]}
-    assert records["20250101000001"]["correction_families"] == {}
-    assert records["20250102000002"]["correction_families"] == {}
-    assert records["20250103000003"]["correction_families"] == {}
-    assert records["20250104000004"]["correction_families"] == {}
+    assert payload["families"] == {}
+    assert "correction_families" not in records["20250101000001"]
+    assert "correction_families" not in records["20250102000002"]
+    assert "correction_families" not in records["20250103000003"]
+    assert "correction_families" not in records["20250104000004"]
 
 
 def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_corrections(
@@ -4301,8 +4303,14 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
 
     records = {record["acpt_no"]: record for record in payload["records"]}
     assert all("docs" not in record for record in records.values())
-    family = records["20081210000626"]["correction_families"]["20081211000252"]
-    assert family["current_sequence"] == 0
+    assert all("correction_families" not in record for record in records.values())
+    assert records["20081210000626"]["family_id"] == "20081211000252"
+    assert records["20081210000626"]["current_sequence"] == 0
+    assert records["20081210000626"]["family_member_count"] == 2
+    assert records["20081211000252"]["family_id"] == "20081211000252"
+    assert records["20081211000252"]["current_sequence"] == 1
+    assert records["20081211000252"]["family_member_count"] == 2
+    family = payload["families"]["20081211000252"]
     assert family["members"] == [
         {
             "sequence": 0,
@@ -4333,20 +4341,22 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "families": {
+                    "20250102000002": {
+                        "members": [
+                            {"sequence": 0, "acpt_no": "20250101000001"},
+                            {"sequence": 1, "acpt_no": "20250102000002"},
+                        ],
+                    }
+                },
                 "records": [
                     {
                         "title": "[정정]전환사채권발행결정",
                         "acpt_no": "20250102000002",
                         "source_file": "/tmp/20250102000002.html",
-                        "correction_families": {
-                            "20250102000002": {
-                                "current_sequence": 1,
-                                "members": [
-                                    {"sequence": 0, "acpt_no": None},
-                                    {"sequence": 1, "acpt_no": "20250102000002"},
-                                ],
-                            }
-                        },
+                        "family_id": "20250102000002",
+                        "current_sequence": 1,
+                        "family_member_count": 2,
                         "corp_name": "발행사",
                         "회차": "1",
                         "종류": "CB",
@@ -4576,7 +4586,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
     assert "docs" not in record
     assert record["corp_name"] == "테스트발행사"
     assert record["상장구분"] == "코스닥"
-    assert record["correction_families"] == {}
+    assert "correction_families" not in record
     assert payload["records"][0]["source_preview"]["available"] is True
 
 
@@ -4592,20 +4602,22 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "rights_issuance",
+                "families": {
+                    "20240829000001": {
+                        "members": [
+                            {"sequence": 0, "acpt_no": "20240822000001"},
+                            {"sequence": 1, "acpt_no": "20240829000001"},
+                        ],
+                    }
+                },
                 "records": [
                     {
                         "title": "유상증자결정",
                         "acpt_no": "20240822000001",
                         "source_file": "/tmp/20240822000001.html",
-                        "correction_families": {
-                            "20240829000001": {
-                                "current_sequence": 0,
-                                "members": [
-                                    {"sequence": 0, "acpt_no": "20240822000001"},
-                                    {"sequence": 1, "acpt_no": "20240829000001"},
-                                ],
-                            }
-                        },
+                        "family_id": "20240829000001",
+                        "current_sequence": 0,
+                        "family_member_count": 2,
                         "신주의 종류와 수": [["보통주식", 100]],
                         "발행목적": [["운영자금", 1000]],
                         "발행가액": [["보통주식", 1000]],
@@ -4615,15 +4627,9 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
                         "title": "[정정]유상증자결정",
                         "acpt_no": "20240829000001",
                         "source_file": "/tmp/20240829000001.html",
-                        "correction_families": {
-                            "20240829000001": {
-                                "current_sequence": 1,
-                                "members": [
-                                    {"sequence": 0, "acpt_no": "20240822000001"},
-                                    {"sequence": 1, "acpt_no": "20240829000001"},
-                                ],
-                            }
-                        },
+                        "family_id": "20240829000001",
+                        "current_sequence": 1,
+                        "family_member_count": 2,
                         "신주의 종류와 수": [["보통주식", 100]],
                         "발행목적": [["운영자금", 2000]],
                         "발행가액": [["보통주식", 1000]],
@@ -4710,6 +4716,59 @@ def test_build_parse_export_xlsx_rejects_missing_result_file_path(
         build_parse_export_xlsx(str(result_path), "bond_issuance")
 
     assert not result_path.exists()
+
+
+def test_build_parse_export_xlsx_latest_only_uses_family_reference_fields(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "parsed-rights_issuance.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "rights_issuance",
+                "families": {
+                    "20240829000001": {
+                        "members": [
+                            {"sequence": 0, "acpt_no": "20240822000001"},
+                            {"sequence": 1, "acpt_no": "20240829000001"},
+                        ],
+                    }
+                },
+                "records": [
+                    {
+                        "title": "유상증자결정",
+                        "acpt_no": "20240822000001",
+                        "family_id": "20240829000001",
+                        "current_sequence": 0,
+                        "family_member_count": 2,
+                    },
+                    {
+                        "title": "[정정]유상증자결정",
+                        "acpt_no": "20240829000001",
+                        "family_id": "20240829000001",
+                        "current_sequence": 1,
+                        "family_member_count": 2,
+                    },
+                    {
+                        "title": "유상증자결정",
+                        "acpt_no": "20240901000001",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    xlsx_bytes = build_parse_export_xlsx(
+        str(tmp_path), "rights_issuance", latest_only=True
+    )
+
+    with zipfile.ZipFile(BytesIO(xlsx_bytes)) as workbook:
+        sheet_xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "20240822000001" not in sheet_xml
+    assert "20240829000001" in sheet_xml
+    assert "20240901000001" in sheet_xml
 
 
 def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:

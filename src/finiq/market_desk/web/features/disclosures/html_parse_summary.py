@@ -38,14 +38,15 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
         records = records[:limit]
 
     summary_records: list[dict[str, Any]] = []
+    payload_families = payload.get("families")
+    all_families = payload_families if isinstance(payload_families, dict) else {}
     families: dict[str, Any] = {}
     for index, record in enumerate(records, start=1):
         if not isinstance(record, dict):
             continue
         family_id, current_sequence, member_count = _record_family_info(record)
-        for family_key, family in (record.get("correction_families") or {}).items():
-            if str(family_key) and str(family_key) not in families:
-                families[str(family_key)] = family
+        if family_id and family_id in all_families and family_id not in families:
+            families[family_id] = all_families[family_id]
         summary_records.append(
             {
                 "index": index,

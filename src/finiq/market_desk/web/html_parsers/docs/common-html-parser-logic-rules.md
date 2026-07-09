@@ -13,6 +13,9 @@
 - 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
 - 원문 미리보기는 record의 `source_file`을 이용해 파싱한다. wrapper HTML은 사용하지 않는다.
 - skip_errors=True인 경우 에러가 발생해도 파싱을 계속한다. 
+- `acpt_no`는 입력 디렉토리 내에서 유일하므로 디렉토리 간 같은 `acpt_no`의 기존 값을 보호하거나 우선순위로 덮어쓰는 fallback을 만들지 않는다.
+- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc`에서만 만들고 parsed JSON 최상위 `families`에 한 번만 저장한다. record마다 묶음 전체를 복사하거나 `filtered.json`으로 묶음을 추론하는 fallback을 만들지 않는다.
+- change-log 비교 대상 필드는 공시 유형별 `CHANGE_LOG_COMPARISON_FIELDS`에 명시되어 있으므로, 필드 목록이 없을 때 record 전체 필드를 동적으로 탐색하는 fallback을 만들지 않는다.
 
 ### 정정공시 핸들링
 - 정정공시 내 제목은 `compressed-external-html.json`의 `mainDoc.text`를 `title`에 저장하며, `title_display` · `title_base` · `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
@@ -44,7 +47,8 @@
 
 | 필드 | 출처 | 설명 |
 | --- | --- | --- |
-| `correction_families` | `compressed-external-html.json` | 외부 HTML `mainDoc` 선택지에 명시된 정정공시 묶음. member 제목은 `mainDoc.text`를 `title`로 저장 |
+| `families` | `compressed-external-html.json` | 외부 HTML `mainDoc` 선택지에 명시된 정정공시 묶음. parsed JSON 최상위에 한 번만 저장하며, member 제목은 `mainDoc.text`를 `title`로 저장 |
+| `family_id` / `current_sequence` / `family_member_count` | `families` | record가 어떤 정정 묶음의 몇 번째 공시인지 표시하는 얇은 참조 필드 |
 | `doc_no` | `compressed-external-html.json` | KIND viewer 본문 문서 선택 번호 |
 | `corp_name` | `filtered.json`, `compressed-external-html.json` | 공시 회사명. 현재 `bond_issuance`, `rights_issuance` 저장 record에 보강 |
 | `상장구분` | `filtered.json`, `compressed-external-html.json` | 코스피, 코스닥, 코넥스, 기타 |
@@ -69,9 +73,13 @@
 | `acpt_no` | 확장자를 뺀 파일명에서 `_` 앞에 있는 숫자 부분. 숫자로 시작하지 않으면 빈 문자열 |
 | `mode` | parser별 mode 값 |
 | `title` | 웹 파싱 저장 record에서는 호출자가 parser에 주입한 제목만 사용한다. metadata 보강 단계에서 빈 제목을 다시 채우지 않는다. 주입 제목이 없으면 빈 문자열과 `strong_warning`을 남긴다. |
-| `correction_families` | 정정공시 묶음. 없으면 빈 객체 |
+| `family_id` | 정정공시 묶음에 속한 경우 최상위 `families`의 키 |
+| `current_sequence` | 정정공시 묶음 안에서 현재 record의 순번 |
+| `family_member_count` | 정정공시 묶음의 전체 member 수 |
 | `상장구분` | 주변 metadata에서 보강. 없으면 `null` |
 | `doc_no` | 주변 metadata에서 산출되는 경우에만 저장 |
+
+정정공시 묶음 전체는 record마다 반복 저장하지 않고 parsed JSON 최상위 `families`에 저장한다.
 
 원본 HTML 경로는 preview, errors, warnings, job status 같은 실행/진단 데이터에서만 다룬다.
 

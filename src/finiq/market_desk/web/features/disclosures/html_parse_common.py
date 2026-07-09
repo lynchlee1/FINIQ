@@ -149,7 +149,7 @@ BOND_SUMMARY_FIELDS = (
     "행사종료일",
     "투자자",
 )
-CHANGE_LOG_FIELDS = {
+CHANGE_LOG_COMPARISON_FIELDS = {
     "bond_issuance": (
         "corp_name",
         "회차",
@@ -214,6 +214,9 @@ METADATA_FIELDS = {
     "acpt_no",
     "source_file",
     "correction_families",
+    "family_id",
+    "current_sequence",
+    "family_member_count",
     "raw_tables",
     "raw_rows",
     "index",
@@ -258,33 +261,18 @@ def _merge_parse_metadata_from_directory(
         _merge_metadata_index(
             directory_metadata_index,
             _load_compressed_external_html_metadata_index(compressed_path),
-            prefer_correction_families=True,
         )
-    _merge_metadata_index(
-        metadata_index,
-        directory_metadata_index,
-        prefer_existing=True,
-    )
+    _merge_metadata_index(metadata_index, directory_metadata_index)
 
 
 def _merge_metadata_index(
     target: dict[str, dict[str, Any]],
     source: dict[str, dict[str, Any]],
-    *,
-    prefer_correction_families: bool = False,
-    prefer_existing: bool = False,
 ) -> None:
     for acpt_no, metadata in source.items():
         current = target.setdefault(acpt_no, {})
         for key, value in metadata.items():
             if value:
-                if prefer_existing and current.get(key):
-                    continue
-                if key == "correction_families" and prefer_correction_families:
-                    current[key] = value
-                    continue
-                if key == "correction_families" and current.get(key):
-                    continue
                 current[key] = value
 
 
@@ -687,6 +675,7 @@ def _build_payload(
             "parsed_files": len(records),
             "failed_files": len(errors),
         },
+        "families": _saved_correction_families(records),
         "records": _saved_records(records),
         "errors": errors,
         "warnings": warnings,
@@ -768,21 +757,70 @@ def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _record_correction_family_info(
+    record: dict[str, Any],
+) -> tuple[str, int | None, int | None]:
+    families = record.get("correction_families")
+    if not isinstance(families, dict) or not families:
+        return ("", None, None)
+    family_id = str(next(iter(families)))
+    family = families.get(family_id)
+    if not isinstance(family, dict):
+        return (family_id, None, None)
+    current_sequence_raw = family.get("current_sequence")
+    current_sequence = (
+        current_sequence_raw if isinstance(current_sequence_raw, int) else None
+    )
+    members = family.get("members")
+    member_count = len(members) if isinstance(members, list) else None
+    return (family_id, current_sequence, member_count)
+
+
 def _saved_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
+    saved_records: list[dict[str, Any]] = []
+    for record in records:
+        saved_record = {
             key: value
             for key, value in record.items()
-            if key != "source_file"
+            if key not in {"source_file", "correction_families"}
         }
-        for record in records
-    ]
+        family_id, current_sequence, member_count = _record_correction_family_info(
+            record
+        )
+        if family_id:
+            saved_record["family_id"] = family_id
+            saved_record["current_sequence"] = current_sequence
+            saved_record["family_member_count"] = member_count
+        saved_records.append(saved_record)
+    return saved_records
+
+
+def _saved_correction_families(records: list[dict[str, Any]]) -> dict[str, Any]:
+    families: dict[str, Any] = {}
+    for record in records:
+        record_families = record.get("correction_families")
+        if not isinstance(record_families, dict):
+            continue
+        for family_key, family in record_families.items():
+            family_id = str(family_key)
+            if (
+                not family_id
+                or family_id in families
+                or not isinstance(family, dict)
+            ):
+                continue
+            members = family.get("members")
+            families[family_id] = {
+                "members": members if isinstance(members, list) else [],
+            }
+    return families
 
 
 def _build_preview_record(
     record: dict[str, Any], *, index: int, mode: str
 ) -> dict[str, Any]:
     compact_record = _compact_record(record)
+    compact_record.pop("correction_families", None)
     return {
         "index": index,
         "title": record.get("title") or "",
