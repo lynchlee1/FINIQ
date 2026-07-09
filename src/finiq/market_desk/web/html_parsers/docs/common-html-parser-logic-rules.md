@@ -14,8 +14,8 @@
 - 원문 미리보기는 record의 `source_file`을 이용해 파싱한다. wrapper HTML은 사용하지 않는다.
 
 ### 정정공시 핸들링
-- 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
-- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에 명시된 관계로 만든다. 이외의 다른 어떤 fallback 로직도 만들지 않는다. 
+- 정정공시 member 제목은 `compressed-external-html.json`의 `mainDoc.text`를 `title`에 저장하며, `title_display` · `title_base` · `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
+- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에 명시된 관계로 만든다. `filtered.json`의 `company_key` · `title_base` · `title_display` · `title`로 묶음을 추론하는 fallback 로직을 만들지 않는다.
 
 ## Intended fallbacks
 ### HTML 파싱
@@ -43,7 +43,7 @@
 
 | 필드 | 출처 | 설명 |
 | --- | --- | --- |
-| `correction_families` | `compressed-external-html.json` | 외부 HTML `mainDoc` 선택지에 명시된 정정공시 묶음 |
+| `correction_families` | `compressed-external-html.json` | 외부 HTML `mainDoc` 선택지에 명시된 정정공시 묶음. member 제목은 `mainDoc.text`를 `title`로 저장 |
 | `doc_no` | `compressed-external-html.json` | KIND viewer 본문 문서 선택 번호 |
 | `corp_name` | `filtered.json`, `compressed-external-html.json` | 공시 회사명. 현재 `bond_issuance`, `rights_issuance` 저장 record에 보강 |
 | `상장구분` | `filtered.json`, `compressed-external-html.json` | 코스피, 코스닥, 코넥스, 기타 |
