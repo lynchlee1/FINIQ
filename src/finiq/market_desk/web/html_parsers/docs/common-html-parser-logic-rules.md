@@ -15,7 +15,7 @@
 
 ### 정정공시 핸들링
 - 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
-- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에 관계가 명시된 경우에만 만들고, `filtered.json`의 회사명·제목·정정 여부로 추정해서 묶지 않는다.
+- 정정공시 묶음은 `compressed-external-html.json`의 `mainDoc` 선택지에 명시된 관계로 만든다. 이외의 다른 어떤 fallback 로직도 만들지 않는다. 
 
 ## Intended fallbacks
 ### HTML 파싱
