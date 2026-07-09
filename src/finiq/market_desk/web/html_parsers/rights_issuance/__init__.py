@@ -18,10 +18,11 @@ def parse_rights_issuance(
         html_text, file_path=file_path, title=title
     )
     record = context.record
+    if not record.get("title"):
+        _append_strong_warning(record, "주입 제목이 없습니다.")
     if context.issuance_type == "unknown":
         warning = "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
-        record["parse_warnings"] = [warning]
-        record["strong_warning"] = [warning]
+        _append_strong_warning(record, warning)
 
     extractor = RightsIssuanceExtractor(context)
     stock_counts = extractor.get_stock_types_and_counts()
@@ -90,3 +91,10 @@ def parse_rights_issuance(
     if extractor.field_parse_status_detail:
         record["field_parse_status_detail"] = extractor.field_parse_status_detail
     return record
+
+
+def _append_strong_warning(record: dict[str, Any], warning: str) -> None:
+    for key in ("strong_warning", "parse_warnings"):
+        values = record.setdefault(key, [])
+        if warning not in values:
+            values.append(warning)

@@ -9,6 +9,20 @@ from lxml import html as lxml_html
 from finiq.market_desk.web.features.disclosures.html_parse_support import *
 from finiq.market_desk.web.html_parsers.common import clean_text, element_text
 
+def _parse_with_manifest_title(
+    parser: ParseFunction,
+    html_bytes: bytes,
+    *,
+    html_file: Path,
+    metadata_index: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    parser_kwargs: dict[str, Any] = {"file_path": html_file}
+    title = _metadata_title_for_file(html_file, metadata_index)
+    if title and _parser_accepts_title(parser):
+        parser_kwargs["title"] = title
+    return parser(html_bytes, **parser_kwargs)
+
+
 def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Return a few reports with source-table preview and parsed JSON for the UI."""
     requested_mode = str(body.get("mode") or "").strip()
@@ -40,9 +54,15 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     for index, html_file in enumerate(html_files, start=1):
         try:
+            html_bytes = html_file.read_bytes()
             record = _apply_manifest_metadata(
                 _compact_record(
-                    parser(html_file.read_bytes(), file_path=html_file)
+                    _parse_with_manifest_title(
+                        parser,
+                        html_bytes,
+                        html_file=html_file,
+                        metadata_index=metadata_index,
+                    )
                 ),
                 metadata_index,
                 mode=requested_mode,
@@ -130,7 +150,14 @@ def _extract_filter_candidate_from_file(
         if structured_value:
             return structured_value
     record = _apply_manifest_metadata(
-        _compact_record(parser(html_bytes, file_path=html_file)),
+        _compact_record(
+            _parse_with_manifest_title(
+                parser,
+                html_bytes,
+                html_file=html_file,
+                metadata_index=metadata_index,
+            )
+        ),
         metadata_index,
         mode=requested_mode,
     )

@@ -10,7 +10,6 @@ from typing import Any
 from ..common import (
     build_base_record,
     clean_text,
-    extract_section_title,
     last_int,
     last_value,
     row_containing,
@@ -98,6 +97,5 @@ def _build_bond_parse_context(
         html_text,
         file_path=file_path,
         mode=MODE,
-        title_extractor=extract_section_title,
     )
     return _BondParseContext(record=record)

@@ -32,9 +32,9 @@ def extract_section_title(document: html.HtmlElement) -> str:
     )
 
 
-def extract_title(document: html.HtmlElement) -> str:
-    """공시 제목을 SECTION-1 후보와 HTML title에서 추출한다."""
-    return extract_section_title(document) or _first_text(document, "//title/text()")
+def extract_title(_document: html.HtmlElement) -> str:
+    """HTML 본문에서 공시 제목을 추출하지 않는다."""
+    return ""
 
 
 def extract_acpt_no(file_path: str | Path) -> str:

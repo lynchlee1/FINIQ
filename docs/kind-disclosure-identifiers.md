@@ -8,7 +8,7 @@
 - KIND 데이터만으로 DART `rcept_no`를 임의 생성하지 않는다. 값은 `None`으로 둔다.
 - `doc_no`는 KIND viewer의 문서 선택용 식별자로만 사용한다.
 - `correction_families`는 `filtered.json`의 공시 행을 기준으로 `acpt_no` 체인으로 구성한다.
-- `compressed-external-html.json`의 `selected_main_doc_no`와 `docs`는 현재 record의 `doc_no` 보강에만 사용한다.
+- `compressed-external-html.json`의 `selected_main_doc_no`와 `docs`는 현재 record의 `doc_no` 산출에만 사용하고, parsed record에는 `doc_no`로 저장한다.
 
 ## 문제
 
@@ -38,7 +38,7 @@ Fresh viewer HTML의 식별자 의미:
 | Source | 역할 | 금지 사항 |
 | --- | --- | --- |
 | `filtered.json` | 회사명, 상장구분, 정정 family 보강 | `doc_no` source로 보지 않음 |
-| `compressed-external-html.json` | 현재 record의 `doc_no`, `selected_main_doc_no`, `docs` 보강 | `rcept_no`나 정정 family 생성에 쓰지 않음 |
+| `compressed-external-html.json` | 현재 record의 `doc_no` 산출 | `rcept_no`나 정정 family 생성에 쓰지 않음 |
 | viewer `mainDoc` | viewer 안의 문서 선택 목록 | 정정 family로 해석하지 않음 |
 | KIND HTML/viewer HTML | KIND `acpt_no`, 본문 | DART `rcept_no` 복원에 쓰지 않음 |
 
@@ -54,7 +54,7 @@ Fresh viewer HTML의 식별자 의미:
   - `mainDoc` 기반 `rcept_no`/정정 family 합성 제거
 - `src/finiq/market_desk/web/disclosure_html_parse.py`
   - `filtered.json` 기반 정정 family 보강
-  - `compressed-external-html.json` 기반 현재 record의 `doc_no`, `selected_main_doc_no`, `docs` 보강
+  - `compressed-external-html.json` 기반 현재 record의 `doc_no` 보강
 - `tests/market_desk/test_kind_web_service.py`
   - `rcept_no`를 임의 생성하지 않는 동작 검증
   - preview에서 현재 record의 `doc_no`가 보강되는 동작 검증
@@ -69,5 +69,5 @@ Fresh viewer HTML의 식별자 의미:
 
 샘플 확인:
 
-- `20080825000024`: `rcept_no=None`, `doc_no=20080825000037`, `selected_main_doc_no=20080825000037`, `docs_len=4`
-- `20080825000089`: `rcept_no=None`, `doc_no=20080825000247`, `selected_main_doc_no=20080825000247`, `docs_len=7`
+- `20080825000024`: `rcept_no=None`, `doc_no=20080825000037`, `docs_len=4`
+- `20080825000089`: `rcept_no=None`, `doc_no=20080825000247`, `docs_len=7`

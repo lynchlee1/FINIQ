@@ -1,7 +1,13 @@
 # HTML 파서 공통 로직 규칙
 
-최종 업데이트: 2026-07-08
+최종 업데이트: 2026-07-09
 
+
+## Fallback 최소화 원칙
+- `rowspan` · `colspan`에 잘못된 값이 있는 경우 조용히 보정하지 않고 실패 또는 경고로 드러낸다.
+- 공시 제목은 외부 소스로부터 주입한 제목을 단일 SoC로 사용하며, `SECTION-1` · `<title>`을 사용한 fallback 로직을 만들지 않는다.
+- 메타데이터 제목은 `title` 단일 필드만 사용하며, `title_display` · `title_attr`을 사용한 fallback 로직을 만들지 않는다.
+- 정정공시 목록 제목은 `mainDoc.text` 단일 필드만 사용하며, `metadata.title` · `record.title`을 사용한 fallback 로직을 만들지 않는다.
 
 ## 워크플로우 메타데이터
 
@@ -11,7 +17,8 @@
 | --- | --- | --- |
 | `correction_families` | `filtered.json` | 정정공시 목록 |
 | `rcept_no` | - | DART 내부 공시 코드 |
-| `corp_name` | `filtered.json`, `compressed-external-html.json` | 공시 회사명 |
+| `doc_no` | `compressed-external-html.json` | KIND viewer 본문 문서 선택 번호 |
+| `corp_name` | `filtered.json`, `compressed-external-html.json` | 공시 회사명. 현재 `bond_issuance`, `rights_issuance` 저장 record에 보강 |
 | `상장구분` | `filtered.json`, `compressed-external-html.json` | 코스피, 코스닥, 코넥스, 기타 |
 
 식별자 계약:
@@ -21,6 +28,7 @@
 | KIND 기준 식별자 | `acpt_no` |
 | DART 접수번호 | KIND HTML 워크플로우는 DART `rcept_no`를 만들거나 보강하지 않는다. |
 | `mainDoc` | viewer 안의 문서 선택 번호로만 다루며, DART 접수번호로 해석하지 않는다. |
+| `selected_main_doc_no` | `doc_no` 산출에만 사용하고 parsed record에는 저장하지 않는다. |
 | 복원 금지 | KIND HTML 본문, viewer HTML, `filtered.json`, `compressed-external-html.json`만으로 DART `rcept_no`를 복원하지 않는다. |
 
 ## 저장 record 계약
@@ -31,9 +39,16 @@
 | --- | --- |
 | `acpt_no` | 확장자를 뺀 파일명에서 `_` 앞에 있는 숫자 부분. 숫자로 시작하지 않으면 빈 문자열 |
 | `mode` | parser별 mode 값 |
-| `title` | parser 호출자가 주입한 제목. 주입 제목이 없을 때의 fallback은 parser별 문서를 따른다. |
+| `title` | 웹 파싱 저장 record에서는 호출자가 parser에 주입한 제목만 사용한다. metadata 보강 단계에서 빈 제목을 다시 채우지 않는다. 주입 제목이 없으면 빈 문자열과 `strong_warning`을 남긴다. |
+| `rcept_no` | KIND HTML 워크플로우에서는 `null` |
+| `correction_families` | 정정공시 묶음. 없으면 빈 객체 |
+| `상장구분` | 주변 metadata에서 보강. 없으면 `null` |
+| `doc_no` | 주변 metadata에서 산출되는 경우에만 저장 |
 
 원본 HTML 경로는 preview, errors, warnings, job status 같은 실행/진단 데이터에서만 다룬다.
+
+`corp_name`은 공시 주체 회사명이다. HTML 본문에서 언급되는 회사명이 아니며,
+현재 `bond_issuance`, `rights_issuance` record에만 저장한다.
 
 ## 원문 구조 계약
 
