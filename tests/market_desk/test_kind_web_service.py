@@ -3530,7 +3530,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         """,
         encoding="utf-8",
     )
-    (viewer_dir / "filtered.json").write_text(
+    (tmp_path / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [
@@ -3583,7 +3583,7 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
         """,
         encoding="utf-8",
     )
-    (viewer_dir / "filtered.json").write_text(
+    (tmp_path / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [
@@ -3611,7 +3611,7 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
     assert payload["records"][0]["corp_name"] == "테스트발행사"
 
 
-def test_parse_disclosure_html_payload_uses_html_grandparent_metadata(
+def test_parse_disclosure_html_payload_uses_input_parent_metadata(
     tmp_path: Path, monkeypatch
 ) -> None:
     input_root = tmp_path / "input"
@@ -3674,7 +3674,7 @@ def test_parse_disclosure_html_payload_uses_html_grandparent_metadata(
 
     payload = parse_disclosure_html_payload(
         {
-            "input_directory": str(input_root),
+            "input_directory": str(input_dir),
             "output_directory": str(tmp_path / "output"),
             "mode": "bond_issuance",
         }
@@ -3792,7 +3792,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
         """,
         encoding="utf-8",
     )
-    (input_dir / "filtered.json").write_text(
+    (bond_dir / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [
@@ -3808,7 +3808,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
         ),
         encoding="utf-8",
     )
-    (input_dir / "compressed-external-html.json").write_text(
+    (bond_dir / "compressed-external-html.json").write_text(
         json.dumps(
             {
                 "records": [
@@ -5396,7 +5396,7 @@ def test_build_parse_filter_candidates_payload_uses_title_for_bonus_rights_issue
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
-    (viewer_dir / "filtered.json").write_text(
+    (tmp_path / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [
@@ -5916,7 +5916,9 @@ def test_parse_bond_issuance_reads_split_span_amounts_without_sum_warning(
     )
 
 
-def test_parse_bond_issuance_does_not_fetch_selected_viewer_body(tmp_path: Path) -> None:
+def test_parse_bond_issuance_uses_given_html_without_wrapper_body_lookup(
+    tmp_path: Path,
+) -> None:
     wrapper_path = tmp_path / "20080826000187.html"
     wrapper_html = """
     <html>
@@ -5997,7 +5999,7 @@ def test_parse_disclosure_html_payload_injects_filtered_title_for_bond_parser(
         """,
         encoding="utf-8",
     )
-    (input_dir / "filtered.json").write_text(
+    (tmp_path / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [
@@ -6042,7 +6044,7 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
     input_dir.mkdir()
     html_path = input_dir / "20250102000012.html"
     html_path.write_text("<html><body></body></html>", encoding="utf-8")
-    (input_dir / "filtered.json").write_text(
+    (tmp_path / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [
@@ -6138,7 +6140,7 @@ def test_parse_disclosure_html_payload_injects_filtered_title_for_rights_parser(
         """,
         encoding="utf-8",
     )
-    (input_dir / "filtered.json").write_text(
+    (tmp_path / "filtered.json").write_text(
         json.dumps(
             {
                 "disclosures": [

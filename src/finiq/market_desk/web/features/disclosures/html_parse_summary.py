@@ -116,9 +116,10 @@ def _source_file_for_record(
     exact_path = source_directory / f"{acpt_no}.html"
     if exact_path.is_file():
         return str(exact_path.resolve())
-    for path in sorted(source_directory.rglob(f"{acpt_no}*.html")):
-        if path.is_file() and path.stem.split("_", 1)[0] == acpt_no:
-            return str(path.resolve())
+    if len(acpt_no) >= 4 and acpt_no[:4].isdigit():
+        year_path = source_directory / acpt_no[:4] / f"{acpt_no}.html"
+        if year_path.is_file():
+            return str(year_path.resolve())
     return ""
 
 

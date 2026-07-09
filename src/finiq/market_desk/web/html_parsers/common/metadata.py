@@ -44,20 +44,6 @@ def extract_acpt_no(file_path: str | Path) -> str:
     return candidate if candidate.isdigit() else ""
 
 
-def preserve_viewer_metadata(
-    record: dict[str, Any], viewer_record: dict[str, Any]
-) -> None:
-    """본문 HTML 파싱 시 래퍼 HTML의 고유 메타데이터를 유지한다."""
-    if not record.get("title"):
-        record["title"] = viewer_record.get("title") or ""
-    if not record.get("correction_families") and viewer_record.get(
-        "correction_families"
-    ):
-        record["correction_families"] = viewer_record["correction_families"]
-    if viewer_record.get("acpt_no"):
-        record["acpt_no"] = viewer_record["acpt_no"]
-
-
 def build_base_record(
     html_markup: str | bytes,
     *,
