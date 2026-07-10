@@ -9,27 +9,6 @@ from lxml import html
 
 from .io import parse_html_document
 from .tables import extract_tables
-from .text import clean_text, element_text
-
-
-def _first_text(document: html.HtmlElement, xpath: str) -> str:
-    for value in document.xpath(xpath):
-        text = (
-            element_text(value)
-            if hasattr(value, "itertext")
-            else clean_text(str(value))
-        )
-        if text:
-            return text
-    return ""
-
-
-def extract_section_title(document: html.HtmlElement) -> str:
-    """공시 본문의 첫 SECTION-1 제목을 추출한다."""
-    return _first_text(
-        document,
-        "//p[contains(concat(' ', normalize-space(@class), ' '), ' SECTION-1 ')]",
-    )
 
 
 def extract_title(_document: html.HtmlElement) -> str:
