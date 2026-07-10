@@ -15,24 +15,18 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
     output_path = _resolve_parse_result_path(
         Path(output_path_raw).expanduser().resolve(), "bond_issuance"
     )
-    source_directory_raw = str(
-        body.get("source_directory") or body.get("input_directory") or ""
-    ).strip()
-    source_directory = (
-        Path(source_directory_raw).expanduser().resolve()
-        if source_directory_raw
-        else None
-    )
     payload = _load_parse_payload(output_path)
     if payload.get("mode") != "bond_issuance":
         msg = "parse result mode must be bond_issuance"
         raise ValueError(msg)
+    input_directory_raw = str(payload.get("input_directory") or "").strip()
+    if not input_directory_raw:
+        msg = "parse result input_directory is required"
+        raise ValueError(msg)
+    input_directory = Path(input_directory_raw).expanduser().resolve()
 
     limit = _parse_limit(body.get("limit"))
-    records = [
-        _compact_record(record) if isinstance(record, dict) else record
-        for record in list(payload.get("records") or [])
-    ]
+    records = list(payload.get("records") or [])
     total_count = len(records)
     if limit is not None:
         records = records[:limit]
@@ -51,15 +45,16 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
             {
                 "index": index,
                 "title": record.get("title") or "",
-                "source_file": _source_file_for_record(record, source_directory),
                 "acpt_no": record.get("acpt_no") or "",
+                "doc_no": record.get("doc_no") or "",
                 "family_id": family_id,
                 "current_sequence": current_sequence,
                 "family_member_count": member_count,
                 "fields": {field: record.get(field) for field in BOND_SUMMARY_FIELDS},
                 "source_preview": _load_source_preview(
-                    _record_with_source_file(record, source_directory),
+                    record,
                     mode="bond_issuance",
+                    input_directory=input_directory,
                 ),
             }
         )
@@ -67,6 +62,7 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
     return {
         "format": "finiq_bond_parse_summary_v1",
         "source_path": str(output_path),
+        "input_directory": str(input_directory),
         "summary": {
             "records": total_count,
             "visible_records": len(summary_records),
@@ -87,40 +83,6 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
         "families": families,
         "records": summary_records,
     }
-
-
-def _record_with_source_file(
-    record: dict[str, Any], source_directory: Path | None
-) -> dict[str, Any]:
-    if record.get("source_file"):
-        return record
-    source_file = _source_file_for_record(record, source_directory)
-    if not source_file:
-        return record
-    updated_record = dict(record)
-    updated_record["source_file"] = source_file
-    return updated_record
-
-
-def _source_file_for_record(
-    record: dict[str, Any], source_directory: Path | None
-) -> str:
-    source_file = str(record.get("source_file") or "").strip()
-    if source_file:
-        return source_file
-    if source_directory is None or not source_directory.is_dir():
-        return ""
-    acpt_no = str(record.get("acpt_no") or "").strip()
-    if not acpt_no:
-        return ""
-    exact_path = source_directory / f"{acpt_no}.html"
-    if exact_path.is_file():
-        return str(exact_path.resolve())
-    if len(acpt_no) >= 4 and acpt_no[:4].isdigit():
-        year_path = source_directory / acpt_no[:4] / f"{acpt_no}.html"
-        if year_path.is_file():
-            return str(year_path.resolve())
-    return ""
 
 
 

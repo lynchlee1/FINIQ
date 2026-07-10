@@ -77,13 +77,14 @@
 1. **입력 파일 선택**
 - 공통 workflow는 입력 디렉토리와 그 아래 폴더에서 확장자가 `.html`인 파일만 찾는다.
 - 찾은 경로를 정렬한 뒤 앞에서부터 처리하며, `limit`이 있으면 정렬 후 처음 `limit`개만 사용한다.
+- 입력 디렉토리의 절대 경로는 최종 payload 최상위 `input_directory`에 한 번만 저장한다.
   - 의도 : 같은 폴더와 같은 설정으로 실행하면 파일 처리 순서가 달라지지 않게 한다.
 2. **parser에 전달하는 값**
 - 각 HTML 파일은 byte로 읽고 parser에는 `file_path`와 함께 전달한다.
 - 외부 metadata에서 title을 찾았고 parser가 `title` parameter를 받을 때만 `title`도 함께 전달한다.
   - 의도 : HTML 디코딩은 공통 parser 경로에서 처리하고 title을 받지 않는 parser의 호출 방식은 바꾸지 않는다.
 3. **반환 후 처리 순서**
-- parser가 반환하면 먼저 원문 분석용 내부 필드를 제거하고, 다음으로 외부 metadata를 연결한 뒤, 마지막으로 record filter를 적용한다.
+- parser가 반환하면 먼저 원문 분석용 `raw_tables`를 제거하고, 다음으로 외부 metadata와 family 참조를 연결한 뒤, 마지막으로 record filter를 적용한다.
 - filter를 통과한 record와 그 record의 warning만 최종 payload에 포함한다.
 - 여기서 filter는 정한 조건에 맞는 record만 남기는 단계이다.
   - 의도 : filter가 HTML 원문 구조가 아니라 저장될 업무 필드와 외부 metadata가 연결된 결과를 기준으로 동작하게 한다.
@@ -96,7 +97,8 @@
   - 의도 : 외부 필드 계약을 한 문서에서만 변경하게 한다.
 2. **metadata 연결 key**
 - key는 서로 같은 HTML record와 metadata를 찾아 연결하는 찾기용 값이다.
-- 입력 파일명에서 확장자를 제거하고 `_` 앞부분을 metadata 연결 key로 사용한다.
+- 입력 경로의 `Path.stem`인 확장자를 제거한 파일명 전체를 metadata 연결 key로 사용한다.
+- `_`를 포함한 문자를 자르거나 숫자 여부를 검사하는 대체 경로는 두지 않는다.
 - `filtered.json`과 `compressed-external-html.json` 안의 `acpt_no`는 이 key와 같은 record를 찾는 데만 사용한다.
   - 의도 : 외부 파일의 식별자가 parser가 만든 record의 `acpt_no`를 덮어쓰지 않게 한다.
 3. **title 선주입**
@@ -110,6 +112,8 @@
 - `doc_no`는 metadata 값이 있고 parser 반환 record에 값이 없을 때만 추가한다.
 - `상장구분`의 metadata 값이 `유가증권`이면 `코스피`로 바꾸어 저장한다.
 - 공시 주체 회사명은 사채발행과 유무상증자 mode에서만 `corp_name`으로 저장한다.
+- 정정공시 family가 완성되면 record에 `family_id`, `current_sequence`, `family_member_count`를 직접 추가하고, family 전체는 payload 최상위 `families`에 한 번만 모은다.
+- parser와 workflow는 `rcept_no`와 빈 `correction_families`를 생성하지 않는다.
 - 공시 유형별 본문 추출 필드와 `title`은 이 단계에서 변경하지 않는다.
   - 의도 : 본문 추출 결과와 외부 metadata 필드를 서로 다른 단계에서 관리한다.
 5. **정정공시 family 후보**

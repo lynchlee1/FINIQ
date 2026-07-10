@@ -13,7 +13,6 @@ from .io import (
 from .metadata import (
     build_base_record,
     extract_acpt_no,
-    extract_title,
 )
 from .rows import (
     column_index,
@@ -59,7 +58,6 @@ __all__ = [
     "compress_repeated_texts",
     "extract_tables",
     "extract_table_rows",
-    "extract_title",
     "extract_acpt_no",
     "build_base_record",
 ]

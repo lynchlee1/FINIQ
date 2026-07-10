@@ -211,13 +211,10 @@ MAJOR_CHANGE_FIELDS = {
 METADATA_FIELDS = {
     "title",
     "acpt_no",
-    "source_file",
-    "correction_families",
     "family_id",
     "current_sequence",
     "family_member_count",
     "raw_tables",
-    "raw_rows",
     "index",
 }
 SOURCE_PREVIEW_MAX_TABLES = 12
@@ -399,6 +396,22 @@ def _external_doc_is_correction(doc: dict[str, Any], title: str) -> bool:
     return "정정" in text or "정정" in title
 
 
+def _correction_family_reference(
+    correction_families: Any,
+) -> tuple[str, int, int] | None:
+    if not isinstance(correction_families, dict) or not correction_families:
+        return None
+    family_id = str(next(iter(correction_families)))
+    family = correction_families.get(family_id)
+    if not family_id or not isinstance(family, dict):
+        return None
+    current_sequence = family.get("current_sequence")
+    members = family.get("members")
+    if not isinstance(current_sequence, int) or not isinstance(members, list):
+        return None
+    return family_id, current_sequence, len(members)
+
+
 def _apply_parse_metadata(
     record: dict[str, Any],
     metadata_index: dict[str, dict[str, Any]],
@@ -421,8 +434,12 @@ def _apply_parse_metadata(
     updated_record = dict(record)
     if doc_no and not updated_record.get("doc_no"):
         updated_record["doc_no"] = doc_no
-    if correction_families:
-        updated_record["correction_families"] = correction_families
+    family_reference = _correction_family_reference(correction_families)
+    if family_reference is not None:
+        family_id, current_sequence, member_count = family_reference
+        updated_record["family_id"] = family_id
+        updated_record["current_sequence"] = current_sequence
+        updated_record["family_member_count"] = member_count
     if market:
         updated_record["상장구분"] = market
     if mode in {"bond_issuance", "rights_issuance"} and company_name:
@@ -485,7 +502,18 @@ def _parse_parallel_workers(value: Any, total_files: int) -> int:
 
 
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
-    files = sorted(path for path in input_directory.rglob("*.html") if path.is_file())
+    resolved_root = input_directory.resolve()
+    candidates = [*resolved_root.glob("*.html"), *resolved_root.glob("*/*.html")]
+    files: list[Path] = []
+    for path in candidates:
+        resolved_path = path.resolve()
+        try:
+            resolved_path.relative_to(resolved_root)
+        except ValueError:
+            continue
+        if resolved_path.is_file():
+            files.append(path)
+    files.sort()
     return files[:limit] if limit is not None else files
 
 
@@ -603,8 +631,7 @@ def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, An
     }
     report_numbers: set[str] = set()
     for warning in warnings:
-        source_name = str(warning.get("source_name") or "").strip()
-        report_no = Path(source_name).stem if source_name else ""
+        report_no = str(warning.get("acpt_no") or "").strip()
         if not report_no:
             continue
         warning_message = str(warning.get("warning") or "").strip()
@@ -636,8 +663,10 @@ def _build_payload(
     *,
     mode: str,
     cancelled: bool,
+    input_directory: Path,
     html_files: list[Path],
     records: list[dict[str, Any]],
+    metadata_index: dict[str, dict[str, Any]],
     errors: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
     filter_blocks: list[dict[str, Any]],
@@ -647,6 +676,7 @@ def _build_payload(
         "format": "finiq_disclosure_html_parse_v1",
         "mode": mode,
         "cancelled": cancelled,
+        "input_directory": str(input_directory),
         "filter_settings": {
             "filter_blocks": filter_blocks,
             "record_filters": record_filters,
@@ -657,8 +687,8 @@ def _build_payload(
             "parsed_files": len(records),
             "failed_files": len(errors),
         },
-        "families": _saved_correction_families(records),
-        "records": _saved_records(records),
+        "families": _saved_correction_families(records, metadata_index),
+        "records": records,
         "errors": errors,
         "warnings": warnings,
     }
@@ -680,8 +710,10 @@ def _payload_from_state(
     return _build_payload(
         mode=request.mode,
         cancelled=cancelled,
+        input_directory=request.input_directory,
         html_files=request.html_files,
         records=state.records,
+        metadata_index=request.metadata_index,
         errors=state.errors,
         warnings=state.warnings,
         filter_blocks=request.filter_blocks,
@@ -720,97 +752,37 @@ def _resolve_parse_result_path(output_directory: Path, mode: str) -> Path:
     return output_directory / f"parsed-{mode}.json"
 
 
-def _compact_record(record: dict[str, Any]) -> dict[str, Any]:
-    def compact_value(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {
-                key: compact_value(nested_value)
-                for key, nested_value in value.items()
-                if key != "rcept_no"
-            }
-        if isinstance(value, list):
-            return [compact_value(item) for item in value]
-        return value
-
+def _record_without_raw_tables(record: dict[str, Any]) -> dict[str, Any]:
     return {
-        key: compact_value(value)
+        key: value
         for key, value in record.items()
-        if key not in {"raw_tables", "raw_rows", "rcept_no"}
+        if key != "raw_tables"
     }
 
 
-def _record_correction_family_info(
-    record: dict[str, Any],
-) -> tuple[str, int | None, int | None]:
-    families = record.get("correction_families")
-    if not isinstance(families, dict) or not families:
-        return ("", None, None)
-    family_id = str(next(iter(families)))
-    family = families.get(family_id)
-    if not isinstance(family, dict):
-        return (family_id, None, None)
-    current_sequence_raw = family.get("current_sequence")
-    current_sequence = (
-        current_sequence_raw if isinstance(current_sequence_raw, int) else None
-    )
-    members = family.get("members")
-    member_count = len(members) if isinstance(members, list) else None
-    return (family_id, current_sequence, member_count)
-
-
-def _saved_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    saved_records: list[dict[str, Any]] = []
-    for record in records:
-        saved_record = {
-            key: value
-            for key, value in record.items()
-            if key not in {"source_file", "correction_families"}
-        }
-        family_id, current_sequence, member_count = _record_correction_family_info(
-            record
-        )
-        if family_id:
-            saved_record["family_id"] = family_id
-            saved_record["current_sequence"] = current_sequence
-            saved_record["family_member_count"] = member_count
-        saved_records.append(saved_record)
-    return saved_records
-
-
-def _saved_correction_families(records: list[dict[str, Any]]) -> dict[str, Any]:
+def _saved_correction_families(
+    records: list[dict[str, Any]],
+    metadata_index: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     families: dict[str, Any] = {}
     for record in records:
-        record_families = record.get("correction_families")
-        if not isinstance(record_families, dict):
+        family_id = str(record.get("family_id") or "").strip()
+        acpt_no = str(record.get("acpt_no") or "").strip()
+        if not family_id or not acpt_no or family_id in families:
             continue
-        for family_key, family in record_families.items():
-            family_id = str(family_key)
-            if (
-                not family_id
-                or family_id in families
-                or not isinstance(family, dict)
-            ):
-                continue
-            members = family.get("members")
-            families[family_id] = {
-                "members": members if isinstance(members, list) else [],
-            }
+        correction_families = (metadata_index.get(acpt_no) or {}).get(
+            "correction_families"
+        )
+        if not isinstance(correction_families, dict):
+            continue
+        family = correction_families.get(family_id)
+        if not isinstance(family, dict):
+            continue
+        members = family.get("members")
+        families[family_id] = {
+            "members": members if isinstance(members, list) else [],
+        }
     return families
-
-
-def _build_preview_record(
-    record: dict[str, Any], *, index: int, mode: str
-) -> dict[str, Any]:
-    compact_record = _compact_record(record)
-    compact_record.pop("correction_families", None)
-    return {
-        "index": index,
-        "title": record.get("title") or "",
-        "acpt_no": record.get("acpt_no") or "",
-        "source_file": record.get("source_file") or "",
-        "source_preview": _load_source_preview(record, mode=mode),
-        "parsed_result": compact_record,
-    }
 
 
 def _record_parse_warning_items(record: dict[str, Any]) -> list[dict[str, str]]:
@@ -866,7 +838,7 @@ def _record_parse_warnings(record: dict[str, Any]) -> list[str]:
 def _metadata_title_for_file(
     html_file: Path, metadata_index: dict[str, dict[str, Any]]
 ) -> str | None:
-    acpt_no = html_file.stem.split("_", 1)[0]
+    acpt_no = html_file.stem
     metadata = metadata_index.get(acpt_no) or {}
     title = str(metadata.get("title") or "").strip()
     return title or None
@@ -933,7 +905,6 @@ def _add_parse_warning(
     *,
     index: int,
     html_file: Path,
-    source_file: str,
     warning: str,
     level: str,
     warning_code: str,
@@ -942,8 +913,7 @@ def _add_parse_warning(
         "index": index,
         "total": len(request.html_files),
         "mode": request.mode,
-        "source_file": source_file,
-        "source_name": html_file.name,
+        "acpt_no": html_file.stem,
         "warning": warning,
         "level": level,
         "warning_code": warning_code,
@@ -960,15 +930,13 @@ def _add_parse_error(
     *,
     index: int,
     html_file: Path,
-    source_file: str,
     exc: Exception,
 ) -> None:
     error_info = {
         "index": index,
         "total": len(request.html_files),
         "mode": request.mode,
-        "source_file": source_file,
-        "source_name": html_file.name,
+        "acpt_no": html_file.stem,
         "error_type": type(exc).__name__,
         "error": str(exc),
     }
@@ -986,9 +954,8 @@ def _parse_one_html_file(
     index: int,
     html_file: Path,
 ) -> None:
-    source_file = str(html_file.resolve())
     try:
-        parsed_record = _compact_record(
+        parsed_record = _record_without_raw_tables(
             _parse_html_file_record(request, html_file)
         )
         record = _apply_parse_metadata(
@@ -1005,7 +972,6 @@ def _parse_one_html_file(
                     state,
                     index=index,
                     html_file=html_file,
-                    source_file=source_file,
                     warning=warning_item["warning"],
                     level=warning_item["level"],
                     warning_code=warning_item["warning_code"],
@@ -1023,7 +989,6 @@ def _parse_one_html_file(
             state,
             index=index,
             html_file=html_file,
-            source_file=source_file,
             exc=exc,
         )
 
@@ -1043,16 +1008,14 @@ def _parse_html_file_for_worker(
     index: int,
     html_file: Path,
 ) -> dict[str, Any]:
-    source_file = str(html_file.resolve())
     try:
-        parsed_record = _compact_record(
+        parsed_record = _record_without_raw_tables(
             _parse_html_file_record(request, html_file)
         )
         return {
             "kind": "record",
             "index": index,
             "html_file": html_file,
-            "source_file": source_file,
             "record": _apply_parse_metadata(
                 parsed_record,
                 request.metadata_index,
@@ -1065,7 +1028,6 @@ def _parse_html_file_for_worker(
             "kind": "error",
             "index": index,
             "html_file": html_file,
-            "source_file": source_file,
             "error": exc,
         }
 
@@ -1077,7 +1039,6 @@ def _record_parallel_parse_result(
 ) -> None:
     index = int(result["index"])
     html_file = result["html_file"]
-    source_file = str(result["source_file"])
     if result["kind"] == "record":
         record = result["record"]
         if _record_matches_filters(record, request.record_filters) and _record_matches_filter_blocks(record, request.filter_blocks):
@@ -1087,7 +1048,6 @@ def _record_parallel_parse_result(
                     state,
                     index=index,
                     html_file=html_file,
-                    source_file=source_file,
                     warning=warning_item["warning"],
                     level=warning_item["level"],
                     warning_code=warning_item["warning_code"],
@@ -1106,7 +1066,6 @@ def _record_parallel_parse_result(
             state,
             index=index,
             html_file=html_file,
-            source_file=source_file,
             exc=exc,
         )
 

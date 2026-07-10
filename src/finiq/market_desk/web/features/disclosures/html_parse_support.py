@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from finiq.market_desk.web.features.disclosures.html_common import (
+    resolve_disclosure_html_file,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_common import *
 
 def _record_family_info(record: dict[str, Any]) -> tuple[str, int | None, int | None]:
@@ -37,7 +40,6 @@ def _compact_source_tables(
         tables.append(
             {
                 "index": table.get("index"),
-                "chapter_title": table.get("chapter_title") or "",
                 "rows": visible_rows,
                 "omitted_rows": max(len(rows) - len(visible_rows), 0),
             }
@@ -45,21 +47,20 @@ def _compact_source_tables(
     return tables, max(total_rows - included_rows, 0)
 
 
-def _load_source_preview(record: dict[str, Any], *, mode: str) -> dict[str, Any]:
-    source_file = str(record.get("source_file") or "").strip()
-    if not source_file:
+def _load_source_preview(
+    record: dict[str, Any],
+    *,
+    mode: str,
+    input_directory: Path,
+) -> dict[str, Any]:
+    path = resolve_disclosure_html_file(
+        input_directory,
+        str(record.get("acpt_no") or ""),
+    )
+    if path is None:
         return {
             "available": False,
-            "source_file": "",
-            "error": "source_file is missing",
-        }
-
-    path = Path(source_file).expanduser().resolve()
-    if not path.is_file():
-        return {
-            "available": False,
-            "source_file": str(path),
-            "error": "source_file does not exist",
+            "error": "source HTML does not exist",
         }
 
     try:
@@ -71,7 +72,6 @@ def _load_source_preview(record: dict[str, Any], *, mode: str) -> dict[str, Any]
         )
         return {
             "available": True,
-            "source_file": str(path),
             "title": source_record.get("title") or record.get("title") or "",
             "tables": tables,
             "omitted_rows": omitted_rows,
@@ -79,23 +79,28 @@ def _load_source_preview(record: dict[str, Any], *, mode: str) -> dict[str, Any]
     except Exception as exc:
         return {
             "available": False,
-            "source_file": str(path),
             "error": str(exc),
         }
 
 
 def _build_preview_record(
-    record: dict[str, Any], *, index: int, mode: str
+    record: dict[str, Any],
+    *,
+    index: int,
+    mode: str,
+    input_directory: Path,
 ) -> dict[str, Any]:
-    compact_record = _compact_record(record)
-    compact_record.pop("correction_families", None)
+    parsed_result = dict(record)
     return {
         "index": index,
         "title": record.get("title") or "",
         "acpt_no": record.get("acpt_no") or "",
-        "source_file": record.get("source_file") or "",
-        "source_preview": _load_source_preview(record, mode=mode),
-        "parsed_result": compact_record,
+        "source_preview": _load_source_preview(
+            record,
+            mode=mode,
+            input_directory=input_directory,
+        ),
+        "parsed_result": parsed_result,
     }
 
 
@@ -112,8 +117,8 @@ def _record_reference(record: dict[str, Any], *, index: int) -> dict[str, Any]:
     return {
         "index": index,
         "title": record.get("title") or "",
-        "source_file": record.get("source_file") or "",
         "acpt_no": record.get("acpt_no") or "",
+        "doc_no": record.get("doc_no") or "",
         "family_id": family_id,
         "current_sequence": current_sequence,
         "family_member_count": member_count,

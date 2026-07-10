@@ -16,8 +16,10 @@ This package contains parser entrypoints for downloaded KIND disclosure viewer H
 
 - All modes should use the common HTML helpers in `common.py`.
 - Tables must be parsed through the span-aware grid utilities so `rowspan` and `colspan` values are expanded before field extraction.
-- Mode-specific parsers may use `raw_tables` and `raw_rows` internally, but saved web parse results must not keep them.
-- Saved web parse results keep the injected `title`, KIND identifiers such as `acpt_no` and conditional `doc_no`, common workflow metadata such as `correction_families`, `상장구분`, and mode-specific extracted fields.
+- Mode-specific parsers return `raw_tables` for direct analysis, and the web workflow removes it before saving. `raw_rows` is not created.
+- `acpt_no` and the metadata join key are the full `Path(file_path).stem`; underscores are never split and digit checks are never used as a fallback.
+- Parsers and the web workflow never create `rcept_no`, `source_file`, or an empty `correction_families` field.
+- Saved records keep the injected `title`, `acpt_no`, conditional `doc_no`, `상장구분`, mode-specific fields, and the direct family references `family_id`, `current_sequence`, and `family_member_count` when applicable. Full families are collected once in the top-level `families` object.
 - `bond_issuance` and `rights_issuance` also store `corp_name` when surrounding metadata provides the filing company name.
 
 ## Web Parse Flow
@@ -27,7 +29,9 @@ The web endpoint in `disclosure_html_parse.py` follows this order:
 1. Validate request options and resolve the parser from `PARSER_REGISTRY`.
 2. Collect `.html` files from the input folder and load parse metadata from `filtered.json` and `compressed-external-html.json`.
 3. Parse each file with the selected mode parser.
-4. Apply parse metadata, collect `parse_warnings`, checkpoint periodically, and write the final JSON.
+4. Remove `raw_tables`, apply parse metadata and family references, collect `parse_warnings`, checkpoint periodically, and write the final JSON.
+
+The final JSON stores the source root once as top-level `input_directory`. Flat and year-split source files are resolved from that root and `acpt_no`; records, warnings, errors, and previews do not store per-file paths or names. Warning and error items identify a file with `acpt_no`; a preview uses `acpt_no` from its outer record and does not duplicate identifiers inside `source_preview`.
 
 When investigating a user bug report, start with the saved JSON:
 
@@ -40,4 +44,4 @@ Run order, checkpoints, and cancellation messages are emitted through progress c
 ## Core Logic Notes
 
 Write mode-specific extraction rules in each parser module, near the parser entrypoint.
-Keep rules conservative and sample-driven: add a fixture and expected output before widening a parser to a new disclosure format.
+Decide parsing behavior only from direct inspection of real files under `resources/KIND/bond_issuance` and `resources/KIND/rights_issuance`. Test fixtures and synthetic HTML verify regressions only after the behavior is fixed.

@@ -18,40 +18,6 @@ test("html parse page does not render warning or step guide boxes", async () => 
   assert.match(source, /notificationActive=\{isErrorStatus \|\| !!executionOptionExampleNotice \|\| warningReports\.length > 0\}/);
 });
 
-test("html parse notification panel lists warning reports and reasons", async () => {
-  const source = await readFile(pagePath, "utf8");
-  const notificationContent = source.match(/notificationContent=\{[\s\S]*?settingsTitle="시스템 설정"/)?.[0] ?? "";
-
-  assert.match(source, /type ParseWarningItem =/);
-  assert.match(source, /const buildWarningReports = \(warnings: ParseWarningItem\[\]\): WarningReport\[\] =>/);
-  assert.match(source, /const warningSourceUrl = \(sourceFile: string, inputDirectory: string\) =>/);
-  assert.match(source, /\/api\/disclosures\/html\/sections\/source\?/);
-  assert.match(source, /return fileUrl\(sourceFile\)/);
-  assert.match(source, /const WARNING_OPEN_PAGE_SIZE = 20/);
-  assert.match(source, /onSuccess: \(result\) => \{[\s\S]*?setLatestParseResult\(result\)/);
-  assert.match(source, /setLatestParseResult\(null\)/);
-  assert.match(source, /const warningReports = buildWarningReports/);
-  assert.match(source, /const warningGroups = WARNING_LEVELS\.flatMap/);
-  assert.match(source, /const warningPageInfoByGroup = warningGroups\.reduce/);
-  assert.match(source, /const pageSourceFiles = sourceFiles\.slice\(startIndex, startIndex \+ WARNING_OPEN_PAGE_SIZE\)/);
-  assert.match(source, /const handleOpenWarningFiles = \(groupKey: string\) => \{[\s\S]*?const pageInfo = warningPageInfoByGroup\[groupKey\][\s\S]*?pageInfo\.sourceFiles\.forEach[\s\S]*?window\.open\(warningSourceUrl\(sourceFile, inputDirectory\), "_blank", "noopener,noreferrer"\)/);
-  assert.match(notificationContent, /경고 리포트/);
-  assert.match(notificationContent, /현재 페이지 열기/);
-  assert.match(notificationContent, /이전/);
-  assert.match(notificationContent, /다음/);
-  assert.match(notificationContent, /warningGroups\.map/);
-  assert.match(notificationContent, /warningPageInfoByGroup\[group\.key\]/);
-  assert.match(notificationContent, /disabled=\{!pageInfo\.sourceFiles\.length\}/);
-  assert.match(notificationContent, /warningReports\.map/);
-  assert.match(notificationContent, /report\.sourceName/);
-  assert.match(notificationContent, /report\.sourceFile/);
-  assert.match(notificationContent, /WARNING_LEVEL_LABELS/);
-  assert.match(notificationContent, /report\.warningsByLevel\[level\]/);
-  assert.match(source, /약한 에러/);
-  assert.match(source, /일반 에러/);
-  assert.match(source, /강한 에러/);
-});
-
 test("html parse page uses standard two-row data path card", async () => {
   const source = await readFile(pagePath, "utf8");
   const pathFieldsBlock = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
@@ -192,12 +158,13 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /key: "rights_issuance"[\s\S]*?executionOptions: \[\{ field: "증자방식", statusLabel: "증자방식" \}\]/);
   assert.match(source, /const PARSE_MODE_CONFIGS = Object\.fromEntries\(DISCLOSURE_PARSE_MODES\.map/);
   assert.match(source, /const \[selectedExecutionOptionValues, setSelectedExecutionOptionValues\] = useState<string\[\]>\(\[\]\)/);
+  assert.match(source, /const \[executionOptionInputDirectory, setExecutionOptionInputDirectory\] = useState\(""\)/);
   assert.match(source, /type FilterCandidateExample =/);
   assert.match(source, /type ExecutionOptionExampleNotice =/);
   assert.match(source, /const \[executionOptionExampleNotice, setExecutionOptionExampleNotice\] = useState<ExecutionOptionExampleNotice \| null>\(null\)/);
   assert.match(source, /const \[notificationResetKey, setNotificationResetKey\] = useState\(0\)/);
   assert.match(source, /const executionOptionExampleUrl = \(example: FilterCandidateExample, inputDirectory: string\) =>/);
-  assert.match(source, /source_name: sourceName/);
+  assert.match(source, /acpt_no: acptNo/);
   assert.match(source, /const selectedParseMode = PARSE_MODE_CONFIGS\[parseMode\] \|\| DISCLOSURE_PARSE_MODES\[0\]/);
   assert.match(source, /const executionOptionConfig = selectedParseMode\.executionOptions\[0\] \|\| null/);
   assert.doesNotMatch(modeCardContent, /실행 옵션/);
@@ -243,7 +210,7 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /setNotificationResetKey\(\(current\) => current \+ 1\)/);
   assert.match(source, /executionOptionExampleNotice \? \(/);
   assert.match(source, /executionOptionExampleNotice\.examples\.map/);
-  assert.match(source, /window\.open\(executionOptionExampleUrl\(example, inputDirectory\), "_blank", "noopener,noreferrer"\)/);
+  assert.match(source, /window\.open\(executionOptionExampleUrl\(example, executionOptionInputDirectory\), "_blank", "noopener,noreferrer"\)/);
   assert.match(source, />\s*열기\s*</);
   assert.match(runHandler, /record_filters: activeRecordFilters/);
   assert.match(runHandler, /field: executionOptionConfig\.field/);

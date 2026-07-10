@@ -208,6 +208,47 @@ def _year_from_disclosure(
     return "unknown"
 
 
+def resolve_disclosure_html_file(
+    input_directory: Path, acpt_no: str
+) -> Path | None:
+    """접수번호로 flat 또는 연도별 저장 HTML을 찾는다."""
+    normalized_acpt_no = str(acpt_no or "")
+    if (
+        not normalized_acpt_no
+        or normalized_acpt_no in {".", ".."}
+        or "/" in normalized_acpt_no
+        or "\\" in normalized_acpt_no
+        or "\x00" in normalized_acpt_no
+    ):
+        return None
+
+    filename = VIEWER_HTML_FILENAME_TEMPLATE.format(acpt_no=normalized_acpt_no)
+    resolved_root = input_directory.resolve()
+    if not resolved_root.is_dir():
+        return None
+    flat_candidate = (resolved_root / filename).resolve()
+    try:
+        flat_candidate.relative_to(resolved_root)
+    except ValueError:
+        pass
+    else:
+        if flat_candidate.is_file():
+            return flat_candidate
+
+    matches: set[Path] = set()
+    for child in resolved_root.iterdir():
+        if not child.is_dir():
+            continue
+        resolved_candidate = (child / filename).resolve()
+        try:
+            resolved_candidate.relative_to(resolved_root)
+        except ValueError:
+            continue
+        if resolved_candidate.is_file():
+            matches.add(resolved_candidate)
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
 def _target_years_from_json(
     source_json: Any, acpt_numbers: list[str]
 ) -> dict[str, str]:

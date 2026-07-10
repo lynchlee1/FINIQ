@@ -18,7 +18,10 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     clean_disclosure_html_output_directory_payload,
     write_disclosure_html_manifest_payload,
 )
-from finiq.market_desk.web.features.disclosures.html_common import cancel_disclosure_html_download
+from finiq.market_desk.web.features.disclosures.html_common import (
+    cancel_disclosure_html_download,
+    resolve_disclosure_html_file,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_changes import (
     build_parse_change_log_payload,
 )
@@ -431,14 +434,26 @@ def create_workflows_router(
         return {"status": "success", "job_id": job_id}
 
     @router.get("/api/disclosures/html/sections/source")
-    async def open_html_section_source(input_directory: str, source_name: str):
+    async def open_html_section_source(
+        input_directory: str,
+        source_name: str = "",
+        acpt_no: str = "",
+    ):
         input_path = Path(input_directory).expanduser().resolve()
-        source_file = (input_path / source_name).resolve()
-        try:
-            source_file.relative_to(input_path)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="HTML source file not found")
-        if source_file.suffix.lower() != ".html" or not source_file.is_file():
+        if acpt_no:
+            source_file = resolve_disclosure_html_file(input_path, acpt_no)
+        else:
+            source_file = (input_path / source_name).resolve()
+            try:
+                source_file.relative_to(input_path)
+            except ValueError:
+                source_file = None
+            if (
+                source_file is not None
+                and (source_file.suffix.lower() != ".html" or not source_file.is_file())
+            ):
+                source_file = None
+        if source_file is None:
             raise HTTPException(status_code=404, detail="HTML source file not found")
         return FileResponse(
             source_file,

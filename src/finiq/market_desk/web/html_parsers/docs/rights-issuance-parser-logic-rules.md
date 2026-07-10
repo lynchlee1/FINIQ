@@ -10,7 +10,7 @@
 `title`은 외부에서 전달받은 공시 제목, `section`은 유상증자와 무상증자를 나눈 구역이다.
 `logical_rows`는 빈 칸과 연속 중복을 줄여 검색하기 쉽게 만든 row이고,
 `positional_rows`는 실제 column(세로줄) 위치를 유지한 row이다.
-`raw_tables`는 원문의 모든 table, `raw_rows`는 그 table들의 `logical_rows`를 순서대로 모은 목록이다.
+`raw_tables`는 원문의 모든 table을 뜻한다.
 `metadata`는 HTML 본문 밖에서 가져오는 정보, `workflow`는 여러 파싱 결과를 모아 저장하는 처리 과정이다.
 `null`은 저장할 값이 없다는 뜻이다.
 
@@ -25,8 +25,8 @@ HTML parsing(표에서 필요한 값을 읽는 동작)은
 
 ### 처리 흐름
 1. **공통 구조 생성**
-- `build_base_record()`로 식별자와 모든 `raw_tables`를 만든다.
-  - 의도 : 개별 값을 찾기 전에도 파일 정보와 원문의 모든 표를 그대로 확인할 수 있게 한다.
+- `build_base_record()`로 파일명 전체에서 만든 `acpt_no`와 모든 `raw_tables`를 만든다.
+  - 의도 : 개별 값을 찾기 전에도 파일 식별자와 원문의 모든 표를 그대로 확인할 수 있게 한다.
 2. **title과 유형 고정**
 - 호출한 쪽에서 전달한 `title`의 앞뒤 공백을 제거해 record에 저장한다.
 - 저장한 `title`만으로 증자 유형을 판정한다.
@@ -45,10 +45,10 @@ HTML parsing(표에서 필요한 값을 읽는 동작)은
 - 유형과 section row에 따라 `유상증자`, `무상증자` 상세 객체를 만든다.
   - 의도 : 한 공시에 유상증자와 무상증자가 함께 있어도 두 내용을 나누어 볼 수 있게 한다.
 7. **직접 반환**
-- 증자 필드·상태·경고와 함께 공통 `source_file`, `raw_tables`, `raw_rows`를 반환한다.
-- 저장 workflow는 반환 직후 `raw_tables`, `raw_rows`, 이 workflow에서 저장하지 않는 DART 공시 식별자인 `rcept_no`를 먼저 제거하고, 그다음 외부 metadata를 연결한다.
-- 최종 `records[]`를 만들 때는 원문 경로인 `source_file`과 내부 정정공시 묶음인 `correction_families`도 제거한다.
-  - 의도 : 파서가 바로 돌려주는 결과와 실제 파일에 저장하는 결과의 차이를 분명히 한다.
+- 증자 parser는 공통 `acpt_no`, `mode`, `title`, `상장구분`, `raw_tables`와 증자 업무 필드·상태·경고를 반환한다.
+- 증자 parser는 `source_file`, `raw_rows`, `correction_families`, `rcept_no`를 반환하지 않는다.
+- 저장 workflow는 `raw_tables`를 제거한 뒤 외부 metadata와 family 참조를 연결한다.
+  - 의도 : 직접 parser 반환 구조와 저장 workflow가 담당하는 필드를 확정한다.
 
 ### 증자 유형 판정
 1. **판정 순서**

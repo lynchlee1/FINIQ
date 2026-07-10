@@ -28,10 +28,7 @@ def build_parse_export_xlsx(
             f"파싱 결과 파일을 찾을 수 없습니다: {output_path.name}"
         ) from exc
 
-    records = [
-        _compact_record(record) if isinstance(record, dict) else record
-        for record in list(payload.get("records") or [])
-    ]
+    records = list(payload.get("records") or [])
     if latest_only:
         filtered_records = []
         for record in records:
@@ -49,11 +46,9 @@ def build_parse_export_xlsx(
         all_keys.update(record.keys())
 
     # Priority headers
-    priority = ["title", "acpt_no", "source_file"]
+    priority = ["title", "acpt_no"]
     headers = [p for p in priority if p in all_keys] + sorted(
-        k
-        for k in all_keys
-        if k not in priority and k != "correction_families" and k != "source_lines"
+        k for k in all_keys if k not in priority
     )
 
     workbook_rows = [headers]

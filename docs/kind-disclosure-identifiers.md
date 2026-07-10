@@ -1,37 +1,17 @@
 # KIND 공시 식별자 규칙
 
 작성일: 2026-07-02
+최종 업데이트: 2026-07-10
 
 ## 결론
 
 - KIND record의 기본 식별자는 `acpt_no`다.
-- KIND 데이터만으로 DART `rcept_no`를 임의 생성하지 않는다. 값은 `None`으로 둔다.
+- `acpt_no`는 입력 경로의 `Path.stem`, 즉 확장자를 제거한 파일명 전체이다.
+- `_`를 기준으로 파일명을 자르거나 숫자 여부를 검사하는 대체 경로는 두지 않는다.
+- KIND HTML parser와 저장 workflow는 DART `rcept_no` 필드를 생성하지 않는다. `None` 자리도 만들지 않는다.
 - `doc_no`는 KIND viewer의 문서 선택용 식별자로만 사용한다.
-- `correction_families`는 `compressed-external-html.json`의 `mainDoc` 선택지에 명시된 관계로 구성한다.
-- `compressed-external-html.json`의 `selected_main_doc_no`와 `docs`는 현재 record의 `doc_no` 산출과 정정 family 구성에 사용하고, parsed record에는 `doc_no`와 `correction_families`로 저장한다.
-
-## 문제
-
-공시원문 변환 preview에서 일부 KIND 공시의 `correction_families`,
-`rcept_no`, `corp_name`이 비어 있었다. 특히 `20080825000089`에서
-`rcept_no`로 `00000000835386`, `00000000846733` 같은 값이 들어가는 문제가
-확인되었다.
-
-## 확인한 사실
-
-`20080825000089`를 임시 디렉터리에 다시 다운로드해 확인했다.
-
-- 다운로드 위치: `tmp/kind_recheck_20080825000089/`
-- URL: `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=20080825000089&docno=&viewerhost=&viewerport=`
-- 기존 `resources/` 데이터는 변경하지 않았다.
-
-Fresh viewer HTML의 식별자 의미:
-
-- `_TRK_PN`과 hidden `acptNo`: `20080825000089`
-- `mainDoc` option 값: `00000000835386|N`, `00000000846733|N`, `20080825000247|Y`
-
-따라서 `mainDoc` 값은 DART `rcept_no`가 아니라 KIND viewer의 문서 선택용
-`doc_no`다.
+- `compressed-external-html.json`의 `selected_main_doc_no`와 `docs`는 현재 record의 `doc_no` 산출과 정정 family 구성에 사용한다.
+- 정정 family가 완성되면 record에는 `family_id`, `current_sequence`, `family_member_count`를 직접 저장하고, family 전체는 payload 최상위 `families`에 한 번만 저장한다.
 
 ## Source 역할
 
@@ -40,34 +20,19 @@ Fresh viewer HTML의 식별자 의미:
 | `filtered.json` | 회사명, 상장구분 보강 | `doc_no` source나 정정 family source로 보지 않음 |
 | `compressed-external-html.json` | 현재 record의 `doc_no` 산출, `mainDoc` 기반 정정 family 보강 | `rcept_no` 생성에 쓰지 않음 |
 | viewer `mainDoc` | viewer 안의 문서 선택 목록 | DART `rcept_no`로 해석하지 않음 |
-| KIND HTML/viewer HTML | KIND `acpt_no`, 본문 | DART `rcept_no` 복원에 쓰지 않음 |
+| 입력 HTML 경로 | 파일명 전체에서 KIND `acpt_no` 생성 | `_` 앞 문자열이나 숫자 문자열만 선택하지 않음 |
+| KIND HTML/viewer HTML | 공시 본문 | DART `rcept_no` 복원에 쓰지 않음 |
 
-## 한계
+## 생성 규칙
 
 - KIND `acpt_no`와 DART `rcept_no`는 같은 개념이 아니다.
-- KIND HTML 워크플로우에서는 DART `rcept_no`를 복원하지 않는다.
+- base record에는 `rcept_no`를 만들지 않는다.
+- 외부 metadata 연결 단계에서도 `rcept_no`를 만들지 않는다.
+- 생성한 `rcept_no`를 재귀적으로 제거하는 정리 단계도 두지 않는다.
+- base record에는 빈 `correction_families`를 만들지 않는다.
+- 정정 family 참조와 최상위 family는 외부 metadata에서 관계가 완성된 시점에 각각의 최종 위치에 직접 만든다.
 
-## 관련 코드
+## 판단과 검증 기준
 
-- `src/finiq/market_desk/web/html_parsers/common/metadata.py`
-  - KIND 기본 record에서 `rcept_no=None` 유지
-  - `mainDoc` 기반 `rcept_no` 합성 제거
-- `src/finiq/market_desk/web/features/disclosures/html_parse_common.py`
-  - `filtered.json` 기반 정정 family 보강 금지
-  - `compressed-external-html.json` 기반 현재 record의 `doc_no`와 정정 family 보강
-- `tests/market_desk/test_kind_web_service.py`
-  - `rcept_no`를 임의 생성하지 않는 동작 검증
-  - preview에서 현재 record의 `doc_no`와 정정 family가 보강되는 동작 검증
-
-## 검증
-
-```bash
-.venv/bin/python -m pytest tests/market_desk/test_kind_web_service.py -k "parse_preview or correction_family or parse_bond_issuance_does_not_fetch_selected_viewer_body"
-```
-
-결과: 4 passed.
-
-샘플 확인:
-
-- `20080825000024`: `rcept_no=None`, `doc_no=20080825000037`, `docs_len=4`
-- `20080825000089`: `rcept_no=None`, `doc_no=20080825000247`, `docs_len=7`
+- parsing 동작을 결정하는 실제 예시는 `resources/KIND/bond_issuance`와 `resources/KIND/rights_issuance` 아래 자료만 사용한다.
+- 테스트 fixture와 합성 HTML은 이미 정한 계약의 회귀 여부만 확인하며 동작을 결정하는 근거로 사용하지 않는다.

@@ -23,8 +23,6 @@ def parse_bond_issuance(
     record_dict["title"] = supplied_title
     title = record_dict.get("title") or ""
     listing_market = record_dict.get("상장구분")
-    issue_amount = extractor.extract_issue_amount_from_bond_face_value_row()
-
     schema_record = BondIssuanceRecord(
         corp_name=record_dict.get("corp_name"),
         회차=extractor.extract_round_from_bond_type_row(),
@@ -33,7 +31,7 @@ def parse_bond_issuance(
             extractor.extract_target_company_name_from_exercise_target_stock_row()
         ),
         상장구분=listing_market,
-        발행금액=issue_amount,
+        발행금액=extractor.extract_issue_amount_from_bond_face_value_row(),
         발행목적=extractor.extract_funding_purposes_from_funding_purpose_rows(),
         행사가액=(
             extractor.extract_exercise_price_from_conversion_exchange_or_warrant_price_row()
@@ -47,14 +45,13 @@ def parse_bond_issuance(
     )
 
     record_dict.update(schema_record.to_dict())
-    apply_bond_issuance_postprocess(
-        record_dict,
-        main_rows=extractor.rows.values,
-        has_funding_purpose_amount_source=extractor.has_funding_purpose_amount_source(),
-        has_investor_source_table=(
-            extractor.has_specific_person_bond_issue_table_source()
-        ),
-    )
+    if extractor.field_parse_status:
+        record_dict["field_parse_status"] = extractor.field_parse_status
+    if extractor.warnings:
+        record_dict["parse_warnings"] = extractor.warnings
+    if extractor.strong_warnings:
+        record_dict["strong_warning"] = extractor.strong_warnings
+    apply_bond_issuance_postprocess(record_dict)
     if not supplied_title:
         _append_strong_warning(record_dict, "주입 제목이 없습니다.")
     return record_dict

@@ -28,7 +28,6 @@ export default function HtmlBondSummaryPage() {
   // Form State
   const {
     html_parse_output_directory: outputPath,
-    html_section_split_output_directory: sourceDirectory,
     fetchSettings,
     saveSetting,
   } = useSettingsStore();
@@ -57,7 +56,6 @@ export default function HtmlBondSummaryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           output_path: outputPath,
-          source_directory: sourceDirectory,
           limit: bondLimit === "all" ? null : Number(bondLimit),
         }),
       });
@@ -90,11 +88,11 @@ export default function HtmlBondSummaryPage() {
 
   const getField = (record: any, key: string) => record?.fields?.[key] ?? "";
 
-  const getRecordKey = (record: any) => `${record.rcept_no || ""}:${record.acpt_no || ""}:${record.index || ""}`;
+  const getRecordKey = (record: any) => `${record.acpt_no || ""}:${record.index || ""}`;
 
   const getKindDisclosureUrl = (record: any) => {
     const acptNo = String(record?.acpt_no || "").trim();
-    const docNo = String(record?.rcept_no || "").trim();
+    const docNo = String(record?.doc_no || "").trim();
     if (!acptNo) return "";
     return `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=${encodeURIComponent(acptNo)}&docno=${encodeURIComponent(docNo)}&viewerhost=&viewerport=`;
   };
@@ -138,7 +136,7 @@ export default function HtmlBondSummaryPage() {
         const haystack = [
           record.title,
           record.acpt_no,
-          record.rcept_no,
+          record.doc_no,
           record.family_id,
           getField(record, "회차"),
           getField(record, "corp_name"),
@@ -167,16 +165,6 @@ export default function HtmlBondSummaryPage() {
   }, [filteredRecords, selectedBondKey]);
 
   const conditionFields: HtmlWorkflowField[] = [
-    {
-      id: "sourceDirectory",
-      kind: "path",
-      label: "입력 데이터 경로",
-      mode: "folder",
-      value: sourceDirectory || "",
-      onChange: (val) => saveSetting("html_section_split_output_directory", val),
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 2,
-    },
     {
       id: "outputPath",
       kind: "path",
@@ -287,7 +275,7 @@ export default function HtmlBondSummaryPage() {
                             <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{getField(record, "회차") || "-"}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{getField(record, "종류") || "-"}</td>
                             <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-400 tabular-nums">{formatHundredMillion(getField(record, "발행금액"))}</td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{record.rcept_no || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{record.acpt_no || "-"}</td>
                             <td className="px-4 py-3 text-center">
                               {url ? (
                                 <a 
@@ -326,7 +314,7 @@ export default function HtmlBondSummaryPage() {
                         {getCorrectionLabel(selectedRecord)}
                       </span>
                       <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">
-                        {selectedRecord.family_id || selectedRecord.rcept_no}
+                        {selectedRecord.family_id || selectedRecord.acpt_no}
                       </span>
                     </div>
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">{selectedRecord.title}</h3>
@@ -368,7 +356,7 @@ export default function HtmlBondSummaryPage() {
                             {tables.map((table: any, tableIndex: number) => (
                               <div key={`${table.index}-${tableIndex}`} className="rounded-lg border border-slate-200 bg-white dark:bg-[#161b22] dark:border-[#30363d] overflow-hidden">
                                 <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                                  {table.chapter_title || `Table ${Number(table.index ?? tableIndex) + 1}`}
+                                  {`Table ${Number(table.index ?? tableIndex) + 1}`}
                                 </div>
                                 <div className="overflow-x-auto">
                                   <table className="w-full min-w-[360px] text-[11px]">
@@ -410,7 +398,7 @@ export default function HtmlBondSummaryPage() {
                         if (members.length === 0) return <p className="text-xs text-slate-400 dark:text-slate-600">정정 기록이 없습니다.</p>;
                         return members.map((member: any) => (
                           <div 
-                            key={member.rcept_no} 
+                            key={`${member.acpt_no}-${member.sequence}`}
                             className={cn(
                               "flex items-center gap-3 p-2 rounded-lg border",
                               member.sequence === selectedRecord.current_sequence 
@@ -422,8 +410,8 @@ export default function HtmlBondSummaryPage() {
                               {Number(member.sequence || 0) + 1}
                             </span>
                             <div className="flex flex-col">
-                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{member.rcept_no}</span>
-                              <span className="text-[9px] text-slate-400 dark:text-slate-500">acpt_no: {member.acpt_no}</span>
+                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{member.acpt_no}</span>
+                              <span className="text-[9px] text-slate-400 dark:text-slate-500">doc_no: {member.doc_no}</span>
                             </div>
                           </div>
                         ));
