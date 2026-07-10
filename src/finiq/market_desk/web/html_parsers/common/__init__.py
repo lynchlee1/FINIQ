@@ -30,9 +30,6 @@ from .tables import (
     expand_table,
     extract_table_rows,
     extract_tables,
-    is_correction_chapter,
-    non_correction_rows,
-    non_correction_tables,
 )
 from .text import (
     clean_text,
@@ -62,9 +59,6 @@ __all__ = [
     "compress_repeated_texts",
     "extract_tables",
     "extract_table_rows",
-    "is_correction_chapter",
-    "non_correction_tables",
-    "non_correction_rows",
     "extract_title",
     "extract_acpt_no",
     "build_base_record",

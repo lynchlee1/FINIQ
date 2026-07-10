@@ -125,22 +125,8 @@ def expand_table(table: etree._Element) -> list[list[dict[str, Any]]]:
             col_index += colspan
             source_col += 1
 
-        while active_spans and col_index <= max(active_spans):
-            # 행 내 실제 셀 개수가 그리드 폭보다 부족한 경우, 남은 활성 rowspan이 모두 채워질 때까지 빈 슬롯을 추가한다.
-            if not append_active_span():
-                expanded_row.append(
-                    {
-                        "text": "",
-                        "row_index": row_index,
-                        "col_index": col_index,
-                        "source_row": row_index,
-                        "source_col": source_col,
-                        "rowspan": 1,
-                        "colspan": 1,
-                        "from_span": False,
-                    }
-                )
-                col_index += 1
+        while append_active_span():
+            pass
 
         if any(slot["text"] for slot in expanded_row):
             grid.append(expanded_row)
@@ -186,7 +172,7 @@ def compress_repeated_texts(row: list[str]) -> list[str]:
         cleaned = clean_text(value)
         if not cleaned:
             continue
-        if compressed and compressed[-1] == cleaned and cleaned != "상동":
+        if compressed and compressed[-1] == cleaned:
             continue
         compressed.append(cleaned)
     return compressed
@@ -196,11 +182,14 @@ def extract_tables(document: html.HtmlElement) -> list[dict[str, Any]]:
     """문서 내 모든 테이블을 평면화된 그리드 및 정규화된 논리 행(row) 형태로 반환한다.
 
     `cells`는 전체 형태가 보존된 디버깅용 데이터이며,
-    `logical_rows`는 개별 추출기에서 실질적으로 활용하는 간소화된 데이터다.
+    `positional_rows`는 열 위치를 보존하고 `logical_rows`는 라벨 검색용으로 압축한다.
     """
     tables: list[dict[str, Any]] = []
     for table_index, table in enumerate(document.xpath("//table")):
         grid = expand_table(table)
+        positional_rows = [
+            [clean_text(slot["text"]) for slot in row] for row in grid
+        ]
         logical_rows = [
             compress_repeated_texts([slot["text"] for slot in row]) for row in grid
         ]
@@ -210,6 +199,7 @@ def extract_tables(document: html.HtmlElement) -> list[dict[str, Any]]:
                 "index": table_index,
                 "chapter_title": _nearest_chapter_title(table),
                 "cells": grid,
+                "positional_rows": positional_rows,
                 "logical_rows": logical_rows,
             }
         )
@@ -225,7 +215,7 @@ def extract_table_rows(document: html.HtmlElement) -> list[list[str]]:
 
 
 def _nearest_chapter_title(table: etree._Element) -> str:
-    """정정 비교표 등을 식별하기 위해 해당 테이블과 가장 근접한 상위 섹션 제목을 탐색한다."""
+    """원문 미리보기에 표시할 가장 가까운 상위 섹션 제목을 탐색한다."""
     chapter_nodes = table.xpath(
         "preceding::*["
         "self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6 or "
@@ -237,23 +227,3 @@ def _nearest_chapter_title(table: etree._Element) -> str:
     if not chapter_nodes:
         return ""
     return element_text(chapter_nodes[0])
-
-
-def is_correction_chapter(table: dict[str, Any]) -> bool:
-    """테이블이 정정 신고 섹션에 포함되어 있는지 확인한다."""
-    chapter_title = clean_text(str(table.get("chapter_title") or "")).replace(" ", "")
-    return "정정신고" in chapter_title
-
-
-def non_correction_tables(raw_tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """필드 추출 전 정정 신고(비교표)와 관련된 테이블을 필터링한다."""
-    return [table for table in raw_tables if not is_correction_chapter(table)]
-
-
-def non_correction_rows(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
-    """다중 테이블 간 필드 조회를 위해 정정 신고가 아닌 논리적 행(row)을 모두 병합한다."""
-    return [
-        row
-        for table in non_correction_tables(raw_tables)
-        for row in table.get("logical_rows") or []
-    ]

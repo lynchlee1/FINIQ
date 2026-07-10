@@ -25,14 +25,14 @@ def row_containing(rows: list[list[str]], *needles: str) -> list[str]:
 
 
 def normalize_label(value: str) -> str:
-    """행 라벨 앞의 목차 번호(예: 1., 1-1.)를 제거한다."""
-    return re.sub(r"^\d+(?:-\d+)?\.\s*", "", clean_text(value))
+    """문자열 맨 앞의 숫자와 마침표 및 뒤따르는 공백만 제거한다."""
+    return re.sub(r"^\d+\.\s*", "", value)
 
 
 def row_with_label(rows: list[list[str]], label: str) -> list[str]:
     """번호가 제거된 라벨이 주어진 라벨과 정확히 일치하는 행을 반환한다."""
     for row in rows:
-        if any(normalize_label(value) == label for value in row):
+        if any(normalize_label(clean_text(value)) == label for value in row):
             return row
     return []
 
