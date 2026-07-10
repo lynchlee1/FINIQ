@@ -67,18 +67,36 @@
 - base record의 `title`은 항상 빈 문자열이다.
   - 의도 : 공통 단계에서는 작성하지 않고 외부 metadata를 통해 다음 단계에서 연결한다.
 2. **개별 parser의 직접 반환값**
-- 개별 `parse_*()`는 base record에 각 parser schema가 정의한 공시 유형별 필드를 추가한 record를 반환한다.
-- parser는 표·행·값을 찾고 해석하는 동안 각 항목의 처리 결과와 warning을 기록한다.
-- 처리가 끝난 뒤 기록된 항목이 하나라도 있으면 `field_parse_status`를 record에 추가한다.
-- warning이 있으면 모든 warning을 `parse_warnings`에 추가하고, `weak_warning`, `medium_warning`, `strong_warning`은 실제 warning이 있는 목록만 추가한다. 빈 상태 객체나 빈 warning 목록은 추가하지 않는다.
-- 직접 호출한 결과에는 원문 분석에 필요한 `raw_tables`가 포함된다.
-- 직접 호출한 결과에는 `source_file`, `raw_rows`, `correction_families`, `rcept_no`가 포함되지 않는다.
-  - 의도 : parser가 반환하는 필드를 하나의 확정된 구조로 유지한다.
+- `parse_*()`는 HTML 파일에서 필요한 정보를 찾아 record로 만드는 함수이다. 
+- `직접 반환값`은 이 함수를 호출한 직후 받는 결과를 뜻한다. 아직 저장용 형태로 바뀌기 전의 결과물이다.
+- 각 `parse_*()`는 먼저 공통 정보가 들어 있는 base record를 받아 모드별로 필요한 필드를 추가해서 반환한다.
+- parser는 HTML의 표에서 필요한 행과 값을 찾는 동안 각 항목이 잘 처리되었는지 기록한다. 기록할 내용이 하나라도 발생하면 `field_parse_status`에 저장하고, 하나도 발생하지 않으면 빈 `field_parse_status`를 만들지 않는다.
+- 문제가 발견되면 `parse_warnings`에 warning을 심각도에 따라 기록한다. warning이 없는 빈 목록은 record에 추가하지 않는다.
+
+| 필드 | 들어가는 warning |
+|---|---|
+| `weak_warning` | 약한 수준의 warning |
+| `medium_warning` | 중간 수준의 warning |
+| `strong_warning` | 강한 수준의 warning |
+
+- 직접 반환값에는 parser가 어떤 원문을 읽었는지 확인할 수 있도록 `raw_tables`가 포함된다.
+- 반면 `source_file`, `raw_rows`, `correction_families`, `rcept_no`는 포함되지 않는다.
+  즉, 직접 반환값은 다음과 같이 이해할 수 있다.
+
+| 구분 | 필드 |
+|---|---|
+| 항상 포함되는 공통 정보 | `acpt_no`, `mode`, `title`, `상장구분`, `raw_tables` |
+| 공시 유형에 따라 추가되는 정보 | 각 parser schema가 정의한 업무 필드 |
+| 처리 결과가 있을 때만 포함되는 정보 | `field_parse_status` |
+| warning이 있을 때만 포함되는 정보 | `parse_warnings`와 warning이 존재하는 심각도별 목록 |
+| 포함되지 않는 정보 | `source_file`, `raw_rows`, `correction_families`, `rcept_no` |
+
+  - 의도 : parser가 직접 반환하는 필드의 범위를 일정하게 유지하고,
+  빈 상태나 빈 warning 목록처럼 의미 없는 값은 만들지 않는다.
 
 ### parser 반환값에서 저장 record까지
 1. **원문 분석용 필드 제거**
 - 웹 parsing workflow는 parser 반환값을 받은 직후 저장 대상이 아닌 `raw_tables`를 제거한다.
-- `rcept_no`는 parser와 workflow 어디에서도 생성하지 않으므로 제거 단계가 없다.
   - 의도 : parsing에 필요한 원문 table은 직접 분석 결과에만 두고 저장 record에는 넣지 않는다.
 2. **외부 metadata 연결**
 - `raw_tables`를 제외한 record에 외부 metadata의 저장 필드를 연결한다.
@@ -108,7 +126,7 @@
 - 각 구성원의 `sequence`는 첫 번째가 0인 정수이다.
 - family에 속한 record에는 `family_id`, `current_sequence`, `family_member_count`를 직접 추가한다.
 - record에 `correction_families`를 임시로 만들지 않는다.
-  - 의도 : record 참조와 최상위 family를 처음부터 최종 저장 위치에 맞게 만든다.
+  - 의도 : record 참조와 최상위 family를 처음부터 최종 저장 위치에 맞게 만든다. 레거시 구조를 거쳤다가 다시 돌아오는 로직을 사용해선 안된다. 
 2. **구성원 필드**
 - 최종 `families[family_id].members[]`의 구성원은 아래 필드를 가진다.
 
