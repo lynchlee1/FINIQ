@@ -88,28 +88,40 @@ class BondIssuanceExtractor:
     def __init__(self, context: _BondParseContext):
         self.context = context
         self.rows = _BondRows(_main_bond_rows(context.raw_tables))
+        self.warnings: list[str] = []
+        self.strong_warnings: list[str] = []
+        self.field_parse_status: dict[str, str] = {}
+        if not self.rows.values:
+            self._append_warning(
+                "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
+            )
 
     def extract_round_from_bond_type_row(self) -> str | None:
-        return self.rows.value_after("사채의 종류", "회차")
+        value = self.rows.value_after("사채의 종류", "회차")
+        self._set_value_status("회차", value)
+        return value
 
     def extract_security_type_from_title(self, title: str) -> str | None:
         """공시 제목을 기반으로 CB/EB/BW 여부를 판별한다."""
         text = title
         if "신주인수권부사채" in text:
-            return "BW"
-        if "교환사채" in text:
-            return "EB"
-        if "전환사채" in text:
-            return "CB"
-        return None
+            value = "BW"
+        elif "교환사채" in text:
+            value = "EB"
+        elif "전환사채" in text:
+            value = "CB"
+        else:
+            value = None
+        self._set_value_status("종류", value)
+        return value
 
     def extract_target_company_name_from_exercise_target_stock_row(self) -> str | None:
         """대상 주식 문구를 원문 기준으로 추출한다."""
         target_text = self._extract_exercise_target_stock_text_from_main_rows()
         text = clean_text(target_text)
-        if not text:
-            return None
-        return text
+        value = text or None
+        self._set_value_status("기업명(행사대상)", value)
+        return value
 
     def _extract_exercise_target_stock_text_from_main_rows(self) -> str | None:
         """전환/교환/신주인수권 행사로 발행될 대상 주식 관련 문구를 추출한다."""
@@ -127,7 +139,15 @@ class BondIssuanceExtractor:
 
     def extract_issue_amount_from_bond_face_value_row(self) -> int | None:
         row = self._issue_amount_row()
-        return self._last_int_after_first_cell(row)
+        value = self._last_int_after_first_cell(row)
+        if value is None:
+            status = "source_not_found"
+        elif value == 0:
+            status = "explicit_zero"
+        else:
+            status = "parsed"
+        self._set_field_status("발행금액", status)
+        return value
 
     def _issue_amount_row(self) -> list[str]:
         return _issue_amount_row(self.rows.values)
@@ -142,26 +162,24 @@ class BondIssuanceExtractor:
     def extract_funding_purposes_from_funding_purpose_rows(self) -> list[list[Any]]:
         """자금조달 목적 행에 적힌 목적명과 금액을 표에 나온 순서대로 추출한다."""
         purposes: list[list[Any]] = []
+        found_amount_source = False
         for row in self.rows.values:
             if not row_contains(row, "자금조달의 목적"):
                 continue
             label = self._funding_purpose_label(row)
             amount = self._funding_purpose_amount(row)
+            if amount is not None:
+                found_amount_source = True
             if label and amount:
                 purposes.append([label, amount])
+        if purposes:
+            status = "parsed"
+        elif found_amount_source:
+            status = "explicit_zero"
+        else:
+            status = "source_not_found"
+        self._set_field_status("발행목적", status)
         return purposes
-
-    def has_funding_purpose_amount_source(self) -> bool:
-        for row in self.rows.values:
-            if not row_contains(row, "자금조달의 목적"):
-                continue
-            purpose_index = self._funding_purpose_index(row)
-            if purpose_index is None:
-                continue
-            for cell in row[purpose_index + 2 :]:
-                if parse_int(cell, dash_as_zero=True) is not None:
-                    return True
-        return False
 
     def _funding_purpose_label(self, row: list[str]) -> str | None:
         purpose_index = self._funding_purpose_index(row)
@@ -192,29 +210,40 @@ class BondIssuanceExtractor:
         self,
     ) -> int | float | None:
         """전환/교환/신주인수권 행사가액을 추출한다."""
+        value = None
         for price_label in EXERCISE_PRICE_LABELS:
             value = _strict_price_value_after_label(self.rows.values, price_label)
             if value is not None:
-                return value
-        return None
+                break
+        self._set_value_status("행사가액", value)
+        return value
 
     def extract_payment_date_from_payment_date_row(self) -> str | None:
-        return self.rows.last_labeled_value("납입일")
+        value = self.rows.last_labeled_value("납입일")
+        self._set_value_status("납입일", value)
+        return value
 
     def extract_maturity_date_from_bond_maturity_row(self) -> str | None:
         value = self.rows.last_value("사채만기일")
         if value is None:
             value = self.rows.last_value("사채만기")
+        self._set_value_status("만기일", value)
         return value
 
     def extract_issue_method_from_bond_issue_method_row(self) -> str | None:
-        return self.rows.last_value("사채발행방법")
+        value = self.rows.last_value("사채발행방법")
+        self._set_value_status("사채발행방법", value)
+        return value
 
     def extract_exercise_period_start_from_claim_period_row(self) -> str | None:
-        return self._extract_exercise_period_value_from_claim_period_row("시작일")
+        value = self._extract_exercise_period_value_from_claim_period_row("시작일")
+        self._set_value_status("행사시작일", value)
+        return value
 
     def extract_exercise_period_end_from_claim_period_row(self) -> str | None:
-        return self._extract_exercise_period_value_from_claim_period_row("종료일")
+        value = self._extract_exercise_period_value_from_claim_period_row("종료일")
+        self._set_value_status("행사종료일", value)
+        return value
 
     def _extract_exercise_period_value_from_claim_period_row(
         self, boundary_label: str
@@ -246,11 +275,12 @@ class BondIssuanceExtractor:
                 amount = parse_int(amount_cell, dash_as_zero=True)
                 if amount is not None:
                     targets.append([target_name, amount])
+            self._set_field_status(
+                "투자자", "parsed" if targets else "explicit_zero"
+            )
             return targets
+        self._set_field_status("투자자", "source_not_found")
         return []
-
-    def has_specific_person_bond_issue_table_source(self) -> bool:
-        return bool(self._specific_person_bond_issue_table_rows())
 
     def _specific_person_bond_issue_table_rows(self) -> list[list[list[str]]]:
         source_tables: list[list[list[str]]] = []
@@ -269,6 +299,24 @@ class BondIssuanceExtractor:
                 ):
                     source_tables.append(rows)
         return source_tables
+
+    def _set_value_status(self, field_name: str, value: Any) -> None:
+        status = "source_not_found" if value in (None, "", []) else "parsed"
+        self._set_field_status(field_name, status)
+
+    def _set_field_status(self, field_name: str, status: str) -> None:
+        self.field_parse_status[field_name] = status
+        if status == "source_not_found":
+            rule = BOND_FIELD_EXTRACTION_RULES[field_name]
+            self._append_warning(
+                f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다. 출처: {rule}"
+            )
+
+    def _append_warning(self, warning: str) -> None:
+        if warning not in self.strong_warnings:
+            self.strong_warnings.append(warning)
+        if warning not in self.warnings:
+            self.warnings.append(warning)
 
 
 def _issue_amount_row(rows: list[list[str]]) -> list[str]:

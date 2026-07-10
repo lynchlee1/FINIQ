@@ -89,8 +89,6 @@ type FilterCandidate = DisclosureFilterCandidate & {
 
 type FilterCandidateExample = {
   acpt_no: string;
-  source_name?: string;
-  source_file?: string;
 };
 
 type ExecutionOptionExampleNotice = {
@@ -100,8 +98,7 @@ type ExecutionOptionExampleNotice = {
 };
 
 type ParseWarningItem = {
-  source_file?: string;
-  source_name?: string;
+  acpt_no?: string;
   warning?: string;
   level?: string;
   warning_code?: string;
@@ -115,8 +112,7 @@ type WarningDetail = {
 };
 
 type WarningReport = {
-  sourceFile: string;
-  sourceName: string;
+  acptNo: string;
   warningsByLevel: Record<WarningLevel, WarningDetail[]>;
 };
 
@@ -139,14 +135,11 @@ const buildWarningReports = (warnings: ParseWarningItem[]): WarningReport[] => {
 
   warnings.forEach((item) => {
     const warning = String(item.warning || "").trim();
-    if (!warning) return;
+    const acptNo = String(item.acpt_no || "").trim();
+    if (!warning || !acptNo) return;
 
-    const sourceFile = String(item.source_file || "").trim();
-    const sourceName = String(item.source_name || "").trim() || sourceFile.split("/").pop() || "리포트";
-    const key = sourceFile || sourceName;
-    const report = reportMap.get(key) || {
-      sourceFile,
-      sourceName,
+    const report = reportMap.get(acptNo) || {
+      acptNo,
       warningsByLevel: {
         weak_warning: [],
         medium_warning: [],
@@ -158,52 +151,22 @@ const buildWarningReports = (warnings: ParseWarningItem[]): WarningReport[] => {
       warning,
       warningCode: normalizeWarningCode(item.warning_code),
     });
-    reportMap.set(key, report);
+    reportMap.set(acptNo, report);
   });
 
   return Array.from(reportMap.values());
 };
 
-const normalizePath = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "");
-
-const fileUrl = (path: string) => `file://${encodeURI(path)}`;
-
-const warningSourceUrl = (sourceFile: string, inputDirectory: string) => {
-  const normalizedSourceFile = normalizePath(sourceFile);
-  const normalizedInputDirectory = normalizePath(inputDirectory.trim());
-
-  if (normalizedSourceFile && normalizedInputDirectory) {
-    const prefix = `${normalizedInputDirectory}/`;
-    if (normalizedSourceFile === normalizedInputDirectory || normalizedSourceFile.startsWith(prefix)) {
-      const sourceName = normalizedSourceFile.slice(prefix.length);
-      const params = new URLSearchParams({
-        input_directory: inputDirectory,
-        source_name: sourceName,
-      });
-      return `/api/disclosures/html/sections/source?${params.toString()}`;
-    }
-  }
-
-  return fileUrl(sourceFile);
+const warningSourceUrl = (acptNo: string, inputDirectory: string) => {
+  const params = new URLSearchParams({
+    input_directory: inputDirectory,
+    acpt_no: acptNo,
+  });
+  return `/api/disclosures/html/sections/source?${params.toString()}`;
 };
 
 const executionOptionExampleUrl = (example: FilterCandidateExample, inputDirectory: string) => {
-  const sourceName = String(example.source_name || "").trim();
-  if (sourceName) {
-    const params = new URLSearchParams({
-      input_directory: inputDirectory,
-      source_name: sourceName,
-    });
-    return `/api/disclosures/html/sections/source?${params.toString()}`;
-  }
-
-  const sourceFile = String(example.source_file || "").trim();
-  if (sourceFile) {
-    return warningSourceUrl(sourceFile, inputDirectory);
-  }
-
-  const normalizedInputDirectory = normalizePath(inputDirectory.trim());
-  return fileUrl(`${normalizedInputDirectory}/${example.acpt_no}.html`);
+  return warningSourceUrl(example.acpt_no, inputDirectory);
 };
 
 const normalizeFilterCandidateExamples = (
@@ -216,8 +179,6 @@ const normalizeFilterCandidateExamples = (
     }
     return {
       acpt_no: String(example.acpt_no || "").trim(),
-      source_name: String(example.source_name || "").trim() || undefined,
-      source_file: String(example.source_file || "").trim() || undefined,
     };
   }).filter((example) => example.acpt_no);
 };
@@ -291,6 +252,7 @@ export default function HtmlParsePage() {
   const [parallelWorkers, setParallelWorkers] = useState("");
   const [selectedExecutionOptionValues, setSelectedExecutionOptionValues] = useState<string[]>([]);
   const [executionOptionCandidates, setExecutionOptionCandidates] = useState<FilterCandidate[]>([]);
+  const [executionOptionInputDirectory, setExecutionOptionInputDirectory] = useState("");
   const [executionOptionExampleNotice, setExecutionOptionExampleNotice] = useState<ExecutionOptionExampleNotice | null>(null);
   const [notificationResetKey, setNotificationResetKey] = useState(0);
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
@@ -343,6 +305,10 @@ export default function HtmlParsePage() {
 
   const handleInputDirectoryChange = (val: string) => {
     setInputDirectory(val);
+    setSelectedExecutionOptionValues([]);
+    setExecutionOptionCandidates([]);
+    setExecutionOptionInputDirectory("");
+    setExecutionOptionExampleNotice(null);
     saveSetting("html_section_split_output_directory", val);
   };
 
@@ -355,6 +321,7 @@ export default function HtmlParsePage() {
     setParseMode(val);
     setSelectedExecutionOptionValues([]);
     setExecutionOptionCandidates([]);
+    setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
     saveSetting("html_parse_mode", val);
   };
@@ -515,8 +482,9 @@ export default function HtmlParsePage() {
   const handleOpenWarningFiles = (groupKey: string) => {
     const pageInfo = warningPageInfoByGroup[groupKey];
     if (!pageInfo) return;
-    pageInfo.sourceFiles.forEach((sourceFile) => {
-      window.open(warningSourceUrl(sourceFile, inputDirectory), "_blank", "noopener,noreferrer");
+    const resultInputDirectory = String(latestParseResult?.input_directory || "").trim();
+    pageInfo.acptNumbers.forEach((acptNo) => {
+      window.open(warningSourceUrl(acptNo, resultInputDirectory), "_blank", "noopener,noreferrer");
     });
     setStatus(`${WARNING_LEVEL_LABELS[pageInfo.level]} ${pageInfo.warningCode} 파일 ${formatInteger(pageInfo.startIndex + 1)}-${formatInteger(pageInfo.endIndex)}번 열기를 요청했습니다.`);
     setIsErrorStatus(false);
@@ -574,6 +542,7 @@ export default function HtmlParsePage() {
       }
       const data = await response.json();
       setExecutionOptionCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setExecutionOptionInputDirectory(String(data.input_directory || ""));
       setExecutionOptionExampleNotice(null);
       setStatus(`${executionOptionConfig.statusLabel} 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
     } catch (err: any) {
@@ -691,7 +660,7 @@ export default function HtmlParsePage() {
   const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputDirectory");
   const warningReports = buildWarningReports(Array.isArray(latestParseResult?.warnings) ? latestParseResult.warnings : []);
   const warningGroups = WARNING_LEVELS.flatMap((level) => {
-    const groupMap = new Map<string, { key: string; level: WarningLevel; warningCode: string; warningCount: number; sourceFiles: string[] }>();
+    const groupMap = new Map<string, { key: string; level: WarningLevel; warningCode: string; warningCount: number; acptNumbers: string[] }>();
     warningReports.forEach((report) => {
       const codes = new Set<string>();
       report.warningsByLevel[level].forEach((detail) => {
@@ -702,11 +671,11 @@ export default function HtmlParsePage() {
           level,
           warningCode,
           warningCount: 0,
-          sourceFiles: [],
+          acptNumbers: [],
         };
         group.warningCount += 1;
-        if (report.sourceFile && !codes.has(warningCode)) {
-          group.sourceFiles.push(report.sourceFile);
+        if (!codes.has(warningCode)) {
+          group.acptNumbers.push(report.acptNo);
           codes.add(warningCode);
         }
         groupMap.set(key, group);
@@ -715,20 +684,20 @@ export default function HtmlParsePage() {
     return Array.from(groupMap.values());
   });
   const warningPageInfoByGroup = warningGroups.reduce((infoByGroup, group) => {
-    const sourceFiles = Array.from(new Set(group.sourceFiles));
-    const pageCount = Math.max(1, Math.ceil(sourceFiles.length / WARNING_OPEN_PAGE_SIZE));
+    const acptNumbers = Array.from(new Set(group.acptNumbers));
+    const pageCount = Math.max(1, Math.ceil(acptNumbers.length / WARNING_OPEN_PAGE_SIZE));
     const safePage = Math.min(warningOpenPages[group.key] || 0, pageCount - 1);
     const startIndex = safePage * WARNING_OPEN_PAGE_SIZE;
-    const pageSourceFiles = sourceFiles.slice(startIndex, startIndex + WARNING_OPEN_PAGE_SIZE);
+    const pageAcptNumbers = acptNumbers.slice(startIndex, startIndex + WARNING_OPEN_PAGE_SIZE);
     infoByGroup[group.key] = {
       level: group.level,
       warningCode: group.warningCode,
       pageCount,
       safePage,
       startIndex,
-      endIndex: startIndex + pageSourceFiles.length,
-      sourceFiles: pageSourceFiles,
-      totalSourceFiles: sourceFiles.length,
+      endIndex: startIndex + pageAcptNumbers.length,
+      acptNumbers: pageAcptNumbers,
+      totalAcptNumbers: acptNumbers.length,
     };
     return infoByGroup;
   }, {} as Record<string, {
@@ -738,8 +707,8 @@ export default function HtmlParsePage() {
     safePage: number;
     startIndex: number;
     endIndex: number;
-    sourceFiles: string[];
-    totalSourceFiles: number;
+    acptNumbers: string[];
+    totalAcptNumbers: number;
   }>);
   const warningCount = warningReports.reduce(
     (total, report) => total + WARNING_LEVELS.reduce((levelTotal, level) => levelTotal + report.warningsByLevel[level].length, 0),
@@ -838,7 +807,7 @@ export default function HtmlParsePage() {
         }
       });
       warningGroups.forEach((group) => {
-        const pageCount = Math.max(1, Math.ceil(group.sourceFiles.length / WARNING_OPEN_PAGE_SIZE));
+        const pageCount = Math.max(1, Math.ceil(group.acptNumbers.length / WARNING_OPEN_PAGE_SIZE));
         const safePage = Math.min(current[group.key] || 0, pageCount - 1);
         if (current[group.key] !== safePage) {
           next[group.key] = safePage;
@@ -848,7 +817,7 @@ export default function HtmlParsePage() {
       return changed ? next : current;
     });
   }, [
-    warningGroups.map((group) => `${group.key}:${group.sourceFiles.length}`).join("|"),
+    warningGroups.map((group) => `${group.key}:${group.acptNumbers.length}`).join("|"),
   ]);
 
   if (loading) {
@@ -953,11 +922,10 @@ export default function HtmlParsePage() {
             <CardContent className="space-y-4">
               {previewData?.records?.length ? (
                 previewData.records.map((record: any) => (
-                  <div key={`${record.index}-${record.source_file}`} className="rounded-md border border-slate-200 bg-white px-4 py-3 dark:border-[#30363d] dark:bg-[#0d1117]">
+                  <div key={`${record.index}-${record.acpt_no}`} className="rounded-md border border-slate-200 bg-white px-4 py-3 dark:border-[#30363d] dark:bg-[#0d1117]">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{record.title || record.source_file || `리포트 ${record.index}`}</p>
-                        <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">{record.source_file}</p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{record.title || record.acpt_no || `리포트 ${record.index}`}</p>
                       </div>
                       <code className="rounded bg-slate-100 px-2 py-1 text-[10px] text-slate-500 dark:bg-[#161b22] dark:text-slate-400">
                         {record.acpt_no || `#${record.index}`}
@@ -1028,12 +996,12 @@ export default function HtmlParsePage() {
                   {executionOptionExampleNotice.examples.length ? (
                     <div className="max-h-[60vh] space-y-2 overflow-auto pr-1">
                       {executionOptionExampleNotice.examples.map((example, exampleIndex) => (
-                        <div key={`${example.acpt_no}-${example.source_name || example.source_file || exampleIndex}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
+                        <div key={`${example.acpt_no}-${exampleIndex}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
                           <div className="min-w-0">
                             <p className="break-all text-sm font-semibold text-slate-900 dark:text-slate-100">{example.acpt_no}</p>
-                            <p className="mt-1 break-all text-[11px] text-slate-500 dark:text-slate-400">{example.source_name || example.source_file || `${example.acpt_no}.html`}</p>
+                            <p className="mt-1 break-all text-[11px] text-slate-500 dark:text-slate-400">{example.acpt_no}.html</p>
                           </div>
-                          <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => window.open(executionOptionExampleUrl(example, inputDirectory), "_blank", "noopener,noreferrer")}>
+                          <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => window.open(executionOptionExampleUrl(example, executionOptionInputDirectory), "_blank", "noopener,noreferrer")}>
                             <ExternalLink className="mr-1 h-3.5 w-3.5" />
                             열기
                           </Button>
@@ -1061,13 +1029,13 @@ export default function HtmlParsePage() {
                               {WARNING_LEVEL_LABELS[group.level]} {formatInteger(group.warningCount)}건
                             </span>
                             <span className="text-slate-500 dark:text-slate-400">
-                              {pageInfo.totalSourceFiles ? `${formatInteger(pageInfo.startIndex + 1)}-${formatInteger(pageInfo.endIndex)} / ${formatInteger(pageInfo.totalSourceFiles)}` : "0 / 0"}
+                              {pageInfo.totalAcptNumbers ? `${formatInteger(pageInfo.startIndex + 1)}-${formatInteger(pageInfo.endIndex)} / ${formatInteger(pageInfo.totalAcptNumbers)}` : "0 / 0"}
                             </span>
                           </div>
                           <div className="mt-1 break-all text-[11px] text-slate-500 dark:text-slate-400">
                             오류코드 {group.warningCode}
                           </div>
-                          <Button type="button" variant="outline" className="mt-2 h-9 w-full justify-center dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => handleOpenWarningFiles(group.key)} disabled={!pageInfo.sourceFiles.length}>
+                          <Button type="button" variant="outline" className="mt-2 h-9 w-full justify-center dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200" onClick={() => handleOpenWarningFiles(group.key)} disabled={!pageInfo.acptNumbers.length}>
                             <ExternalLink className="mr-2 h-4 w-4" />
                             현재 페이지 열기
                           </Button>
@@ -1088,12 +1056,9 @@ export default function HtmlParsePage() {
                   </div>
                   <div className="max-h-[60vh] space-y-3 overflow-auto pr-1">
                     {warningReports.map((report, reportIndex) => (
-                      <div key={`${report.sourceFile}-${report.sourceName}-${reportIndex}`} className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
+                      <div key={`${report.acptNo}-${reportIndex}`} className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
                         <div className="min-w-0">
-                          <p className="break-all text-sm font-semibold text-slate-900 dark:text-slate-100">{report.sourceName}</p>
-                          {report.sourceFile ? (
-                            <p className="mt-1 break-all text-[11px] text-slate-500 dark:text-slate-400">{report.sourceFile}</p>
-                          ) : null}
+                          <p className="break-all text-sm font-semibold text-slate-900 dark:text-slate-100">{report.acptNo}</p>
                         </div>
                         <div className="mt-2 space-y-2">
                           {WARNING_LEVELS.map((level) => {

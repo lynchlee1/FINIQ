@@ -25,10 +25,7 @@ from finiq.market_desk.web.html_parsers.common import (  # noqa: E402
     parse_html_document,
     row_contains,
 )
-from finiq.market_desk.web.html_parsers.common.tables import (  # noqa: E402
-    extract_tables,
-    non_correction_tables,
-)
+from finiq.market_desk.web.html_parsers.common.tables import extract_tables  # noqa: E402
 from finiq.market_desk.web.html_parsers.common.text import parse_int  # noqa: E402
 
 DEFAULT_INPUT_DIRECTORY = (
@@ -106,7 +103,7 @@ def _context_for_missing_fields(path: Path, missing_fields: list[str]) -> dict[s
 
 def _source_status_for_investors(path: Path) -> str:
     document = parse_html_document(path.read_bytes())
-    for table in non_correction_tables(extract_tables(document)):
+    for table in extract_tables(document):
         rows = table.get("logical_rows") or []
         if not rows or not row_contains(rows[0], "발행 대상자명", "발행권면"):
             continue
@@ -138,7 +135,7 @@ def _unexpected_missing_fields(classification: dict[str, str]) -> list[str]:
 
 
 def _parse_one(path: Path, metadata_index: dict[str, dict[str, str]]) -> dict[str, Any]:
-    acpt_no = path.stem.split("_", 1)[0]
+    acpt_no = path.stem
     metadata = metadata_index.get(acpt_no) or {}
     title = str(metadata.get("title") or "").strip() or None
     record = parse_bond_issuance(path.read_bytes(), file_path=path, title=title)
@@ -172,7 +169,6 @@ def validate_sample(
 
         item = {
             "index": index,
-            "source_file": str(path),
             "acpt_no": record.get("acpt_no"),
             "title": record.get("title"),
             "missing_fields": missing_fields,

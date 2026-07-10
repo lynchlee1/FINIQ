@@ -15,7 +15,8 @@ worker는 HTML 파일을 하나씩 맡아 처리하는 실행 단위이다. work
 
 ### 필드 상태 전달
 1. **공통 상태 형식**
-- parser는 `field_parse_status` 객체에 `필드명: 상태` 형식으로 필드별 결과를 기록할 수 있다.
+- parser는 각 값을 추출하면서 원문에서 표·행·값을 찾고 해석한 결과를 `field_parse_status` 객체에 `항목명: 상태` 형식으로 기록할 수 있다.
+- 모든 추출이 끝난 뒤 저장값만 보고 상태를 다시 추측하지 않는다. 추출 과정에서 기록한 상태를 최종 record에 연결한다.
 - 공통으로 사용하는 상태의 뜻은 아래와 같다.
 
 | 상태 | 쉬운 설명 | 세부 판정 |
@@ -65,8 +66,7 @@ worker는 HTML 파일을 하나씩 맡아 처리하는 실행 단위이다. work
 | `index` | 정렬된 전체 입력 파일에서 현재 파일의 1부터 시작하는 순서 |
 | `total` | 처리 대상으로 선택한 전체 HTML 파일 수 |
 | `mode` | 실행한 parser mode |
-| `source_file` | 입력 HTML의 절대 경로 |
-| `source_name` | 입력 HTML 파일명 |
+| `acpt_no` | 입력 경로의 `Path.stem` |
 | `warning` | 사람이 읽는 경고 문장 |
 | `level` | `weak_warning`, `medium_warning`, `strong_warning` 중 하나 |
 | `warning_code` | 프로그램이 구분하기 위한 짧은 code |
@@ -89,7 +89,7 @@ worker는 HTML 파일을 하나씩 맡아 처리하는 실행 단위이다. work
 3. **warning_report_counts**
 - `warning_report_counts.count`는 최종 warning 항목의 전체 수이고 `report_count`는 warning이 하나 이상인 서로 다른 report 번호 수이다.
 - `weak_warning`, `medium_warning`, `strong_warning` 아래에도 같은 방식으로 수준별 `count`, `report_count`, `reports`를 기록한다.
-- 파일을 구분하는 report 번호는 `source_name`에서 확장자를 제거한 값이다.
+- 파일을 구분하는 report 번호는 warning 항목의 `acpt_no`이다.
   - 의도 : warning 문장 수와 warning이 발생한 공시 수를 따로 확인하게 한다.
 
 ### 파일별 parsing error
@@ -104,8 +104,7 @@ worker는 HTML 파일을 하나씩 맡아 처리하는 실행 단위이다. work
 | `index` | 현재 파일의 1부터 시작하는 입력 순서 |
 | `total` | 전체 처리 대상 HTML 파일 수 |
 | `mode` | 실행한 parser mode |
-| `source_file` | 입력 HTML의 절대 경로 |
-| `source_name` | 입력 HTML 파일명 |
+| `acpt_no` | 입력 경로의 `Path.stem` |
 | `error_type` | 발생한 예외 class 이름 |
 | `error` | 예외 message |
 
@@ -141,13 +140,15 @@ worker는 HTML 파일을 하나씩 맡아 처리하는 실행 단위이다. work
 
 ### 미리보기와 필터 후보의 오류 처리
 1. **parse preview**
-- preview 생성 중 한 HTML 파일의 parsing이 실패하면 간단한 `index`, `source_file`, `error`를 preview의 `errors[]`에 넣고 다음 파일을 계속 확인한다.
+- preview 생성 중 한 HTML 파일의 parsing이 실패하면 `index`, `acpt_no`, `error`를 preview의 `errors[]`에 넣고 다음 파일을 계속 확인한다.
 - preview는 본 실행의 `skip_errors` 옵션을 사용하지 않는다.
   - 의도 : 일부 미리보기 후보가 깨져도 요청한 개수만큼 다른 성공 record를 찾을 수 있게 한다.
 2. **source preview**
-- 미리보기 대상 record의 `source_file`이 비어 있거나 파일이 없거나 원문 table 재구성에 실패하면 `source_preview.available`을 `false`로 반환한다.
+- payload 최상위 `input_directory`와 record의 `acpt_no`로 flat 또는 연도별 원문을 찾지 못했거나 원문 table 재구성에 실패하면 `source_preview.available`을 `false`로 반환한다.
+- `source_preview`는 바깥 preview record의 `acpt_no`와 payload 최상위 `input_directory`를 사용하며 식별자와 경로를 중복하지 않는다.
 - 가능한 경우 `error`에 이유를 넣고, 해당 record의 나머지 미리보기 응답은 유지한다.
   - 의도 : 원문 table 표시 실패와 이미 parsing된 업무 필드 결과를 분리한다.
 3. **필터 후보 생성**
 - 모든 HTML에서 필드 후보값을 모으는 중 개별 파일이 실패하면 그 파일을 후보 응답의 `errors[]`에 기록하고 나머지 파일은 계속 처리한다.
+- 후보 예시와 오류 항목은 `acpt_no`로 파일을 식별하고 개별 파일명이나 경로를 저장하지 않는다.
   - 의도 : 일부 파일의 실패 때문에 다른 파일에서 정상적으로 읽은 후보값까지 버리지 않는다.

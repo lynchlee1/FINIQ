@@ -391,25 +391,6 @@ def test_fetch_search_page_refreshes_main_get_body(tmp_path: Path) -> None:
     assert len(session.get_calls) == 1
 
 
-def test_fetch_disclosure_viewer_html_saves_kind_viewer_page(tmp_path: Path) -> None:
-    session = ViewerFakeSession()
-
-    output_path = fetch_disclosure_viewer_html(
-        output_directory=tmp_path,
-        request_headers=REQUEST_HEADERS,
-        acpt_no="20260108000150",
-        doc_no="20260324000592",
-        timeout=5,
-        session=session,
-    )
-
-    assert output_path == tmp_path / "20260108000150_20260324000592.html"
-    assert b"acptno=20260108000150" in output_path.read_bytes()
-    assert b"docno=20260324000592" in output_path.read_bytes()
-    assert len(session.get_calls) == 1
-    assert session.get_calls[0]["headers"] == REQUEST_HEADERS
-
-
 def test_download_disclosure_viewer_htmls_rate_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

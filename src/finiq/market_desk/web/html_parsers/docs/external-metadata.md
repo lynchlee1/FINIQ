@@ -11,8 +11,8 @@
 | 필드 | Only SoT | 비고 | 근거 |
 |---|---|---|---|
 | `title` | `compressed-external-html.json.title` | - | - |
-| `rcept_no` | N/A | DART 공시코드인 `rcept_no`는 저장하거나 사용하지 않는다. | KIND 기반의 파싱 로직에서는 안정적으로 추출할 방법이 없음 |
-| `acpt_no` | 입력 HTML 파일명 | `filtered.json`, `compressed-external-html.json`의 `acpt_no`는 메타데이터를 연결할 key로만 사용하고 record의 `acpt_no`에 영향을 주지 않는다. | - |
+| `rcept_no` | N/A | DART 공시코드인 `rcept_no` 필드는 생성하지 않는다. | KIND 기반 parsing에서 사용하지 않는 식별자 |
+| `acpt_no` | 입력 경로의 `Path.stem` | 확장자를 제거한 파일명 전체를 사용한다. `_`를 기준으로 자르거나 숫자 여부를 검사하지 않는다. 외부 JSON의 `acpt_no`는 같은 record를 찾는 key로만 사용한다. | - |
 | `doc_no` | `compressed-external-html.json.selected_main_doc_no` | - | - |
 | `corp_name` | `filtered.json`의 `company_name` | - | - |
 | `상장구분` | `filtered.json`의 `market` | - | - |

@@ -5,22 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from lxml import html
-
 from .io import parse_html_document
 from .tables import extract_tables
 
 
-def extract_title(_document: html.HtmlElement) -> str:
-    """HTML 본문에서 공시 제목을 추출하지 않는다."""
-    return ""
-
-
 def extract_acpt_no(file_path: str | Path) -> str:
-    """HTML 파일명을 기반으로 KIND 접수번호를 추론한다."""
-    stem = Path(file_path).stem
-    candidate = stem.split("_", 1)[0]
-    return candidate if candidate.isdigit() else ""
+    """확장자를 제외한 HTML 파일명 전체를 KIND 접수번호로 사용한다."""
+    return Path(file_path).stem
 
 
 def build_base_record(
@@ -28,7 +19,6 @@ def build_base_record(
     *,
     file_path: str | Path,
     mode: str,
-    title_extractor=extract_title,
 ) -> dict[str, Any]:
     """공시 HTML 파일의 기초가 되는 공통 파싱 레코드를 생성한다.
 
@@ -39,12 +29,9 @@ def build_base_record(
     raw_tables = extract_tables(document)
     acpt_no = extract_acpt_no(file_path)
     return {
-        "correction_families": {},
         "acpt_no": acpt_no,
-        "source_file": str(Path(file_path).resolve()),
         "mode": mode,
-        "title": title_extractor(document),
+        "title": "",
         "상장구분": None,
         "raw_tables": raw_tables,
-        "raw_rows": [row for table in raw_tables for row in table["logical_rows"]],
     }

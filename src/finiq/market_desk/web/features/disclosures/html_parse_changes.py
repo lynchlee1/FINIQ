@@ -40,10 +40,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     numeric_thresholds = app_config.change_log_numeric_thresholds or {}
 
     # Get records
-    all_records = [
-        _compact_record(record) if isinstance(record, dict) else record
-        for record in list(payload.get("records") or [])
-    ]
+    all_records = list(payload.get("records") or [])
 
     # Identify which records belong to which families
     family_records: dict[str, list[tuple[int, dict[str, Any]]]] = {}

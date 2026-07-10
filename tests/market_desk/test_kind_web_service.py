@@ -33,6 +33,7 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
 from finiq.market_desk.web.features.disclosures.html_common import (
     cancel_disclosure_html_download,
     collect_acpt_numbers_from_json,
+    resolve_disclosure_html_file,
 )
 from finiq.market_desk.web.features.disclosures.html_content_download import (
     download_disclosure_html_contents_payload,
@@ -49,6 +50,7 @@ from finiq.market_desk.web.features.disclosures.html_parse_changes import (
 )
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
     PARSER_REGISTRY,
+    _metadata_title_for_file,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
@@ -76,6 +78,7 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance
 from finiq.market_desk.web.html_parsers.common import (
     expand_table,
+    extract_acpt_no,
     parse_html_document,
     parse_int,
     parse_ints,
@@ -109,7 +112,7 @@ def _rights_manifest_title(fixture_path: Path) -> str:
             str(row.get("acpt_no") or ""): str(row.get("title") or "").strip()
             for row in payload["disclosures"]
         }
-    title = _RIGHTS_MANIFEST_TITLES.get(fixture_path.stem.split("_", 1)[0])
+    title = _RIGHTS_MANIFEST_TITLES.get(fixture_path.stem)
     assert title
     return title
 
@@ -3560,6 +3563,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
     assert payload["mode"] == "bond_issuance"
     assert payload["summary"] == {"found_files": 1, "parsed_files": 1, "failed_files": 0}
     assert payload["cancelled"] is False
+    assert payload["input_directory"] == str(viewer_dir.resolve())
     assert "progress_log" not in payload
     assert payload["records"][0]["acpt_no"] == "20250101000001"
     assert payload["records"][0]["title"] == "Sample Disclosure"
@@ -3567,6 +3571,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
     assert "raw_rows" not in payload["records"][0]
     assert "raw_tables" not in payload["records"][0]
     assert stored["format"] == payload["format"]
+    assert stored["input_directory"] == str(viewer_dir.resolve())
     assert "source_file" not in stored["records"][0]
     assert "progress_log" not in stored
 
@@ -3664,10 +3669,8 @@ def test_parse_disclosure_html_payload_uses_input_parent_metadata(
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "bond_issuance",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", fake_parser)
@@ -3833,13 +3836,13 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     )
 
     assert payload["summary"]["found_files"] == 1
-    assert "input_directory" not in payload
+    assert payload["input_directory"] == str(input_dir.resolve())
     assert "output_path" not in payload
     assert (bond_dir / "parsed-bond_issuance.json").is_file()
     stored = json.loads(
         (bond_dir / "parsed-bond_issuance.json").read_text(encoding="utf-8")
     )
-    assert "input_directory" not in stored
+    assert stored["input_directory"] == str(input_dir.resolve())
     assert "output_path" not in stored
     assert not (input_dir / "parsed-bond_issuance.json").exists()
     record = payload["records"][0]
@@ -3929,10 +3932,8 @@ def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
@@ -3945,7 +3946,7 @@ def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
         }
     )
 
-    assert "input_directory" not in payload
+    assert payload["input_directory"] == str(input_dir.resolve())
     assert "output_path" not in payload
     assert (output_dir / "parsed-rights_issuance.json").is_file()
     assert not (input_dir / "parsed-rights_issuance.json").exists()
@@ -3962,10 +3963,8 @@ def test_parse_disclosure_html_payload_accepts_dotted_output_directory(
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
@@ -3978,7 +3977,7 @@ def test_parse_disclosure_html_payload_accepts_dotted_output_directory(
         }
     )
 
-    assert "input_directory" not in payload
+    assert payload["input_directory"] == str(input_dir.resolve())
     assert "output_path" not in payload
     assert (output_dir / "parsed-rights_issuance.json").is_file()
 
@@ -3994,10 +3993,8 @@ def test_parse_disclosure_html_payload_requires_output_directory(
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
@@ -4009,70 +4006,6 @@ def test_parse_disclosure_html_payload_requires_output_directory(
                 "mode": "rights_issuance",
             }
         )
-
-
-def test_parse_disclosure_html_payload_drops_rcept_no_fields(
-    tmp_path: Path, monkeypatch
-) -> None:
-    viewer_dir = tmp_path / "viewer_html"
-    viewer_dir.mkdir()
-    first = viewer_dir / "20250101000001.html"
-    second = viewer_dir / "20250102000002.html"
-    first.write_text("<html></html>", encoding="utf-8")
-    second.write_text("<html></html>", encoding="utf-8")
-
-    def fake_parser(html_text, *, file_path):
-        acpt_no = Path(file_path).stem
-        current_sequence = 0 if acpt_no == "20250101000001" else 1
-        return {
-            "correction_families": {
-                "20250102000002": {
-                    "current_sequence": current_sequence,
-                    "members": [
-                        {
-                            "sequence": 0,
-                            "acpt_no": "20250101000001",
-                            "rcept_no": "20250101009999",
-                        },
-                        {
-                            "sequence": 1,
-                            "acpt_no": "20250102000002",
-                            "rcept_no": "20250102009999",
-                        },
-                    ],
-                }
-            },
-            "rcept_no": "20250102009999",
-            "acpt_no": acpt_no,
-            "source_file": str(Path(file_path).resolve()),
-            "mode": "security_transaction",
-            "title": "",
-            "raw_rows": [],
-        }
-
-    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
-
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(viewer_dir),
-            "output_directory": str(tmp_path),
-            "mode": "security_transaction",
-        }
-    )
-
-    for record in payload["records"]:
-        assert "rcept_no" not in record
-        assert "correction_families" not in record
-    assert payload["families"]["20250102000002"]["members"] == [
-        {
-            "sequence": 0,
-            "acpt_no": "20250101000001",
-        },
-        {
-            "sequence": 1,
-            "acpt_no": "20250102000002",
-        },
-    ]
 
 
 def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_disclosures(
@@ -4137,12 +4070,9 @@ def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_discl
 
     def fake_parser(html_text, *, file_path, title=None):
         return {
-            "correction_families": {},
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
             "title": title or "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
@@ -4283,12 +4213,9 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
     def fake_parser(html_text, *, file_path):
         acpt_no = Path(file_path).stem
         return {
-            "correction_families": {},
             "acpt_no": acpt_no,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "rights_issuance",
             "title": "유상증자 결정",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
@@ -4341,6 +4268,7 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "input_directory": str(tmp_path.resolve()),
                 "families": {
                     "20250102000002": {
                         "members": [
@@ -4353,7 +4281,6 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
                     {
                         "title": "[정정]전환사채권발행결정",
                         "acpt_no": "20250102000002",
-                        "source_file": "/tmp/20250102000002.html",
                         "family_id": "20250102000002",
                         "current_sequence": 1,
                         "family_member_count": 2,
@@ -4402,11 +4329,11 @@ def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Pat
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "input_directory": str(tmp_path.resolve()),
                 "records": [
                     {
                         "title": "전환사채권발행결정",
                         "acpt_no": "20250102000002",
-                        "source_file": "/tmp/20250102000002.html",
                     }
                 ],
             },
@@ -4457,6 +4384,7 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "input_directory": str(tmp_path.resolve()),
                 "records": [
                     {
                         "title": "전환사채권발행결정",
@@ -4473,13 +4401,13 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
         encoding="utf-8",
     )
 
-    payload = build_bond_parse_summary_payload(
-        {"output_path": str(tmp_path), "source_directory": str(tmp_path)}
-    )
+    payload = build_bond_parse_summary_payload({"output_path": str(tmp_path)})
 
-    preview = payload["records"][0]["source_preview"]
+    summary_record = payload["records"][0]
+    preview = summary_record["source_preview"]
     assert preview["available"] is True
-    assert preview["source_file"] == str(source_path)
+    assert "source_file" not in summary_record
+    assert "source_file" not in preview
     assert preview["tables"][0]["rows"][0] == ["1. 사채의 종류", "전환사채"]
     assert preview["tables"][0]["rows"][1] == ["2. 사채의 권면(전자등록)총액", "1,000,000,000"]
 
@@ -4578,9 +4506,13 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
     )
 
     assert payload["source_kind"] == "input_directory"
+    assert payload["input_directory"] == str(input_dir.resolve())
     assert payload["summary"] == {"records": 1, "visible_records": 1, "errors": 0}
-    assert payload["records"][0]["title"] == "[테스트발행사] 전환사채권발행결정"
-    record = payload["records"][0]["parsed_result"]
+    preview_record = payload["records"][0]
+    assert preview_record["title"] == "[테스트발행사] 전환사채권발행결정"
+    assert "source_file" not in preview_record
+    assert "source_file" not in preview_record["source_preview"]
+    record = preview_record["parsed_result"]
     assert record["acpt_no"] == "20250102000002"
     assert "rcept_no" not in record
     assert record["doc_no"] == "20250102009999"
@@ -4616,7 +4548,6 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
                     {
                         "title": "유상증자결정",
                         "acpt_no": "20240822000001",
-                        "source_file": "/tmp/20240822000001.html",
                         "family_id": "20240829000001",
                         "current_sequence": 0,
                         "family_member_count": 2,
@@ -4628,7 +4559,6 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
                     {
                         "title": "[정정]유상증자결정",
                         "acpt_no": "20240829000001",
-                        "source_file": "/tmp/20240829000001.html",
                         "family_id": "20240829000001",
                         "current_sequence": 1,
                         "family_member_count": 2,
@@ -4783,10 +4713,8 @@ def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monk
         cancel_disclosure_html_parse("parse-cancel-test")
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(file_path),
             "mode": "security_transaction",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -4839,8 +4767,7 @@ def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Pat
             "index": 1,
             "total": 1,
             "mode": "security_transaction",
-            "source_file": str(html_path.resolve()),
-            "source_name": "20250101000001.html",
+            "acpt_no": "20250101000001",
             "error_type": "RuntimeError",
             "error": "broken parser",
         }
@@ -4899,12 +4826,12 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         "index": 1,
         "total": 1,
         "mode": "bond_issuance",
-        "source_file": str(html_path.resolve()),
-        "source_name": "20250101000001.html",
+        "acpt_no": "20250101000001",
         "warning": "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.",
         "level": "strong_warning",
         "warning_code": "bond_main_table_missing",
     }
+    assert all("source_file" not in item for item in payload["warnings"])
     assert any(
         item["warning"].startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
         for item in payload["warnings"]
@@ -4950,8 +4877,7 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
             "index": 1,
             "total": 1,
             "mode": "rights_issuance",
-            "source_file": str(html_path.resolve()),
-            "source_name": "20250101000001.html",
+            "acpt_no": "20250101000001",
             "warning": "주입 제목이 없습니다.",
             "level": "strong_warning",
             "warning_code": "parse_warning",
@@ -4960,13 +4886,13 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
             "index": 1,
             "total": 1,
             "mode": "rights_issuance",
-            "source_file": str(html_path.resolve()),
-            "source_name": "20250101000001.html",
+            "acpt_no": "20250101000001",
             "warning": "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
             "level": "strong_warning",
             "warning_code": "rights_issue_type_missing",
         },
     ]
+    assert all("source_file" not in item for item in payload["warnings"])
     strong_warnings = [
         item["warning"]
         for item in payload["warnings"]
@@ -5001,10 +4927,8 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5036,10 +4960,8 @@ def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5067,10 +4989,8 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5107,14 +5027,12 @@ def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path:
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
             "title": "",
             "parse_warnings": ["weak warning", "medium warning", "strong warning"],
             "weak_warning": ["weak warning"],
             "medium_warning": ["medium warning"],
             "strong_warning": ["strong warning"],
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5132,6 +5050,7 @@ def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path:
         ("medium warning", "medium_warning"),
         ("strong warning", "strong_warning"),
     ]
+    assert all("source_file" not in item for item in payload["warnings"])
     assert payload["warning_report_counts"] == {
         "count": 3,
         "report_count": 1,
@@ -5184,12 +5103,10 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
         acpt_no = Path(file_path).stem
         return {
             "acpt_no": acpt_no,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
             "title": "",
             "사채발행방법": issue_methods[acpt_no],
             "parse_warnings": [f"{acpt_no} warning"],
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5211,8 +5128,8 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
     assert payload["summary"]["found_files"] == 3
     assert payload["summary"]["parsed_files"] == 1
     assert [record["acpt_no"] for record in payload["records"]] == ["20250101000001"]
-    assert [warning["source_name"] for warning in payload["warnings"]] == [
-        "20250101000001.html"
+    assert [warning["acpt_no"] for warning in payload["warnings"]] == [
+        "20250101000001"
     ]
     assert payload["warning_report_counts"] == {
         "count": 1,
@@ -5256,10 +5173,8 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
         acpt_no = Path(file_path).stem
         return {
             "acpt_no": acpt_no,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
             "title": titles[acpt_no],
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5304,10 +5219,8 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
     def fake_parser(html_text, *, file_path):
         return {
             "acpt_no": Path(file_path).stem,
-            "source_file": str(Path(file_path).resolve()),
             "mode": "security_transaction",
             "title": "주주총회소집공고",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5375,13 +5288,9 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
             "examples": [
                 {
                     "acpt_no": "20250101000001",
-                    "source_name": "20250101000001.html",
-                    "source_file": str((viewer_dir / "20250101000001.html").resolve()),
                 },
                 {
                     "acpt_no": "20250101000003",
-                    "source_name": "20250101000003.html",
-                    "source_file": str((viewer_dir / "20250101000003.html").resolve()),
                 },
             ],
         },
@@ -5391,8 +5300,6 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
             "examples": [
                 {
                     "acpt_no": "20250101000002",
-                    "source_name": "20250101000002.html",
-                    "source_file": str((viewer_dir / "20250101000002.html").resolve()),
                 },
             ],
         },
@@ -5464,13 +5371,9 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
             "examples": [
                 {
                     "acpt_no": "20250101000001",
-                    "source_name": "20250101000001.html",
-                    "source_file": str((viewer_dir / "20250101000001.html").resolve()),
                 },
                 {
                     "acpt_no": "20250101000003",
-                    "source_name": "20250101000003.html",
-                    "source_file": str((viewer_dir / "20250101000003.html").resolve()),
                 },
             ],
         },
@@ -5480,8 +5383,6 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
             "examples": [
                 {
                     "acpt_no": "20250101000002",
-                    "source_name": "20250101000002.html",
-                    "source_file": str((viewer_dir / "20250101000002.html").resolve()),
                 },
             ],
         },
@@ -5538,14 +5439,14 @@ def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkey
     viewer_dir.mkdir()
     html_path = viewer_dir / "20250101000001.html"
     html_path.write_text("<html></html>", encoding="utf-8")
+    called_paths: list[Path] = []
 
     def fake_parser(html_text, *, file_path):
+        called_paths.append(Path(file_path))
         return {
-            "acpt_no": "registry-called",
-            "source_file": str(file_path),
+            "acpt_no": Path(file_path).stem,
             "mode": "security_transaction",
             "title": "",
-            "raw_rows": [],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5558,7 +5459,8 @@ def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkey
         }
     )
 
-    assert payload["records"][0]["acpt_no"] == "registry-called"
+    assert called_paths == [html_path]
+    assert payload["records"][0]["acpt_no"] == html_path.stem
 
 
 def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
@@ -5787,6 +5689,34 @@ def test_parse_ints_keeps_adjacent_ungrouped_numbers_separate() -> None:
     assert parse_ints("100 100") == [100, 100]
 
 
+@pytest.mark.parametrize("filename", ["abc_def.html", "123_456.html"])
+def test_extract_acpt_no_uses_full_filename_stem(filename: str) -> None:
+    assert extract_acpt_no(Path(filename)) == Path(filename).stem
+
+
+def test_resolve_disclosure_html_file_uses_full_stem_in_year_directory(
+    tmp_path: Path,
+) -> None:
+    source_directory = tmp_path / "year-not-derived-from-filename"
+    source_directory.mkdir()
+    source_path = source_directory / "abc_def.html"
+    source_path.write_text("<html></html>", encoding="utf-8")
+
+    assert resolve_disclosure_html_file(tmp_path, "abc_def") == source_path.resolve()
+
+
+def test_metadata_title_lookup_uses_full_filename_stem() -> None:
+    metadata_index = {
+        "123": {"title": "prefix title"},
+        "123_456": {"title": "full stem title"},
+    }
+
+    assert (
+        _metadata_title_for_file(Path("123_456.html"), metadata_index)
+        == "full stem title"
+    )
+
+
 def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
     fixture_path = TESTS_DIR / "fixtures" / "kind_bond_issuance_20260508000643.html"
 
@@ -5929,7 +5859,8 @@ def test_parse_bond_issuance_uses_given_html_without_wrapper_body_lookup(
 
     assert parsed["title"] == ""
     assert "rcept_no" not in parsed
-    assert parsed["correction_families"] == {}
+    assert "correction_families" not in parsed
+    assert "raw_rows" not in parsed
     assert parsed["회차"] is None
     assert parsed["종류"] is None
     assert parsed["발행금액"] is None
@@ -6070,9 +6001,7 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
             "acpt_no": Path(file_path).stem,
             "mode": "bond_issuance",
             "title": "",
-            "correction_families": {},
             "상장구분": None,
-            "source_file": str(Path(file_path).resolve()),
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", parser_ignoring_title)
@@ -6108,6 +6037,8 @@ def test_parse_rights_issuance_uses_supplied_title_for_issuance_type(
     )
 
     assert parsed["title"] == "[테스트] 무상증자결정"
+    assert "correction_families" not in parsed
+    assert "raw_rows" not in parsed
     assert parsed["증자유형"] == "무상증자"
     assert parsed["발행목적"] == "-"
     assert parsed["발행가액"] == "-"

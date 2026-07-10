@@ -25,6 +25,11 @@
 - `src/finiq/market_desk/web/html_parsers/common/rows.py`
 
 대부분의 웹 parser는 `build_base_record()`로 공통 record를 만든다.
+`acpt_no`는 입력 경로의 `Path.stem`을 그대로 사용하며 `_`를 기준으로 자르거나
+숫자 여부를 검사하지 않는다. base record는 `source_file`, `raw_rows`, 빈
+`correction_families`, `rcept_no`를 만들지 않는다. `raw_tables`는 parser의
+추출과 직접 분석에 필요한 값이므로 직접 반환 결과에 포함하고, 저장 workflow는
+외부 metadata를 연결하기 전에 이를 제외한다.
 
 공통 처리 흐름:
 
@@ -183,9 +188,8 @@
 - `src/finiq/market_desk/web/html_parsers/asset_transaction/extractor.py`
 - `src/finiq/market_desk/web/html_parsers/asset_transaction/models.py`
 
-현재는 `build_base_record()`로 공통 metadata, `raw_tables`, `raw_rows`만
-생성한다. `AssetTransactionRecord().to_dict()`는 빈 dict를 반환하므로 상세
-필드 추출은 없다.
+현재는 `build_base_record()`로 공통 식별자와 `raw_tables`를 생성한다.
+`AssetTransactionRecord().to_dict()`는 빈 dict를 반환하므로 상세 필드 추출은 없다.
 
 ## 발행증권거래파싱
 
@@ -195,6 +199,5 @@
 - `src/finiq/market_desk/web/html_parsers/security_transaction/extractor.py`
 - `src/finiq/market_desk/web/html_parsers/security_transaction/models.py`
 
-현재는 `build_base_record()`로 공통 metadata, `raw_tables`, `raw_rows`만
-생성한다. `SecurityTransactionRecord().to_dict()`는 빈 dict를 반환하므로 상세
-필드 추출은 없다.
+현재는 `build_base_record()`로 공통 식별자와 `raw_tables`를 생성한다.
+`SecurityTransactionRecord().to_dict()`는 빈 dict를 반환하므로 상세 필드 추출은 없다.

@@ -58,10 +58,10 @@ export function ChangeLogMatrix({ selectedFamily }: ChangeLogMatrixProps) {
                         <tr>
                           <th className="px-4 py-3 text-left font-bold text-slate-500 dark:text-slate-400 w-32 min-w-[128px] shrink-0 border-r dark:border-[#30363d] bg-slate-50/80 dark:bg-[#161b22]/80 sticky left-0 z-20">변동 필드</th>
                           {data.records.map((r: any, i: number) => (
-                            <th key={r.rcept_no} className="px-4 py-3 text-left w-[168px] min-w-[168px] border-r dark:border-[#30363d] last:border-r-0">
+                            <th key={`${r.acpt_no}-${i}`} className="px-4 py-3 text-left w-[168px] min-w-[168px] border-r dark:border-[#30363d] last:border-r-0">
                               <div className="flex flex-col gap-0.5">
                                 <span className="text-blue-600 dark:text-blue-400 font-bold">#{i + 1} {i === 0 ? "(Original)" : i === data.records.length - 1 ? "(Latest)" : ""}</span>
-                                <code className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">{r.rcept_no}</code>
+                                <code className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">{r.acpt_no}</code>
                               </div>
                             </th>
                           ))}

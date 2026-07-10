@@ -197,7 +197,6 @@ def extract_tables(document: html.HtmlElement) -> list[dict[str, Any]]:
         tables.append(
             {
                 "index": table_index,
-                "chapter_title": _nearest_chapter_title(table),
                 "cells": grid,
                 "positional_rows": positional_rows,
                 "logical_rows": logical_rows,
@@ -212,18 +211,3 @@ def extract_table_rows(document: html.HtmlElement) -> list[list[str]]:
     for table in extract_tables(document):
         rows.extend(table["logical_rows"])
     return rows
-
-
-def _nearest_chapter_title(table: etree._Element) -> str:
-    """원문 미리보기에 표시할 가장 가까운 상위 섹션 제목을 탐색한다."""
-    chapter_nodes = table.xpath(
-        "preceding::*["
-        "self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6 or "
-        "(self::p and contains(concat(' ', normalize-space(@class), ' '), ' CORRECTION ')) or "
-        "(self::p and contains(concat(' ', normalize-space(@class), ' '), ' SECTION-')) or "
-        "(self::p and contains(concat(' ', normalize-space(@class), ' '), ' COVER-TITLE '))"
-        "][1]"
-    )
-    if not chapter_nodes:
-        return ""
-    return element_text(chapter_nodes[0])

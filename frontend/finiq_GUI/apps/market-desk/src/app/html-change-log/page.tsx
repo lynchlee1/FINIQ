@@ -141,7 +141,7 @@ export default function HtmlChangeLogPage() {
           const haystack = [
             family.family_id,
             family.title || "",
-            ...(family.records || []).flatMap((r: any) => [r.title, r.acpt_no, r.rcept_no]),
+            ...(family.records || []).flatMap((r: any) => [r.title, r.acpt_no]),
             ...displayFields,
           ].join(" ").toLowerCase();
           if (!haystack.includes(keyword)) return false;

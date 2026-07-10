@@ -23,7 +23,6 @@ KIND_SEARCH_RESULTS_URL = "https://kind.krx.co.kr/disclosure/details.do"
 KIND_DISCLOSURE_VIEWER_URL = "https://kind.krx.co.kr/common/disclsviewer.do"
 SEARCH_RESULTS_FILENAME_TEMPLATE = "{page_number:03d}_post_page_{page_number:05d}.body"
 VIEWER_HTML_FILENAME_TEMPLATE = "{acpt_no}.html"
-VIEWER_HTML_WITH_DOC_FILENAME_TEMPLATE = "{acpt_no}_{doc_no}.html"
 
 KindProgressCallback = Callable[[str], None]
 KindCancelCheck = Callable[[], bool]
@@ -149,9 +148,7 @@ def _validate_kind_identifier(value: str, *, field_name: str) -> str:
     return normalized_value
 
 
-def _build_viewer_html_filename(acpt_no: str, doc_no: str | None = None) -> str:
-    if doc_no:
-        return VIEWER_HTML_WITH_DOC_FILENAME_TEMPLATE.format(acpt_no=acpt_no, doc_no=doc_no)
+def _build_viewer_html_filename(acpt_no: str) -> str:
     return VIEWER_HTML_FILENAME_TEMPLATE.format(acpt_no=acpt_no)
 
 
@@ -466,7 +463,8 @@ def fetch_disclosure_viewer_html(
     """KIND 접수번호로 공시 뷰어 HTML 전체를 저장한다.
 
     ``acpt_no``는 KIND 검색 결과의 ``openDisclsViewer`` 첫 번째 인자이고,
-    ``doc_no``를 지정하면 같은 KIND 뷰어 내 특정 본문 문서를 선택한 HTML을 저장한다.
+    ``doc_no``를 지정하면 같은 KIND 뷰어 내 특정 본문 문서를 선택한다.
+    저장 파일명은 항상 ``<acpt_no>.html``이다.
     """
     if timeout <= 0:
         raise ValueError("timeout must be > 0")
@@ -476,10 +474,7 @@ def fetch_disclosure_viewer_html(
     )
 
     output_directory = output_directory.resolve()
-    output_path = output_directory / _build_viewer_html_filename(
-        normalized_acpt_no,
-        normalized_doc_no,
-    )
+    output_path = output_directory / _build_viewer_html_filename(normalized_acpt_no)
     if skip_existing and output_path.exists():
         _report_progress(progress_callback, f"Skipping existing KIND viewer HTML: {output_path}")
         return output_path
@@ -678,7 +673,6 @@ __all__ = [
     "KIND_SEARCH_RESULTS_URL",
     "SEARCH_RESULTS_FILENAME_TEMPLATE",
     "VIEWER_HTML_FILENAME_TEMPLATE",
-    "VIEWER_HTML_WITH_DOC_FILENAME_TEMPLATE",
     "download_disclosure_viewer_htmls",
     "fetch_disclosure_viewer_html",
     "fetch_search_page",

@@ -53,7 +53,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         try:
             html_bytes = html_file.read_bytes()
             record = _apply_parse_metadata(
-                _compact_record(
+                _record_without_raw_tables(
                     _parse_with_metadata_title(
                         parser,
                         html_bytes,
@@ -72,7 +72,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
             errors.append(
                 {
                     "index": index,
-                    "source_file": str(html_file),
+                    "acpt_no": html_file.stem,
                     "error": str(exc),
                 }
             )
@@ -81,14 +81,19 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         "format": "finiq_parse_preview_v1",
         "mode": requested_mode,
         "source_kind": "input_directory",
-        "source_path": str(input_directory),
+        "input_directory": str(input_directory),
         "summary": {
             "records": len(html_files),
             "visible_records": len(records),
             "errors": len(errors),
         },
         "records": [
-            _build_preview_record(record, index=index, mode=requested_mode)
+            _build_preview_record(
+                record,
+                index=index,
+                mode=requested_mode,
+                input_directory=input_directory,
+            )
             for index, record in enumerate(records, start=1)
         ],
         "errors": errors,
@@ -115,7 +120,7 @@ def _extract_filter_candidate_from_file(
 ) -> str | list[Any] | None:
     html_bytes = html_file.read_bytes()
     record = _apply_parse_metadata(
-        _compact_record(
+        _record_without_raw_tables(
             _parse_with_metadata_title(
                 parser,
                 html_bytes,
@@ -175,8 +180,6 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                     examples.append(
                         {
                             "acpt_no": html_file.stem,
-                            "source_name": html_file.relative_to(input_directory).as_posix(),
-                            "source_file": str(html_file),
                         }
                     )
 
@@ -184,7 +187,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         errors.append(
             {
                 "index": index,
-                "source_file": str(html_file),
+                "acpt_no": html_file.stem,
                 "error": str(exc),
             }
         )
