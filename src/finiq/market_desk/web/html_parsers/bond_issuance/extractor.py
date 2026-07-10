@@ -118,6 +118,12 @@ class BondIssuanceExtractor:
             value = _target_stock_value(self.rows.values, target_label)
             if value is not None:
                 return value
+        for target_label in EXERCISE_TARGET_LABELS:
+            value = _target_stock_value_after_adjacent_kind_cell(
+                self.rows.values, target_label
+            )
+            if value is not None:
+                return value
         return None
 
     def extract_issue_amount_from_bond_face_value_row(self) -> int | None:
@@ -291,6 +297,21 @@ def _target_stock_value(rows: list[list[str]], label: str) -> str | None:
             value = _target_stock_value_inside_cell(cell, label)
             if value is not None:
                 return value
+    return None
+
+
+def _target_stock_value_after_adjacent_kind_cell(
+    rows: list[list[str]], label: str
+) -> str | None:
+    compact_label = _compact(label)
+    if "대상" in compact_label:
+        return None
+    for row in rows:
+        for index, cell in enumerate(row[:-2]):
+            if compact_label not in _compact(cell):
+                continue
+            if _compact(row[index + 1]) == "종류":
+                return row[index + 2]
     return None
 
 

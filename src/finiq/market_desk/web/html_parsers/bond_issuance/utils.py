@@ -18,26 +18,6 @@ from ..common import (
 )
 
 MODE = "bond_issuance"
-_EXERCISE_TARGET_COMPANY_NAME_REPLACEMENTS = (
-    r"\(주\)",
-    r"㈜",
-    r"주식회사",
-    r"기명식",
-    r"무기명식",
-    r"보통주식?",
-    r"보통주?",
-    r"주식",
-)
-
-
-def _clean_exercise_target_company_name(value: str) -> str | None:
-    cleaned = clean_text(value)
-    if not cleaned:
-        return None
-    for pattern in _EXERCISE_TARGET_COMPANY_NAME_REPLACEMENTS:
-        cleaned = re.sub(pattern, " ", cleaned)
-    cleaned = clean_text(cleaned.strip(" -_/·,"))
-    return cleaned or clean_text(value)
 
 
 def _clean_funding_purpose_label(value: str) -> str | None:

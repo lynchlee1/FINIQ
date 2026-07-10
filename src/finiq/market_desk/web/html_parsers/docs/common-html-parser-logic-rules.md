@@ -10,51 +10,53 @@
 1. **Fallback을 새로 만들기 전에는 반드시 사용자에게 승인을 요청한다.**
 - 사용자의 명시적 허가 없이 예외사항을 임의로 추측하거나, 기존 요구사항을 우회하는 대체 로직을 생성하지 않는다. 
 - 예외 처리가 필요하다고 판단되는 경우에는 그 이유와 예상 영향을 설명한 뒤 사용자 확인을 받은 후 진행한다.
+2. **Only SoT(Source of Truth) 원칙**
+- Only SoT는 말 그대로 **유일한 출처**를 의미한다. 언급된 경우 절대로 다른 출처에 의존하지 않는다. 
 
 ### 외부 HTML 연결 규칙
-1. **기본 규칙**
-- 외부 HTML 데이터를 이용한 필드 보강은 필드별로 정해진 `filtered.json` 또는 `compressed-external-html.json`을 유일한 SoC로 사용한다.
-  - 절대로 `kind_disclosure_html_manifest.json`에 의존하지 않는다.
-- `filtered.json`은 `disclosures` 목록만 읽는다. `rows`를 fallback으로 읽지 않는다.
-- `filtered.json`·`compressed-external-html.json`는 입력 디렉토리보다 한 단계 위에 있는 부모 디렉토리에 존재한다. 
-- DART 공시코드인 `rcept_no`는 저장하거나 사용하지 않는다.
-2. **공시 제목**
-- 공시 제목은 외부 소스로부터 주입한 `compressed-external-html.json.title` 단일 필드를 유일한 SoC로 사용한다.
-  - `filtered.json.title`·`title_display`·`title_attr`을 사용한 fallback 로직을 만들지 않는다.
-3. **공시 코드**
-- `doc_no`는 `compressed-external-html.json.selected_main_doc_no` 단일 필드만 사용한다.
-  - `filtered.json.selected_main_doc_no`·`item.doc_no`를 사용한 fallback 로직을 만들지 않는다.
-- `acpt_no`는 입력 HTML 파일명을 유일한 SoC로 사용한다.
-- `filtered.json`·`compressed-external-html.json`의 `acpt_no`는 메타데이터를 연결할 key로만 사용하며, record의 `acpt_no`에 영향을 주지 않는다. 
-4. **기업 정보**
-- `corp_name`은 `filtered.json`의 `company_name`을 유일한 SoC로 사용한다.
-  - `compressed-external-html.json`·`header`를 사용한 fallback 로직을 만들지 않는다.
-- `상장구분`은 `filtered.json`의 `market`을 사용한다.
-  - `유가증권`은 `코스피`로 정규화한다.
-5. **정정공시**
-- 정정공시 record의 `title`은 `compressed-external-html.json.title` 단일 필드를 유일한 SoC로 사용한다.
-- 정정공시 묶음의 각 `members[].title`은 `compressed-external-html.json`의 `mainDoc.text`를 유일한 SoC로 사용한다.
-  - `filtered.json`의 `company_key`·`title_base`·`title_display`·`title`을 사용한 fallback 로직을 만들지 않는다.
+1. **SoC 원칙**
+- 외부 메타데이터를 이용한 필드 보강은 항상 `filtered.json`, `compressed-external-html.json`만을 참고한다. 
+- 절대로 `kind_disclosure_html_manifest.json`등 다른 파일에 의존하지 않는다.
+2. **메타데이터 위치**
+- `filtered.json`, `compressed-external-html.json`는 입력 디렉토리보다 한 단계 위에 있는 부모 디렉토리에 존재한다. 
+
+| 필드 | Only SoT | 비고 | 근거 |
+|---|---|---|---|
+| `title` | `compressed-external-html.json.title` | - | - |
+| `rcept_no` | N/A | DART 공시코드인 `rcept_no`는 저장하거나 사용하지 않는다. | KIND 기반의 파싱 로직에서는 안정적으로 추출할 방법이 없음 |
+| `acpt_no` | 입력 HTML 파일명 | `filtered.json`, `compressed-external-html.json`의 `acpt_no`는 메타데이터를 연결할 key로만 사용하고 record의 `acpt_no`에 영향을 주지 않는다. | - |
+| `doc_no` | `compressed-external-html.json.selected_main_doc_no` | - | - |
+| `corp_name` | `filtered.json`의 `company_name` | - | - |
+| `상장구분` | `filtered.json`의 `market` | - | - |
+| 정정공시 record의 `title` | `compressed-external-html.json.title` | - | - |
+| 정정공시 묶음의 `members[].title` | `compressed-external-html.json.mainDoc.text` | - | - |
 
 ### 내부 HTML 파싱 규칙
-1. **기본 규칙**
-- `rowspan`·`colspan`에 잘못된 값이 있는 경우 조용히 보정하지 않고 실패로 드러낸다.
-- 원문 미리보기는 원본 HTML 파일을 직접 읽어 테이블 preview를 만든다.
-- 원문 미리보기는 `source_directory`와 record의 `acpt_no`로 원본 HTML 파일을 찾는다.
-  - 먼저 `source_directory/<acpt_no>.html`을 확인한다.
-  - 없으면 `source_directory/<YYYY>/<acpt_no>.html`을 확인한다.
-- change-log 비교 대상 필드는 공시 유형별 `CHANGE_LOG_COMPARISON_FIELDS`에 명시한다.
-- skip_errors=True인 경우 파싱 실패 시 전체 작업을 중단하지 않고 errors에 기록한다.
-- change-log는 `CHANGE_LOG_COMPARISON_FIELDS`에 정의된 필드만 비교한다. 정의가 없는 mode는 비교 필드가 빈 목록이다.
-2. **디코딩**
-- 디코딩은 utf-8, cp949, euc-kr, utf-8(errors="replace") 순서로 시도한다.
-- lxml.html.HTMLParser(recover=True)로 깨진 HTML을 복구한다.
-
-### 공시원문 변환
-1. **기본 규칙**
-- 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
+#### 공통 로직
+| 로직 | 발동 조건과 대체 동작 | 영향 |
+|---|---|---|
+| 디코딩 순서 | `utf-8`, `cp949`, `euc-kr`, `utf-8(errors="replace")` 순서로 시도 | Multiple fallback으로 안정적인 추출 가능 | 
+| 깨진 HTML 복구 | `lxml.html.HTMLParser(recover=True)` 사용 | - | 
+| 공백 제거 & 재검색 | 공백을 포함한 문자열을 비교한 다음 행과 검색어의 모든 공백을 제거한 값으로 다시 비교 | 띄어쓰기가 달라도 정상 인식 | 
+| 숫자 내부 공백 복구 | 분할된 숫자의 공백을 제거한 뒤 숫자로 파싱 | `1, 000, 000`을 `1000000`으로 정상 인식 | 
+| span 누락 기본값 | `rowspan` 또는 `colspan` 속성이 없으면 `1`로 처리 | span 누락 테이블을 일반 셀로 계속 파싱 |
+| span 보정 금지 | `rowspan` 또는 `colspan` 속성에 잘못된 값이 있으면 조용히 보정하지 않고 실패 처리 | 잘못된 셀 확장으로 인한 오탐을 방지 |
+| 원문 미리보기 | `source_directory/<acpt_no>.html`, `source_directory/<YYYY>/<acpt_no>.html` 순서로 원본 HTML 파일을 찾아 열기 | 한번에 저장한 경우와 연도별로 저장한 경우를 모두 다룰 수 있음 |
+| `skip_errors` 로직 | skip_errors=True인 경우 파싱 실패 시 전체 작업을 중단하지 않고 errors에 기록 | 긴 작업이 몇 건의 오류로 중단되지 않도록 함 |
+| `change-log` 로직 | `CHANGE_LOG_COMPARISON_FIELDS`에 정정공시에서 비교할 필드를 저장 | 정정공시의 핵심 내용을 구분 |
 
 #### 사채발행파싱 (bond_issuance)
+- 원문에서 추출한 회사명·대상명은 법인 형태나 주식 종류 표현을 임의 제거하지 않고 원문 값을 보존한다.
+| 로직 | 발동 조건과 대체 동작 | 영향 |
+|---|---|---|
+| 제목 문구별 사채 종류 대체 판정 | `신주인수권부사채` → `교환사채` → `전환사채` 순으로 확인 | 동일 제목에 복수 문구가 있으면 앞선 종류가 우선 |
+| 행사대상 `종류` 인접 셀 fallback | 기존 구조화 행·문단 추출이 모두 실패한 뒤, 라벨 다음 셀이 `종류`이면 그다음 셀을 값으로 사용 | 
+| 발행금액 숫자 셀 역방향 탐색 | 선택된 권면 행에서 첫 셀을 제외하고 오른쪽 끝부터 숫자로 파싱되는 셀을 찾음 | 마지막 셀이 숫자가 아니어도 앞쪽 다른 셀의 숫자를 사용 | 
+| 자금조달 목적 금액 역방향 탐색 | 목적명 뒤의 셀들을 끝에서부터 검사해 첫 파싱 가능 숫자 사용 | 기대 위치의 값이 아니어도 같은 행의 다른 숫자를 사용할 수 있음 |
+| 메인 표 누락 후 계속 진행 | 필수 라벨 3개가 있는 표가 없으면 빈 행 목록으로 필드 추출을 계속하고 경고 생성 | 예외로 중단되지 않고 대부분 `null`/빈 목록으로 저장 | 
+| 원천은 있으나 빈 결과면 `explicit_zero` | 목적 금액 원천은 있으나 결과 목록이 비었거나, 투자자 표는 있으나 보존 행이 없으면 `explicit_zero` | “미발견” 대신 “명시적 0”으로 상태가 바뀜 | 
+| 검증 실패 시 값 유지·경고만 추가 | 발행목적 합계 또는 투자자 합계가 발행금액과 다르면 값을 바꾸지 않고 weak 경고만 남김 | 불일치 결과가 그대로 저장됨 |
+
 1. **사채 발행금액** 
 - `원화기준 포함` 행을 우선하고, 없으면 첫 `사채의 권면` 행을 사용한다. 
   - 해외발행의 경우에서 원화기준 권면을 우선하기 위함이다.
@@ -70,6 +72,35 @@
 - 유무상증자(`mixed`)에서 무상증자 섹션 기준 행을 찾지 못하면 유상 상세 객체는 전체 추출 대상 행을 사용하고 무상 상세 객체는 빈 행 목록을 사용한다.
 - 상세 객체의 `1주당 신주배정주식수`는 주식 종류별 값을 찾지 못한 경우 해당 행의 마지막 값을 `보통주식` 값으로 저장한다.
 - 주식 수량형 필드는 원천 값을 찾지 못하면 0을 저장하고, 원문에서 0 또는 대시를 읽은 경우 상태가 있는 필드에는 `explicit_zero`로 기록한다.
+
+
+
+
+
+'''
+### 메타데이터 연결 규칙
+| 로직 | 발동 조건과 대체 동작 | 영향 |
+|---|---|---|
+
+| parser 시그니처 확인 실패 시 제목 미주입 | `inspect.signature()`가 실패하면 해당 parser가 `title`을 받지 않는 것으로 간주 | parser는 제목 없이 실행되고 빈 제목·경고 경로로 진행 가능 |
+| 미리보기 제목 대체 | 원본 HTML 재파싱 record의 제목이 없으면 이미 파싱된 record 제목 사용 | 현재 `build_base_record()`의 본문 제목은 항상 비므로 사실상 주입 제목이 미리보기 제목이 됨 | 
+| 미리보기 재파싱 실패 완화 | 원본을 다시 읽거나 테이블을 만들다가 예외가 나면 미리보기를 `available=False`로 반환 | 전체 미리보기 응답은 유지되고 해당 파일의 원문 표만 표시되지 않음 | 
+| 미리보기 파일별 오류 무조건 계속 | preview 생성 중 한 파일이 실패해도 오류 목록에 넣고 다음 파일 파싱 | 본 실행의 `skip_errors`와 별개인 독립 오류 우회 경로 | 
+| 필터 후보 생성 오류 계속 | 후보 추출 중 개별 파일이 실패하면 오류로 기록하고 나머지 파일에서 후보 생성 | 일부 파일 파싱 실패에도 필터 후보 응답 생성 |
+| 경고 수준 기본 분류 | 경고가 수준별 목록에 없으면 `medium_warning`; 잘못된 수준 값도 `medium_warning` | 미분류 경고가 일반 에러로 표시됨 |
+| 경고 코드 기본값 | 알려진 패턴과 일치하지 않는 경고는 `parse_warning`으로 분류 | 상세 원인 코드 없이 공통 코드로 표시 |
+
+1. | 번호가 붙은 라벨 정규화 | `1.`, `1-1.` 같은 앞 번호를 제거한 뒤 정확한 라벨과 비교 | 원문 라벨이 번호를 포함해도 `납입일` 같은 필드를 찾음 |
+1. | 숫자 부분 문자열 추출 | 셀 전체가 숫자가 아니어도 첫 번째 숫자 부분을 추출 | 단위·설명과 섞인 셀도 숫자로 처리할 수 있음 | 
+1. | 깨진 행의 빈 슬롯 보충 | 활성 `rowspan` 사이에 실제 셀이 없으면 빈 문자열 슬롯을 삽입 | 열 위치를 유지하면서 불완전한 표를 계속 처리 |
+2. | 확장 테이블 중복·빈 텍스트 제거 | 병합 셀 확장 후 빈 값과 연속 중복 값을 제거. 단, `상동`은 보존 | 병합 셀로 생긴 반복 텍스트를 보정 |  
+3. | 정정 문서 순서 기본값 | `option_index`가 없거나 정수 변환에 실패하면 `0` 사용, 이후 `doc_no`로 정렬 | 잘못된 순서 정보도 정정 묶음 생성을 계속함 |
+4. | 불완전한 정정 묶음 폐기 | `mainDoc` 구성원 하나라도 대응 record를 찾지 못하면 전체 family를 `None` 처리 | 개별 공시 파싱은 계속되지만 정정 묶음 정보는 사라짐 |
+'''
+
+
+
+
 
 ## 워크플로우 메타데이터
 이 필드들은 HTML 본문 표에서 직접 추출하지 않고 사전 추출된 데이터로 보강하는 항목이다.

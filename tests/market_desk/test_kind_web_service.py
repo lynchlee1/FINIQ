@@ -6490,7 +6490,7 @@ def test_parse_bond_issuance_maps_legacy_conversion_target_and_refixing(tmp_path
         <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
         <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
         <tr><td>9. 전환에 관한 사항</td><td>전환가액 (원/주)</td><td>500</td></tr>
-        <tr><td>9. 전환에 관한 사항</td><td>전환에 따라 발행할 주식의 종류</td><td>(주)아이에스이커머스 기명식 보통주</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환에 따라 발행할 주식</td><td>종류</td><td>(주)아이에스이커머스 기명식 보통주</td></tr>
       </table>
     </body></html>
     """
