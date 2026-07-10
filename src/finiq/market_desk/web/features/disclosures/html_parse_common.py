@@ -390,10 +390,7 @@ def _external_html_correction_family(
 
 
 def _external_main_doc_sort_key(doc: dict[str, Any]) -> tuple[int, str]:
-    try:
-        option_index = int(doc.get("option_index"))
-    except (TypeError, ValueError):
-        option_index = 0
+    option_index = int(doc["option_index"])
     return (option_index, str(doc.get("doc_no") or ""))
 
 

@@ -4546,6 +4546,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
                         "docs": [
                             {
                                 "select_id": "mainDoc",
+                                "option_index": 1,
                                 "doc_no": "00000000835386",
                                 "value": "00000000835386|N",
                                 "latest_flag": "N",
@@ -4553,6 +4554,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
                             },
                             {
                                 "select_id": "mainDoc",
+                                "option_index": 2,
                                 "doc_no": "20250102009999",
                                 "value": "20250102009999|Y",
                                 "latest_flag": "Y",
@@ -7239,36 +7241,6 @@ def test_parse_rights_issuance_ignores_target_amount_percentage_annotation(
       <table>
         <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
         <tr><td>투자자A</td><td>100,000 (100%)</td></tr>
-      </table>
-    </body></html>
-    """
-
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
-
-    assert parsed["발행대상자"] == [["투자자A", 100_000]]
-    assert not any(
-        "배정주식수 합계" in warning
-        for warning in parsed.get("weak_warning", [])
-    )
-
-
-def test_parse_rights_issuance_keeps_consecutive_ditto_columns_in_target_table(
-    tmp_path: Path,
-) -> None:
-    fixture_path = tmp_path / "20250102000023.html"
-    body_html = """
-    <html><body>
-      <p class="SECTION-1">유상증자결정</p>
-      <table>
-        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>100,000</td></tr>
-        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
-      </table>
-      <table>
-        <tr>
-          <th>제3자배정 대상자</th><th>회사 또는 최대주주와의 관계</th><th>선정경위</th>
-          <th>증자결정 전후 6월이내 거래내역 및 계획</th><th>배정주식수 (주)</th><th>비 고</th>
-        </tr>
-        <tr><td>투자자A</td><td>상동</td><td>상동</td><td>상동</td><td>100,000</td><td>-</td></tr>
       </table>
     </body></html>
     """

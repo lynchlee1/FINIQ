@@ -7,7 +7,6 @@ from typing import Any
 
 from ..common import (
     column_index,
-    last_int,
     parse_int,
     parse_ints,
     row_contains,
@@ -227,28 +226,36 @@ class RightsIssuanceExtractor:
         fallback_targets: list[list[Any]] | None = None
         found_empty_target_table = False
         for table in self.context.extraction_tables:
-            rows = table.get("logical_rows") or []
-            if not rows or not row_contains(rows[0], "제3자배정 대상자", "배정주식수"):
+            logical_rows = table["logical_rows"]
+            if not logical_rows or not row_contains(
+                logical_rows[0], "제3자배정 대상자", "배정주식수"
+            ):
                 continue
+            rows = table["positional_rows"]
+            target_idx = column_index(rows[0], "제3자배정대상자")
             amount_idx = column_index(rows[0], "배정주식수")
+            if (
+                target_idx is None
+                or amount_idx is None
+                or target_idx == amount_idx
+            ):
+                continue
             data_rows = rows[1:]
-            if self._is_undisclosed_issue_target_rows(data_rows, amount_idx):
+            if self._is_undisclosed_issue_target_rows(
+                data_rows, target_idx, amount_idx
+            ):
                 self._set_field_status("발행대상자", "explicit_zero")
                 return [["-", 0]]
             targets: list[list[Any]] = []
             for row in data_rows:
-                if not row or row[0] == "-":
+                if target_idx >= len(row) or amount_idx >= len(row):
                     continue
-                amount_from_declared_column = (
-                    amount_idx is not None and amount_idx < len(row)
-                )
-                amount = (
-                    self._issue_target_amount(row[amount_idx])
-                    if amount_from_declared_column
-                    else last_int(row)
-                )
+                target = row[target_idx]
+                if not target or target == "-":
+                    continue
+                amount = self._issue_target_amount(row[amount_idx])
                 if amount is not None:
-                    targets.append([row[0], amount])
+                    targets.append([target, amount])
             targets = self._exclude_bottom_duplicate_total_target(
                 targets,
                 stock_total=stock_total,
@@ -333,18 +340,16 @@ class RightsIssuanceExtractor:
         return issuance_label, paid_detail, bonus_detail
 
     def _is_undisclosed_issue_target_rows(
-        self, data_rows: list[list[str]], amount_idx: int | None
+        self, data_rows: list[list[str]], target_idx: int, amount_idx: int
     ) -> bool:
         if not data_rows:
             return False
         for row in data_rows:
-            if not row or row[0].strip() != "-":
+            if target_idx >= len(row) or amount_idx >= len(row):
                 return False
-            amount = (
-                self._issue_target_amount(row[amount_idx])
-                if amount_idx is not None and amount_idx < len(row)
-                else last_int(row)
-            )
+            if row[target_idx].strip() != "-":
+                return False
+            amount = self._issue_target_amount(row[amount_idx])
             if amount is not None:
                 return False
         return True

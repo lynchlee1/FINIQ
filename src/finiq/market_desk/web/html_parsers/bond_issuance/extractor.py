@@ -7,7 +7,6 @@ from typing import Any
 
 from ..common import (
     clean_text,
-    non_correction_tables,
     parse_int,
     row_contains,
 )
@@ -73,7 +72,7 @@ BOND_FIELD_EXTRACTION_RULES = {
 
 def _main_bond_rows(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
     """사채 발행 결정의 메인 테이블을 찾는다."""
-    for table in non_correction_tables(raw_tables):
+    for table in raw_tables:
         rows = table.get("logical_rows") or []
         if all(
             any(row_contains(row, label) for row in rows)
@@ -255,10 +254,20 @@ class BondIssuanceExtractor:
 
     def _specific_person_bond_issue_table_rows(self) -> list[list[list[str]]]:
         source_tables: list[list[list[str]]] = []
-        for table in non_correction_tables(self.context.raw_tables):
-            rows = table.get("logical_rows") or []
-            if rows and row_contains(rows[0], "발행 대상자명", "발행권면"):
-                source_tables.append(rows)
+        for table in self.context.raw_tables:
+            logical_rows = table["logical_rows"]
+            if logical_rows and row_contains(
+                logical_rows[0], "발행 대상자명", "발행권면"
+            ):
+                rows = table["positional_rows"]
+                name_index = _first_header_index(rows[0], "발행 대상자명")
+                amount_index = _first_header_index(rows[0], "발행권면")
+                if (
+                    name_index is not None
+                    and amount_index is not None
+                    and name_index != amount_index
+                ):
+                    source_tables.append(rows)
         return source_tables
 
 

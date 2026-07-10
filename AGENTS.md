@@ -78,6 +78,8 @@ the document that matches the current task:
 - KIND disclosure identifiers, `acpt_no`, `doc_no`, `rcept_no`, `mainDoc`, `filtered.json`, `compressed-external-html.json`, or correction families: `docs/kind-disclosure-identifiers.md`.
 - Disclosure HTML parser architecture or cross-mode extraction behavior: `docs/disclosure-html-parser-logic.md`.
 - Editing KIND HTML parser rules, labels, warnings, correction-table filtering, or parser verification expectations: `docs/disclosure-html-parser-rules.md`.
-- KIND HTML parser shared metadata, saved record fields, raw table/row storage policy, or common warning/status semantics: `src/finiq/market_desk/web/html_parsers/docs/common-html-parser-logic-rules.md`.
+- KIND HTML parser common parsing behavior or shared metadata connection flow: `src/finiq/market_desk/web/html_parsers/docs/common/common-html-parser-logic-rules.md`.
+- KIND HTML parser common table/base record shape, saved record fields, or raw table/row storage policy: `src/finiq/market_desk/web/html_parsers/docs/common/common-html-parser-data-structure.md`.
+- KIND HTML parser common warning/status semantics or execution error handling: `src/finiq/market_desk/web/html_parsers/docs/common/common-html-parser-exception-handling.md`.
 - Bond issuance parser field extraction, metadata, title extraction, listing market, or fallback decisions: `src/finiq/market_desk/web/html_parsers/docs/bond-issuance-parser-logic-rules.md`.
 - Rights issuance parser field extraction or type handling for 유상증자, 무상증자, or 유무상증자: `src/finiq/market_desk/web/html_parsers/docs/rights-issuance-parser-logic-rules.md`.

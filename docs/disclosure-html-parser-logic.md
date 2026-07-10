@@ -93,7 +93,7 @@
 처리 방식:
 
 - 공통 table/span 처리 결과를 사용한다.
-- 메인 table 하나가 아니라 정정표가 아닌 모든 table의 `logical_rows`를 합쳐 필드를 찾는다.
+- 메인 table 하나가 아니라 증자 field 또는 section 조건을 만족하는 모든 table의 `logical_rows`를 합쳐 필드를 찾는다.
 - 증자 유형은 공시 제목만으로 분류한다.
 
 | 제목 포함 문구 | 분류 |
