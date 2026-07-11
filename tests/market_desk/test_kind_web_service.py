@@ -53,6 +53,7 @@ from finiq.market_desk.web.features.disclosures.html_parse_common import (
     _collect_html_files,
     _load_html_parse_metadata,
     _metadata_title_for_file,
+    _record_parse_warning_items,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
 )
@@ -84,6 +85,7 @@ from finiq.market_desk.web.html_parsers.common import (
     parse_html_document,
     parse_int,
     parse_ints,
+    row_with_label,
 )
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 from finiq.market_desk.analytics.quanti import list_quanti_stock_codes
@@ -5099,7 +5101,12 @@ def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path:
     }
 
 
-def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("parallel_workers", [1, 2])
+def test_parse_disclosure_html_payload_keeps_warnings_for_filtered_records(
+    tmp_path: Path,
+    monkeypatch,
+    parallel_workers: int,
+) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for name in ("20250101000001", "20250101000002", "20250101000003"):
@@ -5119,6 +5126,7 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
             "title": "",
             "사채발행방법": issue_methods[acpt_no],
             "parse_warnings": [f"{acpt_no} warning"],
+            "medium_warning": [f"{acpt_no} warning"],
         }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
@@ -5129,7 +5137,7 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
-            "parallel_workers": 2,
+            "parallel_workers": parallel_workers,
             "record_filters": [
                 {"field": "사채발행방법", "operator": "in", "value": ["공모"]},
             ],
@@ -5141,20 +5149,30 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
     assert payload["summary"]["parsed_files"] == 1
     assert [record["acpt_no"] for record in payload["records"]] == ["20250101000001"]
     assert [warning["acpt_no"] for warning in payload["warnings"]] == [
-        "20250101000001"
+        "20250101000001",
+        "20250101000002",
+        "20250101000003",
     ]
     assert payload["warning_report_counts"] == {
-        "count": 1,
-        "report_count": 1,
+        "count": 3,
+        "report_count": 3,
         "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
         "medium_warning": {
-            "count": 1,
-            "report_count": 1,
+            "count": 3,
+            "report_count": 3,
             "reports": {
                 "20250101000001": {
                     "count": 1,
                     "warnings": ["20250101000001 warning"],
-                }
+                },
+                "20250101000002": {
+                    "count": 1,
+                    "warnings": ["20250101000002 warning"],
+                },
+                "20250101000003": {
+                    "count": 1,
+                    "warnings": ["20250101000003 warning"],
+                },
             },
         },
         "strong_warning": {"count": 0, "report_count": 0, "reports": {}},
@@ -5167,6 +5185,31 @@ def test_parse_disclosure_html_payload_filters_records_by_bond_issue_method(tmp_
     }
     assert "progress_log" not in payload
     assert "필드 필터: 1개 조건 적용" in progress_log
+    assert f"병렬 처리: {parallel_workers}개 워커" in progress_log
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"parse_warnings": "warning"},
+        {"parse_warnings": ["warning"]},
+        {"weak_warning": ["warning"]},
+        {
+            "parse_warnings": ["warning"],
+            "weak_warning": ["warning"],
+            "strong_warning": ["warning"],
+        },
+        {
+            "parse_warnings": ["warning", "warning"],
+            "weak_warning": ["warning"],
+        },
+    ],
+)
+def test_record_parse_warning_items_rejects_warning_contract_violations(
+    record: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError, match="warning contract violation"):
+        _record_parse_warning_items(record)
 
 
 def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, monkeypatch) -> None:
@@ -5699,6 +5742,26 @@ def test_parse_int_ignores_spaces_inside_comma_grouped_numbers() -> None:
 
 def test_parse_ints_keeps_adjacent_ungrouped_numbers_separate() -> None:
     assert parse_ints("100 100") == [100, 100]
+
+
+@pytest.mark.parametrize(
+    "numbered_label",
+    ["1. 납입일", "1-1. 납입일", "1- 1. 납입일", "1 - 1 . 납입일"],
+)
+def test_row_with_label_accepts_one_or_two_level_number_prefixes(
+    numbered_label: str,
+) -> None:
+    row = [numbered_label, "2025년 01월 02일"]
+
+    assert row_with_label([row], "납입일") == row
+
+
+def test_row_with_label_rejects_number_prefix_deeper_than_two_levels() -> None:
+    matching_row = ["9. 납입일", "2025년 01월 02일"]
+
+    assert row_with_label(
+        [["1-1-1. 납입일", "잘못된 값"], matching_row], "납입일"
+    ) == matching_row
 
 
 def test_parse_int_distinguishes_empty_source_from_explicit_dash_zero() -> None:

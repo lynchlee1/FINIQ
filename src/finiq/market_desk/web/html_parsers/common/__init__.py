@@ -33,7 +33,6 @@ from .tables import (
 from .text import (
     clean_text,
     element_text,
-    parse_float,
     parse_int,
     parse_ints,
 )
@@ -44,7 +43,6 @@ __all__ = [
     "element_text",
     "parse_int",
     "parse_ints",
-    "parse_float",
     "parse_html_document",
     "row_contains",
     "row_containing",

@@ -44,10 +44,3 @@ def _remove_grouping_spaces(value: str) -> str:
         return seq
 
     return re.sub(r"-?\d[\d,\s]*\d|-?\d", repl, value)
-
-
-def parse_float(value: str | None) -> float | None:
-    """문자열에서 소수점 데이터를 찾아 실수(float)형으로 변환한다."""
-    text = clean_text(value)
-    match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
-    return float(match.group(0)) if match else None

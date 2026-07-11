@@ -1,5 +1,5 @@
 # HTML 파서 공통 예외 처리 규칙
-
+- 이 문서는 작성 및 검토가 완료되었으므로 사용자의 명시적 허락이 있지 않는 한 **절대로** 수정하지 않는다.
 - 이 문서에서 `record`는 HTML 파일 한 건을 파싱한 결과를 뜻한다.
 - 이 문서에서 `payload`는 여러 `record`와 경고, 오류를 모은 최종 결과를 뜻한다.
 - 이 문서에서 파서인 `parser`는 HTML에서 필요한 값을 찾아 `record`에 넣는 함수를 뜻한다.
@@ -52,28 +52,17 @@
   - `weak_warning`: 약한 수준의 경고
   - `medium_warning`: 중간 수준의 경고
   - `strong_warning`: 강한 수준의 경고
-
 2. **payload 내부 warnings[] 로직**
 - 파서가 만든 경고 목록은 최종 `record`에 그대로 남는다.
-- 공통 처리 과정은 같은 경고를 `payload` 바로 아래의 `warnings[]`에도 따로 정리한다.
-- 이때 원래 경고를 `record`에서 빼거나 옮기지 않는다.
-- 같은 문장이 한 파일의 여러 경고 목록에 있어도 `payload`의 `warnings[]`에는 한 번만 넣는다.
-- 경고 수준은 아래 순서로 확인한다.
-  1. `weak_warning`
-  2. `medium_warning`
-  3. `strong_warning`
-- 같은 문장이 실수로 여러 수준에 들어 있으면 위 순서에서 먼저 찾은 수준을 사용한다.
-- `payload`의 `warnings[]`에 넣는 문장 순서는 먼저 `parse_warnings`의 순서를 따른다.
-- `parse_warnings`에 없고 수준별 목록에만 있는 문장은 약한 수준, 중간 수준, 강한 수준 순서로 뒤에 넣는다.
-- `parse_warnings`에만 있고 수준별 목록에는 없는 문장은 `medium_warning`으로 처리한다.
-- 약함, 중간, 강함 중 하나가 아닌 수준은 경고 개수를 계산할 때 `medium_warning`으로 처리한다.
-  - 의도 : 경고가 중복되거나 수준이 빠져도 최종 목록에서 사라지지 않게 한다.
+- 각 경고 문장은 `parse_warnings`에 하나, 그리고 `weak_warning`·`medium_warning`·`strong_warning` 중 정확히 하나에 함께 들어 있어야 한다.
+- 공통 처리 과정은 `parse_warnings`의 문장 순서와 수준별 목록의 수준을 결합해 `payload` 바로 아래의 `warnings[]`에 경고를 한 번씩 정리한다. 이때 원래 경고를 `record`에서 빼거나 옮기지 않는다.
+- 같은 목록 안의 중복, 비어 있는 문장, 경고 수준 누락, 둘 이상의 경고 수준 지정, 양쪽 목록의 불일치는 보정하지 않고 오류로 처리한다.
 3. **저장 조건과 경고**
-- 파서가 성공하면 `record`에 외부 정보를 연결한 뒤 저장 조건을 확인한다.
-- `record`가 모든 저장 조건을 통과해야 `record`와 경고를 최종 `payload`에 넣는다.
-- 저장 조건에서 제외된 `record`의 경고는 `warnings[]`와 `warning_report_counts`에 넣지 않는다.
-  - 의도 : 최종 `records[]`에 없는 공시의 경고가 개수 계산에 섞이지 않게 한다.
-
+- 파서가 `record`를 만들면 외부 정보를 연결하고 경고를 `warnings[]`에 정리한 뒤 `record`의 저장 조건을 확인한다.
+- 저장 조건은 `records[]` 포함 여부만 결정하며 parser 경고를 제거하지 않는다.
+- 저장 조건에서 제외된 `record`의 경고도 `warnings[]`와 `warning_report_counts`에 포함한다.
+- 파싱 예외로 `record`를 만들지 못한 파일은 parser 경고가 아니라 `errors[]`에 기록한다.
+  - 의도 : 업무 필터에서 제외된 결과도 원천 누락 같은 파싱 문제를 숨기지 않게 한다.
 4. **경고 관련 field**
 - 최종 `payload`의 `warnings[]`에서 경고 하나는 아래 항목을 가진다.
 
@@ -89,33 +78,36 @@
 
 - 원문은 `payload` 바로 아래의 `input_directory`와 경고의 `acpt_no`로 찾는다.
 
-2. **`warning_code` 결정**
+5. **warning_code 결정**
 - 공통 처리 과정은 경고 문장을 위에서부터 아래 순서로 확인한다.
 - 먼저 맞는 조건 하나의 `warning_code`만 사용한다.
-
-| 경고 조건 | `warning_code` |
-|---|---|
-| 사채 발행 주요 표 누락을 알리는 정해진 문장과 정확히 같음 | `bond_main_table_missing` |
-| 유무상증자 유형 판정 실패 문장과 정확히 같음 | `rights_issue_type_missing` |
-| `발행목적: 자금조달 목적 합계`로 시작 | `bond_funding_purpose_sum_mismatch` |
-| `투자자: 발행권면총액 합계`로 시작 | `bond_investor_sum_mismatch` |
-| `: 정해진 출처에서 값을 찾지 못했습니다.`를 포함 | `source_not_found:<첫 콜론 앞의 항목명>` |
-| 위 조건에 맞지 않음 | `parse_warning` |
-
-- `warning_code`를 정할 때 원문 `table`이나 `field_parse_status`를 다시 확인하지 않는다.
-- 파서가 만든 경고 문장만 사용한다.
   - 의도 : 값 추출은 파서가 판단하고, 공통 처리 과정은 경고를 저장 형태로 바꾸는 일만 맡는다.
-3. **`warning_report_counts`**
-- `warning_report_counts`는 경고 개수를 모아 둔 항목이다.
-- `warning_report_counts.count`는 최종 `warnings[]`에 있는 경고 문장 수이다.
-- `warning_report_counts.report_count`는 경고가 하나 이상 있는 서로 다른 `acpt_no` 수이다.
-- 예를 들어 같은 공시에서 경고가 2개 나오면 `count`는 2이고 `report_count`는 1이다.
-- `weak_warning`, `medium_warning`, `strong_warning` 아래에도 수준별 `count`, `report_count`, `reports`를 기록한다.
-- `reports[acpt_no].count`는 그 공시에서 해당 수준의 경고가 몇 개 나왔는지 나타낸다.
-- `reports[acpt_no].warnings`는 그 경고 문장들을 담은 목록이다.
-- 경고가 없는 수준도 `count: 0`, `report_count: 0`, `reports: {}`로 저장한다.
+
+| 판정 방식 | 실제 경고 문장 예시 | `warning_code` |
+|---|---|---|
+| 문장 전체가 정확히 일치 | `사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.` | `bond_main_table_missing` |
+| 문장 전체가 정확히 일치 | `주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.` | `rights_issue_type_missing` |
+| `발행목적: 자금조달 목적 합계`로 시작 | `발행목적: 자금조달 목적 합계(990,000,000)가 발행금액(1,000,000,000)과 일치하지 않습니다.` | `bond_funding_purpose_sum_mismatch` |
+| `투자자: 발행권면총액 합계`로 시작 | `투자자: 발행권면총액 합계(4,000,000,000)가 발행금액(5,000,000,000)과 일치하지 않습니다.` | `bond_investor_sum_mismatch` |
+| `: 정해진 출처에서 값을 찾지 못했습니다.`를 포함 | `납입일: 정해진 출처에서 값을 찾지 못했습니다. 출처: 메인 표 > '납입일' 라벨 행 > 마지막 값` | 첫 콜론 앞의 `납입일`을 붙인 `source_not_found:납입일` |
+| 위 조건에 맞지 않음 | `주입 제목이 없습니다.` 또는 `신주의 종류와 수: 모든 주식 종류의 수량이 0입니다.` | `parse_warning` |
+
+- `source_not_found` 경고의 항목명에 세부 종류가 있으면 괄호까지 포함한다. 예를 들어 `신주의 종류와 수(기타주식): 정해진 출처에서 값을 찾지 못했습니다. ...`는 `source_not_found:신주의 종류와 수(기타주식)`이 된다.
+
+6. **warning_report_counts**
+- `warning_report_counts`는 최종 `warnings[]`를 전체와 경고 수준별로 집계한다.
+- 같은 공시에서 경고가 2개 나오면 전체 `count`는 2, 전체 `report_count`는 1이다.
+- 저장 조건에서 제외된 record의 경고도 집계하므로 전체 `report_count`는 최종 `records[]` 수보다 클 수 있다.
+- 경고가 없는 수준은 `{count: 0, report_count: 0, reports: {}}`로 저장한다.
   - 의도 : 경고 문장 수와 경고가 나온 공시 수를 따로 확인하게 한다.
-//
+
+| 위치 | 의미 |
+|---|---|
+| `count` | 전체 경고 문장 수 |
+| `report_count` | 경고가 하나 이상 있는 서로 다른 `acpt_no` 수 |
+| `<level>.count` | 해당 수준의 경고 문장 수 |
+| `<level>.report_count` | 해당 수준의 경고가 있는 서로 다른 `acpt_no` 수 |
+| `<level>.reports[acpt_no]` | 해당 공시의 해당 수준 경고를 `{count, warnings}`로 모은 값 |
 
 ### 오류
 1. **skip_errors**
