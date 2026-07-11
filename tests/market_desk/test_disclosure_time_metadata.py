@@ -133,3 +133,86 @@ def test_explicit_missing_kind_metadata_is_not_silently_ignored(
                 "filtered_metadata_path": str(tmp_path / "missing-filtered.json"),
             }
         )
+
+
+def test_explicit_kind_metadata_must_cover_every_html(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_directory = tmp_path / "sections"
+    input_directory.mkdir()
+    (input_directory / "20250102000002.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+    _write_filtered(tmp_path / "filtered.json", disclosed_at="2025-01-02 09:37")
+    monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
+
+    with pytest.raises(ValueError, match="missing KIND disclosed_at metadata"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path / "converted"),
+                "mode": "bond_issuance",
+                "filtered_metadata_path": str(tmp_path / "filtered.json"),
+            }
+        )
+
+
+def test_explicit_kind_metadata_rejects_invalid_disclosed_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_directory = tmp_path / "sections"
+    input_directory.mkdir()
+    (input_directory / "20250102000001.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+    _write_filtered(tmp_path / "filtered.json", disclosed_at="2025-13-40 99:99")
+    monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
+
+    with pytest.raises(ValueError, match="invalid KIND disclosed_at metadata"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path / "converted"),
+                "mode": "bond_issuance",
+                "filtered_metadata_path": str(tmp_path / "filtered.json"),
+            }
+        )
+
+
+def test_duplicate_kind_metadata_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_directory = tmp_path / "sections"
+    input_directory.mkdir()
+    (input_directory / "20250102000001.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+    filtered_path = tmp_path / "filtered.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250102000001",
+                        "disclosed_at": "2025-01-02 09:37",
+                    },
+                    {
+                        "acpt_no": "20250102000001",
+                        "disclosed_at": "2025-01-02 10:41",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
+
+    with pytest.raises(ValueError, match="duplicate KIND metadata acpt_no"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path / "converted"),
+                "mode": "bond_issuance",
+                "filtered_metadata_path": str(filtered_path),
+            }
+        )

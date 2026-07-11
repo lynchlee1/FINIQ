@@ -10,7 +10,11 @@ from typing import Any, Callable, Optional
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
-from finiq.config import normalize_path, save_settings
+from finiq.config import (
+    build_disclosure_workspace_path_settings,
+    normalize_path,
+    save_settings,
+)
 from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
     list_price_source_files,
@@ -143,7 +147,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
 
     def config_payload(*, include_discovery: bool = False) -> dict[str, Any]:
         price_root = config.price_root_directory or str(Path(config.quanti_dir).expanduser().parent)
-        workspace_defaults = disclosure_workspace_settings(
+        workspace_defaults = build_disclosure_workspace_path_settings(
             config.output_root,
             mode=config.html_parse_mode or "bond_issuance",
         )
@@ -228,7 +232,17 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
 
     @router.post("/api/settings")
     async def save_app_settings(update: SettingsUpdate):
-        payload = update.model_dump(exclude_unset=True)
+        payload = {
+            key: value
+            for key, value in update.model_dump(exclude_unset=True).items()
+            if value is not None
+        }
+        if "output_root" in payload and not str(payload["output_root"]).strip():
+            raise HTTPException(status_code=400, detail="output_root cannot be blank")
+        if "html_parse_mode" in payload and not str(
+            payload["html_parse_mode"]
+        ).strip():
+            raise HTTPException(status_code=400, detail="html_parse_mode cannot be blank")
         current_settings = {}
         for key in config.__slots__:
             val = getattr(config, key)
@@ -236,13 +250,15 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 current_settings[key] = val
         original_settings = dict(current_settings)
 
+        def restore_original_settings() -> None:
+            for original_key, original_value in original_settings.items():
+                setattr(config, original_key, original_value)
+
         for key, value in payload.items():
-            if value is None:
-                continue
             if isinstance(value, bool):
                 normalized = value
             elif key == "html_parse_mode":
-                normalized = str(value)
+                normalized = str(value).strip()
             elif key in (
                 "integrated_data_values",
                 "change_log_date_thresholds",
@@ -269,9 +285,13 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                     config.output_root, mode=parse_mode
                 )
             except ValueError as exc:
-                for key, value in original_settings.items():
-                    setattr(config, key, value)
+                restore_original_settings()
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except OSError as exc:
+                restore_original_settings()
+                raise HTTPException(
+                    status_code=500, detail="Failed to prepare disclosure workspace"
+                ) from exc
             keys_to_update = (
                 workspace_settings
                 if "output_root" in payload
@@ -289,7 +309,13 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 setattr(config, key, value)
                 current_settings[key] = value
 
-        save_settings(config.settings_path, current_settings)
+        try:
+            save_settings(config.settings_path, current_settings)
+        except OSError as exc:
+            restore_original_settings()
+            raise HTTPException(
+                status_code=500, detail="Failed to save settings"
+            ) from exc
         return config_payload()
 
     @router.post("/api/file-dialog")

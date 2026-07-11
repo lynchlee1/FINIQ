@@ -157,6 +157,40 @@ def test_workspace_prepare_api(tmp_path: Path) -> None:
     assert Path(response.json()["paths"]["internal"]).name == "05-internal"
 
 
+def test_workspace_prepare_preserves_existing_modes(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    prepare_disclosure_workspace_payload(
+        {"data_root": str(data_root), "modes": ["bond_issuance"]}
+    )
+
+    result = prepare_disclosure_workspace_payload(
+        {"data_root": str(data_root), "modes": ["rights_issuance"]}
+    )
+
+    assert result["modes"] == ["bond_issuance", "rights_issuance"]
+    assert set(result["paths"]["converted"]) == {
+        "bond_issuance",
+        "rights_issuance",
+    }
+
+
+def test_workspace_prepare_does_not_overwrite_unowned_manifest(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    data_root.mkdir()
+    manifest_path = data_root / "disclosure-workspace.json"
+    original = {"format": "unrelated", "records": [1]}
+    manifest_path.write_text(json.dumps(original), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not a FINIQ disclosure workspace"):
+        prepare_disclosure_workspace_payload(
+            {"data_root": str(data_root), "modes": ["bond_issuance"]}
+        )
+
+    assert json.loads(manifest_path.read_text(encoding="utf-8")) == original
+
+
 def test_existing_filter_route_uses_workspace_stage_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -328,3 +362,37 @@ def test_root_save_preserves_explicit_path_in_same_request(
         "download_output_directory"
     ]
     assert response.json()["html_output_directory"] == str(custom_external)
+
+
+def test_blank_output_root_is_rejected_without_mutating_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_root = str(tmp_path / "original")
+    monkeypatch.setattr(app_config, "output_root", original_root)
+
+    response = TestClient(app).post("/api/settings", json={"output_root": ""})
+
+    assert response.status_code == 400
+    assert app_config.output_root == original_root
+
+
+def test_settings_write_failure_rolls_back_in_memory_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_path = str(tmp_path / "original-table")
+    monkeypatch.setattr(app_config, "sqlite_output_directory", original_path)
+
+    def fail_save(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.routers.config.save_settings", fail_save
+    )
+
+    response = TestClient(app).post(
+        "/api/settings",
+        json={"sqlite_output_directory": str(tmp_path / "new-table")},
+    )
+
+    assert response.status_code == 500
+    assert app_config.sqlite_output_directory == original_path

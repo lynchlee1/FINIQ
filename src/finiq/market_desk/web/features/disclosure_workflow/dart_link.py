@@ -38,6 +38,8 @@ from finiq.market_desk.web.features.market_data.service_sources import (
 DART_LINK_FORMAT = "finiq_kind_dart_links_v1"
 DART_LINK_BUILD_FORMAT = "finiq_kind_dart_link_build_v1"
 DART_LINK_MANIFEST_FORMAT = "finiq_kind_dart_link_manifest_v1"
+DART_CORP_CODE_CACHE_FORMAT = "finiq_dart_corp_codes_v1"
+DART_LINK_MATCHER_VERSION = 1
 DEFAULT_DART_API_BASE_URL = "https://opendart.fss.or.kr/api"
 _DART_SUCCESS = "000"
 _DART_NO_DATA = "013"
@@ -116,8 +118,17 @@ class OpenDartClient:
             self._sleep(remaining)
         self._last_request_started = time.monotonic()
 
-    def _get(self, endpoint: str, params: dict[str, object]) -> requests.Response:
-        for attempt in range(1, self._max_attempts + 1):
+    def _get(
+        self,
+        endpoint: str,
+        params: dict[str, object],
+        *,
+        max_attempts: int | None = None,
+    ) -> tuple[requests.Response, int]:
+        attempt_limit = self._max_attempts if max_attempts is None else max_attempts
+        if attempt_limit < 1:
+            raise ValueError("max_attempts must be >= 1")
+        for attempt in range(1, attempt_limit + 1):
             if self._cancel_check and self._cancel_check():
                 raise RuntimeError("Job cancelled")
             self._pace()
@@ -134,29 +145,57 @@ class OpenDartClient:
                     raise DartApiError(f"http_{response.status_code}", retryable=True)
                 if response.status_code != 200:
                     raise DartApiError(f"http_{response.status_code}", retryable=False)
-                return response
+                return response, attempt
             except (requests.Timeout, requests.ConnectionError) as exc:
                 error = DartApiError(type(exc).__name__, retryable=True)
             except DartApiError as exc:
                 error = exc
-            if not error.retryable or attempt == self._max_attempts:
+            if not error.retryable or attempt == attempt_limit:
                 raise error
             self._sleep(min(2 ** (attempt - 1), 4))
         raise AssertionError("unreachable")
 
-    def _get_json(self, endpoint: str, params: dict[str, object]) -> dict[str, Any]:
-        response = self._get(endpoint, params)
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise DartApiError("invalid_json", retryable=False) from exc
-        if not isinstance(payload, dict):
-            raise DartApiError("invalid_json", retryable=False)
-        return payload
+    def _get_json(
+        self, endpoint: str, params: dict[str, object]
+    ) -> tuple[dict[str, Any], int]:
+        request_count = 0
+        while request_count < self._max_attempts:
+            response, attempts = self._get(
+                endpoint,
+                params,
+                max_attempts=self._max_attempts - request_count,
+            )
+            request_count += attempts
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise DartApiError("invalid_json", retryable=False) from exc
+            if not isinstance(payload, dict):
+                raise DartApiError("invalid_json", retryable=False)
+            status = str(payload.get("status") or "")
+            if status not in _DART_RETRYABLE_STATUS:
+                return payload, request_count
+            if request_count >= self._max_attempts:
+                raise DartApiError(status, retryable=True)
+            self._sleep(min(2 ** (request_count - 1), 4))
+        raise AssertionError("unreachable")
 
     def fetch_corp_codes(self) -> list[dict[str, str]]:
-        response = self._get("corpCode.xml", {})
-        return parse_dart_corp_code_payload(response.content)
+        request_count = 0
+        while request_count < self._max_attempts:
+            response, attempts = self._get(
+                "corpCode.xml",
+                {},
+                max_attempts=self._max_attempts - request_count,
+            )
+            request_count += attempts
+            try:
+                return parse_dart_corp_code_payload(response.content)
+            except DartApiError as exc:
+                if not exc.retryable or request_count >= self._max_attempts:
+                    raise
+            self._sleep(min(2 ** (request_count - 1), 4))
+        raise AssertionError("unreachable")
 
     def list_disclosures(
         self, *, corp_code: str, begin_date: str, end_date: str
@@ -170,7 +209,7 @@ class OpenDartClient:
         expected_total_count: int | None = None
         expected_total_pages: int | None = None
         while page_no <= total_pages:
-            payload = self._get_json(
+            payload, page_request_count = self._get_json(
                 "list.json",
                 {
                     "corp_code": corp_code,
@@ -183,7 +222,7 @@ class OpenDartClient:
                     "page_count": 100,
                 },
             )
-            request_count += 1
+            request_count += page_request_count
             status = str(payload.get("status") or "")
             message = str(payload.get("message") or "")
             if status == _DART_NO_DATA:
@@ -322,6 +361,7 @@ def _kind_correction(record: dict[str, Any]) -> bool:
 
 def _input_fingerprint(record: dict[str, Any]) -> str:
     semantic = {
+        "matcher_version": DART_LINK_MATCHER_VERSION,
         "acpt_no": str(record.get("acpt_no") or "").strip(),
         "doc_no": str(record.get("doc_no") or "").strip(),
         "company_id": str(record.get("company_id") or "").strip(),
@@ -448,6 +488,7 @@ def _base_link(
     record: dict[str, Any], *, checked_at: str, company: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     return {
+        "matcher_version": DART_LINK_MATCHER_VERSION,
         "acpt_no": str(record.get("acpt_no") or "").strip(),
         "doc_no": str(record.get("doc_no") or "").strip() or None,
         "rcept_no": None,
@@ -469,6 +510,14 @@ def _base_link(
         "candidates": [],
         "match": None,
     }
+
+
+def _dart_query_is_complete(query: DartListResult) -> bool:
+    if not query.complete or query.total_count != len(query.records):
+        return False
+    if query.total_count < 0 or query.total_pages < 0 or query.request_count < 1:
+        return False
+    return query.total_count == 0 or query.total_pages >= 1
 
 
 def link_kind_disclosures(
@@ -561,17 +610,18 @@ def link_kind_disclosures(
                 )
             continue
 
+        query_complete = _dart_query_is_complete(query)
         query_evidence = {
             "corp_code": corp_code,
             "begin_date": begin_date,
             "end_date": end_date,
             "status": query.status,
-            "complete": query.complete,
+            "complete": query_complete,
             "total_count": query.total_count,
             "total_pages": query.total_pages,
             "request_count": query.request_count,
         }
-        if not query.complete:
+        if not query_complete:
             for _record, link, _method in group_records:
                 link.update(
                     {
@@ -584,6 +634,9 @@ def link_kind_disclosures(
             continue
         for record, link, company_method in group_records:
             disclosed_date = _kind_date(record)
+            invalid_candidate_dates = any(
+                _dart_date(dart_record) is None for dart_record in query.records
+            )
             window_records = [
                 dart_record
                 for dart_record in query.records
@@ -607,6 +660,15 @@ def link_kind_disclosures(
             link["query"] = query_evidence
             link["candidate_count"] = len(scored)
             link["candidates"] = scored[:5]
+            if invalid_candidate_dates or len(scored) != len(window_records):
+                link.update(
+                    {
+                        "status": "unresolved",
+                        "reason_code": "invalid_dart_candidate_metadata",
+                        "retryable": True,
+                    }
+                )
+                continue
             if not window_records:
                 link.update(
                     {
@@ -673,8 +735,8 @@ def _load_source_json(path: Path) -> list[dict[str, Any]]:
     if not isinstance(payload, dict):
         raise ValueError("KIND source JSON must contain an object")
     disclosures = payload.get("disclosures")
-    if isinstance(disclosures, list):
-        return [dict(record) for record in disclosures if isinstance(record, dict)]
+    if disclosures is not None:
+        return _validated_dict_records(disclosures, label="disclosures")
     if isinstance(payload.get("companies"), list):
         return [_public_disclosure_record(record) for record in _iter_disclosure_records(payload)]
     raise ValueError("KIND source JSON has no disclosures or companies")
@@ -682,8 +744,8 @@ def _load_source_json(path: Path) -> list[dict[str, Any]]:
 
 def _load_kind_records(body: dict[str, Any]) -> list[dict[str, Any]]:
     records = body.get("records")
-    if isinstance(records, list):
-        return [dict(record) for record in records if isinstance(record, dict)]
+    if records is not None:
+        return _validated_dict_records(records, label="records")
     source_json_path = str(body.get("source_json_path") or "").strip()
     if source_json_path:
         return _load_source_json(Path(source_json_path).expanduser().resolve())
@@ -713,6 +775,51 @@ def _load_kind_records(body: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
+def _validated_dict_records(value: object, *, label: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a list")
+    records: list[dict[str, Any]] = []
+    for index, record in enumerate(value):
+        if not isinstance(record, dict):
+            raise ValueError(f"{label}[{index}] must be an object")
+        records.append(dict(record))
+    return records
+
+
+def _json_artifact_format(path: Path) -> str | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return str(payload.get("format") or "") or None
+
+
+def _assert_owned_json_artifact(path: Path, *, expected_format: str) -> None:
+    if path.exists() and _json_artifact_format(path) != expected_format:
+        raise ValueError(f"Existing path is not a FINIQ DART link artifact: {path}")
+
+
+def _validate_output_ownership(output_directory: Path) -> None:
+    _assert_owned_json_artifact(
+        output_directory / "manifest.json",
+        expected_format=DART_LINK_MANIFEST_FORMAT,
+    )
+    _assert_owned_json_artifact(
+        output_directory / "undated.json",
+        expected_format=DART_LINK_FORMAT,
+    )
+    years_directory = output_directory / "years"
+    if years_directory.is_dir():
+        for path in years_directory.glob("[0-9][0-9][0-9][0-9].json"):
+            _assert_owned_json_artifact(path, expected_format=DART_LINK_FORMAT)
+    _assert_owned_json_artifact(
+        output_directory / "cache" / "corp-codes.json",
+        expected_format=DART_CORP_CODE_CACHE_FORMAT,
+    )
+
+
 def _load_existing_links(output_directory: Path) -> dict[str, dict[str, Any]]:
     links: dict[str, dict[str, Any]] = {}
     years_directory = output_directory / "years"
@@ -723,12 +830,20 @@ def _load_existing_links(output_directory: Path) -> dict[str, dict[str, Any]]:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
-        for link in payload.get("links") or []:
+        if not isinstance(payload, dict) or payload.get("format") != DART_LINK_FORMAT:
+            continue
+        partition_links = payload.get("links")
+        if not isinstance(partition_links, list):
+            raise ValueError(f"Invalid DART link partition: {path}")
+        for index, link in enumerate(partition_links):
             if not isinstance(link, dict):
-                continue
+                raise ValueError(f"Invalid DART link at {path}:{index}")
             acpt_no = str(link.get("acpt_no") or "").strip()
-            if acpt_no:
-                links[acpt_no] = link
+            if not acpt_no:
+                raise ValueError(f"DART link has no acpt_no at {path}:{index}")
+            if acpt_no in links:
+                raise ValueError(f"Duplicate cached DART link acpt_no: {acpt_no}")
+            links[acpt_no] = link
     return links
 
 
@@ -743,8 +858,29 @@ def _negative_link_is_fresh(
         return False
     if checked_at.tzinfo is None:
         checked_at = checked_at.replace(tzinfo=timezone.utc)
-    return now.astimezone(timezone.utc) - checked_at.astimezone(timezone.utc) < timedelta(
-        days=negative_cache_days
+    age = now.astimezone(timezone.utc) - checked_at.astimezone(timezone.utc)
+    return timedelta(0) <= age < timedelta(days=negative_cache_days)
+
+
+def _link_is_reusable(
+    link: dict[str, Any],
+    record: dict[str, Any],
+    *,
+    now: datetime,
+    negative_cache_days: int,
+) -> bool:
+    if link.get("input_fingerprint") != _input_fingerprint(record):
+        return False
+    query = link.get("query")
+    if not isinstance(query, dict) or query.get("complete") is not True:
+        return False
+    if link.get("status") == "matched":
+        rcept_no = str(link.get("rcept_no") or "").strip()
+        return len(rcept_no) == 14 and rcept_no.isdigit()
+    return _negative_link_is_fresh(
+        link,
+        now=now,
+        negative_cache_days=negative_cache_days,
     )
 
 
@@ -806,15 +942,18 @@ def _load_corp_codes_from_cache(
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("format") != DART_CORP_CODE_CACHE_FORMAT:
+        return None
     try:
         fetched_at = datetime.fromisoformat(str(payload.get("fetched_at") or ""))
     except ValueError:
         return None
     if fetched_at.tzinfo is None:
         fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-    if now.astimezone(timezone.utc) - fetched_at.astimezone(timezone.utc) >= timedelta(
-        days=max_age_days
-    ):
+    age = now.astimezone(timezone.utc) - fetched_at.astimezone(timezone.utc)
+    if age < timedelta(0) or age >= timedelta(days=max_age_days):
         return None
     records = payload.get("records")
     if not isinstance(records, list):
@@ -836,6 +975,7 @@ def build_dart_links_payload(
         raise ValueError("output_directory or data_root is required")
     output_directory = Path(output_raw).expanduser().resolve()
     output_directory.mkdir(parents=True, exist_ok=True)
+    _validate_output_ownership(output_directory)
     current_time = now or datetime.now(timezone.utc)
     if current_time.tzinfo is None:
         current_time = current_time.replace(tzinfo=timezone.utc)
@@ -853,12 +993,11 @@ def build_dart_links_payload(
     for record in records:
         acpt_no = str(record.get("acpt_no") or "").strip()
         prior = existing.get(acpt_no)
-        same_input = prior and prior.get("input_fingerprint") == _input_fingerprint(record)
-        if same_input and (
-            prior.get("status") == "matched"
-            or _negative_link_is_fresh(
-                prior, now=current_time, negative_cache_days=negative_cache_days
-            )
+        if prior and _link_is_reusable(
+            prior,
+            record,
+            now=current_time,
+            negative_cache_days=negative_cache_days,
         ):
             reusable[acpt_no] = prior
         else:
@@ -866,6 +1005,8 @@ def build_dart_links_payload(
 
     resolved_client = client
     corp_code_records = payload.get("corp_code_records")
+    if corp_code_records is not None and not isinstance(corp_code_records, list):
+        raise ValueError("corp_code_records must be a list")
     corp_cache_path = output_directory / "cache" / "corp-codes.json"
     if pending and not isinstance(corp_code_records, list):
         if corp_cache_path.is_file() and not bool(payload.get("refresh_corp_codes")):
@@ -894,7 +1035,7 @@ def build_dart_links_payload(
             atomic_write_json(
                 corp_cache_path,
                 {
-                    "format": "finiq_dart_corp_codes_v1",
+                    "format": DART_CORP_CODE_CACHE_FORMAT,
                     "fetched_at": current_time.astimezone(timezone.utc).isoformat(),
                     "records": corp_code_records,
                 },
@@ -970,7 +1111,10 @@ def build_dart_links_payload(
             {"year": year, "path": str(year_path), "links": len(year_links)}
         )
     for stale_path in years_directory.glob("*.json"):
-        if stale_path not in desired_paths:
+        if (
+            stale_path not in desired_paths
+            and _json_artifact_format(stale_path) == DART_LINK_FORMAT
+        ):
             stale_path.unlink()
     if undated_path not in desired_paths:
         undated_path.unlink(missing_ok=True)
@@ -982,6 +1126,7 @@ def build_dart_links_payload(
     manifest = {
         "format": DART_LINK_MANIFEST_FORMAT,
         "schema_version": 1,
+        "matcher_version": DART_LINK_MATCHER_VERSION,
         "generated_at": current_time.astimezone(timezone.utc).isoformat(),
         "output_directory": str(output_directory),
         "contains_dart_html": False,

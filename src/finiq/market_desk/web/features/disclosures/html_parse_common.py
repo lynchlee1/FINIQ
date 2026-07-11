@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
+from datetime import datetime
 from inspect import signature
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 
+from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
 from finiq.market_desk.web.features.market_data.service_common import (
     _record_filter_blocks_match,
 )
@@ -261,7 +263,7 @@ def _load_html_parse_metadata(
 
 
 def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
-    acpt_no = str(item.get("acpt_no") or "")
+    acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
         return None
     return acpt_no, {
@@ -274,7 +276,7 @@ def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] 
 def _compressed_external_html_metadata_item(
     item: dict[str, Any]
 ) -> tuple[str, dict[str, Any]] | None:
-    acpt_no = str(item.get("acpt_no") or "")
+    acpt_no = str(item.get("acpt_no") or "").strip()
     if not acpt_no:
         return None
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
@@ -302,6 +304,8 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, An
         parsed = _filtered_metadata_item(item)
         if parsed is not None:
             acpt_no, metadata = parsed
+            if acpt_no in metadata_index:
+                raise ValueError(f"duplicate KIND metadata acpt_no: {acpt_no}")
             metadata_index[acpt_no] = metadata
     return metadata_index
 
@@ -318,11 +322,16 @@ def _load_compressed_external_html_metadata_index(
     if not isinstance(payload, dict):
         return {}, {}
     records = [item for item in payload.get("records") or [] if isinstance(item, dict)]
-    selected_doc_to_record = {
-        str(item.get("selected_main_doc_no") or "").strip(): item
-        for item in records
-        if str(item.get("selected_main_doc_no") or "").strip()
-    }
+    selected_doc_to_record: dict[str, dict[str, Any]] = {}
+    for item in records:
+        selected_doc_no = str(item.get("selected_main_doc_no") or "").strip()
+        if not selected_doc_no:
+            continue
+        if selected_doc_no in selected_doc_to_record:
+            raise ValueError(
+                f"duplicate external metadata selected_main_doc_no: {selected_doc_no}"
+            )
+        selected_doc_to_record[selected_doc_no] = item
     metadata_index: dict[str, dict[str, Any]] = {}
     families: dict[str, dict[str, Any]] = {}
     for item in records:
@@ -331,6 +340,8 @@ def _load_compressed_external_html_metadata_index(
         parsed = _compressed_external_html_metadata_item(item)
         if parsed is not None:
             acpt_no, metadata = parsed
+            if acpt_no in metadata_index:
+                raise ValueError(f"duplicate external metadata acpt_no: {acpt_no}")
             family = _external_html_correction_family(item, selected_doc_to_record)
             if family is not None:
                 family_id, current_sequence, members = family
@@ -575,6 +586,41 @@ def _parse_metadata_paths(
     return paths[0], paths[1]
 
 
+def _validate_explicit_kind_disclosed_at_metadata(
+    html_files: list[Path],
+    metadata_index: dict[str, dict[str, Any]],
+    filtered_metadata_path: Path | None,
+) -> None:
+    if filtered_metadata_path is None:
+        return
+    missing: list[str] = []
+    invalid: list[str] = []
+    for html_file in html_files:
+        disclosed_at = str(
+            (metadata_index.get(html_file.stem) or {}).get("disclosed_at") or ""
+        ).strip()
+        if not disclosed_at:
+            missing.append(html_file.stem)
+            continue
+        try:
+            parsed = datetime.strptime(disclosed_at, "%Y-%m-%d %H:%M")
+        except ValueError:
+            invalid.append(html_file.stem)
+            continue
+        if parsed.strftime("%Y-%m-%d %H:%M") != disclosed_at:
+            invalid.append(html_file.stem)
+    if missing:
+        raise ValueError(
+            "missing KIND disclosed_at metadata for HTML files: "
+            + ", ".join(missing[:10])
+        )
+    if invalid:
+        raise ValueError(
+            "invalid KIND disclosed_at metadata for HTML files: "
+            + ", ".join(invalid[:10])
+        )
+
+
 def _record_matches_filter_blocks(
     record: dict[str, Any], filter_blocks: list[dict[str, Any]]
 ) -> bool:
@@ -621,6 +667,11 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         input_directory,
         filtered_metadata_path=filtered_metadata_path,
         compressed_metadata_path=compressed_metadata_path,
+    )
+    _validate_explicit_kind_disclosed_at_metadata(
+        html_files,
+        metadata_index,
+        filtered_metadata_path,
     )
 
     return ParseRequest(
@@ -726,10 +777,7 @@ def _build_payload(
 
 
 def _write_parse_payload(payload: dict[str, Any], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(output_path, payload)
 
 
 def _payload_from_state(

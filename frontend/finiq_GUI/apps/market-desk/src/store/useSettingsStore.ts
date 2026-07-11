@@ -45,8 +45,8 @@ interface SettingsState {
   updateSettings: (newSettings: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings">>) => void;
   fetchSettings: () => Promise<any>;
   fetchRuntimeInfo: () => Promise<any>;
-  saveSetting: (key: keyof Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">, value: any) => Promise<void>;
-  saveSettings: (payload: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">>) => Promise<void>;
+  saveSetting: (key: keyof Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">, value: any) => Promise<boolean>;
+  saveSettings: (payload: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">>) => Promise<boolean>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -122,22 +122,32 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   saveSetting: async (key, value) => {
+    const previousValue = get()[key];
     set((state) => ({ ...state, [key]: value }));
     try {
       const config = await apiPost<any>("/api/settings", { [key]: value });
       set((state) => ({ ...state, ...config }));
+      return true;
     } catch (err) {
+      set((state) => ({ ...state, [key]: previousValue }));
       console.error(`Failed to save setting ${String(key)}:`, err);
+      return false;
     }
   },
 
   saveSettings: async (payload) => {
+    const previousValues = Object.fromEntries(
+      Object.keys(payload).map((key) => [key, get()[key as keyof SettingsState]]),
+    ) as Partial<SettingsState>;
     set((state) => ({ ...state, ...payload }));
     try {
       const config = await apiPost<any>("/api/settings", payload);
       set((state) => ({ ...state, ...config }));
+      return true;
     } catch (err) {
+      set((state) => ({ ...state, ...previousValues }));
       console.error(`Failed to save settings:`, err);
+      return false;
     }
   },
 }));

@@ -52,6 +52,11 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         filtered_metadata_path=filtered_metadata_path,
         compressed_metadata_path=compressed_metadata_path,
     )
+    _validate_explicit_kind_disclosed_at_metadata(
+        html_files,
+        metadata_index,
+        filtered_metadata_path,
+    )
     records: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for index, html_file in enumerate(html_files, start=1):
@@ -170,6 +175,11 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         input_directory,
         filtered_metadata_path=filtered_metadata_path,
         compressed_metadata_path=compressed_metadata_path,
+    )
+    _validate_explicit_kind_disclosed_at_metadata(
+        html_files,
+        metadata_index,
+        filtered_metadata_path,
     )
     worker_count = _filter_candidate_workers(
         body.get("parallel_workers", body.get("workers")), len(html_files)
