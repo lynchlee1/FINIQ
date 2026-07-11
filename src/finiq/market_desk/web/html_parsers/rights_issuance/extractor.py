@@ -507,13 +507,12 @@ class RightsIssuanceExtractor:
             self._set_field_status(field_name, "source_not_found")
         if self.field_parse_status[field_name] == "source_not_found":
             self._append_source_not_found_warning(field_name)
-        else:
-            for output_label, status in item_statuses.items():
-                if status == "source_not_found":
-                    self._append_source_not_found_warning(
-                        field_name,
-                        detail_name=output_label,
-                    )
+        for output_label, status in item_statuses.items():
+            if status == "source_not_found":
+                self._append_source_not_found_warning(
+                    field_name,
+                    detail_name=output_label,
+                )
         return values
 
     def _funding_purpose_row(self, source_labels: tuple[str, ...]) -> list[str]:
