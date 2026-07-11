@@ -1,5 +1,5 @@
 # HTML 파서 공통 로직 규칙
-
+- 이 문서는 작성 및 검토가 완료되었으므로 사용자의 명시적 허락이 있지 않는 한 **절대로** 수정하지 않는다.
 ### HTML 파싱 일반 규칙
 1. **디코딩 방식**
 - byte 입력은 `utf-8`, `cp949`, `euc-kr`, `utf-8(errors="replace")` 순서로 시도한다.
@@ -80,7 +80,5 @@
   - 예를 들어서, `상장구분`의 `유가증권`은 `코스피`로 정규화한다.
 2. **정정공시 family**
 - `compressed-external-html.json`의 각 `records[].docs[]`에서 `select_id=mainDoc`인 항목을 구성원 후보로 사용한다.
-- `mainDoc`이 하나이면 정정공시 family가 아니며, 두 개 이상이면 `option_index`의 오름차순으로 구성원 순서를 정한다.
+- `mainDoc`이 하나인 경우에도 정정공시 family를 생성해야 한다. 두 개 이상이면 `option_index`의 오름차순으로 구성원 순서를 정한다.
 - 각 후보의 `doc_no`와 같은 `selected_main_doc_no`를 가진 외부 record를 찾아 family 구성원으로 연결한다.
-- 후보 중 하나라도 대응하는 외부 record를 찾지 못하면 일부 구성원만으로 family를 만들지 않는다. 이 경우에도 각 HTML의 본문 parsing 결과는 그대로 처리한다.
-  - 의도 : 화면의 문서 선택 순서와 전체 구성원을 확인할 수 있는 정정공시만 family로 기록한다.
