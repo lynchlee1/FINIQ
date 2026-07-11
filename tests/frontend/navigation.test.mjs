@@ -28,6 +28,7 @@ test("top navigation separates disclosure, price data, and utility scopes", asyn
     ["Ontology", "공시데이터", "주가데이터", "유틸리티"],
   );
   assert.equal(getActiveNavItem("/download")?.label, "공시데이터");
+  assert.equal(getActiveNavItem("/disclosure-automation")?.label, "공시데이터");
   assert.equal(getActiveNavItem("/html-parse")?.label, "공시데이터");
   assert.equal(getActiveNavItem("/utility/assets-excel/convert")?.label, "주가데이터");
   assert.equal(getActiveNavItem("/utility")?.label, "유틸리티");
@@ -38,7 +39,11 @@ test("sidebar definitions match the narrowed top-level workflows", async () => {
 
   assert.deepEqual(
     getSidebarDefinition("disclosure-build").groups.map((group) => group.label),
-    ["공시 제목 분석", "공시 내용 분석"],
+    ["공시 자동화", "공시 제목 분석", "공시 내용 분석"],
+  );
+  assert.deepEqual(
+    getSidebarDefinition("disclosure-build").groups[0].steps.map((step) => step.href),
+    ["/disclosure-automation"],
   );
 
   const priceDataSidebar = getSidebarDefinition("price-data");

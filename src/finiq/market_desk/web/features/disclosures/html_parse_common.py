@@ -115,6 +115,7 @@ class ParseRequest:
     progress_interval: int
     parallel_workers: int
     cancel_token: str | None
+    cancel_check: Callable[[], bool] | None
     filter_blocks: list[dict[str, Any]]
     record_filters: list[dict[str, Any]]
 
@@ -263,7 +264,7 @@ def _load_html_parse_metadata(
 
 
 def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
-    acpt_no = str(item.get("acpt_no") or "").strip()
+    acpt_no = str(item.get("acpt_no") or "")
     if not acpt_no:
         return None
     return acpt_no, {
@@ -276,7 +277,7 @@ def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] 
 def _compressed_external_html_metadata_item(
     item: dict[str, Any]
 ) -> tuple[str, dict[str, Any]] | None:
-    acpt_no = str(item.get("acpt_no") or "").strip()
+    acpt_no = str(item.get("acpt_no") or "")
     if not acpt_no:
         return None
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
@@ -478,6 +479,12 @@ def _is_cancelled(token: str | None) -> bool:
         return token in _CANCELLED_PARSES
 
 
+def _parse_cancelled(request: ParseRequest) -> bool:
+    return _is_cancelled(request.cancel_token) or bool(
+        request.cancel_check and request.cancel_check()
+    )
+
+
 def _parse_limit(value: Any) -> int | None:
     if value in (None, ""):
         return None
@@ -629,7 +636,10 @@ def _record_matches_filter_blocks(
     return _record_filter_blocks_match(record, filter_blocks)
 
 
-def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
+def _build_parse_request(
+    body: dict[str, Any],
+    cancel_check: Callable[[], bool] | None = None,
+) -> ParseRequest:
     mode = str(body.get("mode") or "").strip()
     if not mode:
         msg = "mode is required"
@@ -689,6 +699,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
             body.get("parallel_workers", body.get("workers")), len(html_files)
         ),
         cancel_token=cancel_token,
+        cancel_check=cancel_check,
         filter_blocks=_parse_filter_blocks(body.get("filter_blocks")),
         record_filters=_parse_record_filters(body.get("record_filters")),
     )
@@ -696,6 +707,10 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
 WARNING_LEVEL_KEYS = ("weak_warning", "medium_warning", "strong_warning")
 _BOND_MAIN_TABLE_MISSING_WARNING = (
     "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
+)
+_BOND_INVESTOR_TABLE_MISSING_WARNING = (
+    "사채 발행 투자자 표를 찾지 못했습니다. "
+    "HTML 양식이 예상과 달라 투자자 필드가 비어 있을 수 있습니다."
 )
 _RIGHTS_ISSUE_TYPE_MISSING_WARNING = (
     "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
@@ -916,6 +931,8 @@ def _record_warning_texts(record: dict[str, Any], key: str) -> list[str]:
 def _warning_code(warning: str) -> str:
     if warning == _BOND_MAIN_TABLE_MISSING_WARNING:
         return "bond_main_table_missing"
+    if warning == _BOND_INVESTOR_TABLE_MISSING_WARNING:
+        return "bond_investor_table_missing"
     if warning == _RIGHTS_ISSUE_TYPE_MISSING_WARNING:
         return "rights_issue_type_missing"
     if warning.startswith("발행목적: 자금조달 목적 합계"):
@@ -1201,7 +1218,7 @@ def _parse_html_files_parallel(request: ParseRequest, state: ParseRunState) -> N
 
     def submit_next(executor: ThreadPoolExecutor, futures: dict[Any, int]) -> None:
         nonlocal next_item
-        if next_item >= len(pending_items) or _is_cancelled(request.cancel_token):
+        if next_item >= len(pending_items) or _parse_cancelled(request):
             return
         index, html_file = pending_items[next_item]
         next_item += 1
@@ -1232,7 +1249,7 @@ def _parse_html_files_parallel(request: ParseRequest, state: ParseRunState) -> N
                     break
                 _record_parallel_parse_result(request, state, result)
                 next_result_index += 1
-    if _is_cancelled(request.cancel_token):
+    if _parse_cancelled(request):
         state.emit(
             f"중지 요청으로 파싱을 멈췄습니다. "
             f"처리 완료 {len(state.records)}/{len(request.html_files)}건."
@@ -1242,9 +1259,10 @@ def _parse_html_files_parallel(request: ParseRequest, state: ParseRunState) -> N
 def parse_disclosure_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Parse downloaded KIND viewer HTML files with the selected mode parser."""
-    request = _build_parse_request(body)
+    request = _build_parse_request(body, cancel_check=cancel_check)
     state = ParseRunState(progress_callback=progress_callback)
     _clear_cancel_token(request.cancel_token)
     _emit_run_header(request, state)
@@ -1254,14 +1272,14 @@ def parse_disclosure_html_payload(
             _parse_html_files_parallel(request, state)
         else:
             for index, html_file in enumerate(request.html_files, start=1):
-                if _is_cancelled(request.cancel_token):
+                if _parse_cancelled(request):
                     state.emit(
                         f"중지 요청으로 파싱을 멈췄습니다. "
                         f"처리 완료 {len(state.records)}/{len(request.html_files)}건."
                     )
                     break
                 _parse_one_html_file(request, state, index=index, html_file=html_file)
-        cancelled = _is_cancelled(request.cancel_token)
+        cancelled = _parse_cancelled(request)
     finally:
         _clear_cancel_token(request.cancel_token)
 

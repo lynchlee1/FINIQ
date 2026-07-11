@@ -11,7 +11,10 @@ def _fetch_content_html(
     doc_no: str,
     request_headers: dict[str, str],
     timeout: float,
+    before_request: Callable[[], None] | None = None,
 ) -> bytes:
+    if before_request is not None:
+        before_request()
     contents_response = session.get(
         KIND_DISCLOSURE_VIEWER_URL,
         params={"method": "searchContents", "docNo": doc_no},
@@ -24,6 +27,8 @@ def _fetch_content_html(
         msg = f"content path not found for acpt_no={acpt_no} doc_no={doc_no}"
         raise ValueError(msg)
 
+    if before_request is not None:
+        before_request()
     body_response = session.get(
         paths["doc_loc_path"], headers=request_headers, timeout=timeout
     )
@@ -377,10 +382,23 @@ def download_disclosure_content_htmls(
         str(key): str(value) for key, value in request_headers.items()
     }
     saved_paths: list[Path] = []
-    min_interval_seconds = 60.0 / max_requests_per_minute
+    min_interval_seconds = max(
+        wait_seconds_between_requests, 60.0 / max_requests_per_minute
+    )
     last_request_started_at = 0.0
+
+    def wait_for_request() -> None:
+        nonlocal last_request_started_at
+        if cancel_check is not None and cancel_check():
+            raise InterruptedError("content HTML download cancelled")
+        elapsed = time.time() - last_request_started_at
+        sleep_seconds = max(0.0, min_interval_seconds - elapsed)
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+        last_request_started_at = time.time()
+
     with requests.Session() as session:
-        for index, target in enumerate(targets):
+        for target in targets:
             acpt_no = target["acpt_no"]
             doc_no = target["doc_no"]
             if cancel_check is not None and cancel_check():
@@ -395,25 +413,21 @@ def download_disclosure_content_htmls(
                     )
                 saved_paths.append(output_path)
                 continue
-            if index > 0:
-                elapsed = time.time() - last_request_started_at
-                sleep_seconds = max(
-                    wait_seconds_between_requests, min_interval_seconds - elapsed
-                )
-                if sleep_seconds > 0:
-                    time.sleep(sleep_seconds)
-            last_request_started_at = time.time()
             if progress_callback is not None:
                 progress_callback(
                     f"Fetching KIND content HTML acpt_no={acpt_no} doc_no={doc_no}..."
                 )
-            content = _fetch_content_html(
-                session,
-                acpt_no=acpt_no,
-                doc_no=doc_no,
-                request_headers=normalized_headers,
-                timeout=timeout,
-            )
+            try:
+                content = _fetch_content_html(
+                    session,
+                    acpt_no=acpt_no,
+                    doc_no=doc_no,
+                    request_headers=normalized_headers,
+                    timeout=timeout,
+                    before_request=wait_for_request,
+                )
+            except InterruptedError:
+                break
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(content)
             saved_paths.append(output_path)
@@ -425,6 +439,7 @@ def download_disclosure_content_htmls(
 def download_disclosure_html_contents_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     output_directory = str(body.get("output_directory") or "").strip()
@@ -576,7 +591,8 @@ def download_disclosure_html_contents_payload(
                         ),
                         skip_existing=False,
                         progress_callback=handle_progress,
-                        cancel_check=lambda: _is_cancelled(cancel_token),
+                        cancel_check=lambda: _is_cancelled(cancel_token)
+                        or bool(cancel_check and cancel_check()),
                     )
                 )
         saved_paths_by_acpt_no = dict(existing_paths_by_acpt_no)

@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Activity, AlertTriangle, Bell, Info, X, Play, Search, Loader2, Trash2, FolderOpen, Settings, ChevronDown, ChevronRight } from "lucide-react";
+import { Activity, AlertTriangle, Bell, Info, X, Play, Search, Loader2, Trash2, FolderOpen, Settings } from "lucide-react";
 import { Button } from "@finiq/ui";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@finiq/ui";
+import { Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { Input } from "@finiq/ui";
 import { Label } from "@finiq/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
@@ -15,9 +15,13 @@ import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlInsetPanelClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
-import type { DisclosureItem, DownloadOptions, DownloadPayload } from "@/features/download/types";
+import type { DownloadOptions, DownloadPayload } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
+import {
+  DisclosureSearchConditionCard,
+  DisclosureTypeSelectionCard,
+} from "@/components/disclosures/DisclosureSearchSettingsCards";
 
 const parseISODate = (dateStr: string) => {
   const [year, month, day] = dateStr.split("-").map(Number);
@@ -221,7 +225,6 @@ export default function DownloadPage() {
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [inspectRunning, setInspectRunning] = useState(false);
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
-  const [expandedDisclosureGroups, setExpandedDisclosureGroups] = useState<Record<string, boolean>>({});
 
   const filtersMatch = areFiltersMatching(
     {
@@ -608,42 +611,6 @@ export default function DownloadPage() {
     }
   };
 
-  const toggleDisclosure = (suffix: string, code: string) => {
-    setSelectedDisclosures(prev => {
-      const current = prev[suffix] || [];
-      const next = current.includes(code)
-        ? current.filter(c => c !== code)
-        : [...current, code];
-
-      const newObj = { ...prev };
-      if (next.length === 0) delete newObj[suffix];
-      else newObj[suffix] = next;
-      return newObj;
-    });
-  };
-
-  const selectGroup = (suffix: string, items: DisclosureItem[]) => {
-    setSelectedDisclosures(prev => ({
-      ...prev,
-      [suffix]: items.map(i => i.code)
-    }));
-  };
-
-  const clearGroup = (suffix: string) => {
-    setSelectedDisclosures(prev => {
-      const newObj = { ...prev };
-      delete newObj[suffix];
-      return newObj;
-    });
-  };
-
-  const toggleDisclosureGroup = (suffix: string) => {
-    setExpandedDisclosureGroups(prev => ({
-      ...prev,
-      [suffix]: !prev[suffix],
-    }));
-  };
-
   if (loading) {
     return <PageLoadingSpinner message="옵션을 불러오는 중입니다..." />;
   }
@@ -657,11 +624,22 @@ export default function DownloadPage() {
     <WorkflowPageShell workflowId="disclosure-build">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4" onClick={() => setNotificationPanelOpen(false)}>
         <section className="min-w-0 space-y-6">
-          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">검색 조건</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <DisclosureSearchConditionCard
+            options={options}
+            startDate={startDate}
+            endDate={endDate}
+            companyName={companyName}
+            submitterName={submitterName}
+            marketLabel={marketLabel}
+            securitiesLabel={securitiesLabel}
+            onStartDateChange={setStartDate}
+            onEndDateChange={setEndDate}
+            onCompanyNameChange={setCompanyName}
+            onSubmitterNameChange={setSubmitterName}
+            onMarketLabelChange={setMarketLabel}
+            onSecuritiesLabelChange={setSecuritiesLabel}
+            beforeFields={
+              <>
               <div className="space-y-2">
                 <Label className="dark:text-slate-300">데이터 경로</Label>
                 <PathPickerInput
@@ -833,111 +811,15 @@ export default function DownloadPage() {
                 </div>
               )}
 
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">시작일</Label>
-                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={`${htmlControlClassName} dark:[color-scheme:dark]`} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">종료일</Label>
-                  <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={`${htmlControlClassName} dark:[color-scheme:dark]`} />
-                </div>
-              </div>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">회사명</Label>
-                  <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className={htmlControlClassName} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">제출인</Label>
-                  <Input value={submitterName} onChange={(e) => setSubmitterName(e.target.value)} className={htmlControlClassName} />
-                </div>
-              </div>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">시장</Label>
-                  <Select value={marketLabel} onValueChange={setMarketLabel}>
-                    <SelectTrigger className={htmlControlClassName}><SelectValue /></SelectTrigger>
-                    <SelectContent className={htmlSelectContentClassName}>
-                      {options?.market_types.map(t => <SelectItem key={t.label} value={t.label}>{t.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">증권종류</Label>
-                  <Select value={securitiesLabel} onValueChange={setSecuritiesLabel}>
-                    <SelectTrigger className={htmlControlClassName}><SelectValue /></SelectTrigger>
-                    <SelectContent className={htmlSelectContentClassName}>
-                      {options?.securities_types.map(t => <SelectItem key={t.label} value={t.label}>{t.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </>
+            }
+          />
 
-          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
-            <CardHeader>
-              <p className="text-caption font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Disclosure Types</p>
-              <CardTitle className="dark:text-white">공시 종류</CardTitle>
-              <CardDescription className="dark:text-slate-400">다운로드할 공시 종류를 선택하세요.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {options?.disclosure_groups.map((group) => (
-                <div key={group.suffix} className="overflow-hidden rounded-lg border border-[color:var(--tv-border)]">
-                  <div className="flex items-center justify-between gap-3 border-b border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-4 py-2">
-                    <button
-                      type="button"
-                      onClick={() => toggleDisclosureGroup(group.suffix)}
-                      className="text-body flex min-w-0 flex-1 items-center gap-2 text-left font-semibold dark:text-slate-200"
-                    >
-                      {expandedDisclosureGroups[group.suffix] ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                      <span className="truncate">{group.label} ({formatInteger(group.items.length)})</span>
-                    </button>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-caption h-7 text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
-                        onClick={() => selectGroup(group.suffix, group.items)}
-                      >
-                        전체 선택
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-caption h-7 text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
-                        onClick={() => clearGroup(group.suffix)}
-                      >
-                        전체 해제
-                      </Button>
-                    </div>
-                  </div>
-                  {expandedDisclosureGroups[group.suffix] && (
-                    <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
-                      {group.items.map((item) => (
-                        <div key={item.code} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`${group.suffix}-${item.code}`}
-                            checked={selectedDisclosures[group.suffix]?.includes(item.code) || false}
-                            onCheckedChange={() => toggleDisclosure(group.suffix, item.code)}
-                            className="border-[color:var(--tv-border)]"
-                          />
-                          <Label
-                            htmlFor={`${group.suffix}-${item.code}`}
-                            className="text-caption cursor-pointer truncate dark:text-slate-400 dark:hover:text-slate-200"
-                            title={item.name}
-                          >
-                            {item.name}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <DisclosureTypeSelectionCard
+            options={options}
+            selectedDisclosures={selectedDisclosures}
+            onSelectedDisclosuresChange={setSelectedDisclosures}
+          />
 
           <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
             <CardHeader>

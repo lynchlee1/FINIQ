@@ -25,6 +25,9 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
 from finiq.market_desk.web.features.disclosure_workflow.dart_link import (
     build_dart_links_payload,
 )
+from finiq.market_desk.web.features.disclosure_workflow.automation import (
+    run_disclosure_automation_payload,
+)
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
 )
@@ -51,6 +54,9 @@ from finiq.market_desk.web.features.market_data.service_integrated import (
 )
 from finiq.market_desk.web.features.market_data.service_payloads import filter_disclosures_payload
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
+from finiq.market_desk.web.features.downloads.kind_coordination import (
+    KIND_NETWORK_JOB_LOCK,
+)
 from finiq.market_desk.web.features.storage.partition import run_partition_storage_payload
 
 app = FastAPI(title="FINIQ MarketDesk API")
@@ -148,6 +154,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "integrated_market_history": run_integrated_market_history_payload,
     "table_build": build_disclosure_table_payload,
     "dart_link": build_dart_links_payload,
+    "disclosure_automation": run_disclosure_automation_payload,
     "utility_partition": run_partition_storage_payload,
     "asset_excel_convert": _run_asset_excel_convert_job,
     "asset_excel_merge": _run_asset_excel_merge_job,
@@ -171,7 +178,12 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
         if "cancel_check" in sig.parameters:
             kwargs["cancel_check"] = lambda: job_manager.is_cancelled(job_id)
 
-        result = handler(apply_workspace_defaults(kind, payload), **kwargs)
+        if kind in {"download", "content_download", "disclosure_automation"}:
+            progress_callback("다른 KIND 네트워크 작업이 끝날 때까지 대기합니다.")
+            with KIND_NETWORK_JOB_LOCK:
+                result = handler(apply_workspace_defaults(kind, payload), **kwargs)
+        else:
+            result = handler(apply_workspace_defaults(kind, payload), **kwargs)
 
         if job_manager.is_cancelled(job_id) or (
             isinstance(result, dict) and result.get("cancelled") is True

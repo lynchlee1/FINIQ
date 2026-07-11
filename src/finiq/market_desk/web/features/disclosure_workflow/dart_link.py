@@ -362,7 +362,7 @@ def _kind_correction(record: dict[str, Any]) -> bool:
 def _input_fingerprint(record: dict[str, Any]) -> str:
     semantic = {
         "matcher_version": DART_LINK_MATCHER_VERSION,
-        "acpt_no": str(record.get("acpt_no") or "").strip(),
+        "acpt_no": str(record.get("acpt_no") or ""),
         "doc_no": str(record.get("doc_no") or "").strip(),
         "company_id": str(record.get("company_id") or "").strip(),
         "company_name": str(record.get("company_name") or "").strip(),
@@ -489,7 +489,7 @@ def _base_link(
 ) -> dict[str, Any]:
     return {
         "matcher_version": DART_LINK_MATCHER_VERSION,
-        "acpt_no": str(record.get("acpt_no") or "").strip(),
+        "acpt_no": str(record.get("acpt_no") or ""),
         "doc_no": str(record.get("doc_no") or "").strip() or None,
         "rcept_no": None,
         "status": "unresolved",
@@ -539,7 +539,7 @@ def link_kind_disclosures(
     seen_acpt_numbers: set[str] = set()
 
     for record in records:
-        acpt_no = str(record.get("acpt_no") or "").strip()
+        acpt_no = str(record.get("acpt_no") or "")
         if not acpt_no:
             raise ValueError("Every KIND record must have acpt_no")
         if acpt_no in seen_acpt_numbers:
@@ -724,7 +724,7 @@ def link_kind_disclosures(
                     },
                 }
             )
-    return [links_by_acpt_no[str(record.get("acpt_no") or "").strip()] for record in records]
+    return [links_by_acpt_no[str(record.get("acpt_no") or "")] for record in records]
 
 
 def _load_source_json(path: Path) -> list[dict[str, Any]]:
@@ -838,7 +838,7 @@ def _load_existing_links(output_directory: Path) -> dict[str, dict[str, Any]]:
         for index, link in enumerate(partition_links):
             if not isinstance(link, dict):
                 raise ValueError(f"Invalid DART link at {path}:{index}")
-            acpt_no = str(link.get("acpt_no") or "").strip()
+            acpt_no = str(link.get("acpt_no") or "")
             if not acpt_no:
                 raise ValueError(f"DART link has no acpt_no at {path}:{index}")
             if acpt_no in links:
@@ -917,7 +917,7 @@ def _option_value(payload: dict[str, Any], key: str, default: object) -> object:
 def _validate_unique_kind_records(records: list[dict[str, Any]]) -> None:
     seen: set[str] = set()
     for record in records:
-        acpt_no = str(record.get("acpt_no") or "").strip()
+        acpt_no = str(record.get("acpt_no") or "")
         if not acpt_no:
             raise ValueError("Every KIND record must have acpt_no")
         if acpt_no in seen:
@@ -956,9 +956,18 @@ def _load_corp_codes_from_cache(
     if age < timedelta(0) or age >= timedelta(days=max_age_days):
         return None
     records = payload.get("records")
-    if not isinstance(records, list):
+    if not isinstance(records, list) or not records:
         return None
-    return [dict(record) for record in records if isinstance(record, dict)]
+    cached_records: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            return None
+        corp_code = str(record.get("corp_code") or "").strip()
+        corp_name = str(record.get("corp_name") or "").strip()
+        if len(corp_code) != 8 or not corp_code.isdigit() or not corp_name:
+            return None
+        cached_records.append(dict(record))
+    return cached_records
 
 
 def build_dart_links_payload(
@@ -991,7 +1000,7 @@ def build_dart_links_payload(
     reusable: dict[str, dict[str, Any]] = {}
     pending: list[dict[str, Any]] = []
     for record in records:
-        acpt_no = str(record.get("acpt_no") or "").strip()
+        acpt_no = str(record.get("acpt_no") or "")
         prior = existing.get(acpt_no)
         if prior and _link_is_reusable(
             prior,

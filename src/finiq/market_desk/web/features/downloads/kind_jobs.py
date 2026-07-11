@@ -11,6 +11,7 @@ from typing import Any
 from finiq.market_desk.web.features.downloads.kind_api import run_download_action
 from finiq.market_desk.web.features.downloads.kind_common import *
 from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
+from finiq.market_desk.web.features.downloads.kind_coordination import KIND_NETWORK_JOB_LOCK
 
 def _job_snapshot(job: DownloadJob) -> dict[str, Any]:
     return {
@@ -59,11 +60,12 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
             _append_job_progress(job_id, f"JOB start id={job_id}")
             for line in _download_payload_summary(payload):
                 _append_job_progress(job_id, f"JOB {line}")
-            result = run_download_action(
-                payload,
-                progress_callback=lambda message: _append_job_progress(job_id, message),
-                cancel_check=lambda: _is_download_cancelled(job_id),
-            )
+            with KIND_NETWORK_JOB_LOCK:
+                result = run_download_action(
+                    payload,
+                    progress_callback=lambda message: _append_job_progress(job_id, message),
+                    cancel_check=lambda: _is_download_cancelled(job_id),
+                )
             _update_job(job_id, status="completed", result=result)
             _append_job_progress(job_id, f"JOB completed id={job_id}")
         except DownloadCancelled:
@@ -157,5 +159,4 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
     return get_download_job(job_id)
-
 
