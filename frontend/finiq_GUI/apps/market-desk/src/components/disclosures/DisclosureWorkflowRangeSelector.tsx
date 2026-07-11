@@ -90,7 +90,7 @@ export function DisclosureWorkflowRangeSelector({
               aria-pressed={selected}
               aria-label={`${task.label}${endpointLabel ? `, ${endpointLabel}` : ""}`}
               className={[
-                "relative flex min-h-16 select-none items-center justify-center border-r border-[color:var(--tv-border)] px-5 py-3 text-center text-xs outline-none last:border-r-0 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--tv-accent)]",
+                "relative flex min-h-20 select-none items-center justify-center border-r border-[color:var(--tv-border)] px-5 py-4 text-center text-sm outline-none last:border-r-0 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--tv-accent)]",
                 selected ? "bg-[var(--tv-accent-soft)] font-semibold text-[var(--tv-text)]" : "bg-[var(--tv-control)] font-medium text-[var(--tv-muted)]",
               ].join(" ")}
               onKeyDown={(event) => {

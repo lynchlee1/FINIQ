@@ -1,5 +1,31 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-07-12 — 공시 자동화 작업표 밀도 정렬
+
+### Purpose
+
+- `바로가기`를 작업명 옆이 아닌 각 row의 최우측 action 위치에 둔다.
+- 작업표의 여백, 표 frame, 글자 크기를 기존 FINIQ workflow card와 맞춘다.
+
+### Implementation summary
+
+- 작업표에 공용 `CardContent` 여백과 둥근 border table frame을 적용하고, range box 높이와
+  글자 크기 및 row cell padding을 늘렸다.
+- 작업명은 16px, range와 상태 정보는 14px로 조정하고 작은 uppercase table header를
+  일반 14px header로 교체했다.
+- 헤더가 보이지 않는 최우측 action cell을 추가하고 `바로가기`를 1px outline button으로
+  이동했다. 범위 밖 row도 opacity로 button 경계를 흐리지 않도록 배경과 text tone만 낮췄다.
+
+### Verification
+
+- TypeScript 검사와 MarketDesk production build가 통과했다.
+- 자동화 UI 및 navigation 집중 frontend test 10건이 통과했다.
+- 실제 브라우저에서 action cell이 row의 최우측 128px에 위치하고 button border가 1px로
+  표시되며, 작업명 16px·range 14px·table frame 1px가 적용된 것을 확인했다.
+- 전체 frontend test는 89건 중 88건이 통과했다. 남은 1건은 기존
+  `html-section-split` settings store 구조분해 기대값 불일치다.
+- 실제 `resources/`는 읽거나 변경하지 않았다.
+
 ## 2026-07-12 — 공시 자동화 드래그 범위와 Pending 판단 UI
 
 ### Purpose

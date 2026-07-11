@@ -60,7 +60,26 @@ test("automation range is selected directly by dragging task boxes", async () =>
   assert.match(selector, /setPointerCapture/);
   assert.match(selector, /data-workflow-task-value/);
   assert.match(selector, /onRangeChange\(Math\.min\(anchor, value\), Math\.max\(anchor, value\)\)/);
+  assert.match(selector, /min-h-20/);
+  assert.match(selector, /text-sm/);
   assert.doesNotMatch(selector, /SelectTrigger|SelectContent|onStartChange|onEndChange/);
+});
+
+test("automation task table uses standard card spacing and a far-right outlined shortcut", async () => {
+  const page = await readFile(pagePath, "utf8");
+  const tableStart = page.indexOf('<CardTitle className="text-[var(--tv-text)]">작업표</CardTitle>');
+  const tableEnd = page.indexOf('<div ref={searchSettingsRef}', tableStart);
+  const taskTable = page.slice(tableStart, tableEnd);
+
+  assert.ok(tableStart >= 0 && tableEnd > tableStart);
+  assert.match(taskTable, /<CardContent className="space-y-6">/);
+  assert.match(taskTable, /overflow-x-auto rounded-md border border-\[color:var\(--tv-border\)\]/);
+  assert.match(taskTable, /min-w-\[920px\]/);
+  assert.match(taskTable, /text-base font-semibold/);
+  assert.match(taskTable, /<th className="w-32[^>]*><span className="sr-only">바로가기<\/span><\/th>/);
+  assert.match(taskTable, /<div className="flex justify-end">[\s\S]*?variant="outline"[\s\S]*?바로가기/);
+  assert.ok(taskTable.indexOf("formatCompletedAt") < taskTable.indexOf('<div className="flex justify-end">'));
+  assert.doesNotMatch(taskTable, /variant="ghost"[\s\S]{0,220}바로가기/);
 });
 
 test("inactive judgment settings render locked summary cards and section review can wait", async () => {
