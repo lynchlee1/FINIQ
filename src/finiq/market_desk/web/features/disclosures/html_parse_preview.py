@@ -46,7 +46,12 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, None)
-    metadata_index, _ = _load_html_parse_metadata(input_directory)
+    filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
+    metadata_index, _ = _load_html_parse_metadata(
+        input_directory,
+        filtered_metadata_path=filtered_metadata_path,
+        compressed_metadata_path=compressed_metadata_path,
+    )
     records: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for index, html_file in enumerate(html_files, start=1):
@@ -160,7 +165,12 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, None)
-    metadata_index, _ = _load_html_parse_metadata(input_directory)
+    filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
+    metadata_index, _ = _load_html_parse_metadata(
+        input_directory,
+        filtered_metadata_path=filtered_metadata_path,
+        compressed_metadata_path=compressed_metadata_path,
+    )
     worker_count = _filter_candidate_workers(
         body.get("parallel_workers", body.get("workers")), len(html_files)
     )

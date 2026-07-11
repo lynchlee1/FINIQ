@@ -13,6 +13,9 @@ from finiq.market_desk.web.features.disclosures.html_parse_common import (
     PARSER_REGISTRY,
     parse_disclosure_html_payload,
 )
+from finiq.market_desk.web.features.disclosures.html_parse_preview import (
+    build_parse_preview_payload,
+)
 
 
 def _fake_parser(_html: bytes, *, file_path: Path) -> dict[str, object]:
@@ -105,6 +108,10 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
         data_root / "04-external" / "compressed-external-html.json"
     )
     assert result["records"][0]["disclosed_at"] == "2025-01-02 18:42"
+    preview = build_parse_preview_payload(payload)
+    assert preview["records"][0]["parsed_result"]["disclosed_at"] == (
+        "2025-01-02 18:42"
+    )
 
 
 def test_explicit_missing_kind_metadata_is_not_silently_ignored(

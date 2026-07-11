@@ -124,7 +124,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSetting: async (key, value) => {
     set((state) => ({ ...state, [key]: value }));
     try {
-      await apiPost("/api/settings", { [key]: value });
+      const config = await apiPost<any>("/api/settings", { [key]: value });
+      set((state) => ({ ...state, ...config }));
     } catch (err) {
       console.error(`Failed to save setting ${String(key)}:`, err);
     }
@@ -133,7 +134,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSettings: async (payload) => {
     set((state) => ({ ...state, ...payload }));
     try {
-      await apiPost("/api/settings", payload);
+      const config = await apiPost<any>("/api/settings", payload);
+      set((state) => ({ ...state, ...config }));
     } catch (err) {
       console.error(`Failed to save settings:`, err);
     }

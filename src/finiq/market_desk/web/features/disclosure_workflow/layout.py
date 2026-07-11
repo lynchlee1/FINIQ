@@ -11,20 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from finiq.config import PROJECT_ROOT
+from finiq.config import PROJECT_ROOT, build_disclosure_workspace_path_settings
 
 WORKSPACE_FORMAT = "finiq_disclosure_workspace_v1"
 WORKSPACE_MANIFEST_FILENAME = "disclosure-workspace.json"
 _MODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-def _table_manifest_path(workspace: "DisclosureWorkspace") -> Path:
-    # table_export places a requested manifest inside <stem>_shards/.
-    return (
-        workspace.table
-        / "disclosures.sqlite_manifest_shards"
-        / "disclosures.sqlite_manifest.json"
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +143,16 @@ def prepare_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, A
     return {**manifest, "manifest_path": str(manifest_path)}
 
 
+def disclosure_workspace_settings(
+    data_root: str | Path, *, mode: object
+) -> dict[str, str]:
+    workspace = resolve_disclosure_workspace(data_root)
+    normalized_mode = validate_workspace_mode(mode)
+    return build_disclosure_workspace_path_settings(
+        workspace.root, mode=normalized_mode
+    )
+
+
 def _set_default(payload: dict[str, Any], key: str, value: object) -> None:
     if not str(payload.get(key) or "").strip():
         payload[key] = value
@@ -170,17 +171,9 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(payload, "output_directory", str(workspace.list))
     elif normalized_kind == "table_build":
         _set_default(payload, "root_directory", str(workspace.list))
-        _set_default(
-            payload,
-            "output_path",
-            str(workspace.table / "disclosures.sqlite_manifest.json"),
-        )
+        _set_default(payload, "output_path", str(workspace.table))
     elif normalized_kind == "filter":
-        _set_default(
-            payload,
-            "classification_path",
-            str(_table_manifest_path(workspace)),
-        )
+        _set_default(payload, "classification_path", str(workspace.table))
         _set_default(
             payload, "html_transfer_path", str(workspace.filtered / "filtered.json")
         )
@@ -236,9 +229,11 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
                 "root_directory",
             )
         ):
-            table_manifest = _table_manifest_path(workspace)
-            if table_manifest.is_file():
-                payload["classification_path"] = str(table_manifest)
+            has_table_manifest = any(
+                workspace.table.glob("*_shards/*.sqlite_manifest.json")
+            )
+            if has_table_manifest:
+                payload["classification_path"] = str(workspace.table)
             else:
                 payload["root_directory"] = str(workspace.list)
     return payload
@@ -248,6 +243,7 @@ __all__ = [
     "DisclosureWorkspace",
     "apply_workspace_defaults",
     "atomic_write_json",
+    "disclosure_workspace_settings",
     "prepare_disclosure_workspace_payload",
     "resolve_disclosure_workspace",
     "validate_workspace_mode",

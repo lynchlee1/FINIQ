@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ QUANTIWISE_EXCEL_DIR = RESOURCES_DIR / "Quantiwise"
 KIND_DATA_DIR = RESOURCES_DIR / "kind"
 DATABASE_DIR = RESOURCES_DIR / "database"
 QUANTI_DIR = DATABASE_DIR / "by_item"
+_DISCLOSURE_MODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 SAVED_SETTINGS_KEYS = (
     "output_root",
@@ -126,6 +128,39 @@ def normalize_path(value: str) -> str:
     except Exception:
         return str(value)
 
+
+def build_disclosure_workspace_path_settings(
+    data_root: str | Path, *, mode: str
+) -> dict[str, str]:
+    root = Path(data_root).expanduser().resolve()
+    normalized_mode = str(mode or "").strip()
+    if _DISCLOSURE_MODE_RE.fullmatch(normalized_mode) is None:
+        raise ValueError("Invalid disclosure parser mode")
+    converted_path = root / "07-converted" / normalized_mode
+    filtered_path = root / "03-filter" / "filtered.json"
+    external_path = root / "04-external"
+    return {
+        "download_output_directory": str(root / "01-list"),
+        "sqlite_source_path": str(root / "01-list"),
+        "sqlite_output_directory": str(root / "02-table"),
+        "sqlite_manifest_path": str(root / "02-table"),
+        "html_transfer_directory": str(filtered_path),
+        "html_download_source_path": str(filtered_path),
+        "html_output_directory": str(external_path),
+        "html_external_compress_input_directory": str(external_path),
+        "html_external_compress_output_directory": str(external_path),
+        "html_content_compressed_json_path": str(
+            external_path / "compressed-external-html.json"
+        ),
+        "html_content_output_directory": str(root / "05-internal"),
+        "html_merge_output_path": str(root / "05-internal" / "merged"),
+        "html_section_split_output_directory": str(root / "06-sections"),
+        "html_parse_output_directory": str(converted_path),
+        "html_parse_result_path": str(
+            converted_path / f"parsed-{normalized_mode}.json"
+        ),
+    }
+
 def load_settings(settings_path: str | Path) -> dict[str, Any]:
     path = Path(settings_path)
     if not path.exists():
@@ -169,8 +204,12 @@ def init_config() -> AppConfig:
     settings_path = get_default_settings_path()
     settings = load_settings(settings_path)
     
-    output_root = settings.get("output_root", str(KIND_DATA_DIR))
+    output_root = settings.get("output_root") or str(KIND_DATA_DIR)
     quanti_dir = settings.get("quanti_dir", str(QUANTI_DIR))
+    html_parse_mode = settings.get("html_parse_mode") or "bond_issuance"
+    disclosure_paths = build_disclosure_workspace_path_settings(
+        output_root, mode=html_parse_mode
+    )
     
     return AppConfig(
         output_root=output_root,
@@ -178,17 +217,41 @@ def init_config() -> AppConfig:
         settings_path=str(settings_path),
         price_root_directory=settings.get("price_root_directory", str(KIND_DATA_DIR / "price")),
         selected_classification_path=settings.get("selected_classification_path", str(KIND_DATA_DIR / "classification" / "all_companies.json")),
-        sqlite_source_path=settings.get("sqlite_source_path", str(KIND_DATA_DIR / "kind_disclosures.sqlite")),
-        download_output_directory=settings.get("download_output_directory", output_root),
-        sqlite_output_directory=settings.get("sqlite_output_directory", output_root),
-        sqlite_manifest_path=settings.get("sqlite_manifest_path", str(KIND_DATA_DIR / "manifest.json")),
-        html_output_directory=settings.get("html_output_directory", str(KIND_DATA_DIR / "html")),
-        html_content_output_directory=settings.get("html_content_output_directory", str(KIND_DATA_DIR / "html_contents")),
-        html_section_split_output_directory=settings.get("html_section_split_output_directory", ""),
-        html_transfer_directory=settings.get("html_transfer_directory", str(KIND_DATA_DIR / "transfer")),
-        html_parse_output_directory=settings.get("html_parse_output_directory", ""),
-        html_parse_result_path=settings.get("html_parse_result_path", str(KIND_DATA_DIR / "parsed")),
-        html_parse_mode=settings.get("html_parse_mode", "bond_issuance"),
+        sqlite_source_path=settings.get(
+            "sqlite_source_path", disclosure_paths["sqlite_source_path"]
+        ),
+        download_output_directory=settings.get(
+            "download_output_directory",
+            disclosure_paths["download_output_directory"],
+        ),
+        sqlite_output_directory=settings.get(
+            "sqlite_output_directory", disclosure_paths["sqlite_output_directory"]
+        ),
+        sqlite_manifest_path=settings.get(
+            "sqlite_manifest_path", disclosure_paths["sqlite_manifest_path"]
+        ),
+        html_output_directory=settings.get(
+            "html_output_directory", disclosure_paths["html_output_directory"]
+        ),
+        html_content_output_directory=settings.get(
+            "html_content_output_directory",
+            disclosure_paths["html_content_output_directory"],
+        ),
+        html_section_split_output_directory=settings.get(
+            "html_section_split_output_directory",
+            disclosure_paths["html_section_split_output_directory"],
+        ),
+        html_transfer_directory=settings.get(
+            "html_transfer_directory", disclosure_paths["html_transfer_directory"]
+        ),
+        html_parse_output_directory=settings.get(
+            "html_parse_output_directory",
+            disclosure_paths["html_parse_output_directory"],
+        ),
+        html_parse_result_path=settings.get(
+            "html_parse_result_path", disclosure_paths["html_parse_result_path"]
+        ),
+        html_parse_mode=html_parse_mode,
         integrated_merge_input_path=settings.get("integrated_merge_input_path", ""),
         integrated_merge_output_path=settings.get("integrated_merge_output_path", ""),
         integrated_history_item_registry_path=settings.get("integrated_history_item_registry_path", ""),
@@ -201,11 +264,25 @@ def init_config() -> AppConfig:
         asset_excel_cleanup_merged_items=bool(settings.get("asset_excel_cleanup_merged_items", True)),
         asset_excel_duplicate_scan_recursive=bool(settings.get("asset_excel_duplicate_scan_recursive", False)),
         asset_excel_account_mappings=settings.get("asset_excel_account_mappings", []),
-        html_download_source_path=settings.get("html_download_source_path", ""),
-        html_merge_output_path=settings.get("html_merge_output_path", ""),
-        html_content_compressed_json_path=settings.get("html_content_compressed_json_path", ""),
-        html_external_compress_input_directory=settings.get("html_external_compress_input_directory", ""),
-        html_external_compress_output_directory=settings.get("html_external_compress_output_directory", ""),
+        html_download_source_path=settings.get(
+            "html_download_source_path",
+            disclosure_paths["html_download_source_path"],
+        ),
+        html_merge_output_path=settings.get(
+            "html_merge_output_path", disclosure_paths["html_merge_output_path"]
+        ),
+        html_content_compressed_json_path=settings.get(
+            "html_content_compressed_json_path",
+            disclosure_paths["html_content_compressed_json_path"],
+        ),
+        html_external_compress_input_directory=settings.get(
+            "html_external_compress_input_directory",
+            disclosure_paths["html_external_compress_input_directory"],
+        ),
+        html_external_compress_output_directory=settings.get(
+            "html_external_compress_output_directory",
+            disclosure_paths["html_external_compress_output_directory"],
+        ),
         integrated_data_values=settings.get("integrated_data_values", {}),
         change_log_date_thresholds=settings.get("change_log_date_thresholds", {}),
         change_log_numeric_thresholds=settings.get("change_log_numeric_thresholds", {}),

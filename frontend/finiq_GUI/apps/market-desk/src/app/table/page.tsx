@@ -109,6 +109,7 @@ export default function TablePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          data_root: useSettingsStore.getState().output_root,
           classification_path: classificationPath,
           output_path: outputPath,
           table_name: "disclosures",

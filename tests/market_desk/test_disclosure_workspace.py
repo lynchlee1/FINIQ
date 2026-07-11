@@ -6,9 +6,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import finiq.config as finiq_config
+import finiq.market_desk.web.app as web_app
 from finiq.market_desk.web.app import app
+from finiq.market_desk.web.app import config as app_config
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
+    disclosure_workspace_settings,
     prepare_disclosure_workspace_payload,
     resolve_disclosure_workspace,
 )
@@ -70,18 +74,15 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
         "table_build", {"data_root": str(workspace.root)}
     )
     assert table["root_directory"] == str(workspace.list)
-    assert table["output_path"] == str(workspace.table / "disclosures.sqlite_manifest.json")
+    assert table["output_path"] == str(workspace.table)
     filtered = apply_workspace_defaults(
         "filter", {"data_root": str(workspace.root)}
     )
-    assert filtered["classification_path"] == str(
-        workspace.table
-        / "disclosures.sqlite_manifest_shards"
-        / "disclosures.sqlite_manifest.json"
+    assert filtered["classification_path"] == str(workspace.table)
+    assert (
+        _manifest_output_path(table["output_path"], workspace.list).parent.parent
+        == workspace.table
     )
-    assert str(_manifest_output_path(table["output_path"], workspace.list)) == filtered[
-        "classification_path"
-    ]
     assert filtered["html_transfer_path"] == str(workspace.filtered / "filtered.json")
     external = apply_workspace_defaults("download", {"data_root": str(workspace.root)})
     assert external["output_directory"] == str(workspace.external)
@@ -131,6 +132,17 @@ def test_workspace_defaults_preserve_explicit_paths(tmp_path: Path) -> None:
     assert payload["filtered_metadata_path"] == str(explicit / "filtered.json")
     assert payload["compressed_metadata_path"] == str(explicit / "compressed.json")
 
+    filtered = apply_workspace_defaults(
+        "filter",
+        {
+            "data_root": str(tmp_path / "workspace"),
+            "classification_path": str(explicit / "table"),
+            "html_transfer_path": str(explicit / "filtered.json"),
+        },
+    )
+    assert filtered["classification_path"] == str(explicit / "table")
+    assert filtered["html_transfer_path"] == str(explicit / "filtered.json")
+
 
 def test_workspace_prepare_api(tmp_path: Path) -> None:
     client = TestClient(app)
@@ -143,3 +155,176 @@ def test_workspace_prepare_api(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()["format"] == "finiq_disclosure_workspace_v1"
     assert Path(response.json()["paths"]["internal"]).name == "05-internal"
+
+
+def test_existing_filter_route_uses_workspace_stage_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "resources"
+    captured: dict[str, object] = {}
+
+    def fake_filter(payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        captured.update(payload)
+        return {
+            "format": "kind_disclosure_filter_v1",
+            "disclosures": [],
+            "html_download_acpt_numbers": [],
+        }
+
+    monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter)
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter", json={"data_root": str(data_root)}
+    )
+
+    assert response.status_code == 200
+    assert captured["classification_path"] == str(data_root / "02-table")
+    assert captured["html_transfer_path"] == str(
+        data_root / "03-filter" / "filtered.json"
+    )
+    assert (data_root / "03-filter" / "filtered.json").is_file()
+
+
+def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
+    data_root = tmp_path / "resources"
+
+    settings = disclosure_workspace_settings(data_root, mode="bond_issuance")
+
+    assert settings == {
+        "download_output_directory": str(data_root / "01-list"),
+        "sqlite_source_path": str(data_root / "01-list"),
+        "sqlite_output_directory": str(data_root / "02-table"),
+        "sqlite_manifest_path": str(data_root / "02-table"),
+        "html_transfer_directory": str(data_root / "03-filter" / "filtered.json"),
+        "html_download_source_path": str(data_root / "03-filter" / "filtered.json"),
+        "html_output_directory": str(data_root / "04-external"),
+        "html_external_compress_input_directory": str(data_root / "04-external"),
+        "html_external_compress_output_directory": str(data_root / "04-external"),
+        "html_content_compressed_json_path": str(
+            data_root / "04-external" / "compressed-external-html.json"
+        ),
+        "html_content_output_directory": str(data_root / "05-internal"),
+        "html_merge_output_path": str(data_root / "05-internal" / "merged"),
+        "html_section_split_output_directory": str(data_root / "06-sections"),
+        "html_parse_output_directory": str(
+            data_root / "07-converted" / "bond_issuance"
+        ),
+        "html_parse_result_path": str(
+            data_root
+            / "07-converted"
+            / "bond_issuance"
+            / "parsed-bond_issuance.json"
+        ),
+    }
+
+
+def test_init_config_uses_workspace_paths_when_only_root_is_saved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "resources"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps({"output_root": str(data_root)}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        finiq_config, "get_default_settings_path", lambda: settings_path
+    )
+
+    loaded = finiq_config.init_config()
+
+    expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
+    assert {key: getattr(loaded, key) for key in expected} == expected
+
+
+def test_saving_only_output_root_prepares_existing_workflow_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    data_root = tmp_path / "resources"
+    monkeypatch.setattr(app_config, "settings_path", str(settings_path))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+    for key in disclosure_workspace_settings(
+        tmp_path / "old", mode="bond_issuance"
+    ):
+        monkeypatch.setattr(app_config, key, "legacy")
+
+    response = TestClient(app).post(
+        "/api/settings", json={"output_root": str(data_root)}
+    )
+
+    assert response.status_code == 200
+    expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
+    assert {key: response.json()[key] for key in expected} == expected
+    assert (data_root / "disclosure-workspace.json").is_file()
+    assert (data_root / "07-converted" / "bond_issuance").is_dir()
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert {key: saved[key] for key in expected} == expected
+
+
+def test_config_api_uses_workspace_defaults_for_blank_legacy_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "resources"
+    monkeypatch.setattr(app_config, "output_root", str(data_root))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+    expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
+    for key in expected:
+        monkeypatch.setattr(app_config, key, "")
+
+    response = TestClient(app).get("/api/config")
+
+    assert response.status_code == 200
+    assert {key: response.json()[key] for key in expected} == expected
+
+
+def test_changing_parse_mode_updates_only_mode_workspace_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "resources"
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(app_config, "settings_path", str(settings_path))
+    monkeypatch.setattr(app_config, "output_root", str(data_root))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+    monkeypatch.setattr(app_config, "html_parse_output_directory", "old-parse")
+    monkeypatch.setattr(app_config, "html_parse_result_path", "old-result")
+    monkeypatch.setattr(app_config, "download_output_directory", "custom-download")
+
+    response = TestClient(app).post(
+        "/api/settings", json={"html_parse_mode": "rights_issuance"}
+    )
+
+    expected = disclosure_workspace_settings(data_root, mode="rights_issuance")
+    assert response.status_code == 200
+    assert response.json()["html_parse_output_directory"] == expected[
+        "html_parse_output_directory"
+    ]
+    assert response.json()["html_parse_result_path"] == expected[
+        "html_parse_result_path"
+    ]
+    assert response.json()["download_output_directory"] == "custom-download"
+    assert (data_root / "07-converted" / "rights_issuance").is_dir()
+
+
+def test_root_save_preserves_explicit_path_in_same_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    data_root = tmp_path / "resources"
+    custom_external = tmp_path / "custom-external"
+    monkeypatch.setattr(app_config, "settings_path", str(settings_path))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+
+    response = TestClient(app).post(
+        "/api/settings",
+        json={
+            "output_root": str(data_root),
+            "html_output_directory": str(custom_external),
+        },
+    )
+
+    expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
+    assert response.status_code == 200
+    assert response.json()["download_output_directory"] == expected[
+        "download_output_directory"
+    ]
+    assert response.json()["html_output_directory"] == str(custom_external)

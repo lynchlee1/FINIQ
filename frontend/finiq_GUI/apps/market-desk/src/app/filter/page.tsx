@@ -44,6 +44,8 @@ function getKindDisclosureUrl(acptNo: string) {
 export default function FilterPage() {
   const {
     output_root: rootDirectory,
+    sqlite_output_directory: tableDirectory,
+    sqlite_manifest_path: tableManifestPath,
     html_transfer_directory: htmlTransferPath,
     condition_presets: presets,
     fetchSettings,
@@ -86,7 +88,8 @@ export default function FilterPage() {
   }, [pageCount, pageIndex, result]);
 
   const buildPayload = () => ({
-    root_directory: rootDirectory,
+    data_root: rootDirectory,
+    classification_path: tableDirectory || tableManifestPath,
     html_transfer_path: htmlTransferPath,
     filter_blocks: normalizeDisclosureConditionBlocks(conditions),
     title_expression: "",

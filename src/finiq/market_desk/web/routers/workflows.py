@@ -532,14 +532,20 @@ def create_workflows_router(
     @router.post("/api/disclosures/html/parse/preview")
     async def parse_preview_route(payload: dict[str, Any]):
         try:
-            return await run_in_threadpool(build_parse_preview_payload, payload)
+            return await run_in_threadpool(
+                build_parse_preview_payload,
+                apply_workspace_defaults("parse", payload),
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/parse/filter-candidates")
     async def parse_filter_candidates_route(payload: dict[str, Any]):
         try:
-            return await run_in_threadpool(build_parse_filter_candidates_payload, payload)
+            return await run_in_threadpool(
+                build_parse_filter_candidates_payload,
+                apply_workspace_defaults("parse", payload),
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
