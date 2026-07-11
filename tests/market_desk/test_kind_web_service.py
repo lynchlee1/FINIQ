@@ -7784,6 +7784,14 @@ def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
         "보통주식": "source_not_found",
         "기타주식": "source_not_found",
     }
+    for field_name in ("신주의 종류와 수", "증자 전 발행주식총수", "발행가액"):
+        for stock_type in ("보통주식", "기타주식"):
+            assert any(
+                warning.startswith(
+                    f"{field_name}({stock_type}): 정해진 출처에서 값을 찾지 못했습니다."
+                )
+                for warning in parsed["strong_warning"]
+            )
     assert "주입 제목이 없습니다." in parsed["parse_warnings"]
     assert "주입 제목이 없습니다." in parsed["strong_warning"]
     assert (
