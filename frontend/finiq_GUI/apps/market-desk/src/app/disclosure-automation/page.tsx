@@ -502,31 +502,30 @@ export default function DisclosureAutomationPage() {
     <WorkflowPageShell workflowId="disclosure-build">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          <Card className="overflow-hidden border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
-            <CardHeader>
+          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
+            <CardHeader className="pb-4">
               <CardTitle className="text-[var(--tv-text)]">작업표</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-5 p-0">
-              <div className="px-4">
-                <DisclosureWorkflowRangeSelector
-                  tasks={STAGES.map((stage) => ({ value: stage.number, label: stage.label }))}
-                  start={rangeStart}
-                  end={rangeEnd}
-                  disabled={!!activeJobId || !!reviewPatterns.length}
-                  onRangeChange={changeRange}
-                />
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] border-collapse text-sm">
-                  <thead className="bg-[var(--tv-control)] text-left text-xs font-semibold uppercase tracking-wide text-[var(--tv-muted)]">
+            <CardContent className="space-y-6">
+              <DisclosureWorkflowRangeSelector
+                tasks={STAGES.map((stage) => ({ value: stage.number, label: stage.label }))}
+                start={rangeStart}
+                end={rangeEnd}
+                disabled={!!activeJobId || !!reviewPatterns.length}
+                onRangeChange={changeRange}
+              />
+              <div className="overflow-x-auto rounded-md border border-[color:var(--tv-border)]">
+                <table className="w-full min-w-[920px] border-collapse text-left text-sm">
+                  <thead className="bg-[var(--tv-control)] text-sm font-semibold text-[var(--tv-muted)]">
                     <tr>
-                      <th className="px-4 py-3">작업</th>
-                      <th className="px-4 py-3">실행 계획</th>
-                      <th className="px-4 py-3">작업 상태</th>
-                      <th className="px-4 py-3">마지막 성공</th>
+                      <th className="px-5 py-3.5">작업</th>
+                      <th className="px-5 py-3.5">실행 계획</th>
+                      <th className="px-5 py-3.5">작업 상태</th>
+                      <th className="px-5 py-3.5">마지막 성공</th>
+                      <th className="w-32 px-5 py-3.5"><span className="sr-only">바로가기</span></th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-[color:var(--tv-border)]">
                     {STAGES.map((stage) => {
                       const stagePlan = planForStage(stage.number);
                       const statusValue = runStageStatus(stage.number)
@@ -543,18 +542,26 @@ export default function DisclosureAutomationPage() {
                             ? sectionSettingsRef
                             : null;
                       return (
-                        <tr key={stage.key} className={`border-t border-[color:var(--tv-border)] ${inRange ? "text-[var(--tv-text)]" : "text-[var(--tv-muted)] opacity-55"}`}>
-                          <td className="px-4 py-4">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Link href={stage.href} className="font-semibold text-[var(--tv-accent)] hover:underline">
-                                {stage.label}
-                              </Link>
+                        <tr key={stage.key} className={inRange ? "text-[var(--tv-text)]" : "bg-[var(--tv-control)]/30 text-[var(--tv-muted)]"}>
+                          <td className="px-5 py-4 align-middle">
+                            <Link href={stage.href} className="text-base font-semibold text-[var(--tv-accent)] hover:underline">
+                              {stage.label}
+                            </Link>
+                          </td>
+                          <td className="px-5 py-4 align-middle">
+                            <span className={`inline-flex rounded-full border px-3 py-1.5 text-sm font-semibold ${planTone(planAction)}`}>{planLabel(planAction)}</span>
+                            {stagePlan?.reason ? <p className="mt-2 max-w-[260px] text-sm leading-5 text-[var(--tv-muted)]">{stagePlan.reason}</p> : null}
+                          </td>
+                          <td className="px-5 py-4 align-middle text-sm text-[var(--tv-muted)]">{activeJobId && stagePlan?.plan_action === "process" && !statusValue ? "대기 중" : runStatusLabel(statusValue)}</td>
+                          <td className="px-5 py-4 align-middle text-sm text-[var(--tv-muted)]">{formatCompletedAt(stagePlan?.last_success_at)}</td>
+                          <td className="px-5 py-4 align-middle">
+                            <div className="flex justify-end">
                               {settingsTarget ? (
                                 <Button
                                   type="button"
-                                  variant="ghost"
+                                  variant="outline"
                                   size="sm"
-                                  className="h-7 px-2 text-xs text-[var(--tv-accent)]"
+                                  className="h-9 border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-3 text-sm text-[var(--tv-text)]"
                                   onClick={() => settingsTarget.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                                 >
                                   바로가기
@@ -562,12 +569,6 @@ export default function DisclosureAutomationPage() {
                               ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-4">
-                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${planTone(planAction)}`}>{planLabel(planAction)}</span>
-                            {stagePlan?.reason ? <p className="mt-1 max-w-[220px] text-xs leading-5 text-[var(--tv-muted)]">{stagePlan.reason}</p> : null}
-                          </td>
-                          <td className="px-4 py-4 text-[var(--tv-muted)]">{activeJobId && stagePlan?.plan_action === "process" && !statusValue ? "대기 중" : runStatusLabel(statusValue)}</td>
-                          <td className="px-4 py-4 text-xs text-[var(--tv-muted)]">{formatCompletedAt(stagePlan?.last_success_at)}</td>
                         </tr>
                       );
                     })}

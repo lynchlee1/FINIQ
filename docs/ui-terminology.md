@@ -21,7 +21,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Disclosure automation interrupted-run continuation action | 이어서 실행 | Creates a successor run with the same revision, execution mask, and search snapshot; it does not change the original run back to running. Reuse already validated artifacts. |
 | Disclosure automation review-resolution successor run | 후속 실행 | Starts a new run on the successor profile revision after a decision; do not label this as `이어서 실행`. |
 | Disclosure automation continuous work range | 시작·종료 작업 선택 | Use one draggable row of task boxes with endpoint icons and continuous highlighting. Do not add duplicate dropdowns, expose stage numbers, or allow gaps inside the range. |
-| Disclosure automation settings jump action | 바로가기 | Scrolls from a judgment task in `작업표` to the matching shared settings card on the same page. Do not add a separate `설정` column. |
+| Disclosure automation settings jump action | 바로가기 | Use an outlined button in the unlabeled far-right action cell of `작업표`; it scrolls to the matching shared settings card. Do not place it beside the task name or add a visible `설정` column. |
 | Disclosure automation inactive judgment settings | 잠긴 설정 카드 | Render only the existing card title and a lock icon when its task is outside the selected range. This is a non-interactive replacement, not a collapsible control. |
 | Disclosure automation waiting for user decision | Pending | Use after upstream artifacts are not ready yet or when the workflow has stopped for a required section-pattern decision. The successor run remains `후속 실행`. |
 | Disclosure automation disabled plan action | 사용 안 함 | Plan state for a task outside the selected continuous work range. |
