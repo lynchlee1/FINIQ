@@ -10,6 +10,35 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 - 버튼, 카드, 입력, 아이콘, 상태 표시는 기존 화면과 공통 컴포넌트/에셋을 우선 재사용한다.
 - 파일 형식 설명은 도움말이나 상세 문구에만 넣고 버튼명에는 넣지 않는다.
 
+## Disclosure Automation Workflow
+
+| Concept | Preferred UI Term | Notes |
+| --- | --- | --- |
+| Disclosure stages 1–7 orchestration workflow | 공시 자동화 | Use for the page that plans and runs the existing seven disclosure workflows together. Keep the seven stage labels unchanged. |
+| Disclosure automation preflight result | 실행 계획 | Shows which stage entities will run, be reused, or be blocked before execution. |
+| Disclosure automation manual discovery/run action | 동기화 | Starts a new idempotent run that checks recent and due audit windows, then applies downstream deltas. KIND does not provide push. |
+| Disclosure automation unresolved decision state | 판단 필요 | Use when a new section pattern or another configured judgment boundary requires user input. Do not silently include or exclude the affected item. |
+| Disclosure automation interrupted-run continuation action | 이어서 실행 | Creates a successor run with the same revision, execution mask, and search snapshot; it does not change the original run back to running. Reuse already validated artifacts. |
+| Disclosure automation review-resolution successor run | 후속 실행 | Starts a new run on the successor profile revision after a decision; do not label this as `이어서 실행`. |
+| Disclosure automation per-run stage selector | 이번 실행 | Selects the immutable execution mask for the next run without changing the profile's persistent `사용` toggles. |
+| Disclosure automation subset run action | 선택 작업 실행 | Runs only the selected execution mask after prerequisite preflight. It may populate cache without publishing a generation. |
+| Disclosure automation disabled plan action | 사용 안 함 | The profile's persistent stage toggle is off. A mask-excluded enabled stage is still shown as `재사용` or `차단됨`. |
+| Disclosure automation reuse plan action | 재사용 | A validated artifact with the same input fingerprint will be reused. |
+| Disclosure automation process plan action | 실행 예정 | New or stale entities will be processed. |
+| Disclosure automation removal plan action | 제외 예정 | Removes entities from the next generation membership without deleting their cache. |
+| Disclosure automation blocked plan action | 차단됨 | A required valid prerequisite is missing or stale and cannot be built by this run. |
+| Disclosure automation audit overdue state | 재검사 지연 | A recent/cold/remote audit exceeded its configured freshness deadline; do not show the profile as complete or fresh. |
+| Disclosure automation queued runtime status | 대기 중 | Runtime status for a run/stage/entity that has not started. |
+| Disclosure automation running runtime status | 실행 중 | Runtime status while work is actively running. |
+| Disclosure automation successful runtime status | 완료 | Runtime success only; use the separate publish state to show whether a generation became active. |
+| Disclosure automation partial-error runtime status | 일부 실패 | The run completed with retained errors and did not publish its candidate generation. |
+| Disclosure automation failed runtime status | 실패 | A completion invariant failed. |
+| Disclosure automation cancelled runtime status | 취소됨 | The user requested cancellation; validated cache may remain. |
+| Disclosure automation interrupted runtime status | 중단됨 | The process stopped before completion and can create an `이어서 실행` successor. |
+| Disclosure automation pending publish state | 게시 예정 | The full enabled-stage candidate is eligible to publish after all gates pass. |
+| Disclosure automation published state | 게시 완료 | The candidate generation became the active generation. |
+| Disclosure automation not-published state | 게시 안 함 | A diagnostic/subset/error/review run retained cache but did not change the active generation. |
+
 ## Disclosure HTML Workflow
 
 | Concept | Preferred UI Term | Notes |
@@ -22,7 +51,7 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Content HTML selected disclosure source view | 원문 보기 | Row action that loads the selected disclosure source and its section review data. |
 | Content HTML selected disclosure split action | 목차 분리 | Button/action that splits the selected disclosure into TOC sections for review. |
 | Content HTML selected disclosure section view | 목차별 보기 | Button/action and result card that split and show the selected disclosure by TOC section. |
-| Content HTML section save action | 목차 저장 | Button/action that splits each HTML file into TOC-specific output folders. |
+| Content HTML section save action | 목차 저장 | Button/action that saves one HTML file per disclosure containing only the selected TOC sections, while preserving the source-relative path. |
 | Content HTML individual disclosure table | 개별 공시 | Table listing per-file section lists and source-open actions. |
 | Content HTML individual disclosure section count | 목차 수 | Column showing the number of sections in each listed disclosure. |
 | Content HTML problem file table | 문제 파일 | Table listing files without TOC sections and files that failed to read. |
