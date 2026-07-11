@@ -26,6 +26,7 @@ import {
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
 import { DisclosureWorkflowRangeSelector } from "@/components/disclosures/DisclosureWorkflowRangeSelector";
+import { DisclosureLockedSettingsCard } from "@/components/disclosures/DisclosureLockedSettingsCard";
 import {
   HtmlSectionPatternCard,
   type SectionPattern,
@@ -215,7 +216,7 @@ export default function DisclosureAutomationPage() {
         setReviewSelections({});
         setReviewDecided({});
         window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(patterns));
-        setNotification(`새 목차 조합 ${formatInteger(patterns.length)}개에 판단이 필요합니다.`);
+        setNotification(`Pending · 목차 조합 ${formatInteger(patterns.length)}개에 입력이 필요합니다.`);
       } else {
         setReviewPatterns([]);
         window.localStorage.removeItem(REVIEW_STORAGE_KEY);
@@ -273,6 +274,9 @@ export default function DisclosureAutomationPage() {
     () => Object.fromEntries(STAGES.map((stage) => [stage.key, true])) as StageToggleState,
     [],
   );
+  const searchSettingsSelected = executionMask.includes(1);
+  const filterSettingsSelected = executionMask.includes(3);
+  const sectionSettingsSelected = executionMask.includes(6);
 
   const buildProfile = (
     trigger: "sync" | "resume" | "review",
@@ -478,7 +482,7 @@ export default function DisclosureAutomationPage() {
   const runAfterReview = async () => {
     const unresolved = reviewPatterns.filter((pattern) => !reviewDecided[pattern.signature]);
     if (unresolved.length) {
-      setNotification(`목차 조합 ${formatInteger(unresolved.length)}개를 아직 결정하지 않았습니다.`);
+      setNotification(`Pending · 목차 조합 ${formatInteger(unresolved.length)}개가 아직 결정되지 않았습니다.`);
       setIsErrorStatus(true);
       return;
     }
@@ -527,6 +531,9 @@ export default function DisclosureAutomationPage() {
                       const stagePlan = planForStage(stage.number);
                       const statusValue = runStageStatus(stage.number)
                         || (stage.number === 6 && reviewPatterns.length ? "needs_review" : undefined);
+                      const planAction = stage.number === 6 && reviewPatterns.length
+                        ? "review"
+                        : stagePlan?.plan_action;
                       const inRange = executionMask.includes(stage.number);
                       const settingsTarget = stage.target === "search"
                         ? searchSettingsRef
@@ -556,7 +563,7 @@ export default function DisclosureAutomationPage() {
                             </div>
                           </td>
                           <td className="px-4 py-4">
-                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${planTone(stagePlan?.plan_action)}`}>{planLabel(stagePlan?.plan_action)}</span>
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${planTone(planAction)}`}>{planLabel(planAction)}</span>
                             {stagePlan?.reason ? <p className="mt-1 max-w-[220px] text-xs leading-5 text-[var(--tv-muted)]">{stagePlan.reason}</p> : null}
                           </td>
                           <td className="px-4 py-4 text-[var(--tv-muted)]">{activeJobId && stagePlan?.plan_action === "process" && !statusValue ? "대기 중" : runStatusLabel(statusValue)}</td>
@@ -571,6 +578,7 @@ export default function DisclosureAutomationPage() {
           </Card>
 
           <div ref={searchSettingsRef} className="scroll-mt-6 space-y-6">
+            {searchSettingsSelected ? <>
               <DisclosureSearchConditionCard
               options={downloadOptions}
               startDate={startDate}
@@ -602,10 +610,14 @@ export default function DisclosureAutomationPage() {
                 selectedDisclosures={disclosureTypeGroups}
                 onSelectedDisclosuresChange={(value) => { setDisclosureTypeGroups(value); setPlan(null); }}
               />
+            </> : <>
+              <DisclosureLockedSettingsCard title="검색 조건" />
+              <DisclosureLockedSettingsCard title="공시 종류" />
+            </>}
           </div>
 
           <div ref={filterSettingsRef} className="scroll-mt-6">
-            <DisclosureConditionFilterCard
+            {filterSettingsSelected ? <DisclosureConditionFilterCard
               conditions={conditions}
               onConditionsChange={(value) => { setConditions(value); setPlan(null); }}
               presets={presets || []}
@@ -618,11 +630,11 @@ export default function DisclosureAutomationPage() {
               onSavePreset={savePreset}
               onRenamePreset={renamePreset}
               onDeletePreset={deletePreset}
-            />
+            /> : <DisclosureLockedSettingsCard title="공시 조건" />}
           </div>
 
           <div ref={sectionSettingsRef} className="scroll-mt-6 space-y-4">
-            <HtmlSectionPatternCard
+            {sectionSettingsSelected || reviewPatterns.length ? <HtmlSectionPatternCard
               inputDirectory={`${dataRoot}/05-internal/.automation-current`}
               sectionPatterns={reviewPatterns}
               selectedPatternTocIds={reviewSelections}
@@ -640,7 +652,7 @@ export default function DisclosureAutomationPage() {
               decidedPatterns={reviewDecided}
               pending={!runResult || !!activeJobId || !!reviewPatterns.length}
               emptyText="판단이 필요한 새 목차 조합이 없습니다."
-            />
+            /> : <DisclosureLockedSettingsCard title="목차 조합 모아보기" />}
             <div>
               {reviewPatterns.length ? <Button onClick={runAfterReview} disabled={!!activeJobId}><RefreshCw className="mr-2 h-4 w-4" />후속 실행</Button> : null}
             </div>
@@ -663,7 +675,7 @@ export default function DisclosureAutomationPage() {
           activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} isCancellable={!!activeJobId} onCancel={cancelJob} />}
           notificationActive={isErrorStatus || !!reviewPatterns.length || !!notification}
           notificationResetKey={`${notification}:${reviewPatterns.length}`}
-          notificationContent={<div className="space-y-2 text-sm text-[var(--tv-text)]"><p className="whitespace-pre-wrap">{notification || "알림 없음"}</p>{reviewPatterns.length ? <p className="font-medium text-amber-700 dark:text-amber-300">목차 조합 {formatInteger(reviewPatterns.length)}개를 결정하세요.</p> : null}</div>}
+          notificationContent={<div className="space-y-2 text-sm text-[var(--tv-text)]"><p className="whitespace-pre-wrap">{notification || "알림 없음"}</p>{reviewPatterns.length ? <p className="font-medium text-amber-700 dark:text-amber-300">Pending · 목차 조합 {formatInteger(reviewPatterns.length)}개를 결정하세요.</p> : null}</div>}
           settingsTitle="실행 설정"
           settingsContent={
             <div className="space-y-4">
