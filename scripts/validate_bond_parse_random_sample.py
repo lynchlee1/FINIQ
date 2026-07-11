@@ -17,7 +17,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from finiq.market_desk.web.features.disclosures.html_parse_common import (  # noqa: E402
     _apply_parse_metadata,
-    _load_html_parse_metadata_index,
+    _load_html_parse_metadata,
 )
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance  # noqa: E402
 from finiq.market_desk.web.html_parsers.common import (  # noqa: E402
@@ -155,7 +155,7 @@ def validate_sample(
 
     rng = random.Random(seed)
     sample = rng.sample(html_files, sample_size)
-    metadata_index = _load_html_parse_metadata_index(input_directory)
+    metadata_index, _ = _load_html_parse_metadata(input_directory)
 
     records: list[dict[str, Any]] = []
     missing_records: list[dict[str, Any]] = []

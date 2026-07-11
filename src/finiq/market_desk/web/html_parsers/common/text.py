@@ -20,7 +20,7 @@ def element_text(element: etree._Element) -> str:
 def parse_int(value: str | None, *, dash_as_zero: bool = False) -> int | None:
     """쉼표가 포함된 문자열을 정수(int)형으로 변환한다."""
     text = _remove_grouping_spaces(clean_text(value))
-    if dash_as_zero and text in {"", "-"}:
+    if dash_as_zero and text == "-":
         return 0
     match = re.search(r"-?\d[\d,]*", text)
     if match is None:

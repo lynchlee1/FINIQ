@@ -107,6 +107,7 @@ class ParseRequest:
     output_path: Path
     html_files: list[Path]
     metadata_index: dict[str, dict[str, Any]]
+    families: dict[str, dict[str, Any]]
     limit: int | None
     skip_errors: bool
     progress_interval: int
@@ -228,16 +229,20 @@ def _normalize_listing_market(value: Any) -> str:
     return market
 
 
-def _load_html_parse_metadata_index(
+def _load_html_parse_metadata(
     input_directory: Path,
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     metadata_index: dict[str, dict[str, Any]] = {}
-    _merge_parse_metadata_from_directory(metadata_index, input_directory.parent)
-    return metadata_index
+    families: dict[str, dict[str, Any]] = {}
+    _merge_parse_metadata_from_directory(
+        metadata_index, families, input_directory.parent
+    )
+    return metadata_index, families
 
 
 def _merge_parse_metadata_from_directory(
     metadata_index: dict[str, dict[str, Any]],
+    families: dict[str, dict[str, Any]],
     directory: Path,
 ) -> None:
     filtered_metadata_index: dict[str, dict[str, Any]] = {}
@@ -247,9 +252,11 @@ def _merge_parse_metadata_from_directory(
         filtered_metadata_index = _load_filtered_metadata_index(filtered_path)
     compressed_path = directory / "compressed-external-html.json"
     if compressed_path.is_file():
-        compressed_metadata_index = _load_compressed_external_html_metadata_index(
-            compressed_path
-        )
+        (
+            compressed_metadata_index,
+            compressed_families,
+        ) = _load_compressed_external_html_metadata_index(compressed_path)
+        families.update(compressed_families)
     for acpt_no in sorted(set(filtered_metadata_index) | set(compressed_metadata_index)):
         metadata: dict[str, Any] = {}
         metadata.update(filtered_metadata_index.get(acpt_no, {}))
@@ -258,7 +265,7 @@ def _merge_parse_metadata_from_directory(
 
 
 def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
-    acpt_no = str(item.get("acpt_no") or "").strip()
+    acpt_no = str(item.get("acpt_no") or "")
     if not acpt_no:
         return None
     return acpt_no, {
@@ -270,7 +277,7 @@ def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] 
 def _compressed_external_html_metadata_item(
     item: dict[str, Any]
 ) -> tuple[str, dict[str, Any]] | None:
-    acpt_no = str(item.get("acpt_no") or "").strip()
+    acpt_no = str(item.get("acpt_no") or "")
     if not acpt_no:
         return None
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
@@ -304,7 +311,7 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, An
 
 def _load_compressed_external_html_metadata_index(
     compressed_path: Path,
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     try:
         payload = json.loads(compressed_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -312,7 +319,7 @@ def _load_compressed_external_html_metadata_index(
             f"외부 HTML 압축 JSON을 읽을 수 없습니다: {compressed_path}"
         ) from exc
     if not isinstance(payload, dict):
-        return {}
+        return {}, {}
     records = [item for item in payload.get("records") or [] if isinstance(item, dict)]
     selected_doc_to_record = {
         str(item.get("selected_main_doc_no") or "").strip(): item
@@ -320,6 +327,7 @@ def _load_compressed_external_html_metadata_index(
         if str(item.get("selected_main_doc_no") or "").strip()
     }
     metadata_index: dict[str, dict[str, Any]] = {}
+    families: dict[str, dict[str, Any]] = {}
     for item in records:
         if not isinstance(item, dict):
             continue
@@ -327,16 +335,20 @@ def _load_compressed_external_html_metadata_index(
         if parsed is not None:
             acpt_no, metadata = parsed
             family = _external_html_correction_family(item, selected_doc_to_record)
-            if family:
-                metadata["correction_families"] = family
+            if family is not None:
+                family_id, current_sequence, members = family
+                metadata["family_id"] = family_id
+                metadata["current_sequence"] = current_sequence
+                metadata["family_member_count"] = len(members)
+                families.setdefault(family_id, {"members": members})
             metadata_index[acpt_no] = metadata
-    return metadata_index
+    return metadata_index, families
 
 
 def _external_html_correction_family(
     item: dict[str, Any],
     selected_doc_to_record: dict[str, dict[str, Any]],
-) -> dict[str, Any] | None:
+) -> tuple[str, int, list[dict[str, Any]]] | None:
     main_docs = [
         doc
         for doc in item.get("docs") or []
@@ -358,7 +370,7 @@ def _external_html_correction_family(
         members.append(
             {
                 "sequence": sequence,
-                "acpt_no": str(member_record.get("acpt_no") or "").strip(),
+                "acpt_no": str(member_record.get("acpt_no") or ""),
                 "doc_no": doc_no,
                 "title": title,
                 "disclosed_at": str(metadata.get("disclosed_at") or "").strip(),
@@ -375,15 +387,10 @@ def _external_html_correction_family(
         ),
         None,
     )
-    family_id = str(members[-1].get("acpt_no") or "").strip()
+    family_id = str(members[-1].get("acpt_no") or "")
     if current_sequence is None or not family_id:
         return None
-    return {
-        family_id: {
-            "current_sequence": current_sequence,
-            "members": members,
-        }
-    }
+    return family_id, current_sequence, members
 
 
 def _external_main_doc_sort_key(doc: dict[str, Any]) -> tuple[int, str]:
@@ -396,50 +403,38 @@ def _external_doc_is_correction(doc: dict[str, Any], title: str) -> bool:
     return "정정" in text or "정정" in title
 
 
-def _correction_family_reference(
-    correction_families: Any,
-) -> tuple[str, int, int] | None:
-    if not isinstance(correction_families, dict) or not correction_families:
-        return None
-    family_id = str(next(iter(correction_families)))
-    family = correction_families.get(family_id)
-    if not family_id or not isinstance(family, dict):
-        return None
-    current_sequence = family.get("current_sequence")
-    members = family.get("members")
-    if not isinstance(current_sequence, int) or not isinstance(members, list):
-        return None
-    return family_id, current_sequence, len(members)
-
-
 def _apply_parse_metadata(
     record: dict[str, Any],
     metadata_index: dict[str, dict[str, Any]],
     *,
     mode: str,
 ) -> dict[str, Any]:
-    acpt_no = str(record.get("acpt_no") or "").strip()
+    acpt_no = str(record.get("acpt_no") or "")
     metadata = metadata_index.get(acpt_no) or {}
     market = metadata.get("market")
     company_name = metadata.get("company_name")
     doc_no = metadata.get("doc_no")
-    correction_families = metadata.get("correction_families")
+    family_id = str(metadata.get("family_id") or "")
+    current_sequence = metadata.get("current_sequence")
+    family_member_count = metadata.get("family_member_count")
     if (
         not market
         and not company_name
         and not doc_no
-        and not correction_families
+        and not family_id
     ):
         return record
     updated_record = dict(record)
     if doc_no and not updated_record.get("doc_no"):
         updated_record["doc_no"] = doc_no
-    family_reference = _correction_family_reference(correction_families)
-    if family_reference is not None:
-        family_id, current_sequence, member_count = family_reference
+    if (
+        family_id
+        and isinstance(current_sequence, int)
+        and isinstance(family_member_count, int)
+    ):
         updated_record["family_id"] = family_id
         updated_record["current_sequence"] = current_sequence
-        updated_record["family_member_count"] = member_count
+        updated_record["family_member_count"] = family_member_count
     if market:
         updated_record["상장구분"] = market
     if mode in {"bond_issuance", "rights_issuance"} and company_name:
@@ -504,16 +499,30 @@ def _parse_parallel_workers(value: Any, total_files: int) -> int:
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
     resolved_root = input_directory.resolve()
     candidates = [*resolved_root.glob("*.html"), *resolved_root.glob("*/*.html")]
-    files: list[Path] = []
+    resolved_files: set[Path] = set()
     for path in candidates:
         resolved_path = path.resolve()
         try:
             resolved_path.relative_to(resolved_root)
         except ValueError:
             continue
-        if resolved_path.is_file():
-            files.append(path)
-    files.sort()
+        if (
+            resolved_path.suffix.lower() == ".html"
+            and resolved_path.is_file()
+            and (
+                resolved_path.parent == resolved_root
+                or resolved_path.parent.parent == resolved_root
+            )
+        ):
+            resolved_files.add(resolved_path)
+
+    files = sorted(resolved_files)
+    stems: set[str] = set()
+    for path in files:
+        if path.stem in stems:
+            msg = f"duplicate HTML filename stem: {path.stem}"
+            raise ValueError(msg)
+        stems.add(path.stem)
     return files[:limit] if limit is not None else files
 
 
@@ -593,6 +602,7 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
     html_files = _collect_html_files(input_directory, limit)
+    metadata_index, families = _load_html_parse_metadata(input_directory)
 
     return ParseRequest(
         mode=mode,
@@ -600,7 +610,8 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
         input_directory=input_directory,
         output_path=output_path,
         html_files=html_files,
-        metadata_index=_load_html_parse_metadata_index(input_directory),
+        metadata_index=metadata_index,
+        families=families,
         limit=limit,
         skip_errors=bool(body.get("skip_errors", True)),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
@@ -631,7 +642,7 @@ def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, An
     }
     report_numbers: set[str] = set()
     for warning in warnings:
-        report_no = str(warning.get("acpt_no") or "").strip()
+        report_no = str(warning.get("acpt_no") or "")
         if not report_no:
             continue
         warning_message = str(warning.get("warning") or "").strip()
@@ -666,7 +677,7 @@ def _build_payload(
     input_directory: Path,
     html_files: list[Path],
     records: list[dict[str, Any]],
-    metadata_index: dict[str, dict[str, Any]],
+    families: dict[str, dict[str, Any]],
     errors: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
     filter_blocks: list[dict[str, Any]],
@@ -687,7 +698,7 @@ def _build_payload(
             "parsed_files": len(records),
             "failed_files": len(errors),
         },
-        "families": _saved_correction_families(records, metadata_index),
+        "families": _saved_families(records, families),
         "records": records,
         "errors": errors,
         "warnings": warnings,
@@ -713,7 +724,7 @@ def _payload_from_state(
         input_directory=request.input_directory,
         html_files=request.html_files,
         records=state.records,
-        metadata_index=request.metadata_index,
+        families=request.families,
         errors=state.errors,
         warnings=state.warnings,
         filter_blocks=request.filter_blocks,
@@ -760,22 +771,16 @@ def _record_without_raw_tables(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _saved_correction_families(
+def _saved_families(
     records: list[dict[str, Any]],
-    metadata_index: dict[str, dict[str, Any]],
+    family_registry: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     families: dict[str, Any] = {}
     for record in records:
-        family_id = str(record.get("family_id") or "").strip()
-        acpt_no = str(record.get("acpt_no") or "").strip()
-        if not family_id or not acpt_no or family_id in families:
+        family_id = str(record.get("family_id") or "")
+        if not family_id or family_id in families:
             continue
-        correction_families = (metadata_index.get(acpt_no) or {}).get(
-            "correction_families"
-        )
-        if not isinstance(correction_families, dict):
-            continue
-        family = correction_families.get(family_id)
+        family = family_registry.get(family_id)
         if not isinstance(family, dict):
             continue
         members = family.get("members")

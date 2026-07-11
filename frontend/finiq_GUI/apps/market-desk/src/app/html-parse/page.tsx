@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ExternalLink, Eye, Loader2, Play, Square } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
@@ -135,7 +135,7 @@ const buildWarningReports = (warnings: ParseWarningItem[]): WarningReport[] => {
 
   warnings.forEach((item) => {
     const warning = String(item.warning || "").trim();
-    const acptNo = String(item.acpt_no || "").trim();
+    const acptNo = String(item.acpt_no || "");
     if (!warning || !acptNo) return;
 
     const report = reportMap.get(acptNo) || {
@@ -178,7 +178,7 @@ const normalizeFilterCandidateExamples = (
       return { acpt_no: example };
     }
     return {
-      acpt_no: String(example.acpt_no || "").trim(),
+      acpt_no: String(example.acpt_no || ""),
     };
   }).filter((example) => example.acpt_no);
 };
@@ -256,6 +256,7 @@ export default function HtmlParsePage() {
   const [executionOptionExampleNotice, setExecutionOptionExampleNotice] = useState<ExecutionOptionExampleNotice | null>(null);
   const [notificationResetKey, setNotificationResetKey] = useState(0);
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
+  const filterCandidatesRequestIdRef = useRef(0);
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
@@ -304,6 +305,8 @@ export default function HtmlParsePage() {
   }, [defaultParallelWorkers, fetchSettings, setStatus, setIsErrorStatus]);
 
   const handleInputDirectoryChange = (val: string) => {
+    filterCandidatesRequestIdRef.current += 1;
+    setFilterCandidatesLoading(false);
     setInputDirectory(val);
     setSelectedExecutionOptionValues([]);
     setExecutionOptionCandidates([]);
@@ -318,6 +321,8 @@ export default function HtmlParsePage() {
   };
 
   const handleParseModeChange = (val: string) => {
+    filterCandidatesRequestIdRef.current += 1;
+    setFilterCandidatesLoading(false);
     setParseMode(val);
     setSelectedExecutionOptionValues([]);
     setExecutionOptionCandidates([]);
@@ -516,6 +521,8 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
       return;
     }
+    const requestId = filterCandidatesRequestIdRef.current + 1;
+    filterCandidatesRequestIdRef.current = requestId;
     setFilterCandidatesLoading(true);
     setIsErrorStatus(false);
     try {
@@ -541,15 +548,19 @@ export default function HtmlParsePage() {
         throw new Error(message || "필터 후보를 불러오지 못했습니다.");
       }
       const data = await response.json();
+      if (filterCandidatesRequestIdRef.current !== requestId) return;
       setExecutionOptionCandidates(Array.isArray(data.candidates) ? data.candidates : []);
       setExecutionOptionInputDirectory(String(data.input_directory || ""));
       setExecutionOptionExampleNotice(null);
       setStatus(`${executionOptionConfig.statusLabel} 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
     } catch (err: any) {
+      if (filterCandidatesRequestIdRef.current !== requestId) return;
       setStatus(err.message);
       setIsErrorStatus(true);
     } finally {
-      setFilterCandidatesLoading(false);
+      if (filterCandidatesRequestIdRef.current === requestId) {
+        setFilterCandidatesLoading(false);
+      }
     }
   };
 

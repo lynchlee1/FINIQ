@@ -8,7 +8,7 @@ from finiq.market_desk.web.features.disclosures.html_common import (
 from finiq.market_desk.web.features.disclosures.html_parse_common import *
 
 def _record_family_info(record: dict[str, Any]) -> tuple[str, int | None, int | None]:
-    family_id = str(record.get("family_id") or "").strip()
+    family_id = str(record.get("family_id") or "")
     current_sequence = record.get("current_sequence")
     member_count = record.get("family_member_count")
     return (

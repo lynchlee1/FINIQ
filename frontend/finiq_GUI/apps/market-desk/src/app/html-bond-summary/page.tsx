@@ -91,7 +91,7 @@ export default function HtmlBondSummaryPage() {
   const getRecordKey = (record: any) => `${record.acpt_no || ""}:${record.index || ""}`;
 
   const getKindDisclosureUrl = (record: any) => {
-    const acptNo = String(record?.acpt_no || "").trim();
+    const acptNo = String(record?.acpt_no || "");
     const docNo = String(record?.doc_no || "").trim();
     if (!acptNo) return "";
     return `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=${encodeURIComponent(acptNo)}&docno=${encodeURIComponent(docNo)}&viewerhost=&viewerport=`;

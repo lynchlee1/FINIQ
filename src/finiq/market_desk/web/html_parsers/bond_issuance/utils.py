@@ -60,10 +60,12 @@ class _BondRows:
         return value_after(self.containing(row_needle, *additional_needles), label)
 
     def last_value(self, *needles: str) -> str | None:
-        return last_value(self.containing(*needles))
+        row = self.containing(*needles)
+        return last_value(row) if len(row) > 1 else None
 
     def last_labeled_value(self, label: str) -> str | None:
-        return last_value(self.with_label(label))
+        row = self.with_label(label)
+        return last_value(row) if len(row) > 1 else None
 
     def last_int(self, *needles: str) -> int | None:
         return last_int(self.containing(*needles))
