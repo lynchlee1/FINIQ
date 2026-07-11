@@ -20,9 +20,9 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Disclosure automation unresolved decision state | 판단 필요 | Use when a new section pattern or another configured judgment boundary requires user input. Do not silently include or exclude the affected item. |
 | Disclosure automation interrupted-run continuation action | 이어서 실행 | Creates a successor run with the same revision, execution mask, and search snapshot; it does not change the original run back to running. Reuse already validated artifacts. |
 | Disclosure automation review-resolution successor run | 후속 실행 | Starts a new run on the successor profile revision after a decision; do not label this as `이어서 실행`. |
-| Disclosure automation per-run stage selector | 이번 실행 | Selects the immutable execution mask for the next run without changing the profile's persistent `사용` toggles. |
-| Disclosure automation subset run action | 선택 작업 실행 | Runs only the selected execution mask after prerequisite preflight. It may populate cache without publishing a generation. |
-| Disclosure automation disabled plan action | 사용 안 함 | The profile's persistent stage toggle is off. A mask-excluded enabled stage is still shown as `재사용` or `차단됨`. |
+| Disclosure automation continuous work range | 시작·종료 작업 선택 | Show this with endpoint icons, two task-name selectors, and a continuous highlighted rail. Every task between the endpoints is included automatically; do not expose stage numbers or independent per-task toggles. |
+| Disclosure automation settings jump action | 바로가기 | Scrolls from a judgment task in `작업표` to the matching shared settings card on the same page. Do not add a separate `설정` column. |
+| Disclosure automation disabled plan action | 사용 안 함 | Plan state for a task outside the selected continuous work range. |
 | Disclosure automation reuse plan action | 재사용 | A validated artifact with the same input fingerprint will be reused. |
 | Disclosure automation process plan action | 실행 예정 | New or stale entities will be processed. |
 | Disclosure automation removal plan action | 제외 예정 | Removes entities from the next generation membership without deleting their cache. |

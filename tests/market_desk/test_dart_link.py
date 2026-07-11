@@ -391,6 +391,42 @@ def test_unchanged_matched_link_is_reused_without_query(tmp_path: Path) -> None:
     assert second_client.calls == []
 
 
+def test_kind_acpt_no_is_preserved_in_sidecar_and_cache_identity(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    now = datetime(2026, 7, 11, tzinfo=timezone.utc)
+    spaced_record = _kind_record(acpt_no=" report ")
+
+    build_dart_links_payload(
+        {
+            "data_root": str(data_root),
+            "records": [spaced_record],
+            "corp_code_records": CORP_CODES,
+        },
+        client=FakeDartClient([_dart_record()]),
+        now=now,
+    )
+
+    partition_path = data_root / "01-list" / "dart-links" / "years" / "2025.json"
+    partition = json.loads(partition_path.read_text(encoding="utf-8"))
+    assert partition["links"][0]["acpt_no"] == " report "
+
+    client = FakeDartClient([_dart_record()])
+    result = build_dart_links_payload(
+        {
+            "data_root": str(data_root),
+            "records": [_kind_record(acpt_no="report")],
+            "corp_code_records": CORP_CODES,
+        },
+        client=client,
+        now=now,
+    )
+
+    assert result["summary"]["reused"] == 0
+    assert len(client.calls) == 1
+
+
 def test_corrupt_matched_link_is_not_reused(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
     now = datetime(2026, 7, 11, tzinfo=timezone.utc)
@@ -570,6 +606,42 @@ def test_corp_code_list_is_cached_without_api_key(tmp_path: Path) -> None:
 
     assert result["summary"]["matched"] == 1
     assert len(second_client.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "cached_records",
+    [
+        [],
+        [{"corp_code": "invalid", "corp_name": "삼성전자"}],
+        [{"corp_code": "00126380", "corp_name": ""}],
+    ],
+)
+def test_invalid_corp_code_cache_is_refetched(
+    tmp_path: Path, cached_records: list[dict[str, str]]
+) -> None:
+    data_root = tmp_path / "workspace"
+    cache_path = data_root / "01-list" / "dart-links" / "cache" / "corp-codes.json"
+    cache_path.parent.mkdir(parents=True)
+    cache_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_dart_corp_codes_v1",
+                "fetched_at": "2026-07-11T00:00:00+00:00",
+                "records": cached_records,
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeFullDartClient([_dart_record()])
+
+    result = build_dart_links_payload(
+        {"data_root": str(data_root), "records": [_kind_record()]},
+        client=client,
+        now=datetime(2026, 7, 12, tzinfo=timezone.utc),
+    )
+
+    assert client.corp_code_calls == 1
+    assert result["summary"]["matched"] == 1
 
 
 def test_dart_link_build_api_contract(monkeypatch: pytest.MonkeyPatch) -> None:

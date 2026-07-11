@@ -47,6 +47,9 @@ from finiq.market_desk.web.features.disclosures.table_export import build_disclo
 from finiq.market_desk.web.features.disclosure_workflow.dart_link import (
     build_dart_links_payload,
 )
+from finiq.market_desk.web.features.disclosure_workflow.automation import (
+    build_automation_plan_payload,
+)
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
     atomic_write_json,
@@ -236,6 +239,41 @@ def create_workflows_router(
             return prepare_disclosure_workspace_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosure-workflows/plan")
+    async def build_disclosure_automation_plan(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(build_automation_plan_payload, payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosure-workflows/run/start")
+    async def start_disclosure_automation(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
+        try:
+            build_automation_plan_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return _start_background_job(
+            kind="disclosure_automation",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.get("/api/disclosure-workflows/jobs/{job_id}")
+    async def get_disclosure_automation_job(job_id: str):
+        return _job_snapshot(job_id)
+
+    @router.post("/api/disclosure-workflows/run/cancel")
+    async def cancel_disclosure_automation(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
 
     @router.post("/api/disclosures/dart-links/build")
     async def build_dart_links(payload: dict[str, Any]):

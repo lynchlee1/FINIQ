@@ -7,6 +7,7 @@ from finiq.market_desk.web.features.disclosures.html_common import *
 def download_disclosure_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Download KIND viewer HTML files for receipt numbers found in the request JSON."""
     output_directory = str(body.get("output_directory") or "").strip()
@@ -137,7 +138,8 @@ def download_disclosure_html_payload(
                         ),
                         skip_existing=False,
                         progress_callback=handle_progress,
-                        cancel_check=lambda: _is_cancelled(cancel_token),
+                        cancel_check=lambda: _is_cancelled(cancel_token)
+                        or bool(cancel_check and cancel_check()),
                         max_workers=int(body.get("max_workers") or 5),
                         max_retries=int(body.get("max_retries") or 2),
                     )
@@ -175,5 +177,4 @@ def download_disclosure_html_payload(
         "manifest_path": str(manifest_path),
         "progress_log": progress_log[-100:],
     }
-
 

@@ -501,6 +501,10 @@ export default function HtmlSectionSplitPage() {
     });
   };
 
+  const setPatternSelection = (signature: string, tocIds: string[]) => {
+    setSelectedPatternTocIds((current) => ({ ...current, [signature]: tocIds }));
+  };
+
   const cancelInspectFolder = () => {
     inspectAbortControllerRef.current?.abort();
     inspectAbortControllerRef.current = null;
@@ -585,6 +589,7 @@ export default function HtmlSectionSplitPage() {
             onNextPage={handleNextPage}
             onSelectSection={setSelectedSectionId}
             onTogglePatternSection={togglePatternSection}
+            onSetPatternSelection={setPatternSelection}
           />
 
           <HtmlWorkflowCard title="작업 실행">

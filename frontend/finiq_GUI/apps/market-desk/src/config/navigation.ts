@@ -54,12 +54,13 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
   "disclosure-build": {
     id: "disclosure-build",
     label: "공시데이터",
-    basePath: "/download",
+    basePath: "/disclosure-automation",
     layout: "job",
     steps: [
-      { href: "/download", step: 1, label: "공시내역 다운로드" },
-      { href: "/table", step: 2, label: "공시내역 변환" },
-      { href: "/filter", step: 3, label: "공시내역 필터링" },
+      { href: "/disclosure-automation", step: 1, label: "공시 자동화" },
+      { href: "/download", step: 2, label: "공시내역 다운로드" },
+      { href: "/table", step: 3, label: "공시내역 변환" },
+      { href: "/filter", step: 4, label: "공시내역 필터링" },
     ],
   },
   "html-processing": {
@@ -172,8 +173,12 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
     title: WORKFLOWS["disclosure-build"].label,
     groups: [
       {
+        label: "공시 자동화",
+        steps: [WORKFLOWS["disclosure-build"].steps[0]],
+      },
+      {
         label: "공시 제목 분석",
-        steps: WORKFLOWS["disclosure-build"].steps,
+        steps: WORKFLOWS["disclosure-build"].steps.slice(1),
       },
       {
         label: "공시 내용 분석",
