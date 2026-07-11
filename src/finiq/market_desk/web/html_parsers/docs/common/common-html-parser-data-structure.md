@@ -65,6 +65,7 @@
 - `직접 반환값`은 이 함수를 호출한 직후 받는 결과를 뜻한다. 아직 저장용 형태로 바뀌기 전의 결과물이다.
 - 각 `parse_*()`는 먼저 공통 정보가 들어 있는 base record를 받아 모드별로 필요한 필드를 추가해서 반환한다.
 - parser는 HTML의 표에서 필요한 행과 값을 찾는 동안 각 항목이 잘 처리되었는지 기록한다. 기록할 내용이 하나라도 발생하면 `field_parse_status`에 저장하고, 하나도 발생하지 않으면 빈 `field_parse_status`를 만들지 않는다.
+- 상태가 `source_not_found`인 값은 `null`로 저장하고 반드시 strong 수준의 warning을 만든다. 목록의 일부 값만 찾지 못했으면 그 값만 `null`로 저장하고, 목록 전체의 원천을 찾지 못했으면 필드 자체를 `null`로 저장한다.
 - 문제가 발견되면 `parse_warnings`에 warning을 심각도에 따라 기록한다. warning이 없는 빈 목록은 record에 추가하지 않는다.
 
 | 필드 | 들어가는 warning |
