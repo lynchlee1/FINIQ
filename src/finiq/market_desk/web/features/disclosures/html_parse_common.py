@@ -231,26 +231,21 @@ def _normalize_listing_market(value: Any) -> str:
 
 def _load_html_parse_metadata(
     input_directory: Path,
+    *,
+    filtered_metadata_path: Path | None = None,
+    compressed_metadata_path: Path | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     metadata_index: dict[str, dict[str, Any]] = {}
     families: dict[str, dict[str, Any]] = {}
-    _merge_parse_metadata_from_directory(
-        metadata_index, families, input_directory.parent
+    filtered_path = filtered_metadata_path or input_directory.parent / "filtered.json"
+    compressed_path = (
+        compressed_metadata_path
+        or input_directory.parent / "compressed-external-html.json"
     )
-    return metadata_index, families
-
-
-def _merge_parse_metadata_from_directory(
-    metadata_index: dict[str, dict[str, Any]],
-    families: dict[str, dict[str, Any]],
-    directory: Path,
-) -> None:
     filtered_metadata_index: dict[str, dict[str, Any]] = {}
     compressed_metadata_index: dict[str, dict[str, Any]] = {}
-    filtered_path = directory / "filtered.json"
     if filtered_path.is_file():
         filtered_metadata_index = _load_filtered_metadata_index(filtered_path)
-    compressed_path = directory / "compressed-external-html.json"
     if compressed_path.is_file():
         (
             compressed_metadata_index,
@@ -262,6 +257,7 @@ def _merge_parse_metadata_from_directory(
         metadata.update(filtered_metadata_index.get(acpt_no, {}))
         metadata.update(compressed_metadata_index.get(acpt_no, {}))
         metadata_index[acpt_no] = metadata
+    return metadata_index, families
 
 
 def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -271,6 +267,7 @@ def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] 
     return acpt_no, {
         "market": _normalize_listing_market(item.get("market")),
         "company_name": str(item.get("company_name") or "").strip(),
+        "disclosed_at": str(item.get("disclosed_at") or "").strip(),
     }
 
 
@@ -413,6 +410,7 @@ def _apply_parse_metadata(
     metadata = metadata_index.get(acpt_no) or {}
     market = metadata.get("market")
     company_name = metadata.get("company_name")
+    disclosed_at = str(metadata.get("disclosed_at") or "").strip()
     doc_no = metadata.get("doc_no")
     family_id = str(metadata.get("family_id") or "")
     current_sequence = metadata.get("current_sequence")
@@ -420,11 +418,14 @@ def _apply_parse_metadata(
     if (
         not market
         and not company_name
+        and not disclosed_at
         and not doc_no
         and not family_id
     ):
         return record
     updated_record = dict(record)
+    if disclosed_at:
+        updated_record["disclosed_at"] = disclosed_at
     if doc_no and not updated_record.get("doc_no"):
         updated_record["doc_no"] = doc_no
     if (
@@ -602,7 +603,18 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
     html_files = _collect_html_files(input_directory, limit)
-    metadata_index, families = _load_html_parse_metadata(input_directory)
+    metadata_paths: dict[str, Path | None] = {}
+    for key in ("filtered_metadata_path", "compressed_metadata_path"):
+        raw_path = str(body.get(key) or "").strip()
+        path = Path(raw_path).expanduser().resolve() if raw_path else None
+        if path is not None and not path.is_file():
+            raise ValueError(f"{key} does not exist: {path}")
+        metadata_paths[key] = path
+    metadata_index, families = _load_html_parse_metadata(
+        input_directory,
+        filtered_metadata_path=metadata_paths["filtered_metadata_path"],
+        compressed_metadata_path=metadata_paths["compressed_metadata_path"],
+    )
 
     return ParseRequest(
         mode=mode,

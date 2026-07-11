@@ -27,6 +27,30 @@
 - 프로젝트 금지 경로인 `resources/`는 읽거나 변경하지 않았다.
 - 문서 diff와 Markdown 구조 검사를 완료했다.
 
+## 2026-07-11 — 최종 공시 데이터의 KIND 공시시간 보존
+
+### Purpose
+
+- KIND 공시목록의 `disclosed_at` 날짜·시간을 SoT로 삼아 Stage 7 최종
+  `parsed-<mode>.json`의 각 record에 보존한다.
+- DART의 날짜 metadata나 parser 반환값이 KIND 공시시간을 덮어쓰지 않게 한다.
+
+### Implementation summary
+
+- `filtered.json.disclosures[].disclosed_at`을 HTML parse metadata index에 포함하고 최종
+  `records[].disclosed_at`에 그대로 저장한다.
+- legacy 인접 metadata 경로를 유지하면서 canonical workspace에서는
+  `03-filter/filtered.json`과 `04-external/compressed-external-html.json`을 명시적으로
+  Stage 7에 전달한다.
+- 명시한 metadata 파일이 없으면 시간을 조용히 누락하지 않고 실행을 실패시킨다.
+
+### Verification
+
+- `HH:MM` 보존, 저장 JSON 재로드, parser 값보다 KIND 값 우선, canonical workspace의
+  Stage 3→7 metadata 연결, 명시 metadata 누락 실패를 합성 fixture로 확인했다.
+- 보호된 parser 데이터 구조 문서는 변경하지 않았고 `resources/`는 읽거나 변경하지
+  않았다.
+
 ## 2026-07-11 — KIND↔DART 연결 및 공시 data workspace 기반
 
 ### Purpose

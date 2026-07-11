@@ -104,6 +104,12 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     assert converted["output_directory"] == str(
         workspace.converted / "bond_issuance"
     )
+    assert converted["filtered_metadata_path"] == str(
+        workspace.filtered / "filtered.json"
+    )
+    assert converted["compressed_metadata_path"] == str(
+        workspace.external / "compressed-external-html.json"
+    )
 
 
 def test_workspace_defaults_preserve_explicit_paths(tmp_path: Path) -> None:
@@ -115,11 +121,15 @@ def test_workspace_defaults_preserve_explicit_paths(tmp_path: Path) -> None:
             "mode": "bond_issuance",
             "input_directory": str(explicit / "input"),
             "output_directory": str(explicit / "output"),
+            "filtered_metadata_path": str(explicit / "filtered.json"),
+            "compressed_metadata_path": str(explicit / "compressed.json"),
         },
     )
 
     assert payload["input_directory"] == str(explicit / "input")
     assert payload["output_directory"] == str(explicit / "output")
+    assert payload["filtered_metadata_path"] == str(explicit / "filtered.json")
+    assert payload["compressed_metadata_path"] == str(explicit / "compressed.json")
 
 
 def test_workspace_prepare_api(tmp_path: Path) -> None:

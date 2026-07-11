@@ -51,6 +51,7 @@ KIND가 검색 snapshot token이나 cursor를 제공하지 않는 현재 계약�
 | canonical identity | KIND record는 `acpt_no` 단독을 primary key로 사용한다. 문자열 그대로 보존한다. |
 | `doc_no` | viewer 문서 선택과 내부 HTML revision에만 사용한다. |
 | `rcept_no` | KIND/parser record에는 생성하지 않는다. OpenDART 목록으로 검증한 연결 sidecar에만 저장한다. |
+| `disclosed_at` | KIND 공시목록의 날짜·시간 전체를 SoT로 보존한다. DART `rcept_dt`로 덮어쓰지 않는다. |
 | 저장 기본 | 자동화 profile에서 4·5·6 산출물은 `분할저장=true`를 기본으로 한다. 기존 저수준 API 기본값은 호환성을 위해 즉시 바꾸지 않는다. |
 | 6번 산출물 | 선택된 목차를 이어 붙인 공시별 HTML 1개를 원본과 같은 연도 상대 경로에 쓴다. TOC별 폴더를 만들지 않는다. |
 | 7번 필터 | 자동화에서는 비운다. 판단 필터는 3번으로, 목차 판단은 6번으로 모은다. parser mode는 기술 routing 설정이다. |
@@ -1588,9 +1589,10 @@ record에 적용한다. metadata만 바뀌면 HTML parser를 다시 돌리지 �
 다시 계산한다. 여기서 metadata는 stage contract상 enrichment-only field를 뜻하며,
 parser-input projection field는 제외한다.
 
-`filtered.json`은 회사명·상장구분 보강에만 사용하고 `doc_no`나 family source로 쓰지
-않는다. correction family는 Stage 4 compact `mainDoc` 관계에서 계산한다. OpenDART
-연결 sidecar의 `rcept_no`도 parser core/family 계산에 주입하지 않는다.
+`filtered.json`은 회사명·상장구분과 KIND `disclosed_at` 보강에 사용하고 `doc_no`나
+family source로 쓰지 않는다. `disclosed_at`은 `HH:MM`을 포함한 KIND 값을 최종
+`records[]`에 그대로 저장한다. correction family는 Stage 4 compact `mainDoc` 관계에서
+계산한다. OpenDART 연결 sidecar의 `rcept_no`도 parser core/family 계산에 주입하지 않는다.
 
 새 정정공시가 들어오면 family의 다음 값이 기존 구성원 전체에서 바뀔 수 있다.
 
@@ -2331,6 +2333,8 @@ import 과정은 기존 file을 이동·삭제하지 않는다. 새 ledger와 ar
 108. 취소를 page 사이에서 확인하고 DART API key/error 원문을 artifact/log에 미저장
 109. DART 원문 HTML endpoint 호출 0회와 `contains_dart_html=false`
 110. invalid KIND date는 임의 year 대신 `undated.json`의 명시 unresolved 상태로 저장
+111. KIND `disclosed_at`의 `HH:MM`이 Stage 3 metadata에서 Stage 7 최종 record까지 보존
+112. parser/DART 값이 있어도 최종 `disclosed_at`은 KIND metadata 값으로 결정
 
 ## 27. 최종 acceptance 기준
 
