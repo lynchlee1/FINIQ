@@ -1,154 +1,209 @@
 # HTML 파서 공통 예외 처리 규칙
 
-공통 table, base record, 저장 payload의 필드 구조는
-[HTML 파서 공통 데이터 구조](./common-html-parser-data-structure.md)를 따른다.
-공통 parsing 동작은
-[HTML 파서 공통 로직 규칙](./common-html-parser-logic-rules.md)을 따른다.
+- 이 문서에서 `record`는 HTML 파일 한 건을 파싱한 결과를 뜻한다.
+- 이 문서에서 `payload`는 여러 `record`와 경고, 오류를 모은 최종 결과를 뜻한다.
+- 이 문서에서 파서인 `parser`는 HTML에서 필요한 값을 찾아 `record`에 넣는 함수를 뜻한다.
+- 이 문서에서 `worker`는 HTML 파일 하나의 처리를 맡는 작업자이다.
 
-이 문서에서는 세 가지 결과를 구분한다.
+### 상태, 경고, 오류
+1. **차이점**
+- 상태: 각 항목을 어떻게 처리했는지 기록.
+  - `record`의 `field_parse_status`, 필요한 경우 `field_parse_status_detail`에 저장
+- 경고: `record`가 만들어졌지만 확인할 문제가 있다.
+  - `record`의 경고 목록과 `payload` 바로 아래의 `warnings[]`에 저장
+- 오류: `record`가 만들어지지 못했다.
+  - `skip_errors=True`일 때 `payload` 바로 아래의 `errors[]`에 저장
+2. **주의사항**
+- 상태와 경고는 함께 생길 수도 있다.
+- 오류가 발생한 파일은 일부 항목만 채운 `record`도 저장하지 않는다.
+- 오류가 발생한 파일은 오류가 발생하기 전에 만든 상태와 경고도 최종 `payload`에 저장하지 않는다. 
+- 저장 조건에서 제외된 `record`는 실패한 것이 아니므로 오류로 기록하지 않는다.
 
-- 상태는 한 필드의 값을 찾았는지 설명한다.
-- warning은 확인할 문제가 있지만 해당 record를 저장할 수 있다는 뜻이다.
-- error는 해당 HTML 파일의 record를 만들지 못했다는 뜻이다.
+### 상태
+1. **상태 기록 규칙**
+- `field_parse_status`에 `항목명: 상태` 형식으로 저장한다.
+- 파서는 HTML을 **처리하는 동안** 각 항목의 처리 결과를 기록한다.
+  - 모든 추출이 끝난 뒤 저장된 값을 보고 상태를 추측하거나 덮어쓰는 동작은 **치명적인 실패**로 간주한다.
+2. **상태의 종류**
+- `parsed`: 파서가 정해진 위치에서 0이 아닌 값을 읽었다.
+- `explicit_zero`: 파서가 정해진 위치에서 공란, 대시 또는 0을 읽었다.
+- `source_not_found`: 파서가 정해진 값을 찾지 못했다. 
+  - 원문에서 위치를 찾지 못한 경우, 값이 빈 경우, 숫자로 바꾸지 못한 경우 등이 포함될 수 있다.
 
-worker는 HTML 파일을 하나씩 맡아 처리하는 실행 단위이다. worker를 여러 개 쓰면 여러 파일을 동시에 처리할 수 있다.
+- 예를 들어 저장값이 둘 다 0이어도 아래 두 경우의 상태는 다르다.
+  - 원문에서 0을 확인함 : `explicit_zero`
+  - 원문에서 사용할 값을 찾지 못함 : `source_not_found`
+- `source_not_found`라고 해서 반드시 경고가 생기는 것은 아니다. 경고 여부와 수준도 각 파서 문서에서 정한다.
+  - 의도 : 저장값만으로 구분하기 어려운 추출 결과를 상태로 확인하게 한다.
+2. **상태 항목을 만드는 조건**
+- 기록할 상태가 하나라도 있을 때만 `field_parse_status`를 만든다.
+- 기록할 상태가 없으면 빈 `field_parse_status`를 만들지 않는다.
+- 파서는 자신이 상태를 정의한 항목만 기록한다.
+- 공통 처리 과정은 빠진 업무 항목의 상태를 임의로 채우지 않는다.
+- 더 자세한 상태가 필요하면 `field_parse_status_detail`을 사용할 수 있다.
+- 예를 들어 한 항목 안에서 보통주식과 기타주식의 상태를 따로 기록할 수 있다.
+- 실제로 기록할 세부 상태가 없으면 빈 `field_parse_status_detail`을 만들지 않는다.
+- 파서가 만든 상태는 외부 정보 연결, 저장 조건 확인, 저장 단계에서 바꾸지 않는다.
+  - 의도 : 아무 내용 없는 상태 정보를 만들지 않고 파서가 판단한 상태를 그대로 보존한다.
+3. **파서별 추가 상태**
+- 공시 종류에 따라 `not_applicable`, `source_found_empty` 같은 상태를 추가로 사용할 수 있다.
+- 추가 상태의 이름과 뜻은 해당 파서 문서에서 정한다.
+- 공통 처리 과정은 추가 상태를 다른 상태로 바꾸지 않는다.
+  - 의도 : 공시 종류마다 다른 업무 의미를 그대로 유지한다.
 
-### 필드 상태 전달
-1. **공통 상태 형식**
-- parser는 각 값을 추출하면서 원문에서 표·행·값을 찾고 해석한 결과를 `field_parse_status` 객체에 `항목명: 상태` 형식으로 기록할 수 있다.
-- 모든 추출이 끝난 뒤 저장값만 보고 상태를 다시 추측하지 않는다. 추출 과정에서 기록한 상태를 최종 record에 연결한다.
-- 공통으로 사용하는 상태의 뜻은 아래와 같다.
+### 파서가 만드는 경고
+1. **`record` 안의 경고 목록**
+- 경고는 사람이 읽을 수 있는 비어 있지 않은 문장이다.
+- 파서는 모든 경고를 `parse_warnings`에 넣는다.
+- 같은 경고를 아래 수준별 목록 중 하나에도 넣는다.
 
-| 상태 | 쉬운 설명 | 세부 판정 |
-|---|---|---|
-| `parsed` | parser가 정한 위치에서 값을 읽었다. | parser별 문서 |
-| `explicit_zero` | 값의 원천은 있지만 0, 대시 또는 빈 결과를 parser 규칙에 따라 명시적 0에 해당하는 결과로 해석했다. | parser별 문서 |
-| `source_not_found` | parser가 정한 출처에서 저장할 수 있는 값을 얻지 못했다. 출처 누락뿐 아니라 빈 값이나 숫자 변환 실패도 개별 parser 규칙에 따라 포함될 수 있다. | parser별 문서 |
-
-- 저장 결과가 0이나 빈 값처럼 같아 보여도, 원문에서 0을 읽은 `explicit_zero`와 사용할 값을 얻지 못한 `source_not_found`는 다른 상태이다.
-  - 의도 : 저장값만 보면 구분하기 어려운 정상 추출, 명시적 0, 사용할 값을 얻지 못한 경우를 따로 확인하게 한다.
-2. **parser별 추가 상태**
-- 공시 유형에 따라 `not_applicable`, `source_found_empty` 같은 추가 상태를 사용할 수 있다.
-- 추가 상태의 정확한 조건은 해당 parser 문서에서 정의한다.
-- `field_parse_status_detail`도 필요한 parser만 사용하며, 예를 들어 하나의 필드 안에서 주식 종류별 상태를 따로 기록할 수 있다.
-  - 의도 : 공통 형식은 공유하되 공시 유형마다 다른 업무 의미를 공통 코드가 임의로 해석하지 않게 한다.
-
-### parser warning 수집
-1. **parser가 반환하는 목록**
-- parser는 모든 경고를 모은 `parse_warnings`와 수준별 목록인 `weak_warning`, `medium_warning`, `strong_warning`을 반환할 수 있다.
-- warning의 구체적인 발생 조건은 개별 parser 문서에서 정의한다.
-
-| 수준 | 공통 workflow에서의 의미 |
+| 목록 | 뜻 |
 |---|---|
-| `weak_warning` | parser가 약한 수준으로 분류한 warning |
-| `medium_warning` | parser가 중간 수준으로 분류했거나 수준을 정하지 못한 warning |
-| `strong_warning` | parser가 강한 수준으로 분류한 warning |
+| `weak_warning` | 약한 수준의 경고 |
+| `medium_warning` | 중간 수준의 경고 |
+| `strong_warning` | 강한 수준의 경고 |
 
-- 수준 이름만 공통이며, 어떤 문제가 어느 수준인지는 개별 parser가 결정한다.
-  - 의도 : 공시 유형별 판단은 유지하면서 최종 payload의 warning 모양은 같게 만든다.
-2. **중복 제거와 수준 결정**
-- 공통 workflow는 같은 warning 문자열을 한 파일에서 한 번만 수집한다.
-- 수준은 `weak_warning` → `medium_warning` → `strong_warning` 순서로 목록을 확인해 처음 발견한 수준을 사용한다.
-- `parse_warnings`에만 있고 수준별 목록에는 없는 warning은 `medium_warning`으로 분류한다.
-- 알 수 없는 수준 이름도 최종 집계에서는 `medium_warning`으로 처리한다.
-  - 의도 : 같은 문장을 여러 목록에 넣어도 최종 warning이 반복되지 않게 하고, 수준 없는 warning도 빠뜨리지 않는다.
-3. **filter와 warning**
-- parser 성공 후 외부 metadata를 연결한 record가 모든 filter를 통과할 때만 그 record와 warning을 최종 payload에 넣는다.
-- filter에서 제외된 record의 warning은 `warnings[]`와 warning 집계에 포함하지 않는다.
-  - 의도 : 최종 `records[]`에 없는 공시의 warning이 결과 건수에 섞이지 않게 한다.
+- 같은 경고를 각 목록에 한 번만 넣는다.
+- 어떤 경고가 어느 수준인지는 각 파서 문서에서 정한다.
+- 경고가 하나도 없으면 `parse_warnings`를 만들지 않는다.
+- 특정 수준의 경고가 없으면 그 수준의 빈 목록도 만들지 않는다.
+  - 의도 : 빈 목록은 저장하지 않고 실제 경고와 그 수준만 `record`에 남긴다.
+2. **`payload` 바로 아래에 `warnings[]` 만들기**
+- 파서가 만든 경고 목록은 최종 `record`에 그대로 남는다.
+- 공통 처리 과정은 같은 경고를 `payload` 바로 아래의 `warnings[]`에도 따로 정리한다.
+- 이때 원래 경고를 `record`에서 빼거나 옮기지 않는다.
+- 경고 문장의 앞뒤 공백은 제거한다.
+- 같은 문장이 한 파일의 여러 경고 목록에 있어도 `payload`의 `warnings[]`에는 한 번만 넣는다.
+- 경고 수준은 아래 순서로 확인한다.
+  1. `weak_warning`
+  2. `medium_warning`
+  3. `strong_warning`
+- 같은 문장이 실수로 여러 수준에 들어 있으면 위 순서에서 먼저 찾은 수준을 사용한다.
+- `payload`의 `warnings[]`에 넣는 문장 순서는 먼저 `parse_warnings`의 순서를 따른다.
+- `parse_warnings`에 없고 수준별 목록에만 있는 문장은 약한 수준, 중간 수준, 강한 수준 순서로 뒤에 넣는다.
+- `parse_warnings`에만 있고 수준별 목록에는 없는 문장은 `medium_warning`으로 처리한다.
+- 약함, 중간, 강함 중 하나가 아닌 수준은 경고 개수를 계산할 때 `medium_warning`으로 처리한다.
+  - 의도 : 경고가 중복되거나 수준이 빠져도 최종 목록에서 사라지지 않게 한다.
+3. **저장 조건과 경고**
+- 파서가 성공하면 `record`에 외부 정보를 연결한 뒤 저장 조건을 확인한다.
+- `record`가 모든 저장 조건을 통과해야 `record`와 경고를 최종 `payload`에 넣는다.
+- 저장 조건에서 제외된 `record`의 경고는 `warnings[]`와 `warning_report_counts`에 넣지 않는다.
+  - 의도 : 최종 `records[]`에 없는 공시의 경고가 개수 계산에 섞이지 않게 한다.
 
-### workflow warning 구조
-1. **warnings 항목**
-- 최종 payload의 `warnings[]`에서 warning 하나는 아래 필드를 가진다.
+### 최종 경고 구조
+1. **경고 항목**
+- 최종 `payload`의 `warnings[]`에서 경고 하나는 아래 항목을 가진다.
 
-| 필드 | 값 |
+| 항목 | 값 |
 |---|---|
-| `index` | 정렬된 전체 입력 파일에서 현재 파일의 1부터 시작하는 순서 |
+| `index` | 정렬과 `limit` 적용 후 선택한 파일 중 현재 파일의 순서, 첫 번째는 1 |
 | `total` | 처리 대상으로 선택한 전체 HTML 파일 수 |
-| `mode` | 실행한 parser mode |
-| `acpt_no` | 입력 경로의 `Path.stem` |
+| `mode` | 실행한 파서 종류 |
+| `acpt_no` | 확장자를 뺀 입력 파일명 |
 | `warning` | 사람이 읽는 경고 문장 |
 | `level` | `weak_warning`, `medium_warning`, `strong_warning` 중 하나 |
-| `warning_code` | 프로그램이 구분하기 위한 짧은 code |
+| `warning_code` | 프로그램이 경고 종류를 구분할 때 쓰는 짧은 구분값 |
 
-  - 의도 : 사람이 원인을 읽을 수 있고 프로그램도 수준과 종류를 일정한 값으로 구분할 수 있게 한다.
-2. **warning code 변환**
-- 공통 workflow는 warning 문자열을 아래 순서의 규칙으로 code로 바꾼다.
+- 경고 항목에는 개별 파일명이나 경로를 넣지 않는다.
+- 원문은 `payload` 바로 아래의 `input_directory`와 경고의 `acpt_no`로 찾는다.
+  - 의도 : 사람은 문장을 읽고, 프로그램은 수준과 `warning_code`로 경고를 구분하게 한다.
+2. **`warning_code` 결정**
+- 공통 처리 과정은 경고 문장을 위에서부터 아래 순서로 확인한다.
+- 먼저 맞는 조건 하나의 `warning_code`만 사용한다.
 
-| warning 조건 | `warning_code` |
+| 경고 조건 | `warning_code` |
 |---|---|
-| 사채 메인 table 누락 문장과 정확히 일치 | `bond_main_table_missing` |
-| 유무상증자 유형 판정 실패 문장과 정확히 일치 | `rights_issue_type_missing` |
+| 사채 발행 주요 표 누락을 알리는 정해진 문장과 정확히 같음 | `bond_main_table_missing` |
+| 유무상증자 유형 판정 실패 문장과 정확히 같음 | `rights_issue_type_missing` |
 | `발행목적: 자금조달 목적 합계`로 시작 | `bond_funding_purpose_sum_mismatch` |
 | `투자자: 발행권면총액 합계`로 시작 | `bond_investor_sum_mismatch` |
-| `: 정해진 출처에서 값을 찾지 못했습니다.`를 포함 | `source_not_found:<첫 콜론 앞의 필드명>` |
-| 위 규칙에 해당하지 않음 | `parse_warning` |
+| `: 정해진 출처에서 값을 찾지 못했습니다.`를 포함 | `source_not_found:<첫 콜론 앞의 항목명>` |
+| 위 조건에 맞지 않음 | `parse_warning` |
 
-- 공통 workflow는 code를 정하기 위해 원문 table을 다시 검사하지 않고 parser가 반환한 warning 문자열만 사용한다.
-  - 의도 : parser의 추출 판단과 workflow의 출력 변환 책임을 분리한다.
-3. **warning_report_counts**
-- `warning_report_counts.count`는 최종 warning 항목의 전체 수이고 `report_count`는 warning이 하나 이상인 서로 다른 report 번호 수이다.
-- `weak_warning`, `medium_warning`, `strong_warning` 아래에도 같은 방식으로 수준별 `count`, `report_count`, `reports`를 기록한다.
-- 파일을 구분하는 report 번호는 warning 항목의 `acpt_no`이다.
-  - 의도 : warning 문장 수와 warning이 발생한 공시 수를 따로 확인하게 한다.
+- `warning_code`를 정할 때 원문 `table`이나 `field_parse_status`를 다시 확인하지 않는다.
+- 파서가 만든 경고 문장만 사용한다.
+  - 의도 : 값 추출은 파서가 판단하고, 공통 처리 과정은 경고를 저장 형태로 바꾸는 일만 맡는다.
+3. **`warning_report_counts`**
+- `warning_report_counts`는 경고 개수를 모아 둔 항목이다.
+- `warning_report_counts.count`는 최종 `warnings[]`에 있는 경고 문장 수이다.
+- `warning_report_counts.report_count`는 경고가 하나 이상 있는 서로 다른 `acpt_no` 수이다.
+- 예를 들어 같은 공시에서 경고가 2개 나오면 `count`는 2이고 `report_count`는 1이다.
+- `weak_warning`, `medium_warning`, `strong_warning` 아래에도 수준별 `count`, `report_count`, `reports`를 기록한다.
+- `reports[acpt_no].count`는 그 공시에서 해당 수준의 경고가 몇 개 나왔는지 나타낸다.
+- `reports[acpt_no].warnings`는 그 경고 문장들을 담은 목록이다.
+- 경고가 없는 수준도 `count: 0`, `report_count: 0`, `reports: {}`로 저장한다.
+  - 의도 : 경고 문장 수와 경고가 나온 공시 수를 따로 확인하게 한다.
 
-### 파일별 parsing error
-1. **skip_errors=True**
-- HTML 파일을 읽거나 parser를 실행하거나 parser 반환값의 내부 필드·metadata·warning을 처리하는 도중 파일별 예외가 나면 그 파일의 record는 저장하지 않는다.
-- 예외를 `errors[]`에 기록하고 다음 파일을 계속 처리한다.
-- worker를 여러 개 쓰는 병렬 실행에서는 worker가 반환한 결과에 filter를 적용하고 최종 목록에 넣는 단계가 파일별 예외 처리 밖에 있다. 이 단계의 예외는 `skip_errors=True`여도 전체 실행 오류로 전달한다.
-- error 하나는 아래 필드를 가진다.
-
-| 필드 | 값 |
+### HTML 파일별 오류
+1. **skip_errors**
+- `skip_errors`는 HTML 파일 하나를 처리하는 중에 생긴 오류를 어떻게 다룰지 정하는 설정이다.
+- `skip_errors=True`인 경우 오류가 생기면 그 파일의 `record`와 `warning`을 기록하지 않고 오류를 `errors[]`에 기록한 다음 나머지 파일을 계속 처리한다.
+  - 단, 확장자를 뺀 파일명이 같은 HTML 파일이 두 개 이상인 경우 · 정정공시 묶음인 `family`를 만드는 중 실패한 경우 · 최종 `payload`를 만들거나 저장하는 중 실패한 경우 `skip_errors`와 관계없이 전체 실행을 중단한다.
+- `skip_errors=False`인 경우 오류가 생기면 전체 실행을 중단한다. 중단된 실행은 `payload`를 돌려주지 않고 저장도 하지 않는다.
+2. **오류 관련 field**
+| 항목 | 값 |
 |---|---|
-| `index` | 현재 파일의 1부터 시작하는 입력 순서 |
-| `total` | 전체 처리 대상 HTML 파일 수 |
-| `mode` | 실행한 parser mode |
-| `acpt_no` | 입력 경로의 `Path.stem` |
-| `error_type` | 발생한 예외 class 이름 |
-| `error` | 예외 message |
-
-  - 의도 : 일부 파일이 깨져도 대량 실행을 이어 가면서 실패한 파일과 원인을 남긴다.
-2. **skip_errors=False**
-- 첫 번째 파일별 parsing 예외에서 전체 실행을 중단하고 `ValueError`로 전달한다.
-- message에는 파일 순서, 파일명, 원래 예외 class 이름과 message가 포함된다.
-- 중단된 실행은 정상적인 최종 payload를 반환하지 않는다.
-  - 의도 : 호출자가 하나의 실패도 허용하지 않는 실행 방식을 명시적으로 선택할 수 있게 한다.
-3. **skip_errors가 적용되지 않는 오류**
-- mode, 입력·출력 디렉토리, `limit`, 진행 간격 같은 실행 옵션 검증은 파일 처리 전에 끝난다.
-- 외부 metadata JSON 읽기와 정정공시 family 구성도 파일 처리 전에 끝난다.
-- 따라서 이 단계의 오류는 `skip_errors=True`여도 파일별 `errors[]`로 바꾸지 않고 전체 실행 오류로 전달한다.
-- JSON 문법이 잘못된 외부 metadata나 정수로 바꿀 수 없는 `option_index`가 여기에 해당한다.
-  - 의도 : 모든 파일에 공통으로 영향을 주는 설정·metadata 문제를 한 파일의 문제처럼 숨기지 않는다.
+| `index` | 정렬과 `limit` 적용 후 선택한 파일 중 현재 파일의 순서, 첫 번째는 1 |
+| `total` | 처리 대상으로 선택한 전체 HTML 파일 수 |
+| `mode` | 실행한 파서 종류 |
+| `acpt_no` | 확장자를 뺀 입력 파일명 |
+| `error_type` | 발생한 오류 종류의 이름 |
+| `error` | 오류를 설명하는 문장 |
 
 ### 병렬 처리, 저장, 중지
 1. **결과 순서**
-- worker가 여러 개여도 완료된 결과를 바로 저장하지 않고 입력 순서가 된 결과부터 `records[]`, `warnings[]`, `errors[]`에 반영한다.
-- 앞 파일이 늦게 끝나면 뒤 파일의 완료 결과는 잠시 기다린다.
-  - 의도 : 컴퓨터의 처리 속도 차이와 관계없이 같은 입력에서 같은 결과 순서를 유지한다.
+- `worker`가 여러 개여도 먼저 끝난 결과를 바로 최종 목록에 넣지 않는다.
+- 입력 파일 순서에 맞는 결과부터 `records[]`, `warnings[]`, `errors[]`에 넣는다.
+- 앞 파일이 늦게 끝나면 뒤 파일의 결과는 잠시 기다린다.
+  - 의도 : 같은 입력이면 컴퓨터의 처리 속도와 관계없이 결과 순서를 같게 만든다.
 2. **중간 저장**
-- 성공 record, filter에서 제외된 record, error를 모두 포함해 이번 실행에서 처리 완료한 파일 수를 센다.
-- 이 수가 `progress_interval`의 배수가 될 때 현재까지의 payload를 출력 JSON에 저장한다.
-- 실행이 끝나면 같은 경로에 최종 payload를 다시 저장한다.
-  - 의도 : 긴 실행 중에도 일정한 파일 수마다 현재 결과를 확인할 수 있게 한다.
+- 이번 실행에서 처리가 끝난 파일 수를 센다.
+- 아래 세 경우는 모두 처리가 끝난 파일 한 건으로 센다.
+  - 성공하고 최종 `record`에 들어간 파일
+  - 성공했지만 저장 조건에서 제외된 파일
+  - `skip_errors=True`로 오류를 기록한 파일
+- `progress_interval`은 몇 파일마다 중간 저장할지 정하는 값이다.
+- 처리한 파일 수가 `progress_interval`의 배수가 되면 현재 `payload`를 중간 저장한다.
+- 실행 중에 저장한 `payload`의 `cancelled`는 `false`이다.
+- 정상적으로 끝나거나 중지 요청을 반영해 끝나면 같은 경로에 최종 `payload`를 다시 저장한다.
+  - 의도 : 실행 시간이 길어도 일정한 간격으로 현재 결과를 확인하게 한다.
 3. **중지 요청**
-- worker 하나로 처리할 때 `cancel_token`으로 중지 요청을 받으면 다음 파일을 시작하지 않는다. 다만 중지 요청 당시 이미 처리 중인 파일은 끝까지 처리하고 그 결과가 최종 payload에 포함될 수 있다.
-- worker를 여러 개 쓰는 병렬 실행은 중지를 확인한 뒤 새 파일을 worker에게 넘기지 않는다. 다만 중지 전에 이미 넘겨서 실행 중인 파일은 끝까지 처리하고 그 결과가 최종 payload에 포함될 수 있다.
-- 이때 payload의 `cancelled`는 `true`가 된다.
-- 중지는 parsing error로 기록하지 않는다.
-  - 의도 : 사용자가 작업을 멈춘 경우와 HTML 처리 실패를 구분한다.
+- `worker`가 1개이면 현재 파일을 마친 뒤 다음 파일을 시작하지 않는다.
+- `worker`가 여러 개이면 중지 확인 뒤 새 파일을 `worker`에게 주지 않는다.
+- 중지 전에 이미 `worker`에게 준 파일은 끝까지 처리할 수 있다.
+- 이 파일의 결과는 최종 `payload`에 들어갈 수 있다.
+- 중지된 최종 `payload`의 `cancelled`는 `true`이다.
+- 처음 선택한 전체 파일 수인 `summary.found_files`와 경고·오류의 `total`은 바뀌지 않는다.
+- `parsed_files`는 저장된 `record` 수이고, `failed_files`는 저장된 오류 수이다.
+- `records[]`, `warnings[]`, `errors[]`, `parsed_files`, `failed_files`에는 실제로 결과에 반영된 내용만 들어간다.
+- 중지 요청은 파일 처리 오류로 기록하지 않는다.
+  - 의도 : 사용자가 중지한 경우와 HTML 처리에 실패한 경우를 구분한다.
 
-### 미리보기와 필터 후보의 오류 처리
-1. **parse preview**
-- preview 생성 중 한 HTML 파일의 parsing이 실패하면 `index`, `acpt_no`, `error`를 preview의 `errors[]`에 넣고 다음 파일을 계속 확인한다.
-- preview는 본 실행의 `skip_errors` 옵션을 사용하지 않는다.
-  - 의도 : 일부 미리보기 후보가 깨져도 요청한 개수만큼 다른 성공 record를 찾을 수 있게 한다.
-2. **source preview**
-- payload 최상위 `input_directory`와 record의 `acpt_no`로 flat 또는 연도별 원문을 찾지 못했거나 원문 table 재구성에 실패하면 `source_preview.available`을 `false`로 반환한다.
-- `source_preview`는 바깥 preview record의 `acpt_no`와 payload 최상위 `input_directory`를 사용하며 식별자와 경로를 중복하지 않는다.
-- 가능한 경우 `error`에 이유를 넣고, 해당 record의 나머지 미리보기 응답은 유지한다.
-  - 의도 : 원문 table 표시 실패와 이미 parsing된 업무 필드 결과를 분리한다.
-3. **필터 후보 생성**
-- 모든 HTML에서 필드 후보값을 모으는 중 개별 파일이 실패하면 그 파일을 후보 응답의 `errors[]`에 기록하고 나머지 파일은 계속 처리한다.
-- 후보 예시와 오류 항목은 `acpt_no`로 파일을 식별하고 개별 파일명이나 경로를 저장하지 않는다.
-  - 의도 : 일부 파일의 실패 때문에 다른 파일에서 정상적으로 읽은 후보값까지 버리지 않는다.
+### 미리보기와 저장 조건 후보의 오류 처리
+1. **파싱 결과 미리보기**
+- `mode`, 입력 폴더, `limit`, 외부 정보를 준비하는 중 오류가 생기면 미리보기를 만들지 못한 것으로 처리한다.
+- HTML 파일 하나를 파싱하거나 외부 정보를 연결하는 중 실패하면 미리보기의 `errors[]`에 기록한다.
+- 미리보기 오류 하나는 `index`, `acpt_no`, `error`를 가진다.
+- 그 뒤의 파일은 계속 확인한다.
+- 성공한 `record`가 요청한 `limit`만큼 모이면 더 뒤의 파일은 확인하지 않는다.
+- 따라서 미리보기의 `errors[]`에는 실제로 확인한 파일의 오류만 들어간다.
+- 미리보기는 본 실행의 `skip_errors` 설정을 사용하지 않는다.
+  - 의도 : 일부 파일이 깨져도 다른 파일에서 요청한 수만큼 결과를 미리 보여 준다.
+2. **원문 미리보기 (`source_preview`)**
+- `payload` 바로 아래의 `input_directory`와 `record`의 `acpt_no`로 원문 HTML을 찾는다.
+- 한 폴더에 모아 둔 저장 위치와 연도별 저장 위치를 모두 확인한다.
+- 원문을 찾지 못하면 `source_preview.available`을 `false`로 돌려준다.
+- 원문을 읽거나 HTML 표를 다시 만드는 중 실패해도 `available`을 `false`로 돌려준다.
+- 가능한 경우 `error`에 이유를 넣는다.
+- 원문 미리보기가 실패해도 이미 파싱한 업무 항목 결과는 유지한다.
+- `source_preview` 안에 `acpt_no`나 원문 경로를 다시 넣지 않는다.
+- 성공한 `source_preview`의 구조와 표시 제한은 공통 데이터 구조 문서를 따른다.
+  - 의도 : 원문 표 표시 실패 때문에 이미 만든 업무 항목 결과까지 버리지 않는다.
+3. **저장 조건 후보 생성**
+- `mode`, 입력 폴더, 대상 항목, 외부 정보를 준비하는 중 오류가 생기면 후보를 만들지 못한 것으로 처리한다.
+- HTML 파일 하나를 파싱하거나 외부 정보를 연결하는 중 실패하면 후보 결과의 `errors[]`에 기록한다.
+- 후보 오류 하나는 `index`, `acpt_no`, `error`를 가진다.
+- 그 뒤의 파일은 계속 처리한다.
+- 후보 예시와 오류 항목은 `acpt_no`로 파일을 구분한다.
+- 개별 파일명이나 경로는 저장하지 않는다.
+  - 의도 : 일부 파일이 실패해도 다른 파일에서 읽은 정상 후보값은 유지한다.

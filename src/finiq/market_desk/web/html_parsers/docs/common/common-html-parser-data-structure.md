@@ -1,12 +1,6 @@
 # HTML 파서 공통 데이터 구조
 
-- 공통 parsing 동작은
-[HTML 파서 공통 로직 규칙](./common-html-parser-logic-rules.md)을 따른다.
-- 상태, 경고, 실행 오류 처리는
-[HTML 파서 공통 예외 처리 규칙](./common-html-parser-exception-handling.md)을 따른다.
-
-- 이 문서에서 `record`는 HTML 파일 한 건을 parsing한 결과이고,
-`payload`는 여러 record와 warning, error를 한 파일에 모은 최종 결과를 뜻한다.
+- 이 문서에서 `record`는 HTML 파일 한 건을 parsing한 결과이고, `payload`는 여러 record와 warning, error를 한 파일에 모은 최종 결과를 뜻한다.
 
 ### 공통 table 구조
 1. **raw_tables**
