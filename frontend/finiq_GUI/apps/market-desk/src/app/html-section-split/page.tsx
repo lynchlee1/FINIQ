@@ -69,7 +69,7 @@ function defaultPatternTocIds(patterns: SectionPattern[]) {
 }
 
 export default function HtmlSectionSplitPage() {
-  const { fetchSettings, saveSetting } = useSettingsStore();
+  const { output_root: dataRoot, fetchSettings, saveSetting } = useSettingsStore();
   const [loading, setLoading] = useState(true);
   const [inputDirectory, setInputDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -296,6 +296,7 @@ export default function HtmlSectionSplitPage() {
         headers: { "Content-Type": "application/json" },
         signal: abortController.signal,
         body: JSON.stringify({
+          data_root: dataRoot,
           input_directory: targetInputDirectory,
         }),
       });
@@ -378,6 +379,7 @@ export default function HtmlSectionSplitPage() {
         headers: { "Content-Type": "application/json" },
         signal: abortController.signal,
         body: JSON.stringify({
+          data_root: dataRoot,
           input_directory: inputDirectory,
           page: targetPage,
           page_size: Number(limit || 20),
@@ -521,6 +523,7 @@ export default function HtmlSectionSplitPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          data_root: dataRoot,
           input_directory: inputDirectory,
           output_directory: outputDirectory,
           workers: parseOptionalNumber(workers),

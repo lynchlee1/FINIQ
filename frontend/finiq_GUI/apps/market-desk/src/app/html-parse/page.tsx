@@ -185,6 +185,7 @@ const normalizeFilterCandidateExamples = (
 
 export default function HtmlParsePage() {
   const {
+    output_root: dataRoot,
     condition_presets: presets,
     fetchSettings,
     parallel_worker_count: defaultParallelWorkers,
@@ -328,7 +329,11 @@ export default function HtmlParsePage() {
     setExecutionOptionCandidates([]);
     setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
-    saveSetting("html_parse_mode", val);
+    void saveSetting("html_parse_mode", val).then(() => {
+      setOutputDirectory(
+        useSettingsStore.getState().html_parse_output_directory || "",
+      );
+    });
   };
 
   const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
@@ -454,6 +459,7 @@ export default function HtmlParsePage() {
     setWarningOpenPages({});
 
     const payload = {
+      data_root: dataRoot,
       input_directory: inputDirectory,
       output_directory: outputDirectory,
       mode: parseMode,
@@ -530,6 +536,7 @@ export default function HtmlParsePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          data_root: dataRoot,
           input_directory: inputDirectory,
           mode: parseMode,
           field: executionOptionConfig.field,
@@ -579,6 +586,7 @@ export default function HtmlParsePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          data_root: dataRoot,
           input_directory: inputDirectory,
           mode: parseMode,
           limit: 3,

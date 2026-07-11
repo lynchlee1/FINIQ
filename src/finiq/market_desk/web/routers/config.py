@@ -24,6 +24,10 @@ from finiq.market_desk.web.features.market_data.service_common import (
     PRICE_SOURCE_LABELS,
     PRICE_SOURCE_QUANTI,
 )
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    disclosure_workspace_settings,
+    prepare_disclosure_workspace_payload,
+)
 
 
 class SettingsUpdate(BaseModel):
@@ -139,26 +143,40 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
 
     def config_payload(*, include_discovery: bool = False) -> dict[str, Any]:
         price_root = config.price_root_directory or str(Path(config.quanti_dir).expanduser().parent)
+        workspace_defaults = disclosure_workspace_settings(
+            config.output_root,
+            mode=config.html_parse_mode or "bond_issuance",
+        )
         payload = {
             "parallel_worker_count": max(1, os.cpu_count() or 1),
             "output_root": config.output_root,
             "quanti_dir": config.quanti_dir,
             "price_root_directory": price_root,
-            "download_output_directory": config.download_output_directory or config.output_root,
-            "sqlite_output_directory": config.sqlite_output_directory or config.output_root,
-            "sqlite_manifest_path": config.sqlite_manifest_path,
-            "html_output_directory": config.html_output_directory or f"{config.output_root}/viewer_html",
-            "html_content_output_directory": config.html_content_output_directory or f"{config.output_root}/viewer_html_contents",
-            "html_section_split_output_directory": config.html_section_split_output_directory,
-            "html_transfer_directory": config.html_transfer_directory or f"{config.output_root}/.finiq/transfers",
-            "html_parse_output_directory": config.html_parse_output_directory,
-            "html_parse_result_path": config.html_parse_result_path,
+            "download_output_directory": config.download_output_directory
+            or workspace_defaults["download_output_directory"],
+            "sqlite_output_directory": config.sqlite_output_directory
+            or workspace_defaults["sqlite_output_directory"],
+            "sqlite_manifest_path": config.sqlite_manifest_path
+            or workspace_defaults["sqlite_manifest_path"],
+            "html_output_directory": config.html_output_directory
+            or workspace_defaults["html_output_directory"],
+            "html_content_output_directory": config.html_content_output_directory
+            or workspace_defaults["html_content_output_directory"],
+            "html_section_split_output_directory": config.html_section_split_output_directory
+            or workspace_defaults["html_section_split_output_directory"],
+            "html_transfer_directory": config.html_transfer_directory
+            or workspace_defaults["html_transfer_directory"],
+            "html_parse_output_directory": config.html_parse_output_directory
+            or workspace_defaults["html_parse_output_directory"],
+            "html_parse_result_path": config.html_parse_result_path
+            or workspace_defaults["html_parse_result_path"],
             "html_parse_mode": config.html_parse_mode,
             "price_files": [],
             "selected_price_path": config.quanti_dir,
             "classification_files": [],
             "selected_classification_path": config.selected_classification_path,
-            "sqlite_source_path": config.sqlite_source_path,
+            "sqlite_source_path": config.sqlite_source_path
+            or workspace_defaults["sqlite_source_path"],
             "integrated_merge_input_path": config.integrated_merge_input_path,
             "integrated_merge_output_path": config.integrated_merge_output_path,
             "integrated_history_item_registry_path": config.integrated_history_item_registry_path,
@@ -171,11 +189,16 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "asset_excel_cleanup_merged_items": config.asset_excel_cleanup_merged_items,
             "asset_excel_duplicate_scan_recursive": config.asset_excel_duplicate_scan_recursive,
             "asset_excel_account_mappings": config.asset_excel_account_mappings,
-            "html_download_source_path": config.html_download_source_path,
-            "html_merge_output_path": config.html_merge_output_path,
-            "html_content_compressed_json_path": config.html_content_compressed_json_path,
-            "html_external_compress_input_directory": config.html_external_compress_input_directory,
-            "html_external_compress_output_directory": config.html_external_compress_output_directory,
+            "html_download_source_path": config.html_download_source_path
+            or workspace_defaults["html_download_source_path"],
+            "html_merge_output_path": config.html_merge_output_path
+            or workspace_defaults["html_merge_output_path"],
+            "html_content_compressed_json_path": config.html_content_compressed_json_path
+            or workspace_defaults["html_content_compressed_json_path"],
+            "html_external_compress_input_directory": config.html_external_compress_input_directory
+            or workspace_defaults["html_external_compress_input_directory"],
+            "html_external_compress_output_directory": config.html_external_compress_output_directory
+            or workspace_defaults["html_external_compress_output_directory"],
             "integrated_data_values": config.integrated_data_values,
             "change_log_date_thresholds": config.change_log_date_thresholds,
             "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
@@ -211,6 +234,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             val = getattr(config, key)
             if isinstance(val, (str, int, float, bool, dict, list)):
                 current_settings[key] = val
+        original_settings = dict(current_settings)
 
         for key, value in payload.items():
             if value is None:
@@ -231,6 +255,39 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 normalized = normalize_path(str(value))
             setattr(config, key, normalized)
             current_settings[key] = normalized
+
+        workspace_setting_changed = (
+            "output_root" in payload or "html_parse_mode" in payload
+        )
+        if workspace_setting_changed and str(config.output_root or "").strip():
+            parse_mode = str(config.html_parse_mode or "bond_issuance").strip()
+            try:
+                prepare_disclosure_workspace_payload(
+                    {"data_root": config.output_root, "modes": [parse_mode]}
+                )
+                workspace_settings = disclosure_workspace_settings(
+                    config.output_root, mode=parse_mode
+                )
+            except ValueError as exc:
+                for key, value in original_settings.items():
+                    setattr(config, key, value)
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            keys_to_update = (
+                workspace_settings
+                if "output_root" in payload
+                else {
+                    key: workspace_settings[key]
+                    for key in (
+                        "html_parse_output_directory",
+                        "html_parse_result_path",
+                    )
+                }
+            )
+            for key, value in keys_to_update.items():
+                if key in payload:
+                    continue
+                setattr(config, key, value)
+                current_settings[key] = value
 
         save_settings(config.settings_path, current_settings)
         return config_payload()

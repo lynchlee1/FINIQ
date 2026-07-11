@@ -146,7 +146,11 @@ export default function DownloadPage() {
   const checkExistingRequestRef = useRef({ id: 0, key: "" });
   const [lastInspectedExistingKey, setLastInspectedExistingKey] = useState<string | null>(null);
 
-  const { download_output_directory: outputDirectory, saveSetting } = useSettingsStore();
+  const {
+    output_root: dataRoot,
+    download_output_directory: outputDirectory,
+    saveSetting,
+  } = useSettingsStore();
 
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
     pollingEndpoint: "/api/download/jobs/{jobId}",
@@ -417,6 +421,7 @@ export default function DownloadPage() {
 
 
   const buildPayload = (): DownloadPayload => ({
+    data_root: dataRoot,
     mode: "yearly",
     output_directory: outputDirectory,
     start_date: startDate,

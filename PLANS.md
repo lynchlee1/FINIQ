@@ -84,3 +84,32 @@
   DART HTML 미호출, workspace Stage 1–7 경로를 unit/API test로 확인했다.
 - 관련 MarketDesk 회귀 test와 diff/static 검사를 실행했다.
 - 프로젝트 금지 경로인 `resources/`는 읽거나 변경하지 않았다.
+
+## 2026-07-11 — 기존 공시 1–7 화면의 canonical workspace 자동 적용
+
+### Purpose
+
+- 기존 공시 상세 workflow에서도 `output_root` 하나만 지정하면 `01-list`부터
+  `07-converted/<mode>`까지 입력·출력 경로가 자동 연결되게 한다.
+- 사용자 지정 stage 경로는 유지하면서 분할 저장을 기본값으로 적용한다.
+
+### Implementation summary
+
+- 공통 workspace-to-settings mapping을 추가하고, `output_root` 저장 시 stage directory와
+  manifest를 생성한 뒤 기존 설정 전체를 canonical 경로로 갱신한다.
+- parser mode만 바꾸면 `07-converted/<mode>` 경로만 갱신하고, 같은 요청에 명시한 개별
+  stage 경로는 override로 보존한다.
+- 기존 1–7 GUI payload에 `data_root`를 연결하고 설정 저장 응답의 전체 mapping을 즉시
+  반영한다. Stage 4·5 화면의 연도별 분할 저장 기본값을 활성화했다.
+- Stage 2 output을 `02-table` root로 통일하고 Stage 3/DART가 실제
+  `*_shards/*.sqlite_manifest.json`을 directory에서 resolve하게 했다.
+- Stage 7 실행·미리보기·필터 후보가 canonical Stage 3/4 metadata를 동일하게 읽도록
+  연결했다.
+
+### Verification
+
+- root-only 설정 저장, stage directory/manifest 생성, 누락된 legacy 설정 기본값,
+  명시 override 보존, parser mode 전환, Stage 1–7 경로 mapping을 합성 임시 경로로
+  검증했다.
+- 관련 backend 회귀 테스트, Python compile, frontend TypeScript 검사를 실행했다.
+- 실제 `resources/`는 읽거나 변경하지 않았다.

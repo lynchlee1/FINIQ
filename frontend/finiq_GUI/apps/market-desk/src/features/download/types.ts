@@ -17,6 +17,7 @@ export type DownloadOptions = {
 };
 
 export type DownloadPayload = {
+  data_root: string;
   mode: "yearly";
   output_directory: string;
   start_date: string;

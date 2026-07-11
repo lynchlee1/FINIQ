@@ -92,6 +92,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const variantConfig = DOWNLOAD_VARIANTS[variant];
 
   const {
+    output_root: dataRoot,
     fetchSettings,
     saveSetting,
   } = useSettingsStore();
@@ -173,10 +174,10 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [waitSeconds, setWaitSeconds] = useState("0");
   const [limit, setLimit] = useState("");
   const [skipExisting, setSkipExisting] = useState(true);
-  const [downloadSplitByYear, setDownloadSplitByYear] = useState(false);
-  const [contentSourceSplitByYear, setContentSourceSplitByYear] = useState(false);
-  const [compressSplitByYear, setCompressSplitByYear] = useState(false);
-  const [mergeSplitByYear, setMergeSplitByYear] = useState(false);
+  const [downloadSplitByYear, setDownloadSplitByYear] = useState(true);
+  const [contentSourceSplitByYear, setContentSourceSplitByYear] = useState(true);
+  const [compressSplitByYear, setCompressSplitByYear] = useState(true);
+  const [mergeSplitByYear, setMergeSplitByYear] = useState(true);
   const [progressInterval, setProgressInterval] = useState("10");
   const [mergeOutputPath, setMergeOutputPath] = useState("");
 
@@ -268,6 +269,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     : variantConfig.sourceRequiredMessage;
 
   const buildRunPayload = useCallback((cancelToken: string) => ({
+      data_root: dataRoot,
       output_directory: outputDirectory,
       ...sourcePayload(),
       timeout: Number(timeout),
@@ -281,6 +283,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       progress_interval: Number(progressInterval),
       cancel_token: cancelToken,
   }), [
+    dataRoot,
     outputDirectory,
     sourcePayload,
     timeout,
@@ -315,6 +318,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   };
 
   const buildCleanupPayload = useCallback((dryRun: boolean) => ({
+    data_root: dataRoot,
     output_directory: outputDirectory,
     ...sourcePayload(),
     limit: limit ? Number(limit) : null,
@@ -325,6 +329,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
   }), [
+    dataRoot,
     outputDirectory,
     sourcePayload,
     limit,
@@ -553,6 +558,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     }
     const defaultOutputPath = mergeSplitByYear ? outputDirectory : `${outputDirectory}/merged-content-html.json`;
     const payload = {
+      data_root: dataRoot,
       input_directory: outputDirectory,
       output_path: mergeOutputPath || defaultOutputPath,
       split_by_year: mergeSplitByYear,
@@ -576,6 +582,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       return;
     }
     const payload = {
+      data_root: dataRoot,
       input_directory: compressInputDirectory,
       output_directory: compressOutputDirectory,
       split_by_year: compressSplitByYear,

@@ -1022,9 +1022,31 @@ fallback은 금지한다.
 `POST /api/disclosures/workspace/prepare`는 위 7개 canonical root와 안전하게 검증한
 `07-converted/<mode>`를 만들고 `disclosure-workspace.json`을 원자적으로 기록한다.
 기존 저수준 API는 `data_root`가 있을 때만 stage 기본 경로를 채우며 사용자가 명시한
-경로는 덮어쓰지 않는다. Stage 2 writer가 실제로 만드는
-`02-table/disclosures.sqlite_manifest_shards/disclosures.sqlite_manifest.json`을 Stage 3와
-DART link source가 그대로 참조한다.
+경로는 덮어쓰지 않는다. 설정 화면에서 `output_root`만 저장해도 이를 canonical
+`data_root`로 사용해 기존 1–7 화면의 입력·출력 설정을 다음과 같이 함께 갱신한다.
+
+```text
+<output_root>/
+  01-list/
+  02-table/
+  03-filter/filtered.json
+  04-external/compressed-external-html.json
+  05-internal/
+  06-sections/
+  07-converted/<mode>/parsed-<mode>.json
+```
+
+따라서 `output_root=/.../resources`만 지정하면 위 모든 경로가 `resources/` 바로 아래에
+생성된다. 같은 설정 요청에 개별 stage 경로를 함께 명시한 경우에는 그 override를
+보존한다. parser mode만 변경하면 다른 stage 경로는 유지하고
+`07-converted/<mode>`와 결과 경로만 바꾼다. 기존 설정 파일에 stage 경로가 빠져 있어도
+시작 시 같은 mapping을 기본값으로 채우며, GUI 설정 store는 root 저장 응답의 전체
+mapping을 즉시 반영한다.
+
+Stage 2 writer는 입력 이름에 따라
+`02-table/*_shards/*.sqlite_manifest.json`을 만들 수 있으므로 Stage 3와 DART link source는
+고정 filename을 추측하지 않고 `02-table` root에서 유효한 manifest를 resolve한다.
+Stage 4·5의 기존 화면은 분할 저장을 기본값으로 시작한다.
 
 이 adapter는 기존 7개 handler를 새 경로에 연결하는 기반이다. 아직 SQLite 실행 원장,
 entity fingerprint planner, immutable generation/publish pointer 전체를 구현한 것은 아니다.
@@ -2335,6 +2357,14 @@ import 과정은 기존 file을 이동·삭제하지 않는다. 새 ledger와 ar
 110. invalid KIND date는 임의 year 대신 `undated.json`의 명시 unresolved 상태로 저장
 111. KIND `disclosed_at`의 `HH:MM`이 Stage 3 metadata에서 Stage 7 최종 record까지 보존
 112. parser/DART 값이 있어도 최종 `disclosed_at`은 KIND metadata 값으로 결정
+
+### 기존 1–7 화면의 canonical workspace 적용
+
+113. `output_root`만 저장하면 `01-list`부터 `07-converted/<mode>`까지 생성되고 모든 기존
+     stage 설정이 canonical 경로로 갱신
+114. root와 개별 stage 경로를 같은 요청에 저장하면 개별 경로 override 보존
+115. parser mode만 바꾸면 `07-converted/<mode>` 관련 경로만 변경
+116. Stage 2의 실제 `*_shards/*.sqlite_manifest.json`을 Stage 3가 `02-table` root에서 resolve
 
 ## 27. 최종 acceptance 기준
 

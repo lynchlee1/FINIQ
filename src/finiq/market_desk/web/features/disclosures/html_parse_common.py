@@ -562,6 +562,19 @@ def _parse_filter_blocks(value: Any) -> list[dict[str, Any]]:
     return value if isinstance(value, list) else []
 
 
+def _parse_metadata_paths(
+    body: dict[str, Any],
+) -> tuple[Path | None, Path | None]:
+    paths: list[Path | None] = []
+    for key in ("filtered_metadata_path", "compressed_metadata_path"):
+        raw_path = str(body.get(key) or "").strip()
+        path = Path(raw_path).expanduser().resolve() if raw_path else None
+        if path is not None and not path.is_file():
+            raise ValueError(f"{key} does not exist: {path}")
+        paths.append(path)
+    return paths[0], paths[1]
+
+
 def _record_matches_filter_blocks(
     record: dict[str, Any], filter_blocks: list[dict[str, Any]]
 ) -> bool:
@@ -603,17 +616,11 @@ def _build_parse_request(body: dict[str, Any]) -> ParseRequest:
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
     html_files = _collect_html_files(input_directory, limit)
-    metadata_paths: dict[str, Path | None] = {}
-    for key in ("filtered_metadata_path", "compressed_metadata_path"):
-        raw_path = str(body.get(key) or "").strip()
-        path = Path(raw_path).expanduser().resolve() if raw_path else None
-        if path is not None and not path.is_file():
-            raise ValueError(f"{key} does not exist: {path}")
-        metadata_paths[key] = path
+    filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
     metadata_index, families = _load_html_parse_metadata(
         input_directory,
-        filtered_metadata_path=metadata_paths["filtered_metadata_path"],
-        compressed_metadata_path=metadata_paths["compressed_metadata_path"],
+        filtered_metadata_path=filtered_metadata_path,
+        compressed_metadata_path=compressed_metadata_path,
     )
 
     return ParseRequest(
