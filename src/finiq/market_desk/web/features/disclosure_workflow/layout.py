@@ -211,6 +211,16 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         mode = validate_workspace_mode(payload.get("mode"))
         _set_default(payload, "input_directory", str(workspace.sections))
         _set_default(payload, "output_directory", str(workspace.converted_mode(mode)))
+        _set_default(
+            payload,
+            "filtered_metadata_path",
+            str(workspace.filtered / "filtered.json"),
+        )
+        _set_default(
+            payload,
+            "compressed_metadata_path",
+            str(workspace.external / "compressed-external-html.json"),
+        )
     elif normalized_kind == "dart_link":
         _set_default(
             payload,
