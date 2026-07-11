@@ -22,6 +22,12 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
     save_disclosure_html_sections_payload,
     summarize_disclosure_html_section_kinds_payload,
 )
+from finiq.market_desk.web.features.disclosure_workflow.dart_link import (
+    build_dart_links_payload,
+)
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+)
 from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
     list_price_source_files,
@@ -141,6 +147,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "integrated_merge": run_integrated_merge_payload,
     "integrated_market_history": run_integrated_market_history_payload,
     "table_build": build_disclosure_table_payload,
+    "dart_link": build_dart_links_payload,
     "utility_partition": run_partition_storage_payload,
     "asset_excel_convert": _run_asset_excel_convert_job,
     "asset_excel_merge": _run_asset_excel_merge_job,
@@ -164,7 +171,7 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
         if "cancel_check" in sig.parameters:
             kwargs["cancel_check"] = lambda: job_manager.is_cancelled(job_id)
 
-        result = handler(payload, **kwargs)
+        result = handler(apply_workspace_defaults(kind, payload), **kwargs)
 
         if job_manager.is_cancelled(job_id) or (
             isinstance(result, dict) and result.get("cancelled") is True

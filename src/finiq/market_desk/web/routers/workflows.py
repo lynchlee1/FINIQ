@@ -44,6 +44,14 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
 )
 from finiq.market_desk.web.jobs import job_manager
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
+from finiq.market_desk.web.features.disclosure_workflow.dart_link import (
+    build_dart_links_payload,
+)
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+    atomic_write_json,
+    prepare_disclosure_workspace_payload,
+)
 
 FilterDisclosuresPayload = Callable[..., dict[str, Any]]
 RunJobWorker = Callable[[str, str, dict[str, Any]], None]
@@ -69,10 +77,7 @@ def _write_transfer_file(
             / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
         )
 
-    transfer_path.parent.mkdir(parents=True, exist_ok=True)
-    transfer_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(transfer_path, payload)
     return {
         "format": payload.get("format", ""),
         "path": str(transfer_path),
@@ -146,7 +151,7 @@ def create_workflows_router(
 
     @router.post("/api/disclosures/filter")
     async def filter_disclosures(request: Request):
-        body = await request.json()
+        body = apply_workspace_defaults("filter", await request.json())
         accept = request.headers.get("Accept", "")
         if "application/x-ndjson" in accept:
 
@@ -210,7 +215,9 @@ def create_workflows_router(
 
     @router.post("/api/disclosures/table/build")
     async def build_disclosure_table(payload: dict[str, Any]):
-        return build_disclosure_table_payload(payload)
+        return build_disclosure_table_payload(
+            apply_workspace_defaults("table_build", payload)
+        )
 
     @router.post("/api/disclosures/table/build/start")
     async def start_build_disclosure_table(
@@ -222,6 +229,44 @@ def create_workflows_router(
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
         )
+
+    @router.post("/api/disclosures/workspace/prepare")
+    async def prepare_disclosure_workspace(payload: dict[str, Any]):
+        try:
+            return prepare_disclosure_workspace_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/dart-links/build")
+    async def build_dart_links(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(build_dart_links_payload, payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/dart-links/build/start")
+    async def start_dart_links_build(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
+        return _start_background_job(
+            kind="dart_link",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.get("/api/disclosures/dart-links/jobs/{job_id}")
+    async def get_dart_links_job_status(job_id: str):
+        return _job_snapshot(job_id)
+
+    @router.post("/api/disclosures/dart-links/cancel")
+    async def cancel_dart_links_job(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
 
     @router.post("/api/disclosures/table/build/cancel")
     async def cancel_build_disclosure_table(payload: dict[str, Any]):
@@ -401,7 +446,8 @@ def create_workflows_router(
     async def inspect_html_sections(payload: dict[str, Any]):
         try:
             return await run_in_threadpool(
-                inspect_disclosure_html_sections_payload, payload
+                inspect_disclosure_html_sections_payload,
+                apply_workspace_defaults("section_inspect", payload),
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -410,7 +456,8 @@ def create_workflows_router(
     async def list_html_section_sources(payload: dict[str, Any]):
         try:
             return await run_in_threadpool(
-                list_disclosure_html_section_sources_payload, payload
+                list_disclosure_html_section_sources_payload,
+                apply_workspace_defaults("section_list", payload),
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -419,7 +466,8 @@ def create_workflows_router(
     async def summarize_html_section_kinds(payload: dict[str, Any]):
         try:
             return await run_in_threadpool(
-                summarize_disclosure_html_section_kinds_payload, payload
+                summarize_disclosure_html_section_kinds_payload,
+                apply_workspace_defaults("section_kinds", payload),
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))

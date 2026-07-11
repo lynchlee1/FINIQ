@@ -26,3 +26,37 @@
   publish invariant를 상호 검토했다.
 - 프로젝트 금지 경로인 `resources/`는 읽거나 변경하지 않았다.
 - 문서 diff와 Markdown 구조 검사를 완료했다.
+
+## 2026-07-11 — KIND↔DART 연결 및 공시 data workspace 기반
+
+### Purpose
+
+- KIND `acpt_no`/`doc_no`와 OpenDART `rcept_no`를 원문 HTML 다운로드 없이 신뢰 가능한
+  evidence로 연결한다.
+- DART에 확실히 없는 공시와 조회·매칭하지 못한 공시를 구분한다.
+- 기존 1–7 작업이 공통 `<data_root>/01-list` … `07-converted/<mode>` 구조를 선택적으로
+  사용할 수 있게 한다.
+
+### Implementation summary
+
+- `OpenDartClient`를 추가해 `corpCode.xml`과 `list.json`만 호출하고, 회사별 pending
+  접수일 범위의 전 page를 조회해 날짜, 제목, 정정 여부, 제출인으로 유일한 고신뢰
+  후보만 연결한다.
+- 연결 결과를 parser record가 아닌 `01-list/dart-links` sidecar에 저장하고
+  `matched`, `confirmed_absent`, `unresolved`, `ambiguous`, `lookup_failed` 상태와 query/candidate
+  evidence를 보존한다.
+- 동일 matched input은 재사용하고, 부재 확인은 기본 7일 cache하며, 회사코드 목록도 7일
+  cache한다. DART 원문 HTML과 API key는 artifact에 저장하지 않는다.
+- canonical workspace 생성기와 기존 Stage 1–7 handler의 `data_root` 기본 경로 adapter를
+  추가했다. 명시한 기존 경로는 그대로 우선한다.
+- workspace 준비, DART 연결 direct/background/status/cancel API를 추가하고 JSON write를
+  원자적 replace로 전환했다.
+- 전체 영속 planner/ledger와 증분 generation publish는 후속 구현 범위로 유지한다.
+
+### Verification
+
+- 회사/날짜/제목 exact match, 정정공시 분리, 연도 경계, 모호 후보, 잘못된 후보 metadata,
+  incomplete/API failure, 확정 부재, cache 재사용/만료, 중복 `acpt_no`, 전 page pagination,
+  DART HTML 미호출, workspace Stage 1–7 경로를 unit/API test로 확인했다.
+- 관련 MarketDesk 회귀 test와 diff/static 검사를 실행했다.
+- 프로젝트 금지 경로인 `resources/`는 읽거나 변경하지 않았다.
