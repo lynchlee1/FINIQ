@@ -77,7 +77,8 @@ class _RightsRows:
         return row_containing(self.values, *needles)
 
     def last_value(self, *needles: str) -> str | None:
-        return last_value(self.containing(*needles))
+        row = self.containing(*needles)
+        return last_value(row) if len(row) > 1 else None
 
 
 def _build_rights_parse_context(

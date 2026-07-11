@@ -19,14 +19,14 @@ class BondIssuanceRecord:
     기업명_행사대상: str | None
     상장구분: str | Any | None
     발행금액: int | None
-    발행목적: list[list[Any]]
+    발행목적: list[list[Any]] | None
     행사가액: int | float | None
     납입일: str | None
     만기일: str | None
     사채발행방법: str | None
     행사시작일: str | None
     행사종료일: str | None
-    투자자: list[list[Any]]
+    투자자: list[list[Any]] | None
 
     def to_dict(self) -> dict[str, Any]:
         """추출된 데이터를 기존 파이프라인에서 기대하는 dict 키 형태로 매핑합니다."""

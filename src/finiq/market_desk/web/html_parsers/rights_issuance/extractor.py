@@ -36,7 +36,11 @@ FUNDING_PURPOSE_LABELS = [
     ("기타자금", ("기타자금",)),
 ]
 ISSUE_TARGET_TOTAL_LABEL_TOKENS = {"계", "합계", "소계", "총계"}
-STOCK_STATUS_DETAIL_FIELDS = {"신주의 종류와 수", "증자 전 발행주식총수"}
+STOCK_STATUS_DETAIL_FIELDS = {
+    "신주의 종류와 수",
+    "증자 전 발행주식총수",
+    "발행가액",
+}
 ISSUANCE_TYPE_LABELS = {
     "paid": "유상증자",
     "bonus": "무상증자",
@@ -60,7 +64,7 @@ class RightsIssuanceExtractor:
 
     def get_stock_types_and_counts(self) -> list[list[Any]]:
         """신주의 종류별 발행 수량을 보통주/기타주식 순서로 추출한다."""
-        return self._stock_values("신주의 종류와 수", warn_when_all_missing=True)
+        return self._stock_values("신주의 종류와 수")
 
     def get_pre_issuance_stock_counts(self) -> list[list[Any]]:
         """증자 전 발행주식총수를 주식 종류별로 추출한다."""
@@ -69,7 +73,7 @@ class RightsIssuanceExtractor:
             warning_field_name="증자 전 발행주식총수",
         )
 
-    def get_funding_purposes(self) -> list[list[Any]] | str:
+    def get_funding_purposes(self) -> list[list[Any]] | str | None:
         """자금조달 목적 항목(시설자금, 운영자금 등)을 일관된 순서로 반환한다."""
         if self.context.issuance_type == "bonus":
             self._set_field_status("발행목적", "not_applicable")
@@ -89,6 +93,7 @@ class RightsIssuanceExtractor:
             )
         else:
             self._warn_if_missing("발행목적", None)
+            return None
         return purposes
 
     def validate_consistency(
@@ -96,9 +101,9 @@ class RightsIssuanceExtractor:
         *,
         stock_counts: list[list[Any]],
         pre_issuance_stock_counts: list[list[Any]],
-        funding_purposes: list[list[Any]] | str,
+        funding_purposes: list[list[Any]] | str | None,
         issue_prices: list[list[Any]] | str,
-        issue_targets: list[list[Any]] | str,
+        issue_targets: list[list[Any]] | str | None,
     ) -> None:
         """추출 필드 간 합계 검증 경고를 레벨별로 분류한다."""
         stock_total = self._sum_amounts(stock_counts)
@@ -217,7 +222,7 @@ class RightsIssuanceExtractor:
 
     def get_issue_targets(
         self, *, stock_counts: list[list[Any]]
-    ) -> list[list[Any]] | str:
+    ) -> list[list[Any]] | str | None:
         """제3자 배정 대상자와 배정 주식 수를 추출한다."""
         if self.context.issuance_type == "bonus":
             self._set_field_status("발행대상자", "not_applicable")
@@ -272,12 +277,13 @@ class RightsIssuanceExtractor:
             self._set_field_status("발행대상자", "parsed")
             return fallback_targets
         if found_empty_target_table:
-            self._set_field_status("발행대상자", "source_found_empty")
-            return []
+            self._warn_if_missing("발행대상자", None)
+            return None
         issue_method = self.get_issue_method()
         title = str(self.context.record.get("title") or "")
         if issue_method and "제3자배정" in issue_method and "종속회사" not in title:
             self._warn_if_missing("발행대상자", None)
+            return None
         return []
 
     def build_type_details(
@@ -285,13 +291,13 @@ class RightsIssuanceExtractor:
         *,
         stock_counts: list[list[Any]],
         pre_issuance_stock_counts: list[list[Any]],
-        funding_purposes: list[list[Any]] | str,
+        funding_purposes: list[list[Any]] | str | None,
         issue_prices: list[list[Any]] | str,
         issue_method: str | None,
         payment_date: str | None,
         delivery_date: str | None,
         listing_date: str | None,
-        issue_targets: list[list[Any]] | str,
+        issue_targets: list[list[Any]] | str | None,
     ) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
         """증자 유형별 상세 블록을 기존 flat 필드와 별도로 구성한다."""
         issuance_type = self.context.issuance_type
@@ -414,7 +420,7 @@ class RightsIssuanceExtractor:
         values: list[list[Any]] = []
         for output_label, source_labels in STOCK_LABELS.items():
             parsed = self._section_stock_int_value(rows, section_label, source_labels)
-            values.append([output_label, 0 if parsed is None else parsed])
+            values.append([output_label, parsed])
         return values
 
     def _section_stock_int_value(
@@ -480,7 +486,6 @@ class RightsIssuanceExtractor:
         section_label: str,
         *,
         warning_field_name: str | None = None,
-        warn_when_all_missing: bool = True,
     ) -> list[list[Any]]:
         """보통주와 기타주식 값을 일관된 순서로 배열하여 반환한다."""
         values: list[list[Any]] = []
@@ -490,22 +495,25 @@ class RightsIssuanceExtractor:
                 section_label, source_labels
             )
             item_statuses[output_label] = item_status
-            values.append([output_label, 0 if parsed is None else parsed])
+            values.append([output_label, parsed])
         field_name = warning_field_name or section_label
         if field_name in STOCK_STATUS_DETAIL_FIELDS:
             self.field_parse_status_detail[field_name] = item_statuses
-        if any(value > 0 for _, value in values):
+        if any(isinstance(value, int) and value > 0 for _, value in values):
             self._set_field_status(field_name, "parsed")
         elif any(status == "explicit_zero" for status in item_statuses.values()):
             self._set_field_status(field_name, "explicit_zero")
-        elif not warn_when_all_missing:
-            self._set_field_status(field_name, "not_applicable")
         else:
             self._set_field_status(field_name, "source_not_found")
-        if warn_when_all_missing and all(
-            status == "source_not_found" for status in item_statuses.values()
-        ):
-            self._warn_if_missing(field_name, None)
+        if self.field_parse_status[field_name] == "source_not_found":
+            self._append_source_not_found_warning(field_name)
+        else:
+            for output_label, status in item_statuses.items():
+                if status == "source_not_found":
+                    self._append_source_not_found_warning(
+                        field_name,
+                        detail_name=output_label,
+                    )
         return values
 
     def _funding_purpose_row(self, source_labels: tuple[str, ...]) -> list[str]:
@@ -567,8 +575,8 @@ class RightsIssuanceExtractor:
             total += self._item_amount(item) * issue_price_by_label[label]
         return total if matched else None
 
-    def _sum_amounts(self, rows: list[list[Any]] | str) -> int:
-        if isinstance(rows, str):
+    def _sum_amounts(self, rows: list[list[Any]] | str | None) -> int:
+        if rows is None or isinstance(rows, str):
             return 0
         return sum(self._item_amount(row) for row in rows)
 
@@ -584,9 +592,22 @@ class RightsIssuanceExtractor:
     def _warn_if_missing(self, field_name: str, value: object | None) -> None:
         if value not in (None, "", []):
             return
-        rule = RIGHTS_FIELD_EXTRACTION_RULES[field_name]
-        warning = f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다. 출처: {rule}"
         self._set_field_status(field_name, "source_not_found")
+        self._append_source_not_found_warning(field_name)
+
+    def _append_source_not_found_warning(
+        self,
+        field_name: str,
+        *,
+        detail_name: str | None = None,
+    ) -> None:
+        rule = RIGHTS_FIELD_EXTRACTION_RULES[field_name]
+        warning_field = (
+            f"{field_name}({detail_name})" if detail_name is not None else field_name
+        )
+        warning = (
+            f"{warning_field}: 정해진 출처에서 값을 찾지 못했습니다. 출처: {rule}"
+        )
         self._append_warning(warning, level="strong")
 
     def _set_field_status(self, field_name: str, status: str) -> None:

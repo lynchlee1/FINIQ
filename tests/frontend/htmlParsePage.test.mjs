@@ -37,6 +37,7 @@ test("html parse page persists explicit parse directories without auto generated
   const modeHandler = source.match(/const handleParseModeChange =[\s\S]*?};/)?.[0] ?? "";
 
   assert.match(inputHandler, /setInputDirectory\(val\)/);
+  assert.match(inputHandler, /setFilterCandidatesLoading\(false\)/);
   assert.match(inputHandler, /saveSetting\("html_section_split_output_directory", val\)/);
   assert.doesNotMatch(inputHandler, /html_output_directory/);
   assert.doesNotMatch(inputHandler, /html_content_output_directory/);
@@ -159,12 +160,15 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /const PARSE_MODE_CONFIGS = Object\.fromEntries\(DISCLOSURE_PARSE_MODES\.map/);
   assert.match(source, /const \[selectedExecutionOptionValues, setSelectedExecutionOptionValues\] = useState<string\[\]>\(\[\]\)/);
   assert.match(source, /const \[executionOptionInputDirectory, setExecutionOptionInputDirectory\] = useState\(""\)/);
+  assert.match(source, /const filterCandidatesRequestIdRef = useRef\(0\)/);
   assert.match(source, /type FilterCandidateExample =/);
   assert.match(source, /type ExecutionOptionExampleNotice =/);
   assert.match(source, /const \[executionOptionExampleNotice, setExecutionOptionExampleNotice\] = useState<ExecutionOptionExampleNotice \| null>\(null\)/);
   assert.match(source, /const \[notificationResetKey, setNotificationResetKey\] = useState\(0\)/);
   assert.match(source, /const executionOptionExampleUrl = \(example: FilterCandidateExample, inputDirectory: string\) =>/);
   assert.match(source, /acpt_no: acptNo/);
+  assert.doesNotMatch(source, /String\(item\.acpt_no \|\| ""\)\.trim\(\)/);
+  assert.doesNotMatch(source, /String\(example\.acpt_no \|\| ""\)\.trim\(\)/);
   assert.match(source, /const selectedParseMode = PARSE_MODE_CONFIGS\[parseMode\] \|\| DISCLOSURE_PARSE_MODES\[0\]/);
   assert.match(source, /const executionOptionConfig = selectedParseMode\.executionOptions\[0\] \|\| null/);
   assert.doesNotMatch(modeCardContent, /실행 옵션/);
@@ -205,6 +209,9 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(modeHandler, /setSelectedExecutionOptionValues\(\[\]\)/);
   assert.match(modeHandler, /setExecutionOptionCandidates\(\[\]\)/);
   assert.match(modeHandler, /setExecutionOptionExampleNotice\(null\)/);
+  assert.match(modeHandler, /setFilterCandidatesLoading\(false\)/);
+  assert.match(source, /filterCandidatesRequestIdRef\.current \+= 1/);
+  assert.match(source, /if \(filterCandidatesRequestIdRef\.current !== requestId\) return/);
   assert.match(source, /notificationActive=\{isErrorStatus \|\| !!executionOptionExampleNotice \|\| warningReports\.length > 0\}/);
   assert.match(source, /notificationResetKey=\{notificationResetKey\}/);
   assert.match(source, /setNotificationResetKey\(\(current\) => current \+ 1\)/);

@@ -159,7 +159,9 @@ class BondIssuanceExtractor:
                 return parsed
         return None
 
-    def extract_funding_purposes_from_funding_purpose_rows(self) -> list[list[Any]]:
+    def extract_funding_purposes_from_funding_purpose_rows(
+        self,
+    ) -> list[list[Any]] | None:
         """자금조달 목적 행에 적힌 목적명과 금액을 표에 나온 순서대로 추출한다."""
         purposes: list[list[Any]] = []
         found_amount_source = False
@@ -179,7 +181,7 @@ class BondIssuanceExtractor:
         else:
             status = "source_not_found"
         self._set_field_status("발행목적", status)
-        return purposes
+        return None if status == "source_not_found" else purposes
 
     def _funding_purpose_label(self, row: list[str]) -> str | None:
         purpose_index = self._funding_purpose_index(row)
@@ -257,7 +259,7 @@ class BondIssuanceExtractor:
 
     def extract_investors_from_specific_person_bond_issue_table(
         self,
-    ) -> list[list[Any]]:
+    ) -> list[list[Any]] | None:
         """사채 발행 대상자(인수자)와 배정 권면액을 추출한다."""
         for rows in self._specific_person_bond_issue_table_rows():
             header = rows[0]
@@ -276,11 +278,11 @@ class BondIssuanceExtractor:
                 if amount is not None:
                     targets.append([target_name, amount])
             self._set_field_status(
-                "투자자", "parsed" if targets else "explicit_zero"
+                "투자자", "parsed" if targets else "source_not_found"
             )
-            return targets
+            return targets or None
         self._set_field_status("투자자", "source_not_found")
-        return []
+        return None
 
     def _specific_person_bond_issue_table_rows(self) -> list[list[list[str]]]:
         source_tables: list[list[list[str]]] = []

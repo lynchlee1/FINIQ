@@ -5,6 +5,14 @@
 - 오탈자, 표현 개선, 구조 정리처럼 사소해 보이는 수정이라도 사용자의 명시적 요청이 없는 한 임의로 고치지 않는다. 
 - 수정이 필요하다고 판단되는 경우에는 먼저 변경 사유와 범위를 설명하고 사용자 승인을 받은 뒤 진행한다.
 
+### 내부 문서 역할
+- [external-metadata.md](./external-metadata.md): 외부 metadata 파일의 위치, 내용, 보강 방식에 대해 설명한다.
+- [common-html-parser-logic-rules.md](./common/common-html-parser-logic-rules.md): HTML 파서가 공통으로 사용하는 경고 기준 로직·예외처리 로직 및 병렬 처리·미리보기 로직을 설명한다.
+- [common-html-parser-data-structure.md](./common/common-html-parser-data-structure.md): 공통 표와 파일별 파싱 결과, 정정공시 묶음, 최종 저장 결과, 진단·미리보기 자료에 어떤 항목이 있고 어디에 저장되는지 설명한다.
+- [common-html-parser-exception-handling.md](./common/common-html-parser-exception-handling.md): 필드 상태·경고·오류를 구분해 기록하는 공통 기준과 파일별 오류 처리, 병렬 실행 중 결과 순서·저장·중지, 미리보기·저장 조건 후보의 오류 처리 방법을 설명한다.
+- [bond-issuance-parser-logic-rules.md](./bond-issuance-parser-logic-rules.md): 사채발행 공시에서 필요한 필드 추출 로직·경고 기준 로직·예외처리 로직 등을 설명한다.
+- [rights-issuance-parser-logic-rules.md](./rights-issuance-parser-logic-rules.md): 유무상증자 공시에서 필요한 필드 추출 로직·경고 기준 로직·예외처리 로직 등을 설명한다.
+
 ### 프로젝트 규칙
 1. **Fallback을 새로 만들기 전에는 반드시 사용자에게 승인을 요청한다.**
 - 사용자의 명시적 허가 없이 예외사항을 임의로 추측하거나, 기존 요구사항을 우회하는 대체 로직을 생성하지 않는다. 

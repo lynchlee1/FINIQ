@@ -50,6 +50,8 @@ from finiq.market_desk.web.features.disclosures.html_parse_changes import (
 )
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
     PARSER_REGISTRY,
+    _collect_html_files,
+    _load_html_parse_metadata,
     _metadata_title_for_file,
     cancel_disclosure_html_parse,
     parse_disclosure_html_payload,
@@ -4220,6 +4222,16 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
 
     monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
 
+    metadata_index, families = _load_html_parse_metadata(input_dir)
+    assert all(
+        "correction_families" not in metadata
+        for metadata in metadata_index.values()
+    )
+    assert metadata_index["20081210000626"]["family_id"] == "20081211000252"
+    assert metadata_index["20081210000626"]["current_sequence"] == 0
+    assert metadata_index["20081210000626"]["family_member_count"] == 2
+    assert families["20081211000252"]["members"][1]["acpt_no"] == "20081211000252"
+
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(input_dir),
@@ -5689,32 +5701,104 @@ def test_parse_ints_keeps_adjacent_ungrouped_numbers_separate() -> None:
     assert parse_ints("100 100") == [100, 100]
 
 
-@pytest.mark.parametrize("filename", ["abc_def.html", "123_456.html"])
+def test_parse_int_distinguishes_empty_source_from_explicit_dash_zero() -> None:
+    assert parse_int("", dash_as_zero=True) is None
+    assert parse_int(None, dash_as_zero=True) is None
+    assert parse_int("-", dash_as_zero=True) == 0
+
+
+@pytest.mark.parametrize(
+    "filename", ["abc_def.html", "123_456.html", " report .html"]
+)
 def test_extract_acpt_no_uses_full_filename_stem(filename: str) -> None:
     assert extract_acpt_no(Path(filename)) == Path(filename).stem
 
 
+@pytest.mark.parametrize("stem", ["abc_def", " report "])
 def test_resolve_disclosure_html_file_uses_full_stem_in_year_directory(
-    tmp_path: Path,
+    tmp_path: Path, stem: str,
 ) -> None:
     source_directory = tmp_path / "year-not-derived-from-filename"
     source_directory.mkdir()
-    source_path = source_directory / "abc_def.html"
+    source_path = source_directory / f"{stem}.html"
     source_path.write_text("<html></html>", encoding="utf-8")
 
-    assert resolve_disclosure_html_file(tmp_path, "abc_def") == source_path.resolve()
+    assert resolve_disclosure_html_file(tmp_path, stem) == source_path.resolve()
+
+
+def test_collect_html_files_rejects_duplicate_full_stems(tmp_path: Path) -> None:
+    year_directory = tmp_path / "2025"
+    year_directory.mkdir()
+    (tmp_path / "abc_def.html").write_text("<html></html>", encoding="utf-8")
+    (year_directory / "abc_def.html").write_text("<html></html>", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate HTML filename stem: abc_def"):
+        _collect_html_files(tmp_path, None)
+
+
+def test_collect_html_files_uses_resolved_path_once(tmp_path: Path) -> None:
+    source_path = tmp_path / "abc_def.html"
+    source_path.write_text("<html></html>", encoding="utf-8")
+    year_directory = tmp_path / "2025"
+    year_directory.mkdir()
+    (year_directory / "alias.html").symlink_to(source_path)
+
+    assert _collect_html_files(tmp_path, None) == [source_path.resolve()]
 
 
 def test_metadata_title_lookup_uses_full_filename_stem() -> None:
     metadata_index = {
         "123": {"title": "prefix title"},
         "123_456": {"title": "full stem title"},
+        " report ": {"title": "space-preserving title"},
     }
 
     assert (
         _metadata_title_for_file(Path("123_456.html"), metadata_index)
         == "full stem title"
     )
+    assert (
+        _metadata_title_for_file(Path(" report .html"), metadata_index)
+        == "space-preserving title"
+    )
+
+
+def test_parse_disclosure_html_payload_preserves_full_stem_in_metadata_and_warnings(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "viewer_html"
+    input_directory.mkdir()
+    (input_directory / " report .html").write_text(
+        "<html><body></body></html>", encoding="utf-8"
+    )
+    (tmp_path / "filtered.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": " report ",
+                        "company_name": "공백식별자회사",
+                        "market": "코스닥",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(tmp_path),
+            "mode": "bond_issuance",
+        }
+    )
+
+    assert payload["records"][0]["acpt_no"] == " report "
+    assert payload["records"][0]["corp_name"] == "공백식별자회사"
+    assert payload["warnings"][0]["acpt_no"] == " report "
+    assert " report " in payload["warning_report_counts"]["strong_warning"]["reports"]
 
 
 def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
@@ -5865,13 +5949,19 @@ def test_parse_bond_issuance_uses_given_html_without_wrapper_body_lookup(
     assert parsed["종류"] is None
     assert parsed["발행금액"] is None
     assert parsed["만기일"] is None
-    assert parsed["투자자"] == []
+    assert parsed["발행목적"] is None
+    assert parsed["투자자"] is None
     assert parsed["parse_warnings"][0] == (
         "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
     )
     assert any(
         warning.startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
+    )
+    assert all(
+        warning in parsed["strong_warning"]
+        for warning in parsed["parse_warnings"]
+        if ": 정해진 출처에서 값을 찾지 못했습니다." in warning
     )
 
 
@@ -6169,12 +6259,48 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
     assert parsed["사채발행방법"] == "사모"
     assert parsed["행사시작일"] == "2026년 01월 02일"
     assert parsed["행사종료일"] == "2027년 12월 02일"
-    assert parsed["투자자"] == []
+    assert parsed["투자자"] is None
     assert any(
         warning.startswith("투자자: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
     )
     assert not any("발행대상자세부엔티티" in warning for warning in parsed["parse_warnings"])
+
+
+def test_parse_bond_issuance_saves_empty_source_cells_as_null_with_strong_warnings(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000031.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td></td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td></td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td></td></tr>
+        <tr><td>5. 사채만기일</td><td></td></tr>
+      </table>
+      <table>
+        <tr><th>발행 대상자명</th><th>발행권면총액 (원)</th></tr>
+        <tr><td>테스트조합</td><td></td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["회차"] is None
+    assert parsed["발행금액"] is None
+    assert parsed["발행목적"] is None
+    assert parsed["만기일"] is None
+    assert parsed["투자자"] is None
+    for field_name in ("회차", "발행금액", "발행목적", "만기일", "투자자"):
+        assert parsed["field_parse_status"][field_name] == "source_not_found"
+        assert any(
+            warning.startswith(
+                f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다."
+            )
+            for warning in parsed["strong_warning"]
+        )
 
 
 def test_parse_bond_issuance_keeps_investor_name_when_amount_is_dash(
@@ -7247,8 +7373,53 @@ def test_parse_rights_issuance_ignores_non_extraction_correction_history_table(
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
+    assert parsed["신주의 종류와 수"] == [["보통주식", 10], ["기타주식", None]]
+    assert parsed["field_parse_status_detail"]["신주의 종류와 수"] == {
+        "보통주식": "parsed",
+        "기타주식": "source_not_found",
+    }
+    assert any(
+        warning.startswith(
+            "신주의 종류와 수(기타주식): 정해진 출처에서 값을 찾지 못했습니다."
+        )
+        for warning in parsed["strong_warning"]
+    )
     assert parsed["납입일"] is None
     assert parsed["field_parse_status"]["납입일"] == "source_not_found"
+
+
+def test_parse_rights_issuance_saves_empty_source_cells_as_null_with_strong_warnings(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000032.html"
+    body_html = """
+    <html><body>
+      <p class="SECTION-1">유상증자결정</p>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td></td></tr>
+        <tr><td>4. 자금조달의 목적</td><td>운영자금 (원)</td><td></td></tr>
+        <tr><td>5. 증자방식</td><td></td></tr>
+        <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td></td></tr>
+        <tr><td>9. 납입일</td><td></td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+
+    assert parsed["신주의 종류와 수"] == [["보통주식", None], ["기타주식", None]]
+    assert parsed["발행목적"] is None
+    assert parsed["증자방식"] is None
+    assert parsed["발행가액"] == [["보통주식", None], ["기타주식", None]]
+    assert parsed["납입일"] is None
+    for field_name in ("신주의 종류와 수", "발행목적", "증자방식", "발행가액", "납입일"):
+        assert parsed["field_parse_status"][field_name] == "source_not_found"
+        assert any(
+            warning.startswith(
+                f"{field_name}: 정해진 출처에서 값을 찾지 못했습니다."
+            )
+            for warning in parsed["strong_warning"]
+        )
 
 
 def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_warning(
@@ -7506,11 +7677,11 @@ def test_parse_rights_issuance_does_not_mark_dash_name_with_amount_as_undisclose
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["발행대상자"] == []
-    assert parsed["field_parse_status"]["발행대상자"] == "source_found_empty"
-    assert not any(
+    assert parsed["발행대상자"] is None
+    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
+    assert any(
         warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed.get("parse_warnings", [])
+        for warning in parsed.get("strong_warning", [])
     )
 
 
@@ -7529,11 +7700,11 @@ def test_parse_rights_issuance_does_not_mark_non_dash_placeholder_as_undisclosed
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["발행대상자"] == []
-    assert parsed["field_parse_status"]["발행대상자"] == "source_found_empty"
-    assert not any(
+    assert parsed["발행대상자"] is None
+    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
+    assert any(
         warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed.get("parse_warnings", [])
+        for warning in parsed.get("strong_warning", [])
     )
 
 
@@ -7571,11 +7742,11 @@ def test_parse_rights_issuance_warns_when_third_party_target_table_is_absent() -
 
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
-    assert parsed["발행대상자"] == []
+    assert parsed["발행대상자"] is None
     assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
     assert any(
         warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed.get("parse_warnings", [])
+        for warning in parsed.get("strong_warning", [])
     )
 
 
@@ -7594,8 +7765,25 @@ def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
     parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
 
     assert parsed["title"] == ""
-    assert parsed["신주의 종류와 수"] == [["보통주식", 0], ["기타주식", 0]]
+    assert parsed["신주의 종류와 수"] == [["보통주식", None], ["기타주식", None]]
+    assert parsed["증자 전 발행주식총수"] == [
+        ["보통주식", None],
+        ["기타주식", None],
+    ]
+    assert parsed["발행목적"] is None
+    assert parsed["발행가액"] == [["보통주식", None], ["기타주식", None]]
     assert parsed["증자방식"] is None
+    assert parsed["납입일"] is None
+    assert parsed["신주권교부예정일"] is None
+    assert parsed["상장예정일"] is None
+    assert parsed["field_parse_status_detail"]["신주의 종류와 수"] == {
+        "보통주식": "source_not_found",
+        "기타주식": "source_not_found",
+    }
+    assert parsed["field_parse_status_detail"]["발행가액"] == {
+        "보통주식": "source_not_found",
+        "기타주식": "source_not_found",
+    }
     assert "주입 제목이 없습니다." in parsed["parse_warnings"]
     assert "주입 제목이 없습니다." in parsed["strong_warning"]
     assert (
@@ -7613,6 +7801,11 @@ def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
     assert any(
         warning.startswith("증자방식: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
+    )
+    assert all(
+        warning in parsed["strong_warning"]
+        for warning in parsed["parse_warnings"]
+        if ": 정해진 출처에서 값을 찾지 못했습니다." in warning
     )
 
 
