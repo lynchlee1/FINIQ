@@ -113,3 +113,38 @@
   검증했다.
 - 관련 backend 회귀 테스트, Python compile, frontend TypeScript 검사를 실행했다.
 - 실제 `resources/`는 읽거나 변경하지 않았다.
+
+## 2026-07-11 — 공시 workspace·DART 연결 correctness review
+
+### Purpose
+
+- 최근 추가한 공시 workspace, DART 연결, KIND 공시시간 보존 코드의 cache 신뢰,
+  파일 소유권, 설정 영속성, metadata 완전성 edge case를 검토한다.
+- 손상되거나 불완전한 artifact를 재사용하거나 사용자 파일을 덮어쓰는 동작을 차단한다.
+
+### Implementation summary
+
+- OpenDART HTTP/API-status 재시도를 같은 bounded attempt 예산으로 통합하고 실제 요청
+  횟수를 query evidence에 반영했다. query count 불일치와 잘못된 후보 날짜는
+  `confirmed_absent`로 승격하지 않는다.
+- DART cached match는 matcher version, input fingerprint, complete query, 유효한
+  `rcept_no`를 모두 확인한 뒤에만 재사용한다. 미래 cache timestamp와 비-object input을
+  거부하고, DART 소유가 아닌 manifest·연도 partition·cache 파일은 덮어쓰거나 삭제하지
+  않는다.
+- workspace manifest의 기존 parser mode를 보존하고, 같은 이름의 비-FINIQ manifest를
+  덮어쓰지 않는다.
+- 설정 JSON을 임시 파일과 atomic replace로 저장하고, 빈 root/mode와 workspace·disk
+  저장 실패 시 in-memory 설정을 rollback한다. frontend의 optimistic 설정도 API 실패 시
+  이전 값으로 복구한다.
+- canonical Stage 7은 명시한 KIND metadata가 모든 HTML의 유효한 `YYYY-MM-DD HH:MM`
+  공시시간을 포함하는지 확인한다. 중복 KIND/external metadata를 거부하고 parse 결과를
+  atomic JSON으로 기록한다.
+
+### Verification
+
+- 각 결함을 재현하는 회귀 테스트를 먼저 추가해 실패를 확인한 뒤 수정했다.
+- DART cache/output ownership, OpenDART retry/count, workspace manifest, settings rollback,
+  KIND 공시시간 coverage·형식·중복과 기존 parse metadata/family 동작을 합성 임시 경로로
+  검증했다.
+- Python compile, frontend TypeScript 검사와 production build를 실행했다.
+- 실제 `resources/`는 읽거나 변경하지 않았다.

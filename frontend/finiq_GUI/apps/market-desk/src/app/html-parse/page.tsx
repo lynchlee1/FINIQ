@@ -330,9 +330,9 @@ export default function HtmlParsePage() {
     setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
     void saveSetting("html_parse_mode", val).then(() => {
-      setOutputDirectory(
-        useSettingsStore.getState().html_parse_output_directory || "",
-      );
+      const settings = useSettingsStore.getState();
+      setParseMode(settings.html_parse_mode || "");
+      setOutputDirectory(settings.html_parse_output_directory || "");
     });
   };
 

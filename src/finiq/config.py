@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 from dataclasses import dataclass, field
@@ -188,17 +189,21 @@ def load_settings(settings_path: str | Path) -> dict[str, Any]:
             settings[key] = value
     return settings
 
-def save_settings(settings_path: str | Path, settings: dict[str, Any]):
+def save_settings(settings_path: str | Path, settings: dict[str, Any]) -> None:
     path = Path(settings_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    clean_settings = {
+        key: settings[key] for key in SAVED_SETTINGS_KEYS if key in settings
+    }
+    temporary_path = path.with_name(f".{path.name}.part-{uuid.uuid4().hex}")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        clean_settings = {}
-        for key in SAVED_SETTINGS_KEYS:
-            if key in settings:
-                clean_settings[key] = settings[key]
-        path.write_text(json.dumps(clean_settings, indent=2, ensure_ascii=False), encoding="utf-8")
-    except Exception as e:
-        print(f"Error saving settings to {path}: {e}")
+        with temporary_path.open("w", encoding="utf-8") as handle:
+            json.dump(clean_settings, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 def init_config() -> AppConfig:
     settings_path = get_default_settings_path()

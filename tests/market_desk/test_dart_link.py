@@ -152,6 +152,17 @@ def test_invalid_candidate_metadata_is_not_mislabeled_as_absent() -> None:
     assert link["candidate_count"] == 0
 
 
+def test_invalid_candidate_date_is_not_mislabeled_as_absent() -> None:
+    client = FakeDartClient([_dart_record(rcept_dt="invalid")])
+
+    [link] = link_kind_disclosures(
+        [_kind_record()], corp_code_records=CORP_CODES, client=client
+    )
+
+    assert link["status"] == "unresolved"
+    assert link["reason_code"] == "invalid_dart_candidate_metadata"
+
+
 def test_original_and_correction_disclosures_are_not_cross_matched() -> None:
     client = FakeDartClient(
         [
@@ -281,6 +292,22 @@ def test_incomplete_query_cannot_confirm_absence() -> None:
     assert link["retryable"] is True
 
 
+def test_query_count_mismatch_cannot_confirm_absence() -> None:
+    class CountMismatchClient(FakeDartClient):
+        def list_disclosures(
+            self, *, corp_code: str, begin_date: str, end_date: str
+        ) -> DartListResult:
+            self.calls.append((corp_code, begin_date, end_date))
+            return DartListResult([], "000", "partial", 1, 1, 1, True)
+
+    [link] = link_kind_disclosures(
+        [_kind_record()], corp_code_records=CORP_CODES, client=CountMismatchClient()
+    )
+
+    assert link["status"] == "lookup_failed"
+    assert link["reason_code"] == "incomplete_dart_query"
+
+
 def test_build_payload_saves_year_partitions_manifest_and_no_html(
     tmp_path: Path,
 ) -> None:
@@ -364,6 +391,27 @@ def test_unchanged_matched_link_is_reused_without_query(tmp_path: Path) -> None:
     assert second_client.calls == []
 
 
+def test_corrupt_matched_link_is_not_reused(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    now = datetime(2026, 7, 11, tzinfo=timezone.utc)
+    payload = {
+        "data_root": str(data_root),
+        "records": [_kind_record()],
+        "corp_code_records": CORP_CODES,
+    }
+    build_dart_links_payload(payload, client=FakeDartClient([_dart_record()]), now=now)
+    partition_path = data_root / "01-list" / "dart-links" / "years" / "2025.json"
+    partition = json.loads(partition_path.read_text(encoding="utf-8"))
+    partition["links"][0]["rcept_no"] = "broken"
+    partition_path.write_text(json.dumps(partition), encoding="utf-8")
+    client = FakeDartClient([_dart_record()])
+
+    result = build_dart_links_payload(payload, client=client, now=now)
+
+    assert result["summary"]["reused"] == 0
+    assert len(client.calls) == 1
+
+
 def test_confirmed_absent_cache_expires_and_is_rechecked(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
     first_time = datetime(2026, 7, 1, tzinfo=timezone.utc)
@@ -422,6 +470,60 @@ def test_duplicate_kind_identifiers_are_rejected_before_reuse(tmp_path: Path) ->
             },
             client=FakeDartClient(),
         )
+
+
+def test_non_object_kind_record_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=r"records\[1\]"):
+        build_dart_links_payload(
+            {
+                "data_root": str(tmp_path / "workspace"),
+                "records": [_kind_record(), "invalid"],
+                "corp_code_records": CORP_CODES,
+            },
+            client=FakeDartClient(),
+        )
+
+
+def test_dart_output_does_not_overwrite_unowned_year_partition(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "dart-links"
+    partition_path = output_directory / "years" / "2025.json"
+    partition_path.parent.mkdir(parents=True)
+    original = {"format": "unrelated", "records": [1]}
+    partition_path.write_text(json.dumps(original), encoding="utf-8")
+    client = FakeDartClient(error=AssertionError("must not query"))
+
+    with pytest.raises(ValueError, match="not a FINIQ DART link artifact"):
+        build_dart_links_payload(
+            {
+                "output_directory": str(output_directory),
+                "records": [_kind_record()],
+                "corp_code_records": CORP_CODES,
+            },
+            client=client,
+        )
+
+    assert json.loads(partition_path.read_text(encoding="utf-8")) == original
+    assert client.calls == []
+
+
+def test_dart_build_preserves_unrelated_year_directory_json(tmp_path: Path) -> None:
+    output_directory = tmp_path / "dart-links"
+    notes_path = output_directory / "years" / "notes.json"
+    notes_path.parent.mkdir(parents=True)
+    notes_path.write_text(json.dumps({"notes": [1]}), encoding="utf-8")
+
+    build_dart_links_payload(
+        {
+            "output_directory": str(output_directory),
+            "records": [_kind_record()],
+            "corp_code_records": CORP_CODES,
+        },
+        client=FakeDartClient([_dart_record()]),
+    )
+
+    assert json.loads(notes_path.read_text(encoding="utf-8")) == {"notes": [1]}
 
 
 def test_corp_code_list_is_cached_without_api_key(tmp_path: Path) -> None:
@@ -623,6 +725,33 @@ def test_open_dart_retries_http_429_with_bounded_attempts() -> None:
     )
 
     assert result.complete is True
+    assert result.request_count == 2
+    assert len(session.calls) == 2
+    assert sleeps == [1]
+
+
+def test_open_dart_retries_retryable_api_status_with_bounded_attempts() -> None:
+    session = _FakeSession(
+        [
+            _FakeResponse(payload={"status": "020", "message": "limit"}),
+            _FakeResponse(payload={"status": "013", "message": "no data"}),
+        ]
+    )
+    sleeps: list[float] = []
+    client = OpenDartClient(
+        "x" * 40,
+        session=session,  # type: ignore[arg-type]
+        max_attempts=2,
+        min_interval_seconds=0,
+        sleep=sleeps.append,
+    )
+
+    result = client.list_disclosures(
+        corp_code="00126380", begin_date="20250101", end_date="20250103"
+    )
+
+    assert result.complete is True
+    assert result.request_count == 2
     assert len(session.calls) == 2
     assert sleeps == [1]
 

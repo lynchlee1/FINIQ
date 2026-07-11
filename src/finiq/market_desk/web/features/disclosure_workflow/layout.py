@@ -121,12 +121,42 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
+def _existing_workspace_modes(manifest_path: Path, *, root: Path) -> list[str]:
+    if not manifest_path.exists():
+        return []
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Existing path is not a FINIQ disclosure workspace: {manifest_path}"
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("format") != WORKSPACE_FORMAT:
+        raise ValueError(
+            f"Existing path is not a FINIQ disclosure workspace: {manifest_path}"
+        )
+    manifest_root = Path(str(payload.get("data_root") or "")).expanduser().resolve()
+    if manifest_root != root:
+        raise ValueError(
+            f"Disclosure workspace manifest belongs to another data_root: {manifest_root}"
+        )
+    modes = payload.get("modes")
+    if not isinstance(modes, list):
+        raise ValueError(f"Disclosure workspace manifest has invalid modes: {manifest_path}")
+    return [validate_workspace_mode(mode) for mode in modes]
+
+
 def prepare_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, Any]:
     modes_value = payload.get("modes") or []
     if not isinstance(modes_value, list):
         raise ValueError("modes must be a list")
-    modes = sorted({validate_workspace_mode(mode) for mode in modes_value})
-    workspace = resolve_disclosure_workspace(payload.get("data_root") or "", create=True)
+    requested_modes = {validate_workspace_mode(mode) for mode in modes_value}
+    workspace = resolve_disclosure_workspace(payload.get("data_root") or "")
+    manifest_path = workspace.root / WORKSPACE_MANIFEST_FILENAME
+    modes = sorted(
+        requested_modes
+        | set(_existing_workspace_modes(manifest_path, root=workspace.root))
+    )
+    workspace = resolve_disclosure_workspace(workspace.root, create=True)
     for mode in modes:
         workspace.converted_mode(mode).mkdir(parents=True, exist_ok=True)
 
@@ -138,7 +168,6 @@ def prepare_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, A
         "modes": modes,
         "paths": workspace.paths_payload(modes),
     }
-    manifest_path = workspace.root / WORKSPACE_MANIFEST_FILENAME
     atomic_write_json(manifest_path, manifest)
     return {**manifest, "manifest_path": str(manifest_path)}
 
