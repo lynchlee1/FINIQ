@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
+from typing import Any
 import zipfile
 
 import pandas as pd
@@ -5188,16 +5189,76 @@ def test_parse_disclosure_html_payload_keeps_warnings_for_filtered_records(
     assert f"병렬 처리: {parallel_workers}개 워커" in progress_log
 
 
+@pytest.mark.parametrize("parallel_workers", [1, 2])
+def test_parse_disclosure_html_payload_discards_warnings_when_filter_fails(
+    tmp_path: Path,
+    monkeypatch,
+    parallel_workers: int,
+) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    acpt_numbers = ("20250101000001", "20250101000002")
+    for acpt_no in acpt_numbers:
+        (viewer_dir / f"{acpt_no}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "mode": "security_transaction",
+            "title": "",
+            "parse_warnings": ["warning"],
+            "medium_warning": ["warning"],
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+
+    payload = parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
+            "mode": "security_transaction",
+            "parallel_workers": parallel_workers,
+            "skip_errors": True,
+            "filter_blocks": [
+                {"field": "title", "operator": "unsupported", "value": "x"}
+            ],
+        }
+    )
+
+    assert payload["summary"] == {
+        "found_files": 2,
+        "parsed_files": 0,
+        "failed_files": 2,
+    }
+    assert payload["records"] == []
+    assert payload["warnings"] == []
+    assert [error["acpt_no"] for error in payload["errors"]] == list(acpt_numbers)
+    assert all(error["error_type"] == "ValueError" for error in payload["errors"])
+
+
 @pytest.mark.parametrize(
     "record",
     [
         {"parse_warnings": "warning"},
+        {"parse_warnings": None},
+        {"parse_warnings": []},
+        {"weak_warning": []},
         {"parse_warnings": ["warning"]},
         {"weak_warning": ["warning"]},
+        {"parse_warnings": [None], "weak_warning": [None]},
+        {"parse_warnings": [1], "weak_warning": [1]},
+        {"parse_warnings": ["warning"], "weak_warning": [" warning "]},
         {
             "parse_warnings": ["warning"],
             "weak_warning": ["warning"],
             "strong_warning": ["warning"],
+        },
+        {
+            "parse_warnings": ["warning"],
+            "weak_warning": ["warning"],
+            "critical_warning": ["warning"],
         },
         {
             "parse_warnings": ["warning", "warning"],
@@ -5444,13 +5505,28 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
     ]
 
 
-def test_parse_disclosure_html_payload_reports_failed_file_when_not_skipping(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("parallel_workers", [1, 2])
+def test_parse_disclosure_html_payload_does_not_save_partial_result_when_not_skipping(
+    tmp_path: Path,
+    monkeypatch,
+    parallel_workers: int,
+) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    for acpt_no in ("20250101000001", "20250101000002"):
+        (viewer_dir / f"{acpt_no}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+    output_path = tmp_path / "parsed-security_transaction.json"
 
     def fake_parser(html_text, *, file_path):
-        raise RuntimeError("broken parser")
+        if Path(file_path).stem == "20250101000002":
+            raise RuntimeError("broken parser")
+        return {
+            "acpt_no": Path(file_path).stem,
+            "mode": "security_transaction",
+            "title": "",
+        }
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
@@ -5461,12 +5537,15 @@ def test_parse_disclosure_html_payload_reports_failed_file_when_not_skipping(tmp
                 "output_directory": str(tmp_path),
                 "mode": "security_transaction",
                 "skip_errors": False,
+                "parallel_workers": parallel_workers,
+                "progress_interval": 1,
             }
         )
 
     message = str(exc_info.value)
-    assert "파싱 실패 1/1: 20250101000001.html" in message
+    assert "파싱 실패 2/2: 20250101000002.html" in message
     assert "(RuntimeError) broken parser" in message
+    assert not output_path.exists()
 
 
 def test_parse_disclosure_html_payload_applies_limit(tmp_path: Path) -> None:

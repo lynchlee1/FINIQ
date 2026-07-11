@@ -792,6 +792,18 @@ def _saved_families(
 
 
 def _record_parse_warning_items(record: dict[str, Any]) -> list[dict[str, str]]:
+    unsupported_level_keys = sorted(
+        key
+        for key in record
+        if isinstance(key, str)
+        and key.endswith("_warning")
+        and key not in WARNING_LEVEL_KEYS
+    )
+    if unsupported_level_keys:
+        levels = ", ".join(unsupported_level_keys)
+        msg = f"warning contract violation: unsupported warning levels: {levels}"
+        raise ValueError(msg)
+
     parse_warnings = _record_warning_texts(record, "parse_warnings")
 
     level_by_warning: dict[str, str] = {}
@@ -819,17 +831,19 @@ def _record_parse_warning_items(record: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _record_warning_texts(record: dict[str, Any], key: str) -> list[str]:
-    values = record.get(key)
-    if values is None:
+    if key not in record:
         return []
-    if not isinstance(values, list):
-        msg = f"warning contract violation: {key} must be a list"
+    values = record[key]
+    if not isinstance(values, list) or not values:
+        msg = f"warning contract violation: {key} must be a non-empty list"
         raise ValueError(msg)
-    warnings = [str(value).strip() for value in values]
-    if any(not warning for warning in warnings) or len(warnings) != len(set(warnings)):
-        msg = f"warning contract violation: {key} must be unique and non-empty"
+    if any(not isinstance(value, str) or not value.strip() for value in values):
+        msg = f"warning contract violation: {key} must contain non-empty strings"
         raise ValueError(msg)
-    return warnings
+    if len(values) != len(set(values)):
+        msg = f"warning contract violation: {key} must contain unique strings"
+        raise ValueError(msg)
+    return list(values)
 
 
 def _warning_code(warning: str) -> str:
@@ -979,7 +993,11 @@ def _parse_one_html_file(
             request.metadata_index,
             mode=request.mode,
         )
-        for warning_item in _record_parse_warning_items(parsed_record):
+        warning_items = _record_parse_warning_items(parsed_record)
+        matches_filters = _record_matches_filters(
+            record, request.record_filters
+        ) and _record_matches_filter_blocks(record, request.filter_blocks)
+        for warning_item in warning_items:
             _add_parse_warning(
                 request,
                 state,
@@ -989,9 +1007,7 @@ def _parse_one_html_file(
                 level=warning_item["level"],
                 warning_code=warning_item["warning_code"],
             )
-        if _record_matches_filters(
-            record, request.record_filters
-        ) and _record_matches_filter_blocks(record, request.filter_blocks):
+        if matches_filters:
             state.records.append(record)
     except Exception as exc:
         if not request.skip_errors:
@@ -1009,7 +1025,10 @@ def _parse_one_html_file(
         )
 
     state.processed_this_run += 1
-    if state.processed_this_run % request.progress_interval == 0:
+    if (
+        request.skip_errors
+        and state.processed_this_run % request.progress_interval == 0
+    ):
         _write_parse_payload(
             _payload_from_state(request, state, cancelled=False), request.output_path
         )
@@ -1028,16 +1047,22 @@ def _parse_html_file_for_worker(
         parsed_record = _record_without_raw_tables(
             _parse_html_file_record(request, html_file)
         )
+        record = _apply_parse_metadata(
+            parsed_record,
+            request.metadata_index,
+            mode=request.mode,
+        )
+        warning_items = _record_parse_warning_items(parsed_record)
+        matches_filters = _record_matches_filters(
+            record, request.record_filters
+        ) and _record_matches_filter_blocks(record, request.filter_blocks)
         return {
             "kind": "record",
             "index": index,
             "html_file": html_file,
-            "record": _apply_parse_metadata(
-                parsed_record,
-                request.metadata_index,
-                mode=request.mode,
-            ),
-            "warnings": _record_parse_warning_items(parsed_record),
+            "record": record,
+            "warnings": warning_items,
+            "matches_filters": matches_filters,
         }
     except Exception as exc:
         return {
@@ -1067,7 +1092,7 @@ def _record_parallel_parse_result(
                 level=warning_item["level"],
                 warning_code=warning_item["warning_code"],
             )
-        if _record_matches_filters(record, request.record_filters) and _record_matches_filter_blocks(record, request.filter_blocks):
+        if result["matches_filters"]:
             state.records.append(record)
     else:
         exc = result["error"]
@@ -1086,7 +1111,10 @@ def _record_parallel_parse_result(
         )
 
     state.processed_this_run += 1
-    if state.processed_this_run % request.progress_interval == 0:
+    if (
+        request.skip_errors
+        and state.processed_this_run % request.progress_interval == 0
+    ):
         _write_parse_payload(
             _payload_from_state(request, state, cancelled=False), request.output_path
         )
