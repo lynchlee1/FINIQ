@@ -1,9 +1,9 @@
 # 공시 1–7 자동화·증분 이어받기 설계
 
-- 상태: Proposed
+- 상태: 기반 구현 중 (전체 오케스트레이터는 Proposed)
 - 작성일: 2026-07-11
-- 대상 브랜치: `codex/disclosure-incremental-workflow-design`
-- 범위: 설계와 구현 순서 정의. 이 문서 자체는 런타임 동작을 바꾸지 않는다.
+- 대상 브랜치: `codex/dart-link-workspace`
+- 범위: 전체 자동화 설계와 구현 순서, canonical data workspace와 KIND↔DART 연결 기반.
 
 ## 1. 결론
 
@@ -50,7 +50,7 @@ KIND가 검색 snapshot token이나 cursor를 제공하지 않는 현재 계약�
 | 단계 토글 | 1–7 각각 `enabled`를 가진다. 비활성 선행 단계의 검증된 산출물이 없으면 후행 단계는 명시적으로 blocked 된다. |
 | canonical identity | KIND record는 `acpt_no` 단독을 primary key로 사용한다. 문자열 그대로 보존한다. |
 | `doc_no` | viewer 문서 선택과 내부 HTML revision에만 사용한다. |
-| `rcept_no` | 생성하지 않는다. |
+| `rcept_no` | KIND/parser record에는 생성하지 않는다. OpenDART 목록으로 검증한 연결 sidecar에만 저장한다. |
 | 저장 기본 | 자동화 profile에서 4·5·6 산출물은 `분할저장=true`를 기본으로 한다. 기존 저수준 API 기본값은 호환성을 위해 즉시 바꾸지 않는다. |
 | 6번 산출물 | 선택된 목차를 이어 붙인 공시별 HTML 1개를 원본과 같은 연도 상대 경로에 쓴다. TOC별 폴더를 만들지 않는다. |
 | 7번 필터 | 자동화에서는 비운다. 판단 필터는 3번으로, 목차 판단은 6번으로 모은다. parser mode는 기술 routing 설정이다. |
@@ -149,7 +149,8 @@ raw page, content HTML, compact JSON, parse JSON, HTML manifest의 여러 write�
 
 - 분산 worker cluster나 외부 message broker를 도입하지 않는다.
 - 현재 7개 상세 화면을 제거하거나 한 번에 재작성하지 않는다.
-- KIND 외에 DART identifier를 추정하지 않는다.
+- OpenDART 목록 증거 없이 DART identifier를 KIND HTML/식별자에서 추정하지 않는다.
+- DART 공시 원문 HTML을 다운로드하지 않는다.
 - parser field 추출 규칙 자체를 이 작업에서 변경하지 않는다.
 - raw/cache artifact를 자동 garbage collection하지 않는다.
 - snapshot token 없는 KIND API에 대해 zero-replay page resume을 보장하지 않는다.
@@ -941,23 +942,30 @@ active generation pointer만 transaction/atomic replace한다.
 등이 filesystem 경로에 들어갈 수 없다.
 
 ```text
-<data_root>/.finiq/workflows/<profile_id>/
-  profile-revisions/<revision_id>.json
-  runs/<run_id>/run.json
-  crawl/
-    <request_filter_hash>/<window_id>/<epoch_id>/pages/00001.body
-  artifacts/
-    02-table/<year>/<partition_fingerprint>.sqlite
-    03-filter/<selection_hash>/<year>/<membership_fingerprint>.jsonl
-    04-external/<year>/<entity_path_key>/<request_identity_hash>/<response_sha256>.html
-    04-compact/<year>/<entity_path_key>/<input_fingerprint>.json
-    05-content/<year>/<entity_path_key>/<request_identity_hash>/<response_sha256>.html
-    06-sections/<year>/<entity_path_key>/<input_fingerprint>.html
-    07-parse-core/<mode>/<year>/<entity_path_key>/<input_fingerprint>.json
-    07-results/<generation_id>/parsed-<mode>.json
-  generations/<generation_id>/manifest.json
-  active-generation.json
+<data_root>/
+  disclosure-workspace.json
+  01-list/
+    <year>/...
+    dart-links/
+      manifest.json
+      years/<year>.json
+      cache/corp-codes.json
+  02-table/...
+  03-filter/filtered.json
+  04-external/<year>/...
+  05-internal/<year>/...
+  06-sections/<year>/...
+  07-converted/
+    <mode>/parsed-<mode>.json
+  .finiq/workflows/<profile_id>/
+    profile-revisions/...
+    runs/...
+    generations/...
 ```
+
+사용자/기존 tool이 읽는 canonical stage root는 `01-list`부터 `07-converted`까지다.
+실행 원장과 immutable generation metadata는 `.finiq/workflows`에 분리한다. mode는 안전한
+path component로 검증하며 사용자가 준 `acpt_no`를 unchecked path로 보간하지 않는다.
 
 local derived artifact의 final path에는 input fingerprint를, remote network blob에는
 request identity와 response SHA-256을 포함한다. 그래야 새 content가 과거 active
@@ -1007,6 +1015,53 @@ path-stem identity를 분리해야 한다. 기존 개별 API 계약은 유지한
 compatibility tree는 source identifier가 엄격한 safe filename validation을 통과할 때만
 generation 안에 만들 수 있으며, unsafe identifier에 원문을 직접 filename으로 쓰는
 fallback은 금지한다.
+
+### 11.1 현재 구현된 workspace adapter
+
+`POST /api/disclosures/workspace/prepare`는 위 7개 canonical root와 안전하게 검증한
+`07-converted/<mode>`를 만들고 `disclosure-workspace.json`을 원자적으로 기록한다.
+기존 저수준 API는 `data_root`가 있을 때만 stage 기본 경로를 채우며 사용자가 명시한
+경로는 덮어쓰지 않는다. Stage 2 writer가 실제로 만드는
+`02-table/disclosures.sqlite_manifest_shards/disclosures.sqlite_manifest.json`을 Stage 3와
+DART link source가 그대로 참조한다.
+
+이 adapter는 기존 7개 handler를 새 경로에 연결하는 기반이다. 아직 SQLite 실행 원장,
+entity fingerprint planner, immutable generation/publish pointer 전체를 구현한 것은 아니다.
+
+### 11.2 KIND↔DART 연결 sidecar
+
+`POST /api/disclosures/dart-links/build`와 background start/status/cancel API는 KIND record의
+`acpt_no`, `doc_no`를 OpenDART `rcept_no`와 연결한다. `OPENDART_API_KEY` 또는 request의
+`dart_api_key`를 사용하되 key는 결과, cache, progress log에 저장하지 않는다.
+
+연결 순서는 다음과 같다.
+
+1. OpenDART `corpCode.xml`을 최대 7일 cache하고, KIND 6자리 종목코드 exact match를
+   우선하며 정규화 회사명 exact match를 보조로 쓴다.
+2. 같은 `corp_code`의 pending KIND 접수일 범위를 묶어 `list.json` 전 page를
+   `page_count=100`, `last_reprt_at=N`으로 조회한다. 날짜 허용 오차가 연말·연초를
+   넘을 수 있으므로 query bound도 그만큼 확장한다.
+3. 접수일, 제목, 정정 여부, 제출인을 evidence로 점수화하고 유일한 고신뢰 후보만
+   `matched`로 확정한다.
+4. DART 원문 endpoint는 호출하지 않고 `01-list/dart-links/years/<year>.json` sidecar에만
+   결과를 저장한다. 접수일이 잘못된 미해결 record는 `dart-links/undated.json`으로
+   분리해 임의의 연도에 넣지 않는다.
+
+상태 의미는 다음 불변조건을 따른다.
+
+- `confirmed_absent`: 회사코드가 확정되고 완전한 목록 응답의 날짜 허용 범위에 후보가
+  전혀 없을 때만 사용한다.
+- 날짜 후보가 있지만 metadata가 잘못됐거나 제목/정정 증거가 부족하면 `unresolved`,
+  유력 후보가 여럿이면 `ambiguous`다.
+- network/API/pagination이 끝까지 확인되지 않으면 `lookup_failed`다. incomplete 응답을
+  부재로 승격하지 않는다.
+- 동일 input fingerprint의 `matched`는 재사용하고, `confirmed_absent`는 기본 7일 뒤
+  재조회한다. 실패/미해결/모호 상태는 다음 실행에서 다시 조회한다.
+
+input은 해당 실행이 원하는 전체 KIND membership snapshot으로 취급한다. 결과 JSON에는
+원문이 없음을 나타내는 `contains_dart_html=false`, query completeness, 후보 evidence와
+상태별 count를 기록한다. parser base record와 correction family에는 `rcept_no`를 주입하지
+않는다.
 
 ## 12. Stage 1 — 공시내역 다운로드
 
@@ -1534,8 +1589,8 @@ record에 적용한다. metadata만 바뀌면 HTML parser를 다시 돌리지 �
 parser-input projection field는 제외한다.
 
 `filtered.json`은 회사명·상장구분 보강에만 사용하고 `doc_no`나 family source로 쓰지
-않는다. correction family는 Stage 4 compact `mainDoc` 관계에서 계산한다. `rcept_no`는
-만들지 않는다.
+않는다. correction family는 Stage 4 compact `mainDoc` 관계에서 계산한다. OpenDART
+연결 sidecar의 `rcept_no`도 parser core/family 계산에 주입하지 않는다.
 
 새 정정공시가 들어오면 family의 다음 값이 기존 구성원 전체에서 바뀔 수 있다.
 
@@ -2263,6 +2318,19 @@ import 과정은 기존 file을 이동·삭제하지 않는다. 새 ledger와 ar
 99. locally validated import의 freshness warning과 live reconcile 승격
 100. 같은 request filter를 공유하는 두 profile의 lookback/split policy가 서로의
      mutable/leaf coverage를 변경하지 않음
+
+### KIND↔DART 연결 기반
+
+101. 종목코드/회사명 연결 뒤 날짜·제목·정정 여부가 유일한 후보만 `matched`
+102. 완전 조회의 날짜 범위에 후보가 없을 때만 `confirmed_absent`
+103. 후보 metadata 불량/제목 불일치/복수 고신뢰 후보/API 실패 상태 분리
+104. 연말·연초 ±날짜 허용 범위와 원공시/정정공시 교차 매칭 방지
+105. pagination count/page drift, 중복 `rcept_no`, incomplete 응답을 완전 조회로 거부
+106. 동일 회사의 pending 날짜 범위를 한 query stream으로 묶고 모든 page 확인
+107. unchanged matched 재사용, negative cache 만료 재조회, 회사코드 cache 재사용
+108. 취소를 page 사이에서 확인하고 DART API key/error 원문을 artifact/log에 미저장
+109. DART 원문 HTML endpoint 호출 0회와 `contains_dart_html=false`
+110. invalid KIND date는 임의 year 대신 `undated.json`의 명시 unresolved 상태로 저장
 
 ## 27. 최종 acceptance 기준
 

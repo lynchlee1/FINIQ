@@ -11,6 +11,10 @@ from finiq.data_scraper.workflow import KindWorkflow
 
 from finiq.market_desk.web.features.downloads.kind_common import *
 from finiq.market_desk.web.features.downloads.kind_runner import _run_resume, _run_single, _run_yearly
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+)
+
 
 def build_download_options_payload(
     *, default_output_directory: str | Path
@@ -36,6 +40,7 @@ def build_download_options_payload(
 
 
 def build_download_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = apply_workspace_defaults("kind_download", payload)
     output_directory_raw = str(payload.get("output_directory") or "").strip()
     if not output_directory_raw:
         raise ValueError("output_directory is required")
@@ -87,6 +92,7 @@ def build_download_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_download_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = apply_workspace_defaults("kind_download", payload)
     output_directory_raw = str(payload.get("output_directory") or "").strip()
     if not output_directory_raw:
         raise ValueError("output_directory is required")
@@ -114,6 +120,7 @@ def run_download_action(
     progress_callback: Any | None = None,
     cancel_check: Any | None = None,
 ) -> dict[str, Any]:
+    payload = apply_workspace_defaults("kind_download", payload)
     mode = str(payload.get("mode") or "single").strip().lower()
     if mode == "single":
         return _run_single(
@@ -128,5 +135,3 @@ def run_download_action(
             payload, progress_callback=progress_callback, cancel_check=cancel_check
         )
     raise ValueError("mode must be one of: single, yearly, resume")
-
-
