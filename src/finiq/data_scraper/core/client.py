@@ -14,6 +14,7 @@ import requests
 from finiq.concurrency import bounded_as_completed
 
 from .html_rate_limit import (
+    RequestSpacingLimiter,
     SlidingWindowRateLimiter,
     wait_for_html_download_request_slot,
 )
@@ -613,6 +614,7 @@ def download_disclosure_viewer_htmls(
         active_session.mount("http://", adapter)
 
     rate_limiter = SlidingWindowRateLimiter(max_requests_per_minute)
+    spacing_limiter = RequestSpacingLimiter(wait_seconds_between_requests)
     saved_paths: dict[str, Path] = {}
     valid_acpt_numbers: set[str] = set()
     errors: dict[str, str] = {}
@@ -622,8 +624,6 @@ def download_disclosure_viewer_htmls(
     
     total_count = len(normalized_acpt_numbers)
     lock = threading.Lock()
-    request_spacing_lock = threading.Lock()
-    next_request_time = time.monotonic()
 
     def get_worker_session() -> requests.Session:
         if not owns_session or max_workers == 1:
@@ -636,16 +636,6 @@ def download_disclosure_viewer_htmls(
             with worker_sessions_lock:
                 worker_sessions.append(worker_session)
         return worker_session
-
-    def wait_for_request_spacing() -> bool:
-        nonlocal next_request_time
-        if wait_seconds_between_requests <= 0:
-            return bool(cancel_check is not None and cancel_check())
-        with request_spacing_lock:
-            now = time.monotonic()
-            sleep_seconds = max(0.0, next_request_time - now)
-            next_request_time = max(now, next_request_time) + wait_seconds_between_requests
-        return _sleep_between_requests(sleep_seconds, cancel_check)
 
     def download_task(acpt_no: str, current_retry: int = 0) -> Path | None:
         if cancel_check is not None and cancel_check():
@@ -660,12 +650,11 @@ def download_disclosure_viewer_htmls(
                 valid_acpt_numbers.add(acpt_no)
             return output_path
 
-        # Wait for rate limit
-        if rate_limiter.wait(cancel_check):
-            return None
-        if wait_for_request_spacing():
-            return None
-        if wait_for_html_download_request_slot(cancel_check):
+        if wait_for_html_download_request_slot(
+            cancel_check,
+            local_limiter=rate_limiter,
+            spacing_limiter=spacing_limiter,
+        ):
             return None
 
         try:

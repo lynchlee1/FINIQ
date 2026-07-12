@@ -11,15 +11,6 @@ import finiq.market_desk.web.features.disclosures.html_content_download as conte
 from finiq.data_scraper.core.client import download_disclosure_viewer_htmls
 
 
-class _RecordingLimiter:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def wait(self, cancel_check=None) -> bool:
-        self.calls += 1
-        return bool(cancel_check is not None and cancel_check())
-
-
 class _ViewerResponse:
     def __init__(self) -> None:
         self.content = ("<html><body>" + ("viewer " * 30) + "</body></html>").encode()
@@ -56,11 +47,16 @@ def test_sliding_window_limiter_waits_after_capacity(
     assert clock[0] >= 60
 
 
+def test_sliding_window_limiter_rejects_non_positive_capacity() -> None:
+    with pytest.raises(ValueError, match="at least 1"):
+        rate_limit_module.SlidingWindowRateLimiter(0)
+
+
 def test_external_and_content_html_share_one_request_limiter(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    limiter = _RecordingLimiter()
+    limiter = rate_limit_module.SlidingWindowRateLimiter(100)
     monkeypatch.setattr(rate_limit_module, "_HTML_DOWNLOAD_RATE_LIMITER", limiter)
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
@@ -95,4 +91,55 @@ def test_external_and_content_html_share_one_request_limiter(
 
     assert len(external_paths) == 1
     assert len(content_paths) == 1
-    assert limiter.calls == 3
+    assert len(limiter._request_timestamps) == 3
+
+
+def test_local_and_global_windows_reserve_the_same_request_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    local = rate_limit_module.SlidingWindowRateLimiter(2)
+    global_limiter = rate_limit_module.SlidingWindowRateLimiter(1)
+    monkeypatch.setattr(rate_limit_module, "_HTML_DOWNLOAD_RATE_LIMITER", global_limiter)
+    monkeypatch.setattr(rate_limit_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        rate_limit_module.time,
+        "sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+
+    assert rate_limit_module.wait_for_html_download_request_slot(
+        local_limiter=local
+    ) is False
+    assert rate_limit_module.wait_for_html_download_request_slot(
+        local_limiter=local
+    ) is False
+
+    assert clock[0] >= 60
+    assert local._request_timestamps == global_limiter._request_timestamps
+
+
+def test_spacing_is_reserved_after_a_global_window_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    request_times: list[float] = []
+    global_limiter = rate_limit_module.SlidingWindowRateLimiter(2)
+    global_limiter._request_timestamps = [0.0, 0.0]
+    spacing_limiter = rate_limit_module.RequestSpacingLimiter(2.0)
+    monkeypatch.setattr(rate_limit_module, "_HTML_DOWNLOAD_RATE_LIMITER", global_limiter)
+    monkeypatch.setattr(rate_limit_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        rate_limit_module.time,
+        "sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+
+    for _ in range(2):
+        assert rate_limit_module.wait_for_html_download_request_slot(
+            spacing_limiter=spacing_limiter
+        ) is False
+        request_times.append(clock[0])
+
+    assert request_times[0] >= 60
+    assert request_times[1] >= request_times[0] + 2

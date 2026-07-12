@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 import finiq.market_desk.web.features.downloads.kind_runner as download_module
+from finiq.market_desk.web.features.downloads.kind_common import _detect_pagination
 
 
 def test_run_resume_starts_from_first_missing_page(tmp_path, monkeypatch) -> None:
@@ -61,6 +62,30 @@ def test_run_resume_starts_from_first_missing_page(tmp_path, monkeypatch) -> Non
     )
 
     assert received_start_pages == [3]
+
+
+def test_detect_pagination_uses_earlier_page_when_latest_is_corrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "001_post_page_00001.body"
+    latest = tmp_path / "002_post_page_00002.body"
+    first.write_bytes(b"valid")
+    latest.write_bytes(b"corrupt")
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_common.pagination_info",
+        lambda content: {"total_pages": 2, "total_items": 150}
+        if content == b"valid"
+        else None,
+    )
+
+    result = _detect_pagination(tmp_path)
+
+    assert result == {
+        "total_pages": 2,
+        "total_items": 150,
+        "downloaded_pages": 2,
+        "latest_file": first.name,
+    }
 
 
 def test_run_yearly_returns_promptly_when_parallel_worker_fails(tmp_path, monkeypatch) -> None:

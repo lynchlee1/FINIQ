@@ -71,6 +71,16 @@ type AutomationPlan = {
   kind_limit: { max_requests_per_minute: number; max_in_flight: number };
 };
 
+type InspectionStage = {
+  stage: number;
+  label: string;
+  confirmed: boolean;
+  reason: string;
+  details?: Record<string, unknown>;
+  updated_at?: string | null;
+};
+type WorkspaceInspection = { stage: InspectionStage };
+
 type ReviewPattern = SectionPattern;
 
 type AutomationRunResult = {
@@ -120,7 +130,9 @@ function loadJson<T>(key: string): T | null {
   }
 }
 
-function planLabel(action?: PlanAction) {
+function planLabel(action?: PlanAction | "confirmed" | "mismatch") {
+  if (action === "confirmed") return "확인됨";
+  if (action === "mismatch") return "확인 필요";
   if (action === "disabled") return "사용 안 함";
   if (action === "reuse") return "재사용";
   if (action === "process") return "실행 예정";
@@ -129,10 +141,10 @@ function planLabel(action?: PlanAction) {
   return "확인 전";
 }
 
-function planTone(action?: PlanAction) {
-  if (action === "blocked" || action === "review") return "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200";
+function planTone(action?: PlanAction | "confirmed" | "mismatch") {
+  if (action === "blocked" || action === "review" || action === "mismatch") return "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200";
   if (action === "process") return "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200";
-  if (action === "reuse") return "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200";
+  if (action === "reuse" || action === "confirmed") return "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200";
   return "border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-muted)]";
 }
 
@@ -173,6 +185,8 @@ export default function DisclosureAutomationPage() {
   const [timeout, setTimeoutValue] = useState("20");
   const [downloadOptions, setDownloadOptions] = useState<DownloadOptions | null>(null);
   const [plan, setPlan] = useState<AutomationPlan | null>(null);
+  const [workspaceInspections, setWorkspaceInspections] = useState<Record<number, InspectionStage>>({});
+  const [inspectingStage, setInspectingStage] = useState<number | null>(null);
   const [runResult, setRunResult] = useState<AutomationRunResult | null>(null);
   const [reviewPatterns, setReviewPatterns] = useState<ReviewPattern[]>([]);
   const [reviewSelections, setReviewSelections] = useState<Record<string, string[]>>({});
@@ -265,6 +279,23 @@ export default function DisclosureAutomationPage() {
     }).finally(() => setLoading(false));
   }, [fetchSettings, setIsErrorStatus]);
 
+  useEffect(() => {
+    setWorkspaceInspections({});
+  }, [
+    companyName,
+    conditions,
+    dataRoot,
+    disclosureTypeGroups,
+    endDate,
+    marketLabel,
+    pageSize,
+    parserMode,
+    sectionRules,
+    securitiesLabel,
+    startDate,
+    submitterName,
+  ]);
+
   const normalizedConditions = useMemo(() => normalizeDisclosureConditionBlocks(conditions), [conditions]);
   const executionMask = useMemo(
     () => STAGES.filter((stage) => stage.number >= rangeStart && stage.number <= rangeEnd).map((stage) => stage.number),
@@ -347,6 +378,29 @@ export default function DisclosureAutomationPage() {
       setNotification(error instanceof Error ? error.message : String(error));
       setIsErrorStatus(true);
       return null;
+    }
+  }
+
+  async function inspectStage(stage: number) {
+    if (!dataRoot.trim()) {
+      setNotification("데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    setInspectingStage(stage);
+    try {
+      const result = await apiPost<WorkspaceInspection>("/api/disclosure-workflows/inspect", {
+        ...buildProfile("resume"),
+        stage,
+      });
+      setWorkspaceInspections((current) => ({ ...current, [stage]: result.stage }));
+      setNotification(`${result.stage.label} 작업 결과를 검사했습니다.`);
+      setIsErrorStatus(false);
+    } catch (error) {
+      setNotification(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    } finally {
+      setInspectingStage(null);
     }
   }
 
@@ -535,6 +589,7 @@ export default function DisclosureAutomationPage() {
 
   const runStageStatus = (stage: number) => runResult?.stages.find((item) => item.stage === stage)?.status;
   const planForStage = (stage: number) => plan?.stages.find((item) => item.stage === stage);
+  const inspectionForStage = (stage: number) => workspaceInspections[stage];
 
   if (loading) return <PageLoadingSpinner message="공시 자동화 설정을 불러오는 중입니다..." />;
 
@@ -576,6 +631,12 @@ export default function DisclosureAutomationPage() {
                       const planAction = stage.number === 6 && reviewPatterns.length
                         ? "review"
                         : stagePlan?.plan_action;
+                      const stageInspection = inspectionForStage(stage.number);
+                      const displayedPlanAction = stage.number === 6 && reviewPatterns.length
+                        ? "review"
+                        : stageInspection
+                          ? stageInspection.confirmed ? "confirmed" : "mismatch"
+                          : planAction;
                       const inRange = executionMask.includes(stage.number);
                       const isRangeStart = stage.number === rangeStart;
                       const isRangeEnd = stage.number === rangeEnd;
@@ -617,13 +678,13 @@ export default function DisclosureAutomationPage() {
                             </div>
                           </td>
                           <td className="px-5 py-2 align-middle">
-                            <span className={`inline-flex rounded-full border px-3 py-1.5 text-sm font-semibold ${planTone(planAction)}`}>{planLabel(planAction)}</span>
-                            {stagePlan?.reason ? <p className="mt-2 max-w-[260px] text-sm leading-5 text-[var(--tv-muted)]">{stagePlan.reason}</p> : null}
+                            <span className={`inline-flex rounded-full border px-3 py-1.5 text-sm font-semibold ${planTone(displayedPlanAction)}`}>{planLabel(displayedPlanAction)}</span>
+                            {stageInspection?.reason || stagePlan?.reason ? <p className="mt-2 max-w-[260px] text-sm leading-5 text-[var(--tv-muted)]">{stageInspection?.reason || stagePlan?.reason}</p> : null}
                           </td>
                           <td className="px-5 py-2 align-middle text-sm text-[var(--tv-muted)]">{activeJobId && stagePlan?.plan_action === "process" && !statusValue ? "대기 중" : runStatusLabel(statusValue)}</td>
                           <td className="px-5 py-2 align-middle text-sm text-[var(--tv-muted)]">{formatCompletedAt(stagePlan?.last_success_at)}</td>
                           <td className="px-5 py-2 align-middle">
-                            <div className="flex justify-end">
+                            <div className="flex justify-end gap-2">
                               {settingsTarget ? (
                                 <Button
                                   type="button"
@@ -635,6 +696,16 @@ export default function DisclosureAutomationPage() {
                                   설정
                                 </Button>
                               ) : null}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-3 text-sm text-[var(--tv-text)]"
+                                onClick={() => void inspectStage(stage.number)}
+                                disabled={!!activeJobId || inspectingStage !== null}
+                              >
+                                검사
+                              </Button>
                             </div>
                           </td>
                         </tr>

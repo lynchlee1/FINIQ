@@ -343,7 +343,14 @@ def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
 
 def _find_source_body_files(root: Path) -> list[Path]:
     return sorted(
-        root.rglob("*_post_page_*.body"),
+        (
+            path
+            for path in root.rglob("*_post_page_*.body")
+            if not any(
+                part.startswith(".")
+                for part in path.relative_to(root).parts[:-1]
+            )
+        ),
         key=lambda path: (
             str(path.parent.relative_to(root)),
             _result_page_number(path),

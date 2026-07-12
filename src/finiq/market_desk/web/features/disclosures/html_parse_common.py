@@ -520,6 +520,11 @@ def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
     candidates = [*resolved_root.glob("*.html"), *resolved_root.glob("*/*.html")]
     resolved_files: set[Path] = set()
     for path in candidates:
+        if any(
+            part.startswith(".")
+            for part in path.relative_to(resolved_root).parts[:-1]
+        ):
+            continue
         resolved_path = path.resolve()
         try:
             resolved_path.relative_to(resolved_root)

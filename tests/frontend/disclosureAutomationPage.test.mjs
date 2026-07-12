@@ -76,8 +76,8 @@ test("automation task table uses standard card spacing and a far-right outlined 
   assert.match(taskTable, /className="h-8 border-\[color:var\(--tv-border\)\]/);
   assert.doesNotMatch(taskTable, /<Link href=\{stage\.href\}|<MoveVertical|<GripVertical|<Flag|isRangeStart \? <Play/);
   assert.match(taskTable, /<th className="w-32[^>]*><span className="sr-only">설정<\/span><\/th>/);
-  assert.match(taskTable, /<div className="flex justify-end">[\s\S]*?variant="outline"[\s\S]*?설정/);
-  assert.ok(taskTable.indexOf("formatCompletedAt") < taskTable.indexOf('<div className="flex justify-end">'));
+  assert.match(taskTable, /<div className="flex justify-end gap-2">[\s\S]*?variant="outline"[\s\S]*?설정[\s\S]*?검사/);
+  assert.ok(taskTable.indexOf("formatCompletedAt") < taskTable.indexOf('<div className="flex justify-end gap-2">'));
   assert.doesNotMatch(taskTable, /variant="ghost"[\s\S]{0,220}설정/);
 });
 
@@ -113,4 +113,21 @@ test("automation and detail pages share the same judgment setting components", a
   }
   assert.match(page, /HtmlSectionPatternCard/);
   assert.match(sectionResults, /HtmlSectionPatternCard/);
+});
+
+test("automation page inspects detail-page outputs and shows confirmed plans", async () => {
+  const page = await readFile(pagePath, "utf8");
+
+  assert.match(page, /\/api\/disclosure-workflows\/inspect/);
+  assert.match(page, /\.\.\.buildProfile\("resume"\),\s*stage,/);
+  assert.match(page, /onClick=\{\(\) => void inspectStage\(stage\.number\)\}/);
+  assert.match(page, /disabled=\{!!activeJobId \|\| inspectingStage !== null\}[\s\S]{0,80}>\s*검사/);
+  assert.doesNotMatch(page, /inspectingStage === stage\.number \? <Loader2/);
+  assert.match(page, /const stageInspection = inspectionForStage\(stage\.number\)/);
+  assert.match(page, /action === "confirmed"\) return "확인됨"/);
+  assert.match(page, /action === "mismatch"\) return "확인 필요"/);
+  assert.match(page, /action === "reuse" \|\| action === "confirmed"/);
+  assert.match(page, /stageInspection\?\.reason \|\| stagePlan\?\.reason/);
+  assert.match(page, /companyName,[\s\S]*conditions,[\s\S]*disclosureTypeGroups,[\s\S]*sectionRules/);
+  assert.equal(page.match(/\/api\/disclosure-workflows\/inspect/g)?.length, 1);
 });

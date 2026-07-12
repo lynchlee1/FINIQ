@@ -25,6 +25,7 @@ from finiq.market_desk.web.features.disclosure_workflow.automation import (
     _window_body_hash,
     _window_ranges,
     build_automation_plan_payload,
+    inspect_disclosure_workspace_payload,
     normalize_automation_profile,
 )
 from finiq.market_desk.web.app import app
@@ -334,6 +335,8 @@ def test_stage_two_passes_parent_cancel_check(
 def test_content_download_rate_limits_each_actual_kind_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import finiq.data_scraper.core.html_rate_limit as rate_limit_module
+
     clock = {"now": 100.0}
     sleeps: list[float] = []
 
@@ -363,6 +366,12 @@ def test_content_download_rate_limits_each_actual_kind_request(
     )
     monkeypatch.setattr("time.time", lambda: clock["now"])
     monkeypatch.setattr("time.sleep", sleep)
+    monkeypatch.setattr(rate_limit_module.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        rate_limit_module,
+        "_HTML_DOWNLOAD_RATE_LIMITER",
+        rate_limit_module.SlidingWindowRateLimiter(100),
+    )
 
     saved = html_content_download.download_disclosure_content_htmls(
         output_directory=tmp_path,
@@ -372,7 +381,7 @@ def test_content_download_rate_limits_each_actual_kind_request(
     )
 
     assert len(saved) == 1
-    assert sleeps == [2.0]
+    assert 2.0 <= sum(sleeps) < 2.2
 
 
 def test_automation_plan_api_exposes_stage_preflight(tmp_path: Path) -> None:
@@ -385,6 +394,394 @@ def test_automation_plan_api_exposes_stage_preflight(tmp_path: Path) -> None:
     payload = response.json()
     assert payload["execution_allowed"] is True
     assert [stage["stage"] for stage in payload["stages"]] == list(range(1, 8))
+
+
+def _write_matching_detail_download_snapshot(raw: dict[str, object], root: Path) -> Path:
+    profile = normalize_automation_profile(raw)
+    payload = automation._detail_download_payload(profile)
+    start = date.fromisoformat(str(payload["start_date"]))
+    end = date.fromisoformat(str(payload["end_date"]))
+    folder = root / "01-list" / f"{start:%Y%m%d}_{end:%Y%m%d}"
+    folder.mkdir(parents=True)
+    snapshot = automation._download_input_snapshot_from_payload(
+        payload,
+        start=start,
+        end=end,
+        page_size=int(payload["page_size"]),
+    )
+    (folder / "kind_workflow.input.json").write_text(json.dumps(snapshot))
+    return folder
+
+
+def test_workspace_inspection_compares_download_settings_and_completeness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _profile(tmp_path)
+    folder = _write_matching_detail_download_snapshot(raw, tmp_path)
+    monkeypatch.setattr(
+        automation,
+        "check_existing_downloads",
+        lambda *_args, **_kwargs: {
+            "has_existing": True,
+            "ranges": [
+                {
+                    "folder_path": str(folder),
+                    "status": "validated",
+                    "local_count": 12,
+                    "kind_count": 12,
+                }
+            ],
+        },
+    )
+
+    result = inspect_disclosure_workspace_payload({**raw, "stage": 1})["stage"]
+
+    assert result["confirmed"] is True
+    assert result["details"]["local_count"] == 12
+
+    snapshot_path = folder / "kind_workflow.input.json"
+    snapshot = json.loads(snapshot_path.read_text())
+    snapshot["search_filters"] = {"searchCorpName": "다른 회사"}
+    snapshot_path.write_text(json.dumps(snapshot))
+
+    mismatch = inspect_disclosure_workspace_payload({**raw, "stage": 1})["stage"]
+
+    assert mismatch["confirmed"] is False
+    assert "설정" in mismatch["reason"]
+
+
+def test_workspace_inspection_rejects_incomplete_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _profile(tmp_path)
+    folder = _write_matching_detail_download_snapshot(raw, tmp_path)
+    monkeypatch.setattr(
+        automation,
+        "check_existing_downloads",
+        lambda *_args, **_kwargs: {
+            "has_existing": True,
+            "ranges": [
+                {
+                    "folder_path": str(folder),
+                    "status": "stale",
+                    "error_detail": "Page completeness check failed",
+                }
+            ],
+        },
+    )
+
+    result = inspect_disclosure_workspace_payload({**raw, "stage": 1})["stage"]
+
+    assert result["confirmed"] is False
+    assert "completeness" in result["reason"]
+
+
+def test_automation_download_inspection_queries_only_mutable_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _profile(tmp_path)
+    raw["decisions"]["s1_search"]["start_date"] = "2026-07-01"  # type: ignore[index]
+    profile = normalize_automation_profile(raw)
+    live_queries: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        automation,
+        "inspect_download_directory_pages",
+        lambda *_args, **_kwargs: {"total_items": 1},
+    )
+    monkeypatch.setattr(
+        automation,
+        "get_current_kind_total_count",
+        lambda snapshot: live_queries.append(snapshot) or 1,
+    )
+
+    result = automation._inspect_automation_download(profile)
+
+    assert result["confirmed"] is True
+    assert result["details"]["live_checked_windows"] == 7
+    assert len(live_queries) == 7
+
+
+def test_table_inspection_compares_source_records_and_sqlite_shards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    manifest_path = tmp_path / "02-table" / "source_shards" / "source.sqlite_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    monkeypatch.setattr(automation, "_table_manifest", lambda _profile: manifest_path)
+    monkeypatch.setattr(
+        automation,
+        "_load_sqlite_manifest",
+        lambda _path: {
+            "source_type": "source_folder",
+            "source_path": str(tmp_path / "01-list"),
+        },
+    )
+    monkeypatch.setattr(automation, "_validate_sqlite_manifest_counts", lambda *_args: None)
+    results = iter(
+        [
+            {"disclosures": [{"acpt_no": "1"}]},
+            {"disclosures": [{"acpt_no": "1"}]},
+        ]
+    )
+    monkeypatch.setattr(automation, "filter_disclosures_payload", lambda *_args, **_kwargs: next(results))
+
+    confirmed = automation._inspect_detail_table(profile)
+
+    assert confirmed["confirmed"] is True
+
+    changed_results = iter(
+        [
+            {"disclosures": [{"acpt_no": "1"}]},
+            {"disclosures": [{"acpt_no": "2"}]},
+        ]
+    )
+    monkeypatch.setattr(
+        automation,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: next(changed_results),
+    )
+
+    mismatch = automation._inspect_detail_table(profile)
+
+    assert mismatch["confirmed"] is False
+    assert "레코드" in mismatch["reason"]
+
+    duplicate_count_results = iter(
+        [
+            {
+                "summary": {"source_disclosures": 2},
+                "disclosures": [{"acpt_no": "1"}],
+            },
+            {
+                "summary": {"source_disclosures": 1},
+                "disclosures": [{"acpt_no": "1"}],
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        automation,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: next(duplicate_count_results),
+    )
+
+    count_mismatch = automation._inspect_detail_table(profile)
+
+    assert count_mismatch["confirmed"] is False
+    assert count_mismatch["details"]["source_rows"] == 2
+    assert count_mismatch["details"]["table_rows"] == 1
+
+
+def test_table_source_discovery_ignores_nested_automation_windows(
+    tmp_path: Path,
+) -> None:
+    from finiq.market_desk.web.features.market_data.service_sources import (
+        _find_source_body_files,
+    )
+
+    root = tmp_path / "01-list"
+    visible = root / "20260101_20261231" / "001_post_page_00001.body"
+    hidden_root = root / ".automation-windows"
+    hidden = hidden_root / "20260101_20260131" / "001_post_page_00001.body"
+    visible.parent.mkdir(parents=True)
+    hidden.parent.mkdir(parents=True)
+    visible.write_bytes(b"visible")
+    hidden.write_bytes(b"hidden")
+
+    assert _find_source_body_files(root) == [visible]
+    assert _find_source_body_files(hidden_root) == [hidden]
+
+
+def test_detail_table_manifest_selects_current_standard_source(tmp_path: Path) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    table_root = tmp_path / "02-table"
+    automation_manifest = (
+        table_root
+        / ".automation-windows_shards"
+        / ".automation-windows.sqlite_manifest.json"
+    )
+    detail_manifest = table_root / "01-list_shards" / "01-list.sqlite_manifest.json"
+    automation_manifest.parent.mkdir(parents=True)
+    detail_manifest.parent.mkdir(parents=True)
+    automation_manifest.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_table_manifest_v1",
+                "source_type": "source_folder",
+                "source_path": str(tmp_path / "01-list" / ".automation-windows"),
+            }
+        )
+    )
+    detail_manifest.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_table_manifest_v1",
+                "source_type": "source_folder",
+                "source_path": str(tmp_path / "01-list"),
+            }
+        )
+    )
+
+    assert automation._table_manifest(profile) == detail_manifest
+
+
+def test_filter_inspection_recomputes_current_filter_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    output_path = tmp_path / "03-filter" / "filtered.json"
+    output_path.parent.mkdir(parents=True)
+    expected = {
+        "format": "kind_disclosure_filter_v1",
+        "source_type": "sqlite_manifest",
+        "source_classification_path": "",
+        "source_sqlite_manifest_path": str(tmp_path / "manifest.json"),
+        "source_root_directory": "",
+        "filters": {"filter_blocks": [], "filter_workers": 4},
+        "summary": {"matched_disclosures": 1},
+        "disclosures": [{"acpt_no": "1"}],
+        "html_download_acpt_numbers": ["1"],
+    }
+    output_path.write_text(json.dumps(expected))
+    monkeypatch.setattr(
+        automation, "_table_manifest", lambda _profile: tmp_path / "manifest.json"
+    )
+    monkeypatch.setattr(
+        automation,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: expected,
+    )
+
+    confirmed = automation._inspect_detail_filter(profile)
+
+    assert confirmed["confirmed"] is True
+
+    monkeypatch.setattr(
+        automation,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: {
+            **expected,
+            "disclosures": [{"acpt_no": "2"}],
+        },
+    )
+
+    mismatch = automation._inspect_detail_filter(profile)
+
+    assert mismatch["confirmed"] is False
+    assert "다릅니다" in mismatch["reason"]
+
+
+def test_html_inspections_require_complete_current_membership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    filtered_path = tmp_path / "03-filter" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True)
+    filtered_path.write_text(
+        json.dumps({"html_download_acpt_numbers": ["1", "2"]})
+    )
+    complete = {
+        "requested_count": 2,
+        "existing_target_html_count": 2,
+        "missing_target_html_count": 0,
+        "invalid_target_html_count": 0,
+        "unexpected_file_count": 0,
+        "existing_target_acpt_numbers": ["1", "2"],
+        "detected_output_split_by_year": True,
+    }
+    monkeypatch.setattr(
+        automation,
+        "check_disclosure_html_output_directory_payload",
+        lambda _payload: complete,
+    )
+    monkeypatch.setattr(
+        automation,
+        "_verify_compressed_external_html_files",
+        lambda **_kwargs: {"passed": True},
+    )
+    monkeypatch.setattr(
+        automation,
+        "compress_disclosure_external_html_payload",
+        lambda *_args, **_kwargs: {},
+    )
+
+    assert automation._inspect_detail_external_html(profile)["confirmed"] is True
+    assert automation._inspect_detail_internal_html(profile)["confirmed"] is True
+
+    monkeypatch.setattr(
+        automation,
+        "check_disclosure_html_output_directory_payload",
+        lambda _payload: {**complete, "missing_target_html_count": 1},
+    )
+
+    assert automation._inspect_detail_external_html(profile)["confirmed"] is False
+    assert automation._inspect_detail_internal_html(profile)["confirmed"] is False
+
+
+def test_section_inspection_uses_current_rules_and_exact_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    captured: dict[str, object] = {}
+
+    def inspect(body: dict[str, object]) -> dict[str, object]:
+        captured.update(body)
+        return {"summary": {"integrity_ok": True, "actual_files": 3}}
+
+    monkeypatch.setattr(
+        automation, "inspect_disclosure_html_section_output_payload", inspect
+    )
+
+    result = automation._inspect_detail_sections(profile)
+
+    assert result["confirmed"] is True
+    assert captured["section_save_rules"] == profile["decisions"]["s6_sections"][
+        "section_save_rules"
+    ]
+
+
+def test_parse_inspection_compares_mode_inputs_filters_membership_and_mtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    input_directory = tmp_path / "06-sections"
+    input_directory.mkdir()
+    source = input_directory / "20260712000001.html"
+    source.write_text("<html></html>")
+    output_path = (
+        tmp_path
+        / "07-converted"
+        / "bond_issuance"
+        / "parsed-bond_issuance.json"
+    )
+    output_path.parent.mkdir(parents=True)
+    saved = {
+        "format": "finiq_disclosure_html_parse_v1",
+        "mode": "bond_issuance",
+        "cancelled": False,
+        "input_directory": str(input_directory),
+        "filter_settings": {"filter_blocks": [], "record_filters": []},
+        "summary": {"found_files": 1, "parsed_files": 1, "failed_files": 0},
+        "records": [{"acpt_no": source.stem}],
+        "errors": [],
+    }
+    output_path.write_text(json.dumps(saved))
+    monkeypatch.setattr(
+        automation,
+        "parse_disclosure_html_payload",
+        lambda *_args, **_kwargs: saved,
+    )
+
+    confirmed = automation._inspect_detail_parse(profile)
+
+    assert confirmed["confirmed"] is True
+
+    payload = json.loads(output_path.read_text())
+    payload["filter_settings"]["filter_blocks"] = [{"field": "title"}]
+    output_path.write_text(json.dumps(payload))
+
+    mismatch = automation._inspect_detail_parse(profile)
+
+    assert mismatch["confirmed"] is False
 
 
 def test_recent_window_refresh_detects_content_change_not_page_position(

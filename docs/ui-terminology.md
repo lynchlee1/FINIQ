@@ -16,6 +16,9 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | --- | --- | --- |
 | Disclosure stages 1–7 orchestration workflow | 공시 자동화 | Use for the page that plans and runs the existing seven disclosure workflows together. Keep the seven stage labels unchanged. |
 | Disclosure automation preflight result | 실행 계획 | Shows which stage entities will run, be reused, or be blocked before execution. |
+| Disclosure automation detail-output inspection result | 확인됨 | Green state only after the current profile, all prerequisite inputs, expected membership, integrity checks, and recomputed outputs agree for either detail-page or continuous-run artifacts. |
+| Disclosure automation detail-output inspection action | 검사 | Per-stage action placed to the right of `설정`; checks only that stage in the selected workspace. |
+| Disclosure automation detail-output inspection mismatch | 확인 필요 | Amber state after inspection finds mismatched settings, incomplete inputs, missing outputs, or damaged outputs. Show the reason below the state. |
 | Disclosure automation manual discovery/run action | 동기화 | Starts a new idempotent run that checks recent and due audit windows, then applies downstream deltas. KIND does not provide push. |
 | Disclosure automation unresolved decision state | 판단 필요 | Use when a new section pattern or another configured judgment boundary requires user input. Do not silently include or exclude the affected item. |
 | Disclosure automation interrupted-run continuation action | 이어서 실행 | Creates a successor run with the same revision, execution mask, and search snapshot; it does not change the original run back to running. Reuse already validated artifacts. |

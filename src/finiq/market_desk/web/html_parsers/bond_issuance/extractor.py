@@ -349,24 +349,26 @@ def _first_header_index(row: list[str], label: str) -> int | None:
 
 def _target_stock_value(rows: list[list[str]], label: str) -> str | None:
     compact_label = _compact(label)
-    for row in rows:
-        for index, cell in enumerate(row[:-1]):
-            compact_cell = _compact(cell)
-            if compact_label not in compact_cell:
-                continue
-            if "대상" in compact_label and not (
-                compact_cell == compact_label
-                or "종류" in compact_cell
-                or "유가증권" in compact_cell
-            ):
-                continue
-            if "대상" not in compact_label and "종류" not in compact_cell:
-                continue
-            return row[index + 1]
-        for cell in row:
-            value = _target_stock_value_inside_cell(cell, label)
-            if value is not None:
-                return value
+    row = next((item for item in rows if row_contains(item, label)), None)
+    if row is None:
+        return None
+    for index, cell in enumerate(row[:-1]):
+        compact_cell = _compact(cell)
+        if compact_label not in compact_cell:
+            continue
+        if "대상" in compact_label and not (
+            compact_cell == compact_label
+            or "종류" in compact_cell
+            or "유가증권" in compact_cell
+        ):
+            continue
+        if "대상" not in compact_label and "종류" not in compact_cell:
+            continue
+        return row[index + 1]
+    for cell in row:
+        value = _target_stock_value_inside_cell(cell, label)
+        if value is not None:
+            return value
     return None
 
 
@@ -376,12 +378,14 @@ def _target_stock_value_after_adjacent_kind_cell(
     compact_label = _compact(label)
     if "대상" in compact_label:
         return None
-    for row in rows:
-        for index, cell in enumerate(row[:-2]):
-            if compact_label not in _compact(cell):
-                continue
-            if _compact(row[index + 1]) == "종류":
-                return row[index + 2]
+    row = next((item for item in rows if row_contains(item, label)), None)
+    if row is None:
+        return None
+    for index, cell in enumerate(row[:-2]):
+        if compact_label not in _compact(cell):
+            continue
+        if _compact(row[index + 1]) == "종류":
+            return row[index + 2]
     return None
 
 

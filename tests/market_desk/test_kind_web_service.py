@@ -71,6 +71,7 @@ from finiq.market_desk.web.features.disclosures.html_parse_summary import (
 from finiq.market_desk.web.features.disclosures.html_sections import (
     DEFAULT_HTML_SECTION_WORKERS,
     HtmlSectionSummary,
+    inspect_disclosure_html_section_output_payload,
     inspect_disclosure_html_sections_payload,
     list_disclosure_html_section_sources_payload,
     parse_html_section_worker_count,
@@ -3012,6 +3013,25 @@ def test_list_disclosure_html_section_sources_payload_pages_with_current_page_to
     assert [document["section_count"] for document in second_page["documents"]] == [1, 1]
 
 
+def test_list_disclosure_html_section_sources_ignores_hidden_automation_cache(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    visible = input_directory / "20260712000001.html"
+    hidden = input_directory / ".automation-current" / "20260712000002.html"
+    hidden.parent.mkdir()
+    markup = "<html><body><h2 id='toc_1'><p>목차</p></h2></body></html>"
+    visible.write_text(markup, encoding="utf-8")
+    hidden.write_text(markup, encoding="utf-8")
+
+    result = list_disclosure_html_section_sources_payload(
+        {"input_directory": str(input_directory)}
+    )
+
+    assert [item["source_name"] for item in result["documents"]] == [visible.name]
+
+
 def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
@@ -3150,6 +3170,67 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
     assert not (output_directory / "2008" / "20260402000001_1.html").exists()
     assert not (output_directory / "toc_1").exists()
     assert not (output_directory / "2008" / "toc_1").exists()
+
+
+def test_section_output_inspection_reuses_save_selection_and_detects_content_change(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    source = input_directory / "20260401000001.html"
+    source.write_text(
+        """
+        <html><body>
+          <h2 id="toc_1"><p>1</p></h2><p>표지</p>
+          <h2 id="toc_2"><p>2</p></h2><p>본문</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    body = {
+        "input_directory": str(input_directory),
+        "output_directory": str(output_directory),
+        "section_save_rules": {"toc_1 1 toc_2 2": ["toc_2"]},
+    }
+    save_disclosure_html_sections_payload(body)
+
+    checked = inspect_disclosure_html_section_output_payload(body)
+
+    assert checked["summary"]["integrity_ok"] is True
+    assert checked["summary"]["expected_files"] == 1
+
+    (output_directory / source.name).write_text("changed", encoding="utf-8")
+
+    changed = inspect_disclosure_html_section_output_payload(body)
+
+    assert changed["summary"]["integrity_ok"] is False
+    assert changed["mismatched_files"] == [source.name]
+
+
+def test_section_save_ignores_automation_cache_below_standard_input(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "05-internal"
+    output_directory = tmp_path / "06-sections"
+    visible = input_directory / "2026" / "20260101000001.html"
+    hidden = input_directory / ".automation-current" / "20260101000002.html"
+    visible.parent.mkdir(parents=True)
+    hidden.parent.mkdir(parents=True)
+    html = "<html><body><h2 id='toc_1'><p>1</p></h2><p>본문</p></body></html>"
+    visible.write_text(html)
+    hidden.write_text(html)
+
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+        }
+    )
+
+    assert result["summary"]["found_files"] == 1
+    assert (output_directory / "2026" / visible.name).is_file()
+    assert not (output_directory / ".automation-current" / hidden.name).exists()
 
 
 def test_save_disclosure_html_sections_payload_preserves_multiple_selected_sections(tmp_path: Path) -> None:
@@ -5993,6 +6074,17 @@ def test_collect_html_files_uses_resolved_path_once(tmp_path: Path) -> None:
     assert _collect_html_files(tmp_path, None) == [source_path.resolve()]
 
 
+def test_collect_html_files_ignores_hidden_automation_directory(tmp_path: Path) -> None:
+    visible = tmp_path / "2026" / "20260101000001.html"
+    hidden = tmp_path / ".automation-current" / "20260101000002.html"
+    visible.parent.mkdir()
+    hidden.parent.mkdir()
+    visible.write_text("<html></html>")
+    hidden.write_text("<html></html>")
+
+    assert _collect_html_files(tmp_path, None) == [visible.resolve()]
+
+
 def test_metadata_title_lookup_uses_full_filename_stem() -> None:
     metadata_index = {
         "123": {"title": "prefix title"},
@@ -7025,6 +7117,32 @@ def test_parse_bond_issuance_uses_symmetric_cb_eb_bw_target_priority(
     )
 
     assert parsed["기업명(행사대상)"] == "전환 대상 주식"
+
+
+def test_parse_bond_issuance_does_not_replace_failed_target_from_later_same_label_row(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20260712000002.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환대상 관련 참고</td><td>미정</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환대상 주식의 종류</td><td>뒤 행의 주식</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="전환사채발행결정",
+    )
+
+    assert parsed["기업명(행사대상)"] is None
+    assert parsed["field_parse_status"]["기업명(행사대상)"] == "source_not_found"
 
 
 @pytest.mark.parametrize(
