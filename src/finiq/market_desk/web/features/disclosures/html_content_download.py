@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from finiq.data_scraper.core.html_rate_limit import wait_for_html_download_request_slot
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 def _fetch_content_html(
@@ -396,6 +397,8 @@ def download_disclosure_content_htmls(
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
         last_request_started_at = time.time()
+        if wait_for_html_download_request_slot(cancel_check):
+            raise InterruptedError("content HTML download cancelled")
 
     with requests.Session() as session:
         for target in targets:

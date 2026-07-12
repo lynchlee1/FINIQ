@@ -13,6 +13,11 @@ import requests
 
 from finiq.concurrency import bounded_as_completed
 
+from .html_rate_limit import (
+    SlidingWindowRateLimiter,
+    wait_for_html_download_request_slot,
+)
+
 from .payload import (
     DisclosureTypeGroupKey,
     DisclosureTypeGroupValue,
@@ -56,29 +61,6 @@ def _is_valid_html(path: Path) -> bool:
         return "<html" in content.lower() or "openDisclsViewer" in content
     except Exception:
         return False
-
-
-class _RateLimiter:
-    def __init__(self, max_requests_per_minute: int):
-        self.lock = threading.Lock()
-        self.max_requests_per_minute = max_requests_per_minute
-        self.request_timestamps: list[float] = []
-
-    def wait(self, cancel_check: KindCancelCheck | None = None) -> bool:
-        while True:
-            if cancel_check is not None and cancel_check():
-                return True
-
-            now = time.monotonic()
-            with self.lock:
-                # Remove timestamps older than 60 seconds
-                self.request_timestamps = [t for t in self.request_timestamps if now - t < 60]
-
-                if len(self.request_timestamps) < self.max_requests_per_minute:
-                    self.request_timestamps.append(now)
-                    return False
-
-            time.sleep(0.1)
 
 
 def _report_progress(progress_callback: KindProgressCallback | None, message: str) -> None:
@@ -630,7 +612,7 @@ def download_disclosure_viewer_htmls(
         active_session.mount("https://", adapter)
         active_session.mount("http://", adapter)
 
-    rate_limiter = _RateLimiter(max_requests_per_minute)
+    rate_limiter = SlidingWindowRateLimiter(max_requests_per_minute)
     saved_paths: dict[str, Path] = {}
     valid_acpt_numbers: set[str] = set()
     errors: dict[str, str] = {}
@@ -682,6 +664,8 @@ def download_disclosure_viewer_htmls(
         if rate_limiter.wait(cancel_check):
             return None
         if wait_for_request_spacing():
+            return None
+        if wait_for_html_download_request_slot(cancel_check):
             return None
 
         try:
