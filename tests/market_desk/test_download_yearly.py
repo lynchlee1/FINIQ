@@ -47,3 +47,51 @@ def test_run_yearly_returns_promptly_when_parallel_worker_fails(tmp_path, monkey
         )
 
     assert time.monotonic() - started_at < 0.5
+
+
+def test_run_yearly_pages_strategy_processes_years_sequentially(
+    tmp_path, monkeypatch
+) -> None:
+    received_tasks: list[dict[str, Any]] = []
+
+    def fake_run_yearly_task(
+        task: dict[str, Any],
+        *,
+        resume_yearly: bool,
+        progress_callback: Any | None = None,
+        cancel_check: Any | None = None,
+    ) -> dict[str, Any]:
+        received_tasks.append(task)
+        return {
+            "output_directory": task["output_directory"],
+            "download_status": {
+                "total_pages": 1,
+                "downloaded_pages": 1,
+                "missing_pages": [],
+            },
+        }
+
+    monkeypatch.setattr(download_module, "_run_yearly_task", fake_run_yearly_task)
+    monkeypatch.setattr(download_module, "_as_worker_count", lambda payload: 3)
+
+    result = download_module._run_yearly(
+        {
+            "output_directory": str(tmp_path),
+            "start_date": "2024-01-01",
+            "end_date": "2025-12-31",
+            "page_size": 100,
+            "wait_seconds": 0,
+            "timeout": 1,
+            "worker_count": 3,
+            "parallel_strategy": "pages",
+        }
+    )
+
+    assert result["worker_count"] == 1
+    assert result["parallel_strategy"] == "pages"
+    assert [task["start_date"] for task in received_tasks] == [
+        "2024-01-01",
+        "2025-01-01",
+    ]
+    assert all(task["worker_count"] == 3 for task in received_tasks)
+    assert all(task["parallel_strategy"] == "pages" for task in received_tasks)

@@ -69,7 +69,12 @@ function defaultPatternTocIds(patterns: SectionPattern[]) {
 }
 
 export default function HtmlSectionSplitPage() {
-  const { output_root: dataRoot, fetchSettings, saveSetting } = useSettingsStore();
+  const {
+    output_root: dataRoot,
+    disclosure_separate_output_directory: useSeparateOutputDirectory,
+    fetchSettings,
+    saveSetting,
+  } = useSettingsStore();
   const [loading, setLoading] = useState(true);
   const [inputDirectory, setInputDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -183,14 +188,14 @@ export default function HtmlSectionSplitPage() {
     };
   }, []);
 
-  const handleInputDirectoryChange = (value: string) => {
+  const handleWorkspaceDirectoryChange = async (value: string) => {
     sectionPatternAbortControllerRef.current?.abort();
     sectionPatternAbortControllerRef.current = null;
-    const nextOutputDirectory = value ? `${value}_sections` : "";
-    setInputDirectory(value);
-    setOutputDirectory(nextOutputDirectory);
-    saveSetting("html_content_output_directory", value);
-    saveSetting("html_section_split_output_directory", nextOutputDirectory);
+    if (await saveSetting("output_root", value)) {
+      const settings = useSettingsStore.getState();
+      setInputDirectory(settings.html_content_output_directory || "");
+      setOutputDirectory(settings.html_section_split_output_directory || "");
+    }
     setInspectResult(null);
     setSectionPatterns([]);
     setSelectedPatternTocIds({});
@@ -212,15 +217,15 @@ export default function HtmlSectionSplitPage() {
     {
       id: "inputDirectory",
       kind: "path",
-      label: "입력 데이터 경로 (HTML)",
+      label: "작업공간 디렉토리",
       mode: "folder",
-      value: inputDirectory,
-      onChange: handleInputDirectoryChange,
+      value: dataRoot,
+      onChange: handleWorkspaceDirectoryChange,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       placeholder: "/path/to/html-folder",
       span: 4,
     },
-    {
+    ...(useSeparateOutputDirectory ? [{
       id: "outputDirectory",
       kind: "path",
       label: "결과 데이터 경로",
@@ -230,7 +235,7 @@ export default function HtmlSectionSplitPage() {
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       placeholder: "/path/to/output-folder",
       span: 4,
-    },
+    } satisfies HtmlWorkflowField] : []),
   ];
 
   const splitOptionFields: HtmlWorkflowField[] = [
@@ -517,8 +522,8 @@ export default function HtmlSectionSplitPage() {
   };
 
   const startSave = async () => {
-    if (!inputDirectory || !outputDirectory) {
-      setStatus("입력 데이터 경로와 결과 데이터 경로를 모두 입력하세요.");
+    if (!dataRoot || (useSeparateOutputDirectory && !outputDirectory)) {
+      setStatus("작업공간 디렉토리와 결과 데이터 경로를 확인하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -528,8 +533,8 @@ export default function HtmlSectionSplitPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data_root: dataRoot,
-          input_directory: inputDirectory,
-          output_directory: outputDirectory,
+          input_directory: useSeparateOutputDirectory ? inputDirectory : "",
+          output_directory: useSeparateOutputDirectory ? outputDirectory : "",
           workers: parseOptionalNumber(workers),
           section_save_rules: selectedPatternTocIds,
         }),

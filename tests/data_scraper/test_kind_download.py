@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
@@ -171,6 +173,25 @@ class ViewerFakeSession:
         )
 
 
+class ParallelTrackingSession(FakeSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self._lock = threading.Lock()
+        self._active_posts = 0
+        self.max_active_posts = 0
+
+    def post(self, *args, **kwargs) -> FakeResponse:
+        with self._lock:
+            self._active_posts += 1
+            self.max_active_posts = max(self.max_active_posts, self._active_posts)
+        try:
+            time.sleep(0.02)
+            return super().post(*args, **kwargs)
+        finally:
+            with self._lock:
+                self._active_posts -= 1
+
+
 class BrokenPageSizeSession(FakeSession):
     def __init__(self) -> None:
         super().__init__()
@@ -211,7 +232,7 @@ def test_download_pages_saves_requested_page_range_and_filters(
         start_date="2024-01-01",
         end_date="2024-12-31",
         start_page=2,
-        end_page=3,
+        end_page=4,
         search_filters={"searchCorpName": "삼성전자", "marketType": "", "reportNm": "사업보고서"},
         page_size=50,
         wait_seconds_between_requests=0,
@@ -232,6 +253,35 @@ def test_download_pages_saves_requested_page_range_and_filters(
     assert get_form_value(first_post["data"], "disclosureType01") == ""
     assert get_form_value(first_post["data"], "pageIndex") == "2"
     assert get_form_value(first_post["data"], "currentPageSize") == "50"
+
+
+def test_download_pages_parallel_workers_save_each_page_once(tmp_path: Path) -> None:
+    session = ParallelTrackingSession()
+
+    download_pages(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=4,
+        page_size=10,
+        wait_seconds_between_requests=0,
+        timeout=5,
+        session=session,
+        max_workers=2,
+    )
+
+    assert sorted(
+        get_form_value(call["data"], "pageIndex") for call in session.post_calls
+    ) == ["1", "2", "3", "4"]
+    assert sorted(path.name for path in tmp_path.glob("*_post_page_*.body")) == [
+        "001_post_page_00001.body",
+        "002_post_page_00002.body",
+        "003_post_page_00003.body",
+        "004_post_page_00004.body",
+    ]
+    assert session.max_active_posts >= 2
 
 
 def test_download_pages_rejects_invalid_page_range(tmp_path: Path) -> None:
@@ -429,19 +479,15 @@ def test_download_disclosure_viewer_htmls_rate_limits(
     assert all(s == 0.1 for s in sleep_calls)
 
 
-def test_download_disclosure_viewer_htmls_skips_existing_by_filename(
+def test_download_disclosure_viewer_htmls_skips_existing_valid_html(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     existing_path = tmp_path / "20260108000150.html"
-    existing_path.write_text("cached", encoding="utf-8")
+    existing_path.write_text(
+        "<html><body>" + ("cached " * 30) + "</body></html>", encoding="utf-8"
+    )
     session = ViewerFakeSession()
     progress_messages: list[str] = []
-
-    def fail_if_called(path: Path) -> bool:
-        raise AssertionError(f"existing HTML should not be opened for validation: {path}")
-
-    monkeypatch.setattr("finiq.data_scraper.core.client._is_valid_html", fail_if_called)
 
     saved_paths = download_disclosure_viewer_htmls(
         output_directory=tmp_path,
@@ -455,6 +501,26 @@ def test_download_disclosure_viewer_htmls_skips_existing_by_filename(
     assert saved_paths == [existing_path]
     assert session.get_calls == []
     assert progress_messages == [f"Skipping existing KIND viewer HTML: {existing_path}"]
+
+
+def test_download_disclosure_viewer_htmls_replaces_invalid_existing_html(
+    tmp_path: Path,
+) -> None:
+    existing_path = tmp_path / "20260108000150.html"
+    existing_path.write_text("broken", encoding="utf-8")
+    session = ViewerFakeSession()
+
+    saved_paths = download_disclosure_viewer_htmls(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        acpt_numbers=["20260108000150"],
+        timeout=5,
+        session=session,
+    )
+
+    assert saved_paths == [existing_path]
+    assert len(session.get_calls) == 1
+    assert existing_path.read_text("utf-8").startswith("<html><body>")
 
 
 def test_download_disclosure_viewer_htmls_rejects_rates_over_kind_limit(tmp_path: Path) -> None:
@@ -577,6 +643,75 @@ def test_kind_workflow_can_save_results_from_stored_inputs(tmp_path: Path) -> No
     assert checkpoint_payload["completed"] is True
     assert checkpoint_payload["last_saved_page"] == 2
     assert checkpoint_payload["saved_files"][-1].endswith("002_post_page_00002.body")
+
+
+def test_kind_workflow_parallel_checkpoint_contains_every_saved_file(
+    tmp_path: Path,
+) -> None:
+    workflow = KindWorkflow()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=3,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+
+    result = workflow.save_search_results(session=FakeSession(), max_workers=2)
+
+    checkpoint = json.loads(
+        Path(result["checkpoint_path"]).read_text(encoding="utf-8")
+    )
+    assert checkpoint["completed"] is True
+    assert checkpoint["last_saved_page"] == 3
+    assert checkpoint["last_saved_file"].endswith("003_post_page_00003.body")
+    assert sorted(Path(path).name for path in checkpoint["saved_files"]) == [
+        "000_mainGET.body",
+        "001_post_page_00001.body",
+        "002_post_page_00002.body",
+        "003_post_page_00003.body",
+    ]
+
+
+def test_kind_workflow_parallel_cancellation_keeps_checkpoint_incomplete(
+    tmp_path: Path,
+) -> None:
+    workflow = KindWorkflow()
+    cancelled = threading.Event()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=3,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+
+    def cancel_after_first_page(
+        _output_path: Path,
+        page_number: int | None,
+        _request_data: list[tuple[str, str]] | None,
+    ) -> None:
+        if page_number == 1:
+            cancelled.set()
+
+    result = workflow.save_search_results(
+        session=FakeSession(),
+        max_workers=2,
+        cancel_check=cancelled.is_set,
+        saved_file_callback=cancel_after_first_page,
+    )
+
+    checkpoint = json.loads(
+        Path(result["checkpoint_path"]).read_text(encoding="utf-8")
+    )
+    assert cancelled.is_set()
+    assert checkpoint["completed"] is False
 
 
 def test_run_download_saves_and_returns_summary(tmp_path: Path) -> None:

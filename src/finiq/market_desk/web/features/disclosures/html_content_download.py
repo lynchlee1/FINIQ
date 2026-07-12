@@ -406,7 +406,7 @@ def download_disclosure_content_htmls(
             output_path = output_directory / VIEWER_HTML_FILENAME_TEMPLATE.format(
                 acpt_no=acpt_no
             )
-            if skip_existing and output_path.exists():
+            if skip_existing and _is_valid_html(output_path):
                 if progress_callback is not None:
                     progress_callback(
                         f"Skipping existing KIND content HTML: {output_path}"
@@ -430,6 +430,11 @@ def download_disclosure_content_htmls(
                 break
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(content)
+            if not _is_valid_html(output_path):
+                output_path.unlink(missing_ok=True)
+                raise ValueError(
+                    f"Downloaded content for acpt_no={acpt_no} is invalid HTML"
+                )
             saved_paths.append(output_path)
             if progress_callback is not None:
                 progress_callback(f"Saved KIND content HTML to: {output_path}")
@@ -602,7 +607,7 @@ def download_disclosure_html_contents_payload(
             for acpt_no in acpt_numbers
             if acpt_no in saved_paths_by_acpt_no
         ]
-        cancelled = _is_cancelled(cancel_token)
+        cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
     finally:
         _clear_cancel_token(cancel_token)
     manifest_path = _write_html_manifest(

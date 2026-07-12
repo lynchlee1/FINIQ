@@ -113,12 +113,13 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     )
 
 
-def test_workspace_defaults_preserve_explicit_paths(tmp_path: Path) -> None:
+def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> None:
+    workspace = resolve_disclosure_workspace(tmp_path / "workspace")
     explicit = tmp_path / "explicit"
     payload = apply_workspace_defaults(
         "parse",
         {
-            "data_root": str(tmp_path / "workspace"),
+            "data_root": str(workspace.root),
             "mode": "bond_issuance",
             "input_directory": str(explicit / "input"),
             "output_directory": str(explicit / "output"),
@@ -135,13 +136,90 @@ def test_workspace_defaults_preserve_explicit_paths(tmp_path: Path) -> None:
     filtered = apply_workspace_defaults(
         "filter",
         {
-            "data_root": str(tmp_path / "workspace"),
+            "data_root": str(workspace.root),
             "classification_path": str(explicit / "table"),
             "html_transfer_path": str(explicit / "filtered.json"),
         },
     )
     assert filtered["classification_path"] == str(explicit / "table")
     assert filtered["html_transfer_path"] == str(explicit / "filtered.json")
+
+    downloaded = apply_workspace_defaults(
+        "kind_download",
+        {
+            "data_root": str(workspace.root),
+            "output_directory": str(explicit / "list"),
+        },
+    )
+    assert downloaded["output_directory"] == str(workspace.list)
+
+    separate_download = apply_workspace_defaults(
+        "kind_download",
+        {
+            "data_root": str(workspace.root),
+            "separate_output_directory": True,
+            "output_directory": str(explicit / "list"),
+        },
+    )
+    assert separate_download["output_directory"] == str(explicit / "list")
+
+    table = apply_workspace_defaults(
+        "table_build",
+        {
+            "data_root": str(workspace.root),
+            "classification_path": str(explicit / "classification.json"),
+            "root_directory": str(explicit / "list"),
+            "output_path": str(explicit / "table"),
+        },
+    )
+    assert table["classification_path"] == str(explicit / "classification.json")
+    assert table["root_directory"] == str(explicit / "list")
+    assert table["output_path"] == str(explicit / "table")
+
+    external = apply_workspace_defaults(
+        "download",
+        {
+            "data_root": str(workspace.root),
+            "source_json_path": str(explicit / "filtered.json"),
+            "output_directory": str(explicit / "external"),
+        },
+    )
+    assert external["source_json_path"] == str(explicit / "filtered.json")
+    assert external["output_directory"] == str(explicit / "external")
+
+    compressed = apply_workspace_defaults(
+        "external_compress",
+        {
+            "data_root": str(workspace.root),
+            "input_directory": str(explicit / "external"),
+            "output_directory": str(explicit / "compressed"),
+        },
+    )
+    assert compressed["input_directory"] == str(explicit / "external")
+    assert compressed["output_directory"] == str(explicit / "compressed")
+
+    internal = apply_workspace_defaults(
+        "content_download",
+        {
+            "data_root": str(workspace.root),
+            "source_compressed_json_path": str(explicit / "compressed.json"),
+            "output_directory": str(explicit / "internal"),
+        },
+    )
+    assert "source_directory" not in internal
+    assert internal["source_compressed_json_path"] == str(explicit / "compressed.json")
+    assert internal["output_directory"] == str(explicit / "internal")
+
+    sections = apply_workspace_defaults(
+        "section_save",
+        {
+            "data_root": str(workspace.root),
+            "input_directory": str(explicit / "internal"),
+            "output_directory": str(explicit / "sections"),
+        },
+    )
+    assert sections["input_directory"] == str(explicit / "internal")
+    assert sections["output_directory"] == str(explicit / "sections")
 
 
 def test_workspace_prepare_api(tmp_path: Path) -> None:
@@ -268,9 +346,85 @@ def test_init_config_uses_workspace_paths_when_only_root_is_saved(
 
     expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
     assert {key: getattr(loaded, key) for key in expected} == expected
+    assert loaded.disclosure_separate_output_directory is False
+    assert loaded.job_retention_minutes == 60
 
 
-def test_saving_only_output_root_prepares_existing_workflow_paths(
+def test_separate_output_directory_setting_is_shared_and_persisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    data_root = tmp_path / "database"
+    monkeypatch.setattr(app_config, "settings_path", str(settings_path))
+    monkeypatch.setattr(app_config, "output_root", str(data_root))
+    monkeypatch.setattr(app_config, "disclosure_separate_output_directory", False)
+
+    response = TestClient(app).post(
+        "/api/settings",
+        json={"disclosure_separate_output_directory": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["disclosure_separate_output_directory"] is True
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert saved["disclosure_separate_output_directory"] is True
+
+
+def test_init_config_preserves_saved_stage_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "database"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "output_root": str(data_root),
+                "download_output_directory": str(tmp_path / "legacy-list"),
+                "sqlite_output_directory": str(tmp_path / "legacy-table"),
+                "html_output_directory": str(tmp_path / "legacy-external"),
+                "html_content_output_directory": str(tmp_path / "legacy-internal"),
+                "html_section_split_output_directory": str(tmp_path / "legacy-sections"),
+                "html_parse_output_directory": str(tmp_path / "legacy-converted"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        finiq_config, "get_default_settings_path", lambda: settings_path
+    )
+
+    loaded = finiq_config.init_config()
+
+    assert loaded.download_output_directory == str(tmp_path / "legacy-list")
+    assert loaded.sqlite_output_directory == str(tmp_path / "legacy-table")
+    assert loaded.html_output_directory == str(tmp_path / "legacy-external")
+    assert loaded.html_content_output_directory == str(tmp_path / "legacy-internal")
+    assert loaded.html_section_split_output_directory == str(tmp_path / "legacy-sections")
+    assert loaded.html_parse_output_directory == str(tmp_path / "legacy-converted")
+
+
+def test_init_config_migrates_legacy_default_kind_root_to_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps({"output_root": str(finiq_config.KIND_DATA_DIR)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        finiq_config, "get_default_settings_path", lambda: settings_path
+    )
+
+    loaded = finiq_config.init_config()
+
+    assert loaded.output_root == str(finiq_config.RESOURCES_DIR)
+    expected = disclosure_workspace_settings(
+        finiq_config.RESOURCES_DIR, mode="bond_issuance"
+    )
+    assert {key: getattr(loaded, key) for key in expected} == expected
+
+
+def test_saving_only_output_root_updates_paths_without_preparing_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings_path = tmp_path / "settings.json"
@@ -289,13 +443,34 @@ def test_saving_only_output_root_prepares_existing_workflow_paths(
     assert response.status_code == 200
     expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
     assert {key: response.json()[key] for key in expected} == expected
-    assert (data_root / "disclosure-workspace.json").is_file()
-    assert (data_root / "07-converted" / "bond_issuance").is_dir()
+    assert not data_root.exists()
     saved = json.loads(settings_path.read_text(encoding="utf-8"))
     assert {key: saved[key] for key in expected} == expected
 
 
-def test_config_api_uses_workspace_defaults_for_blank_legacy_paths(
+def test_saving_high_risk_output_root_defers_validation_until_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(app_config, "settings_path", str(settings_path))
+    monkeypatch.setattr(app_config, "output_root", str(tmp_path / "old-root"))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+    expected = finiq_config.build_disclosure_workspace_path_settings(
+        finiq_config.PROJECT_ROOT, mode="bond_issuance"
+    )
+    for key in expected:
+        monkeypatch.setattr(app_config, key, "legacy")
+
+    response = TestClient(app).post(
+        "/api/settings", json={"output_root": str(finiq_config.PROJECT_ROOT)}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["output_root"] == str(finiq_config.PROJECT_ROOT.resolve())
+    assert {key: response.json()[key] for key in expected} == expected
+
+
+def test_config_api_returns_saved_stage_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data_root = tmp_path / "resources"
@@ -303,12 +478,14 @@ def test_config_api_uses_workspace_defaults_for_blank_legacy_paths(
     monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
     expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
     for key in expected:
-        monkeypatch.setattr(app_config, key, "")
+        monkeypatch.setattr(app_config, key, str(tmp_path / "legacy" / key))
 
     response = TestClient(app).get("/api/config")
 
     assert response.status_code == 200
-    assert {key: response.json()[key] for key in expected} == expected
+    assert {key: response.json()[key] for key in expected} == {
+        key: str(tmp_path / "legacy" / key) for key in expected
+    }
 
 
 def test_changing_parse_mode_updates_only_mode_workspace_paths(
@@ -336,10 +513,10 @@ def test_changing_parse_mode_updates_only_mode_workspace_paths(
         "html_parse_result_path"
     ]
     assert response.json()["download_output_directory"] == "custom-download"
-    assert (data_root / "07-converted" / "rights_issuance").is_dir()
+    assert not data_root.exists()
 
 
-def test_root_save_preserves_explicit_path_in_same_request(
+def test_root_save_preserves_explicit_stage_path_in_same_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings_path = tmp_path / "settings.json"
@@ -362,6 +539,27 @@ def test_root_save_preserves_explicit_path_in_same_request(
         "download_output_directory"
     ]
     assert response.json()["html_output_directory"] == str(custom_external)
+
+
+def test_saving_individual_stage_path_preserves_manual_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    data_root = tmp_path / "database"
+    monkeypatch.setattr(app_config, "settings_path", str(settings_path))
+    monkeypatch.setattr(app_config, "output_root", str(data_root))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+
+    response = TestClient(app).post(
+        "/api/settings",
+        json={"html_output_directory": str(tmp_path / "custom-external")},
+    )
+
+    custom_external = str(tmp_path / "custom-external")
+    assert response.status_code == 200
+    assert response.json()["html_output_directory"] == custom_external
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert saved["html_output_directory"] == custom_external
 
 
 def test_blank_output_root_is_rejected_without_mutating_config(

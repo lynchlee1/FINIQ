@@ -19,6 +19,7 @@ import {
   type DisclosureConditionBlock,
   type DisclosureConditionPresetPayload,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
+import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 
 const TRANSFER_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const PAGE_SIZE = 20;
@@ -47,6 +48,7 @@ export default function FilterPage() {
     sqlite_output_directory: tableDirectory,
     sqlite_manifest_path: tableManifestPath,
     html_transfer_directory: htmlTransferPath,
+    disclosure_separate_output_directory: useSeparateOutputDirectory,
     condition_presets: presets,
     fetchSettings,
     saveSetting,
@@ -89,8 +91,10 @@ export default function FilterPage() {
 
   const buildPayload = () => ({
     data_root: rootDirectory,
-    classification_path: tableDirectory || tableManifestPath,
-    html_transfer_path: htmlTransferPath,
+    classification_path: useSeparateOutputDirectory
+      ? tableDirectory || tableManifestPath
+      : "",
+    html_transfer_path: useSeparateOutputDirectory ? htmlTransferPath : "",
     filter_blocks: normalizeDisclosureConditionBlocks(conditions),
     title_expression: "",
     limit: limitUnlimited ? null : Number(limit || 1000),
@@ -115,6 +119,9 @@ export default function FilterPage() {
       setResult(payload);
       const transferPath = String(payload.html_download_transfer?.path || "").trim();
       if (transferPath) {
+        if (useSeparateOutputDirectory) {
+          void saveSetting("html_transfer_directory", transferPath);
+        }
         sessionStorage.setItem(TRANSFER_STORAGE_KEY, JSON.stringify({
           source_json_path: transferPath,
           acpt_numbers: Number(payload.html_download_transfer?.acpt_numbers || 0),
@@ -227,15 +234,15 @@ export default function FilterPage() {
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="grid gap-2">
-            <Label className="dark:text-slate-300">입력 데이터 경로</Label>
+            <Label className="dark:text-slate-300">작업공간 디렉토리</Label>
             <PathPickerInput 
-              mode="folder"
+              mode="save"
               value={rootDirectory || ""}
               onChange={(val) => saveSetting("output_root", val)}
               onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
             />
           </div>
-          <div className="grid gap-2">
+          {useSeparateOutputDirectory && <div className="grid gap-2">
             <Label className="dark:text-slate-300">결과 데이터 경로</Label>
             <PathPickerInput 
               mode="folder"
@@ -243,7 +250,7 @@ export default function FilterPage() {
               onChange={(val) => saveSetting("html_transfer_directory", val)}
               onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
             />
-          </div>
+          </div>}
         </CardContent>
           </Card>
 
@@ -348,6 +355,7 @@ export default function FilterPage() {
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">
+              <DisclosureSeparateOutputDirectorySetting id="filter-separate-output-directory" />
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>

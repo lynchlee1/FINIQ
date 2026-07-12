@@ -57,6 +57,9 @@ from finiq.market_desk.web.features.disclosures.table_export import build_disclo
 from finiq.market_desk.web.features.downloads.kind_coordination import (
     KIND_NETWORK_JOB_LOCK,
 )
+from finiq.market_desk.web.features.downloads.kind_common import (
+    configure_download_job_retention,
+)
 from finiq.market_desk.web.features.storage.partition import run_partition_storage_payload
 
 app = FastAPI(title="FINIQ MarketDesk API")
@@ -70,6 +73,8 @@ app.add_middleware(
 )
 
 config = init_config()
+job_manager.set_retention_minutes(config.job_retention_minutes)
+configure_download_job_retention(config.job_retention_minutes)
 
 
 def _choose_finder_path(*, mode: str, title: str, default_path: str = "") -> str:

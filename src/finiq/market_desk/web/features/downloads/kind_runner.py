@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from finiq.concurrency import bounded_as_completed
 from finiq.data_scraper.core.client import download_pages
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.workflow import KindWorkflow, make_page_size_integrity_validator
@@ -36,6 +37,7 @@ def _download_payload_summary(payload: dict[str, Any]) -> list[str]:
         f"wait={payload.get('wait_seconds') or 1}s",
         f"timeout={payload.get('timeout') or 20}s",
         f"workers={payload.get('worker_count') or 1}",
+        f"parallel_strategy={payload.get('parallel_strategy') or 'years'}",
         f"log_limit={payload.get('log_limit') or 20}",
         f"resume_yearly={payload.get('resume_yearly', True)}",
     ]
@@ -138,6 +140,10 @@ def _run_single(
     page_size = _as_int(payload, "page_size", 100)
     wait_seconds = _as_float(payload, "wait_seconds", 1.0)
     timeout = _as_float(payload, "timeout", 20.0)
+    parallel_strategy = _as_parallel_strategy(payload)
+    page_worker_count = (
+        _as_worker_count(payload) if parallel_strategy == "pages" else 1
+    )
     if wait_seconds < 0:
         raise ValueError("wait_seconds must be >= 0")
     if timeout <= 0:
@@ -185,6 +191,7 @@ def _run_single(
             save=True,
             progress_callback=local_progress_callback,
             cancel_check=cancel_check,
+            max_workers=page_worker_count,
         )
         if cancel_check is not None and cancel_check():
             raise DownloadCancelled("download job cancelled")
@@ -212,6 +219,7 @@ def _run_single(
             save=True,
             progress_callback=local_progress_callback,
             cancel_check=cancel_check,
+            max_workers=1,
         )
         if cancel_check is not None and cancel_check():
             raise DownloadCancelled("download job cancelled")
@@ -247,6 +255,7 @@ def _run_single(
                 saved_file_validator=make_page_size_integrity_validator(
                     expected_page_size=int(saved_input.get("page_size", page_size)),
                 ),
+                max_workers=page_worker_count,
             )
             if cancel_check is not None and cancel_check():
                 raise DownloadCancelled("download job cancelled")
@@ -345,8 +354,14 @@ def _run_yearly(
     disclosure_type_groups = _normalize_disclosure_type_groups(payload)
     last_report_only = _as_bool(payload, "last_report_only")
     resume_yearly = _as_resume_yearly(payload)
+    parallel_strategy = _as_parallel_strategy(payload)
     yearly_ranges = _split_yearly_ranges(start_date, end_date)
-    worker_count = min(_as_worker_count(payload), max(1, len(yearly_ranges)))
+    requested_worker_count = _as_worker_count(payload)
+    worker_count = (
+        min(requested_worker_count, max(1, len(yearly_ranges)))
+        if parallel_strategy == "years"
+        else 1
+    )
     progress_log: deque[str] = deque(maxlen=0)
     for line in _download_payload_summary(payload):
         _append_progress(progress_log, f"YEARLY {line}", progress_callback)
@@ -376,7 +391,10 @@ def _run_yearly(
                 "securities_label": str(payload.get("securities_label") or ""),
                 "disclosure_type_groups": disclosure_type_groups or {},
                 "last_report_only": last_report_only,
-                "worker_count": 1,
+                "worker_count": (
+                    requested_worker_count if parallel_strategy == "pages" else 1
+                ),
+                "parallel_strategy": parallel_strategy,
                 "resume_yearly": resume_yearly,
                 "log_limit": payload.get("log_limit") or 20,
                 "_folder_name": folder_name,
@@ -411,18 +429,16 @@ def _run_yearly(
         executor = ThreadPoolExecutor(
             max_workers=worker_count, thread_name_prefix="kind-download"
         )
-        future_to_folder = {}
         try:
-            for worker_index, task in enumerate(tasks, start=1):
-                if cancel_check is not None and cancel_check():
-                    break
+            def submit_task(indexed_task: tuple[int, dict[str, Any]]):
+                worker_index, task = indexed_task
                 folder_name = str(task["_folder_name"])
                 _append_progress(
                     progress_log,
                     f"[{folder_name}] worker_submit index={worker_index}/{len(tasks)}",
                     progress_callback,
                 )
-                future = executor.submit(
+                return executor.submit(
                     _run_yearly_task,
                     task,
                     resume_yearly=resume_yearly,
@@ -433,9 +449,19 @@ def _run_yearly(
                     ),
                     cancel_check=cancel_check,
                 )
-                future_to_folder[future] = folder_name
-            for future in as_completed(future_to_folder):
-                folder_name = future_to_folder[future]
+
+            indexed_tasks = (
+                (worker_index, task)
+                for worker_index, task in enumerate(tasks, start=1)
+                if cancel_check is None or not cancel_check()
+            )
+            for future, (_worker_index, task) in bounded_as_completed(
+                executor,
+                indexed_tasks,
+                submit_task,
+                max_pending=worker_count * 2,
+            ):
+                folder_name = str(task["_folder_name"])
                 try:
                     chunk_results_by_folder[folder_name] = future.result()
                     _append_progress(
@@ -449,9 +475,6 @@ def _run_yearly(
                         f"[{folder_name}] worker_failed error={exc}",
                         progress_callback,
                     )
-                    for pending_future in future_to_folder:
-                        if pending_future is not future:
-                            pending_future.cancel()
                     raise ValueError(f"{folder_name} download failed: {exc}") from exc
         except BaseException:
             executor.shutdown(wait=False, cancel_futures=True)
@@ -480,6 +503,7 @@ def _run_yearly(
         "base_output_directory": str(base_output),
         "ranges": len(yearly_ranges),
         "worker_count": worker_count,
+        "parallel_strategy": parallel_strategy,
         "results": results,
         "summary": _aggregate_download_summary(results),
         "progress_log": list(progress_log),
@@ -532,6 +556,10 @@ def _run_resume(
         float(saved_input.get("wait_seconds_between_requests", 1.0)),
     )
     timeout = _as_float(payload, "timeout", float(saved_input.get("timeout", 20.0)))
+    parallel_strategy = _as_parallel_strategy(payload)
+    page_worker_count = (
+        _as_worker_count(payload) if parallel_strategy == "pages" else 1
+    )
     if wait_seconds < 0:
         raise ValueError("wait_seconds must be >= 0")
     if timeout <= 0:
@@ -556,6 +584,7 @@ def _run_resume(
         saved_file_validator=make_page_size_integrity_validator(
             expected_page_size=page_size,
         ),
+        max_workers=page_worker_count,
     )
     if cancel_check is not None and cancel_check():
         raise DownloadCancelled("download job cancelled")
@@ -569,5 +598,3 @@ def _run_resume(
         "summary": _download_status_summary(status_after),
         "progress_log": list(progress_log),
     }
-
-

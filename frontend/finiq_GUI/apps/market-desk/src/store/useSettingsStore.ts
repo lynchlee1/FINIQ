@@ -10,6 +10,7 @@ interface SettingsState {
   selected_classification_path: string;
   sqlite_source_path: string;
   download_output_directory: string;
+  disclosure_separate_output_directory: boolean;
   sqlite_output_directory: string;
   sqlite_manifest_path: string;
   html_output_directory: string;
@@ -40,6 +41,7 @@ interface SettingsState {
   change_log_date_thresholds: Record<string, number>;
   change_log_numeric_thresholds: Record<string, number>;
   condition_presets: any[];
+  job_retention_minutes: number;
   
   // Actions
   updateSettings: (newSettings: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings">>) => void;
@@ -58,6 +60,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   selected_classification_path: "",
   sqlite_source_path: "",
   download_output_directory: "",
+  disclosure_separate_output_directory: false,
   sqlite_output_directory: "",
   sqlite_manifest_path: "",
   html_output_directory: "",
@@ -88,6 +91,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   change_log_date_thresholds: {},
   change_log_numeric_thresholds: {},
   condition_presets: [],
+  job_retention_minutes: 60,
 
   updateSettings: (newSettings) => set((state) => ({ ...state, ...newSettings })),
 

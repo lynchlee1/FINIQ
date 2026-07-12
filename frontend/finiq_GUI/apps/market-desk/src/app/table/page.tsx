@@ -12,69 +12,32 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { UI_TEXT } from "@/config/uiText";
+import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 
 export default function TablePage() {
   const [loading, setLoading] = useState(true);
   
-  const { fetchSettings, saveSetting } = useSettingsStore();
+  const {
+    output_root: dataRoot,
+    disclosure_separate_output_directory: useSeparateOutputDirectory,
+    fetchSettings,
+    saveSetting,
+  } = useSettingsStore();
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus, cancelJob } = useJobPolling({
     pollingEndpoint: "/api/disclosures/table/jobs/{jobId}",
     cancelEndpoint: "/api/disclosures/table/build/cancel",
   });
   
-  // Data State
-  const [classificationOptions, setClassificationOptions] = useState<any[]>([]);
-
   // Form State
-  const [classificationPath, setClassificationPath] = useState("");
   const [outputPath, setOutputPath] = useState("");
   const [tableWorkers, setTableWorkers] = useState("1");
   const [maxTableWorkers, setMaxTableWorkers] = useState(1);
-
-  const outputDirectoryFromRawPath = (path: string) => {
-    const normalized = String(path || "").trim();
-    if (!normalized) return "";
-    if (/\.json$/i.test(normalized)) return normalized.replace(/\.json$/i, "_sqlite");
-    return normalized.replace(/\/?$/, "/kind_sqlite");
-  };
-
-  const outputDirectoryFromSavedPath = (path: string) => {
-    const normalized = String(path || "").trim();
-    if (!/\.sqlite_manifest\.json$/i.test(normalized)) return normalized;
-    return normalized.replace(/\/[^/]*$/i, "");
-  };
-
-  const loadClassifications = useCallback(async (rootDirectory: string, selectedPath: string = "", selectedOutputPath: string = "") => {
-    try {
-      const url = new URL("/api/classifications", window.location.origin);
-      url.searchParams.set("root_directory", rootDirectory);
-      const response = await fetch(url.pathname + url.search);
-      if (!response.ok) throw new Error("Failed to load classifications");
-      const data = await response.json();
-      
-      const files = data.classification_files || [];
-      setClassificationOptions(files);
-      
-      const path = selectedPath || data.selected_classification_path || (files.length > 0 ? files[0].path : "");
-      setClassificationPath(path);
-      
-      const outPath = outputDirectoryFromSavedPath(selectedOutputPath) || outputDirectoryFromRawPath(path);
-      setOutputPath(outPath);
-    } catch (err: any) {
-      setStatus(err.message);
-      setIsErrorStatus(true);
-    }
-  }, []);
 
   const fetchConfig = useCallback(async () => {
     try {
       const config = await fetchSettings();
       if (config) {
-        await loadClassifications(
-          config.output_root || "",
-          config.sqlite_source_path || config.selected_classification_path || "",
-          config.sqlite_output_directory || config.sqlite_manifest_path || ""
-        );
+        setOutputPath(config.sqlite_output_directory || config.sqlite_manifest_path || "");
       }
     } catch (err: any) {
       setStatus(err.message);
@@ -82,7 +45,7 @@ export default function TablePage() {
     } finally {
       setLoading(false);
     }
-  }, [loadClassifications, fetchSettings]);
+  }, [fetchSettings, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     const hardwareConcurrency = Math.max(1, Math.floor(window.navigator.hardwareConcurrency || 1));
@@ -91,15 +54,16 @@ export default function TablePage() {
     fetchConfig();
   }, [fetchConfig]);
 
-  const handleClassificationPathChange = (val: string) => {
-    setClassificationPath(val);
-    setOutputPath(outputDirectoryFromRawPath(val));
-    saveSetting("sqlite_source_path", val);
+  const handleWorkspaceDirectoryChange = async (value: string) => {
+    if (await saveSetting("output_root", value)) {
+      const settings = useSettingsStore.getState();
+      setOutputPath(settings.sqlite_output_directory || settings.sqlite_manifest_path || "");
+    }
   };
 
   const handleBuild = async () => {
-    if (!classificationPath) {
-      setStatus("Raw JSON을 선택하세요.");
+    if (!dataRoot) {
+      setStatus("작업공간 디렉토리를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -109,9 +73,11 @@ export default function TablePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          data_root: useSettingsStore.getState().output_root,
-          classification_path: classificationPath,
-          output_path: outputPath,
+          data_root: dataRoot,
+          root_directory: useSeparateOutputDirectory
+            ? useSettingsStore.getState().download_output_directory
+            : "",
+          output_path: useSeparateOutputDirectory ? outputPath : "",
           table_name: "disclosures",
           table_workers: Number(tableWorkers || maxTableWorkers || 1),
         }),
@@ -145,16 +111,16 @@ export default function TablePage() {
             <CardContent className="space-y-4">
               <div className="grid gap-4">
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">입력 데이터 경로 (Raw JSON)</Label>
+                  <Label className="dark:text-slate-300">작업공간 디렉토리</Label>
                   <PathPickerInput
-                    value={classificationPath}
-                    onChange={handleClassificationPathChange}
+                    value={dataRoot}
+                    onChange={handleWorkspaceDirectoryChange}
                     mode="folder"
-                    placeholder="입력 데이터 경로를 선택하세요"
+                    placeholder="작업공간 디렉토리를 선택하세요"
                     onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                   />
                 </div>
-                <div className="space-y-2">
+                {useSeparateOutputDirectory && <div className="space-y-2">
                   <Label className="dark:text-slate-300">결과 데이터 경로 (SQLite)</Label>
                   <PathPickerInput 
                     value={outputPath} 
@@ -166,7 +132,7 @@ export default function TablePage() {
                     placeholder="데이터 경로를 선택하세요"
                     onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                   />
-                </div>
+                </div>}
               </div>
             </CardContent>
           </Card>
@@ -206,6 +172,7 @@ export default function TablePage() {
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">
+              <DisclosureSeparateOutputDirectorySetting id="table-separate-output-directory" />
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>

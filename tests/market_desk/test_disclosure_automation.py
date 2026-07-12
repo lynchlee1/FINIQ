@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from finiq.config import PROJECT_ROOT
 from finiq.market_desk.web.features.disclosures import html_content_download
 from finiq.market_desk.web.features.disclosure_workflow import automation
 from finiq.market_desk.web.features.disclosure_workflow.automation import (
@@ -80,6 +81,17 @@ def test_normalize_automation_profile_fixes_safe_kind_execution_settings(
     assert profile["decisions"]["s6_sections"]["unmatched_policy"] == "needs_review"
 
 
+def test_run_start_rejects_high_risk_data_root() -> None:
+    response = TestClient(app).post(
+        "/api/disclosure-workflows/run/start", json=_profile(PROJECT_ROOT)
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        f"Refusing to use high-risk data_root: {PROJECT_ROOT.resolve()}"
+    )
+
+
 def test_normalize_automation_profile_rejects_non_incremental_last_report_only(
     tmp_path: Path,
 ) -> None:
@@ -144,9 +156,13 @@ def test_resume_reuses_valid_stage_checkpoints(
             for path in _stage_output_paths(profile, stage)
             if path.is_dir()
         )
-        (output_directory / filename).write_text(
-            json.dumps({"format": owner_format}), encoding="utf-8"
-        )
+        owner = {"format": owner_format}
+        if stage == 6:
+            owner["upstream_fingerprint"] = _stage_output_fingerprint(profile, 5)
+        (output_directory / filename).write_text(json.dumps(owner), encoding="utf-8")
+    (_stage_output_paths(profile, 4)[0]).write_text(
+        json.dumps({"records": []}), encoding="utf-8"
+    )
     for stage in range(1, 8):
         checkpoint_path = _checkpoint_path(profile, stage)
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -322,7 +338,7 @@ def test_content_download_rate_limits_each_actual_kind_request(
     sleeps: list[float] = []
 
     class Response:
-        content = b"<html>ok</html>"
+        content = b"<html><body>" + (b"valid " * 30) + b"</body></html>"
 
         def raise_for_status(self) -> None:
             return None
@@ -473,13 +489,25 @@ def test_stage_four_replaces_active_membership_without_stale_html(
     def fake_compress(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
         directory = Path(str(body["input_directory"]))
         records = [
-            {"acpt_no": path.stem, "docs": []}
+            {
+                "acpt_no": path.stem,
+                "docs": [
+                    {
+                        "select_id": "mainDoc",
+                        "doc_no": f"{path.stem}99",
+                        "selected": True,
+                    }
+                ],
+            }
             for path in sorted(directory.rglob("*.html"))
         ]
         (directory / "compressed-external-html.json").write_text(
             json.dumps({"records": records}), encoding="utf-8"
         )
-        return {"summary": {"compressed_files": len(records)}}
+        return {
+            "summary": {"compressed_files": len(records)},
+            "verification": {"passed": True},
+        }
 
     monkeypatch.setattr(automation, "download_disclosure_html_payload", fake_download)
     monkeypatch.setattr(
@@ -513,3 +541,132 @@ def test_stage_four_replaces_active_membership_without_stale_html(
     assert [record["acpt_no"] for record in compressed["records"]] == [
         "20260712000001"
     ]
+
+
+def test_stage_four_rejects_compressed_record_without_main_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    filtered_path = tmp_path / "03-filter" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True)
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260712000001",
+                        "disclosed_at": "2026-07-12 09:00",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_download(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        output = Path(str(body["output_directory"])) / "2026" / "20260712000001.html"
+        output.parent.mkdir(parents=True)
+        output.write_text("<html><body>" + ("valid " * 30) + "</body></html>", encoding="utf-8")
+        return {"requested_count": 1, "saved_count": 1, "cancelled": False}
+
+    def fake_compress(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        output = Path(str(body["output_directory"])) / "compressed-external-html.json"
+        output.write_text(
+            json.dumps(
+                {
+                    "records": [
+                        {"acpt_no": "20260712000001", "docs": []}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"verification": {"passed": True}}
+
+    monkeypatch.setattr(automation, "download_disclosure_html_payload", fake_download)
+    monkeypatch.setattr(
+        automation, "compress_disclosure_external_html_payload", fake_compress
+    )
+
+    with pytest.raises(ValueError, match="selected main docNo not found"):
+        _run_stage(
+            4,
+            profile,
+            trigger="sync",
+            progress_callback=lambda _message: None,
+            cancel_check=lambda: False,
+        )
+
+
+def test_stage_six_rejects_source_without_sections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    monkeypatch.setattr(
+        automation,
+        "summarize_disclosure_html_section_kinds_payload",
+        lambda *args, **kwargs: {
+            "summary": {
+                "found_files": 1,
+                "documents_with_sections": 0,
+                "files_without_sections": 1,
+                "failed_files": 0,
+            },
+            "items": [],
+        },
+    )
+    monkeypatch.setattr(
+        automation,
+        "save_disclosure_html_sections_payload",
+        lambda *args, **kwargs: pytest.fail("section save must not start"),
+    )
+
+    with pytest.raises(ValueError, match="목차 없음=1"):
+        _run_stage(
+            6,
+            profile,
+            trigger="resume",
+            progress_callback=lambda _message: None,
+            cancel_check=lambda: False,
+        )
+
+
+def test_stage_six_allows_an_empty_filtered_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    stage_five_output = _stage_output_paths(profile, 5)[0]
+    stage_five_output.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        automation,
+        "summarize_disclosure_html_section_kinds_payload",
+        lambda *args, **kwargs: {
+            "summary": {
+                "found_files": 0,
+                "documents_with_sections": 0,
+                "files_without_sections": 0,
+                "failed_files": 0,
+            },
+            "items": [],
+        },
+    )
+
+    def fake_save(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        Path(str(body["output_directory"])).mkdir(parents=True)
+        return {"summary": {"integrity_ok": True, "saved_files": 0}}
+
+    monkeypatch.setattr(
+        automation, "save_disclosure_html_sections_payload", fake_save
+    )
+
+    result = _run_stage(
+        6,
+        profile,
+        trigger="resume",
+        progress_callback=lambda _message: None,
+        cancel_check=lambda: False,
+    )
+
+    assert result["summary"]["saved_files"] == 0
+    assert _stage_output_paths(profile, 6)[0].is_dir()

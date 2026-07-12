@@ -32,6 +32,11 @@ from finiq.data_scraper.workflow import (
 )
 from finiq.data_scraper.workflow.workflow import _validate_downloaded_result_page_task
 from finiq.market_desk.web.features.downloads.page import render_download_page
+from finiq.market_desk.web.jobs import (
+    DEFAULT_JOB_RETENTION_MINUTES,
+    TERMINAL_JOB_STATUSES,
+    normalize_job_retention_minutes,
+)
 
 
 @dataclass(slots=True)
@@ -49,11 +54,35 @@ _DOWNLOAD_JOBS: dict[str, DownloadJob] = {}
 _DOWNLOAD_JOBS_LOCK = threading.Lock()
 _DOWNLOAD_JOB_SEMAPHORE = threading.Semaphore(1)
 _CANCELLED_DOWNLOAD_JOBS: set[str] = set()
+_DOWNLOAD_JOB_RETENTION_MINUTES = DEFAULT_JOB_RETENTION_MINUTES
 DOWNLOAD_DELETE_CONFIRMATION_TEXT = "확인했습니다."
+DOWNLOAD_PARALLEL_STRATEGIES = {"years", "pages"}
 
 
 class DownloadCancelled(Exception):
     """Raised when a running download job is cancelled by the user."""
+
+
+def _purge_expired_download_jobs_locked(*, now: float | None = None) -> int:
+    current_time = time.time() if now is None else now
+    cutoff = current_time - (_DOWNLOAD_JOB_RETENTION_MINUTES * 60)
+    expired_ids = [
+        job_id
+        for job_id, job in _DOWNLOAD_JOBS.items()
+        if job.status in TERMINAL_JOB_STATUSES and job.updated_at < cutoff
+    ]
+    for job_id in expired_ids:
+        del _DOWNLOAD_JOBS[job_id]
+        _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
+    return len(expired_ids)
+
+
+def configure_download_job_retention(minutes: int) -> None:
+    global _DOWNLOAD_JOB_RETENTION_MINUTES
+    normalized = normalize_job_retention_minutes(minutes)
+    with _DOWNLOAD_JOBS_LOCK:
+        _DOWNLOAD_JOB_RETENTION_MINUTES = normalized
+        _purge_expired_download_jobs_locked()
 
 
 def _is_download_cancelled(job_id: str | None) -> bool:
@@ -230,6 +259,13 @@ def _as_worker_count(payload: dict[str, Any], *, default: int | None = None) -> 
     if worker_count < 1:
         raise ValueError("worker_count must be >= 1")
     return min(worker_count, cpu_count)
+
+
+def _as_parallel_strategy(payload: dict[str, Any]) -> str:
+    strategy = str(payload.get("parallel_strategy") or "years").strip().lower()
+    if strategy not in DOWNLOAD_PARALLEL_STRATEGIES:
+        raise ValueError("parallel_strategy must be one of: years, pages")
+    return strategy
 
 
 def _as_log_limit(payload: dict[str, Any], *, default: int = 20) -> int:

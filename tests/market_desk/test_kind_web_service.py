@@ -80,6 +80,12 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
     summarize_disclosure_html_section_kinds_payload,
 )
 from finiq.market_desk.web.html_parsers.bond_issuance import parse_bond_issuance
+from finiq.market_desk.web.html_parsers.bond_issuance.extractor import (
+    BOND_SECURITY_TYPE_LABELS,
+    EXERCISE_PERIOD_LABEL_GROUPS,
+    EXERCISE_PRICE_LABEL_GROUPS,
+    EXERCISE_TARGET_LABEL_GROUPS,
+)
 from finiq.market_desk.web.html_parsers.common import (
     expand_table,
     extract_acpt_no,
@@ -285,6 +291,17 @@ GUI_HTML_DOWNLOAD_COMPONENT = GUI_APP_DIR / "html-download" / "_components" / "H
 GUI_HTML_CONTENT_DOWNLOAD_PAGE = GUI_APP_DIR / "html-content-download" / "page.tsx"
 GUI_HTML_SECTION_SPLIT_PAGE = GUI_APP_DIR / "html-section-split" / "page.tsx"
 GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT = GUI_APP_DIR / "html-section-split" / "_components" / "HtmlSectionSplitResults.tsx"
+GUI_HTML_SECTION_PATTERN_CARD = (
+    REPO_ROOT
+    / "frontend"
+    / "finiq_GUI"
+    / "apps"
+    / "market-desk"
+    / "src"
+    / "components"
+    / "disclosures"
+    / "HtmlSectionPatternCard.tsx"
+)
 GUI_HTML_PARSE_PAGE = GUI_APP_DIR / "html-parse" / "page.tsx"
 GUI_HTML_CHANGE_LOG_PAGE = GUI_APP_DIR / "html-change-log" / "page.tsx"
 GUI_UTILITY_PAGE = GUI_APP_DIR / "utility" / "page.tsx"
@@ -339,6 +356,10 @@ def _build_download_result_page_html(
         </html>
         """
     ).encode("utf-8")
+
+
+def _valid_download_html() -> str:
+    return "<html><body>" + ("valid " * 30) + "</body></html>"
 
 
 def _trusted_download_input_snapshot(
@@ -1651,7 +1672,9 @@ def test_check_disclosure_html_output_directory_reports_existing_overlap(
 
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
-    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
 
     payload = check_disclosure_html_output_directory_payload(
         {
@@ -1688,7 +1711,9 @@ def test_check_disclosure_html_output_directory_uses_single_worker_for_single_ta
 
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
-    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
 
     payload = check_disclosure_html_output_directory_payload(
         {
@@ -1713,7 +1738,9 @@ def test_download_disclosure_html_payload_logs_existing_html_overlap(
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
-    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
 
     payload = download_disclosure_html_payload(
         {
@@ -1787,7 +1814,9 @@ def test_check_disclosure_html_output_directory_uses_source_directory_manifest(t
         encoding="utf-8",
     )
     (output_directory / "2025").mkdir(parents=True)
-    (output_directory / "2025" / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "2025" / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
 
     payload = check_disclosure_html_output_directory_payload(
         {
@@ -1821,7 +1850,9 @@ def test_download_disclosure_html_payload_rejects_unexpected_resume_files(
     )
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
-    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
     (output_directory / "20240101000001.html").write_text("<html></html>", encoding="utf-8")
 
     try:
@@ -2037,7 +2068,9 @@ def test_download_disclosure_html_payload_resumes_split_files(
 
     output_directory = tmp_path / "viewer_html"
     (output_directory / "2025").mkdir(parents=True)
-    (output_directory / "2025" / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "2025" / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
 
     payload = download_disclosure_html_payload(
         {
@@ -2324,6 +2357,69 @@ def test_inspect_folder_job_cancellation(tmp_path: Path, monkeypatch) -> None:
     status = get_download_job(job_id)
     assert status["status"] == "cancelled"
     assert any("cancelled" in msg.lower() for msg in status["progress_log"])
+
+
+def test_download_job_logs_payload_summary_before_running_action(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import time
+
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
+        get_download_job,
+        start_download_job,
+    )
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.run_download_action",
+        lambda payload, progress_callback=None, cancel_check=None: {"summary": {}},
+    )
+
+    job = start_download_job(
+        {
+            "mode": "single",
+            "output_directory": str(tmp_path),
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-02",
+        }
+    )
+
+    for _ in range(50):
+        job = get_download_job(job["job_id"])
+        if job["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+
+    assert job["status"] == "completed"
+    assert job["error"] is None
+    assert any("JOB mode=single" in line for line in job["progress_log"])
+
+
+def test_download_job_retention_purges_only_terminal_jobs() -> None:
+    import finiq.market_desk.web.features.downloads.kind_common as kind_common
+
+    completed_id = "retention-completed"
+    running_id = "retention-running"
+    try:
+        kind_common.configure_download_job_retention(1)
+        with kind_common._DOWNLOAD_JOBS_LOCK:
+            kind_common._DOWNLOAD_JOBS[completed_id] = kind_common.DownloadJob(
+                id=completed_id,
+                status="completed",
+                updated_at=100.0,
+            )
+            kind_common._DOWNLOAD_JOBS[running_id] = kind_common.DownloadJob(
+                id=running_id,
+                status="running",
+                updated_at=100.0,
+            )
+            assert kind_common._purge_expired_download_jobs_locked(now=161.0) == 1
+            assert completed_id not in kind_common._DOWNLOAD_JOBS
+            assert running_id in kind_common._DOWNLOAD_JOBS
+    finally:
+        with kind_common._DOWNLOAD_JOBS_LOCK:
+            kind_common._DOWNLOAD_JOBS.pop(completed_id, None)
+            kind_common._DOWNLOAD_JOBS.pop(running_id, None)
+        kind_common.configure_download_job_retention(60)
 
 
 def test_inspect_download_output_directory_rejects_high_risk_directory() -> None:
@@ -3468,7 +3564,9 @@ def test_check_disclosure_html_output_directory_prefers_output_directory_split_b
     )
     output_directory = tmp_path / "content_html"
     (output_directory / "2025").mkdir(parents=True)
-    (output_directory / "2025" / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "2025" / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
 
     payload = check_disclosure_html_output_directory_payload(
         {
@@ -3608,7 +3706,6 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
         ),
         encoding="utf-8",
     )
-
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
@@ -4851,6 +4948,10 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         item["warning"].startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
         for item in payload["warnings"]
     )
+    assert any(
+        item["warning_code"] == "bond_investor_table_missing"
+        for item in payload["warnings"]
+    )
     assert payload["records"][0]["parse_warnings"] == [
         item["warning"] for item in payload["warnings"]
     ]
@@ -5604,7 +5705,12 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     content_download_ui_html = GUI_HTML_CONTENT_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     section_split_page_html = GUI_HTML_SECTION_SPLIT_PAGE.read_text(encoding="utf-8")
     section_split_results_component_html = GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT.read_text(encoding="utf-8")
-    section_split_ui_html = section_split_page_html + section_split_results_component_html
+    section_pattern_card_html = GUI_HTML_SECTION_PATTERN_CARD.read_text(encoding="utf-8")
+    section_split_ui_html = (
+        section_split_page_html
+        + section_split_results_component_html
+        + section_pattern_card_html
+    )
     parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
     change_log_ui_html = GUI_HTML_CHANGE_LOG_PAGE.read_text(encoding="utf-8")
     utility_ui_html = GUI_UTILITY_PAGE.read_text(encoding="utf-8")
@@ -5642,14 +5748,13 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "목차 조합 모아보기" in section_split_ui_html
     assert "불러오기" in section_split_ui_html
     assert "sectionPatterns" in section_split_ui_html
-    assert "maxSectionPatternCount" in section_split_ui_html
     assert "section_save_rules" in section_split_ui_html
     assert "selectedPatternTocIds" in section_split_ui_html
     assert "onTogglePatternSection" in section_split_ui_html
     assert "저장할 목차" in section_split_ui_html
-    assert "sample_documents" in section_split_results_component_html
-    assert "공시 열기" in section_split_results_component_html
-    assert 'target="_blank"' in section_split_results_component_html
+    assert "sample_documents" in section_pattern_card_html
+    assert "공시 열기" in section_pattern_card_html
+    assert 'target="_blank"' in section_pattern_card_html
     assert "limit: parseOptionalNumber(limit)" not in section_split_page_html
     assert "align-middle" in section_split_results_component_html
     assert "원문 보기" in section_split_ui_html
@@ -5691,7 +5796,7 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "내부 HTML 저장" in download_component_html
     assert "외부 HTML 압축" in download_component_html
     assert "내부 HTML 병합" in download_component_html
-    assert "외부 HTML 입력 경로" in download_component_html
+    assert "작업공간 디렉토리" in download_component_html
     assert "압축 JSON 데이터 경로" in download_component_html
     assert "압축 설정" not in download_component_html
     assert "압축 처리" in download_component_html
@@ -5921,6 +6026,22 @@ def test_parse_disclosure_html_payload_preserves_full_stem_in_metadata_and_warni
                         "acpt_no": " report ",
                         "company_name": "공백식별자회사",
                         "market": "코스닥",
+                        "disclosed_at": "2025-01-02 09:00:00",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": " report ",
+                        "title": "전환사채권 발행결정",
+                        "selected_main_doc_no": "20250102000011",
                     }
                 ]
             },
@@ -5939,6 +6060,9 @@ def test_parse_disclosure_html_payload_preserves_full_stem_in_metadata_and_warni
 
     assert payload["records"][0]["acpt_no"] == " report "
     assert payload["records"][0]["corp_name"] == "공백식별자회사"
+    assert payload["records"][0]["disclosed_at"] == "2025-01-02 09:00:00"
+    assert payload["records"][0]["title"] == "전환사채권 발행결정"
+    assert payload["records"][0]["doc_no"] == "20250102000011"
     assert payload["warnings"][0]["acpt_no"] == " report "
     assert " report " in payload["warning_report_counts"]["strong_warning"]["reports"]
 
@@ -6406,6 +6530,10 @@ def test_parse_bond_issuance_warns_when_required_detail_tables_are_absent(tmp_pa
         warning.startswith("투자자: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
     )
+    assert (
+        "사채 발행 투자자 표를 찾지 못했습니다. HTML 양식이 예상과 달라 투자자 필드가 비어 있을 수 있습니다."
+        in parsed["strong_warning"]
+    )
     assert not any("발행대상자세부엔티티" in warning for warning in parsed["parse_warnings"])
 
 
@@ -6470,6 +6598,10 @@ def test_parse_bond_issuance_keeps_investor_name_when_amount_is_dash(
     assert parsed["field_parse_status"]["투자자"] == "parsed"
     assert not any(
         warning.startswith("투자자: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed["parse_warnings"]
+    )
+    assert not any(
+        warning.startswith("사채 발행 투자자 표를 찾지 못했습니다.")
         for warning in parsed["parse_warnings"]
     )
 
@@ -6893,6 +7025,51 @@ def test_parse_bond_issuance_uses_symmetric_cb_eb_bw_target_priority(
     )
 
     assert parsed["기업명(행사대상)"] == "전환 대상 주식"
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_matches"),
+    [
+        ("신주인수권부사채·교환사채·전환사채 발행결정", "CB, EB, BW"),
+        ("신주인수권부사채·교환사채 발행결정", "EB, BW"),
+    ],
+)
+def test_parse_bond_issuance_rejects_multiple_security_types_in_title(
+    tmp_path: Path,
+    title: str,
+    expected_matches: str,
+) -> None:
+    fixture_path = tmp_path / "20260712000001.html"
+
+    parsed = parse_bond_issuance(
+        b"<html><body></body></html>",
+        file_path=fixture_path,
+        title=title,
+    )
+
+    assert parsed["종류"] is None
+    assert parsed["field_parse_status"]["종류"] == "source_not_found"
+    assert (
+        f"종류: 주입 제목에서 사채 종류를 둘 이상 확인했습니다. 확인된 종류: {expected_matches}"
+        in parsed["strong_warning"]
+    )
+
+
+def test_bond_issuance_type_specific_labels_are_symmetric_cb_eb_bw_triplets() -> None:
+    assert tuple(item[0] for item in BOND_SECURITY_TYPE_LABELS) == (
+        "CB",
+        "EB",
+        "BW",
+    )
+    assert all(
+        len(group) == 3
+        for groups in (
+            EXERCISE_TARGET_LABEL_GROUPS,
+            EXERCISE_PRICE_LABEL_GROUPS,
+            EXERCISE_PERIOD_LABEL_GROUPS,
+        )
+        for group in groups
+    )
 
 
 def test_parse_bond_issuance_reads_price_from_strict_numeric_value_cells(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from os import cpu_count
 from pathlib import Path
 from threading import Lock
@@ -11,10 +11,12 @@ from typing import Any, Callable
 
 import requests
 
+from finiq.concurrency import bounded_as_completed
 from finiq.config import PROJECT_ROOT
 from finiq.data_scraper.core.client import (
     KIND_DISCLOSURE_VIEWER_URL,
     VIEWER_HTML_FILENAME_TEMPLATE,
+    _is_valid_html,
     download_disclosure_viewer_htmls,
 )
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
@@ -387,6 +389,8 @@ def _validate_html_output_directory_files(
             "missing_target_html_count": len(acpt_numbers),
             "existing_target_acpt_numbers": [],
             "missing_target_acpt_numbers": acpt_numbers,
+            "invalid_target_html_count": 0,
+            "invalid_target_acpt_numbers": [],
             "auxiliary_file_count": 0,
             "total_file_count": 0,
         }
@@ -399,24 +403,38 @@ def _validate_html_output_directory_files(
     existing_paths = set(files)
     worker_count = _html_output_check_workers(len(acpt_numbers))
 
-    def target_status(acpt_no: str) -> tuple[str, Path, bool]:
+    def target_status(acpt_no: str) -> tuple[str, Path, bool, bool]:
         target_path = _target_html_path(
             output_directory,
             acpt_no,
             split_by_year=split_by_year,
             target_years=target_years,
         )
-        return acpt_no, target_path, target_path in existing_paths
+        exists = target_path in existing_paths
+        return acpt_no, target_path, exists and _is_valid_html(target_path), exists
 
     if worker_count == 1:
         target_statuses = [target_status(acpt_no) for acpt_no in acpt_numbers]
     else:
+        indexed_statuses: list[tuple[str, Path, bool, bool] | None] = [
+            None
+        ] * len(acpt_numbers)
         with ThreadPoolExecutor(
             max_workers=worker_count, thread_name_prefix="html-output-check"
         ) as executor:
-            target_statuses = list(executor.map(target_status, acpt_numbers))
+            completed = bounded_as_completed(
+                executor,
+                enumerate(acpt_numbers),
+                lambda item: executor.submit(target_status, item[1]),
+                max_pending=worker_count * 2,
+            )
+            for future, (index, _acpt_no) in completed:
+                indexed_statuses[index] = future.result()
+        target_statuses = [
+            status for status in indexed_statuses if status is not None
+        ]
 
-    allowed_paths = {target_path for _, target_path, _ in target_statuses}
+    allowed_paths = {target_path for _, target_path, _, _ in target_statuses}
     allowed_paths.update(
         output_directory / filename for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
     )
@@ -427,14 +445,20 @@ def _validate_html_output_directory_files(
                 for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
             )
     existing_target_acpt_numbers = [
-        acpt_no for acpt_no, _, exists in target_statuses if exists
+        acpt_no for acpt_no, _, valid, _ in target_statuses if valid
     ]
     missing_target_acpt_numbers = [
-        acpt_no for acpt_no, _, exists in target_statuses if not exists
+        acpt_no for acpt_no, _, valid, _ in target_statuses if not valid
+    ]
+    invalid_target_acpt_numbers = [
+        acpt_no
+        for acpt_no, _, valid, exists in target_statuses
+        if exists and not valid
     ]
     allowed_file_count = sum(1 for path in files if path in allowed_paths)
+    present_target_count = sum(1 for _, _, _, exists in target_statuses if exists)
     target_html_count = len(existing_target_acpt_numbers)
-    auxiliary_file_count = allowed_file_count - target_html_count
+    auxiliary_file_count = allowed_file_count - present_target_count
     unexpected_files = sorted(
         _relative_name(path, output_directory)
         for path in files
@@ -451,6 +475,7 @@ def _validate_html_output_directory_files(
             "전체 검사 결과:\n"
             f"- 전체 파일: {len(files)}개\n"
             f"- 대상 접수번호 HTML: {target_html_count}개 / {len(acpt_numbers)}개\n"
+            f"- 손상된 대상 HTML: {len(invalid_target_acpt_numbers)}개\n"
             f"- 허용 보조 파일: {auxiliary_file_count}개\n"
             f"- 문제 파일: {len(unexpected_files)}개\n"
             "문제 파일 전체:\n"
@@ -463,6 +488,8 @@ def _validate_html_output_directory_files(
         "missing_target_html_count": len(missing_target_acpt_numbers),
         "existing_target_acpt_numbers": existing_target_acpt_numbers,
         "missing_target_acpt_numbers": missing_target_acpt_numbers,
+        "invalid_target_html_count": len(invalid_target_acpt_numbers),
+        "invalid_target_acpt_numbers": invalid_target_acpt_numbers,
         "auxiliary_file_count": auxiliary_file_count,
         "total_file_count": len(files),
         "unexpected_file_count": len(unexpected_files),
@@ -484,6 +511,8 @@ def _delete_unexpected_html_output_directory_files(
             "missing_target_html_count": len(acpt_numbers),
             "existing_target_acpt_numbers": [],
             "missing_target_acpt_numbers": acpt_numbers,
+            "invalid_target_html_count": 0,
+            "invalid_target_acpt_numbers": [],
             "auxiliary_file_count": 0,
             "total_file_count": 0,
             "deleted_files": [],

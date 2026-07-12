@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { ActionDock, JobStatusLogger } from "@finiq/web-app/status";
+import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 import {
   HtmlWorkflowCard,
   HtmlWorkflowForm,
@@ -459,11 +460,14 @@ export function HtmlSectionSplitActionDock({
       notificationContent={notificationContent}
       settingsTitle="설정"
       settingsContent={
-        <div className="space-y-3">
-          <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>
+        <div className="space-y-5">
+          <DisclosureSeparateOutputDirectorySetting id="section-split-separate-output-directory" />
+          <div className="space-y-3">
+            <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>
+            </div>
+            <HtmlWorkflowForm fields={settingsFields} />
           </div>
-          <HtmlWorkflowForm fields={settingsFields} />
         </div>
       }
     />

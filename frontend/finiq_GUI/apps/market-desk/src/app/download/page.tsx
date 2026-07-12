@@ -22,6 +22,7 @@ import {
   DisclosureSearchConditionCard,
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
+import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 
 const parseISODate = (dateStr: string) => {
   const [year, month, day] = dateStr.split("-").map(Number);
@@ -152,9 +153,17 @@ export default function DownloadPage() {
 
   const {
     output_root: dataRoot,
-    download_output_directory: outputDirectory,
+    download_output_directory: separateOutputDirectory,
+    disclosure_separate_output_directory: useSeparateOutputDirectory,
+    job_retention_minutes: jobRetentionMinutes,
+    fetchSettings,
     saveSetting,
   } = useSettingsStore();
+  const outputDirectory = useSeparateOutputDirectory
+    ? separateOutputDirectory
+    : dataRoot
+      ? `${dataRoot.replace(/\/$/, "")}/01-list`
+      : "";
 
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
     pollingEndpoint: "/api/download/jobs/{jobId}",
@@ -215,6 +224,8 @@ export default function DownloadPage() {
   const [waitSeconds, setWaitSeconds] = useState("1");
   const [timeout, setTimeoutVal] = useState("20");
   const [workerCount, setWorkerCount] = useState("1");
+  const [parallelStrategy, setParallelStrategy] = useState<"years" | "pages">("years");
+  const [jobRetentionInput, setJobRetentionInput] = useState("60");
   const [startPage, setStartPage] = useState("1");
   const [endPage, setEndPage] = useState("");
   const [lastReportOnly, setLastReportOnly] = useState(false);
@@ -225,6 +236,19 @@ export default function DownloadPage() {
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [inspectRunning, setInspectRunning] = useState(false);
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
+
+  useEffect(() => {
+    setJobRetentionInput(String(jobRetentionMinutes || 60));
+  }, [jobRetentionMinutes]);
+
+  const saveJobRetentionMinutes = async () => {
+    const parsed = Number(jobRetentionInput);
+    const normalized = Number.isInteger(parsed) && parsed >= 1
+      ? parsed
+      : jobRetentionMinutes || 60;
+    setJobRetentionInput(String(normalized));
+    await saveSetting("job_retention_minutes", normalized);
+  };
 
   const filtersMatch = areFiltersMatching(
     {
@@ -253,7 +277,7 @@ export default function DownloadPage() {
 
   const fetchOptions = useCallback(async () => {
     try {
-      const data = await fetchDownloadOptions();
+      const [data] = await Promise.all([fetchDownloadOptions(), fetchSettings()]);
       setOptions(data);
 
       if (!useSettingsStore.getState().download_output_directory && data.default_output_directory) {
@@ -274,7 +298,7 @@ export default function DownloadPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchSettings, saveSetting]);
 
   useEffect(() => {
     fetchOptions();
@@ -425,6 +449,7 @@ export default function DownloadPage() {
 
   const buildPayload = (): DownloadPayload => ({
     data_root: dataRoot,
+    separate_output_directory: useSeparateOutputDirectory,
     mode: "yearly",
     output_directory: outputDirectory,
     start_date: startDate,
@@ -437,6 +462,7 @@ export default function DownloadPage() {
     wait_seconds: Number(waitSeconds),
     timeout: Number(timeout),
     worker_count: Number(workerCount),
+    parallel_strategy: parallelStrategy,
     log_limit: Number(logLimit),
     start_page: Number(startPage),
     end_page: endPage ? Number(endPage) : null,
@@ -641,15 +667,28 @@ export default function DownloadPage() {
             beforeFields={
               <>
               <div className="space-y-2">
-                <Label className="dark:text-slate-300">데이터 경로</Label>
+                <Label className="dark:text-slate-300">작업공간 디렉토리</Label>
                 <PathPickerInput
-                  value={outputDirectory}
-                  onChange={(val) => saveSetting("download_output_directory", val)}
+                  value={dataRoot}
+                  onChange={(val) => saveSetting("output_root", val)}
                   placeholder="데이터 경로를 선택하세요"
                   mode="folder"
                   onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
                 />
               </div>
+
+              {useSeparateOutputDirectory && (
+                <div className="space-y-2">
+                  <Label className="dark:text-slate-300">결과 데이터 경로</Label>
+                  <PathPickerInput
+                    value={separateOutputDirectory}
+                    onChange={(val) => saveSetting("download_output_directory", val)}
+                    placeholder="결과 데이터 경로를 선택하세요"
+                    mode="folder"
+                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
+                  />
+                </div>
+              )}
 
               {checkingExisting && !existingData && (
                 <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
@@ -1003,6 +1042,7 @@ export default function DownloadPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
+                <DisclosureSeparateOutputDirectorySetting id="download-separate-output-directory" />
                 <div className="space-y-3">
                   <div className="border-b border-[color:var(--tv-border)] pb-2">
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
@@ -1050,12 +1090,39 @@ export default function DownloadPage() {
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                   </div>
                   <div className="space-y-2">
+                    <Label className="dark:text-slate-300">병렬 처리 방식</Label>
+                    <Select value={parallelStrategy} onValueChange={(value) => setParallelStrategy(value as "years" | "pages")}>
+                      <SelectTrigger className={htmlControlClassName}><SelectValue /></SelectTrigger>
+                      <SelectContent className={htmlSelectContentClassName}>
+                        <SelectItem value="years">여러 연도 병렬 처리</SelectItem>
+                        <SelectItem value="pages">한 연도 내 페이지 병렬 처리</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-caption text-slate-500 dark:text-slate-400">
+                      같은 워커 수를 연도 간 분산하거나 한 연도의 페이지 처리에 집중합니다.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
                     <Label className="dark:text-slate-300">워커 수</Label>
                     <Input type="number" value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className={htmlControlClassName} />
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">로그 줄 수</Label>
                     <Input type="number" value={logLimit} onChange={(e) => setLogLimit(e.target.value)} className={htmlControlClassName} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="dark:text-slate-300">작업 기록 보관 시간 (분)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={jobRetentionInput}
+                      onChange={(e) => setJobRetentionInput(e.target.value)}
+                      onBlur={saveJobRetentionMinutes}
+                      className={htmlControlClassName}
+                    />
+                    <p className="text-caption text-slate-500 dark:text-slate-400">
+                      완료·실패·중단된 작업 상태만 정리하며 저장 파일과 메타데이터는 유지합니다.
+                    </p>
                   </div>
                 </div>
               </CardContent>

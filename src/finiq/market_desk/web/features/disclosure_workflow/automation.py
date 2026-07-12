@@ -22,6 +22,7 @@ from finiq.data_scraper.core.client import _is_valid_html
 from finiq.data_scraper.parse import disclosure_file_rows
 
 from finiq.market_desk.web.features.disclosures.html_content_download import (
+    _collect_content_targets_from_compressed_payload,
     download_disclosure_html_contents_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_download import (
@@ -45,7 +46,11 @@ from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
 )
 
-from .layout import atomic_write_json, prepare_disclosure_workspace_payload
+from .layout import (
+    atomic_write_json,
+    prepare_disclosure_workspace_payload,
+    resolve_disclosure_workspace,
+)
 
 
 AUTOMATION_PROFILE_FORMAT = "finiq_disclosure_automation_profile_v1"
@@ -113,7 +118,7 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
     data_root_text = str(payload.get("data_root") or "").strip()
     if not data_root_text:
         raise ValueError("data_root is required")
-    data_root = Path(data_root_text).expanduser().resolve()
+    data_root = resolve_disclosure_workspace(data_root_text).root
 
     raw_steps = payload.get("steps")
     if raw_steps is None:
@@ -383,6 +388,12 @@ def _load_valid_checkpoint(profile: dict[str, Any], stage: int) -> dict[str, Any
             return None
         if not isinstance(owner, dict) or owner.get("format") != owner_format:
             return None
+        if stage == 6 and owner.get("upstream_fingerprint") != _stage_output_fingerprint(
+            profile, 5
+        ):
+            return None
+    if stage in {4, 5} and not _active_html_outputs_valid(profile, stage):
+        return None
     return payload
 
 
@@ -669,6 +680,47 @@ def _copy_reusable_active_html(
     return copied
 
 
+def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
+    try:
+        root = Path(profile["data_root"])
+        expected_targets = _active_disclosure_targets(
+            root / "03-filter" / "filtered.json"
+        )
+        expected_membership = set(expected_targets)
+        current = (
+            root
+            / ("04-external" if stage == 4 else "05-internal")
+            / ".automation-current"
+        )
+        actual_files = sorted(current.rglob("*.html"))
+        actual_membership = {(path.stem, path.parent.name) for path in actual_files}
+        if actual_membership != expected_membership or any(
+            not _is_valid_html(path) for path in actual_files
+        ):
+            return False
+        if stage == 4:
+            compressed_payload = json.loads(
+                (root / "04-external" / "compressed-external-html.json").read_text(
+                    "utf-8"
+                )
+            )
+            records = compressed_payload.get("records")
+            if not isinstance(records, list):
+                return False
+            if not expected_targets:
+                return records == []
+            content_targets, _ = _collect_content_targets_from_compressed_payload(
+                compressed_payload
+            )
+            if {target["acpt_no"] for target in content_targets} != {
+                acpt_no for acpt_no, _year in expected_targets
+            } or len(content_targets) != len(expected_targets):
+                return False
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return True
+
+
 def _run_stage_one(
     profile: dict[str, Any],
     *,
@@ -912,6 +964,8 @@ def _run_stage(
                     },
                     progress_callback=progress_callback,
                 )
+                if not (compress_result.get("verification") or {}).get("passed"):
+                    raise ValueError("외부 HTML 압축 결과 재검사에 실패했습니다.")
                 compressed_payload = json.loads(
                     (temporary / "compressed-external-html.json").read_text("utf-8")
                 )
@@ -930,6 +984,17 @@ def _run_stage(
                     raise ValueError(
                         "외부 HTML 압축 membership이 필터 결과와 다릅니다. "
                         f"누락={missing[:10]}, 추가={extra[:10]}"
+                    )
+                content_targets, _ = _collect_content_targets_from_compressed_payload(
+                    compressed_payload
+                )
+                if (
+                    {target["acpt_no"] for target in content_targets}
+                    != expected_acpt_numbers
+                    or len(content_targets) != len(targets)
+                ):
+                    raise ValueError(
+                        "외부 HTML 압축 본문 대상이 필터 결과와 다릅니다."
                     )
             else:
                 download_result = {
@@ -1031,6 +1096,19 @@ def _run_stage(
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
+        if pattern_result.get("cancelled"):
+            raise RuntimeError("Job cancelled")
+        pattern_summary = pattern_result.get("summary") or {}
+        if (
+            int(pattern_summary.get("files_without_sections") or 0)
+            or int(pattern_summary.get("failed_files") or 0)
+        ):
+            raise ValueError(
+                "목차 조합 확인에 실패한 공시원문이 있습니다. "
+                f"전체={pattern_summary.get('found_files', 0)}, "
+                f"목차 없음={pattern_summary.get('files_without_sections', 0)}, "
+                f"읽기 실패={pattern_summary.get('failed_files', 0)}"
+            )
         rules = profile["decisions"]["s6_sections"]["section_save_rules"]
         unknown = [
             item
@@ -1067,6 +1145,7 @@ def _run_stage(
                 {
                     "format": AUTOMATION_SECTIONS_FORMAT,
                     "rules_hash": _canonical_hash(rules),
+                    "upstream_fingerprint": _stage_output_fingerprint(profile, 5),
                     "complete": True,
                 },
             )

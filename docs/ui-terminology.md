@@ -20,8 +20,8 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Disclosure automation unresolved decision state | 판단 필요 | Use when a new section pattern or another configured judgment boundary requires user input. Do not silently include or exclude the affected item. |
 | Disclosure automation interrupted-run continuation action | 이어서 실행 | Creates a successor run with the same revision, execution mask, and search snapshot; it does not change the original run back to running. Reuse already validated artifacts. |
 | Disclosure automation review-resolution successor run | 후속 실행 | Starts a new run on the successor profile revision after a decision; do not label this as `이어서 실행`. |
-| Disclosure automation continuous work range | 시작·종료 작업 선택 | Use one draggable row of task boxes with endpoint icons and continuous highlighting. Do not add duplicate dropdowns, expose stage numbers, or allow gaps inside the range. |
-| Disclosure automation settings jump action | 바로가기 | Use an outlined button in the unlabeled far-right action cell of `작업표`; it scrolls to the matching shared settings card. Do not place it beside the task name or add a visible `설정` column. |
+| Disclosure automation continuous work range | 시작·종료 작업 선택 | Use compact checkbox-style vertical-drag controls in the first `작업표` column, showing checks only for the continuous selected range. Do not add separate endpoint icons, a task-box row, duplicate dropdowns, expose stage numbers, or allow gaps inside the range. |
+| Disclosure automation settings jump action | 설정 | Use an outlined button in the unlabeled far-right action cell of `작업표`; it scrolls to the matching shared settings card. Do not place it beside the task name or add a visible `설정` column. |
 | Disclosure automation inactive judgment settings | 잠긴 설정 카드 | Render only the existing card title and a lock icon when its task is outside the selected range. This is a non-interactive replacement, not a collapsible control. |
 | Disclosure automation waiting for user decision | Pending | Use after upstream artifacts are not ready yet or when the workflow has stopped for a required section-pattern decision. The successor run remains `후속 실행`. |
 | Disclosure automation disabled plan action | 사용 안 함 | Plan state for a task outside the selected continuous work range. |
@@ -167,3 +167,9 @@ UI 문구를 추가하거나 바꿀 때는 이 파일의 용어를 먼저 따른
 | Notification panel | 알림 | Use only for errors, warnings, confirmations, or user action required. |
 | Notification clear action | 지우기 | Button in the right-side `알림` panel that clears the currently accumulated notification display. |
 | Settings panel | 설정 | Use as the generic right dock settings title unless a page-specific settings title is already established. |
+| Download parallel strategy setting | 병렬 처리 방식 | Selects whether workers are distributed across yearly ranges or pages within one year. |
+| Parallel yearly ranges option | 여러 연도 병렬 처리 | Runs multiple yearly download folders concurrently. |
+| Parallel pages within one year option | 한 연도 내 페이지 병렬 처리 | Runs yearly folders in sequence and downloads pages within the active year concurrently. |
+| Background job retention setting | 작업 기록 보관 시간 (분) | Retains terminal in-memory job status for the configured number of minutes. It never removes saved files or workflow metadata. |
+| Disclosure separate output directory setting | 저장 디렉토리 별도 설정하기 | Shared setting across all disclosure detail pages. Default is off. When off, hide the result-directory input and use the canonical stage directory under the workspace. |
+| Disclosure workspace root path | 작업공간 디렉토리 | Shared root directory shown on every disclosure detail page. All canonical stage paths are resolved below this directory. |

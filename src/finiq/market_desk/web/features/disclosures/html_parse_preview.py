@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
+from finiq.concurrency import bounded_as_completed
 from finiq.market_desk.web.features.disclosures.html_parse_support import *
 
 def _parse_with_metadata_title(
@@ -214,19 +215,20 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
 
     if worker_count > 1:
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = {
-                executor.submit(
+            completed = bounded_as_completed(
+                executor,
+                indexed_files,
+                lambda item: executor.submit(
                     _extract_filter_candidate_from_file,
-                    html_file=html_file,
+                    html_file=item[1],
                     parser=parser,
                     requested_mode=requested_mode,
                     field=field,
                     metadata_index=metadata_index,
-                ): (index, html_file)
-                for index, html_file in indexed_files
-            }
-            for future in as_completed(futures):
-                index, html_file = futures[future]
+                ),
+                max_pending=worker_count * 2,
+            )
+            for future, (index, html_file) in completed:
                 try:
                     record_value(future.result(), html_file)
                 except Exception as exc:

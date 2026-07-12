@@ -12,6 +12,9 @@ from finiq.market_desk.web.features.downloads.kind_api import run_download_actio
 from finiq.market_desk.web.features.downloads.kind_common import *
 from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
 from finiq.market_desk.web.features.downloads.kind_coordination import KIND_NETWORK_JOB_LOCK
+from finiq.market_desk.web.features.downloads.kind_runner import _download_payload_summary
+from finiq.market_desk.web.features.disclosure_workflow.layout import apply_workspace_defaults
+
 
 def _job_snapshot(job: DownloadJob) -> dict[str, Any]:
     return {
@@ -42,9 +45,11 @@ def _append_job_progress(job_id: str, message: str) -> None:
 
 
 def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = apply_workspace_defaults("kind_download", payload)
     job_id = uuid.uuid4().hex
     job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
     with _DOWNLOAD_JOBS_LOCK:
+        _purge_expired_download_jobs_locked()
         _DOWNLOAD_JOBS[job_id] = job
         _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
 
@@ -109,6 +114,7 @@ def cancel_download_job(job_id: str) -> dict[str, Any]:
     if not normalized_job_id:
         raise ValueError("job_id is required")
     with _DOWNLOAD_JOBS_LOCK:
+        _purge_expired_download_jobs_locked()
         job = _DOWNLOAD_JOBS.get(normalized_job_id)
         if job is None:
             raise ValueError(f"download job not found: {normalized_job_id}")
@@ -122,6 +128,7 @@ def cancel_download_job(job_id: str) -> dict[str, Any]:
 
 def get_download_job(job_id: str) -> dict[str, Any]:
     with _DOWNLOAD_JOBS_LOCK:
+        _purge_expired_download_jobs_locked()
         job = _DOWNLOAD_JOBS.get(job_id)
         if job is None:
             raise ValueError(f"download job not found: {job_id}")
@@ -129,9 +136,11 @@ def get_download_job(job_id: str) -> dict[str, Any]:
 
 
 def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = apply_workspace_defaults("kind_download", payload)
     job_id = uuid.uuid4().hex
     job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
     with _DOWNLOAD_JOBS_LOCK:
+        _purge_expired_download_jobs_locked()
         _DOWNLOAD_JOBS[job_id] = job
         _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
 
@@ -159,4 +168,3 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
     return get_download_job(job_id)
-

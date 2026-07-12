@@ -9,10 +9,12 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import threading
 from typing import Any
 
 import requests
 
+from finiq.concurrency import bounded_as_completed
 from finiq.data_scraper.core.client import (
     KIND_SEARCH_PAGE_URL,
     KIND_SEARCH_RESULTS_URL,
@@ -1321,12 +1323,16 @@ def validate_download_directory_page_size(
         return
     try:
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            list(
-                executor.map(
+            for future, _task in bounded_as_completed(
+                executor,
+                ((str(page_path), expected_page_size) for page_path in page_paths),
+                lambda task: executor.submit(
                     _validate_downloaded_result_page_task,
-                    [(str(page_path), expected_page_size) for page_path in page_paths],
-                )
-            )
+                    task,
+                ),
+                max_pending=worker_count * 2,
+            ):
+                future.result()
     except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
         for page_path in page_paths:
             validate_downloaded_result_page(page_path, expected_page_size=expected_page_size)
@@ -1362,12 +1368,24 @@ def inspect_download_directory_pages(
     else:
         try:
             with ProcessPoolExecutor(max_workers=worker_count) as executor:
-                inspected_pages = list(
-                    executor.map(
+                indexed_pages: list[dict[str, int] | None] = [None] * len(page_paths)
+                completed = bounded_as_completed(
+                    executor,
+                    (
+                        (index, str(page_path), expected_page_size)
+                        for index, page_path in enumerate(page_paths)
+                    ),
+                    lambda item: executor.submit(
                         _validate_downloaded_result_page_task,
-                        [(str(page_path), expected_page_size) for page_path in page_paths],
-                    )
+                        (item[1], item[2]),
+                    ),
+                    max_pending=worker_count * 2,
                 )
+                for future, (index, _path, _page_size) in completed:
+                    indexed_pages[index] = future.result()
+                inspected_pages = [
+                    page for page in indexed_pages if page is not None
+                ]
         except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
             inspected_pages = [
                 validate_downloaded_result_page(page_path, expected_page_size=expected_page_size)
@@ -1605,6 +1623,7 @@ class KindWorkflow:
         user_callback: KindSavedFileCallback | None,
     ) -> KindSavedFileCallback:
         checkpoint = self._build_checkpoint()
+        checkpoint_lock = threading.Lock()
 
         def _callback(
             output_path: Path,
@@ -1612,15 +1631,19 @@ class KindWorkflow:
             request_data: KindSearchFormData | None,
         ) -> None:
             resolved_output_path = str(output_path.resolve())
-            checkpoint.saved_files.append(resolved_output_path)
-            checkpoint.last_saved_file = resolved_output_path
-            checkpoint.last_saved_page = page_number
-            checkpoint.last_request_data = [] if request_data is None else list(request_data)
-            checkpoint.completed = False
-            if checkpoint_path is not None:
-                _write_json_file(checkpoint_path, checkpoint.to_dict())
-            if user_callback is not None:
-                user_callback(output_path, page_number, request_data)
+            with checkpoint_lock:
+                checkpoint.saved_files.append(resolved_output_path)
+                checkpoint.saved_files.sort()
+                checkpoint.last_saved_file = resolved_output_path
+                checkpoint.last_saved_page = page_number
+                checkpoint.last_request_data = (
+                    [] if request_data is None else list(request_data)
+                )
+                checkpoint.completed = False
+                if checkpoint_path is not None:
+                    _write_json_file(checkpoint_path, checkpoint.to_dict())
+                if user_callback is not None:
+                    user_callback(output_path, page_number, request_data)
 
         return _callback
 
@@ -1633,6 +1656,7 @@ class KindWorkflow:
         cancel_check: KindCancelCheck | None = None,
         input_snapshot_path: str | Path | None = None,
         checkpoint_path: str | Path | None = None,
+        max_workers: int = 1,
     ) -> dict[str, Any]:
         """저장된 입력값으로 KIND raw response를 폴더에 저장한다."""
         configured_input = self._require_input()
@@ -1684,8 +1708,23 @@ class KindWorkflow:
                 saved_file_callback,
             ),
             cancel_check=cancel_check,
+            max_workers=max_workers,
         )
-        checkpoint.completed = True
+        checkpoint.completed = not (
+            cancel_check is not None and cancel_check()
+        )
+        if checkpoint.completed:
+            final_page = configured_input.end_page
+            final_path = (
+                configured_input.output_directory
+                / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=final_page)
+            ).resolve()
+            if final_path.exists():
+                checkpoint.last_saved_file = str(final_path)
+                checkpoint.last_saved_page = final_page
+                checkpoint.last_request_data = list(
+                    self.build_request_data(page_number=final_page)
+                )
         _write_json_file(resolved_checkpoint_path, checkpoint.to_dict())
         return {
             "input": configured_input.to_dict(),
@@ -1722,6 +1761,7 @@ class KindWorkflow:
         cancel_check: KindCancelCheck | None = None,
         input_snapshot_path: str | Path | None = None,
         checkpoint_path: str | Path | None = None,
+        max_workers: int = 1,
     ) -> dict[str, Any]:
         """입력을 저장하고, 필요하면 바로 KIND raw response를 내려받는다."""
         configured_input = self.configure(
@@ -1756,6 +1796,7 @@ class KindWorkflow:
             cancel_check=cancel_check,
             input_snapshot_path=input_snapshot_path,
             checkpoint_path=checkpoint_path,
+            max_workers=max_workers,
         )
 
 
