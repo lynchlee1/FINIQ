@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from finiq.concurrency import bounded_as_completed
 from finiq.market_desk.web.features.market_data.service_records import *
 
 def _looks_like_sqlite_manifest(path: Path) -> bool:
@@ -395,12 +396,16 @@ def _parse_source_body_files_cached(
         with ThreadPoolExecutor(
             max_workers=worker_count, thread_name_prefix="kind-filter"
         ) as executor:
-            future_to_path = {
-                executor.submit(_parse_source_body_file, body_path): body_path
-                for body_path in body_paths
-            }
-            for future in as_completed(future_to_path):
-                parsed_by_path[future_to_path[future]] = future.result()
+            completed = bounded_as_completed(
+                executor,
+                body_paths,
+                lambda body_path: executor.submit(
+                    _parse_source_body_file, body_path
+                ),
+                max_pending=worker_count * 2,
+            )
+            for future, body_path in completed:
+                parsed_by_path[body_path] = future.result()
 
     records: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, str, str, str]] = set()

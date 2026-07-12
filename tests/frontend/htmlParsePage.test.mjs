@@ -30,22 +30,21 @@ test("html parse page uses standard two-row data path card", async () => {
   assert.doesNotMatch(dataPathCard, /description=/);
 });
 
-test("html parse page persists explicit parse directories without auto generated paths", async () => {
+test("html parse page keeps workspace directories directly editable", async () => {
   const source = await readFile(pagePath, "utf8");
-  const inputHandler = source.match(/const handleInputDirectoryChange =[\s\S]*?};/)?.[0] ?? "";
-  const outputHandler = source.match(/const handleOutputDirectoryChange =[\s\S]*?};/)?.[0] ?? "";
+  const pathFields = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
   const modeHandler = source.match(/const handleParseModeChange =[\s\S]*?};/)?.[0] ?? "";
 
-  assert.match(inputHandler, /setInputDirectory\(val\)/);
-  assert.match(inputHandler, /setFilterCandidatesLoading\(false\)/);
-  assert.match(inputHandler, /saveSetting\("html_section_split_output_directory", val\)/);
-  assert.doesNotMatch(inputHandler, /html_output_directory/);
-  assert.doesNotMatch(inputHandler, /html_content_output_directory/);
-  assert.doesNotMatch(inputHandler, /html_parse_result_path/);
-  assert.match(outputHandler, /setOutputDirectory\(val\)/);
-  assert.match(outputHandler, /saveSetting\("html_parse_output_directory", val\)/);
+  assert.doesNotMatch(pathFields, /disabled:/);
+  assert.match(pathFields, /label: "작업공간 디렉토리"/);
+  assert.match(pathFields, /onChange: handleWorkspaceDirectoryChange/);
+  assert.match(pathFields, /\.\.\.\(useSeparateOutputDirectory \? \[\{/);
+  assert.match(pathFields, /onChange: handleOutputDirectoryChange/);
+  assert.match(source, /data_root: dataRoot/);
+  assert.match(source, /setInputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
+  assert.match(source, /setOutputDirectory\(config\.html_parse_output_directory \|\| ""\)/);
   assert.match(modeHandler, /saveSetting\("html_parse_mode", val\)/);
-  assert.doesNotMatch(modeHandler, /html_parse_result_path/);
+  assert.match(source, /DisclosureSeparateOutputDirectorySetting id="parse-separate-output-directory"/);
 });
 
 test("html parse mode cards render as full-width rows", async () => {
@@ -113,7 +112,7 @@ test("html parse page does not auto generate output paths", async () => {
   assert.doesNotMatch(source, /output_root \? `\$\{config\.output_root\}\/viewer_html`/);
   assert.match(source, /setOutputDirectory\(config\.html_parse_output_directory \|\| ""\)/);
   assert.match(source, /setInputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
-  assert.match(source, /output_directory: outputDirectory/);
+  assert.match(source, /output_directory: useSeparateOutputDirectory \? outputDirectory : ""/);
   assert.doesNotMatch(source, /output_path: output/);
 });
 

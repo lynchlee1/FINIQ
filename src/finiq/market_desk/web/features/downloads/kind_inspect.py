@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any
 
+from finiq.concurrency import bounded_as_completed
 from finiq.data_scraper.workflow import inspect_download_directory_pages, validate_downloaded_result_page
 from finiq.data_scraper.workflow.workflow import _validate_downloaded_result_page_task
 
@@ -147,24 +148,24 @@ def inspect_download_output_directory_payload(
         is_cancelled = False
         try:
             executor = ProcessPoolExecutor(max_workers=worker_count)
-            future_to_path = {
-                executor.submit(
-                    _validate_downloaded_result_page_task, (str(path), page_size)
-                ): path
-                for path, page_size in files_to_validate
-            }
             completed_count = 0
-            for future in as_completed(future_to_path):
+            completed = bounded_as_completed(
+                executor,
+                files_to_validate,
+                lambda item: executor.submit(
+                    _validate_downloaded_result_page_task,
+                    (str(item[0]), item[1]),
+                ),
+                max_pending=worker_count * 2,
+            )
+            for future, (path, _page_size) in completed:
                 if cancel_check is not None and cancel_check():
                     is_cancelled = True
-                    for fut in future_to_path:
-                        fut.cancel()
                     try:
                         executor.shutdown(wait=False, cancel_futures=True)
                     except TypeError:
                         executor.shutdown(wait=False)
                     raise DownloadCancelled("Folder inspection cancelled by the user")
-                path = future_to_path[future]
                 try:
                     page_infos[str(path)] = future.result()
                 except BrokenProcessPool:
@@ -348,4 +349,3 @@ def inspect_download_output_directory_payload(
         "download_needed_count": download_needed_count,
         "download_needed_pages": download_needed_pages,
     }
-

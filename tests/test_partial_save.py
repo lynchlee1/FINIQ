@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from finiq.config import build_disclosure_workspace_path_settings
 from finiq.market_desk.web.app import app, config
 
 
@@ -14,7 +15,7 @@ def restore_config():
         setattr(config, key, value)
 
 
-def test_partial_update_persistence(tmp_path: Path):
+def test_output_root_update_rebases_canonical_workflow_paths(tmp_path: Path):
     config.settings_path = str(tmp_path / "settings.json")
     keep_path = tmp_path / "keep-me.json"
     client = TestClient(app)
@@ -36,4 +37,7 @@ def test_partial_update_persistence(tmp_path: Path):
     payload = resp.json()
     val = payload.get("html_parse_result_path")
 
-    assert val == str(keep_path.resolve())
+    expected = build_disclosure_workspace_path_settings(
+        "/tmp/main-output", mode=config.html_parse_mode
+    )
+    assert val == expected["html_parse_result_path"]

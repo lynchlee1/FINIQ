@@ -16,31 +16,33 @@ from .utils import (
     _clean_funding_purpose_label,
 )
 
-EXERCISE_TARGET_LABELS = (
-    "전환대상",
-    "교환대상",
-    "인수권행사대상",
-    "전환에 따라",
-    "교환에 따라",
-    "인수권행사에 따라",
-    "전환으로 발행할",
-    "교환으로 발행할",
-    "인수권행사로 발행할",
+BOND_SECURITY_TYPE_LABELS = (
+    ("CB", "전환사채"),
+    ("EB", "교환사채"),
+    ("BW", "신주인수권부사채"),
 )
 
-EXERCISE_PRICE_LABELS = (
-    "전환가액",
-    "교환가액",
-    "행사가액",
-    "전환가격",
-    "교환가격",
-    "행사가격",
+# 각 묶음은 의미가 같은 CB, EB, BW label을 이 순서로 유지한다.
+EXERCISE_TARGET_LABEL_GROUPS = (
+    ("전환대상", "교환대상", "인수권행사대상"),
+    ("전환에 따라", "교환에 따라", "인수권행사에 따라"),
+    ("전환으로 발행할", "교환으로 발행할", "인수권행사로 발행할"),
 )
-
+EXERCISE_PRICE_LABEL_GROUPS = (
+    ("전환가액", "교환가액", "행사가액"),
+    ("전환가격", "교환가격", "행사가격"),
+)
+EXERCISE_PERIOD_LABEL_GROUPS = (
+    ("전환청구기간", "교환청구기간", "권리행사기간"),
+)
+EXERCISE_TARGET_LABELS = tuple(
+    label for group in EXERCISE_TARGET_LABEL_GROUPS for label in group
+)
+EXERCISE_PRICE_LABELS = tuple(
+    label for group in EXERCISE_PRICE_LABEL_GROUPS for label in group
+)
 EXERCISE_PERIOD_LABELS = (
-    "전환청구기간",
-    "교환청구기간",
-    "권리행사기간",
+    *(label for group in EXERCISE_PERIOD_LABEL_GROUPS for label in group),
     "행사기간",
 )
 
@@ -68,6 +70,10 @@ BOND_FIELD_EXTRACTION_RULES = {
         "'특정인에 대한 대상자별 사채발행내역' 표 > 발행 대상자명 + 발행권면총액"
     ),
 }
+INVESTOR_TABLE_MISSING_WARNING = (
+    "사채 발행 투자자 표를 찾지 못했습니다. "
+    "HTML 양식이 예상과 달라 투자자 필드가 비어 있을 수 있습니다."
+)
 
 
 def _main_bond_rows(raw_tables: list[dict[str, Any]]) -> list[list[str]]:
@@ -103,15 +109,17 @@ class BondIssuanceExtractor:
 
     def extract_security_type_from_title(self, title: str) -> str | None:
         """공시 제목을 기반으로 CB/EB/BW 여부를 판별한다."""
-        text = title
-        if "신주인수권부사채" in text:
-            value = "BW"
-        elif "교환사채" in text:
-            value = "EB"
-        elif "전환사채" in text:
-            value = "CB"
-        else:
-            value = None
+        matched_types = [
+            security_type
+            for security_type, label in BOND_SECURITY_TYPE_LABELS
+            if label in title
+        ]
+        value = matched_types[0] if len(matched_types) == 1 else None
+        if len(matched_types) > 1:
+            self._append_warning(
+                "종류: 주입 제목에서 사채 종류를 둘 이상 확인했습니다. "
+                f"확인된 종류: {', '.join(matched_types)}"
+            )
         self._set_value_status("종류", value)
         return value
 
@@ -261,7 +269,10 @@ class BondIssuanceExtractor:
         self,
     ) -> list[list[Any]] | None:
         """사채 발행 대상자(인수자)와 배정 권면액을 추출한다."""
-        for rows in self._specific_person_bond_issue_table_rows():
+        source_tables = self._specific_person_bond_issue_table_rows()
+        if not source_tables:
+            self._append_warning(INVESTOR_TABLE_MISSING_WARNING)
+        for rows in source_tables:
             header = rows[0]
             name_index = _first_header_index(header, "발행 대상자명")
             amount_index = _first_header_index(header, "발행권면")

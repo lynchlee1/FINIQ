@@ -188,7 +188,7 @@ def _set_default(payload: dict[str, Any], key: str, value: object) -> None:
 
 
 def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Fill stage paths only when ``data_root`` is supplied and a path is absent."""
+    """Fill missing stage paths from ``data_root`` without blocking overrides."""
     payload = dict(body)
     data_root = str(payload.get("data_root") or "").strip()
     if not data_root:
@@ -197,7 +197,12 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
     normalized_kind = str(kind or "").strip()
 
     if normalized_kind == "kind_download":
-        _set_default(payload, "output_directory", str(workspace.list))
+        # The download detail page accepts the workspace root. Raw KIND files
+        # always live in the first canonical stage below that root.
+        if payload.get("separate_output_directory"):
+            _set_default(payload, "output_directory", str(workspace.list))
+        else:
+            payload["output_directory"] = str(workspace.list)
     elif normalized_kind == "table_build":
         _set_default(payload, "root_directory", str(workspace.list))
         _set_default(payload, "output_path", str(workspace.table))
@@ -215,7 +220,8 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(payload, "output_directory", str(workspace.external))
         payload.setdefault("input_split_by_year", True)
     elif normalized_kind == "content_download":
-        _set_default(payload, "source_directory", str(workspace.external))
+        if not str(payload.get("source_compressed_json_path") or "").strip():
+            _set_default(payload, "source_directory", str(workspace.external))
         _set_default(payload, "output_directory", str(workspace.internal))
         payload.setdefault("source_split_by_year", True)
         payload.setdefault("output_split_by_year", True)
@@ -244,11 +250,7 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
             str(workspace.external / "compressed-external-html.json"),
         )
     elif normalized_kind == "dart_link":
-        _set_default(
-            payload,
-            "output_directory",
-            str(workspace.list / "dart-links"),
-        )
+        _set_default(payload, "output_directory", str(workspace.list / "dart-links"))
         if not any(
             payload.get(key)
             for key in (

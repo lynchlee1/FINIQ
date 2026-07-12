@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Play, RefreshCw, Save, Square } from "lucide-react";
-import Link from "next/link";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Check, Loader2, Play, RefreshCw, Save, Square } from "lucide-react";
 import {
   Button,
   Card,
@@ -25,7 +24,6 @@ import {
   DisclosureSearchConditionCard,
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
-import { DisclosureWorkflowRangeSelector } from "@/components/disclosures/DisclosureWorkflowRangeSelector";
 import { DisclosureLockedSettingsCard } from "@/components/disclosures/DisclosureLockedSettingsCard";
 import {
   HtmlSectionPatternCard,
@@ -43,13 +41,13 @@ const PROFILE_STORAGE_KEY = "finiq.disclosureAutomation.profile.v1";
 const REVIEW_STORAGE_KEY = "finiq.disclosureAutomation.review.v1";
 
 const STAGES = [
-  { number: 1, key: "s1_download", label: "공시내역 다운로드", href: "/download", target: "search" },
-  { number: 2, key: "s2_table", label: "공시내역 변환", href: "/table", target: null },
-  { number: 3, key: "s3_filter", label: "공시내역 필터링", href: "/filter", target: "filter" },
-  { number: 4, key: "s4_external_html", label: "공시원문 외부 저장", href: "/html-download", target: null },
-  { number: 5, key: "s5_content_html", label: "공시원문 내부 저장", href: "/html-content-download", target: null },
-  { number: 6, key: "s6_sections", label: "공시원문 목차 분리", href: "/html-section-split", target: "sections" },
-  { number: 7, key: "s7_parse", label: "공시원문 변환", href: "/html-parse", target: null },
+  { number: 1, key: "s1_download", label: "공시내역 다운로드", target: "search" },
+  { number: 2, key: "s2_table", label: "공시내역 변환", target: null },
+  { number: 3, key: "s3_filter", label: "공시내역 필터링", target: "filter" },
+  { number: 4, key: "s4_external_html", label: "공시원문 외부 저장", target: null },
+  { number: 5, key: "s5_content_html", label: "공시원문 내부 저장", target: null },
+  { number: 6, key: "s6_sections", label: "공시원문 목차 분리", target: "sections" },
+  { number: 7, key: "s7_parse", label: "공시원문 변환", target: null },
 ] as const;
 
 type StageKey = (typeof STAGES)[number]["key"];
@@ -186,6 +184,8 @@ export default function DisclosureAutomationPage() {
   const searchSettingsRef = useRef<HTMLDivElement | null>(null);
   const filterSettingsRef = useRef<HTMLDivElement | null>(null);
   const sectionSettingsRef = useRef<HTMLDivElement | null>(null);
+  const rangeDragAnchorRef = useRef<number | null>(null);
+  const lastRangeDragValueRef = useRef<number | null>(null);
 
   const formatStatus = (snapshot: any) => {
     const lines = [`작업 상태: ${snapshot.status === "running" ? "실행 중" : snapshot.status === "completed" ? "완료" : snapshot.status === "failed" ? "실패" : snapshot.status === "cancelled" ? "취소됨" : "대기 중"}`];
@@ -388,6 +388,46 @@ export default function DisclosureAutomationPage() {
     setPlan(null);
   };
 
+  const rangeSelectionDisabled = !!activeJobId || !!reviewPatterns.length;
+
+  const selectRangeThrough = (value: number) => {
+    const anchor = rangeDragAnchorRef.current;
+    if (anchor === null || lastRangeDragValueRef.current === value) return;
+    lastRangeDragValueRef.current = value;
+    changeRange(Math.min(anchor, value), Math.max(anchor, value));
+  };
+
+  const rangeValueAtPointer = (event: ReactPointerEvent<HTMLTableSectionElement>) => {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const taskElement = element?.closest<HTMLElement>("[data-workflow-task-value]");
+    const value = Number(taskElement?.dataset.workflowTaskValue);
+    return STAGES.some((stage) => stage.number === value) ? value : null;
+  };
+
+  const handleRangePointerDown = (event: ReactPointerEvent<HTMLTableSectionElement>) => {
+    if (rangeSelectionDisabled || event.button !== 0) return;
+    const value = rangeValueAtPointer(event);
+    if (value === null) return;
+    rangeDragAnchorRef.current = value;
+    lastRangeDragValueRef.current = null;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    selectRangeThrough(value);
+  };
+
+  const handleRangePointerMove = (event: ReactPointerEvent<HTMLTableSectionElement>) => {
+    if (rangeDragAnchorRef.current === null) return;
+    const value = rangeValueAtPointer(event);
+    if (value !== null) selectRangeThrough(value);
+  };
+
+  const finishRangeDrag = (event: ReactPointerEvent<HTMLTableSectionElement>) => {
+    rangeDragAnchorRef.current = null;
+    lastRangeDragValueRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   const applyPreset = (preset: DisclosureConditionPresetPayload, message: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
     if (preset.name) setPresetName(preset.name);
@@ -507,13 +547,6 @@ export default function DisclosureAutomationPage() {
               <CardTitle className="text-[var(--tv-text)]">작업표</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <DisclosureWorkflowRangeSelector
-                tasks={STAGES.map((stage) => ({ value: stage.number, label: stage.label }))}
-                start={rangeStart}
-                end={rangeEnd}
-                disabled={!!activeJobId || !!reviewPatterns.length}
-                onRangeChange={changeRange}
-              />
               <div className="overflow-x-auto rounded-md border border-[color:var(--tv-border)]">
                 <table className="w-full min-w-[920px] border-collapse text-left text-sm">
                   <thead className="bg-[var(--tv-control)] text-sm font-semibold text-[var(--tv-muted)]">
@@ -522,10 +555,20 @@ export default function DisclosureAutomationPage() {
                       <th className="px-5 py-3.5">실행 계획</th>
                       <th className="px-5 py-3.5">작업 상태</th>
                       <th className="px-5 py-3.5">마지막 성공</th>
-                      <th className="w-32 px-5 py-3.5"><span className="sr-only">바로가기</span></th>
+                      <th className="w-32 px-5 py-3.5"><span className="sr-only">설정</span></th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[color:var(--tv-border)]">
+                  <tbody
+                    className="divide-y divide-[color:var(--tv-border)]"
+                    onPointerDown={handleRangePointerDown}
+                    onPointerMove={handleRangePointerMove}
+                    onPointerUp={finishRangeDrag}
+                    onPointerCancel={finishRangeDrag}
+                    onLostPointerCapture={() => {
+                      rangeDragAnchorRef.current = null;
+                      lastRangeDragValueRef.current = null;
+                    }}
+                  >
                     {STAGES.map((stage) => {
                       const stagePlan = planForStage(stage.number);
                       const statusValue = runStageStatus(stage.number)
@@ -534,6 +577,15 @@ export default function DisclosureAutomationPage() {
                         ? "review"
                         : stagePlan?.plan_action;
                       const inRange = executionMask.includes(stage.number);
+                      const isRangeStart = stage.number === rangeStart;
+                      const isRangeEnd = stage.number === rangeEnd;
+                      const rangePositionLabel = isRangeStart && isRangeEnd
+                        ? "선택 범위"
+                        : isRangeStart
+                          ? "선택 범위 시작"
+                          : isRangeEnd
+                            ? "선택 범위 끝"
+                            : inRange ? "선택 범위 안" : "선택 범위 밖";
                       const settingsTarget = stage.target === "search"
                         ? searchSettingsRef
                         : stage.target === "filter"
@@ -543,28 +595,44 @@ export default function DisclosureAutomationPage() {
                             : null;
                       return (
                         <tr key={stage.key} className={inRange ? "text-[var(--tv-text)]" : "bg-[var(--tv-control)]/30 text-[var(--tv-muted)]"}>
-                          <td className="px-5 py-4 align-middle">
-                            <Link href={stage.href} className="text-base font-semibold text-[var(--tv-accent)] hover:underline">
-                              {stage.label}
-                            </Link>
+                          <td className="px-5 py-2 align-middle">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                data-workflow-task-value={stage.number}
+                                disabled={rangeSelectionDisabled}
+                                aria-pressed={inRange}
+                                aria-label={`${stage.label}, ${rangePositionLabel}`}
+                                title="드래그하여 시작·종료 작업 선택"
+                                className={`flex h-4 w-4 shrink-0 touch-none select-none items-center justify-center rounded-sm border outline-none focus-visible:ring-2 focus-visible:ring-[var(--tv-accent)] ${inRange ? "border-[color:var(--tv-accent)] bg-[var(--tv-accent)] text-[var(--tv-surface)]" : "border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"} ${rangeSelectionDisabled ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}`}
+                                onKeyDown={(event) => {
+                                  if (event.key !== "Enter" && event.key !== " ") return;
+                                  event.preventDefault();
+                                  changeRange(stage.number, stage.number);
+                                }}
+                              >
+                                {inRange ? <Check className="h-2.5 w-2.5" aria-hidden="true" /> : null}
+                              </button>
+                              <span className="text-sm font-medium">{stage.label}</span>
+                            </div>
                           </td>
-                          <td className="px-5 py-4 align-middle">
+                          <td className="px-5 py-2 align-middle">
                             <span className={`inline-flex rounded-full border px-3 py-1.5 text-sm font-semibold ${planTone(planAction)}`}>{planLabel(planAction)}</span>
                             {stagePlan?.reason ? <p className="mt-2 max-w-[260px] text-sm leading-5 text-[var(--tv-muted)]">{stagePlan.reason}</p> : null}
                           </td>
-                          <td className="px-5 py-4 align-middle text-sm text-[var(--tv-muted)]">{activeJobId && stagePlan?.plan_action === "process" && !statusValue ? "대기 중" : runStatusLabel(statusValue)}</td>
-                          <td className="px-5 py-4 align-middle text-sm text-[var(--tv-muted)]">{formatCompletedAt(stagePlan?.last_success_at)}</td>
-                          <td className="px-5 py-4 align-middle">
+                          <td className="px-5 py-2 align-middle text-sm text-[var(--tv-muted)]">{activeJobId && stagePlan?.plan_action === "process" && !statusValue ? "대기 중" : runStatusLabel(statusValue)}</td>
+                          <td className="px-5 py-2 align-middle text-sm text-[var(--tv-muted)]">{formatCompletedAt(stagePlan?.last_success_at)}</td>
+                          <td className="px-5 py-2 align-middle">
                             <div className="flex justify-end">
                               {settingsTarget ? (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  className="h-9 border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-3 text-sm text-[var(--tv-text)]"
+                                  className="h-8 border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-3 text-sm text-[var(--tv-text)]"
                                   onClick={() => settingsTarget.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                                 >
-                                  바로가기
+                                  설정
                                 </Button>
                               ) : null}
                             </div>

@@ -6,15 +6,11 @@ const pagePath = "frontend/finiq_GUI/apps/market-desk/src/app/disclosure-automat
 const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts";
 const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx";
 const sectionResultsPath = "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx";
-const rangeSelectorPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureWorkflowRangeSelector.tsx";
 const lockedCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureLockedSettingsCard.tsx";
 const sectionPatternCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/HtmlSectionPatternCard.tsx";
 
-test("disclosure automation is additive and keeps all seven detail routes", async () => {
-  const [page, navigation] = await Promise.all([
-    readFile(pagePath, "utf8"),
-    readFile(navigationPath, "utf8"),
-  ]);
+test("disclosure automation navigation keeps all seven detail routes", async () => {
+  const navigation = await readFile(navigationPath, "utf8");
 
   assert.match(navigation, /basePath: "\/disclosure-automation"/);
   assert.match(navigation, /label: "공시 자동화"/);
@@ -28,17 +24,16 @@ test("disclosure automation is additive and keeps all seven detail routes", asyn
     "/html-parse",
   ]) {
     assert.match(navigation, new RegExp(`href: "${route}"`));
-    assert.match(page, new RegExp(`href: "${route}"`));
   }
 });
 
-test("automation page uses a continuous work range and in-page settings shortcuts", async () => {
+test("automation page uses a continuous work range and in-page settings actions", async () => {
   const page = await readFile(pagePath, "utf8");
 
-  assert.match(page, /DisclosureWorkflowRangeSelector/);
-  assert.match(page, /onRangeChange=\{changeRange\}/);
+  assert.doesNotMatch(page, /DisclosureWorkflowRangeSelector/);
+  assert.match(page, /data-workflow-task-value=\{stage\.number\}/);
   assert.match(page, /scrollIntoView/);
-  assert.match(page, /바로가기/);
+  assert.match(page, /설정/);
   assert.match(page, /실행 계획/);
   assert.match(page, /DisclosureConditionFilterCard/);
   assert.match(page, /동기화/);
@@ -52,20 +47,19 @@ test("automation page uses a continuous work range and in-page settings shortcut
   assert.doesNotMatch(page, /\{stage\.number\}<\/span>/);
 });
 
-test("automation range is selected directly by dragging task boxes", async () => {
-  const selector = await readFile(rangeSelectorPath, "utf8");
+test("automation range is selected directly by dragging task-table controls", async () => {
+  const page = await readFile(pagePath, "utf8");
 
-  assert.match(selector, /onPointerDown=\{handlePointerDown\}/);
-  assert.match(selector, /onPointerMove/);
-  assert.match(selector, /setPointerCapture/);
-  assert.match(selector, /data-workflow-task-value/);
-  assert.match(selector, /onRangeChange\(Math\.min\(anchor, value\), Math\.max\(anchor, value\)\)/);
-  assert.match(selector, /min-h-20/);
-  assert.match(selector, /text-sm/);
-  assert.doesNotMatch(selector, /SelectTrigger|SelectContent|onStartChange|onEndChange/);
+  assert.match(page, /onPointerDown=\{handleRangePointerDown\}/);
+  assert.match(page, /onPointerMove=\{handleRangePointerMove\}/);
+  assert.match(page, /setPointerCapture/);
+  assert.match(page, /data-workflow-task-value/);
+  assert.match(page, /changeRange\(Math\.min\(anchor, value\), Math\.max\(anchor, value\)\)/);
+  assert.match(page, /aria-pressed=\{inRange\}/);
+  assert.doesNotMatch(page, /SelectTrigger|SelectContent|onStartChange|onEndChange/);
 });
 
-test("automation task table uses standard card spacing and a far-right outlined shortcut", async () => {
+test("automation task table uses standard card spacing and a far-right outlined settings action", async () => {
   const page = await readFile(pagePath, "utf8");
   const tableStart = page.indexOf('<CardTitle className="text-[var(--tv-text)]">작업표</CardTitle>');
   const tableEnd = page.indexOf('<div ref={searchSettingsRef}', tableStart);
@@ -75,11 +69,16 @@ test("automation task table uses standard card spacing and a far-right outlined 
   assert.match(taskTable, /<CardContent className="space-y-6">/);
   assert.match(taskTable, /overflow-x-auto rounded-md border border-\[color:var\(--tv-border\)\]/);
   assert.match(taskTable, /min-w-\[920px\]/);
-  assert.match(taskTable, /text-base font-semibold/);
-  assert.match(taskTable, /<th className="w-32[^>]*><span className="sr-only">바로가기<\/span><\/th>/);
-  assert.match(taskTable, /<div className="flex justify-end">[\s\S]*?variant="outline"[\s\S]*?바로가기/);
+  assert.match(taskTable, /<span className="text-sm font-medium">\{stage\.label\}<\/span>/);
+  assert.match(taskTable, /className=\{`flex h-4 w-4/);
+  assert.match(taskTable, /\{inRange \? <Check className="h-2\.5 w-2\.5"/);
+  assert.match(taskTable, /<td className="px-5 py-2 align-middle">/);
+  assert.match(taskTable, /className="h-8 border-\[color:var\(--tv-border\)\]/);
+  assert.doesNotMatch(taskTable, /<Link href=\{stage\.href\}|<MoveVertical|<GripVertical|<Flag|isRangeStart \? <Play/);
+  assert.match(taskTable, /<th className="w-32[^>]*><span className="sr-only">설정<\/span><\/th>/);
+  assert.match(taskTable, /<div className="flex justify-end">[\s\S]*?variant="outline"[\s\S]*?설정/);
   assert.ok(taskTable.indexOf("formatCompletedAt") < taskTable.indexOf('<div className="flex justify-end">'));
-  assert.doesNotMatch(taskTable, /variant="ghost"[\s\S]{0,220}바로가기/);
+  assert.doesNotMatch(taskTable, /variant="ghost"[\s\S]{0,220}설정/);
 });
 
 test("inactive judgment settings render locked summary cards and section review can wait", async () => {
@@ -96,6 +95,8 @@ test("inactive judgment settings render locked summary cards and section review 
   assert.match(page, /DisclosureLockedSettingsCard title="공시 종류"/);
   assert.match(page, /pending=\{!runResult \|\| !!activeJobId \|\| !!reviewPatterns\.length\}/);
   assert.match(lockedCard, /Lock/);
+  assert.match(lockedCard, /min-h-8/);
+  assert.doesNotMatch(lockedCard, /min-h-14/);
   assert.match(sectionPatternCard, /Pending/);
 });
 

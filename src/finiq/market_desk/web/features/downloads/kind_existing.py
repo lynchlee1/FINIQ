@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from finiq.concurrency import bounded_as_completed
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS, DISCLOSURE_GROUPS, MARKET_TYPES, SECURITIES_TYPES
 from finiq.data_scraper.parse import pagination_info
 from finiq.data_scraper.workflow import KindWorkflow, inspect_download_directory_pages
@@ -377,19 +378,22 @@ def check_existing_downloads(
 
     ranges_data = []
     # Run validation checks concurrently in a ThreadPool
-    with ThreadPoolExecutor(max_workers=min(10, len(candidates))) as executor:
-        futures = {
-            executor.submit(
+    worker_count = min(10, len(candidates))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        completed = bounded_as_completed(
+            executor,
+            candidates,
+            lambda item: executor.submit(
                 _validate_single_folder,
-                folder,
-                folder_name,
-                date_range,
+                item[0],
+                item[1],
+                item[2],
                 verify_with_kind=verify_with_kind,
                 current_payload=current_payload,
-            ): folder_name
-            for folder, folder_name, date_range in candidates
-        }
-        for future in futures:
+            ),
+            max_pending=worker_count * 2,
+        )
+        for future, _candidate in completed:
             try:
                 res = future.result()
                 if res is not None:

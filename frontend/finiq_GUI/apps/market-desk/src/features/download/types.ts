@@ -18,6 +18,7 @@ export type DownloadOptions = {
 
 export type DownloadPayload = {
   data_root: string;
+  separate_output_directory: boolean;
   mode: "yearly";
   output_directory: string;
   start_date: string;
@@ -30,6 +31,7 @@ export type DownloadPayload = {
   wait_seconds: number;
   timeout: number;
   worker_count: number;
+  parallel_strategy: "years" | "pages";
   log_limit: number;
   start_page: number;
   end_page: number | null;

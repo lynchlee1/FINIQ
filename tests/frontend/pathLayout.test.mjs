@@ -71,19 +71,73 @@ test("html section split can cancel save jobs and source loading", async () => {
   assert.match(resultsSource, /isCancellable=\{isJobActive \|\| isInspecting\}/);
 });
 
-test("html section split persists data path fields", async () => {
+test("html section split keeps workspace paths directly editable", async () => {
   const pageSource = await readFile(htmlSectionSplitPath, "utf8");
+  const resultsSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx",
+    "utf8",
+  );
   const storeSource = await readFile(
     "frontend/finiq_GUI/apps/market-desk/src/store/useSettingsStore.ts",
     "utf8",
   );
 
   assert.match(storeSource, /html_section_split_output_directory: string/);
-  assert.match(pageSource, /const \{ fetchSettings, saveSetting \} = useSettingsStore\(\)/);
+  assert.match(storeSource, /disclosure_separate_output_directory: boolean/);
+  assert.match(storeSource, /disclosure_separate_output_directory: false/);
+  assert.match(pageSource, /disclosure_separate_output_directory: useSeparateOutputDirectory/);
   assert.match(pageSource, /config\.html_section_split_output_directory \|\| \(defaultInput \? `\$\{defaultInput\}_sections` : ""\)/);
-  assert.match(pageSource, /saveSetting\("html_content_output_directory", value\)/);
-  assert.match(pageSource, /saveSetting\("html_section_split_output_directory", nextOutputDirectory\)/);
-  assert.match(pageSource, /saveSetting\("html_section_split_output_directory", value\)/);
+  const pathFields = pageSource.match(/const folderPathFields:[\s\S]*?const splitOptionFields:/)?.[0] ?? "";
+  assert.doesNotMatch(pathFields, /disabled:/);
+  assert.match(pathFields, /label: "작업공간 디렉토리"/);
+  assert.match(pathFields, /onChange: handleWorkspaceDirectoryChange/);
+  assert.match(pathFields, /\.\.\.\(useSeparateOutputDirectory \? \[\{/);
+  assert.match(pathFields, /onChange: handleOutputDirectoryChange/);
+  assert.match(pageSource, /data_root: dataRoot/);
+  assert.match(resultsSource, /DisclosureSeparateOutputDirectorySetting id="section-split-separate-output-directory"/);
+});
+
+test("disclosure detail pages share one workspace and hide separate outputs by default", async () => {
+  const downloadSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx",
+    "utf8",
+  );
+  const tableSource = await readFile(tablePagePath, "utf8");
+  const filterSource = await readFile(filterPagePath, "utf8");
+  const htmlDownloadSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-download/_components/HtmlDownloadPageView.tsx",
+    "utf8",
+  );
+  const parseSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx",
+    "utf8",
+  );
+  const templateSource = await readFile(htmlWorkflowTemplatePath, "utf8");
+  const separateSettingSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureSeparateOutputDirectorySetting.tsx",
+    "utf8",
+  );
+  assert.match(downloadSource, /value=\{dataRoot\}[\s\S]*?onChange=\{\(val\) => saveSetting\("output_root", val\)\}/);
+  assert.match(separateSettingSource, /저장 디렉토리 별도 설정하기/);
+  assert.match(separateSettingSource, /saveSetting\("disclosure_separate_output_directory", !!value\)/);
+  assert.doesNotMatch(templateSource, /disabled=\{field\.disabled\}/);
+  assert.match(tableSource, /value=\{dataRoot\}/);
+  assert.match(tableSource, /useSeparateOutputDirectory && <div/);
+  assert.match(tableSource, /root_directory: useSeparateOutputDirectory/);
+  assert.match(tableSource, /saveSetting\("sqlite_output_directory", val\)/);
+  assert.match(filterSource, /classification_path: useSeparateOutputDirectory/);
+  assert.match(filterSource, /saveSetting\("html_transfer_directory", val\)/);
+  assert.match(htmlDownloadSource, /sourcePayload[\s\S]*?if \(useSeparateOutputDirectory\)/);
+  assert.match(htmlDownloadSource, /output_directory: useSeparateOutputDirectory \? outputDirectory : ""/);
+  assert.match(parseSource, /input_directory: useSeparateOutputDirectory \? inputDirectory : ""/);
+  for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
+    assert.doesNotMatch(source, /disabled: true/);
+    assert.match(source, /작업공간 디렉토리/);
+    assert.match(source, /DisclosureSeparateOutputDirectorySetting/);
+  }
+  for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
+    assert.match(source, /data_root:/);
+  }
 });
 
 test("html section split keeps job status only in the action dock", async () => {

@@ -18,6 +18,7 @@ import {
   type DisclosureConditionBlock,
   type DisclosureConditionPresetPayload,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
+import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 import {
   HtmlWorkflowForm,
   HtmlWorkflowCard,
@@ -186,6 +187,7 @@ const normalizeFilterCandidateExamples = (
 export default function HtmlParsePage() {
   const {
     output_root: dataRoot,
+    disclosure_separate_output_directory: useSeparateOutputDirectory,
     condition_presets: presets,
     fetchSettings,
     parallel_worker_count: defaultParallelWorkers,
@@ -305,15 +307,18 @@ export default function HtmlParsePage() {
     });
   }, [defaultParallelWorkers, fetchSettings, setStatus, setIsErrorStatus]);
 
-  const handleInputDirectoryChange = (val: string) => {
+  const handleWorkspaceDirectoryChange = async (val: string) => {
     filterCandidatesRequestIdRef.current += 1;
     setFilterCandidatesLoading(false);
-    setInputDirectory(val);
+    if (await saveSetting("output_root", val)) {
+      const settings = useSettingsStore.getState();
+      setInputDirectory(settings.html_section_split_output_directory || "");
+      setOutputDirectory(settings.html_parse_output_directory || "");
+    }
     setSelectedExecutionOptionValues([]);
     setExecutionOptionCandidates([]);
     setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
-    saveSetting("html_section_split_output_directory", val);
   };
 
   const handleOutputDirectoryChange = (val: string) => {
@@ -436,12 +441,12 @@ export default function HtmlParsePage() {
   }, [isJobActive]);
 
   const handleRun = async () => {
-    if (!inputDirectory) {
-      setStatus("입력 데이터 경로를 선택하세요.");
+    if (!dataRoot) {
+      setStatus("작업공간 디렉토리를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
-    if (!outputDirectory) {
+    if (useSeparateOutputDirectory && !outputDirectory) {
       setStatus("결과 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
@@ -460,8 +465,8 @@ export default function HtmlParsePage() {
 
     const payload = {
       data_root: dataRoot,
-      input_directory: inputDirectory,
-      output_directory: outputDirectory,
+      input_directory: useSeparateOutputDirectory ? inputDirectory : "",
+      output_directory: useSeparateOutputDirectory ? outputDirectory : "",
       mode: parseMode,
       limit: limit ? Number(limit) : null,
       skip_errors: skipErrors,
@@ -619,14 +624,14 @@ export default function HtmlParsePage() {
     {
       id: "inputDirectory",
       kind: "path",
-      label: "입력 데이터 경로 (HTML)",
+      label: "작업공간 디렉토리",
       mode: "folder",
-      value: inputDirectory,
-      onChange: handleInputDirectoryChange,
+      value: dataRoot,
+      onChange: handleWorkspaceDirectoryChange,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
     },
-    {
+    ...(useSeparateOutputDirectory ? [{
       id: "outputDirectory",
       kind: "path",
       label: "결과 데이터 경로",
@@ -635,7 +640,7 @@ export default function HtmlParsePage() {
       onChange: handleOutputDirectoryChange,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
-    },
+    } satisfies HtmlWorkflowField] : []),
     {
       id: "limit",
       kind: "input",
@@ -1111,11 +1116,14 @@ export default function HtmlParsePage() {
           settingsTitle="시스템 설정"
           settingsContent={
             <>
-              <div className="space-y-3">
+              <div className="space-y-5">
+                <DisclosureSeparateOutputDirectorySetting id="parse-separate-output-directory" />
+                <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
                 <HtmlWorkflowForm fields={parseOptionFields} />
+                </div>
               </div>
             </>
           }

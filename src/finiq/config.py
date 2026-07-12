@@ -38,6 +38,7 @@ SAVED_SETTINGS_KEYS = (
     "selected_classification_path",
     "sqlite_source_path",
     "download_output_directory",
+    "disclosure_separate_output_directory",
     "sqlite_output_directory",
     "sqlite_manifest_path",
     "html_output_directory",
@@ -68,6 +69,7 @@ SAVED_SETTINGS_KEYS = (
     "change_log_date_thresholds",
     "change_log_numeric_thresholds",
     "condition_presets",
+    "job_retention_minutes",
 )
 
 @dataclass(slots=True)
@@ -81,6 +83,7 @@ class AppConfig:
     selected_classification_path: str = ""
     sqlite_source_path: str = ""
     download_output_directory: str = ""
+    disclosure_separate_output_directory: bool = False
     sqlite_output_directory: str = ""
     sqlite_manifest_path: str = ""
     html_output_directory: str = ""
@@ -111,6 +114,7 @@ class AppConfig:
     change_log_date_thresholds: dict[str, float] = field(default_factory=dict)
     change_log_numeric_thresholds: dict[str, float] = field(default_factory=dict)
     condition_presets: list[dict[str, Any]] = field(default_factory=list)
+    job_retention_minutes: int = 60
 
 def get_default_settings_path() -> Path:
     if os.name == "nt":
@@ -208,13 +212,32 @@ def save_settings(settings_path: str | Path, settings: dict[str, Any]) -> None:
 def init_config() -> AppConfig:
     settings_path = get_default_settings_path()
     settings = load_settings(settings_path)
-    
-    output_root = settings.get("output_root") or str(KIND_DATA_DIR)
+
+    saved_output_root = str(settings.get("output_root") or "").strip()
+    migrated_legacy_root = (
+        not saved_output_root
+        or Path(saved_output_root).resolve() == KIND_DATA_DIR.resolve()
+    )
+    if migrated_legacy_root:
+        output_root = str(RESOURCES_DIR)
+    else:
+        output_root = saved_output_root
     quanti_dir = settings.get("quanti_dir", str(QUANTI_DIR))
     html_parse_mode = settings.get("html_parse_mode") or "bond_issuance"
+    try:
+        job_retention_minutes = int(settings.get("job_retention_minutes", 60))
+    except (TypeError, ValueError):
+        job_retention_minutes = 60
+    if job_retention_minutes < 1:
+        job_retention_minutes = 60
     disclosure_paths = build_disclosure_workspace_path_settings(
         output_root, mode=html_parse_mode
     )
+
+    def disclosure_path(key: str) -> str:
+        if migrated_legacy_root:
+            return disclosure_paths[key]
+        return settings.get(key, disclosure_paths[key])
     
     return AppConfig(
         output_root=output_root,
@@ -222,40 +245,23 @@ def init_config() -> AppConfig:
         settings_path=str(settings_path),
         price_root_directory=settings.get("price_root_directory", str(KIND_DATA_DIR / "price")),
         selected_classification_path=settings.get("selected_classification_path", str(KIND_DATA_DIR / "classification" / "all_companies.json")),
-        sqlite_source_path=settings.get(
-            "sqlite_source_path", disclosure_paths["sqlite_source_path"]
+        sqlite_source_path=disclosure_path("sqlite_source_path"),
+        download_output_directory=disclosure_path("download_output_directory"),
+        disclosure_separate_output_directory=bool(
+            settings.get("disclosure_separate_output_directory", False)
         ),
-        download_output_directory=settings.get(
-            "download_output_directory",
-            disclosure_paths["download_output_directory"],
+        sqlite_output_directory=disclosure_path("sqlite_output_directory"),
+        sqlite_manifest_path=disclosure_path("sqlite_manifest_path"),
+        html_output_directory=disclosure_path("html_output_directory"),
+        html_content_output_directory=disclosure_path(
+            "html_content_output_directory"
         ),
-        sqlite_output_directory=settings.get(
-            "sqlite_output_directory", disclosure_paths["sqlite_output_directory"]
+        html_section_split_output_directory=disclosure_path(
+            "html_section_split_output_directory"
         ),
-        sqlite_manifest_path=settings.get(
-            "sqlite_manifest_path", disclosure_paths["sqlite_manifest_path"]
-        ),
-        html_output_directory=settings.get(
-            "html_output_directory", disclosure_paths["html_output_directory"]
-        ),
-        html_content_output_directory=settings.get(
-            "html_content_output_directory",
-            disclosure_paths["html_content_output_directory"],
-        ),
-        html_section_split_output_directory=settings.get(
-            "html_section_split_output_directory",
-            disclosure_paths["html_section_split_output_directory"],
-        ),
-        html_transfer_directory=settings.get(
-            "html_transfer_directory", disclosure_paths["html_transfer_directory"]
-        ),
-        html_parse_output_directory=settings.get(
-            "html_parse_output_directory",
-            disclosure_paths["html_parse_output_directory"],
-        ),
-        html_parse_result_path=settings.get(
-            "html_parse_result_path", disclosure_paths["html_parse_result_path"]
-        ),
+        html_transfer_directory=disclosure_path("html_transfer_directory"),
+        html_parse_output_directory=disclosure_path("html_parse_output_directory"),
+        html_parse_result_path=disclosure_path("html_parse_result_path"),
         html_parse_mode=html_parse_mode,
         integrated_merge_input_path=settings.get("integrated_merge_input_path", ""),
         integrated_merge_output_path=settings.get("integrated_merge_output_path", ""),
@@ -269,27 +275,20 @@ def init_config() -> AppConfig:
         asset_excel_cleanup_merged_items=bool(settings.get("asset_excel_cleanup_merged_items", True)),
         asset_excel_duplicate_scan_recursive=bool(settings.get("asset_excel_duplicate_scan_recursive", False)),
         asset_excel_account_mappings=settings.get("asset_excel_account_mappings", []),
-        html_download_source_path=settings.get(
-            "html_download_source_path",
-            disclosure_paths["html_download_source_path"],
+        html_download_source_path=disclosure_path("html_download_source_path"),
+        html_merge_output_path=disclosure_path("html_merge_output_path"),
+        html_content_compressed_json_path=disclosure_path(
+            "html_content_compressed_json_path"
         ),
-        html_merge_output_path=settings.get(
-            "html_merge_output_path", disclosure_paths["html_merge_output_path"]
+        html_external_compress_input_directory=disclosure_path(
+            "html_external_compress_input_directory"
         ),
-        html_content_compressed_json_path=settings.get(
-            "html_content_compressed_json_path",
-            disclosure_paths["html_content_compressed_json_path"],
-        ),
-        html_external_compress_input_directory=settings.get(
-            "html_external_compress_input_directory",
-            disclosure_paths["html_external_compress_input_directory"],
-        ),
-        html_external_compress_output_directory=settings.get(
-            "html_external_compress_output_directory",
-            disclosure_paths["html_external_compress_output_directory"],
+        html_external_compress_output_directory=disclosure_path(
+            "html_external_compress_output_directory"
         ),
         integrated_data_values=settings.get("integrated_data_values", {}),
         change_log_date_thresholds=settings.get("change_log_date_thresholds", {}),
         change_log_numeric_thresholds=settings.get("change_log_numeric_thresholds", {}),
         condition_presets=settings.get("condition_presets", []),
+        job_retention_minutes=job_retention_minutes,
     )

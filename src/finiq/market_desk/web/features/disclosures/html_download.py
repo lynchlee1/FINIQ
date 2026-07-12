@@ -151,7 +151,7 @@ def download_disclosure_html_payload(
             for acpt_no in acpt_numbers
             if acpt_no in saved_paths_by_acpt_no
         ]
-        cancelled = _is_cancelled(cancel_token)
+        cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
     finally:
         _clear_cancel_token(cancel_token)
     manifest_path = _write_html_manifest(
@@ -177,4 +177,3 @@ def download_disclosure_html_payload(
         "manifest_path": str(manifest_path),
         "progress_log": progress_log[-100:],
     }
-

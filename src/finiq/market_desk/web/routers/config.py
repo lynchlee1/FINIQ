@@ -28,12 +28,10 @@ from finiq.market_desk.web.features.market_data.service_common import (
     PRICE_SOURCE_LABELS,
     PRICE_SOURCE_QUANTI,
 )
-from finiq.market_desk.web.features.disclosure_workflow.layout import (
-    disclosure_workspace_settings,
-    prepare_disclosure_workspace_payload,
+from finiq.market_desk.web.features.downloads.kind_common import (
+    configure_download_job_retention,
 )
-
-
+from finiq.market_desk.web.jobs import job_manager, normalize_job_retention_minutes
 class SettingsUpdate(BaseModel):
     output_root: Optional[str] = None
     quanti_dir: Optional[str] = None
@@ -41,6 +39,7 @@ class SettingsUpdate(BaseModel):
     selected_classification_path: Optional[str] = None
     sqlite_source_path: Optional[str] = None
     download_output_directory: Optional[str] = None
+    disclosure_separate_output_directory: Optional[bool] = None
     sqlite_output_directory: Optional[str] = None
     sqlite_manifest_path: Optional[str] = None
     html_output_directory: Optional[str] = None
@@ -71,6 +70,7 @@ class SettingsUpdate(BaseModel):
     change_log_date_thresholds: Optional[dict[str, float]] = None
     change_log_numeric_thresholds: Optional[dict[str, float]] = None
     condition_presets: Optional[list[dict[str, Any]]] = None
+    job_retention_minutes: Optional[int] = None
 
 
 class FileDialogRequest(BaseModel):
@@ -158,6 +158,9 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "price_root_directory": price_root,
             "download_output_directory": config.download_output_directory
             or workspace_defaults["download_output_directory"],
+            "disclosure_separate_output_directory": bool(
+                getattr(config, "disclosure_separate_output_directory", False)
+            ),
             "sqlite_output_directory": config.sqlite_output_directory
             or workspace_defaults["sqlite_output_directory"],
             "sqlite_manifest_path": config.sqlite_manifest_path
@@ -207,6 +210,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "change_log_date_thresholds": config.change_log_date_thresholds,
             "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
             "condition_presets": config.condition_presets,
+            "job_retention_minutes": config.job_retention_minutes,
             "range_options": list(INSIGHT_RANGE_OPTIONS),
             "display_frequency_options": list(DISPLAY_FREQUENCY_OPTIONS),
             "price_sources": [
@@ -243,6 +247,13 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             payload["html_parse_mode"]
         ).strip():
             raise HTTPException(status_code=400, detail="html_parse_mode cannot be blank")
+        if "job_retention_minutes" in payload:
+            try:
+                payload["job_retention_minutes"] = normalize_job_retention_minutes(
+                    payload["job_retention_minutes"]
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         current_settings = {}
         for key in config.__slots__:
             val = getattr(config, key)
@@ -257,6 +268,8 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
         for key, value in payload.items():
             if isinstance(value, bool):
                 normalized = value
+            elif key == "job_retention_minutes":
+                normalized = int(value)
             elif key == "html_parse_mode":
                 normalized = str(value).strip()
             elif key in (
@@ -278,20 +291,12 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
         if workspace_setting_changed and str(config.output_root or "").strip():
             parse_mode = str(config.html_parse_mode or "bond_issuance").strip()
             try:
-                prepare_disclosure_workspace_payload(
-                    {"data_root": config.output_root, "modes": [parse_mode]}
-                )
-                workspace_settings = disclosure_workspace_settings(
+                workspace_settings = build_disclosure_workspace_path_settings(
                     config.output_root, mode=parse_mode
                 )
             except ValueError as exc:
                 restore_original_settings()
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except OSError as exc:
-                restore_original_settings()
-                raise HTTPException(
-                    status_code=500, detail="Failed to prepare disclosure workspace"
-                ) from exc
             keys_to_update = (
                 workspace_settings
                 if "output_root" in payload
@@ -316,6 +321,9 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             raise HTTPException(
                 status_code=500, detail="Failed to save settings"
             ) from exc
+        if "job_retention_minutes" in payload:
+            job_manager.set_retention_minutes(config.job_retention_minutes)
+            configure_download_job_retention(config.job_retention_minutes)
         return config_payload()
 
     @router.post("/api/file-dialog")

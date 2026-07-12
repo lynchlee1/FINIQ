@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from finiq.concurrency import bounded_as_completed
+from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
 from finiq.market_desk.web.features.disclosures.html_common import *
+
 
 def compress_disclosure_external_html_payload(
     body: dict[str, Any],
@@ -71,11 +74,17 @@ def compress_disclosure_external_html_payload(
                 )
     else:
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            futures = [
-                executor.submit(_compress_external_html_file, (index, year, html_path))
+            items = (
+                (index, year, html_path)
                 for index, (year, html_path) in enumerate(html_files)
-            ]
-            for completed_count, future in enumerate(as_completed(futures), start=1):
+            )
+            completed = bounded_as_completed(
+                executor,
+                items,
+                lambda item: executor.submit(_compress_external_html_file, item),
+                max_pending=worker_count * 2,
+            )
+            for completed_count, (future, _item) in enumerate(completed, start=1):
                 index, year, acpt_no, record = future.result()
                 record["metadata"] = metadata.get(acpt_no) or {}
                 indexed_records[index] = (year, acpt_no, record)
@@ -117,17 +126,27 @@ def compress_disclosure_external_html_payload(
         "summary": {"found_files": len(html_files), "compressed_files": len(records)},
         "records": records,
     }
+    expected_acpt_numbers = [html_path.stem for _year, html_path in html_files]
+    actual_acpt_numbers = [str(record.get("acpt_no") or "") for record in records]
+    if (
+        len(set(expected_acpt_numbers)) != len(expected_acpt_numbers)
+        or len(set(actual_acpt_numbers)) != len(actual_acpt_numbers)
+        or set(actual_acpt_numbers) != set(expected_acpt_numbers)
+    ):
+        raise ValueError(
+            "External HTML compression membership does not match input filenames"
+        )
     output_directory.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(output_path, payload)
     written_files.append(str(output_path))
     emit(f"외부 HTML 압축 JSON 저장 완료: {output_path}")
 
     verification = _verify_compressed_external_html_files(
         written_files=written_files,
-        expected_acpt_numbers=[str(record.get("acpt_no") or "") for record in records],
+        expected_acpt_numbers=expected_acpt_numbers,
     )
+    if not verification["passed"]:
+        raise ValueError("External HTML compression verification failed")
     emit(
         "외부 HTML 압축 결과 재검사: "
         f"{verification['verified_records']}/{verification['expected_records']}건 확인, "
@@ -148,5 +167,3 @@ def compress_disclosure_external_html_payload(
         "verification": verification,
         "progress_log": progress_log[-100:],
     }
-
-

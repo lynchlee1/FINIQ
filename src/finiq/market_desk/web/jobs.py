@@ -9,6 +9,20 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
 
+DEFAULT_JOB_RETENTION_MINUTES = 60
+TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
+
+
+def normalize_job_retention_minutes(value: Any) -> int:
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("job_retention_minutes must be an integer") from exc
+    if minutes < 1:
+        raise ValueError("job_retention_minutes must be >= 1")
+    return minutes
+
+
 @dataclass(slots=True)
 class HtmlJob:
     """Represents a background job."""
@@ -26,18 +40,43 @@ class HtmlJob:
 class JobManager:
     """Manages background jobs in memory."""
 
-    def __init__(self):
+    def __init__(self, *, retention_minutes: int = DEFAULT_JOB_RETENTION_MINUTES):
         self._jobs: Dict[str, HtmlJob] = {}
         self._lock = threading.RLock()
+        self._retention_minutes = normalize_job_retention_minutes(retention_minutes)
+
+    def set_retention_minutes(self, minutes: int) -> None:
+        normalized = normalize_job_retention_minutes(minutes)
+        with self._lock:
+            self._retention_minutes = normalized
+            self._purge_expired_locked()
+
+    def _purge_expired_locked(self, *, now: float | None = None) -> int:
+        current_time = time.time() if now is None else now
+        cutoff = current_time - (self._retention_minutes * 60)
+        expired_ids = [
+            job_id
+            for job_id, job in self._jobs.items()
+            if job.status in TERMINAL_JOB_STATUSES and job.updated_at < cutoff
+        ]
+        for job_id in expired_ids:
+            del self._jobs[job_id]
+        return len(expired_ids)
+
+    def purge_expired(self, *, now: float | None = None) -> int:
+        with self._lock:
+            return self._purge_expired_locked(now=now)
 
     def create_job(self, job_id: str, kind: str) -> HtmlJob:
         job = HtmlJob(id=job_id, kind=kind)
         with self._lock:
+            self._purge_expired_locked()
             self._jobs[job_id] = job
         return job
 
     def get_job(self, job_id: str) -> Optional[HtmlJob]:
         with self._lock:
+            self._purge_expired_locked()
             return self._jobs.get(job_id)
 
     def start_job(self, job_id: str) -> bool:
@@ -80,6 +119,7 @@ class JobManager:
 
     def get_snapshot(self, job_id: str) -> Optional[dict[str, Any]]:
         with self._lock:
+            self._purge_expired_locked()
             job = self._jobs.get(job_id)
             if not job:
                 return None
@@ -96,6 +136,7 @@ class JobManager:
 
     def cancel_job(self, job_id: str) -> bool:
         with self._lock:
+            self._purge_expired_locked()
             if job := self._jobs.get(job_id):
                 if job.status not in {"completed", "failed", "cancelled"}:
                     job.status = "cancelled"

@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 import finiq.market_desk.web.app as web_app
 from finiq.market_desk.web.app import _normalize_file_dialog_mode, app, config
 from finiq.config import AppConfig
-from finiq.market_desk.web.jobs import JobManager
+from finiq.market_desk.web.jobs import JobManager, job_manager
+from finiq.market_desk.web.features.downloads.kind_common import (
+    configure_download_job_retention,
+)
 
 def test_api_config(tmp_path: Path):
     # Setup mock config
@@ -37,9 +40,10 @@ def test_api_settings(tmp_path: Path):
     assert settings_path.exists()
 
 
-def test_api_settings_persists_sqlite_output_directory(tmp_path: Path):
+def test_api_settings_preserves_manual_sqlite_output(tmp_path: Path, monkeypatch):
     settings_path = tmp_path / "settings.json"
-    config.settings_path = str(settings_path)
+    monkeypatch.setattr(config, "settings_path", str(settings_path))
+    monkeypatch.setattr(config, "output_root", str(tmp_path / "database"))
 
     client = TestClient(app)
     response = client.post("/api/settings", json={
@@ -48,12 +52,13 @@ def test_api_settings_persists_sqlite_output_directory(tmp_path: Path):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["sqlite_output_directory"] == str((tmp_path / "sqlite_output").resolve())
+    expected = str((tmp_path / "sqlite_output").resolve())
+    assert data["sqlite_output_directory"] == expected
 
     response = client.get("/api/config")
 
     assert response.status_code == 200
-    assert response.json()["sqlite_output_directory"] == str((tmp_path / "sqlite_output").resolve())
+    assert response.json()["sqlite_output_directory"] == expected
 
 
 def test_api_settings_persists_asset_excel_directories(tmp_path: Path):
@@ -248,6 +253,66 @@ def test_job_manager_status_updates_do_not_deadlock() -> None:
     assert any("JOB start" in line for line in snapshot["progress_log"])
 
 
+def test_job_manager_purges_only_expired_terminal_jobs() -> None:
+    manager = JobManager(retention_minutes=60)
+    completed = manager.create_job("completed", "download")
+    manager.complete_job("completed", {"saved": True})
+    running = manager.create_job("running", "download")
+    manager.start_job("running")
+    completed.updated_at = 100.0
+    running.updated_at = 100.0
+
+    assert manager.purge_expired(now=3701.0) == 1
+    assert manager.get_job("completed") is None
+    assert manager.get_job("running") is running
+
+
+def test_job_manager_releases_many_expired_results() -> None:
+    manager = JobManager(retention_minutes=1)
+    jobs = []
+    for index in range(1_000):
+        job_id = f"expired-{index}"
+        jobs.append(manager.create_job(job_id, "download"))
+        manager.complete_job(job_id, {"payload": "x" * 1_024})
+    for job in jobs:
+        job.updated_at = 0.0
+
+    assert manager.purge_expired(now=61.0) == 1_000
+    assert manager._jobs == {}
+
+
+def test_api_settings_persists_job_retention_minutes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(config, "settings_path", str(settings_path))
+    original_retention = config.job_retention_minutes
+
+    try:
+        response = TestClient(app).post(
+            "/api/settings", json={"job_retention_minutes": 15}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["job_retention_minutes"] == 15
+        assert json.loads(settings_path.read_text(encoding="utf-8"))[
+            "job_retention_minutes"
+        ] == 15
+    finally:
+        config.job_retention_minutes = original_retention
+        job_manager.set_retention_minutes(original_retention)
+        configure_download_job_retention(original_retention)
+
+
+def test_api_settings_rejects_non_positive_job_retention_minutes() -> None:
+    response = TestClient(app).post(
+        "/api/settings", json={"job_retention_minutes": 0}
+    )
+
+    assert response.status_code == 400
+    assert "must be >= 1" in response.json()["detail"]
+
+
 def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypatch) -> None:
     def fake_filter_disclosures_payload(body, progress_callback=None):
         if progress_callback:
@@ -376,7 +441,9 @@ def test_html_download_inspect_folder_route_dry_run_reports_unexpected_file(tmp_
 def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path) -> None:
     output_directory = tmp_path / "viewer_html"
     output_directory.mkdir()
-    (output_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "20250101000001.html").write_text(
+        "<html><body>" + ("valid " * 30) + "</body></html>", encoding="utf-8"
+    )
 
     client = TestClient(app)
     response = client.post(
@@ -482,7 +549,9 @@ def test_html_content_download_check_existing_route_honors_split_options(tmp_pat
     output_directory = tmp_path / "content_html"
     output_year_directory = output_directory / "2025"
     output_year_directory.mkdir(parents=True)
-    (output_year_directory / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_year_directory / "20250101000001.html").write_text(
+        "<html><body>" + ("valid " * 30) + "</body></html>", encoding="utf-8"
+    )
 
     client = TestClient(app)
     response = client.post(
@@ -571,7 +640,9 @@ def test_html_content_download_check_existing_route_prefers_output_directory_spl
     )
     output_directory = tmp_path / "content_html"
     (output_directory / "2025").mkdir(parents=True)
-    (output_directory / "2025" / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    (output_directory / "2025" / "20250101000001.html").write_text(
+        "<html><body>" + ("valid " * 30) + "</body></html>", encoding="utf-8"
+    )
 
     client = TestClient(app)
     response = client.post(

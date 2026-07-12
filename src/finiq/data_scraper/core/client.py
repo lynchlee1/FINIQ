@@ -5,11 +5,13 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
+
+from finiq.concurrency import bounded_as_completed
 
 from .payload import (
     DisclosureTypeGroupKey,
@@ -34,7 +36,12 @@ KindViewerSavedFileCallback = Callable[[Path, str, str | None], None]
 def _save_response_content(output_path: Path, response: requests.Response) -> None:
     """response body를 지정한 경로에 저장한다."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(response.content)
+    try:
+        output_path.write_bytes(response.content)
+    finally:
+        close_response = getattr(response, "close", None)
+        if close_response is not None:
+            close_response()
 
 
 def _is_valid_html(path: Path) -> bool:
@@ -349,6 +356,7 @@ def download_pages(
     saved_file_validator: KindSavedFileValidator | None = None,
     saved_file_callback: KindSavedFileCallback | None = None,
     cancel_check: KindCancelCheck | None = None,
+    max_workers: int = 1,
 ) -> None:
     """KIND 검색 결과를 순서대로 내려받아 file로 저장한다.
 
@@ -361,6 +369,8 @@ def download_pages(
         end_page=end_page,
         timeout=timeout,
     )
+    if max_workers < 1:
+        raise ValueError("max_workers must be >= 1")
 
     output_directory = output_directory.resolve()
     normalized_request_headers = _normalize_request_headers(request_headers)
@@ -382,32 +392,102 @@ def download_pages(
         )
 
         total_pages = end_page - start_page + 1
-        for page_offset, page_number in enumerate(range(start_page, end_page + 1), start=1):
-            if _sleep_between_requests(wait_seconds_between_requests, cancel_check):
-                _report_progress(progress_callback, "Download cancelled between result page requests.")
-                return
+        if max_workers == 1 or total_pages == 1:
+            for page_offset, page_number in enumerate(
+                range(start_page, end_page + 1), start=1
+            ):
+                if _sleep_between_requests(wait_seconds_between_requests, cancel_check):
+                    _report_progress(progress_callback, "Download cancelled between result page requests.")
+                    return
+                if cancel_check is not None and cancel_check():
+                    _report_progress(progress_callback, "Download cancelled before result page request.")
+                    return
+                _fetch_and_save_results_page(
+                    session=active_session,
+                    output_directory=output_directory,
+                    request_headers=normalized_request_headers,
+                    page_number=page_number,
+                    page_offset=page_offset,
+                    total_pages=total_pages,
+                    start_date=start_date,
+                    end_date=end_date,
+                    page_size=page_size,
+                    timeout=timeout,
+                    search_filters=search_filters,
+                    disclosure_type_groups=disclosure_type_groups,
+                    last_report_only=last_report_only,
+                    include_previous_disclosures=include_previous_disclosures,
+                    progress_callback=progress_callback,
+                    saved_file_validator=saved_file_validator,
+                    saved_file_callback=saved_file_callback,
+                )
+        else:
+            worker_local = threading.local()
+            worker_sessions: list[requests.Session] = []
+            worker_sessions_lock = threading.Lock()
+
+            def get_worker_session() -> requests.Session:
+                if not owns_session:
+                    return active_session
+                worker_session = getattr(worker_local, "session", None)
+                if worker_session is None:
+                    worker_session = requests.Session()
+                    worker_session.cookies.update(active_session.cookies)
+                    worker_local.session = worker_session
+                    with worker_sessions_lock:
+                        worker_sessions.append(worker_session)
+                return worker_session
+
+            def fetch_page(item: tuple[int, int]) -> None:
+                page_offset, page_number = item
+                if _sleep_between_requests(
+                    wait_seconds_between_requests, cancel_check
+                ):
+                    return
+                _fetch_and_save_results_page(
+                    session=get_worker_session(),
+                    output_directory=output_directory,
+                    request_headers=normalized_request_headers,
+                    page_number=page_number,
+                    page_offset=page_offset,
+                    total_pages=total_pages,
+                    start_date=start_date,
+                    end_date=end_date,
+                    page_size=page_size,
+                    timeout=timeout,
+                    search_filters=search_filters,
+                    disclosure_type_groups=disclosure_type_groups,
+                    last_report_only=last_report_only,
+                    include_previous_disclosures=include_previous_disclosures,
+                    progress_callback=progress_callback,
+                    saved_file_validator=saved_file_validator,
+                    saved_file_callback=saved_file_callback,
+                )
+
+            def pending_pages():
+                for item in enumerate(range(start_page, end_page + 1), start=1):
+                    if cancel_check is not None and cancel_check():
+                        return
+                    yield item
+
+            try:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    for future, _item in bounded_as_completed(
+                        executor,
+                        pending_pages(),
+                        lambda item: executor.submit(fetch_page, item),
+                        max_pending=max_workers * 2,
+                    ):
+                        future.result()
+            finally:
+                for worker_session in worker_sessions:
+                    worker_session.close()
+
             if cancel_check is not None and cancel_check():
-                _report_progress(progress_callback, "Download cancelled before result page request.")
-                return
-            _fetch_and_save_results_page(
-                session=active_session,
-                output_directory=output_directory,
-                request_headers=normalized_request_headers,
-                page_number=page_number,
-                page_offset=page_offset,
-                total_pages=total_pages,
-                start_date=start_date,
-                end_date=end_date,
-                page_size=page_size,
-                timeout=timeout,
-                search_filters=search_filters,
-                disclosure_type_groups=disclosure_type_groups,
-                last_report_only=last_report_only,
-                include_previous_disclosures=include_previous_disclosures,
-                progress_callback=progress_callback,
-                saved_file_validator=saved_file_validator,
-                saved_file_callback=saved_file_callback,
-            )
+                _report_progress(
+                    progress_callback,
+                    "Download cancelled between result page requests.",
+                )
     finally:
         if owns_session:
             active_session.close()
@@ -527,6 +607,10 @@ def download_disclosure_viewer_htmls(
         raise ValueError("wait_seconds_between_requests must be >= 0")
     if max_requests_per_minute < 1 or max_requests_per_minute > 100:
         raise ValueError("max_requests_per_minute must be between 1 and 100")
+    if max_workers < 1:
+        raise ValueError("max_workers must be >= 1")
+    if max_retries < 0:
+        raise ValueError("max_retries must be >= 0")
 
     normalized_acpt_numbers = [
         _validate_kind_identifier(acpt_no, field_name="acpt_no")
@@ -550,11 +634,26 @@ def download_disclosure_viewer_htmls(
     saved_paths: dict[str, Path] = {}
     valid_acpt_numbers: set[str] = set()
     errors: dict[str, str] = {}
+    worker_local = threading.local()
+    worker_sessions: list[requests.Session] = []
+    worker_sessions_lock = threading.Lock()
     
     total_count = len(normalized_acpt_numbers)
     lock = threading.Lock()
     request_spacing_lock = threading.Lock()
     next_request_time = time.monotonic()
+
+    def get_worker_session() -> requests.Session:
+        if not owns_session or max_workers == 1:
+            return active_session
+        worker_session = getattr(worker_local, "session", None)
+        if worker_session is None:
+            worker_session = requests.Session()
+            worker_session.cookies.update(active_session.cookies)
+            worker_local.session = worker_session
+            with worker_sessions_lock:
+                worker_sessions.append(worker_session)
+        return worker_session
 
     def wait_for_request_spacing() -> bool:
         nonlocal next_request_time
@@ -572,7 +671,7 @@ def download_disclosure_viewer_htmls(
 
         output_path = output_directory / _build_viewer_html_filename(acpt_no)
         
-        if skip_existing and output_path.exists():
+        if skip_existing and _is_valid_html(output_path):
             _report_progress(progress_callback, f"Skipping existing KIND viewer HTML: {output_path}")
             with lock:
                 saved_paths[acpt_no] = output_path
@@ -591,7 +690,7 @@ def download_disclosure_viewer_htmls(
                 f"Fetching KIND viewer HTML acpt_no={acpt_no} (retry={current_retry})...",
             )
             response = _request_disclosure_viewer_page(
-                active_session,
+                get_worker_session(),
                 request_headers=normalized_request_headers,
                 acpt_no=acpt_no,
                 doc_no=None,
@@ -617,11 +716,13 @@ def download_disclosure_viewer_htmls(
     try:
         # First Pass: Parallel Download
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(download_task, acpt_no): acpt_no 
-                for acpt_no in normalized_acpt_numbers
-            }
-            for future in as_completed(futures):
+            for future, _acpt_no in bounded_as_completed(
+                executor,
+                normalized_acpt_numbers,
+                lambda acpt_no: executor.submit(download_task, acpt_no),
+                max_pending=max_workers * 2,
+            ):
+                future.result()
                 if cancel_check is not None and cancel_check():
                     break
         
@@ -641,11 +742,14 @@ def download_disclosure_viewer_htmls(
             )
             
             with ThreadPoolExecutor(max_workers=min(max_workers, len(missing_or_invalid))) as executor:
-                futures = {
-                    executor.submit(download_task, acpt_no, retry): acpt_no 
-                    for acpt_no in missing_or_invalid
-                }
-                for future in as_completed(futures):
+                retry_workers = min(max_workers, len(missing_or_invalid))
+                for future, _acpt_no in bounded_as_completed(
+                    executor,
+                    missing_or_invalid,
+                    lambda acpt_no: executor.submit(download_task, acpt_no, retry),
+                    max_pending=retry_workers * 2,
+                ):
+                    future.result()
                     if cancel_check is not None and cancel_check():
                         break
 
@@ -660,6 +764,8 @@ def download_disclosure_viewer_htmls(
             _report_progress(progress_callback, error_msg)
 
     finally:
+        for worker_session in worker_sessions:
+            worker_session.close()
         if owns_session:
             active_session.close()
 
