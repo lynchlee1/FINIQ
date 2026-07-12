@@ -206,6 +206,14 @@ test("data path cards keep the same vertical field rhythm across workflow pages"
   assert.doesNotMatch(assetsDataPathCard, /pt-6 space-y-5/);
 });
 
+test("disclosure filter workspace picker selects a folder", async () => {
+  const source = await readFile(filterPagePath, "utf8");
+  const workspacePicker = source.match(/<Label[^>]*>작업공간 디렉토리<\/Label>[\s\S]*?<PathPickerInput[\s\S]*?\/>/)?.[0] ?? "";
+
+  assert.match(workspacePicker, /mode="folder"/);
+  assert.doesNotMatch(workspacePicker, /mode="save"/);
+});
+
 test("disclosure filter loads saved JSON filters and auto-applies selected presets", async () => {
   const source = await readFile(filterPagePath, "utf8");
   const conditionCardSource = await readFile(disclosureConditionCardPath, "utf8");

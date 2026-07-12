@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+import finiq.data_scraper.core.html_rate_limit as rate_limit_module
 from finiq.data_scraper.core.client import (
     download_disclosure_viewer_htmls,
     download_pages,
@@ -282,6 +283,35 @@ def test_download_pages_parallel_workers_save_each_page_once(tmp_path: Path) -> 
         "004_post_page_00004.body",
     ]
     assert session.max_active_posts >= 2
+
+
+def test_download_pages_does_not_use_html_request_limiter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingLimiter:
+        def wait(self, cancel_check=None) -> bool:
+            raise AssertionError("search result downloads must not use the HTML limiter")
+
+    monkeypatch.setattr(
+        rate_limit_module,
+        "_HTML_DOWNLOAD_RATE_LIMITER",
+        FailingLimiter(),
+    )
+
+    download_pages(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=2,
+        page_size=10,
+        wait_seconds_between_requests=0,
+        timeout=5,
+        session=FakeSession(),
+        max_workers=2,
+    )
 
 
 def test_download_pages_rejects_invalid_page_range(tmp_path: Path) -> None:

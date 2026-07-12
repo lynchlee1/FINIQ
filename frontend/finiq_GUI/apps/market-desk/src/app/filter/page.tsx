@@ -236,7 +236,7 @@ export default function FilterPage() {
           <div className="grid gap-2">
             <Label className="dark:text-slate-300">작업공간 디렉토리</Label>
             <PathPickerInput 
-              mode="save"
+              mode="folder"
               value={rootDirectory || ""}
               onChange={(val) => saveSetting("output_root", val)}
               onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
