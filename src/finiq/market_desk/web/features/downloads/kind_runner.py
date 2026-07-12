@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from finiq.concurrency import bounded_as_completed
-from finiq.data_scraper.core.client import download_pages
+from finiq.data_scraper.core.client import SEARCH_RESULTS_FILENAME_TEMPLATE, download_pages
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.workflow import KindWorkflow, make_page_size_integrity_validator
 
@@ -510,6 +510,26 @@ def _run_yearly(
     }
 
 
+def _first_page_needing_download(
+    output_directory: Path,
+    *,
+    total_pages: int,
+    page_size: int,
+) -> int:
+    for page_number in range(1, total_pages + 1):
+        page_path = output_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(
+            page_number=page_number
+        )
+        try:
+            validate_downloaded_result_page(
+                page_path,
+                expected_page_size=page_size,
+            )
+        except (OSError, ValueError):
+            return page_number
+    return total_pages + 1
+
+
 def _run_resume(
     payload: dict[str, Any],
     progress_callback: Any | None = None,
@@ -531,14 +551,17 @@ def _run_resume(
         raise ValueError("kind_workflow.input.json is missing")
 
     total_pages = int(paging["total_pages"])
-    downloaded_pages = int(paging["downloaded_pages"])
     page_size = int(saved_input.get("page_size", 100))
     status_before = _download_integrity_status(output_directory, page_size)
     progress_log, local_progress_callback = _build_progress_collector(
         external_callback=progress_callback
     )
     _append_status_progress(progress_log, status_before, progress_callback)
-    start_page = downloaded_pages + 1
+    start_page = _first_page_needing_download(
+        output_directory,
+        total_pages=total_pages,
+        page_size=page_size,
+    )
     if start_page > total_pages:
         return {
             "mode": "resume",
