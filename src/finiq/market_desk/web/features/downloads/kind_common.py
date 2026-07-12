@@ -233,13 +233,14 @@ def _detect_pagination(folder: Path) -> dict[str, Any] | None:
     body_files = sorted(folder.glob("*_post_page_*.body"))
     if not body_files:
         return None
-    latest = body_files[-1]
-    info = pagination_info(latest.read_bytes())
-    if info is None:
-        return None
-    info["downloaded_pages"] = len(body_files)
-    info["latest_file"] = latest.name
-    return info
+    for body_file in reversed(body_files):
+        info = pagination_info(body_file.read_bytes())
+        if info is None:
+            continue
+        info["downloaded_pages"] = len(body_files)
+        info["latest_file"] = body_file.name
+        return info
+    return None
 
 
 def _load_workflow_input(folder: Path) -> dict[str, Any] | None:

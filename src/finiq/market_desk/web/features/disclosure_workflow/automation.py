@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 import time
 import uuid
 from calendar import monthrange
@@ -20,10 +21,17 @@ from typing import Any, Callable
 
 from finiq.data_scraper.core.client import _is_valid_html
 from finiq.data_scraper.parse import disclosure_file_rows
+from finiq.data_scraper.workflow import inspect_download_directory_pages
 
 from finiq.market_desk.web.features.disclosures.html_content_download import (
     _collect_content_targets_from_compressed_payload,
     download_disclosure_html_contents_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_cleanup import (
+    check_disclosure_html_output_directory_payload,
+)
+from finiq.market_desk.web.features.disclosures.external_compact import (
+    _verify_compressed_external_html_files,
 )
 from finiq.market_desk.web.features.disclosures.html_download import (
     download_disclosure_html_payload,
@@ -32,9 +40,11 @@ from finiq.market_desk.web.features.disclosures.html_external_compress import (
     compress_disclosure_external_html_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
+    _collect_html_files as _collect_parse_html_files,
     parse_disclosure_html_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_sections import (
+    inspect_disclosure_html_section_output_payload,
     save_disclosure_html_sections_payload,
     summarize_disclosure_html_section_kinds_payload,
 )
@@ -42,8 +52,25 @@ from finiq.market_desk.web.features.disclosures.table_export import (
     build_disclosure_table_payload,
 )
 from finiq.market_desk.web.features.downloads.kind_runner import _run_single
+from finiq.market_desk.web.features.downloads.kind_common import (
+    _download_input_snapshot_from_payload,
+    _is_trusted_download_input_snapshot,
+    _load_workflow_input,
+    _split_yearly_ranges,
+)
+from finiq.market_desk.web.features.downloads.kind_coordination import (
+    KIND_NETWORK_JOB_LOCK,
+)
+from finiq.market_desk.web.features.downloads.kind_existing import (
+    check_existing_downloads,
+    get_current_kind_total_count,
+)
 from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
+)
+from finiq.market_desk.web.features.market_data.service_sources import (
+    _load_sqlite_manifest,
+    _validate_sqlite_manifest_counts,
 )
 
 from .layout import (
@@ -330,6 +357,679 @@ def _stage_output_fingerprint(profile: dict[str, Any], stage: int) -> str:
                     }
                 )
     return _canonical_hash(snapshots)
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _inspection_success(
+    stage: int, *, reason: str, details: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return {
+        "stage": stage,
+        "label": STAGE_LABELS[stage],
+        "confirmed": True,
+        "reason": reason,
+        "details": details or {},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _inspection_failure(
+    stage: int, *, reason: str, details: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return {
+        "stage": stage,
+        "label": STAGE_LABELS[stage],
+        "confirmed": False,
+        "reason": reason,
+        "details": details or {},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _detail_download_payload(profile: dict[str, Any]) -> dict[str, Any]:
+    search = profile["decisions"]["s1_search"]
+    return {
+        "output_directory": str(Path(profile["data_root"]) / "01-list"),
+        "mode": "yearly",
+        "start_date": search["start_date"],
+        "end_date": search["end_date"],
+        "company_name": search["company_name"],
+        "submitter_name": search["submitter_name"],
+        "market_label": search["market_label"],
+        "securities_label": search["securities_label"],
+        "disclosure_type_groups": search["disclosure_type_groups"],
+        "last_report_only": False,
+        "page_size": profile["execution"]["page_size"],
+    }
+
+
+def _snapshot_semantics(snapshot: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "start_date",
+        "end_date",
+        "page_size",
+        "search_filters",
+        "disclosure_type_groups",
+        "last_report_only",
+        "include_previous_disclosures",
+    )
+    return {key: snapshot.get(key) for key in keys}
+
+
+def _inspect_detail_download(profile: dict[str, Any]) -> dict[str, Any]:
+    payload = _detail_download_payload(profile)
+    root = Path(payload["output_directory"])
+    start = date.fromisoformat(payload["start_date"])
+    end = date.fromisoformat(payload["end_date"])
+    ranges = _split_yearly_ranges(start, end)
+    expected_folders = {
+        root / f"{range_start:%Y%m%d}_{range_end:%Y%m%d}"
+        for range_start, range_end in ranges
+    }
+    actual_folders = {
+        child
+        for child in root.iterdir()
+        if child.is_dir()
+        and len(child.name) == 17
+        and child.name[8] == "_"
+        and child.name.replace("_", "").isdigit()
+    } if root.is_dir() else set()
+    if actual_folders != expected_folders:
+        return _inspection_failure(
+            1,
+            reason="현재 날짜 범위와 다운로드 폴더 범위가 일치하지 않습니다.",
+            details={
+                "expected_folders": sorted(path.name for path in expected_folders),
+                "actual_folders": sorted(path.name for path in actual_folders),
+            },
+        )
+
+    for range_start, range_end in ranges:
+        folder = root / f"{range_start:%Y%m%d}_{range_end:%Y%m%d}"
+        snapshot = _load_workflow_input(folder)
+        if not _is_trusted_download_input_snapshot(snapshot):
+            return _inspection_failure(
+                1,
+                reason=f"{folder.name}의 다운로드 설정 메타데이터가 없거나 손상되었습니다.",
+            )
+        expected_snapshot = _download_input_snapshot_from_payload(
+            payload,
+            start=range_start,
+            end=range_end,
+            page_size=int(payload["page_size"]),
+        )
+        if _snapshot_semantics(snapshot or {}) != _snapshot_semantics(
+            expected_snapshot
+        ):
+            return _inspection_failure(
+                1,
+                reason=f"{folder.name}의 다운로드 설정이 현재 실행 설정과 다릅니다.",
+                details={
+                    "expected": _snapshot_semantics(expected_snapshot),
+                    "actual": _snapshot_semantics(snapshot or {}),
+                },
+            )
+
+    with KIND_NETWORK_JOB_LOCK:
+        existing = check_existing_downloads(
+            str(root), verify_with_kind=True, current_payload=payload
+        )
+    statuses = list(existing.get("ranges") or [])
+    if len(statuses) != len(expected_folders):
+        return _inspection_failure(
+            1,
+            reason="다운로드 완료 범위를 모두 확인할 수 없습니다.",
+            details={"expected_ranges": len(expected_folders), "actual_ranges": len(statuses)},
+        )
+    failed = [item for item in statuses if item.get("status") != "validated"]
+    if failed:
+        first = failed[0]
+        return _inspection_failure(
+            1,
+            reason=str(first.get("error_detail") or "다운로드 무결성 검사에 실패했습니다."),
+            details={"failed_ranges": failed},
+        )
+    return _inspection_success(
+        1,
+        reason="현재 검색 설정과 일치하며 모든 페이지와 KIND 현재 건수를 확인했습니다.",
+        details={
+            "ranges": len(statuses),
+            "local_count": sum(int(item.get("local_count") or 0) for item in statuses),
+            "kind_count": sum(int(item.get("kind_count") or 0) for item in statuses),
+        },
+    )
+
+
+def _automation_window_snapshot(
+    profile: dict[str, Any], window_start: date, window_end: date
+) -> dict[str, Any]:
+    search = profile["decisions"]["s1_search"]
+    return _download_input_snapshot_from_payload(
+        {
+            "company_name": search["company_name"],
+            "submitter_name": search["submitter_name"],
+            "market_label": search["market_label"],
+            "securities_label": search["securities_label"],
+            "disclosure_type_groups": search["disclosure_type_groups"],
+            "last_report_only": False,
+        },
+        start=window_start,
+        end=window_end,
+        page_size=profile["execution"]["page_size"],
+    )
+
+
+def _inspect_automation_download(profile: dict[str, Any]) -> dict[str, Any]:
+    search = profile["decisions"]["s1_search"]
+    start = date.fromisoformat(search["start_date"])
+    end = date.fromisoformat(search["end_date"])
+    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
+    local_total = 0
+    kind_total = 0
+    live_checked_windows = 0
+    with KIND_NETWORK_JOB_LOCK:
+        for window_start, window_end, mutable in _window_ranges(start, end):
+            folder = windows_root / f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
+            try:
+                inspected = inspect_download_directory_pages(
+                    folder,
+                    expected_page_size=profile["execution"]["page_size"],
+                    require_complete=True,
+                )
+            except Exception as exc:
+                return _inspection_failure(
+                    1,
+                    reason=f"{folder.name} 다운로드 페이지가 완전하지 않습니다: {exc}",
+                )
+            window_local_count = int(inspected.get("total_items") or 0)
+            local_total += window_local_count
+            if mutable:
+                snapshot = _automation_window_snapshot(
+                    profile, window_start, window_end
+                )
+                current_count = get_current_kind_total_count(snapshot)
+                if current_count is None:
+                    return _inspection_failure(
+                        1,
+                        reason=f"{folder.name}의 KIND 현재 건수를 확인하지 못했습니다.",
+                    )
+                if window_local_count != current_count:
+                    return _inspection_failure(
+                        1,
+                        reason=(
+                            f"{folder.name}의 로컬 건수({window_local_count})와 "
+                            f"KIND 현재 건수({current_count})가 다릅니다."
+                        ),
+                    )
+                kind_total += current_count
+                live_checked_windows += 1
+    return _inspection_success(
+        1,
+        reason="자동화 window의 모든 페이지와 KIND 현재 건수를 확인했습니다.",
+        details={
+            "local_count": local_total,
+            "mutable_kind_count": kind_total,
+            "live_checked_windows": live_checked_windows,
+        },
+    )
+
+
+def _table_manifest(profile: dict[str, Any]) -> Path:
+    root = Path(profile["data_root"])
+    expected_source = (root / "01-list").resolve()
+    matches: list[Path] = []
+    for path in sorted((root / "02-table").glob("*_shards/*.sqlite_manifest.json")):
+        try:
+            manifest = _load_sqlite_manifest(path)
+            source_path = Path(
+                str(manifest.get("source_path") or "")
+            ).expanduser().resolve()
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if manifest.get("source_type") == "source_folder" and source_path == expected_source:
+            matches.append(path)
+    if not matches:
+        raise ValueError("공시내역 변환 매니페스트를 찾을 수 없습니다.")
+    if len(matches) > 1:
+        raise ValueError("현재 다운로드 경로를 가리키는 변환 매니페스트가 여러 개입니다.")
+    return matches[0]
+
+
+def _filter_signature(payload: dict[str, Any]) -> str:
+    filters = dict(payload.get("filters") or {})
+    filters.pop("filter_workers", None)
+    return _canonical_hash(
+        {
+            "format": payload.get("format"),
+            "source_type": payload.get("source_type"),
+            "source_classification_path": payload.get("source_classification_path"),
+            "source_sqlite_manifest_path": payload.get("source_sqlite_manifest_path"),
+            "source_root_directory": payload.get("source_root_directory"),
+            "filters": filters,
+            "summary": payload.get("summary"),
+            "disclosures": payload.get("disclosures"),
+            "html_download_acpt_numbers": payload.get("html_download_acpt_numbers"),
+        }
+    )
+
+
+def _html_inspection_details(payload: dict[str, Any]) -> dict[str, Any]:
+    count_keys = (
+        "requested_count",
+        "existing_target_html_count",
+        "missing_target_html_count",
+        "invalid_target_html_count",
+        "unexpected_file_count",
+        "total_file_count",
+    )
+    list_keys = (
+        "missing_target_acpt_numbers",
+        "invalid_target_acpt_numbers",
+        "unexpected_files",
+    )
+    return {
+        **{key: int(payload.get(key) or 0) for key in count_keys},
+        **{
+            key: list(payload.get(key) or [])[:20]
+            for key in list_keys
+            if payload.get(key)
+        },
+    }
+
+
+def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
+    root = Path(profile["data_root"])
+    manifest_path = _table_manifest(profile)
+    manifest = _load_sqlite_manifest(manifest_path)
+    _validate_sqlite_manifest_counts(manifest_path, manifest)
+    source_path = Path(str(manifest.get("source_path") or "")).expanduser().resolve()
+    expected_source = (root / "01-list").resolve()
+    if manifest.get("source_type") != "source_folder" or source_path != expected_source:
+        return _inspection_failure(
+            2,
+            reason="공시내역 변환 입력 경로가 현재 다운로드 경로와 다릅니다.",
+            details={"expected": str(expected_source), "actual": str(source_path)},
+        )
+    source_result = filter_disclosures_payload(
+        {
+            "root_directory": str(expected_source),
+            "filter_blocks": [],
+            "filter_workers": profile["execution"]["local_workers"],
+        }
+    )
+    table_result = filter_disclosures_payload(
+        {
+            "classification_path": str(manifest_path),
+            "filter_blocks": [],
+            "filter_workers": profile["execution"]["local_workers"],
+        }
+    )
+    source_count = int(
+        (source_result.get("summary") or {}).get("source_disclosures") or 0
+    )
+    table_count = int(
+        (table_result.get("summary") or {}).get("source_disclosures") or 0
+    )
+    if (
+        source_count != table_count
+        or source_result.get("disclosures") != table_result.get("disclosures")
+    ):
+        return _inspection_failure(
+            2,
+            reason="다운로드 원본과 SQLite 공시 레코드가 일치하지 않습니다.",
+            details={
+                "source_rows": source_count,
+                "table_rows": table_count,
+                "source_records": len(source_result.get("disclosures") or []),
+                "table_records": len(table_result.get("disclosures") or []),
+            },
+        )
+    return _inspection_success(
+        2,
+        reason="다운로드 원본, SQLite 매니페스트와 실제 shard 레코드가 모두 일치합니다.",
+        details={"records": len(table_result.get("disclosures") or [])},
+    )
+
+
+def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
+    root = Path(profile["data_root"])
+    output_path = root / "03-filter" / "filtered.json"
+    actual = _read_json_object(output_path)
+    if actual is None:
+        return _inspection_failure(3, reason="필터 결과 JSON이 없거나 손상되었습니다.")
+    expected = filter_disclosures_payload(
+        {
+            "classification_path": str(_table_manifest(profile)),
+            "filter_blocks": profile["decisions"]["s3_selection"]["filter_blocks"],
+            "include_html_download_acpt_numbers": True,
+            "filter_workers": profile["execution"]["local_workers"],
+        }
+    )
+    if _filter_signature(actual) != _filter_signature(expected):
+        return _inspection_failure(
+            3,
+            reason="현재 필터 설정으로 다시 계산한 결과와 저장된 결과가 다릅니다.",
+            details={
+                "expected_records": len(expected.get("disclosures") or []),
+                "actual_records": len(actual.get("disclosures") or []),
+            },
+        )
+    return _inspection_success(
+        3,
+        reason="필터 설정, 입력 SQLite와 전체 필터 결과가 일치합니다.",
+        details={"records": len(actual.get("disclosures") or [])},
+    )
+
+
+def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
+    root = Path(profile["data_root"])
+    filtered_path = root / "03-filter" / "filtered.json"
+    output_directory = root / "04-external"
+    filtered = _read_json_object(filtered_path) or {}
+    expected_acpt_numbers = list(filtered.get("html_download_acpt_numbers") or [])
+    if not expected_acpt_numbers:
+        compressed = _read_json_object(
+            output_directory / "compressed-external-html.json"
+        )
+        html_files = (
+            [
+                path
+                for path in output_directory.rglob("*.html")
+                if not any(
+                    part.startswith(".")
+                    for part in path.relative_to(output_directory).parts[:-1]
+                )
+            ]
+            if output_directory.is_dir()
+            else []
+        )
+        if compressed == {
+            "format": "finiq_disclosure_external_html_docs_v1",
+            "summary": {"found_files": 0, "compressed_files": 0},
+            "records": [],
+        } and not html_files:
+            return _inspection_success(
+                4,
+                reason="현재 필터 대상이 0건이며 외부 HTML 결과도 비어 있습니다.",
+                details={"records": 0},
+            )
+        return _inspection_failure(
+            4,
+            reason="현재 필터 대상은 0건이지만 외부 HTML 결과가 비어 있지 않습니다.",
+        )
+    checked = check_disclosure_html_output_directory_payload(
+        {
+            "source_json_path": str(filtered_path),
+            "output_directory": str(output_directory),
+            "output_split_by_year": True,
+        }
+    )
+    requested = int(checked.get("requested_count") or 0)
+    if (
+        int(checked.get("missing_target_html_count") or 0)
+        or int(checked.get("invalid_target_html_count") or 0)
+        or int(checked.get("unexpected_file_count") or 0)
+        or int(checked.get("existing_target_html_count") or 0) != requested
+        or checked.get("detected_output_split_by_year") is not True
+    ):
+        return _inspection_failure(
+            4,
+            reason="외부 HTML에 누락·손상 또는 현재 대상이 아닌 파일이 있습니다.",
+            details=_html_inspection_details(checked),
+        )
+    compressed_path = output_directory / "compressed-external-html.json"
+    verification = _verify_compressed_external_html_files(
+        written_files=[str(compressed_path)],
+        expected_acpt_numbers=list(checked.get("existing_target_acpt_numbers") or []),
+    )
+    if not verification.get("passed"):
+        return _inspection_failure(
+            4,
+            reason="외부 HTML 압축 JSON의 대상이 현재 필터 결과와 다릅니다.",
+            details=verification,
+        )
+    saved_compressed = _read_json_object(compressed_path)
+    with tempfile.TemporaryDirectory(prefix="finiq-external-inspection-") as temporary:
+        compress_disclosure_external_html_payload(
+            {
+                "input_directory": str(output_directory),
+                "output_directory": temporary,
+                "input_split_by_year": True,
+                "workers": profile["execution"]["local_workers"],
+            }
+        )
+        rebuilt_compressed = _read_json_object(
+            Path(temporary) / "compressed-external-html.json"
+        )
+    if saved_compressed != rebuilt_compressed:
+        return _inspection_failure(
+            4,
+            reason="외부 HTML을 현재 압축 로직으로 다시 계산한 결과와 저장된 JSON이 다릅니다.",
+        )
+    return _inspection_success(
+        4,
+        reason="현재 필터 대상의 외부 HTML과 압축 JSON이 모두 완전합니다.",
+        details={"records": requested},
+    )
+
+
+def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
+    root = Path(profile["data_root"])
+    checked = check_disclosure_html_output_directory_payload(
+        {
+            "source_compressed_json_path": str(
+                root / "04-external" / "compressed-external-html.json"
+            ),
+            "output_directory": str(root / "05-internal"),
+            "source_split_by_year": False,
+            "output_split_by_year": True,
+        }
+    )
+    requested = int(checked.get("requested_count") or 0)
+    if (
+        int(checked.get("missing_target_html_count") or 0)
+        or int(checked.get("invalid_target_html_count") or 0)
+        or int(checked.get("unexpected_file_count") or 0)
+        or int(checked.get("existing_target_html_count") or 0) != requested
+        or (requested > 0 and checked.get("detected_output_split_by_year") is not True)
+    ):
+        return _inspection_failure(
+            5,
+            reason="내부 HTML에 누락·손상 또는 현재 대상이 아닌 파일이 있습니다.",
+            details=_html_inspection_details(checked),
+        )
+    return _inspection_success(
+        5,
+        reason="현재 외부 HTML 대상의 내부 HTML이 모두 완전합니다.",
+        details={"records": requested},
+    )
+
+
+def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
+    root = Path(profile["data_root"])
+    checked = inspect_disclosure_html_section_output_payload(
+        {
+            "input_directory": str(root / "05-internal"),
+            "output_directory": str(root / "06-sections"),
+            "section_save_rules": profile["decisions"]["s6_sections"][
+                "section_save_rules"
+            ],
+            "workers": profile["execution"]["local_workers"],
+        }
+    )
+    summary = checked.get("summary") or {}
+    if not summary.get("integrity_ok"):
+        return _inspection_failure(
+            6,
+            reason="현재 목차 선택 설정으로 계산한 결과와 저장된 HTML이 다릅니다.",
+            details={
+                "summary": summary,
+                "problem_files": list(checked.get("problem_files") or [])[:20],
+                "missing_files": list(checked.get("missing_files") or [])[:20],
+                "unexpected_files": list(checked.get("unexpected_files") or [])[:20],
+                "mismatched_files": list(checked.get("mismatched_files") or [])[:20],
+            },
+        )
+    return _inspection_success(
+        6,
+        reason="목차 선택 설정과 모든 분리 HTML 내용이 일치합니다.",
+        details={"records": int(summary.get("actual_files") or 0)},
+    )
+
+
+def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
+    root = Path(profile["data_root"])
+    mode = profile["execution"]["parser_mode"]
+    path = root / "07-converted" / mode / f"parsed-{mode}.json"
+    payload = _read_json_object(path)
+    if payload is None or payload.get("format") != "finiq_disclosure_html_parse_v1":
+        return _inspection_failure(7, reason="공시원문 변환 결과가 없거나 손상되었습니다.")
+    input_directory = (root / "06-sections").resolve()
+    saved_input = Path(str(payload.get("input_directory") or "")).expanduser().resolve()
+    filters = payload.get("filter_settings") or {}
+    html_files = (
+        _collect_parse_html_files(input_directory, None)
+        if input_directory.is_dir()
+        else []
+    )
+    records = list(payload.get("records") or [])
+    errors = list(payload.get("errors") or [])
+    summary = payload.get("summary") or {}
+    expected_acpt_numbers = sorted(path.stem for path in html_files)
+    actual_acpt_numbers = sorted(
+        str(record.get("acpt_no") or "")
+        for record in records
+        if isinstance(record, dict)
+    )
+    valid = (
+        payload.get("mode") == mode
+        and not payload.get("cancelled")
+        and saved_input == input_directory
+        and filters.get("filter_blocks") in (None, [])
+        and filters.get("record_filters") in (None, [])
+        and not errors
+        and int(summary.get("found_files") or 0) == len(html_files)
+        and int(summary.get("parsed_files") or 0) == len(records)
+        and int(summary.get("failed_files") or 0) == 0
+        and actual_acpt_numbers == expected_acpt_numbers
+    )
+    if not valid:
+        return _inspection_failure(
+            7,
+            reason="현재 파서 설정·입력 HTML과 저장된 변환 결과가 일치하지 않습니다.",
+            details={
+                "expected_files": len(html_files),
+                "parsed_files": len(records),
+                "failed_files": len(errors),
+            },
+        )
+    if html_files and path.stat().st_mtime_ns < max(item.stat().st_mtime_ns for item in html_files):
+        return _inspection_failure(
+            7,
+            reason="목차 HTML이 변환 결과보다 나중에 수정되어 다시 변환해야 합니다.",
+        )
+    with tempfile.TemporaryDirectory(prefix="finiq-parse-inspection-") as temporary:
+        rebuilt = parse_disclosure_html_payload(
+            {
+                "data_root": str(root),
+                "mode": mode,
+                "input_directory": str(input_directory),
+                "output_directory": temporary,
+                "filtered_metadata_path": str(root / "03-filter" / "filtered.json"),
+                "compressed_metadata_path": str(
+                    root / "04-external" / "compressed-external-html.json"
+                ),
+                "parallel_workers": profile["execution"]["local_workers"],
+                "skip_errors": False,
+            }
+        )
+    if payload != rebuilt:
+        return _inspection_failure(
+            7,
+            reason="현재 파서로 다시 계산한 결과와 저장된 변환 결과가 다릅니다.",
+            details={
+                "expected_records": len(rebuilt.get("records") or []),
+                "actual_records": len(records),
+            },
+        )
+    return _inspection_success(
+        7,
+        reason="파서 설정, 입력 HTML 전체와 변환 레코드가 일치합니다.",
+        details={"records": len(records)},
+    )
+
+
+DETAIL_STAGE_INSPECTORS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    1: _inspect_detail_download,
+    2: _inspect_detail_table,
+    3: _inspect_detail_filter,
+    4: _inspect_detail_external_html,
+    5: _inspect_detail_internal_html,
+    6: _inspect_detail_sections,
+    7: _inspect_detail_parse,
+}
+
+
+def inspect_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate one stage and every prerequisite against the current profile."""
+    profile = normalize_automation_profile(payload)
+    try:
+        stage = int(payload.get("stage"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("stage must be an integer from 1 through 7") from exc
+    if stage not in STAGE_NUMBERS:
+        raise ValueError("stage must be an integer from 1 through 7")
+    checkpoint_chain_valid = all(
+        _load_valid_checkpoint(profile, current_stage) is not None
+        for current_stage in range(1, stage + 1)
+    )
+    if checkpoint_chain_valid:
+        stage_one = _inspect_automation_download(profile)
+        if stage_one["confirmed"]:
+            result = _inspection_success(
+                stage,
+                reason="현재 설정과 일치하는 연속 실행 체크포인트와 산출물을 확인했습니다.",
+                details={"source": "automation", "download": stage_one["details"]},
+            )
+        else:
+            result = _inspection_failure(
+                stage,
+                reason=f"선행 작업 '{STAGE_LABELS[1]}' 확인 실패: {stage_one['reason']}",
+                details={"failed_stage": 1, **stage_one.get("details", {})},
+            )
+    else:
+        result = _inspection_failure(stage, reason="검사를 시작하지 못했습니다.")
+        for current_stage in range(1, stage + 1):
+            try:
+                current = DETAIL_STAGE_INSPECTORS[current_stage](profile)
+            except Exception as exc:
+                current = _inspection_failure(current_stage, reason=str(exc))
+            if not current["confirmed"]:
+                result = _inspection_failure(
+                    stage,
+                    reason=(
+                        current["reason"]
+                        if current_stage == stage
+                        else f"선행 작업 '{STAGE_LABELS[current_stage]}' 확인 실패: {current['reason']}"
+                    ),
+                    details={"failed_stage": current_stage, **current.get("details", {})},
+                )
+                break
+            result = current
+
+    return {
+        "format": "finiq_disclosure_workspace_inspection_v1",
+        "data_root": profile["data_root"],
+        "parser_mode": profile["execution"]["parser_mode"],
+        "stage": result,
+    }
 
 
 def _load_valid_checkpoint(profile: dict[str, Any], stage: int) -> dict[str, Any] | None:

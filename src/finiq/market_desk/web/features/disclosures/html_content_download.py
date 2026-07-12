@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from finiq.data_scraper.core.html_rate_limit import wait_for_html_download_request_slot
+from finiq.data_scraper.core.html_rate_limit import (
+    RequestSpacingLimiter,
+    wait_for_html_download_request_slot,
+)
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 def _fetch_content_html(
@@ -376,8 +379,6 @@ def download_disclosure_content_htmls(
         msg = "max_requests_per_minute must be between 1 and 100"
         raise ValueError(msg)
 
-    import time
-
     output_directory = output_directory.resolve()
     normalized_headers = {
         str(key): str(value) for key, value in request_headers.items()
@@ -386,18 +387,13 @@ def download_disclosure_content_htmls(
     min_interval_seconds = max(
         wait_seconds_between_requests, 60.0 / max_requests_per_minute
     )
-    last_request_started_at = 0.0
+    spacing_limiter = RequestSpacingLimiter(min_interval_seconds)
 
     def wait_for_request() -> None:
-        nonlocal last_request_started_at
-        if cancel_check is not None and cancel_check():
-            raise InterruptedError("content HTML download cancelled")
-        elapsed = time.time() - last_request_started_at
-        sleep_seconds = max(0.0, min_interval_seconds - elapsed)
-        if sleep_seconds > 0:
-            time.sleep(sleep_seconds)
-        last_request_started_at = time.time()
-        if wait_for_html_download_request_slot(cancel_check):
+        if wait_for_html_download_request_slot(
+            cancel_check,
+            spacing_limiter=spacing_limiter,
+        ):
             raise InterruptedError("content HTML download cancelled")
 
     with requests.Session() as session:

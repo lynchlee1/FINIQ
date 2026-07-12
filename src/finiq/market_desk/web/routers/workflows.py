@@ -49,6 +49,7 @@ from finiq.market_desk.web.features.disclosure_workflow.dart_link import (
 )
 from finiq.market_desk.web.features.disclosure_workflow.automation import (
     build_automation_plan_payload,
+    inspect_disclosure_workspace_payload,
 )
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
@@ -244,6 +245,15 @@ def create_workflows_router(
     async def build_disclosure_automation_plan(payload: dict[str, Any]):
         try:
             return await run_in_threadpool(build_automation_plan_payload, payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosure-workflows/inspect")
+    async def inspect_disclosure_workspace(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(
+                inspect_disclosure_workspace_payload, payload
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

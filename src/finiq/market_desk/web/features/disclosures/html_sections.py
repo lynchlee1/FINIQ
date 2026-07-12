@@ -405,6 +405,8 @@ def _map_html_files(
 def _iter_html_files(input_directory: Path):
     for child in sorted(input_directory.iterdir(), key=lambda path: path.name):
         if child.is_dir():
+            if child.name.startswith("."):
+                continue
             yield from _iter_html_files(child)
         elif child.is_file() and child.suffix.lower() == ".html":
             yield child
@@ -782,7 +784,12 @@ def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
         (
             path
             for path in input_directory.rglob("*")
-            if path.is_file() and path.suffix.lower() == ".html"
+            if path.is_file()
+            and path.suffix.lower() == ".html"
+            and not any(
+                part.startswith(".")
+                for part in path.relative_to(input_directory).parts[:-1]
+            )
         ),
         key=lambda path: _relative_source_path(input_directory, path),
     )
@@ -801,6 +808,135 @@ def _parse_limit(value: Any) -> int | None:
         msg = "limit must be >= 1"
         raise ValueError(msg)
     return parsed
+
+
+def _selected_section_output(
+    source_file: Path,
+    section_save_rules: dict[str, set[str]],
+) -> dict[str, Any]:
+    try:
+        sections = split_content_html_sections(source_file.read_bytes())
+    except Exception as exc:
+        return {
+            "status": "read_failed",
+            "source_file": str(source_file),
+            "error": str(exc),
+        }
+    if not sections:
+        return {
+            "status": "no_sections",
+            "source_file": str(source_file),
+            "error": "no sections found",
+        }
+    signature = _section_signature(_section_dicts_from_split_sections(sections))
+    allowed_toc_ids = section_save_rules.get(signature)
+    selected_sections = [
+        section
+        for section in sections
+        if allowed_toc_ids is None or section.toc_id in allowed_toc_ids
+    ]
+    return {
+        "status": "ok",
+        "source_file": str(source_file),
+        "content": "\n".join(section.html for section in selected_sections),
+        "selected_sections": len(selected_sections),
+    }
+
+
+def inspect_disclosure_html_section_output_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Rebuild expected section output in memory and compare every saved HTML."""
+    input_directory_raw = str(body.get("input_directory") or "").strip()
+    output_directory_raw = str(body.get("output_directory") or "").strip()
+    if not input_directory_raw:
+        raise ValueError("input_directory is required")
+    if not output_directory_raw:
+        raise ValueError("output_directory is required")
+    input_directory = Path(input_directory_raw).expanduser().resolve()
+    output_directory = Path(output_directory_raw).expanduser().resolve()
+    if not input_directory.is_dir():
+        raise ValueError(f"input_directory does not exist: {input_directory}")
+
+    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    workers = parse_html_section_worker_count(body.get("workers"))
+    section_save_rules = _section_save_rules(body.get("section_save_rules"))
+    results = _map_html_files(
+        html_files,
+        workers,
+        lambda source_file: _selected_section_output(source_file, section_save_rules),
+        cancel_check,
+    )
+    if _cancel_requested(cancel_check):
+        return {"cancelled": True}
+
+    expected: dict[str, str] = {}
+    problems: list[dict[str, str]] = []
+    for source_file, result in zip(html_files, results):
+        if result["status"] != "ok":
+            problems.append(
+                {
+                    "source_file": str(source_file),
+                    "error": str(result.get("error") or result["status"]),
+                }
+            )
+            continue
+        if int(result.get("selected_sections") or 0) > 0:
+            expected[_relative_source_path(input_directory, source_file)] = str(
+                result["content"]
+            )
+
+    actual_paths = (
+        {
+            path.relative_to(output_directory).as_posix(): path
+            for path in output_directory.rglob("*.html")
+            if path.is_file()
+            and not any(
+                part.startswith(".")
+                for part in path.relative_to(output_directory).parts[:-1]
+            )
+        }
+        if output_directory.is_dir()
+        else {}
+    )
+    missing_files = sorted(set(expected) - set(actual_paths))
+    unexpected_files = sorted(set(actual_paths) - set(expected))
+    mismatched_files = sorted(
+        relative_path
+        for relative_path in set(expected) & set(actual_paths)
+        if actual_paths[relative_path].read_text(encoding="utf-8")
+        != expected[relative_path]
+    )
+    integrity_ok = not (
+        problems or missing_files or unexpected_files or mismatched_files
+    )
+    if progress_callback is not None:
+        progress_callback(
+            "목차 분리 결과 검사 완료: "
+            f"예상 {len(expected)}건, 누락 {len(missing_files)}건, "
+            f"내용 불일치 {len(mismatched_files)}건"
+        )
+    return {
+        "format": "finiq_disclosure_html_section_output_inspection_v1",
+        "input_directory": str(input_directory),
+        "output_directory": str(output_directory),
+        "summary": {
+            "found_files": len(html_files),
+            "expected_files": len(expected),
+            "actual_files": len(actual_paths),
+            "problem_files": len(problems),
+            "missing_files": len(missing_files),
+            "unexpected_files": len(unexpected_files),
+            "mismatched_files": len(mismatched_files),
+            "integrity_ok": integrity_ok,
+        },
+        "problem_files": problems,
+        "missing_files": missing_files,
+        "unexpected_files": unexpected_files,
+        "mismatched_files": mismatched_files,
+    }
 
 
 def save_disclosure_html_sections_payload(
@@ -841,15 +977,17 @@ def save_disclosure_html_sections_payload(
             progress_callback(message)
 
     def save_one(source_file: Path) -> dict[str, Any]:
-        try:
-            sections = split_content_html_sections(source_file.read_bytes())
-        except Exception as exc:
+        selected = _selected_section_output(source_file, section_save_rules)
+        if selected["status"] == "read_failed":
             return {
                 "status": "read_failed",
-                "skipped": {"source_file": str(source_file), "error": str(exc)},
+                "skipped": {
+                    "source_file": str(source_file),
+                    "error": str(selected["error"]),
+                },
                 "saved": [],
             }
-        if not sections:
+        if selected["status"] == "no_sections":
             return {
                 "status": "no_sections",
                 "skipped": {
@@ -858,21 +996,12 @@ def save_disclosure_html_sections_payload(
                 },
                 "saved": [],
             }
-        signature = _section_signature(_section_dicts_from_split_sections(sections))
-        allowed_toc_ids = section_save_rules.get(signature)
-        selected_sections = [
-            section
-            for section in sections
-            if allowed_toc_ids is None or section.toc_id in allowed_toc_ids
-        ]
-        if not selected_sections:
+        if int(selected.get("selected_sections") or 0) == 0:
             return {"status": "ok", "saved": [], "expected": []}
         source_relative_path = source_file.relative_to(input_directory)
         output_path = output_directory / source_relative_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            "\n".join(section.html for section in selected_sections), encoding="utf-8"
-        )
+        output_path.write_text(str(selected["content"]), encoding="utf-8")
         return {
             "status": "ok",
             "saved": [str(output_path)],
