@@ -43,11 +43,6 @@ class OntologyGraphQueryService:
         if not hasattr(self, "graph_json_path"):
             from finiq.config import PROJECT_ROOT
             self.graph_json_path = Path(graph_json_path or (PROJECT_ROOT / "resources" / "ontology_graph.json"))
-            # Fallback to tmp if resources version doesn't exist
-            if not self.graph_json_path.exists():
-                fallback = PROJECT_ROOT / "tmp" / "ontology_graph.json"
-                if fallback.exists():
-                    self.graph_json_path = fallback
 
         if not hasattr(self, "nodes_index"):
             self.nodes_index = {}
@@ -65,61 +60,49 @@ class OntologyGraphQueryService:
         if self.is_loaded and not force:
             return True
 
-        if not self.graph_json_path.exists():
-            return False
+        with open(self.graph_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        try:
-            with open(self.graph_json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                
-            nodes_list = data.get("nodes", [])
-            edges_list = data.get("edges", [])
-            self.metadata = data.get("metadata", {})
-            
-            self.nodes_index = {node["id"]: node for node in nodes_list}
-            self.edges_index = edges_list
-            
-            # Build adjacency list
-            self.adjacency = {}
-            for node_id in self.nodes_index:
-                self.adjacency[node_id] = []
-                
-            for edge in edges_list:
-                src = edge["source"]
-                tgt = edge["target"]
-                
-                # Check for references
-                if src in self.adjacency:
-                    self.adjacency[src].append(edge)
-                if tgt in self.adjacency:
-                    self.adjacency[tgt].append(edge)
+        nodes_list = data.get("nodes", [])
+        edges_list = data.get("edges", [])
+        nodes_index = {node["id"]: node for node in nodes_list}
+        adjacency = {node_id: [] for node_id in nodes_index}
 
-            # Build company/investor lookup indices
-            self.company_to_node_id = {}
-            self.investor_to_node_id = {}
-            for node_id, node in self.nodes_index.items():
-                node_type = node.get("type")
-                props = node.get("properties", {})
-                
-                if node_type == "Company":
-                    code = props.get("stock_code")
-                    if code:
-                        self.company_to_node_id[normalize_company_id(code)] = node_id
-                        self.company_to_node_id[code] = node_id
-                    name = props.get("name") or node.get("label")
-                    if name:
-                        self.company_to_node_id[name] = node_id
-                elif node_type in ("Person", "Organization"):
-                    name = props.get("name") or node.get("label")
-                    if name:
-                        if name not in self.investor_to_node_id:
-                            self.investor_to_node_id[name] = []
-                        self.investor_to_node_id[name].append(node_id)
+        for edge in edges_list:
+            src = edge["source"]
+            tgt = edge["target"]
+            if src in adjacency:
+                adjacency[src].append(edge)
+            if tgt in adjacency:
+                adjacency[tgt].append(edge)
 
-            self.is_loaded = True
-            return True
-        except Exception:
-            return False
+        company_to_node_id = {}
+        investor_to_node_id = {}
+        for node_id, node in nodes_index.items():
+            node_type = node.get("type")
+            props = node.get("properties", {})
+
+            if node_type == "Company":
+                code = props.get("stock_code")
+                if code:
+                    company_to_node_id[normalize_company_id(code)] = node_id
+                    company_to_node_id[code] = node_id
+                name = props.get("name") or node.get("label")
+                if name:
+                    company_to_node_id[name] = node_id
+            elif node_type in ("Person", "Organization"):
+                name = props.get("name") or node.get("label")
+                if name:
+                    investor_to_node_id.setdefault(name, []).append(node_id)
+
+        self.metadata = data.get("metadata", {})
+        self.nodes_index = nodes_index
+        self.edges_index = edges_list
+        self.adjacency = adjacency
+        self.company_to_node_id = company_to_node_id
+        self.investor_to_node_id = investor_to_node_id
+        self.is_loaded = True
+        return True
 
     def get_neighborhood(
         self, 

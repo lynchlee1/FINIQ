@@ -20,7 +20,6 @@ from finiq.data_scraper.core.client import (
 from finiq.data_scraper.core.payload import build_search_form
 from finiq.data_scraper.workflow import (
     KindWorkflow,
-    download_kind_viewer_htmls_from_result_folder,
     inspect_download_directory_pages,
     run_download,
 )
@@ -587,35 +586,6 @@ def test_download_disclosure_viewer_htmls_reports_failures_without_error_log(
     assert saved_paths == []
     assert "Permanently failed to download 1 files: 20260108000150" in progress_messages
     assert not (tmp_path / "download_errors.log").exists()
-
-
-def test_download_kind_viewer_htmls_from_result_folder_collects_acpt_numbers(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    result_folder = tmp_path / "results"
-    result_folder.mkdir()
-    (result_folder / "001_post_page_00001.body").write_bytes(
-        build_result_page_html(page_number=1, page_size=2, total_items=2)
-    )
-    session = ViewerFakeSession()
-    monkeypatch.setattr("finiq.data_scraper.core.client.time.sleep", lambda seconds: None)
-
-    result = download_kind_viewer_htmls_from_result_folder(
-        result_folder,
-        request_headers=REQUEST_HEADERS,
-        timeout=5,
-        session=session,
-        max_requests_per_minute=90,
-    )
-
-    assert result["output_directory"] == str(result_folder / "viewer_html")
-    assert result["acpt_numbers"] == ["20240100000001", "20240100000002"]
-    assert [Path(path).name for path in result["saved_files"]] == [
-        "20240100000001.html",
-        "20240100000002.html",
-    ]
-    assert len(session.get_calls) == 2
 
 
 def test_kind_workflow_can_store_inputs_without_saving(tmp_path: Path) -> None:

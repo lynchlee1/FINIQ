@@ -273,7 +273,6 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
             ),
             "mutable_lookback_days": MUTABLE_LOOKBACK_DAYS,
             "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
-            "split_by_year": True,
         },
     }
 
@@ -768,7 +767,6 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
         {
             "source_json_path": str(filtered_path),
             "output_directory": str(output_directory),
-            "output_split_by_year": True,
         }
     )
     requested = int(checked.get("requested_count") or 0)
@@ -777,7 +775,6 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
         or int(checked.get("invalid_target_html_count") or 0)
         or int(checked.get("unexpected_file_count") or 0)
         or int(checked.get("existing_target_html_count") or 0) != requested
-        or checked.get("detected_output_split_by_year") is not True
     ):
         return _inspection_failure(
             4,
@@ -801,7 +798,6 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
             {
                 "input_directory": str(output_directory),
                 "output_directory": temporary,
-                "input_split_by_year": True,
                 "workers": profile["execution"]["local_workers"],
             }
         )
@@ -828,8 +824,6 @@ def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
                 root / "04-external" / "compressed-external-html.json"
             ),
             "output_directory": str(root / "05-internal"),
-            "source_split_by_year": False,
-            "output_split_by_year": True,
         }
     )
     requested = int(checked.get("requested_count") or 0)
@@ -838,7 +832,6 @@ def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
         or int(checked.get("invalid_target_html_count") or 0)
         or int(checked.get("unexpected_file_count") or 0)
         or int(checked.get("existing_target_html_count") or 0) != requested
-        or (requested > 0 and checked.get("detected_output_split_by_year") is not True)
     ):
         return _inspection_failure(
             5,
@@ -1360,7 +1353,7 @@ def _active_disclosure_targets(filtered_path: Path) -> list[tuple[str, str]]:
         disclosed_at = str(record.get("disclosed_at") or "")
         year = disclosed_at[:4] if len(disclosed_at) >= 4 and disclosed_at[:4].isdigit() else acpt_no[:4]
         if len(year) != 4 or not year.isdigit():
-            year = "unknown"
+            raise ValueError(f"공시 연도를 확인할 수 없습니다: {acpt_no}")
         targets.append((acpt_no, year))
         seen.add(acpt_no)
     return targets
@@ -1632,7 +1625,6 @@ def _run_stage(
                     {
                         "source_json_path": str(filtered_path),
                         "output_directory": str(temporary),
-                        "split_by_year": True,
                         "skip_existing": True,
                         "timeout": execution["timeout"],
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
@@ -1652,7 +1644,6 @@ def _run_stage(
                     {
                         "input_directory": str(temporary),
                         "output_directory": str(temporary),
-                        "input_split_by_year": True,
                         "workers": execution["local_workers"],
                     },
                     progress_callback=progress_callback,
@@ -1741,8 +1732,6 @@ def _run_stage(
                             root / "04-external" / "compressed-external-html.json"
                         ),
                         "output_directory": str(temporary),
-                        "source_split_by_year": False,
-                        "output_split_by_year": True,
                         "skip_existing": True,
                         "timeout": execution["timeout"],
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,

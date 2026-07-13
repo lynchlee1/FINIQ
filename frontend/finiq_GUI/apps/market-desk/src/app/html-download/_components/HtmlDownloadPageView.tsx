@@ -34,7 +34,6 @@ const DOWNLOAD_VARIANTS = {
     sourceRequiredMessage: "입력 데이터 경로를 선택하세요.",
     sourcePayloadKey: "source_json_path",
     defaultDirectoryKey: "html_output_directory",
-    defaultDirectorySuffix: "viewer_html",
     startEndpoint: "/api/disclosures/html/download/start",
     cancelEndpoint: "/api/disclosures/html/download/cancel",
     inspectEndpoint: "/api/disclosures/html/download/inspect-folder",
@@ -51,7 +50,6 @@ const DOWNLOAD_VARIANTS = {
     sourceRequiredMessage: "공시원문 외부 데이터 경로를 선택하세요.",
     sourcePayloadKey: "source_directory",
     defaultDirectoryKey: "html_content_output_directory",
-    defaultDirectorySuffix: "viewer_html_contents",
     startEndpoint: "/api/disclosures/html/content-download/start",
     cancelEndpoint: "/api/disclosures/html/content-download/cancel",
     inspectEndpoint: "/api/disclosures/html/content-download/inspect-folder",
@@ -100,14 +98,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     if (data.error) lines.push(`오류: ${data.error}`);
     if (res.requested_count !== undefined) {
       lines.push(`요청 접수번호: ${formatInteger(res.requested_count)}`);
-      lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       lines.push(`저장 파일: ${formatInteger(res.saved_count)}`);
       lines.push(`데이터 경로: ${res.output_directory || ""}`);
     }
     if (res.summary?.merged_files !== undefined) {
       lines.push(`병합 HTML: ${formatInteger(res.summary.merged_files)}`);
       lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
-      lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       if (Array.isArray(res.written_files)) {
         lines.push("결과 파일", ...res.written_files);
       }
@@ -115,7 +111,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     if (res.summary?.compressed_files !== undefined) {
       lines.push(`외부 HTML 압축: ${formatInteger(res.summary.compressed_files)}`);
       lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
-      lines.push(`분할저장: ${res.split_by_year ? "On" : "Off"}`);
       if (res.verification) {
         lines.push(`재검사: ${res.verification.passed ? "통과" : "누락/불일치 있음"}`);
         lines.push(`재검사 기록: ${formatInteger(res.verification.verified_records)}/${formatInteger(res.verification.expected_records)}`);
@@ -163,11 +158,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [progressInterval, setProgressInterval] = useState("10");
   const [mergeOutputPath, setMergeOutputPath] = useState("");
 
-  const existingOutputSplitByYear =
-    existingData && typeof existingData.detected_output_split_by_year === "boolean"
-      ? existingData.detected_output_split_by_year
-      : null;
-  const existingSplitMismatch = existingOutputSplitByYear !== null && !existingOutputSplitByYear;
   const existingAllSaved = !!existingData && (existingData.requested_count || 0) > 0 && (existingData.missing_target_html_count || 0) === 0;
 
   const {
@@ -206,7 +196,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
   useEffect(() => {
     fetchSettings().then((config) => {
-      const nextOutputDirectory = config[variantConfig.defaultDirectoryKey] || (config.output_root ? `${config.output_root}/${variantConfig.defaultDirectorySuffix}` : "");
+      const nextOutputDirectory = config[variantConfig.defaultDirectoryKey] || "";
       setOutputDirectory(nextOutputDirectory);
       setCompressInputDirectory(config.html_output_directory || nextOutputDirectory);
       setCompressOutputDirectory(config.html_external_compress_output_directory || nextOutputDirectory);
@@ -218,9 +208,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         sessionStorage.removeItem("finiq.kind.filteredDisclosures");
         setStatus("공시 필터에서 생성한 결과 파일을 불러왔습니다.");
       } else if (variant === "content") {
-        setSourcePath(config.html_output_directory || (config.output_root ? `${config.output_root}/viewer_html` : ""));
+        setSourcePath(config.html_output_directory || "");
         setContentSourceFilePath(config.html_content_compressed_json_path || "");
-        setMergeOutputPath(config.html_merge_output_path || (nextOutputDirectory ? `${nextOutputDirectory}/merged-content-html.json` : ""));
+        setMergeOutputPath(config.html_merge_output_path || "");
       } else if (config.html_transfer_directory) {
         setSourcePath(config.html_transfer_directory);
       }
@@ -230,7 +220,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     }).finally(() => {
       setLoading(false);
     });
-  }, [fetchSettings, variant, variantConfig.defaultDirectoryKey, variantConfig.defaultDirectorySuffix, setStatus, setIsErrorStatus]);
+  }, [fetchSettings, variant, variantConfig.defaultDirectoryKey, setStatus, setIsErrorStatus]);
 
   useEffect(() => {
     if (!isJobActive) {
@@ -262,9 +252,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       wait_seconds: Number(waitSeconds),
       limit: limit ? Number(limit) : null,
       skip_existing: skipExisting,
-      split_by_year: true,
-      source_split_by_year: true,
-      output_split_by_year: true,
       progress_interval: Number(progressInterval),
       cancel_token: cancelToken,
   }), [
@@ -287,11 +274,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setIsErrorStatus(true);
       return;
     }
-    if (existingSplitMismatch) {
-      setStatus("기존 데이터 경로가 현재 필수 연도별 구조와 다릅니다. 연도별 구조로 전환하거나 다른 데이터 경로를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
     const cancelToken = window.crypto.randomUUID();
     setActiveCancelToken(cancelToken);
 
@@ -305,9 +287,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     output_directory: useSeparateOutputDirectory ? outputDirectory : "",
     ...sourcePayload(),
     limit: limit ? Number(limit) : null,
-    split_by_year: true,
-    source_split_by_year: true,
-    output_split_by_year: true,
     dry_run: dryRun,
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
@@ -358,13 +337,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
         return;
       }
       setExistingCheckError("");
-      setExistingData(
-        data.has_existing ||
-        typeof data.detected_output_split_by_year === "boolean" ||
-        typeof data.detected_source_split_by_year === "boolean"
-          ? data
-          : null
-      );
+      setExistingData(data.has_existing ? data : null);
     } catch (err: any) {
       if (err.name === 'AbortError') {
         return;
@@ -443,7 +416,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       const lines = [
         "폴더 검사 완료",
         `대상 접수번호: ${formatInteger(data.requested_count)}`,
-        `분할저장: ${data.split_by_year ? "On" : "Off"}`,
         `삭제 예정 파일: ${formatInteger(data.deletion_candidate_count)}`,
         `데이터 경로: ${data.output_directory || ""}`,
       ];
@@ -496,7 +468,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       const lines = [
         "파일 삭제 완료",
         `대상 접수번호: ${formatInteger(data.requested_count)}`,
-        `분할저장: ${data.split_by_year ? "On" : "Off"}`,
         `삭제 파일: ${formatInteger(data.deleted_count)}`,
         `데이터 경로: ${data.output_directory || ""}`,
       ];
@@ -540,10 +511,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     const payload = {
       data_root: dataRoot,
       input_directory: useSeparateOutputDirectory ? outputDirectory : "",
-      output_path: useSeparateOutputDirectory ? mergeOutputPath || outputDirectory : "",
-      split_by_year: true,
-      input_split_by_year: true,
-      output_split_by_year: true,
+      output_directory: useSeparateOutputDirectory ? mergeOutputPath || outputDirectory : "",
       limit: limit ? Number(limit) : null,
     };
     startJob("/api/disclosures/html/content-download/merge/start", payload);
@@ -565,9 +533,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       data_root: dataRoot,
       input_directory: useSeparateOutputDirectory ? compressInputDirectory : "",
       output_directory: useSeparateOutputDirectory ? compressOutputDirectory : "",
-      split_by_year: true,
-      input_split_by_year: true,
-      output_split_by_year: false,
       parallel_workers: compressWorkers ? Number(compressWorkers) : null,
     };
     startJob("/api/disclosures/html/download/compress/start", payload);
@@ -591,7 +556,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     const settings = useSettingsStore.getState();
     const nextOutputDirectory = settings[variantConfig.defaultDirectoryKey] || "";
     setOutputDirectory(nextOutputDirectory);
-      setCompressInputDirectory(settings.html_output_directory || "");
+    setCompressInputDirectory(settings.html_output_directory || "");
     setCompressOutputDirectory(settings.html_external_compress_output_directory || "");
     if (variant === "content") {
       setSourcePath(settings.html_output_directory || "");
@@ -728,12 +693,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     return "기존 파일 건너뛰기 옵션이 꺼져 있어 실행 시 다시 저장합니다.";
   })() : "";
   const existingStatus = existingData ? (() => {
-    if (existingSplitMismatch) {
-      return {
-        className: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down)]",
-        label: "분할저장 설정 불일치",
-      };
-    }
     if ((existingData.deletion_candidate_count || 0) > 0) {
       return {
         className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
@@ -922,13 +881,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   </div>
                 </div>
 
-                {existingSplitMismatch && (
-                  <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down)]">
-                    <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-                    <strong>오류:</strong> 기존 데이터 경로가 현재 필수 연도별 구조와 다릅니다. 연도별 구조로 전환하거나 다른 데이터 경로를 선택하세요.
-                  </div>
-                )}
-
                 {(existingData.deletion_candidate_count || 0) > 0 && (
                   <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
                     <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
@@ -1000,7 +952,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                     {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
                     폴더 검사하기
                   </Button>
-                  <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive || existingSplitMismatch}>
+                  <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
                     <Play className="mr-2 h-4 w-4" />
                     실행
                   </Button>

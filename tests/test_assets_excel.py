@@ -847,52 +847,6 @@ def test_convert_asset_excels_uses_selected_files(tmp_path):
     assert not (output_dir / "stock_price.parquet").exists()
 
 
-def test_convert_asset_excels_resume_failed_only_skips_completed_outputs(tmp_path):
-    source_dir = tmp_path / "assets"
-    output_dir = tmp_path / "merged"
-    source_dir.mkdir()
-    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
-        _write_quanti_sheet(
-            writer,
-            "종가",
-            [[pd.Timestamp("2020-01-01"), 100, 200]],
-        )
-    with pd.ExcelWriter(source_dir / "source-b.xlsx") as writer:
-        _write_quanti_sheet(
-            writer,
-            "거래량",
-            [[pd.Timestamp("2020-01-02"), 1000, 2000]],
-        )
-
-    initial = convert_asset_excels_to_wide_parquet(
-        source_dir,
-        output_dir,
-        selected_files=["source-a.xlsx"],
-    )
-    completed_output = _output_for_sheet(initial, "종가")["output_file"]
-
-    payload = convert_asset_excels_to_wide_parquet(
-        source_dir,
-        output_dir,
-        resume_failed_only=True,
-    )
-
-    assert payload["resume_failed_only"] is True
-    assert payload["resume_skipped"] == [
-        {
-            "file_name": "source-a.xlsx",
-            "relative_path": "source-a.xlsx",
-            "sheet_name": "종가",
-            "output_file": completed_output,
-            "reason": "이미 변환 완료",
-        }
-    ]
-    assert payload["sheets_processed"] == 1
-    assert _output_for_sheet(payload, "거래량")["output_file"] == _expected_output_file("volume", "2020-01-02", "2020-01-02", ["A005930", "A000660"])
-    assert pd.read_parquet(output_dir / completed_output)["A005930"].tolist() == [100]
-    assert _read_output_sheet(payload, output_dir, "거래량")["A000660"].tolist() == [2000]
-
-
 def test_convert_asset_excels_updates_existing_output(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"

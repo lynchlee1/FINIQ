@@ -15,8 +15,6 @@ def find_company_classification_files(root_directory: str | Path) -> list[Path]:
 
     date_pattern = re.compile(r"^\d{8}_\d{8}$")
     exclude_names = {
-        "viewer_html",
-        "viewer_html_contents",
         ".finiq",
         ".git",
         ".github",

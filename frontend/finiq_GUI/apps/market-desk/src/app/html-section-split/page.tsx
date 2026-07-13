@@ -135,7 +135,7 @@ export default function HtmlSectionSplitPage() {
     cancelEndpoint: "/api/disclosures/html/cancel",
     onSuccess: (data) => {
       if (data?.format === "finiq_disclosure_html_section_inspect_v1") {
-        setInspectResult(data.result || data);
+        setInspectResult(data);
         setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.documents_with_sections || 0)}개 공시`);
       }
       setIsInspecting(false);
@@ -163,9 +163,9 @@ export default function HtmlSectionSplitPage() {
 
   useEffect(() => {
     fetchSettings().then((config) => {
-      const defaultInput = config.html_content_output_directory || (config.output_root ? `${config.output_root}/viewer_html_contents` : "");
+      const defaultInput = config.html_content_output_directory || "";
       setInputDirectory(defaultInput || "");
-      setOutputDirectory(config.html_section_split_output_directory || (defaultInput ? `${defaultInput}_sections` : ""));
+      setOutputDirectory(config.html_section_split_output_directory || "");
     }).catch((err) => {
       setStatus(errorMessage(err));
       setIsErrorStatus(true);

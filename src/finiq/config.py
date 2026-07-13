@@ -172,10 +172,10 @@ def load_settings(settings_path: str | Path) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid settings JSON: {path}") from exc
     if not isinstance(payload, dict):
-        return {}
+        raise ValueError(f"Settings JSON must contain an object: {path}")
     
     settings: dict[str, Any] = {}
     for key in SAVED_SETTINGS_KEYS:

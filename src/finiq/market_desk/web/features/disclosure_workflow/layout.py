@@ -214,22 +214,16 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
     elif normalized_kind == "download":
         _set_default(payload, "source_json_path", str(workspace.filtered / "filtered.json"))
         _set_default(payload, "output_directory", str(workspace.external))
-        payload.setdefault("output_split_by_year", True)
     elif normalized_kind == "external_compress":
         _set_default(payload, "input_directory", str(workspace.external))
         _set_default(payload, "output_directory", str(workspace.external))
-        payload.setdefault("input_split_by_year", True)
     elif normalized_kind == "content_download":
         if not str(payload.get("source_compressed_json_path") or "").strip():
             _set_default(payload, "source_directory", str(workspace.external))
         _set_default(payload, "output_directory", str(workspace.internal))
-        payload.setdefault("source_split_by_year", True)
-        payload.setdefault("output_split_by_year", True)
     elif normalized_kind == "content_merge":
         _set_default(payload, "input_directory", str(workspace.internal))
-        _set_default(payload, "output_path", str(workspace.internal / "merged"))
-        payload.setdefault("input_split_by_year", True)
-        payload.setdefault("output_split_by_year", True)
+        _set_default(payload, "output_directory", str(workspace.internal / "merged"))
     elif normalized_kind in {"section_inspect", "section_kinds", "section_list"}:
         _set_default(payload, "input_directory", str(workspace.internal))
     elif normalized_kind == "section_save":

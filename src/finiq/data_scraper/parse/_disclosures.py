@@ -148,11 +148,11 @@ def disclosure_rows(html_markup: str | bytes) -> list[dict[str, Any]]:
     parser = html.HTMLParser(recover=True, huge_tree=True)
     try:
         root = html.document_fromstring(decoded_markup, parser=parser)
-    except etree.ParserError:
-        return []
+    except etree.ParserError as exc:
+        raise ValueError("Failed to parse KIND disclosure result page") from exc
     table_tag = _find_disclosure_results_table(root)
     if table_tag is None:
-        return []
+        raise ValueError("KIND disclosure result table is missing")
 
     tbody_tags = table_tag.xpath("./tbody")
     parent_tags: list[html.HtmlElement] = tbody_tags if tbody_tags else [table_tag]

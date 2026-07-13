@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from finiq.concurrency import bounded_as_completed
+from finiq.data_scraper.parse._markup import decode_html_markup
 from finiq.market_desk.web.features.market_data.service_records import *
 
 def _looks_like_sqlite_manifest(path: Path) -> bool:
@@ -319,15 +320,15 @@ def _build_source_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any] | 
 
 
 def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
-    markup = file_path.read_bytes().decode("utf-8", errors="replace")
+    markup = decode_html_markup(file_path.read_bytes())
     parser = html.HTMLParser(recover=True, huge_tree=True)
     try:
         root = html.document_fromstring(markup, parser=parser)
-    except etree.ParserError:
-        return []
+    except etree.ParserError as exc:
+        raise ValueError(f"Failed to parse KIND disclosure result page: {file_path}") from exc
     table_tag = _find_disclosure_results_table(root)
     if table_tag is None:
-        return []
+        raise ValueError(f"KIND disclosure result table is missing: {file_path}")
 
     parent_tags = table_tag.xpath("./tbody") or [table_tag]
     rows: list[dict[str, Any]] = []

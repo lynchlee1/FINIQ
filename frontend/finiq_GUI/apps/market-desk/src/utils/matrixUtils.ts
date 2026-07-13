@@ -41,23 +41,7 @@ export const parseNumericValue = (val: any) => {
 };
 
 export const getChangedFields = (family: any) => {
-  const fields: string[] = [];
-  const seen = new Set<string>();
-  
-  // Use backend-provided field names if available (optimized)
-  if (family.changed_field_names) {
-    return family.changed_field_names;
-  }
-
-  for (const change of family.changes || []) {
-    for (const fieldChange of change.changes || []) {
-      const field = String(fieldChange.field || "").trim();
-      if (!field || seen.has(field) || field === "회차") continue;
-      seen.add(field);
-      fields.push(field);
-    }
-  }
-  return fields;
+  return Array.isArray(family?.changed_field_names) ? family.changed_field_names : [];
 };
 
 export const getMatrixData = (family: any) => {
@@ -65,6 +49,7 @@ export const getMatrixData = (family: any) => {
   const records = family.records || [];
   const changes = family.changes || [];
   const fields = getChangedFields(family);
+  if (!fields.length) return null;
   
   const matrix: Record<string, any[]> = {};
   for (const f of fields) matrix[f] = new Array(records.length).fill(null);
@@ -83,14 +68,6 @@ export const getMatrixData = (family: any) => {
     for (const f of fields) {
       const delta = change.changes.find((c: any) => c.field === f);
       if (delta) matrix[f][vIdx] = delta.after;
-      else matrix[f][vIdx] = matrix[f][vIdx - 1];
-    }
-  }
-
-  for (const f of fields) {
-    let firstIdx = matrix[f].findIndex((v: any) => v !== null);
-    if (firstIdx > 0) {
-      for (let j = 0; j < firstIdx; j++) matrix[f][j] = matrix[f][firstIdx];
     }
   }
   return { fields, records, matrix };

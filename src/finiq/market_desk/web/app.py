@@ -102,7 +102,6 @@ def _run_asset_excel_convert_job(
         if "account_mappings" in payload
         else None,
         write_mode=str(payload.get("write_mode") or "update"),
-        resume_failed_only=bool(payload.get("resume_failed_only")),
         progress_callback=progress_callback,
         cancel_check=cancel_check,
     )

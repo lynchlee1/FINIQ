@@ -29,7 +29,7 @@ def decode_html_markup(html_markup: str | bytes) -> str:
     dammit = UnicodeDammit(html_markup, is_html=True)
     if dammit.unicode_markup is not None:
         return dammit.unicode_markup
-    return html_markup.decode("utf-8", errors="replace")
+    return html_markup.decode("utf-8")
 
 
 def parse_html_with_recovery(html_markup: str | bytes) -> BeautifulSoup:
@@ -42,7 +42,7 @@ def parse_html_with_recovery(html_markup: str | bytes) -> BeautifulSoup:
     parser = etree.HTMLParser(recover=True, huge_tree=True)
     root = etree.HTML(decoded_markup, parser=parser)
     if root is None:
-        return BeautifulSoup("", "lxml")
+        raise ValueError("Failed to parse HTML document")
     recovered_markup = etree.tostring(root, encoding="unicode", method="html")
     return BeautifulSoup(recovered_markup, "lxml")
 

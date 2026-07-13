@@ -65,18 +65,14 @@ def convert_quanti_excel_to_parquet(
     for xlsx_path in xlsx_files:
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
-        try:
-            excel = _excel_file(xlsx_path)
-            for sheet_name in excel.sheet_names:
-                if cancel_check and cancel_check():
-                    raise RuntimeError("Job cancelled")
-                item_code = str(sheet_name).strip().upper()
-                # Basic validation: item code usually starts with S or similar, 7 chars
-                if not item_code:
-                    continue
-                item_files.setdefault(item_code, []).append(xlsx_path)
-        except Exception as exc:
-            _emit(progress_callback, f"Warning: Failed to read {xlsx_path.name}: {exc}")
+        excel = _excel_file(xlsx_path)
+        for sheet_name in excel.sheet_names:
+            if cancel_check and cancel_check():
+                raise RuntimeError("Job cancelled")
+            item_code = str(sheet_name).strip().upper()
+            if not item_code:
+                raise ValueError(f"Excel sheet name is empty: {xlsx_path}")
+            item_files.setdefault(item_code, []).append(xlsx_path)
 
     total_items = len(item_files)
     _emit(progress_callback, f"Identified {total_items} unique items across files.")
@@ -91,18 +87,13 @@ def convert_quanti_excel_to_parquet(
         for xlsx_path in paths:
             if cancel_check and cancel_check():
                 raise RuntimeError("Job cancelled")
-            try:
-                # Assuming first column is 'date' or unnamed date column
-                df = _read_excel(xlsx_path, sheet_name=item_code, index_col=0)
-                df.index.name = "date"
-                # Ensure index is datetime and normalized to date
-                df.index = pd.to_datetime(df.index).date
-                item_df = pd.concat([item_df, df])
-            except Exception as exc:
-                _emit(progress_callback, f"Warning: Failed to read item {item_code} from {xlsx_path.name}: {exc}")
+            df = _read_excel(xlsx_path, sheet_name=item_code, index_col=0)
+            df.index.name = "date"
+            df.index = pd.to_datetime(df.index).date
+            item_df = pd.concat([item_df, df])
 
         if item_df.empty:
-            continue
+            raise ValueError(f"Excel sheet contains no rows: {item_code}")
 
         # Merge duplicate dates by taking the last value (usually most recent or correction)
         item_df = item_df[~item_df.index.duplicated(keep="last")].sort_index()
@@ -149,8 +140,7 @@ def merge_quanti_by_item_datasets(
     for input_dir in inputs:
         by_item = input_dir if input_dir.name == "by_item" else input_dir / "by_item"
         if not by_item.is_dir():
-            _emit(progress_callback, f"Warning: {by_item} is not a directory, skipping.")
-            continue
+            raise ValueError(f"Quantiwise input directory does not exist: {by_item}")
 
         for p in by_item.glob("*.parquet"):
             item_code = p.stem.upper()
@@ -170,12 +160,12 @@ def merge_quanti_by_item_datasets(
                 raise RuntimeError("Job cancelled")
             df = pd.read_parquet(p)
             if "date" not in df.columns:
-                continue
+                raise ValueError(f"Parquet input is missing date column: {p}")
             df = df.set_index("date")
             combined_df = pd.concat([combined_df, df])
 
         if combined_df.empty:
-            continue
+            raise ValueError(f"Parquet inputs contain no rows: {item_code}")
 
         # Resolve overlaps/duplicates
         # Sort and take last for duplicate index/column pairs if any,

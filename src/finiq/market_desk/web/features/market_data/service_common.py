@@ -113,11 +113,13 @@ def _resolve_display_frequency(option_label: str, candle_count: int) -> str:
         return "week"
     if option_label == "월봉":
         return "month"
-    if candle_count <= 180:
-        return "day"
-    if candle_count <= 520:
-        return "week"
-    return "month"
+    if option_label == "자동":
+        if candle_count <= 180:
+            return "day"
+        if candle_count <= 520:
+            return "week"
+        return "month"
+    raise ValueError(f"Unsupported display frequency: {option_label}")
 
 
 def _default_period_from_company(company: dict[str, Any]) -> tuple[date, date]:

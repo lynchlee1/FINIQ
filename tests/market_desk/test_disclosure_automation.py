@@ -78,7 +78,6 @@ def test_normalize_automation_profile_fixes_safe_kind_execution_settings(
     assert profile["data_root"] == str(tmp_path.resolve())
     assert profile["execution"]["max_requests_per_minute"] == 45
     assert profile["execution"]["mutable_lookback_days"] == 7
-    assert profile["execution"]["split_by_year"] is True
     assert profile["decisions"]["s6_sections"]["unmatched_policy"] == "needs_review"
 
 
@@ -686,7 +685,6 @@ def test_html_inspections_require_complete_current_membership(
         "invalid_target_html_count": 0,
         "unexpected_file_count": 0,
         "existing_target_acpt_numbers": ["1", "2"],
-        "detected_output_split_by_year": True,
     }
     monkeypatch.setattr(
         automation,

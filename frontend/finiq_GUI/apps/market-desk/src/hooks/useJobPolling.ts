@@ -101,7 +101,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
         if (data.status === "completed") {
           setActiveJobId(null);
           forgetJobId();
-          if (onSuccess) onSuccess(data.result || data);
+          if (onSuccess) onSuccess(data.result);
           return;
         } else if (data.status === "cancelled") {
           setActiveJobId(null);

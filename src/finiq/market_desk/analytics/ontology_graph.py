@@ -557,7 +557,7 @@ def _load_quanti_ohlcv(
 def _json_number(value: Any) -> int | float:
     number = float(value)
     if not math.isfinite(number):
-        return 0
+        raise ValueError(f"Ontology chart value must be finite: {value!r}")
     if number.is_integer():
         return int(number)
     return number
@@ -821,17 +821,23 @@ def build_ontology_company_panel(
 def _resolve_frequency(display_frequency_label: str, candle_count: int) -> str:
     if display_frequency_label == "일봉":
         return "day"
+    if display_frequency_label == "3일봉":
+        return "3day"
     if display_frequency_label == "5일봉":
         return "5day"
+    if display_frequency_label == "7일봉":
+        return "7day"
     if display_frequency_label == "20일봉":
         return "20day"
     if display_frequency_label == "월봉":
         return "month"
-    if candle_count <= 180:
-        return "day"
-    if candle_count <= 520:
-        return "week"
-    return "month"
+    if display_frequency_label == "자동":
+        if candle_count <= 180:
+            return "day"
+        if candle_count <= 520:
+            return "week"
+        return "month"
+    raise ValueError(f"Unsupported display frequency: {display_frequency_label}")
 
 
 def _empty_company_panel(

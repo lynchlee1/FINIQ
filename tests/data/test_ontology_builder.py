@@ -29,7 +29,47 @@ def test_parse_date_safe():
     assert parse_date_safe("2026-04-30") == date(2026, 4, 30)
     assert parse_date_safe("2026-04-30 17:32") == date(2026, 4, 30)
     assert parse_date_safe("2026년 04월 30일") == date(2026, 4, 30)
-    assert parse_date_safe("invalid") == date(1900, 1, 1)
+    with pytest.raises(ValueError, match="Invalid ontology event date"):
+        parse_date_safe("invalid")
+    with pytest.raises(ValueError, match="Ontology event date is required"):
+        parse_date_safe(None)
+
+
+def test_build_ontology_graph_rejects_unreadable_sources(tmp_path: Path):
+    missing_path = tmp_path / "missing.json"
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        build_ontology_graph(rights_issuance_path=missing_path)
+
+    invalid_path = tmp_path / "invalid.json"
+    invalid_path.write_text("not-json", encoding="utf-8")
+    with pytest.raises(ValueError, match="Failed to read rights issuance parsed source"):
+        build_ontology_graph(rights_issuance_path=invalid_path)
+
+
+def test_ontology_query_rejects_unreadable_graph(tmp_path: Path, monkeypatch):
+    import finiq.config
+    from finiq.data.ontology_query import OntologyGraphQueryService
+
+    missing_path = tmp_path / "missing.json"
+    service = OntologyGraphQueryService(graph_json_path=missing_path)
+    with pytest.raises(FileNotFoundError):
+        service.load_index(force=True)
+
+    invalid_path = tmp_path / "invalid.json"
+    invalid_path.write_text("not-json", encoding="utf-8")
+    service = OntologyGraphQueryService(graph_json_path=invalid_path)
+    with pytest.raises(json.JSONDecodeError):
+        service.load_index(force=True)
+
+    fallback_path = tmp_path / "tmp" / "ontology_graph.json"
+    fallback_path.parent.mkdir()
+    fallback_path.write_text('{"nodes": [], "edges": []}', encoding="utf-8")
+    monkeypatch.setattr(finiq.config, "PROJECT_ROOT", tmp_path)
+    OntologyGraphQueryService._instance = None
+    service = OntologyGraphQueryService()
+    assert service.graph_json_path == tmp_path / "resources" / "ontology_graph.json"
+    with pytest.raises(FileNotFoundError):
+        service.load_index()
 
 def test_classify_investor_type():
     assert classify_investor_type("홍길동") == "Person"

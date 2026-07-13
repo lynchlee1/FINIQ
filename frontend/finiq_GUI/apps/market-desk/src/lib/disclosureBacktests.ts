@@ -29,7 +29,7 @@ export type BacktestResultRow = {
   entryDate: string;
   exitDate: string;
   outcome: string;
-  returnPct: number;
+  returnPct: number | null;
 };
 
 export type BacktestResult = {
@@ -76,11 +76,23 @@ export function runTripleBarrierMethod(input: BacktestInput): BacktestResult {
         entryDate: "",
         exitDate: "",
         outcome: "가격 없음",
-        returnPct: 0,
+        returnPct: null,
       };
     }
 
     const entry = input.candles[entryIndex];
+    if (!Number.isFinite(entry.close) || entry.close <= 0) {
+      return {
+        key: marker.acpt_no || `${marker.time}-${marker.title}`,
+        disclosedAt: marker.disclosed_at || marker.time,
+        group: marker.group || "기타",
+        title: marker.title || "-",
+        entryDate: entry.time,
+        exitDate: "",
+        outcome: "가격 없음",
+        returnPct: null,
+      };
+    }
     const upper = entry.close * (1 + upperBarrier);
     const lower = entry.close * (1 - lowerBarrier);
     const lastIndex = Math.min(input.candles.length - 1, entryIndex + barrierHorizon);
@@ -109,7 +121,7 @@ export function runTripleBarrierMethod(input: BacktestInput): BacktestResult {
       entryDate: entry.time,
       exitDate: exit.time,
       outcome,
-      returnPct: entry.close ? ((exit.close - entry.close) / entry.close) * 100 : 0,
+      returnPct: ((exit.close - entry.close) / entry.close) * 100,
     };
   });
 
@@ -129,6 +141,7 @@ export const BACKTEST_METHODS: BacktestMethodDefinition[] = [
 ];
 
 export function runDisclosureBacktest(methodId: string, input: BacktestInput): BacktestResult {
-  const method = BACKTEST_METHODS.find((candidate) => candidate.id === methodId) ?? BACKTEST_METHODS[0];
+  const method = BACKTEST_METHODS.find((candidate) => candidate.id === methodId);
+  if (!method) throw new Error(`Unsupported backtest method: ${methodId}`);
   return method.run(input);
 }

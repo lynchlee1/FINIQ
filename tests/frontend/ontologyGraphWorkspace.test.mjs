@@ -15,6 +15,13 @@ const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigatio
 const backtestPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureBacktests.ts";
 const terminologyPath = "docs/ui-terminology.md";
 
+test("local backtest rejects an unknown calculation method", async () => {
+  const source = await readFile(backtestPath, "utf8");
+
+  assert.match(source, /if \(!method\) throw new Error\(`Unsupported backtest method:/);
+  assert.doesNotMatch(source, /\?\? BACKTEST_METHODS\[0\]/);
+});
+
 test("graph page uses the real ontology workspace instead of test-data fixtures", async () => {
   const source = await readFile(graphPagePath, "utf8");
 

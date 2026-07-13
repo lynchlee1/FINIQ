@@ -221,7 +221,7 @@ export function OntologyGraphWorkspace() {
         if (current && data.companies.some((company) => company.stock_code === current.stock_code)) {
           return current;
         }
-        return data.companies[0] ?? null;
+        return null;
       });
     } catch (err) {
       if (isAbortError(err)) return;

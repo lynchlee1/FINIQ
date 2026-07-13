@@ -28,8 +28,8 @@ def test_external_html_resume_redownloads_invalid_existing_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     output_directory = tmp_path / "external"
-    output_directory.mkdir()
-    target = output_directory / "20250101000001.html"
+    (output_directory / "2025").mkdir(parents=True)
+    target = output_directory / "2025" / "20250101000001.html"
     target.write_text("broken", encoding="utf-8")
 
     inspection = check_disclosure_html_output_directory_payload(
@@ -109,8 +109,8 @@ def test_content_download_cancellation_manifest_lists_only_saved_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     external_directory = tmp_path / "external"
-    external_directory.mkdir()
-    (external_directory / "20250101000001.html").write_text(
+    (external_directory / "2025").mkdir(parents=True)
+    (external_directory / "2025" / "20250101000001.html").write_text(
         "<html><body><select id='mainDoc'><option value='1|Y' selected>본문</option></select></body></html>",
         encoding="utf-8",
     )
@@ -136,8 +136,8 @@ def test_external_compression_rejects_receipt_number_mismatching_filename(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "external"
-    input_directory.mkdir()
-    (input_directory / "20250101000001.html").write_text(
+    (input_directory / "2025").mkdir(parents=True)
+    (input_directory / "2025" / "20250101000001.html").write_text(
         """
         <html><body>
           <input type="hidden" name="acptNo" value="20250101000002" />

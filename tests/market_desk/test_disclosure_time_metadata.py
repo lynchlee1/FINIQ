@@ -65,6 +65,7 @@ def test_final_parse_record_preserves_kind_disclosed_at(
             "input_directory": str(input_directory),
             "output_directory": str(tmp_path / "converted"),
             "mode": "bond_issuance",
+            "skip_errors": False,
         }
     )
 
@@ -96,7 +97,12 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
     )
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
     payload = apply_workspace_defaults(
-        "parse", {"data_root": str(data_root), "mode": "bond_issuance"}
+        "parse",
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "skip_errors": False,
+        },
     )
 
     result = parse_disclosure_html_payload(payload)
@@ -130,6 +136,7 @@ def test_explicit_missing_kind_metadata_is_not_silently_ignored(
                 "input_directory": str(input_directory),
                 "output_directory": str(tmp_path / "converted"),
                 "mode": "bond_issuance",
+                "skip_errors": False,
                 "filtered_metadata_path": str(tmp_path / "missing-filtered.json"),
             }
         )
@@ -152,6 +159,7 @@ def test_explicit_kind_metadata_must_cover_every_html(
                 "input_directory": str(input_directory),
                 "output_directory": str(tmp_path / "converted"),
                 "mode": "bond_issuance",
+                "skip_errors": False,
                 "filtered_metadata_path": str(tmp_path / "filtered.json"),
             }
         )
@@ -174,6 +182,7 @@ def test_explicit_kind_metadata_rejects_invalid_disclosed_at(
                 "input_directory": str(input_directory),
                 "output_directory": str(tmp_path / "converted"),
                 "mode": "bond_issuance",
+                "skip_errors": False,
                 "filtered_metadata_path": str(tmp_path / "filtered.json"),
             }
         )
@@ -213,6 +222,7 @@ def test_duplicate_kind_metadata_is_rejected(
                 "input_directory": str(input_directory),
                 "output_directory": str(tmp_path / "converted"),
                 "mode": "bond_issuance",
+                "skip_errors": False,
                 "filtered_metadata_path": str(filtered_path),
             }
         )

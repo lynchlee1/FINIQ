@@ -8,6 +8,7 @@ from finiq.data_scraper.core.html_rate_limit import (
 )
 from finiq.market_desk.web.features.disclosures.html_common import *
 
+
 def _fetch_content_html(
     session: requests.Session,
     *,
@@ -40,58 +41,23 @@ def _fetch_content_html(
     return body_response.content
 
 
-def _iter_compressed_external_html_files(
-    source_directory: Path, *, split_by_year: bool
-) -> list[Path]:
-    output_path = source_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
-    if output_path.is_file():
-        return [output_path]
-    if not split_by_year:
-        return []
-    return [
-        year_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
-        for year_directory in sorted(
-            path for path in source_directory.iterdir() if path.is_dir()
-        )
-        if len(year_directory.name) == 4
-        and year_directory.name.isdigit()
-        and (year_directory / COMPRESSED_EXTERNAL_HTML_FILENAME).is_file()
-    ]
-
-
 def _load_compressed_external_html_payload(
-    source_directory: Path, *, split_by_year: bool
+    source_directory: Path,
 ) -> dict[str, Any] | None:
-    compressed_files = _iter_compressed_external_html_files(
-        source_directory, split_by_year=split_by_year
-    )
-    if not compressed_files:
+    compressed_file = source_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+    if not compressed_file.is_file():
         return None
 
-    records: list[dict[str, Any]] = []
-    payloads: list[dict[str, Any]] = []
-    for compressed_file in compressed_files:
-        payload = json.loads(compressed_file.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            msg = f"compressed external HTML JSON is not an object: {compressed_file}"
-            raise ValueError(msg)
-        payloads.append(payload)
-        file_records = payload.get("records")
-        if not isinstance(file_records, list):
-            msg = f"compressed external HTML JSON records is not a list: {compressed_file}"
-            raise ValueError(msg)
-        records.extend(record for record in file_records if isinstance(record, dict))
-
-    if len(payloads) == 1:
-        payload = dict(payloads[0])
-        payload["source_json_path"] = str(compressed_files[0])
-        return payload
-    return {
-        "format": "finiq_disclosure_external_html_compress_collection_v1",
-        "source_json_path": str(source_directory),
-        "split_by_year": True,
-        "records": records,
-    }
+    payload = json.loads(compressed_file.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        msg = f"compressed external HTML JSON is not an object: {compressed_file}"
+        raise ValueError(msg)
+    if not isinstance(payload.get("records"), list):
+        msg = f"compressed external HTML JSON records is not a list: {compressed_file}"
+        raise ValueError(msg)
+    payload = dict(payload)
+    payload["source_json_path"] = str(compressed_file)
+    return payload
 
 
 def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, Any]:
@@ -199,8 +165,6 @@ def _collect_content_cleanup_targets_from_compressed_payload(
 
 def _collect_content_targets_from_external_directory(
     source_directory: Path,
-    *,
-    split_by_year: bool = False,
 ) -> tuple[list[dict[str, str]], Any]:
     if not source_directory.is_dir():
         msg = f"source_directory does not exist: {source_directory}"
@@ -220,23 +184,17 @@ def _collect_content_targets_from_external_directory(
             if acpt_no.isdigit():
                 manifest_order.append(acpt_no)
 
-    compressed_payload = _load_compressed_external_html_payload(
-        source_directory,
-        split_by_year=split_by_year,
-    )
+    compressed_payload = _load_compressed_external_html_payload(source_directory)
     if compressed_payload is not None:
         return _collect_content_targets_from_compressed_payload(compressed_payload)
 
     target_by_acpt_no: dict[str, dict[str, str]] = {}
-    html_paths = sorted(source_directory.glob("*.html"))
-    if split_by_year:
-        html_paths = []
-        for year_directory in sorted(
-            path for path in source_directory.iterdir() if path.is_dir()
-        ):
-            if len(year_directory.name) == 4 and year_directory.name.isdigit():
-                html_paths.extend(sorted(year_directory.glob("*.html")))
-    metadata = _collect_disclosure_metadata_from_json(manifest_payload)
+    html_paths = []
+    for year_directory in sorted(
+        path for path in source_directory.iterdir() if path.is_dir()
+    ):
+        if len(year_directory.name) == 4 and year_directory.name.isdigit():
+            html_paths.extend(sorted(year_directory.glob("*.html")))
     for html_path in html_paths:
         acpt_no = html_path.stem
         if not acpt_no.isdigit():
@@ -245,11 +203,7 @@ def _collect_content_targets_from_external_directory(
         if not doc_no:
             msg = f"selected main docNo not found in external HTML: {html_path}"
             raise ValueError(msg)
-        year = (
-            html_path.parent.name
-            if split_by_year
-            else _year_from_disclosure(acpt_no, metadata.get(acpt_no))
-        )
+        year = html_path.parent.name
         target_by_acpt_no[acpt_no] = {
             "acpt_no": acpt_no,
             "doc_no": doc_no,
@@ -266,15 +220,6 @@ def _collect_content_targets_from_external_directory(
     )
     targets = [target_by_acpt_no[acpt_no] for acpt_no in ordered_acpt_numbers]
     if not targets:
-        if not split_by_year and any(
-            child.is_dir() and len(child.name) == 4 and child.name.isdigit()
-            for child in source_directory.iterdir()
-        ):
-            msg = (
-                "No external viewer HTML files found in source_directory. "
-                "The source directory appears to contain year folders; enable source_split_by_year."
-            )
-            raise ValueError(msg)
         msg = "No external viewer HTML files found in source_directory"
         raise ValueError(msg)
     return targets, manifest_payload
@@ -282,8 +227,6 @@ def _collect_content_targets_from_external_directory(
 
 def _collect_content_cleanup_targets_from_external_directory(
     source_directory: Path,
-    *,
-    split_by_year: bool = False,
 ) -> tuple[list[dict[str, str]], Any]:
     if not source_directory.is_dir():
         msg = f"source_directory does not exist: {source_directory}"
@@ -301,35 +244,24 @@ def _collect_content_cleanup_targets_from_external_directory(
             if acpt_no.isdigit():
                 manifest_order.append(acpt_no)
 
-    compressed_payload = _load_compressed_external_html_payload(
-        source_directory,
-        split_by_year=split_by_year,
-    )
+    compressed_payload = _load_compressed_external_html_payload(source_directory)
     if compressed_payload is not None:
         return _collect_content_cleanup_targets_from_compressed_payload(
             compressed_payload
         )
 
-    html_paths = sorted(source_directory.glob("*.html"))
-    if split_by_year:
-        html_paths = []
-        for year_directory in sorted(
-            path for path in source_directory.iterdir() if path.is_dir()
-        ):
-            if len(year_directory.name) == 4 and year_directory.name.isdigit():
-                html_paths.extend(sorted(year_directory.glob("*.html")))
-
-    metadata = _collect_disclosure_metadata_from_json(manifest_payload)
+    html_paths = []
+    for year_directory in sorted(
+        path for path in source_directory.iterdir() if path.is_dir()
+    ):
+        if len(year_directory.name) == 4 and year_directory.name.isdigit():
+            html_paths.extend(sorted(year_directory.glob("*.html")))
     target_by_acpt_no: dict[str, dict[str, str]] = {}
     for html_path in html_paths:
         acpt_no = html_path.stem
         if not acpt_no.isdigit():
             continue
-        year = (
-            html_path.parent.name
-            if split_by_year
-            else _year_from_disclosure(acpt_no, metadata.get(acpt_no))
-        )
+        year = html_path.parent.name
         target_by_acpt_no[acpt_no] = {"acpt_no": acpt_no, "doc_no": "", "year": year}
 
     ordered_acpt_numbers = [
@@ -342,15 +274,6 @@ def _collect_content_cleanup_targets_from_external_directory(
     )
     targets = [target_by_acpt_no[acpt_no] for acpt_no in ordered_acpt_numbers]
     if not targets:
-        if not split_by_year and any(
-            child.is_dir() and len(child.name) == 4 and child.name.isdigit()
-            for child in source_directory.iterdir()
-        ):
-            msg = (
-                "No external viewer HTML files found in source_directory. "
-                "The source directory appears to contain year folders; enable source_split_by_year."
-            )
-            raise ValueError(msg)
         msg = "No external viewer HTML files found in source_directory"
         raise ValueError(msg)
     return targets, manifest_payload
@@ -461,8 +384,6 @@ def download_disclosure_html_contents_payload(
     if not source_directory_raw and not source_compressed_json_path_raw:
         msg = "source_directory or source_compressed_json_path is required"
         raise ValueError(msg)
-    source_split_by_year = _as_source_split_by_year(body)
-    output_split_by_year = _as_output_split_by_year(body)
     if source_compressed_json_path_raw:
         source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
         compressed_payload = _load_compressed_external_html_file_payload(source_path)
@@ -473,7 +394,6 @@ def download_disclosure_html_contents_payload(
         source_path = Path(source_directory_raw).expanduser().resolve()
         targets, manifest_payload = _collect_content_targets_from_external_directory(
             source_path,
-            split_by_year=source_split_by_year,
         )
 
     targets = _apply_limit_to_targets(targets, body.get("limit"))
@@ -520,8 +440,6 @@ def download_disclosure_html_contents_payload(
     emit(f"HTML 내부 저장 대상 접수번호 {len(acpt_numbers)}건을 준비했습니다.")
     emit(f"외부 HTML 경로: {source_path}")
     emit(f"저장 경로: {resolved_output_directory}")
-    emit(f"입력 분할저장: {'예' if source_split_by_year else '아니오'}")
-    emit(f"출력 분할저장: {'예' if output_split_by_year else '아니오'}")
     emit(
         f"기존 파일 건너뛰기: {'예' if bool(body.get('skip_existing', True)) else '아니오'}"
     )
@@ -533,7 +451,6 @@ def download_disclosure_html_contents_payload(
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
             acpt_numbers,
-            split_by_year=output_split_by_year,
             target_years=target_years,
         )
         existing_acpt_numbers = output_summary["existing_target_acpt_numbers"]
@@ -542,7 +459,6 @@ def download_disclosure_html_contents_payload(
             acpt_no: _target_html_path(
                 resolved_output_directory,
                 acpt_no,
-                split_by_year=output_split_by_year,
                 target_years=target_years,
             )
             for acpt_no in existing_acpt_numbers
@@ -564,23 +480,14 @@ def download_disclosure_html_contents_payload(
         downloaded_paths = []
         if download_acpt_numbers:
             target_by_acpt_no = {target["acpt_no"]: target for target in targets}
-            grouped_targets: dict[str, list[dict[str, str]]] = {
-                "": [target_by_acpt_no[acpt_no] for acpt_no in download_acpt_numbers]
-            }
-            if output_split_by_year:
-                grouped_targets = {}
-                for acpt_no in download_acpt_numbers:
-                    target = target_by_acpt_no[acpt_no]
-                    grouped_targets.setdefault(target_years[acpt_no], []).append(target)
+            grouped_targets: dict[str, list[dict[str, str]]] = {}
+            for acpt_no in download_acpt_numbers:
+                target = target_by_acpt_no[acpt_no]
+                grouped_targets.setdefault(target_years[acpt_no], []).append(target)
             for year, group_targets in grouped_targets.items():
-                group_output_directory = (
-                    resolved_output_directory / year
-                    if output_split_by_year
-                    else resolved_output_directory
-                )
                 downloaded_paths.extend(
                     download_disclosure_content_htmls(
-                        output_directory=group_output_directory,
+                        output_directory=resolved_output_directory / year,
                         request_headers=DEFAULT_REQUEST_HEADERS,
                         targets=[
                             {"acpt_no": target["acpt_no"], "doc_no": target["doc_no"]}
@@ -623,9 +530,6 @@ def download_disclosure_html_contents_payload(
     return {
         "format": "kind_disclosure_html_content_download_v1",
         "output_directory": str(resolved_output_directory),
-        "split_by_year": output_split_by_year,
-        "source_split_by_year": source_split_by_year,
-        "output_split_by_year": output_split_by_year,
         "requested_count": len(acpt_numbers),
         "saved_count": len(saved_paths),
         "cancelled": cancelled,

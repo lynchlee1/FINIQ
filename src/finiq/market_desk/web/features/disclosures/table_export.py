@@ -346,16 +346,19 @@ def _collect_source_folder_rows_by_year(
 
 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:
-    if shard_count <= 1:
-        return 1
     cpu_limit = os.cpu_count() or 1
-    try:
-        requested = int(value or cpu_limit)
-    except (TypeError, ValueError):
+    if value in (None, ""):
         requested = cpu_limit
-    if requested <= 1:
+    else:
+        try:
+            requested = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("table_workers must be an integer") from exc
+        if requested < 1:
+            raise ValueError("table_workers must be >= 1")
+    if shard_count <= 1 or requested == 1:
         return 1
-    return max(1, min(requested, shard_count, cpu_limit))
+    return min(requested, shard_count, cpu_limit)
 
 
 def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) -> None:
@@ -721,7 +724,7 @@ def build_disclosure_table_payload(
             source_path, cancel_check=cancel_check
         )
     shard_workers = _resolve_shard_workers(
-        body.get("table_workers") or body.get("shard_workers"), len(rows_by_year)
+        body.get("table_workers", body.get("shard_workers")), len(rows_by_year)
     )
 
     if progress_callback:
