@@ -104,8 +104,11 @@ def _record_sort_key(record: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def _disclosure_dedup_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    acpt_no = str(record.get("acpt_no") or record.get("acptno") or "").strip()
+    if acpt_no:
+        return (acpt_no, "", "", "")
     return (
-        str(record.get("acpt_no") or record.get("acptno") or "").strip(),
+        "",
         str(record.get("company_id") or "").strip(),
         str(record.get("disclosed_at") or "").strip(),
         str(record.get("title") or "").strip(),
