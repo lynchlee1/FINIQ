@@ -61,7 +61,6 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
       { href: "/download", step: 2, label: "공시내역 다운로드" },
       { href: "/table", step: 3, label: "공시내역 변환" },
       { href: "/filter", step: 4, label: "공시내역 필터링" },
-      { href: "/dart-link", step: 5, label: "KIND-DART 연결" },
     ],
   },
   "html-processing": {

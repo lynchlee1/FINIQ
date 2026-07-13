@@ -249,24 +249,6 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
             "compressed_metadata_path",
             str(workspace.external / "compressed-external-html.json"),
         )
-    elif normalized_kind == "dart_link":
-        _set_default(payload, "output_directory", str(workspace.list / "dart-links"))
-        if not any(
-            payload.get(key)
-            for key in (
-                "records",
-                "source_json_path",
-                "classification_path",
-                "root_directory",
-            )
-        ):
-            has_table_manifest = any(
-                workspace.table.glob("*_shards/*.sqlite_manifest.json")
-            )
-            if has_table_manifest:
-                payload["classification_path"] = str(workspace.table)
-            else:
-                payload["root_directory"] = str(workspace.list)
     return payload
 
 
