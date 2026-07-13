@@ -93,7 +93,7 @@ def test_recursive_find_company_classification_files(tmp_path: Path) -> None:
     date_sqlite = date_dir / "kind.company_classification.sqlite"
     date_sqlite.touch()
 
-    # 5. Excluded directory: viewer_html
+    # 5. A regular nested directory
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     viewer_sqlite = viewer_dir / "kind.company_classification.sqlite"
@@ -108,13 +108,13 @@ def test_recursive_find_company_classification_files(tmp_path: Path) -> None:
     # Run discovery
     found = find_company_classification_files(tmp_path)
 
-    # Should find 1, 2, and 3
+    # Should find 1, 2, 3, and 5
     assert root_sqlite in found
     assert deep_sqlite in found
     assert all_companies in found
+    assert viewer_sqlite in found
 
-    # Should NOT find 4, 5, or 6
+    # Should NOT find 4 or 6
     assert date_sqlite not in found
-    assert viewer_sqlite not in found
     assert git_sqlite not in found
-    assert len(found) == 3
+    assert len(found) == 4

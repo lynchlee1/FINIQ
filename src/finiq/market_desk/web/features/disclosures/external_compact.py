@@ -300,12 +300,14 @@ def _compress_external_html_file(
 
 def _external_html_compress_workers(body: dict[str, Any], total_files: int) -> int:
     raw_workers = body.get("parallel_workers", body.get("workers"))
-    if raw_workers is not None:
+    if raw_workers not in (None, ""):
         try:
             requested_workers = int(raw_workers)
-        except (TypeError, ValueError):
-            requested_workers = 1
-        return max(1, min(requested_workers, total_files))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("parallel_workers must be an integer") from exc
+        if requested_workers < 1:
+            raise ValueError("parallel_workers must be >= 1")
+        return min(requested_workers, total_files)
     return max(1, min(total_files, cpu_count() or 1))
 
 

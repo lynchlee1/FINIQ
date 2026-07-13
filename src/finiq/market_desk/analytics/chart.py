@@ -142,8 +142,12 @@ def aggregate_price_dataframe(
         return price_frame.copy()
 
     multi_day_map = {
+        "3day": 3,
+        "3d": 3,
         "5day": 5,
         "5d": 5,
+        "7day": 7,
+        "7d": 7,
         "20day": 20,
         "20d": 20,
     }

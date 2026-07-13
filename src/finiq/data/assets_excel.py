@@ -1382,22 +1382,6 @@ def _write_sheet_parquet_temp(
     return quality
 
 
-def _existing_output_stem_counts(output_directory: Path) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    if not output_directory.is_dir():
-        return counts
-    for path in output_directory.glob("*.parquet"):
-        if path.name in NON_ACCOUNT_PARQUET_FILES:
-            continue
-        match = re.match(r"^(?P<base>.+?)(?:__(?P<index>\d+))?$", path.stem)
-        if not match:
-            continue
-        base = match.group("base")
-        count = int(match.group("index") or "1")
-        counts[base] = max(counts.get(base, 0), count)
-    return counts
-
-
 def _scan_and_write_asset_excel_parquet(
     source_directory: str | Path,
     temp_output: Path,
@@ -1405,7 +1389,6 @@ def _scan_and_write_asset_excel_parquet(
     *,
     selected_files: list[str] | None = None,
     account_mappings: list[AccountMappingInput] | None = None,
-    resume_failed_only: bool = False,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[
@@ -1414,7 +1397,6 @@ def _scan_and_write_asset_excel_parquet(
     list[dict[str, str]],
     list[dict[str, Any]],
     list[CodeNameMapping],
-    list[dict[str, str]],
     list[tuple[Path, Path]],
 ]:
     source = Path(source_directory).expanduser().resolve()
@@ -1423,18 +1405,11 @@ def _scan_and_write_asset_excel_parquet(
         msg = f"No Excel files found in {source}"
         raise ValueError(msg)
 
-    completed_output_files = {
-        path.name
-        for path in final_output.glob("*.parquet")
-        if resume_failed_only and path.name not in NON_ACCOUNT_PARQUET_FILES
-    } if final_output.is_dir() else set()
-
     def scan_file(file_index: int, xlsx_path: Path) -> tuple[
         list[dict[str, Any]],
         list[dict[str, str]],
         list[dict[str, Any]],
         list[CodeNameMapping],
-        list[dict[str, str]],
     ]:
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
@@ -1442,7 +1417,6 @@ def _scan_and_write_asset_excel_parquet(
         file_skipped: list[dict[str, str]] = []
         file_sheet_summaries: list[dict[str, Any]] = []
         file_code_name_mappings: list[CodeNameMapping] = []
-        file_resume_skipped: list[dict[str, str]] = []
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] {xlsx_path.name} 스캔 중...")
         excel = _excel_file(xlsx_path)
         _emit(progress_callback, f"[파일 {file_index}/{len(xlsx_files)}] Sheet {len(excel.sheet_names)}개 발견")
@@ -1515,33 +1489,6 @@ def _scan_and_write_asset_excel_parquet(
                 "rows": len(frame),
                 "columns": len(frame.columns),
             }
-            completed_output_file = ""
-            if resume_failed_only and f"{output_stem}.parquet" in completed_output_files:
-                completed_output_file = f"{output_stem}.parquet"
-            if completed_output_file:
-                summary = _sheet_summary_payload(
-                    xlsx_path,
-                    sheet_name,
-                    source_directory=source,
-                    account_name=account_name,
-                    account_mappings=account_mappings,
-                    frame=frame,
-                )
-                summary["output_file"] = completed_output_file
-                file_sheet_summaries.append(summary)
-                file_resume_skipped.append(
-                    {
-                        "file_name": xlsx_path.name,
-                        "relative_path": relative_path,
-                        "sheet_name": sheet_name,
-                        "output_file": completed_output_file,
-                        "reason": "이미 변환 완료",
-                    }
-                )
-                _emit(progress_callback, f"  이어하기 건너뜀: 이미 변환 완료 ({completed_output_file})")
-                del frame
-                continue
-
             temp_path = temp_output / f"pending_{file_index}_{sheet_index}_{_safe_output_token(output_stem)}.parquet"
             quality = _write_sheet_parquet_temp(
                 frame,
@@ -1580,7 +1527,7 @@ def _scan_and_write_asset_excel_parquet(
             )
             _emit(progress_callback, f"  임시 저장: {temp_path.name}")
             del frame
-        return file_outputs, file_skipped, file_sheet_summaries, file_code_name_mappings, file_resume_skipped
+        return file_outputs, file_skipped, file_sheet_summaries, file_code_name_mappings
 
     scan_workers = _asset_excel_scan_workers(len(xlsx_files))
     _emit(progress_callback, f"Excel 스캔 워커: {scan_workers}개")
@@ -1601,17 +1548,15 @@ def _scan_and_write_asset_excel_parquet(
     skipped: list[dict[str, str]] = []
     sheet_summaries: list[dict[str, Any]] = []
     code_name_mappings: list[CodeNameMapping] = []
-    resume_skipped: list[dict[str, str]] = []
     temp_outputs: list[dict[str, Any]] = []
     replacements: list[tuple[Path, Path]] = []
-    used_stems: dict[str, int] = _existing_output_stem_counts(final_output) if resume_failed_only else {}
+    used_stems: dict[str, int] = {}
 
-    for file_outputs, file_skipped, file_sheet_summaries, file_code_name_mappings, file_resume_skipped in file_results:
+    for file_outputs, file_skipped, file_sheet_summaries, file_code_name_mappings in file_results:
         temp_outputs.extend(file_outputs)
         skipped.extend(file_skipped)
         sheet_summaries.extend(file_sheet_summaries)
         code_name_mappings.extend(file_code_name_mappings)
-        resume_skipped.extend(file_resume_skipped)
 
     total_outputs = len(temp_outputs)
     mapped_sheet_count = sum(1 for sheet in sheet_summaries if sheet.get("status") == "mapped")
@@ -1625,8 +1570,7 @@ def _scan_and_write_asset_excel_parquet(
         (
             "스캔 완료: "
             f"Sheet {len(sheet_summaries)}개, 정상 {mapped_sheet_count}개, "
-            f"건너뜀 {len(skipped)}개"
-            f"{f', 이어하기 건너뜀 {len(resume_skipped)}개' if resume_failed_only else ''}, "
+            f"건너뜀 {len(skipped)}개, "
             f"계정 {len(mapped_accounts)}개"
         ),
     )
@@ -1678,7 +1622,6 @@ def _scan_and_write_asset_excel_parquet(
         skipped,
         sheet_summaries,
         code_name_mappings,
-        resume_skipped,
         replacements,
     )
 
@@ -1690,7 +1633,6 @@ def convert_asset_excels_to_wide_parquet(
     selected_files: list[str] | None = None,
     account_mappings: list[AccountMappingInput] | None = None,
     write_mode: str = "replace",
-    resume_failed_only: bool = False,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -1708,7 +1650,6 @@ def convert_asset_excels_to_wide_parquet(
     _emit(progress_callback, f"원본 데이터 경로: {source}")
     _emit(progress_callback, f"데이터 경로: {output}")
     _emit(progress_callback, f"저장 방식: {normalized_mode}")
-    _emit(progress_callback, f"이어하기: {'실패분만' if resume_failed_only else '아니오'}")
     if selected_files:
         _emit(progress_callback, f"선택 파일: {len(selected_files)}개")
     else:
@@ -1724,19 +1665,15 @@ def convert_asset_excels_to_wide_parquet(
         temp_output = Path(temp_output_name)
         _emit(progress_callback, f"임시 데이터 경로: {temp_output}")
         _emit(progress_callback, "Sheet 단위 생성: Sheet를 읽는 즉시 임시 Parquet로 저장")
-        outputs, sources_by_account, skipped, sheet_summaries, code_name_mappings, resume_skipped, replacements = _scan_and_write_asset_excel_parquet(
+        outputs, sources_by_account, skipped, sheet_summaries, code_name_mappings, replacements = _scan_and_write_asset_excel_parquet(
             source,
             temp_output,
             output,
             selected_files=selected_files,
             account_mappings=account_mappings,
-            resume_failed_only=resume_failed_only,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
-
-        if resume_failed_only:
-            code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
 
         code_name_mapping = _code_name_mapping_frame(code_name_mappings)
         code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
@@ -1754,8 +1691,6 @@ def convert_asset_excels_to_wide_parquet(
         progress_callback,
         f"Quantiwise 변환 완료: Sheet Parquet {len(outputs)}개, 건너뛴 Sheet {len(skipped)}개, 데이터 경로 {output}",
     )
-    if resume_failed_only:
-        _emit(progress_callback, f"이어하기 건너뜀: {len(resume_skipped)}개")
     for item in skipped:
         _emit(
             progress_callback,
@@ -1769,7 +1704,6 @@ def convert_asset_excels_to_wide_parquet(
         "sheets_processed": len(outputs),
         "accounts_processed": len(sources_by_account),
         "write_mode": normalized_mode,
-        "resume_failed_only": resume_failed_only,
         "selected_files": selected_files or [],
         "conflict_policy": "error",
         "code_name_mapping": {
@@ -1779,7 +1713,6 @@ def convert_asset_excels_to_wide_parquet(
         "outputs": outputs,
         "conflicts": {},
         "skipped": skipped,
-        "resume_skipped": resume_skipped,
         "sheets": sheet_summaries,
     }
 

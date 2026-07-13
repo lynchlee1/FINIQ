@@ -43,7 +43,11 @@ def filter_disclosures_payload(
     exclude_title_keywords = _split_keywords(body.get("exclude_title_keywords"))
     title_match_mode = str(body.get("title_match_mode") or "or").strip().casefold()
     if title_match_mode not in {"or", "and"}:
-        title_match_mode = "or"
+        raise ValueError("title_match_mode must be one of: or, and")
+    if filter_blocks is None:
+        filter_blocks = []
+    elif not isinstance(filter_blocks, list):
+        raise ValueError("filter_blocks must be a list")
     company_keyword = str(body.get("company_keyword") or "").strip().casefold()
     submitter_keyword = str(body.get("submitter_keyword") or "").strip().casefold()
     market = str(body.get("market") or "전체").strip() or "전체"

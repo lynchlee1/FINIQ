@@ -19,11 +19,12 @@ def compress_disclosure_external_html_payload(
         msg = "input_directory is required"
         raise ValueError(msg)
     input_directory = Path(input_directory_raw).expanduser().resolve()
-    input_split_by_year = _as_input_split_by_year(body)
     limit = _parse_merge_limit(body.get("limit"))
-    output_directory = _resolve_external_compress_output_directory(
-        str(body.get("output_directory") or body.get("output_path") or "").strip(),
-        input_directory,
+    output_directory_raw = str(body.get("output_directory") or "").strip()
+    output_directory = (
+        Path(output_directory_raw).expanduser().resolve()
+        if output_directory_raw
+        else input_directory
     )
 
     progress_log: list[str] = []
@@ -33,9 +34,7 @@ def compress_disclosure_external_html_payload(
         if progress_callback is not None:
             progress_callback(message)
 
-    html_files = _collect_external_html_files(
-        input_directory, split_by_year=input_split_by_year
-    )
+    html_files = _collect_yearly_html_files(input_directory)
     if limit is not None:
         html_files = html_files[:limit]
     if not html_files:
@@ -52,8 +51,6 @@ def compress_disclosure_external_html_payload(
 
     emit(f"외부 HTML 압축 대상 {len(html_files)}건을 찾았습니다.")
     emit(f"입력 경로: {input_directory}")
-    emit(f"입력 분할저장: {'예' if input_split_by_year else '아니오'}")
-    emit("출력 분할저장: 아니오 (압축 JSON은 단일 파일로 저장)")
     emit(f"병렬 처리: {worker_count}개 워커")
 
     indexed_records: list[tuple[str, str, dict[str, Any]] | None] = [None] * len(

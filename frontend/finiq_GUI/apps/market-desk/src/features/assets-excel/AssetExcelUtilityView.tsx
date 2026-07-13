@@ -71,14 +71,12 @@ function jobStatusLines(data: any): string[] {
       return lines;
     }
     const skipped = data.result.skipped || [];
-    const resumeSkipped = data.result.resume_skipped || [];
     lines.push(
       "",
       "변환 완료",
       `Sheet Parquet: ${formatInteger(data.result.sheets_processed ?? Object.keys(data.result.outputs || {}).length)}개`,
       `계정: ${formatInteger(data.result.accounts_processed)}개`,
       `건너뛴 Sheet: ${formatInteger(skipped.length)}개`,
-      `이어하기 건너뜀: ${formatInteger(resumeSkipped.length)}개`,
       `데이터 경로: ${data.result.output_directory || ""}`,
     );
     if (skipped.length) {
@@ -975,7 +973,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     }
   };
 
-  const handleStart = async (resumeFailedOnly = false) => {
+  const handleStart = async () => {
     if (activeJobId) return;
     if (isMergeMode) {
       if (!mergeBaseDirectory.trim()) {
@@ -1048,7 +1046,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
         write_mode: writeMode,
         selected_files: selectedConvertFiles,
         account_mappings: normalizedAccountMappings,
-        resume_failed_only: resumeFailedOnly,
       });
       startPolling(data.job_id);
     } catch (err: any) {
@@ -1399,14 +1396,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length || !selectedConvertFileCount}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length || !selectedConvertFileCount}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
-                </Button>
-                <Button variant="outline" className="w-full" onClick={() => handleStart(true)} disabled={!!activeJobId || loading || mappingsLoading || !sourceDirectory.trim() || !outputDirectory.trim() || !excelFiles.length || !selectedConvertFileCount}>
-                  {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                  실패분 이어서 실행
                 </Button>
                 <Button variant="outline" className="w-full" onClick={cancelJob} disabled={!activeJobId}>
                   {UI_TEXT.actions.cancelJob}
@@ -1609,7 +1602,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
                   중복 검사하기
                 </Button>
-                <Button className="w-full" onClick={() => handleStart(false)} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || (!mergeSameDirectory && !outputDirectory.trim()) || !mergeSelectionReady}>
+                <Button className="w-full" onClick={handleStart} disabled={!!activeJobId || loading || !mergeBaseDirectory.trim() || (!mergeSameDirectory && !outputDirectory.trim()) || !mergeSelectionReady}>
                   {activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>

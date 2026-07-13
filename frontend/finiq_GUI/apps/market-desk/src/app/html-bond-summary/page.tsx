@@ -15,6 +15,12 @@ import {
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { formatInteger } from "@/lib/format";
 
+const optionalNonnegativeInteger = (value: any) => {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+};
+
 export default function HtmlBondSummaryPage() {
   const [loading, setLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
@@ -98,9 +104,9 @@ export default function HtmlBondSummaryPage() {
   };
 
   const getCorrectionLabel = (record: any) => {
-    const current = Number(record.current_sequence ?? 0);
-    const total = Number(record.family_member_count || 0);
-    if (!total || total <= 1) return "-";
+    const current = optionalNonnegativeInteger(record.current_sequence);
+    const total = optionalNonnegativeInteger(record.family_member_count);
+    if (current === null || total === null || total <= 1) return "-";
     return `${current + 1}/${total}`;
   };
 
@@ -149,19 +155,22 @@ export default function HtmlBondSummaryPage() {
       }
 
       // Correction filter
-      const current = Number(record.current_sequence ?? 0);
-      const total = Number(record.family_member_count || 0);
-      if (bondCorrectionFilter === "corrected" && total <= 1) return false;
-      if (bondCorrectionFilter === "current" && current === 0) return false;
-      if (bondCorrectionFilter === "latest" && (total === 0 || current !== total - 1)) return false;
+      const current = optionalNonnegativeInteger(record.current_sequence);
+      const total = optionalNonnegativeInteger(record.family_member_count);
+      if (bondCorrectionFilter !== "all") {
+        if (current === null || total === null) return false;
+        if (bondCorrectionFilter === "corrected" && total <= 1) return false;
+        if (bondCorrectionFilter === "current" && current === 0) return false;
+        if (bondCorrectionFilter === "latest" && current !== total - 1) return false;
+      }
 
       return true;
     });
   }, [bondSummary, bondSearch, bondCorrectionFilter]);
 
   const selectedRecord = useMemo(() => {
-    if (!selectedBondKey) return filteredRecords[0] || null;
-    return filteredRecords.find((r: any) => getRecordKey(r) === selectedBondKey) || filteredRecords[0] || null;
+    if (!selectedBondKey) return null;
+    return filteredRecords.find((r: any) => getRecordKey(r) === selectedBondKey) || null;
   }, [filteredRecords, selectedBondKey]);
 
   const conditionFields: HtmlWorkflowField[] = [

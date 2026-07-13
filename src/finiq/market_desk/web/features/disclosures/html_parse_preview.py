@@ -116,9 +116,11 @@ def _filter_candidate_workers(value: Any, total_files: int) -> int:
         return min(8, max(1, total_files))
     try:
         requested_workers = int(value)
-    except (TypeError, ValueError):
-        requested_workers = 8
-    return max(1, min(requested_workers, max(1, total_files), 16))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("parallel_workers must be an integer") from exc
+    if requested_workers < 1:
+        raise ValueError("parallel_workers must be >= 1")
+    return min(requested_workers, max(1, total_files), 16)
 
 
 def _extract_filter_candidate_from_file(

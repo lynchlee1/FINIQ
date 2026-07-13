@@ -36,7 +36,6 @@ def download_disclosure_html_payload(
         raise ValueError(msg)
 
     acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
-    split_by_year = _as_output_split_by_year(body)
     target_years = _target_years_from_json(source_json, acpt_numbers)
 
     cancel_token = str(body.get("cancel_token") or "").strip() or None
@@ -44,6 +43,13 @@ def download_disclosure_html_payload(
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     progress_interval = _parse_progress_interval(body.get("progress_interval"))
+    raw_max_workers = body.get("max_workers")
+    try:
+        max_workers = 5 if raw_max_workers in (None, "") else int(raw_max_workers)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_workers must be an integer") from exc
+    if max_workers < 1:
+        raise ValueError("max_workers must be >= 1")
     progress_log: list[str] = []
     processed_count = 0
 
@@ -69,7 +75,6 @@ def download_disclosure_html_payload(
 
     emit(f"HTML 저장 대상 접수번호 {len(acpt_numbers)}건을 준비했습니다.")
     emit(f"저장 경로: {resolved_output_directory}")
-    emit(f"분할저장: {'예' if split_by_year else '아니오'}")
     emit(
         f"기존 파일 건너뛰기: {'예' if bool(body.get('skip_existing', True)) else '아니오'}"
     )
@@ -81,7 +86,6 @@ def download_disclosure_html_payload(
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
             acpt_numbers,
-            split_by_year=split_by_year,
             target_years=target_years,
         )
         existing_acpt_numbers = output_summary["existing_target_acpt_numbers"]
@@ -90,7 +94,6 @@ def download_disclosure_html_payload(
             acpt_no: _target_html_path(
                 resolved_output_directory,
                 acpt_no,
-                split_by_year=split_by_year,
                 target_years=target_years,
             )
             for acpt_no in existing_acpt_numbers
@@ -111,22 +114,15 @@ def download_disclosure_html_payload(
     try:
         downloaded_paths = []
         if download_acpt_numbers:
-            grouped_acpt_numbers: dict[str, list[str]] = {"": download_acpt_numbers}
-            if split_by_year:
-                grouped_acpt_numbers = {}
-                for acpt_no in download_acpt_numbers:
-                    grouped_acpt_numbers.setdefault(target_years[acpt_no], []).append(
-                        acpt_no
-                    )
-            for year, group_acpt_numbers in grouped_acpt_numbers.items():
-                group_output_directory = (
-                    resolved_output_directory / year
-                    if split_by_year
-                    else resolved_output_directory
+            grouped_acpt_numbers: dict[str, list[str]] = {}
+            for acpt_no in download_acpt_numbers:
+                grouped_acpt_numbers.setdefault(target_years[acpt_no], []).append(
+                    acpt_no
                 )
+            for year, group_acpt_numbers in grouped_acpt_numbers.items():
                 downloaded_paths.extend(
                     download_disclosure_viewer_htmls(
-                        output_directory=group_output_directory,
+                        output_directory=resolved_output_directory / year,
                         request_headers=DEFAULT_REQUEST_HEADERS,
                         acpt_numbers=group_acpt_numbers,
                         timeout=float(body.get("timeout") or 20.0),
@@ -140,7 +136,7 @@ def download_disclosure_html_payload(
                         progress_callback=handle_progress,
                         cancel_check=lambda: _is_cancelled(cancel_token)
                         or bool(cancel_check and cancel_check()),
-                        max_workers=int(body.get("max_workers") or 5),
+                        max_workers=max_workers,
                         max_retries=int(body.get("max_retries") or 2),
                     )
                 )
@@ -168,8 +164,6 @@ def download_disclosure_html_payload(
     return {
         "format": "kind_disclosure_html_download_v1",
         "output_directory": str(resolved_output_directory),
-        "split_by_year": split_by_year,
-        "output_split_by_year": split_by_year,
         "requested_count": len(acpt_numbers),
         "saved_count": len(saved_paths),
         "cancelled": cancelled,

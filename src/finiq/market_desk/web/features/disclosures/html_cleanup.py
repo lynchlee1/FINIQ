@@ -13,9 +13,6 @@ def clean_disclosure_html_output_directory_payload(
     if not output_directory:
         msg = "output_directory is required"
         raise ValueError(msg)
-    source_split_by_year = _as_source_split_by_year(body)
-    output_split_by_year = _as_output_split_by_year(body)
-
     source_json = body.get("json")
     if source_json is None:
         source_json = body.get("payload")
@@ -52,7 +49,6 @@ def clean_disclosure_html_output_directory_payload(
         targets, _manifest_payload = (
             html_content_download._collect_content_cleanup_targets_from_external_directory(
                 source_directory,
-                split_by_year=source_split_by_year,
             )
         )
         targets = _apply_limit_to_targets(targets, body.get("limit"))
@@ -89,7 +85,6 @@ def clean_disclosure_html_output_directory_payload(
         planned_summary = _delete_unexpected_html_output_directory_files(
             resolved_output_directory,
             acpt_numbers,
-            split_by_year=output_split_by_year,
             target_years=target_years,
             dry_run=True,
         )
@@ -100,7 +95,6 @@ def clean_disclosure_html_output_directory_payload(
     summary = _delete_unexpected_html_output_directory_files(
         resolved_output_directory,
         acpt_numbers,
-        split_by_year=output_split_by_year,
         target_years=target_years,
         dry_run=dry_run,
     )
@@ -109,9 +103,6 @@ def clean_disclosure_html_output_directory_payload(
         "source_type": source_type,
         "source_path": source_path,
         "output_directory": str(resolved_output_directory),
-        "split_by_year": output_split_by_year,
-        "source_split_by_year": source_split_by_year,
-        "output_split_by_year": output_split_by_year,
         "dry_run": dry_run,
         "requested_count": len(acpt_numbers),
         "deleted_count": 0 if dry_run else len(summary["deleted_files"]),
@@ -127,24 +118,6 @@ def check_disclosure_html_output_directory_payload(
     """Inspect existing HTML download files without deleting anything."""
     payload = dict(body)
     payload["dry_run"] = True
-    output_directory_raw = str(body.get("output_directory") or "").strip()
-    detected_output_split_by_year = None
-    if output_directory_raw:
-        detected_output_directory_split_by_year = _detect_html_split_by_year(
-            Path(output_directory_raw).expanduser()
-        )
-        if detected_output_directory_split_by_year is not None:
-            detected_output_split_by_year = detected_output_directory_split_by_year
-            payload["split_by_year"] = detected_output_directory_split_by_year
-            payload["output_split_by_year"] = detected_output_directory_split_by_year
-    source_directory_raw = str(body.get("source_directory") or "").strip()
-    detected_source_split_by_year = None
-    if source_directory_raw:
-        detected_source_split_by_year = _detect_html_split_by_year(
-            Path(source_directory_raw).expanduser()
-        )
-        if detected_source_split_by_year is not None:
-            payload["source_split_by_year"] = detected_source_split_by_year
     summary = clean_disclosure_html_output_directory_payload(payload)
     existing_count = int(summary.get("existing_target_html_count") or 0)
     total_file_count = int(summary.get("total_file_count") or 0)
@@ -152,8 +125,6 @@ def check_disclosure_html_output_directory_payload(
         **summary,
         "format": "kind_disclosure_html_existing_check_v1",
         "has_existing": existing_count > 0 or total_file_count > 0,
-        "detected_output_split_by_year": detected_output_split_by_year,
-        "detected_source_split_by_year": detected_source_split_by_year,
     }
 
 
@@ -194,10 +165,8 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         resolved_source_path = str(source_compressed_json_path)
     elif source_directory_raw:
         source_directory = Path(source_directory_raw).expanduser().resolve()
-        source_split_by_year = _as_source_split_by_year(body)
         targets, manifest_payload = html_content_download._collect_content_targets_from_external_directory(
             source_directory,
-            split_by_year=source_split_by_year,
         )
         targets = _apply_limit_to_targets(targets, body.get("limit"))
         acpt_numbers = [target["acpt_no"] for target in targets]

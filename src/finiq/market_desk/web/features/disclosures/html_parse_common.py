@@ -510,9 +510,11 @@ def _parse_parallel_workers(value: Any, total_files: int) -> int:
         return 1
     try:
         requested_workers = int(value)
-    except (TypeError, ValueError):
-        requested_workers = 1
-    return max(1, min(requested_workers, max(1, total_files)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("parallel_workers must be an integer") from exc
+    if requested_workers < 1:
+        raise ValueError("parallel_workers must be >= 1")
+    return min(requested_workers, max(1, total_files))
 
 
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
@@ -588,7 +590,20 @@ def _parse_record_filters(value: Any) -> list[dict[str, Any]]:
 
 
 def _parse_filter_blocks(value: Any) -> list[dict[str, Any]]:
-    return value if isinstance(value, list) else []
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("filter_blocks must be a list")
+    return value
+
+
+def _parse_skip_errors(body: dict[str, Any]) -> bool:
+    if "skip_errors" not in body:
+        raise ValueError("skip_errors is required")
+    value = body["skip_errors"]
+    if not isinstance(value, bool):
+        raise ValueError("skip_errors must be a boolean")
+    return value
 
 
 def _parse_metadata_paths(
@@ -704,7 +719,7 @@ def _build_parse_request(
         metadata_index=metadata_index,
         families=families,
         limit=limit,
-        skip_errors=bool(body.get("skip_errors", True)),
+        skip_errors=_parse_skip_errors(body),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
         parallel_workers=_parse_parallel_workers(
             body.get("parallel_workers", body.get("workers")), len(html_files)
@@ -970,10 +985,7 @@ def _metadata_title_for_file(
 
 
 def _parser_accepts_title(parser: ParseFunction) -> bool:
-    try:
-        return "title" in signature(parser).parameters
-    except (TypeError, ValueError):
-        return False
+    return "title" in signature(parser).parameters
 
 
 def _parse_html_file_record(request: ParseRequest, html_file: Path) -> dict[str, Any]:

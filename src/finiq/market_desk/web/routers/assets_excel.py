@@ -37,7 +37,6 @@ class AssetExcelConvertRequest(BaseModel):
     selected_files: list[str] = []
     account_mappings: Optional[list[AssetAccountMappingRequest]] = None
     write_mode: str = "replace"
-    resume_failed_only: bool = False
 
 
 class AssetParquetMergeRequest(BaseModel):
@@ -121,7 +120,6 @@ def create_assets_excel_router(
                     for mapping in request.account_mappings
                 ] if request.account_mappings is not None else None,
                 write_mode=request.write_mode,
-                resume_failed_only=request.resume_failed_only,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -139,7 +137,6 @@ def create_assets_excel_router(
                     for mapping in request.account_mappings
                 ] if request.account_mappings is not None else None,
                 write_mode=request.write_mode,
-                resume_failed_only=request.resume_failed_only,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

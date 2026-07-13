@@ -86,7 +86,8 @@ test("html section split keeps workspace paths directly editable", async () => {
   assert.match(storeSource, /disclosure_separate_output_directory: boolean/);
   assert.match(storeSource, /disclosure_separate_output_directory: false/);
   assert.match(pageSource, /disclosure_separate_output_directory: useSeparateOutputDirectory/);
-  assert.match(pageSource, /config\.html_section_split_output_directory \|\| \(defaultInput \? `\$\{defaultInput\}_sections` : ""\)/);
+  assert.match(pageSource, /setOutputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
+  assert.doesNotMatch(pageSource, /`\$\{defaultInput\}_sections`/);
   const pathFields = pageSource.match(/const folderPathFields:[\s\S]*?const splitOptionFields:/)?.[0] ?? "";
   assert.doesNotMatch(pathFields, /disabled:/);
   assert.match(pathFields, /label: "작업공간 디렉토리"/);

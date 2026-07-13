@@ -68,9 +68,9 @@ def normalize_company_id(company_id: str | None) -> str:
 
 
 def parse_date_safe(date_str: str | None) -> date:
-    """Safely parse date strings (ISO, Korean, or fallback)."""
+    """Parse a supported ontology event date."""
     if not date_str:
-        return date(1900, 1, 1)
+        raise ValueError("Ontology event date is required")
     
     date_str = str(date_str).strip()
     if len(date_str) >= 10:
@@ -79,15 +79,27 @@ def parse_date_safe(date_str: str | None) -> date:
         except ValueError:
             pass
 
-    # Match YYYY년 MM월 DD일
-    try:
-        match = re.search(r"(\d{4})[년\-\./\s]+(\d{1,2})[월\-\./\s]+(\d{1,2})", date_str)
-        if match:
+    match = re.search(r"(\d{4})[년\-\./\s]+(\d{1,2})[월\-\./\s]+(\d{1,2})", date_str)
+    if match:
+        try:
             return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-    except Exception:
-        pass
+        except ValueError:
+            pass
 
-    return date(1900, 1, 1)
+    raise ValueError(f"Invalid ontology event date: {date_str!r}")
+
+
+def _load_json_object(path: str | Path, *, source_name: str) -> dict[str, Any]:
+    source_path = Path(path)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"{source_name} does not exist: {source_path}")
+    try:
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Failed to read {source_name}: {source_path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{source_name} must contain a JSON object: {source_path}")
+    return payload
 
 
 def classify_investor_type(name: str) -> str:
@@ -162,22 +174,17 @@ def build_ontology_graph(
     # This enables Entity Resolution to merge corporate investors with company nodes!
     company_name_to_id: Dict[str, str] = {}
     
-    def index_companies(f_path):
-        if not f_path or not Path(f_path).exists():
+    def index_companies(f_path: str | Path | None) -> None:
+        if not f_path:
             return
-        try:
-            with open(f_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                disclosures = data.get("disclosures", [])
-                for d in disclosures:
-                    raw_id = d.get("company_id") or d.get("company_key")
-                    code = normalize_company_id(raw_id)
-                    name = d.get("company_name") or d.get("submitter")
-                    if code and name:
-                        norm_name = normalize_entity_name(name)
-                        company_name_to_id[norm_name] = f"company_{code}"
-        except Exception:
-            pass
+        data = _load_json_object(f_path, source_name="ontology filtered source")
+        for disclosure in data.get("disclosures", []):
+            raw_id = disclosure.get("company_id") or disclosure.get("company_key")
+            code = normalize_company_id(raw_id)
+            name = disclosure.get("company_name") or disclosure.get("submitter")
+            if code and name:
+                norm_name = normalize_entity_name(name)
+                company_name_to_id[norm_name] = f"company_{code}"
 
     index_companies(rights_filtered_path)
     index_companies(bond_filtered_path)
@@ -245,28 +252,17 @@ def _process_rights_issuance(
     if parsed_path is None:
         return
     parsed_path = Path(parsed_path)
-    if not parsed_path.exists():
-        return
+    parsed_data = _load_json_object(parsed_path, source_name="rights issuance parsed source")
 
     # Load filtered data for company metadata mapping
     filtered_map = {}
-    if filtered_path and Path(filtered_path).exists():
-        try:
-            with open(filtered_path, "r", encoding="utf-8") as f:
-                filtered_data = json.load(f)
-                for disc in filtered_data.get("disclosures", []):
-                    acpt = disc.get("acpt_no")
-                    if acpt:
-                        filtered_map[acpt] = disc
-        except Exception:
-            pass
-
-    try:
-        with open(parsed_path, "r", encoding="utf-8") as f:
-            parsed_data = json.load(f)
-            records = parsed_data.get("records", [])
-    except Exception:
-        return
+    if filtered_path:
+        filtered_data = _load_json_object(filtered_path, source_name="rights issuance filtered source")
+        for disc in filtered_data.get("disclosures", []):
+            acpt = disc.get("acpt_no")
+            if acpt:
+                filtered_map[acpt] = disc
+    records = parsed_data.get("records", [])
 
     for rec in records:
         acpt_no = rec.get("acpt_no")
@@ -536,28 +532,17 @@ def _process_bond_issuance(
     if parsed_path is None:
         return
     parsed_path = Path(parsed_path)
-    if not parsed_path.exists():
-        return
+    parsed_data = _load_json_object(parsed_path, source_name="bond issuance parsed source")
 
     # Load filtered data for company metadata mapping
     filtered_map = {}
-    if filtered_path and Path(filtered_path).exists():
-        try:
-            with open(filtered_path, "r", encoding="utf-8") as f:
-                filtered_data = json.load(f)
-                for disc in filtered_data.get("disclosures", []):
-                    acpt = disc.get("acpt_no")
-                    if acpt:
-                        filtered_map[acpt] = disc
-        except Exception:
-            pass
-
-    try:
-        with open(parsed_path, "r", encoding="utf-8") as f:
-            parsed_data = json.load(f)
-            records = parsed_data.get("records", [])
-    except Exception:
-        return
+    if filtered_path:
+        filtered_data = _load_json_object(filtered_path, source_name="bond issuance filtered source")
+        for disc in filtered_data.get("disclosures", []):
+            acpt = disc.get("acpt_no")
+            if acpt:
+                filtered_map[acpt] = disc
+    records = parsed_data.get("records", [])
 
     for rec in records:
         acpt_no = rec.get("acpt_no")
@@ -813,29 +798,17 @@ def _process_shareholder_meetings(
     if filtered_path is None:
         return
     filtered_path = Path(filtered_path)
-    if not filtered_path.exists():
-        return
+    filtered_data = _load_json_object(filtered_path, source_name="shareholder meeting filtered source")
 
     # Load parsed data if provided
     parsed_map = {}
-    if parsed_path and Path(parsed_path).exists():
-        try:
-            with open(parsed_path, "r", encoding="utf-8") as f:
-                parsed_data = json.load(f)
-                records = parsed_data.get("records", [])
-                for rec in records:
-                    acpt = rec.get("acpt_no")
-                    if acpt:
-                        parsed_map[acpt] = rec
-        except Exception:
-            pass
-
-    try:
-        with open(filtered_path, "r", encoding="utf-8") as f:
-            filtered_data = json.load(f)
-            disclosures = filtered_data.get("disclosures", [])
-    except Exception:
-        return
+    if parsed_path:
+        parsed_data = _load_json_object(parsed_path, source_name="shareholder meeting parsed source")
+        for rec in parsed_data.get("records", []):
+            acpt = rec.get("acpt_no")
+            if acpt:
+                parsed_map[acpt] = rec
+    disclosures = filtered_data.get("disclosures", [])
 
     for disc in disclosures:
         acpt_no = disc.get("acpt_no")
@@ -1076,6 +1049,5 @@ def export_ontology_to_web_json(
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(out_data, f, ensure_ascii=False, indent=2)
-
 
 

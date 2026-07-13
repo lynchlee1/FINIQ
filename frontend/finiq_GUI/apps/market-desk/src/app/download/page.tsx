@@ -200,7 +200,7 @@ export default function DownloadPage() {
           setSettingsPanelOpen(false);
         }
       } else {
-        setResult(data.result || data);
+        setResult(data);
       }
     },
     onError: (error) => {

@@ -174,7 +174,7 @@ export function DisclosureAnalysisWorkspace() {
         if (current && data.companies.some((company) => company.stock_code === current.stock_code)) {
           return current;
         }
-        return data.companies[0] ?? null;
+        return null;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "종목을 불러오지 못했습니다.");
@@ -205,7 +205,7 @@ export function DisclosureAnalysisWorkspace() {
         if (current && data.companies.some((company) => company.stock_code === current.stock_code)) {
           return current;
         }
-        return data.companies[0] ?? null;
+        return null;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "결과 조회 종목을 불러오지 못했습니다.");

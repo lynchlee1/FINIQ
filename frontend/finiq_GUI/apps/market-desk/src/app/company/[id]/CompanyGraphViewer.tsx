@@ -69,7 +69,6 @@ export function CompanyGraphViewer({
       console.error(err);
       if (mounted) {
         setLoadError(err instanceof Error ? err.message : 'Graph View 데이터를 불러오지 못했습니다.');
-        replaceGraph({ nodes: [], edges: [] } as any);
         setLoading(false);
       }
     });

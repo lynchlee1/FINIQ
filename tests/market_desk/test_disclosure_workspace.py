@@ -86,13 +86,11 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     assert filtered["html_transfer_path"] == str(workspace.filtered / "filtered.json")
     external = apply_workspace_defaults("download", {"data_root": str(workspace.root)})
     assert external["output_directory"] == str(workspace.external)
-    assert external["output_split_by_year"] is True
     internal = apply_workspace_defaults(
         "content_download", {"data_root": str(workspace.root)}
     )
     assert internal["source_directory"] == str(workspace.external)
     assert internal["output_directory"] == str(workspace.internal)
-    assert internal["output_split_by_year"] is True
     sections = apply_workspace_defaults(
         "section_save", {"data_root": str(workspace.root)}
     )
@@ -101,6 +99,7 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     converted = apply_workspace_defaults(
         "parse", {"data_root": str(workspace.root), "mode": "bond_issuance"}
     )
+    assert "skip_errors" not in converted
     assert converted["input_directory"] == str(workspace.sections)
     assert converted["output_directory"] == str(
         workspace.converted / "bond_issuance"

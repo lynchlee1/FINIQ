@@ -9,15 +9,18 @@ class FilterCancelled(Exception):
 
 
 def _resolve_filter_workers(value: object, item_count: int) -> int:
+    if value in (None, ""):
+        requested = min(8, os.cpu_count() or 1)
+    else:
+        try:
+            requested = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("filter_workers must be an integer") from exc
+        if requested < 1:
+            raise ValueError("filter_workers must be >= 1")
     if item_count <= 1:
         return max(1, item_count)
-    try:
-        requested = int(value or 0)
-    except (TypeError, ValueError):
-        requested = 0
-    if requested < 1:
-        requested = min(8, os.cpu_count() or 1)
-    return max(1, min(requested, item_count, 32))
+    return min(requested, item_count, 32)
 
 
 def _progress_interval(value: object) -> int:

@@ -25,7 +25,6 @@ export type AssetExcelConvertPayload = {
   write_mode: string;
   selected_files?: string[];
   account_mappings?: AssetAccountMapping[];
-  resume_failed_only?: boolean;
 };
 
 export type AssetParquetMergePayload = {

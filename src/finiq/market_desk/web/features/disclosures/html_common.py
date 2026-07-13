@@ -177,28 +177,6 @@ def _load_source_json_path_payload(source_json_path: Any) -> tuple[Any, str]:
     return json.loads(source_path.read_text(encoding="utf-8")), str(source_path)
 
 
-def _as_split_by_year(body: dict[str, Any]) -> bool:
-    return bool(body.get("split_by_year"))
-
-
-def _as_named_split_by_year(body: dict[str, Any], key: str) -> bool:
-    if key in body:
-        return bool(body.get(key))
-    return _as_split_by_year(body)
-
-
-def _as_input_split_by_year(body: dict[str, Any]) -> bool:
-    return _as_named_split_by_year(body, "input_split_by_year")
-
-
-def _as_source_split_by_year(body: dict[str, Any]) -> bool:
-    return _as_named_split_by_year(body, "source_split_by_year")
-
-
-def _as_output_split_by_year(body: dict[str, Any]) -> bool:
-    return _as_named_split_by_year(body, "output_split_by_year")
-
-
 def _year_from_disclosure(
     acpt_no: str, disclosure: dict[str, Any] | None = None
 ) -> str:
@@ -207,13 +185,13 @@ def _year_from_disclosure(
         return disclosed_at[:4]
     if len(acpt_no) >= 4 and acpt_no[:4].isdigit():
         return acpt_no[:4]
-    return "unknown"
+    raise ValueError(f"disclosure year not found: {acpt_no}")
 
 
 def resolve_disclosure_html_file(
     input_directory: Path, acpt_no: str
 ) -> Path | None:
-    """접수번호로 flat 또는 연도별 저장 HTML을 찾는다."""
+    """접수번호로 연도별 저장 HTML을 찾는다."""
     normalized_acpt_no = str(acpt_no or "")
     if (
         not normalized_acpt_no
@@ -228,27 +206,14 @@ def resolve_disclosure_html_file(
     resolved_root = input_directory.resolve()
     if not resolved_root.is_dir():
         return None
-    flat_candidate = (resolved_root / filename).resolve()
+    candidate = (
+        resolved_root / _year_from_disclosure(normalized_acpt_no) / filename
+    ).resolve()
     try:
-        flat_candidate.relative_to(resolved_root)
+        candidate.relative_to(resolved_root)
     except ValueError:
-        pass
-    else:
-        if flat_candidate.is_file():
-            return flat_candidate
-
-    matches: set[Path] = set()
-    for child in resolved_root.iterdir():
-        if not child.is_dir():
-            continue
-        resolved_candidate = (child / filename).resolve()
-        try:
-            resolved_candidate.relative_to(resolved_root)
-        except ValueError:
-            continue
-        if resolved_candidate.is_file():
-            matches.add(resolved_candidate)
-    return next(iter(matches)) if len(matches) == 1 else None
+        return None
+    return candidate if candidate.is_file() else None
 
 
 def _target_years_from_json(
@@ -265,12 +230,9 @@ def _target_html_path(
     output_directory: Path,
     acpt_no: str,
     *,
-    split_by_year: bool,
     target_years: dict[str, str] | None = None,
 ) -> Path:
     filename = VIEWER_HTML_FILENAME_TEMPLATE.format(acpt_no=acpt_no)
-    if not split_by_year:
-        return output_directory / filename
     year = (target_years or {}).get(acpt_no) or _year_from_disclosure(acpt_no)
     return output_directory / year / filename
 
@@ -281,41 +243,12 @@ def _html_output_check_workers(total_targets: int) -> int:
     return max(1, min(total_targets, cpu_count() or 1))
 
 
-def _iter_html_output_files(
-    output_directory: Path, *, split_by_year: bool
-) -> list[Path]:
-    if not split_by_year:
-        return sorted(path for path in output_directory.iterdir() if path.is_file())
-
+def _iter_html_output_files(output_directory: Path) -> list[Path]:
     files = [path for path in output_directory.iterdir() if path.is_file()]
     for child in sorted(path for path in output_directory.iterdir() if path.is_dir()):
         if len(child.name) == 4 and child.name.isdigit():
             files.extend(path for path in child.iterdir() if path.is_file())
     return sorted(files)
-
-
-def _detect_html_split_by_year(directory: Path) -> bool | None:
-    if not directory.is_dir():
-        return None
-    has_root_html = any(
-        path.is_file() and path.suffix.lower() == ".html"
-        for path in directory.iterdir()
-    )
-    has_year_html = any(
-        child.is_dir()
-        and len(child.name) == 4
-        and child.name.isdigit()
-        and any(
-            path.is_file() and path.suffix.lower() == ".html"
-            for path in child.iterdir()
-        )
-        for child in directory.iterdir()
-    )
-    if has_year_html:
-        return True
-    if has_root_html:
-        return False
-    return None
 
 
 def _relative_name(path: Path, root: Path) -> str:
@@ -335,9 +268,13 @@ def _write_html_manifest(
     import json
 
     metadata = _collect_disclosure_metadata_from_json(source_json)
-    disclosures = [
-        metadata.get(acpt_no, {"acpt_no": acpt_no}) for acpt_no in acpt_numbers
-    ]
+    missing_metadata = [acpt_no for acpt_no in acpt_numbers if acpt_no not in metadata]
+    if missing_metadata:
+        raise ValueError(
+            "Missing disclosure metadata for acpt_no values: "
+            + ", ".join(missing_metadata[:10])
+        )
+    disclosures = [metadata[acpt_no] for acpt_no in acpt_numbers]
     manifest_path = output_directory / HTML_MANIFEST_FILENAME
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
@@ -379,7 +316,6 @@ def _validate_html_output_directory_files(
     output_directory: Path,
     acpt_numbers: list[str],
     *,
-    split_by_year: bool = False,
     target_years: dict[str, str] | None = None,
     allow_unexpected: bool = False,
 ) -> dict[str, Any]:
@@ -399,7 +335,7 @@ def _validate_html_output_directory_files(
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
-    files = _iter_html_output_files(output_directory, split_by_year=split_by_year)
+    files = _iter_html_output_files(output_directory)
     existing_paths = set(files)
     worker_count = _html_output_check_workers(len(acpt_numbers))
 
@@ -407,7 +343,6 @@ def _validate_html_output_directory_files(
         target_path = _target_html_path(
             output_directory,
             acpt_no,
-            split_by_year=split_by_year,
             target_years=target_years,
         )
         exists = target_path in existing_paths
@@ -438,12 +373,11 @@ def _validate_html_output_directory_files(
     allowed_paths.update(
         output_directory / filename for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
     )
-    if split_by_year:
-        for year in set((target_years or {}).values()):
-            allowed_paths.update(
-                output_directory / year / filename
-                for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
-            )
+    for year in set((target_years or {}).values()):
+        allowed_paths.update(
+            output_directory / year / filename
+            for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
+        )
     existing_target_acpt_numbers = [
         acpt_no for acpt_no, _, valid, _ in target_statuses if valid
     ]
@@ -501,7 +435,6 @@ def _delete_unexpected_html_output_directory_files(
     output_directory: Path,
     acpt_numbers: list[str],
     *,
-    split_by_year: bool = False,
     target_years: dict[str, str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -526,7 +459,6 @@ def _delete_unexpected_html_output_directory_files(
         _target_html_path(
             output_directory,
             acpt_no,
-            split_by_year=split_by_year,
             target_years=target_years,
         )
         for acpt_no in acpt_numbers
@@ -534,13 +466,12 @@ def _delete_unexpected_html_output_directory_files(
     allowed_paths.update(
         output_directory / filename for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
     )
-    if split_by_year:
-        for year in set((target_years or {}).values()):
-            allowed_paths.update(
-                output_directory / year / filename
-                for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
-            )
-    files = _iter_html_output_files(output_directory, split_by_year=split_by_year)
+    for year in set((target_years or {}).values()):
+        allowed_paths.update(
+            output_directory / year / filename
+            for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
+        )
+    files = _iter_html_output_files(output_directory)
     deleted_files: list[dict[str, str]] = []
     for path in files:
         if path in allowed_paths:
@@ -558,7 +489,6 @@ def _delete_unexpected_html_output_directory_files(
     summary = _validate_html_output_directory_files(
         output_directory,
         acpt_numbers,
-        split_by_year=split_by_year,
         target_years=target_years,
         allow_unexpected=dry_run,
     )
@@ -604,19 +534,10 @@ def _parse_merge_limit(value: Any) -> int | None:
     return parsed
 
 
-def _collect_content_html_files(
-    input_directory: Path, *, split_by_year: bool
-) -> list[tuple[str, Path]]:
+def _collect_yearly_html_files(input_directory: Path) -> list[tuple[str, Path]]:
     if not input_directory.is_dir():
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
-    if not split_by_year:
-        return [
-            (_year_from_disclosure(path.stem), path)
-            for path in sorted(input_directory.glob("*.html"))
-            if path.is_file() and path.stem.isdigit()
-        ]
-
     files: list[tuple[str, Path]] = []
     for year_directory in sorted(
         path for path in input_directory.iterdir() if path.is_dir()
@@ -631,53 +552,17 @@ def _collect_content_html_files(
     return files
 
 
-def _collect_external_html_files(
-    input_directory: Path, *, split_by_year: bool
-) -> list[tuple[str, Path]]:
-    if not input_directory.is_dir():
-        msg = f"input_directory does not exist: {input_directory}"
-        raise ValueError(msg)
-
-    if not split_by_year:
-        return [
-            (_year_from_disclosure(path.stem), path)
-            for path in sorted(input_directory.glob("*.html"))
-            if path.is_file() and path.stem.isdigit()
-        ]
-
-    files: list[tuple[str, Path]] = []
-    for year_directory in sorted(
-        path for path in input_directory.iterdir() if path.is_dir()
-    ):
-        if len(year_directory.name) != 4 or not year_directory.name.isdigit():
-            continue
-        files.extend(
-            (year_directory.name, path)
-            for path in sorted(year_directory.glob("*.html"))
-            if path.is_file() and path.stem.isdigit()
-        )
-    return files
-
-
-def _resolve_content_merge_output_path(
-    output_path_raw: str, input_directory: Path
-) -> Path:
-    if output_path_raw:
-        output_path = Path(output_path_raw).expanduser().resolve()
-        if output_path.suffix.lower() == ".json":
-            return output_path
-        return output_path / "merged-content-html.json"
-    return input_directory / "merged-content-html.json"
-
-
-def _resolve_external_compress_output_directory(
+def _resolve_content_merge_output_directory(
     output_directory_raw: str, input_directory: Path
 ) -> Path:
-    if output_directory_raw:
-        return Path(output_directory_raw).expanduser().resolve()
-    return input_directory
-
-
+    output_directory = (
+        Path(output_directory_raw).expanduser().resolve()
+        if output_directory_raw
+        else input_directory / "merged"
+    )
+    if output_directory.suffix.lower() == ".json":
+        raise ValueError("output_directory must be a directory path")
+    return output_directory
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

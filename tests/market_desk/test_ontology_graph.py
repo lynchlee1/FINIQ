@@ -22,6 +22,12 @@ from finiq.market_desk.web.routers import market_data as market_data_router
 from finiq.market_desk.web.routers.market_data import create_market_data_router
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_json_number_rejects_nonfinite_values(value: float) -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        ontology_graph._json_number(value)
+
+
 def _write_disclosure_shard(root: Path) -> Path:
     shard_root = root / "KIND_DISCTABLE_FULL.sqlite_manifest_shards"
     shard_root.mkdir(parents=True)

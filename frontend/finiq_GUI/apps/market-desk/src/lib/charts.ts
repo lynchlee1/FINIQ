@@ -32,6 +32,14 @@ function toNumber(value: any, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function finiteDataNumber(value: any, field: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new TypeError(`Chart ${field} must be a finite number`);
+  }
+  return parsed;
+}
+
 function alphaColor(color: string, alphaHex: string) {
   if (typeof color !== "string") {
     return `${TV_CHART_COLORS.axis}66`;
@@ -542,11 +550,11 @@ export class ChartApi {
     priceSeries.data.slice(startIndex, endIndex + 1).forEach((item) => {
       const low = item.low === undefined ? item.value : item.low;
       const high = item.high === undefined ? item.value : item.high;
-      min = Math.min(min, toNumber(low, 0));
-      max = Math.max(max, toNumber(high, 0));
+      min = Math.min(min, finiteDataNumber(low, "low"));
+      max = Math.max(max, finiteDataNumber(high, "high"));
     });
-    if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-      const anchor = Number.isFinite(min) ? min : 0;
+    if (min === max) {
+      const anchor = min;
       return { min: anchor * 0.98, max: anchor * 1.02 + 1 };
     }
     const padding = (max - min) * 0.06;
@@ -629,7 +637,7 @@ export class ChartApi {
     const endIndex = Math.min(volumeSeries.data.length - 1, Math.ceil(visibleRange.to));
     let max = 0;
     volumeSeries.data.slice(startIndex, endIndex + 1).forEach((item) => {
-      max = Math.max(max, toNumber(item.value, 0));
+      max = Math.max(max, finiteDataNumber(item.value, "volume"));
     });
     return { min: 0, max: Math.max(max, 1) };
   }
@@ -681,8 +689,7 @@ export class ChartApi {
   }
 
   priceToY(value: number, range: { min: number; max: number }, rect: { bottom: number; height: number }) {
-    const safeValue = toNumber(value, range.min);
-    const normalized = (safeValue - range.min) / Math.max(range.max - range.min, 1e-9);
+    const normalized = (finiteDataNumber(value, "price") - range.min) / Math.max(range.max - range.min, 1e-9);
     return rect.bottom - normalized * rect.height;
   }
 
@@ -935,7 +942,7 @@ export class ChartApi {
     data.slice(visibleIndexes.startIndex, visibleIndexes.endIndex + 1).forEach((item, offset) => {
       const index = visibleIndexes.startIndex + offset;
       const x = this.getX(index, data.length, layout);
-      const height = (toNumber(item.value, 0) / Math.max(volumeRange.max, 1)) * volumeRect.height;
+      const height = (finiteDataNumber(item.value, "volume") / Math.max(volumeRange.max, 1)) * volumeRect.height;
       const top = volumeRect.bottom - height;
       ctx.fillStyle = item.color || alphaColor(TV_CHART_COLORS.axis, "66");
       ctx.fillRect(x - barWidth / 2, top, barWidth, height);
@@ -978,7 +985,7 @@ export class ChartApi {
       const x = this.getX(index, data.length, layout);
       const highY = this.priceToY(item.high, priceRange, priceRect);
       const lowY = this.priceToY(item.low, priceRange, priceRect);
-      const midY = this.priceToY((toNumber(item.high) + toNumber(item.low)) / 2, priceRange, priceRect);
+      const midY = this.priceToY((finiteDataNumber(item.high, "high") + finiteDataNumber(item.low, "low")) / 2, priceRange, priceRect);
       itemMarkers.forEach((marker, markerIndex) => {
         let y = midY;
         if (marker.position === "paneTop") {

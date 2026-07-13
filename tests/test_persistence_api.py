@@ -52,7 +52,7 @@ def test_html_download_settings_persist(tmp_path: Path):
     client = TestClient(app)
 
     payload = {
-        "html_merge_output_path": str(tmp_path / "merged-content-html.json"),
+        "html_merge_output_path": str(tmp_path / "merged"),
         "html_content_compressed_json_path": str(tmp_path / "compressed.json"),
         "html_external_compress_input_directory": str(tmp_path / "html"),
         "html_external_compress_output_directory": str(tmp_path / "compressed"),

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from finiq.data_scraper.parse import (
     dart_main_doc_no,
+    disclosure_rows,
     disclosure_onclick,
     file_to_json,
     html_to_json,
@@ -13,8 +16,31 @@ from finiq.data_scraper.parse import (
     search_paths,
     viewer_html,
 )
+from finiq.data_scraper.parse import _markup
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+def test_disclosure_rows_rejects_missing_results_table() -> None:
+    with pytest.raises(ValueError, match="result table is missing"):
+        disclosure_rows("<html><body>no disclosure table</body></html>")
+
+
+def test_decode_html_markup_rejects_undecodable_bytes(monkeypatch) -> None:
+    class UndetectedMarkup:
+        unicode_markup = None
+
+    monkeypatch.setattr(_markup, "UnicodeDammit", lambda *args, **kwargs: UndetectedMarkup())
+
+    with pytest.raises(UnicodeDecodeError):
+        _markup.decode_html_markup(b"\xff")
+
+
+def test_parse_html_with_recovery_rejects_empty_document(monkeypatch) -> None:
+    monkeypatch.setattr(_markup.etree, "HTML", lambda *args, **kwargs: None)
+
+    with pytest.raises(ValueError, match="Failed to parse HTML document"):
+        _markup.parse_html_with_recovery("<html></html>")
 
 
 def test_html_to_json_collects_all_table_cells() -> None:

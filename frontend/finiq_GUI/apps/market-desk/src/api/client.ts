@@ -17,9 +17,9 @@ type ApiRequestOptions = Omit<RequestInit, "body"> & {
 async function readResponsePayload(response: Response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
-    return response.json().catch(() => null);
+    return response.json();
   }
-  return response.text().catch(() => "");
+  return response.text();
 }
 
 function errorMessageFromPayload(payload: unknown, fallback: string) {

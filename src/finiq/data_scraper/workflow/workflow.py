@@ -23,10 +23,8 @@ from finiq.data_scraper.core.client import (
     KindCancelCheck,
     KindSavedFileCallback,
     KindSavedFileValidator,
-    KindViewerSavedFileCallback,
     _normalize_request_headers,
     _validate_save_request,
-    download_disclosure_viewer_htmls,
     download_pages,
 )
 from finiq.data_scraper.storage.classification_store import (
@@ -112,19 +110,6 @@ class KindCompanyClassificationIntegrityError(ValueError):
             "회사별 분류 저장을 중단했습니다. 페이지 무결성 검사를 통과하지 못했습니다.\n"
             f"{details}{repair_summary}"
         )
-
-
-def _collect_unique_acpt_numbers_from_result_pages(folder: Path) -> list[str]:
-    acpt_numbers: list[str] = []
-    seen_acpt_numbers: set[str] = set()
-    for body_path in sorted_result_page_paths(folder):
-        for row in disclosure_file_rows(body_path):
-            acpt_no = str(row.get("acpt_no") or "").strip()
-            if not acpt_no or acpt_no in seen_acpt_numbers:
-                continue
-            seen_acpt_numbers.add(acpt_no)
-            acpt_numbers.append(acpt_no)
-    return acpt_numbers
 
 
 def _iter_target_kind_dirs(
@@ -1088,61 +1073,6 @@ def diagnose_kind_company_classification_integrity(
     return integrity_report
 
 
-def download_kind_viewer_htmls_from_result_folder(
-    result_folder: str | Path,
-    *,
-    output_directory: str | Path | None = None,
-    request_headers: Mapping[str, object],
-    timeout: float = 20.0,
-    wait_seconds_between_requests: float = 0.0,
-    max_requests_per_minute: int = 90,
-    limit: int | None = None,
-    session: requests.Session | None = None,
-    skip_existing: bool = True,
-    progress_callback: KindProgressCallback | None = None,
-    saved_file_callback: KindViewerSavedFileCallback | None = None,
-    max_workers: int = 5,
-    max_retries: int = 2,
-) -> dict[str, Any]:
-    """저장된 KIND 검색 결과 폴더의 접수번호별 뷰어 HTML 전체를 저장한다."""
-    source_folder = Path(result_folder).resolve()
-    if not source_folder.is_dir():
-        msg = f"Not a directory: {source_folder}"
-        raise NotADirectoryError(msg)
-    if limit is not None and limit < 1:
-        raise ValueError("limit must be >= 1")
-
-    viewer_output_directory = (
-        source_folder / "viewer_html"
-        if output_directory is None
-        else Path(output_directory).resolve()
-    )
-    acpt_numbers = _collect_unique_acpt_numbers_from_result_pages(source_folder)
-    if limit is not None:
-        acpt_numbers = acpt_numbers[:limit]
-
-    saved_paths = download_disclosure_viewer_htmls(
-        output_directory=viewer_output_directory,
-        request_headers=request_headers,
-        acpt_numbers=acpt_numbers,
-        timeout=timeout,
-        wait_seconds_between_requests=wait_seconds_between_requests,
-        max_requests_per_minute=max_requests_per_minute,
-        session=session,
-        skip_existing=skip_existing,
-        progress_callback=progress_callback,
-        saved_file_callback=saved_file_callback,
-        max_workers=max_workers,
-        max_retries=max_retries,
-    )
-    return {
-        "source_folder": str(source_folder),
-        "output_directory": str(viewer_output_directory),
-        "acpt_numbers": acpt_numbers,
-        "saved_files": [str(path) for path in saved_paths],
-    }
-
-
 def _normalize_disclosure_type_groups(
     disclosure_type_groups: Mapping[DisclosureTypeGroupKey, DisclosureTypeGroupValue] | None,
 ) -> dict[str, list[str]]:
@@ -1861,7 +1791,6 @@ __all__ = [
     "KindWorkflowCheckpoint",
     "KindWorkflowInput",
     "diagnose_kind_company_classification_integrity",
-    "download_kind_viewer_htmls_from_result_folder",
     "ensure_download_directory_integrity",
     "export_kind_company_classification",
     "export_kind_mode_batch",

@@ -43,9 +43,7 @@ export function useJobStreaming() {
       }
 
       if (!response.body) {
-        const data = await response.json();
-        onResult(data);
-        return;
+        throw new Error("결과를 받지 못했습니다.");
       }
 
       const reader = response.body.getReader();
