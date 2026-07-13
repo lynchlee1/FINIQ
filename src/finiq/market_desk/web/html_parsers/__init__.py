@@ -1,4 +1,4 @@
-"""KIND 공시 유형별 HTML parser 모음."""
+"""KIND 공시 유형별 parser 모음."""
 
 from __future__ import annotations
 

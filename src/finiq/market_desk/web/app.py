@@ -22,9 +22,6 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
     save_disclosure_html_sections_payload,
     summarize_disclosure_html_section_kinds_payload,
 )
-from finiq.market_desk.web.features.disclosure_workflow.dart_link import (
-    build_dart_links_payload,
-)
 from finiq.market_desk.web.features.disclosure_workflow.automation import (
     run_disclosure_automation_payload,
 )
@@ -158,7 +155,6 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "integrated_merge": run_integrated_merge_payload,
     "integrated_market_history": run_integrated_market_history_payload,
     "table_build": build_disclosure_table_payload,
-    "dart_link": build_dart_links_payload,
     "disclosure_automation": run_disclosure_automation_payload,
     "utility_partition": run_partition_storage_payload,
     "asset_excel_convert": _run_asset_excel_convert_job,

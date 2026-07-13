@@ -44,9 +44,6 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
 )
 from finiq.market_desk.web.jobs import job_manager
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
-from finiq.market_desk.web.features.disclosure_workflow.dart_link import (
-    build_dart_links_payload,
-)
 from finiq.market_desk.web.features.disclosure_workflow.automation import (
     build_automation_plan_payload,
     inspect_disclosure_workspace_payload,
@@ -278,37 +275,6 @@ def create_workflows_router(
 
     @router.post("/api/disclosure-workflows/run/cancel")
     async def cancel_disclosure_automation(payload: dict[str, Any]):
-        job_id = str(payload.get("job_id") or "").strip()
-        if not job_id:
-            raise HTTPException(status_code=400, detail="Missing job_id")
-        if not job_manager.cancel_job(job_id):
-            raise HTTPException(status_code=404, detail="Job not found")
-        return {"status": "success", "job_id": job_id}
-
-    @router.post("/api/disclosures/dart-links/build")
-    async def build_dart_links(payload: dict[str, Any]):
-        try:
-            return await run_in_threadpool(build_dart_links_payload, payload)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    @router.post("/api/disclosures/dart-links/build/start")
-    async def start_dart_links_build(
-        payload: dict[str, Any], background_tasks: BackgroundTasks
-    ):
-        return _start_background_job(
-            kind="dart_link",
-            payload=payload,
-            background_tasks=background_tasks,
-            run_job_worker=run_job_worker,
-        )
-
-    @router.get("/api/disclosures/dart-links/jobs/{job_id}")
-    async def get_dart_links_job_status(job_id: str):
-        return _job_snapshot(job_id)
-
-    @router.post("/api/disclosures/dart-links/cancel")
-    async def cancel_dart_links_job(payload: dict[str, Any]):
         job_id = str(payload.get("job_id") or "").strip()
         if not job_id:
             raise HTTPException(status_code=400, detail="Missing job_id")
