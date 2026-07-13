@@ -65,6 +65,9 @@ from finiq.market_desk.web.features.disclosures.html_parse_preview import (
     build_parse_filter_candidates_payload,
     build_parse_preview_payload,
 )
+from finiq.market_desk.web.features.disclosures.html_parse_support import (
+    _compact_source_tables,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_summary import (
     build_bond_parse_summary_payload,
 )
@@ -944,9 +947,12 @@ def test_filter_disclosures_payload_ignores_return_limit(tmp_path: Path) -> None
     assert payload["html_download_acpt_numbers"] == ["3", "2", "1"]
 
 
-def test_filter_disclosures_payload_deduplicates_by_disclosure_identity(tmp_path: Path) -> None:
+def test_filter_disclosures_payload_deduplicates_by_acpt_no(tmp_path: Path) -> None:
     payload = _classification_fixture_payload()
-    payload["companies"][0]["disclosures"].append(dict(payload["companies"][0]["disclosures"][0]))
+    duplicate = dict(payload["companies"][0]["disclosures"][0])
+    duplicate["disclosed_at"] = "2025-01-03 10:00:00"
+    duplicate["title"] = "다른 제목"
+    payload["companies"][0]["disclosures"].append(duplicate)
     payload["summary"]["disclosures"] = 4
     fixture_path = _write_classification_fixture(tmp_path, payload)
 
@@ -3414,6 +3420,16 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
     assert "output_directory" not in saved
     assert "output_path" not in saved
     assert "html" not in saved["records"][0]
+    assert set(saved["records"][0]) == {
+        "acpt_no",
+        "title",
+        "header",
+        "selected_main_doc_no",
+        "metadata",
+        "docs",
+        "source_sha256",
+        "source_size_bytes",
+    }
     assert saved["records"][0]["acpt_no"] == "20250101000001"
     assert saved["records"][0]["title"] == "뷰어 제목"
     assert saved["records"][0]["selected_main_doc_no"] == "20250101000999"
@@ -4706,6 +4722,26 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
     assert record["상장구분"] == "코스닥"
     assert "correction_families" not in record
     assert payload["records"][0]["source_preview"]["available"] is True
+
+
+def test_compact_source_tables_limits_table_components_and_total_rows() -> None:
+    short_tables = [
+        {"index": index, "logical_rows": [[str(index)]]}
+        for index in range(13)
+    ]
+
+    tables, omitted_rows = _compact_source_tables(short_tables)
+
+    assert len(tables) == 12
+    assert omitted_rows == 1
+
+    tables, omitted_rows = _compact_source_tables(
+        [{"index": 0, "logical_rows": [[str(index)] for index in range(121)]}]
+    )
+
+    assert len(tables[0]["rows"]) == 120
+    assert tables[0]["omitted_rows"] == 1
+    assert omitted_rows == 1
 
 
 def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path, monkeypatch) -> None:

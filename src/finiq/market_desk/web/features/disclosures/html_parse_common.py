@@ -221,6 +221,8 @@ METADATA_FIELDS = {
     "raw_tables",
     "index",
 }
+# The table cap bounds rendered components even when tables are short or empty;
+# the row cap independently bounds the preview response size.
 SOURCE_PREVIEW_MAX_TABLES = 12
 SOURCE_PREVIEW_MAX_ROWS = 120
 
