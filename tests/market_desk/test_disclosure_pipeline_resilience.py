@@ -10,6 +10,7 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
 )
 from finiq.market_desk.web.features.disclosures.html_content_download import (
     download_disclosure_content_htmls,
+    download_disclosure_html_contents_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_download import (
     download_disclosure_html_payload,
@@ -100,6 +101,35 @@ def test_download_payload_reports_parent_cancellation(
     )
 
     assert result["cancelled"] is True
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["disclosures"] == []
+
+
+def test_content_download_cancellation_manifest_lists_only_saved_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    external_directory = tmp_path / "external"
+    external_directory.mkdir()
+    (external_directory / "20250101000001.html").write_text(
+        "<html><body><select id='mainDoc'><option value='1|Y' selected>본문</option></select></body></html>",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls",
+        lambda **kwargs: [],
+    )
+
+    result = download_disclosure_html_contents_payload(
+        {
+            "output_directory": str(tmp_path / "content"),
+            "source_directory": str(external_directory),
+        },
+        cancel_check=lambda: True,
+    )
+
+    assert result["cancelled"] is True
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["disclosures"] == []
 
 
 def test_external_compression_rejects_receipt_number_mismatching_filename(

@@ -883,10 +883,17 @@ def inspect_disclosure_html_section_output_payload(
                 }
             )
             continue
-        if int(result.get("selected_sections") or 0) > 0:
-            expected[_relative_source_path(input_directory, source_file)] = str(
-                result["content"]
+        if int(result.get("selected_sections") or 0) == 0:
+            problems.append(
+                {
+                    "source_file": str(source_file),
+                    "error": "section save rules selected no sections",
+                }
             )
+            continue
+        expected[_relative_source_path(input_directory, source_file)] = str(
+            result["content"]
+        )
 
     actual_paths = (
         {
@@ -997,7 +1004,14 @@ def save_disclosure_html_sections_payload(
                 "saved": [],
             }
         if int(selected.get("selected_sections") or 0) == 0:
-            return {"status": "ok", "saved": [], "expected": []}
+            return {
+                "status": "no_selected_sections",
+                "skipped": {
+                    "source_file": str(source_file),
+                    "error": "section save rules selected no sections",
+                },
+                "saved": [],
+            }
         source_relative_path = source_file.relative_to(input_directory)
         output_path = output_directory / source_relative_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1023,8 +1037,10 @@ def save_disclosure_html_sections_payload(
             source_name = Path(result["skipped"]["source_file"]).name
             if result["status"] == "read_failed":
                 emit(f"읽기 실패 {index}/{len(html_files)}: {source_name}")
-            else:
+            elif result["status"] == "no_sections":
                 emit(f"목차 없음 {index}/{len(html_files)}: {source_name}")
+            else:
+                emit(f"선택 목차 없음 {index}/{len(html_files)}: {source_name}")
         if index == 1 or index == len(html_files) or index % 25 == 0:
             emit(f"목차 저장 중간 확인: {index}/{len(html_files)}건 처리.")
 
@@ -1043,7 +1059,8 @@ def save_disclosure_html_sections_payload(
             "skipped_files": len(skipped_files),
             "expected_files": len(expected_files),
             "integrity_ok": len(saved_files) == len(expected_files)
-            and not missing_files,
+            and not missing_files
+            and not skipped_files,
             "missing_files": len(missing_files),
         },
         "saved_files": saved_files,

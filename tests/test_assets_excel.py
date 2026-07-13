@@ -741,6 +741,83 @@ def test_convert_asset_excels_cancel_during_streaming_save_leaves_no_final_outpu
     assert not any(path.name.startswith(".quanti_parquet_write_") for path in output_dir.iterdir())
 
 
+def test_convert_asset_excels_rejects_invalid_dates_without_outputs(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(writer, "종가", [["not-a-date", 100, 200]])
+
+    with pytest.raises(ValueError, match="Invalid date values"):
+        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    assert not list(output_dir.glob("*.parquet"))
+
+
+@pytest.mark.parametrize(
+    ("rows", "codes", "error"),
+    [
+        (
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+            ["A005930", "A005930"],
+            "Duplicate code columns",
+        ),
+        (
+            [
+                [pd.Timestamp("2020-01-01"), 100, 200],
+                [pd.Timestamp("2020-01-01"), 101, 201],
+            ],
+            None,
+            "Duplicate dates",
+        ),
+    ],
+)
+def test_convert_asset_excels_rejects_duplicate_axes_without_outputs(
+    tmp_path, rows, codes, error
+):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(writer, "종가", rows, codes=codes)
+
+    with pytest.raises(ValueError, match=error):
+        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    assert not list(output_dir.glob("*.parquet"))
+
+
+def test_convert_asset_excels_rolls_back_partial_final_promotion(tmp_path, monkeypatch):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
+        _write_quanti_sheet(
+            writer, "종가", [[pd.Timestamp("2020-01-01"), 100, 200]]
+        )
+        _write_quanti_sheet(
+            writer, "거래량", [[pd.Timestamp("2020-01-01"), 1000, 2000]]
+        )
+
+    real_move = shutil.move
+    promotion_count = 0
+
+    def fail_second_promotion(source, destination, *args, **kwargs):
+        nonlocal promotion_count
+        if Path(source).name.startswith("pending_") and Path(destination).parent == output_dir:
+            promotion_count += 1
+            if promotion_count == 2:
+                raise OSError("promotion failed")
+        return real_move(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(assets_excel_module.shutil, "move", fail_second_promotion)
+
+    with pytest.raises(OSError, match="promotion failed"):
+        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    assert not list(output_dir.glob("*.parquet"))
+
+
 def test_convert_asset_excels_uses_selected_files(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
@@ -1556,6 +1633,43 @@ def test_cleanup_duplicate_asset_parquet_outputs_keeps_overlapping_conflicts(tmp
     assert (target_output / second_file).exists()
 
 
+def test_cleanup_duplicate_asset_parquet_outputs_rejects_invalid_dates(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    invalid_file = "close_20200103_20200103.parquet"
+    valid_file = "close_20200103_20200103__2.parquet"
+    target_output.mkdir()
+    metadata = assets_excel_module._account_footer_metadata(
+        account_id="S00001",
+        account_name="close",
+        date_start="2020-01-03",
+        date_end="2020-01-03",
+        rows=1,
+        columns=1,
+        quality={"non_null_cells": 1, "total_cells": 1, "missing_ratio": 0.0},
+    )
+    assets_excel_module._write_parquet_with_metadata(
+        pd.DataFrame({"date": ["invalid-date"], "A005930": [100]}),
+        target_output / invalid_file,
+        metadata,
+    )
+    _write_account_parquet(
+        target_output,
+        valid_file,
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+
+    payload = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+    assert payload["deletion_candidate_count"] == 0
+    assert any(
+        item["file_name"] == invalid_file and "Invalid date value" in item["reason"]
+        for item in payload["mismatched_duplicates"]
+    )
+    assert (target_output / invalid_file).exists()
+    assert (target_output / valid_file).exists()
+
+
 def test_cleanup_duplicate_asset_parquet_outputs_requires_delete_confirmation(tmp_path):
     target_output = tmp_path / "target-parquet"
     _write_account_parquet(
@@ -1636,6 +1750,45 @@ def test_merge_asset_parquet_outputs_cleanup_waits_for_success(tmp_path):
     assert not (target_output / "merged").exists()
     assert (target_output / "close_20200103_20200103.parquet").exists()
     assert (target_output / "close_20200104_20200104.parquet").exists()
+
+
+def test_merge_asset_parquet_outputs_rolls_back_cleanup_when_promotion_fails(
+    tmp_path, monkeypatch
+):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    selected_files = [
+        "close_20200103_20200103.parquet",
+        "close_20200104_20200104.parquet",
+    ]
+    _write_account_parquet(
+        target_output, selected_files[0], ["2020-01-03"], {"A005930": [100]}
+    )
+    _write_account_parquet(
+        target_output, selected_files[1], ["2020-01-04"], {"A005930": [101]}
+    )
+    real_move = shutil.move
+
+    def fail_result_promotion(source, destination, *args, **kwargs):
+        if Path(source).name.startswith("pending_"):
+            raise OSError("merge promotion failed")
+        return real_move(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(assets_excel_module.shutil, "move", fail_result_promotion)
+
+    with pytest.raises(OSError, match="merge promotion failed"):
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=selected_files,
+            cleanup_merged_items=True,
+        )
+
+    assert all((target_output / file_name).is_file() for file_name in selected_files)
+    assert not (target_output / "merged").exists() or not list(
+        (target_output / "merged").glob("*.parquet")
+    )
+    assert not list(merged_output.glob("*.parquet"))
 
 
 def test_merge_asset_parquet_outputs_cleans_temp_outputs_on_cancel(tmp_path):

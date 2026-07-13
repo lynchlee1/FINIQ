@@ -551,18 +551,22 @@ def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
 
 
 def _parse_record_filters(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
+    if value in (None, ""):
         return []
+    if not isinstance(value, list):
+        raise ValueError("record_filters must be a list")
     filters: list[dict[str, Any]] = []
-    for item in value:
+    for index, item in enumerate(value, start=1):
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"record_filters[{index}] must be an object")
         field = str(item.get("field") or "").strip()
         if not field:
-            continue
+            raise ValueError(f"record_filters[{index}].field is required")
         operator = str(item.get("operator") or "contains").strip()
         if operator not in SUPPORTED_RECORD_FILTER_OPERATORS:
-            operator = "contains"
+            raise ValueError(
+                f"record_filters[{index}].operator is unsupported: {operator}"
+            )
         raw_value = item.get("value")
         if operator == "in":
             values = [
@@ -571,12 +575,14 @@ def _parse_record_filters(value: Any) -> list[dict[str, Any]]:
                 if str(candidate).strip()
             ] if isinstance(raw_value, list) else []
             if not values:
-                continue
+                raise ValueError(
+                    f"record_filters[{index}].value must be a non-empty list for operator in"
+                )
             filters.append({"field": field, "operator": operator, "value": values})
             continue
-        filter_value = str(raw_value or "").strip()
+        filter_value = "" if raw_value is None else str(raw_value).strip()
         if operator != "exists" and not filter_value:
-            continue
+            raise ValueError(f"record_filters[{index}].value is required")
         filters.append({"field": field, "operator": operator, "value": filter_value})
     return filters
 
