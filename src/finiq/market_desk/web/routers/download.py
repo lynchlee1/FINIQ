@@ -12,7 +12,6 @@ from finiq.market_desk.web.features.downloads.kind_api import (
 )
 from finiq.market_desk.web.features.downloads.kind_existing import (
     check_existing_downloads,
-    create_folder_metadata,
     detect_existing_downloads,
 )
 from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
@@ -27,14 +26,6 @@ from finiq.market_desk.web.features.downloads.kind_jobs import (
 
 def create_download_router(config: Any) -> APIRouter:
     router = APIRouter()
-
-    @router.post("/api/download/create-metadata")
-    def create_metadata_route(payload: dict[str, Any]):
-        try:
-            with KIND_NETWORK_JOB_LOCK:
-                return create_folder_metadata(payload)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/download/check-existing")
     def check_existing_downloads_route(payload: dict[str, Any]):

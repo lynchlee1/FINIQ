@@ -12,6 +12,8 @@ test("download metadata-ready status uses success tone", async () => {
   assert.match(source, /const statusTone = metadataReady \? "metadataOk" : range\.status;/);
   assert.match(source, /metadataOk: "border-\[color:var\(--tv-up\)\] bg-\[var\(--tv-up-soft\)\] text-\[var\(--tv-up-text\)\]"/);
   assert.match(source, /메타데이터 확인됨/);
+  assert.doesNotMatch(source, /현재 설정으로 메타데이터 작성/);
+  assert.doesNotMatch(source, /handleCreateMetadata/);
 });
 
 test("download colored status surfaces use contrast text tokens", async () => {

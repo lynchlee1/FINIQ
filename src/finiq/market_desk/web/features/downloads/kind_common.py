@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -129,23 +130,6 @@ def _normalize_disclosure_type_groups(
     return normalized or None
 
 
-def _has_complete_current_download_payload(payload: dict[str, Any] | None) -> bool:
-    if not payload:
-        return False
-    required_keys = {
-        "start_date",
-        "end_date",
-        "company_name",
-        "submitter_name",
-        "market_label",
-        "securities_label",
-        "page_size",
-        "last_report_only",
-        "disclosure_type_groups",
-    }
-    return required_keys.issubset(payload.keys())
-
-
 def _is_trusted_download_input_snapshot(snapshot: dict[str, Any] | None) -> bool:
     if not isinstance(snapshot, dict):
         return False
@@ -164,10 +148,10 @@ def _is_trusted_download_input_snapshot(snapshot: dict[str, Any] | None) -> bool
     try:
         date.fromisoformat(str(snapshot["start_date"]))
         date.fromisoformat(str(snapshot["end_date"]))
-        int(snapshot["page_size"])
+        page_size = int(snapshot["page_size"])
     except Exception:
         return False
-    return True
+    return page_size > 0
 
 
 def _build_search_filters(payload: dict[str, Any]) -> dict[str, str] | None:
@@ -230,7 +214,11 @@ def _as_bool(payload: dict[str, Any], key: str) -> bool | None:
 
 
 def _detect_pagination(folder: Path) -> dict[str, Any] | None:
-    body_files = sorted(folder.glob("*_post_page_*.body"))
+    def page_number(path: Path) -> int:
+        match = re.search(r"_post_page_(\d+)\.body$", path.name)
+        return int(match.group(1)) if match else -1
+
+    body_files = sorted(folder.glob("*_post_page_*.body"), key=page_number)
     if not body_files:
         return None
     for body_file in reversed(body_files):
@@ -372,13 +360,6 @@ def _download_input_snapshot_from_payload(
     }
 
 
-def _write_download_input_snapshot(folder: Path, snapshot: dict[str, Any]) -> None:
-    (folder / "kind_workflow.input.json").write_text(
-        json.dumps(snapshot, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
 def _folder_date_range_from_name(folder: Path) -> tuple[date, date] | None:
     parts = folder.name.split("_")
     if len(parts) != 2 or len(parts[0]) != 8 or len(parts[1]) != 8:
@@ -392,21 +373,6 @@ def _folder_date_range_from_name(folder: Path) -> tuple[date, date] | None:
         )
     except Exception:
         return None
-
-
-def _expected_date_range_for_folder(
-    payload: dict[str, Any], folder: Path
-) -> tuple[date, date]:
-    mode = str(payload.get("mode") or "single").strip().lower()
-    if mode == "yearly":
-        folder_range = _folder_date_range_from_name(folder)
-        if folder_range is not None:
-            return folder_range
-    start_date_raw = str(payload.get("start_date") or "").strip()
-    end_date_raw = str(payload.get("end_date") or "").strip()
-    return _parse_iso_date(start_date_raw, "start_date"), _parse_iso_date(
-        end_date_raw, "end_date"
-    )
 
 
 def _snapshot_filters_payload(snapshot: dict[str, Any]) -> dict[str, Any] | None:

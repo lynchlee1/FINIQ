@@ -88,6 +88,29 @@ def test_detect_pagination_uses_earlier_page_when_latest_is_corrupt(
     }
 
 
+def test_detect_pagination_sorts_four_digit_pages_numerically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page_999 = tmp_path / "999_post_page_00999.body"
+    page_1000 = tmp_path / "1000_post_page_01000.body"
+    page_999.write_bytes(b"page-999")
+    page_1000.write_bytes(b"page-1000")
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_common.pagination_info",
+        lambda content: {
+            "total_pages": 1000,
+            "total_items": 100_000,
+            "marker": content.decode(),
+        },
+    )
+
+    result = _detect_pagination(tmp_path)
+
+    assert result is not None
+    assert result["latest_file"] == page_1000.name
+    assert result["marker"] == "page-1000"
+
+
 def test_run_yearly_returns_promptly_when_parallel_worker_fails(tmp_path, monkeypatch) -> None:
     def fake_run_yearly_task(
         task: dict[str, Any],

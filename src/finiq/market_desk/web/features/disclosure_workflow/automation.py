@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from finiq.data_scraper.core.client import _is_valid_html
-from finiq.data_scraper.parse import disclosure_file_rows
+from finiq.data_scraper.parse import disclosure_file_rows, pagination_info
 from finiq.data_scraper.workflow import inspect_download_directory_pages
 
 from finiq.market_desk.web.features.disclosures.html_content_download import (
@@ -1213,11 +1213,17 @@ def _window_body_hash(window_path: Path) -> str:
     return digest.hexdigest()
 
 
-def _page_one_semantic_hash(window_path: Path) -> str:
+def _page_one_snapshot_hash(window_path: Path) -> str:
     candidates = sorted(window_path.glob("*_post_page_00001.body"))
     if len(candidates) != 1:
         raise ValueError(f"KIND window page 1을 하나만 찾을 수 없습니다: {window_path}")
-    return _canonical_hash(disclosure_file_rows(candidates[0]))
+    body_path = candidates[0]
+    return _canonical_hash(
+        {
+            "pagination": pagination_info(body_path.read_bytes()),
+            "rows": disclosure_file_rows(body_path),
+        }
+    )
 
 
 def _owned_window_matches(window_path: Path, query_hash: str) -> bool:
@@ -1478,54 +1484,41 @@ def _run_stage_one(
                 "last_report_only": False,
                 "log_limit": 20,
             }
-            result: dict[str, Any] | None = None
-            for attempt in range(1, 4):
-                if temporary.exists():
-                    shutil.rmtree(temporary)
-                result = _run_single(
+            result = _run_single(
+                {
+                    **request_payload,
+                    "output_directory": str(temporary),
+                    "end_page": None,
+                },
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+            )
+            status = result.get("download_status") or {}
+            if not status.get("integrity_valid"):
+                raise ValueError(f"KIND window 무결성 검사에 실패했습니다: {name}")
+
+            probe = target.with_name(f".{target.name}.probe-{uuid.uuid4().hex}")
+            try:
+                time.sleep(KIND_AUTOMATION_WAIT_SECONDS)
+                _run_single(
                     {
                         **request_payload,
-                        "output_directory": str(temporary),
-                        "end_page": None,
+                        "output_directory": str(probe),
+                        "end_page": 1,
                     },
                     progress_callback=progress_callback,
                     cancel_check=cancel_check,
                 )
-                status = result.get("download_status") or {}
-                if not status.get("integrity_valid"):
-                    raise ValueError(f"KIND window 무결성 검사에 실패했습니다: {name}")
-
-                probe = target.with_name(
-                    f".{target.name}.probe-{uuid.uuid4().hex}"
-                )
-                try:
-                    time.sleep(KIND_AUTOMATION_WAIT_SECONDS)
-                    _run_single(
-                        {
-                            **request_payload,
-                            "output_directory": str(probe),
-                            "end_page": 1,
-                        },
-                        progress_callback=progress_callback,
-                        cancel_check=cancel_check,
-                    )
-                    stable = _page_one_semantic_hash(temporary) == _page_one_semantic_hash(
-                        probe
-                    )
-                finally:
-                    if probe.exists():
-                        shutil.rmtree(probe)
-                if stable:
-                    break
-                progress_callback(
-                    f"window page 이동 감지, 전체 재시도 {attempt}/3: {name}"
-                )
-            else:
+                changed_during_download = _page_one_snapshot_hash(
+                    temporary
+                ) != _page_one_snapshot_hash(probe)
+            finally:
+                if probe.exists():
+                    shutil.rmtree(probe)
+            if changed_during_download:
                 raise ValueError(
-                    f"KIND window page 1이 세 번 연속 안정되지 않았습니다: {name}"
+                    f"KIND window pagination 또는 본문이 실행 중 변경되었습니다: {name}"
                 )
-            assert result is not None
-            status = result.get("download_status") or {}
             data_hash = _window_body_hash(temporary)
             body_file_count, body_total_bytes = _window_file_summary(temporary)
             atomic_write_json(
