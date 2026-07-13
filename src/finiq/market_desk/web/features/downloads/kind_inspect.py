@@ -13,7 +13,6 @@ from finiq.data_scraper.workflow import inspect_download_directory_pages, valida
 from finiq.data_scraper.workflow.workflow import _validate_downloaded_result_page_task
 
 from finiq.market_desk.web.features.downloads.kind_common import *
-from finiq.market_desk.web.features.downloads import kind_existing
 
 def inspect_download_output_directory_payload(
     payload: dict[str, Any],
@@ -37,7 +36,6 @@ def inspect_download_output_directory_payload(
     files_to_validate: list[tuple[Path, int]] = []
     candidates_by_path: dict[str, dict[str, str]] = {}
     folder_body_files: dict[Path, list[Path]] = {}
-    candidate_repair_snapshots: dict[Path, dict[str, Any]] = {}
 
     log("연도별 대상 폴더 수집 중...")
     for folder, page_size in targets:
@@ -54,79 +52,29 @@ def inspect_download_output_directory_payload(
             input_snapshot = _load_workflow_input(folder)
         except Exception:
             input_snapshot = None
-        if _is_trusted_download_input_snapshot(input_snapshot):
-            saved_filters = _snapshot_filters_payload(input_snapshot or {})
-            if _has_complete_current_download_payload(
-                payload
-            ) and not _filters_payloads_match(
-                _current_filters_payload(payload),
-                saved_filters,
-            ):
-                raise ValueError(
-                    f"{folder.name}: 기존 메타데이터의 검색 설정이 현재 검색 설정과 다릅니다. "
-                    "기존 메타데이터 기준으로 설정을 맞춘 뒤 다시 실행하세요."
+        if not _is_trusted_download_input_snapshot(input_snapshot):
+            for path in body_files + _workflow_auxiliary_files(folder):
+                candidates_by_path[str(path)] = _relative_candidate(
+                    path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과"
                 )
-        else:
-            if not _has_complete_current_download_payload(payload):
-                if (
-                    isinstance(input_snapshot, dict)
-                    and input_snapshot.get("page_size") is not None
-                ):
-                    input_snapshot = {
-                        **input_snapshot,
-                        "page_size": input_snapshot.get("page_size"),
-                    }
-                    log(
-                        f"{folder.name}: 신뢰할 수 없는 메타데이터지만 로컬 무결성 검사만 진행합니다."
-                    )
-                    locked_page_size = input_snapshot.get("page_size")
-                    if locked_page_size is None or int(locked_page_size) != page_size:
-                        reason = (
-                            "현재 요청의 페이지 크기와 맞지 않는 기존 다운로드 상태"
-                        )
-                        for path in body_files + _workflow_auxiliary_files(folder):
-                            candidates_by_path[str(path)] = _relative_candidate(
-                                path, base, reason
-                            )
-                        continue
-                    for path in body_files:
-                        files_to_validate.append((path, page_size))
-                    continue
-                else:
-                    for path in body_files:
-                        candidates_by_path[str(path)] = _relative_candidate(
-                            path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과"
-                        )
-                    continue
+            continue
 
-            expected_start, expected_end = _expected_date_range_for_folder(
-                payload, folder
+        saved_filters = _snapshot_filters_payload(input_snapshot)
+        has_current_filters = {
+            "company_name",
+            "submitter_name",
+            "market_label",
+            "securities_label",
+            "disclosure_type_groups",
+            "last_report_only",
+        }.issubset(payload)
+        if has_current_filters and not _filters_payloads_match(
+            _current_filters_payload(payload), saved_filters
+        ):
+            raise ValueError(
+                f"{folder.name}: 기존 메타데이터의 검색 설정이 현재 검색 설정과 다릅니다. "
+                "기존 메타데이터 기준으로 설정을 맞춘 뒤 다시 실행하세요."
             )
-            evidence_range = _folder_date_range_from_name(
-                folder
-            ) or kind_existing._infer_date_range_from_disclosures(folder)
-            if evidence_range is not None and evidence_range != (
-                expected_start,
-                expected_end,
-            ):
-                reason = (
-                    "현재 검색 설정의 날짜 범위와 맞지 않는 기존 다운로드 결과 "
-                    f"({evidence_range[0].isoformat()}~{evidence_range[1].isoformat()})"
-                )
-                for path in body_files:
-                    candidates_by_path[str(path)] = _relative_candidate(
-                        path, base, reason
-                    )
-                continue
-
-            input_snapshot = _download_input_snapshot_from_payload(
-                payload,
-                start=expected_start,
-                end=expected_end,
-                page_size=page_size,
-            )
-            candidate_repair_snapshots[folder] = input_snapshot
-            log(f"{folder.name}: 메타데이터가 없어 현재 검색 설정 기준으로 검사합니다.")
 
         locked_page_size = input_snapshot.get("page_size")
         if locked_page_size is None or int(locked_page_size) != page_size:
@@ -200,8 +148,6 @@ def inspect_download_output_directory_payload(
 
     log("폴더 간 페이지 번호 연속성 및 메타데이터 일관성 검사 중...")
     precomputed_statuses: dict[str, dict[str, int]] = {}
-    download_needed_count = 0
-    download_needed_pages = 0
     for folder, page_size in targets:
         check_cancel()
         if folder not in folder_body_files:
@@ -259,43 +205,6 @@ def inspect_download_output_directory_payload(
                         "total_pages": total_pages,
                         "total_items": total_items,
                     }
-                    repair_snapshot = candidate_repair_snapshots.get(folder)
-                    if repair_snapshot is not None:
-                        log(f"{folder.name}: KIND 현재 건수 대조 중...")
-                        kind_count = kind_existing.get_current_kind_total_count(
-                            repair_snapshot
-                        )
-                        if kind_count is None:
-                            reason = "KIND 현재 건수를 확인할 수 없어 메타데이터를 자동 복구할 수 없습니다."
-                            for p in body_files:
-                                candidates_by_path[str(p)] = _relative_candidate(
-                                    p, base, reason
-                                )
-                            precomputed_statuses.pop(str(folder), None)
-                        elif total_items > kind_count:
-                            reason = f"현재 검색 설정의 KIND 건수({kind_count})보다 로컬 건수({total_items})가 많습니다."
-                            for p in body_files:
-                                candidates_by_path[str(p)] = _relative_candidate(
-                                    p, base, reason
-                                )
-                            precomputed_statuses.pop(str(folder), None)
-                        else:
-                            if total_items < kind_count:
-                                download_needed_count += kind_count - total_items
-                                expected_pages = (
-                                    kind_count + page_size - 1
-                                ) // page_size
-                                download_needed_pages += max(
-                                    expected_pages - total_pages, 0
-                                )
-                                log(
-                                    f"{folder.name}: 현재 설정 기준 추가 다운로드 필요 "
-                                    f"{kind_count - total_items}건"
-                                )
-                            _write_download_input_snapshot(folder, repair_snapshot)
-                            log(
-                                f"{folder.name}: 현재 검색 설정으로 메타데이터를 자동 작성했습니다."
-                            )
 
     deletion_candidates = sorted(
         candidates_by_path.values(), key=lambda item: item["name"]
@@ -346,6 +255,6 @@ def inspect_download_output_directory_payload(
             "failed": max(total_pages - downloaded_pages, 0),
             "total": total_pages,
         },
-        "download_needed_count": download_needed_count,
-        "download_needed_pages": download_needed_pages,
+        "download_needed_count": 0,
+        "download_needed_pages": 0,
     }

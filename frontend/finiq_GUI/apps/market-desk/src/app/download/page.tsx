@@ -14,7 +14,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlInsetPanelClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload, createMetadata } from "@/features/download/api";
+import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload } from "@/features/download/api";
 import type { DownloadOptions, DownloadPayload } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -371,50 +371,6 @@ export default function DownloadPage() {
     selectedDisclosures,
   ]);
 
-  const handleCreateMetadata = async (range: any, force = false) => {
-    try {
-      setStatus(`[${range.folder_name}] 메타데이터 생성 체크 중...`);
-      setIsErrorStatus(false);
-      
-      const folderPath = range.folder_path;
-      
-      const payload = {
-        output_directory: folderPath,
-        start_date: range.start_date,
-        end_date: range.end_date,
-        company_name: companyName,
-        submitter_name: submitterName,
-        market_label: marketLabel,
-        securities_label: securitiesLabel,
-        disclosure_type_groups: selectedDisclosures,
-        last_report_only: lastReportOnly,
-        page_size: Number(pageSize),
-        wait_seconds: Number(waitSeconds),
-        timeout: Number(timeout),
-        force: force,
-      };
-
-      const res = await createMetadata(payload);
-      if (res.success) {
-        setStatus(`[${range.folder_name}] 메타데이터가 성공적으로 생성되었습니다.`);
-        await checkExisting(outputDirectory);
-      } else {
-        setStatus(`[${range.folder_name}] 메타데이터 작성 보류: ${res.message}`);
-        setIsErrorStatus(true);
-        
-        const confirmForce = window.confirm(
-          `${res.message}\n\n현재 검색 설정으로 메타데이터를 강제로 작성하시겠습니까?`
-        );
-        if (confirmForce) {
-          await handleCreateMetadata(range, true);
-        }
-      }
-    } catch (err: any) {
-      setStatus(`[${range.folder_name}] 메타데이터 작성 중 오류가 발생했습니다: ${err.message}`);
-      setIsErrorStatus(true);
-    }
-  };
-
   useEffect(() => {
     checkExisting(outputDirectory);
   }, [outputDirectory, checkExisting]);
@@ -750,12 +706,12 @@ export default function DownloadPage() {
                           };
                           const statusLabels = {
                             validated: "검증 완료: KIND 건수 일치",
-                            stale: "검증 실패: KIND 건수 불일치 (stale)",
+                            stale: range.metadata_missing
+                              ? "검증 실패: 메타데이터 없음"
+                              : "검증 실패: KIND 건수 불일치 (stale)",
                             unverified: range.metadata_status === "mismatch"
                               ? "메타데이터 설정 불일치"
-                              : range.metadata_missing
-                                ? (range.metadata_obsolete ? "구버전 메타데이터: 실행 시 보정 검사" : "메타데이터 없음: 실행 시 보정 검사")
-                                : "메타데이터 확인됨",
+                              : "메타데이터 확인됨",
                           };
 
                           return (
@@ -765,7 +721,7 @@ export default function DownloadPage() {
                             >
                               <div className="space-y-0.5">
                                 <p className="font-medium text-slate-800 dark:text-slate-200">
-                                  {range.folder_name} ({range.start_date} ~ {range.end_date})
+                                  {range.folder_name} ({range.start_date ?? "-"} ~ {range.end_date ?? "-"})
                                 </p>
                                 <p className="text-caption text-slate-500 dark:text-slate-400">
                                   로컬 건수: {range.local_count == null ? "-" : formatInteger(range.local_count)} | KIND 건수: {range.kind_count == null ? "-" : formatInteger(range.kind_count)}
@@ -775,18 +731,6 @@ export default function DownloadPage() {
                                     <AlertTriangle className="h-3.5 w-3.5" />
                                     {range.error_detail}
                                   </p>
-                                )}
-                                {range.metadata_missing && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleCreateMetadata(range);
-                                    }}
-                                    className="text-caption mt-1.5 rounded border border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] px-2 py-0.5 font-semibold text-[var(--tv-accent)] transition-all"
-                                  >
-                                    현재 설정으로 메타데이터 작성
-                                  </button>
                                 )}
                               </div>
                               <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${statusColors[statusTone]}`}>
@@ -800,8 +744,8 @@ export default function DownloadPage() {
                       {/* Warning message if stale ranges exist */}
                       {existingData?.ranges?.some(r => r.status === "stale") && (
                         <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down-text)]">
-                          <strong>경고:</strong> 기존 다운로드한 데이터 중 일부가 KIND의 현재 검색 결과와 일치하지 않습니다 (데이터 변경/정정/누락 가능성). 
-                          무결성이 손상되었으므로 <strong>이어서 다운로드하기가 기본 비활성화</strong>됩니다. mismatch 폴더를 수동으로 검사/보완하거나 삭제 후 재실행해야 합니다.
+                          <strong>경고:</strong> 기존 다운로드한 데이터 중 일부를 안전하게 재사용할 수 없습니다. KIND 건수가 다르거나 필수 메타데이터가 없습니다.
+                          해당 폴더를 삭제한 뒤 다시 다운로드해야 합니다.
                         </div>
                       )}
 
@@ -844,7 +788,7 @@ export default function DownloadPage() {
                       {existingData?.ranges?.some(r => r.status === "unverified") && !hasCompletedCurrentInspection && (
                         <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                           <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-                          <strong>알림:</strong> 일부 다운로드 범위는 {existingData.ranges?.some(r => r.metadata_obsolete) ? "workflow 메타데이터가 구버전입니다" : existingData.ranges?.some(r => r.metadata_missing) ? "workflow 메타데이터가 없습니다" : "아직 무결성 검사를 하지 않았습니다"}. 실행 또는 폴더 검사하기를 누르면 현재 검색 설정을 기준으로 무결성 검사와 메타데이터 보정을 진행합니다.
+                          <strong>알림:</strong> 일부 다운로드 범위는 아직 무결성 검사를 하지 않았습니다. 실행 또는 폴더 검사하기를 누르면 저장된 메타데이터를 기준으로 검사합니다.
                         </div>
                       )}
                 </div>

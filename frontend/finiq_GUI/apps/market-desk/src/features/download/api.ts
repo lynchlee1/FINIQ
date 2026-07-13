@@ -71,26 +71,3 @@ export function detectExistingDownload(payload: ExistingDownloadPayload) {
 export function checkExistingDownload(payload: ExistingDownloadPayload) {
   return apiPost<ExistingDownloadResponse>("/api/download/check-existing", { ...payload, verify_with_kind: false });
 }
-
-export function createMetadata(payload: {
-  output_directory: string;
-  start_date: string;
-  end_date: string;
-  company_name: string;
-  submitter_name: string;
-  market_label: string;
-  securities_label: string;
-  disclosure_type_groups: Record<string, string[]>;
-  last_report_only: boolean;
-  page_size: number;
-  wait_seconds: number;
-  timeout: number;
-  force?: boolean;
-}) {
-  return apiPost<{
-    success: boolean;
-    local_count: number;
-    kind_count: number | null;
-    message: string;
-  }>("/api/download/create-metadata", payload);
-}

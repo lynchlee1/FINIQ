@@ -791,7 +791,9 @@ def test_recent_window_refresh_detects_content_change_not_page_position(
     raw["decisions"]["s1_search"]["start_date"] = "2026-07-12"  # type: ignore[index]
     profile = normalize_automation_profile(raw)
 
-    def fake_run_single(payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
+    def fake_run_single(
+        payload: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
         output = Path(str(payload["output_directory"]))
         output.mkdir(parents=True, exist_ok=True)
         (output / "001_post_page_00001.body").write_bytes(b"same disclosure rows")
@@ -823,6 +825,56 @@ def test_recent_window_refresh_detects_content_change_not_page_position(
     assert first["changed_windows"] == 1
     assert second["changed_windows"] == 0
     assert second["refreshed_windows"] == 1
+
+
+@pytest.mark.parametrize("changed_part", ["pagination", "body"])
+def test_recent_window_change_during_download_fails_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_part: str,
+) -> None:
+    raw = _profile(tmp_path)
+    raw["decisions"]["s1_search"]["start_date"] = "2026-07-12"  # type: ignore[index]
+    profile = normalize_automation_profile(raw)
+    calls = 0
+
+    def fake_run_single(
+        payload: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        output = Path(str(payload["output_directory"]))
+        output.mkdir(parents=True, exist_ok=True)
+        total_pages = 2 if changed_part == "pagination" and calls == 2 else 1
+        body_marker = "second" if changed_part == "body" and calls == 2 else "first"
+        (output / "001_post_page_00001.body").write_text(
+            f"전체 <em>1</em>건 : <strong>1</strong>/{total_pages} {body_marker}",
+            encoding="utf-8",
+        )
+        return {
+            "download_status": {"integrity_valid": True},
+            "summary": {"success": 1, "failed": 0, "total": 1},
+        }
+
+    def fake_disclosure_rows(path: Path) -> list[dict[str, str]]:
+        text = Path(path).read_text("utf-8")
+        marker = text.rsplit(" ", 1)[-1] if changed_part == "body" else "same"
+        return [{"body": marker}]
+
+    monkeypatch.setattr(automation, "_run_single", fake_run_single)
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(automation, "disclosure_file_rows", fake_disclosure_rows)
+
+    with pytest.raises(ValueError, match="pagination 또는 본문이 실행 중 변경"):
+        automation._run_stage_one(
+            profile,
+            trigger="sync",
+            progress_callback=lambda _message: None,
+            cancel_check=lambda: False,
+        )
+
+    assert calls == 2
+    assert list((tmp_path / "01-list" / ".automation-windows").iterdir()) == []
 
 
 def test_active_html_candidate_reuses_only_current_membership(tmp_path: Path) -> None:
