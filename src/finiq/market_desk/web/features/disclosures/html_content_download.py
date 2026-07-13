@@ -609,10 +609,11 @@ def download_disclosure_html_contents_payload(
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
     finally:
         _clear_cancel_token(cancel_token)
+    saved_acpt_numbers = [path.stem for path in saved_paths]
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
         source_json_path=str(source_path),
-        acpt_numbers=acpt_numbers,
+        acpt_numbers=saved_acpt_numbers,
         source_json=source_json,
     )
     emit(f"HTML 메타데이터 저장 완료: {manifest_path}")

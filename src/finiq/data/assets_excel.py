@@ -49,6 +49,10 @@ AccountMapping = dict[str, str]
 AccountMappingInput = Mapping[str, Any]
 
 
+class _QuantiDataValidationError(ValueError):
+    pass
+
+
 def _excel_file(path: str | Path) -> pd.ExcelFile:
     return pd.ExcelFile(path, engine=EXCEL_ENGINE)
 
@@ -771,7 +775,23 @@ def _read_quanti_wide_sheet_with_mapping(
 
     codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1:].tolist()]
     data = raw_frame.iloc[date_header_row + 1 :, : len(codes) + 1].copy()
-    dates = pd.to_datetime(data.iloc[:, 0], errors="coerce").dt.date
+    raw_dates = data.iloc[:, 0]
+    parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
+    populated_date_mask = raw_dates.notna() & raw_dates.astype(str).str.strip().ne("")
+    invalid_date_mask = populated_date_mask & parsed_dates.isna()
+    if invalid_date_mask.any():
+        invalid_values = [str(value) for value in raw_dates.loc[invalid_date_mask].head(5)]
+        raise _QuantiDataValidationError(
+            f"Invalid date values in sheet {sheet_name}: {', '.join(invalid_values)}"
+        )
+    dates = parsed_dates.dt.date
+    duplicate_codes = sorted(
+        code for code in set(codes) if code and codes.count(code) > 1
+    )
+    if duplicate_codes:
+        raise _QuantiDataValidationError(
+            f"Duplicate code columns in sheet {sheet_name}: {', '.join(duplicate_codes[:5])}"
+        )
     values = data.iloc[:, 1:].copy()
     values.columns = codes
     values.insert(0, "date", dates)
@@ -780,10 +800,11 @@ def _read_quanti_wide_sheet_with_mapping(
     values = values.set_index("date")
     values = values.where(pd.notna(values), None)
 
-    if values.columns.duplicated().any():
-        values = values.T.groupby(level=0).last().T
     if values.index.duplicated().any():
-        values = values.groupby(level=0).last()
+        duplicate_dates = sorted({value.isoformat() for value in values.index[values.index.duplicated(keep=False)]})
+        raise _QuantiDataValidationError(
+            f"Duplicate dates in sheet {sheet_name}: {', '.join(duplicate_dates[:5])}"
+        )
     mappings = _code_name_mappings_from_sheet(raw_frame, xlsx_path, sheet_name, code_row, name_row, len(codes))
     return values, mappings
 
@@ -1102,10 +1123,39 @@ def _available_archive_path(path: Path) -> Path:
         index += 1
 
 
-def _move_file_replacing_destination(source_path: Path, destination_path: Path) -> None:
-    if destination_path.exists():
-        destination_path.unlink()
-    shutil.move(str(source_path), str(destination_path))
+def _commit_file_transaction(
+    replacements: list[tuple[Path, Path]],
+    moves: list[tuple[Path, Path]],
+    *,
+    backup_directory: Path,
+) -> None:
+    backup_directory.mkdir(parents=True, exist_ok=True)
+    completed_moves: list[tuple[Path, Path]] = []
+    promoted_destinations: list[Path] = []
+    backups: list[tuple[Path, Path]] = []
+    try:
+        for source_path, destination_path in moves:
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source_path), str(destination_path))
+            completed_moves.append((source_path, destination_path))
+        for index, (source_path, destination_path) in enumerate(replacements):
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            if destination_path.exists():
+                backup_path = backup_directory / f"{index}_{destination_path.name}"
+                shutil.move(str(destination_path), str(backup_path))
+                backups.append((destination_path, backup_path))
+            shutil.move(str(source_path), str(destination_path))
+            promoted_destinations.append(destination_path)
+    except Exception:
+        for destination_path in reversed(promoted_destinations):
+            destination_path.unlink(missing_ok=True)
+        for destination_path, backup_path in reversed(backups):
+            if backup_path.exists():
+                shutil.move(str(backup_path), str(destination_path))
+        for source_path, destination_path in reversed(completed_moves):
+            if destination_path.exists():
+                shutil.move(str(destination_path), str(source_path))
+        raise
 
 
 def cleanup_duplicate_asset_parquet_outputs(
@@ -1210,6 +1260,8 @@ def _scan_asset_excel_frames(
                 continue
             try:
                 frame, mappings = _read_quanti_wide_sheet_with_mapping(excel, sheet_name)
+            except _QuantiDataValidationError:
+                raise
             except ValueError as exc:
                 summary = _sheet_summary_payload(
                     xlsx_path,
@@ -1363,6 +1415,7 @@ def _scan_and_write_asset_excel_parquet(
     list[dict[str, Any]],
     list[CodeNameMapping],
     list[dict[str, str]],
+    list[tuple[Path, Path]],
 ]:
     source = Path(source_directory).expanduser().resolve()
     xlsx_files = _selected_asset_excel_paths(source, selected_files)
@@ -1420,6 +1473,8 @@ def _scan_and_write_asset_excel_parquet(
                 continue
             try:
                 frame, mappings = _read_quanti_wide_sheet_with_mapping(excel, sheet_name)
+            except _QuantiDataValidationError:
+                raise
             except ValueError as exc:
                 summary = _sheet_summary_payload(
                     xlsx_path,
@@ -1548,6 +1603,7 @@ def _scan_and_write_asset_excel_parquet(
     code_name_mappings: list[CodeNameMapping] = []
     resume_skipped: list[dict[str, str]] = []
     temp_outputs: list[dict[str, Any]] = []
+    replacements: list[tuple[Path, Path]] = []
     used_stems: dict[str, int] = _existing_output_stem_counts(final_output) if resume_failed_only else {}
 
     for file_outputs, file_skipped, file_sheet_summaries, file_code_name_mappings, file_resume_skipped in file_results:
@@ -1603,7 +1659,7 @@ def _scan_and_write_asset_excel_parquet(
                 f"날짜={source_info.get('date_start')}~{source_info.get('date_end')}"
             ),
         )
-        shutil.move(str(output_item["temp_path"]), final_path)
+        replacements.append((output_item["temp_path"], final_path))
         outputs[resolved_stem] = {
             "path": str(final_path),
             "output_file": final_path.name,
@@ -1616,7 +1672,15 @@ def _scan_and_write_asset_excel_parquet(
             "quality": output_item["quality"],
         }
 
-    return dict(sorted(outputs.items())), sources_by_account, skipped, sheet_summaries, code_name_mappings, resume_skipped
+    return (
+        dict(sorted(outputs.items())),
+        sources_by_account,
+        skipped,
+        sheet_summaries,
+        code_name_mappings,
+        resume_skipped,
+        replacements,
+    )
 
 
 def convert_asset_excels_to_wide_parquet(
@@ -1660,7 +1724,7 @@ def convert_asset_excels_to_wide_parquet(
         temp_output = Path(temp_output_name)
         _emit(progress_callback, f"임시 데이터 경로: {temp_output}")
         _emit(progress_callback, "Sheet 단위 생성: Sheet를 읽는 즉시 임시 Parquet로 저장")
-        outputs, sources_by_account, skipped, sheet_summaries, code_name_mappings, resume_skipped = _scan_and_write_asset_excel_parquet(
+        outputs, sources_by_account, skipped, sheet_summaries, code_name_mappings, resume_skipped, replacements = _scan_and_write_asset_excel_parquet(
             source,
             temp_output,
             output,
@@ -1671,12 +1735,20 @@ def convert_asset_excels_to_wide_parquet(
             cancel_check=cancel_check,
         )
 
-    if resume_failed_only:
-        code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
+        if resume_failed_only:
+            code_name_mappings = [*_existing_code_name_mappings(output), *code_name_mappings]
 
-    code_name_mapping = _code_name_mapping_frame(code_name_mappings)
-    code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
-    code_name_mapping.to_parquet(code_name_mapping_path, index=False, compression="snappy")
+        code_name_mapping = _code_name_mapping_frame(code_name_mappings)
+        code_name_mapping_path = output / CODE_NAME_MAPPING_FILE
+        temp_code_name_mapping_path = temp_output / CODE_NAME_MAPPING_FILE
+        code_name_mapping.to_parquet(
+            temp_code_name_mapping_path, index=False, compression="snappy"
+        )
+        _commit_file_transaction(
+            [*replacements, (temp_code_name_mapping_path, code_name_mapping_path)],
+            [],
+            backup_directory=temp_output / "backups",
+        )
     _emit(progress_callback, f"코드-종목명 매핑 저장: {code_name_mapping_path.name} ({len(code_name_mapping)}행)")
     _emit(
         progress_callback,
@@ -1822,13 +1894,15 @@ def merge_asset_parquet_outputs(
                 "quality": quality,
             }
 
-        if cleanup_destinations:
-            cleanup_destinations[0][1].parent.mkdir(parents=True, exist_ok=True)
-            for path, destination in cleanup_destinations:
-                shutil.move(str(path), str(destination))
-                moved_files.append({"from": str(path), "to": str(destination)})
-        for source_path, destination_path in final_output_replacements:
-            _move_file_replacing_destination(source_path, destination_path)
+        _commit_file_transaction(
+            final_output_replacements,
+            cleanup_destinations,
+            backup_directory=temp_output / "backups",
+        )
+        moved_files.extend(
+            {"from": str(path), "to": str(destination)}
+            for path, destination in cleanup_destinations
+        )
 
     return {
         "status": "completed",

@@ -35,9 +35,18 @@ def _comparison_frame(
     frame = pd.read_parquet(path)
     if "date" not in frame.columns:
         raise ValueError("Missing date column")
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date
+    raw_dates = frame["date"]
+    parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
+    populated_date_mask = raw_dates.notna() & raw_dates.astype(str).str.strip().ne("")
+    if (populated_date_mask & parsed_dates.isna()).any():
+        raise ValueError("Invalid date value")
+    frame["date"] = parsed_dates.dt.date
     frame = frame.dropna(subset=["date"]).set_index("date")
+    if frame.index.duplicated().any():
+        raise ValueError("Duplicate date axis")
     frame.columns = [str(column) for column in frame.columns]
+    if frame.columns.duplicated().any():
+        raise ValueError("Duplicate code axis")
     return payload, frame.sort_index()
 
 

@@ -2866,7 +2866,7 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
         "saved_files": 1,
         "skipped_files": 1,
         "expected_files": 1,
-        "integrity_ok": True,
+        "integrity_ok": False,
         "missing_files": 0,
     }
     assert (output_directory / "2008" / "20260422000832.html").is_file()
@@ -2876,6 +2876,37 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
     assert payload["skipped_files"] == [
         {"source_file": str(source_directory / "20260421000111.html"), "error": "no sections found"}
     ]
+
+
+def test_section_save_reports_zero_rule_selection_as_integrity_failure(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    source = input_directory / "20260422000832.html"
+    source.write_text(
+        "<html><body><h2 id='toc_1'><p>주요사항보고서</p></h2><p>본문</p></body></html>",
+        encoding="utf-8",
+    )
+
+    payload = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 주요사항보고서": []},
+        }
+    )
+
+    assert payload["summary"]["integrity_ok"] is False
+    assert payload["summary"]["skipped_files"] == 1
+    assert payload["skipped_files"] == [
+        {
+            "source_file": str(source),
+            "error": "section save rules selected no sections",
+        }
+    ]
+    assert not (output_directory / source.name).exists()
 
 
 def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problems(tmp_path: Path) -> None:
@@ -3693,6 +3724,20 @@ def test_parse_disclosure_html_payload_requires_mode(tmp_path: Path) -> None:
         assert str(exc) == "mode is required"
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_parse_disclosure_html_payload_rejects_invalid_record_filter(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="operator is unsupported"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(tmp_path),
+                "output_directory": str(tmp_path / "output"),
+                "mode": "security_transaction",
+                "record_filters": [
+                    {"field": "title", "operator": "unsupported", "value": "x"}
+                ],
+            }
+        )
 
 
 def test_parse_disclosure_html_payload_rejects_unknown_mode(tmp_path: Path) -> None:
@@ -5892,6 +5937,16 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "setDownloadSplitByYear(existingOutputSplitByYear)" not in download_component_html
     assert "저장 경로 분할저장을" not in download_component_html
     assert "detected_source_split_by_year !== contentSourceSplitByYear" not in download_component_html
+    assert "SplitByYearButton" not in download_component_html
+    assert "setDownloadSplitByYear" not in download_component_html
+    assert "setContentSourceSplitByYear" not in download_component_html
+    assert "setCompressSplitByYear" not in download_component_html
+    assert "setMergeSplitByYear" not in download_component_html
+    assert "split_by_year: true" in download_component_html
+    assert "source_split_by_year: true" in download_component_html
+    assert "input_split_by_year: true" in download_component_html
+    assert "output_split_by_year: true" in download_component_html
+    assert "output_split_by_year: false" in download_component_html
     assert "/api/utility/partition-storage/start" not in download_component_html
     assert "분할저장 구조 전환" not in download_component_html
     assert "/api/utility/partition-storage/start" in utility_ui_html
@@ -5901,7 +5956,8 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "기존 원문 저장 범위 감지됨" in download_component_html
     assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
     assert "기존 메타데이터 기준으로 설정 맞추기" not in download_component_html
-    assert "분할저장 설정이 기존 폴더 구조와 다릅니다" in download_component_html
+    assert "기존 데이터 경로가 현재 필수 연도별 구조와 다릅니다" in download_component_html
+    assert "분할저장 On/Off를 맞춘 뒤" not in download_component_html
     assert "/html-change-log" in parse_ui_html
     assert "/html-bond-summary" in change_log_ui_html
     assert "변동 불러오기" in change_log_ui_html
@@ -8455,6 +8511,26 @@ def test_check_existing_downloads_empty(tmp_path: Path) -> None:
     res = check_existing_downloads(str(tmp_path))
     assert res == {"has_existing": False}
 
+
+def test_check_existing_downloads_reports_validation_exception_as_stale(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+
+    folder = tmp_path / "20260101_20260131"
+    folder.mkdir()
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_existing._validate_single_folder",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("validation exploded")),
+    )
+
+    result = check_existing_downloads(str(tmp_path))
+
+    assert result["has_existing"] is True
+    assert result["earliest_date"] == "2026-01-01"
+    assert result["latest_date"] == "2026-01-31"
+    assert result["ranges"][0]["status"] == "stale"
+    assert "validation exploded" in result["ranges"][0]["error_detail"]
 
 def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
     from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads

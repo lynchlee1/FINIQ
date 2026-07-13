@@ -22,10 +22,6 @@ type DownloadVariant = "external" | "content";
 type ContentSourceInputMode = "folder" | "file";
 type ExternalTaskMode = "download" | "compress";
 type ContentTaskMode = "download" | "merge";
-type SplitByYearButtonProps = {
-  checked: boolean;
-  onChange: () => void;
-};
 
 const DOWNLOAD_VARIANTS = {
   external: {
@@ -75,18 +71,6 @@ async function readJsonResponse(response: Response, fallbackMessage: string) {
   } catch {
     throw new Error(response.ok ? fallbackMessage : text);
   }
-}
-
-function SplitByYearButton({ checked, onChange }: SplitByYearButtonProps) {
-  return (
-    <Button
-      variant={checked ? "default" : "outline"}
-      onClick={onChange}
-      className="h-10 w-[116px] shrink-0"
-    >
-      분할저장 {checked ? "On" : "Off"}
-    </Button>
-  );
 }
 
 export function HtmlDownloadPageView({ variant = "external" }: { variant?: DownloadVariant }) {
@@ -176,10 +160,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [waitSeconds, setWaitSeconds] = useState("0");
   const [limit, setLimit] = useState("");
   const [skipExisting, setSkipExisting] = useState(true);
-  const [downloadSplitByYear, setDownloadSplitByYear] = useState(true);
-  const [contentSourceSplitByYear, setContentSourceSplitByYear] = useState(true);
-  const [compressSplitByYear, setCompressSplitByYear] = useState(true);
-  const [mergeSplitByYear, setMergeSplitByYear] = useState(true);
   const [progressInterval, setProgressInterval] = useState("10");
   const [mergeOutputPath, setMergeOutputPath] = useState("");
 
@@ -187,7 +167,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     existingData && typeof existingData.detected_output_split_by_year === "boolean"
       ? existingData.detected_output_split_by_year
       : null;
-  const existingSplitMismatch = existingOutputSplitByYear !== null && existingOutputSplitByYear !== downloadSplitByYear;
+  const existingSplitMismatch = existingOutputSplitByYear !== null && !existingOutputSplitByYear;
   const existingAllSaved = !!existingData && (existingData.requested_count || 0) > 0 && (existingData.missing_target_html_count || 0) === 0;
 
   const {
@@ -282,9 +262,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       wait_seconds: Number(waitSeconds),
       limit: limit ? Number(limit) : null,
       skip_existing: skipExisting,
-      split_by_year: downloadSplitByYear,
-      source_split_by_year: variant === "content" ? (contentSourceInputMode === "folder" && contentSourceSplitByYear) : downloadSplitByYear,
-      output_split_by_year: downloadSplitByYear,
+      split_by_year: true,
+      source_split_by_year: true,
+      output_split_by_year: true,
       progress_interval: Number(progressInterval),
       cancel_token: cancelToken,
   }), [
@@ -297,9 +277,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     waitSeconds,
     limit,
     skipExisting,
-    downloadSplitByYear,
-    contentSourceSplitByYear,
-    contentSourceInputMode,
     progressInterval,
     variant,
   ]);
@@ -311,7 +288,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       return;
     }
     if (existingSplitMismatch) {
-      setStatus("분할저장 설정이 기존 폴더 구조와 다릅니다. 기존 메타데이터 기준으로 설정을 맞춘 뒤 실행하세요.");
+      setStatus("기존 데이터 경로가 현재 필수 연도별 구조와 다릅니다. 연도별 구조로 전환하거나 다른 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -328,9 +305,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     output_directory: useSeparateOutputDirectory ? outputDirectory : "",
     ...sourcePayload(),
     limit: limit ? Number(limit) : null,
-    split_by_year: downloadSplitByYear,
-    source_split_by_year: variant === "content" ? (contentSourceInputMode === "folder" && contentSourceSplitByYear) : downloadSplitByYear,
-    output_split_by_year: downloadSplitByYear,
+    split_by_year: true,
+    source_split_by_year: true,
+    output_split_by_year: true,
     dry_run: dryRun,
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
@@ -340,9 +317,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     useSeparateOutputDirectory,
     sourcePayload,
     limit,
-    downloadSplitByYear,
-    contentSourceSplitByYear,
-    contentSourceInputMode,
     deleteConfirmed,
     deleteConfirmationText,
     variant,
@@ -563,14 +537,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setIsErrorStatus(true);
       return;
     }
-    const defaultOutputPath = mergeSplitByYear ? outputDirectory : `${outputDirectory}/merged-content-html.json`;
     const payload = {
       data_root: dataRoot,
       input_directory: useSeparateOutputDirectory ? outputDirectory : "",
-      output_path: useSeparateOutputDirectory ? mergeOutputPath || defaultOutputPath : "",
-      split_by_year: mergeSplitByYear,
-      input_split_by_year: mergeSplitByYear,
-      output_split_by_year: mergeSplitByYear,
+      output_path: useSeparateOutputDirectory ? mergeOutputPath || outputDirectory : "",
+      split_by_year: true,
+      input_split_by_year: true,
+      output_split_by_year: true,
       limit: limit ? Number(limit) : null,
     };
     startJob("/api/disclosures/html/content-download/merge/start", payload);
@@ -592,8 +565,8 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       data_root: dataRoot,
       input_directory: useSeparateOutputDirectory ? compressInputDirectory : "",
       output_directory: useSeparateOutputDirectory ? compressOutputDirectory : "",
-      split_by_year: compressSplitByYear,
-      input_split_by_year: compressSplitByYear,
+      split_by_year: true,
+      input_split_by_year: true,
       output_split_by_year: false,
       parallel_workers: compressWorkers ? Number(compressWorkers) : null,
     };
@@ -604,7 +577,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     setOutputDirectory(val);
     saveSetting(variantConfig.defaultDirectoryKey, val);
     if (variant === "content") {
-      setMergeOutputPath(mergeSplitByYear ? val : (val ? `${val}/merged-content-html.json` : ""));
+      setMergeOutputPath(val);
     }
   };
 
@@ -640,12 +613,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       onChange: variant === "content" && contentSourceInputMode === "file" ? saveContentSourceFilePath : saveWorkspaceDirectory,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
-      trailing: variantConfig.sourcePickMode === "folder" && contentSourceInputMode === "folder" ? (
-        <SplitByYearButton
-          checked={contentSourceSplitByYear}
-          onChange={() => setContentSourceSplitByYear((value) => !value)}
-        />
-      ) : null,
     },
     ...(useSeparateOutputDirectory ? [{
       id: "outputDirectory",
@@ -656,12 +623,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       onChange: saveOutputDirectory,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
-      trailing: (
-        <SplitByYearButton
-          checked={downloadSplitByYear}
-          onChange={() => setDownloadSplitByYear((value) => !value)}
-        />
-      ),
     } satisfies HtmlWorkflowField] : []),
     { id: "timeout", kind: "input", type: "number", label: "타임아웃 (초)", value: timeout, onChange: setTimeoutVal },
     { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", help: "KIND에 인터넷 요청을 보내는 저장 실행에만 적용됩니다.", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
@@ -686,12 +647,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       onChange: saveWorkspaceDirectory,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
-      trailing: (
-        <SplitByYearButton
-          checked={compressSplitByYear}
-          onChange={() => setCompressSplitByYear((value) => !value)}
-        />
-      ),
     },
     ...(useSeparateOutputDirectory ? [{
       id: "compressOutputDirectory",
@@ -738,25 +693,14 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       id: "mergeOutputPath",
       kind: "path",
       label: "병합 결과 데이터 경로",
-      mode: mergeSplitByYear ? "folder" : "save",
-      value: mergeOutputPath || (mergeSplitByYear ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : "")),
+      mode: "folder",
+      value: mergeOutputPath || outputDirectory,
       onChange: (val) => {
         setMergeOutputPath(val);
         saveSetting("html_merge_output_path", val);
       },
-      placeholder: mergeSplitByYear ? `${outputDirectory || "/path/to/content_html"}` : `${outputDirectory || "/path/to/content_html"}/merged-content-html.json`,
+      placeholder: outputDirectory || "/path/to/content_html/merged",
       span: 4,
-      trailing: (
-        <SplitByYearButton
-          checked={mergeSplitByYear}
-          onChange={() => setMergeSplitByYear((value) => {
-            const nextVal = !value;
-            const newPath = nextVal ? outputDirectory : (outputDirectory ? `${outputDirectory}/merged-content-html.json` : "");
-            setMergeOutputPath(newPath);
-            return nextVal;
-          })}
-        />
-      ),
     } satisfies HtmlWorkflowField] : []),
   ];
 
@@ -981,7 +925,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                 {existingSplitMismatch && (
                   <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down)]">
                     <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-                    <strong>오류:</strong> 분할저장 설정이 기존 폴더 구조와 다릅니다. 폴더 내 데이터가 섞이지 않도록 데이터 경로의 분할저장 On/Off를 맞춘 뒤 실행하세요.
+                    <strong>오류:</strong> 기존 데이터 경로가 현재 필수 연도별 구조와 다릅니다. 연도별 구조로 전환하거나 다른 데이터 경로를 선택하세요.
                   </div>
                 )}
 

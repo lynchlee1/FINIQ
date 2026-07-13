@@ -297,8 +297,8 @@ def check_existing_downloads(
         return {"has_existing": False}
     try:
         output_directory = Path(output_directory_raw).expanduser().resolve()
-    except Exception:
-        return {"has_existing": False}
+    except Exception as exc:
+        raise ValueError(f"Invalid output directory: {exc}") from exc
 
     if not output_directory.is_dir():
         return {"has_existing": False}
@@ -313,7 +313,29 @@ def check_existing_downloads(
                 pass
         return None
 
+    def stale_range(
+        folder: Path,
+        folder_name: str,
+        error_detail: str,
+        date_range: tuple[date, date] | None = None,
+        *,
+        metadata_missing: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "start_date": date_range[0].isoformat() if date_range else None,
+            "end_date": date_range[1].isoformat() if date_range else None,
+            "folder_name": folder_name,
+            "local_count": None,
+            "kind_count": None,
+            "status": "stale",
+            "error_detail": error_detail,
+            "metadata_missing": metadata_missing,
+            "metadata_obsolete": False,
+            "folder_path": str(folder),
+        }
+
     candidates = []
+    discovery_errors: list[dict[str, Any]] = []
 
     # Check for yearly subfolders (YYYYMMDD_YYYYMMDD)
     try:
@@ -341,10 +363,16 @@ def check_existing_downloads(
                         candidates.append(
                             (child, child.name, (folder_start, folder_end))
                         )
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+                    except Exception as exc:
+                        discovery_errors.append(
+                            stale_range(
+                                child,
+                                child.name,
+                                f"Invalid download folder date range: {exc}",
+                            )
+                        )
+    except Exception as exc:
+        raise RuntimeError(f"Failed to inspect output directory: {exc}") from exc
 
     # If no yearly subfolders, check the directory itself (Single mode)
     if not candidates:
@@ -362,51 +390,83 @@ def check_existing_downloads(
                                 (start_date, end_date),
                             )
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        discovery_errors.append(
+                            stale_range(
+                                output_directory,
+                                output_directory.name,
+                                f"Invalid download metadata date range: {exc}",
+                            )
+                        )
                 else:
                     date_range = _infer_date_range_from_disclosures(output_directory)
                     if date_range:
                         candidates.append(
                             (output_directory, output_directory.name, date_range)
                         )
-        except Exception:
-            pass
+                    else:
+                        discovery_errors.append(
+                            stale_range(
+                                output_directory,
+                                output_directory.name,
+                                "Failed to determine date range from existing download files.",
+                                metadata_missing=True,
+                            )
+                        )
+        except Exception as exc:
+            discovery_errors.append(
+                stale_range(
+                    output_directory,
+                    output_directory.name,
+                    f"Failed to inspect existing download files: {exc}",
+                )
+            )
 
-    if not candidates:
+    if not candidates and not discovery_errors:
         return {"has_existing": False}
 
-    ranges_data = []
+    ranges_data = list(discovery_errors)
     # Run validation checks concurrently in a ThreadPool
     worker_count = min(10, len(candidates))
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        completed = bounded_as_completed(
-            executor,
-            candidates,
-            lambda item: executor.submit(
-                _validate_single_folder,
-                item[0],
-                item[1],
-                item[2],
-                verify_with_kind=verify_with_kind,
-                current_payload=current_payload,
-            ),
-            max_pending=worker_count * 2,
-        )
-        for future, _candidate in completed:
-            try:
-                res = future.result()
-                if res is not None:
-                    ranges_data.append(res)
-            except Exception:
-                pass
+    if candidates:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            completed = bounded_as_completed(
+                executor,
+                candidates,
+                lambda item: executor.submit(
+                    _validate_single_folder,
+                    item[0],
+                    item[1],
+                    item[2],
+                    verify_with_kind=verify_with_kind,
+                    current_payload=current_payload,
+                ),
+                max_pending=worker_count * 2,
+            )
+            for future, _candidate in completed:
+                try:
+                    res = future.result()
+                    if res is not None:
+                        ranges_data.append(res)
+                except Exception as exc:
+                    folder, folder_name, (folder_start, folder_end) = _candidate
+                    ranges_data.append(
+                        stale_range(
+                            folder,
+                            folder_name,
+                            f"Download validation failed: {exc}",
+                            (folder_start, folder_end),
+                        )
+                    )
 
     if not ranges_data:
         return {"has_existing": False}
 
-    sorted_ranges = sorted(ranges_data, key=lambda x: x["start_date"])
-    earliest_date = min(r["start_date"] for r in ranges_data)
-    latest_date = max(r["end_date"] for r in ranges_data)
+    sorted_ranges = sorted(ranges_data, key=lambda x: str(x.get("start_date") or ""))
+    starts = [r["start_date"] for r in ranges_data if r.get("start_date")]
+    ends = [r["end_date"] for r in ranges_data if r.get("end_date")]
+    earliest_date = min(starts) if starts else None
+    latest_date = max(ends) if ends else None
 
     saved_filters = None
     for folder, _, _ in candidates:
