@@ -126,7 +126,7 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   assert.match(tableSource, /useSeparateOutputDirectory && <div/);
   assert.match(tableSource, /root_directory: useSeparateOutputDirectory/);
   assert.match(tableSource, /saveSetting\("sqlite_output_directory", val\)/);
-  assert.match(filterSource, /classification_path: useSeparateOutputDirectory/);
+  assert.match(filterSource, /\.\.\.\(useSeparateOutputDirectory[\s\S]*?classification_path:/);
   assert.match(filterSource, /saveSetting\("html_transfer_directory", val\)/);
   assert.match(htmlDownloadSource, /sourcePayload[\s\S]*?if \(useSeparateOutputDirectory\)/);
   assert.match(htmlDownloadSource, /output_directory: useSeparateOutputDirectory \? outputDirectory : ""/);

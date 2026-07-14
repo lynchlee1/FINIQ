@@ -78,7 +78,7 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     filtered = apply_workspace_defaults(
         "filter", {"data_root": str(workspace.root)}
     )
-    assert filtered["classification_path"] == str(workspace.table)
+    assert "classification_path" not in filtered
     assert (
         _manifest_output_path(table["output_path"], workspace.list).parent.parent
         == workspace.table
@@ -289,7 +289,8 @@ def test_existing_filter_route_uses_workspace_stage_paths(
     )
 
     assert response.status_code == 200
-    assert captured["classification_path"] == str(data_root / "02-table")
+    assert captured["data_root"] == str(data_root)
+    assert "classification_path" not in captured
     assert captured["html_transfer_path"] == str(
         data_root / "03-filter" / "filtered.json"
     )

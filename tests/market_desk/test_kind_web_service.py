@@ -620,6 +620,27 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
     assert payload["html_download_acpt_numbers"] == ["20250102000001"]
 
 
+def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    source_root = data_root / "01-list"
+    source_root.mkdir(parents=True)
+    _write_source_body_fixture(source_root)
+    output_path = data_root / "02-table" / "kind.sqlite_manifest.json"
+    manifest_path = _nested_sqlite_manifest_path(output_path)
+    build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(output_path),
+        }
+    )
+
+    payload = filter_disclosures_payload({"data_root": str(data_root)})
+
+    assert payload["source_type"] == "sqlite_manifest"
+    assert payload["source_sqlite_manifest_path"] == str(manifest_path.resolve())
+    assert payload["summary"]["source_disclosures"] == 2
+
+
 def test_filter_disclosures_payload_reads_sqlite_manifest_shard_directory(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
