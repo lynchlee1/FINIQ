@@ -20,28 +20,37 @@ def _resolve_sqlite_manifest_path(path: str | Path) -> Path | None:
     candidate = Path(path).expanduser().resolve()
     if candidate.is_file():
         if not _looks_like_sqlite_manifest(candidate):
+            if candidate.name.endswith(".sqlite_manifest.json"):
+                msg = f"Not a FINIQ disclosure SQLite manifest: {candidate}"
+                raise ValueError(msg)
             return None
         if not candidate.parent.name.endswith("_shards"):
             msg = f"SQLite manifest must be inside a *_shards directory: {candidate}"
             raise ValueError(msg)
         return candidate
     if not candidate.is_dir():
+        if candidate.name.endswith(".sqlite_manifest.json"):
+            raise FileNotFoundError(f"SQLite manifest not found: {candidate}")
         return None
     if candidate.name.endswith("_shards"):
         nested_manifest = candidate / f"{candidate.name.removesuffix('_shards')}.json"
-        if _looks_like_sqlite_manifest(nested_manifest):
-            return nested_manifest
-        manifests = sorted(candidate.glob("*.sqlite_manifest.json"))
-        for manifest_path in manifests:
-            if _looks_like_sqlite_manifest(manifest_path):
-                return manifest_path
-    search_dirs = [candidate, candidate / "kind_sqlite"]
-    for search_dir in search_dirs:
-        shard_manifests = sorted(search_dir.glob("*_shards/*.sqlite_manifest.json"))
-        for manifest_path in shard_manifests:
-            if _looks_like_sqlite_manifest(manifest_path):
-                return manifest_path
-    return None
+        if not nested_manifest.is_file():
+            raise FileNotFoundError(f"SQLite manifest not found: {nested_manifest}")
+        if not _looks_like_sqlite_manifest(nested_manifest):
+            msg = f"Not a FINIQ disclosure SQLite manifest: {nested_manifest}"
+            raise ValueError(msg)
+        return nested_manifest
+    manifests = sorted(candidate.glob("*_shards/*.sqlite_manifest.json"))
+    if not manifests:
+        return None
+    if len(manifests) != 1:
+        msg = f"Expected exactly one SQLite manifest in {candidate}, found {len(manifests)}"
+        raise ValueError(msg)
+    manifest_path = manifests[0]
+    if not _looks_like_sqlite_manifest(manifest_path):
+        msg = f"Not a FINIQ disclosure SQLite manifest: {manifest_path}"
+        raise ValueError(msg)
+    return manifest_path
 
 
 def _load_sqlite_manifest(manifest_path: Path) -> dict[str, Any]:
@@ -71,14 +80,6 @@ def _resolve_sqlite_shard_path(manifest_path: Path, shard: dict[str, Any]) -> Pa
     shard_path = Path(str(shard.get("path") or "")).expanduser()
     if not shard_path.is_absolute():
         shard_path = (manifest_parent / shard_path).resolve()
-    if shard_path.is_file():
-        return shard_path
-
-    relative_path = str(shard.get("relative_path") or "").strip()
-    if relative_path:
-        same_directory_path = (manifest_parent / relative_path).resolve()
-        if same_directory_path.is_file():
-            return same_directory_path
     return shard_path
 
 
@@ -131,9 +132,9 @@ def _sqlite_table_columns(connection: sqlite3.Connection, table_name: str) -> se
 
 def _sqlite_select_column(columns: set[str], column_name: str) -> str:
     quoted_column = _quoted_sqlite_identifier(column_name)
-    if column_name in columns:
-        return quoted_column
-    return f"NULL AS {quoted_column}"
+    if column_name not in columns:
+        raise ValueError(f"SQLite table is missing required column: {column_name}")
+    return quoted_column
 
 
 def _iter_sqlite_manifest_disclosure_records(

@@ -46,6 +46,25 @@ def compress_disclosure_external_html_payload(
     if manifest_path.is_file():
         manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     metadata = _collect_disclosure_metadata_from_json(manifest_payload)
+    expected_acpt_numbers = [html_path.stem for _year, html_path in html_files]
+    missing_metadata_acpt_numbers = [
+        acpt_no for acpt_no in expected_acpt_numbers if acpt_no not in metadata
+    ]
+    metadata_check = {
+        "complete": not missing_metadata_acpt_numbers,
+        "expected_records": len(expected_acpt_numbers),
+        "matched_records": len(expected_acpt_numbers)
+        - len(missing_metadata_acpt_numbers),
+        "missing_records": len(missing_metadata_acpt_numbers),
+    }
+    warnings: list[str] = []
+    if missing_metadata_acpt_numbers:
+        sample = ", ".join(missing_metadata_acpt_numbers[:10])
+        warnings.append(
+            f"manifest에서 외부 HTML {len(html_files)}건 중 "
+            f"{len(missing_metadata_acpt_numbers)}건의 metadata를 찾지 못했습니다. "
+            f"누락 접수번호 예시: {sample}"
+        )
 
     worker_count = _external_html_compress_workers(body, len(html_files))
 
@@ -109,6 +128,8 @@ def compress_disclosure_external_html_payload(
         "외부 HTML 압축 병렬 결과 확인: "
         f"{processing_verification['processed_files']}/{processing_verification['expected_files']}건 처리."
     )
+    for warning in warnings:
+        emit(f"경고: {warning}")
 
     records: list[dict[str, Any]] = []
     for indexed_record in indexed_records:
@@ -123,7 +144,6 @@ def compress_disclosure_external_html_payload(
         "summary": {"found_files": len(html_files), "compressed_files": len(records)},
         "records": records,
     }
-    expected_acpt_numbers = [html_path.stem for _year, html_path in html_files]
     actual_acpt_numbers = [str(record.get("acpt_no") or "") for record in records]
     if (
         len(set(expected_acpt_numbers)) != len(expected_acpt_numbers)
@@ -160,6 +180,8 @@ def compress_disclosure_external_html_payload(
             "written_files": len(written_files),
         },
         "written_files": written_files,
+        "metadata_check": metadata_check,
+        "warnings": warnings,
         "processing_verification": processing_verification,
         "verification": verification,
         "progress_log": progress_log[-100:],

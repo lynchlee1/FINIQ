@@ -11,6 +11,7 @@ import zipfile
 import pandas as pd
 import pytest
 
+from finiq.config import QUANTI_DIR, STOCK_DATA_DIR
 from finiq.data_scraper.workflow import KIND_WORKFLOW_INPUT_FORMAT
 from finiq.market_desk.analytics.quanti_market_history import (
     build_quanti_market_history,
@@ -622,6 +623,23 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
     assert payload["html_download_acpt_numbers"] == ["20250102000001"]
 
 
+def test_filter_disclosures_payload_rejects_multiple_manifests_in_directory(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    sqlite_root = tmp_path / "kind_sqlite"
+    for name in ("first", "second"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(source_root),
+                "output_path": str(sqlite_root / f"{name}.sqlite_manifest.json"),
+            }
+        )
+
+    with pytest.raises(ValueError, match="Expected exactly one SQLite manifest"):
+        filter_disclosures_payload({"root_directory": str(sqlite_root)})
+
+
 def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
     source_root = data_root / "01-list"
@@ -643,7 +661,7 @@ def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path
     assert payload["summary"]["source_disclosures"] == 2
 
 
-def test_filter_disclosures_payload_reads_sqlite_manifest_shard_directory(tmp_path: Path) -> None:
+def test_filter_disclosures_payload_rejects_missing_manifest_shard_path(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
@@ -659,27 +677,24 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_shard_directory(tmp_pa
         shard["path"] = str(tmp_path / "stale" / "kind.sqlite_manifest_shards" / Path(shard["path"]).name)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
-    payload = filter_disclosures_payload(
-        {
-            "root_directory": str(sqlite_root / "kind.sqlite_manifest_shards"),
-            "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환사채",
-                }
-            ],
-        }
-    )
-
-    assert payload["source_type"] == "sqlite_manifest"
-    assert payload["source_sqlite_manifest_path"] == str(manifest_path.resolve())
-    assert payload["summary"]["source_disclosures"] == 2
-    assert payload["summary"]["matched_disclosures"] == 1
-    assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
+    with pytest.raises(ValueError, match="SQLite shard not found"):
+        filter_disclosures_payload(
+            {
+                "root_directory": str(sqlite_root / "kind.sqlite_manifest_shards"),
+                "filter_blocks": [
+                    {
+                        "field": "title",
+                        "operator": "contains",
+                        "value": "전환사채",
+                    }
+                ],
+            }
+        )
 
 
-def test_filter_disclosures_payload_reads_nested_kind_sqlite_manifest(tmp_path: Path) -> None:
+def test_filter_disclosures_payload_does_not_search_nested_kind_sqlite_manifest(
+    tmp_path: Path,
+) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     root = tmp_path / "kind_kosdaq"
     sqlite_root = root / "kind_sqlite"
@@ -692,27 +707,13 @@ def test_filter_disclosures_payload_reads_nested_kind_sqlite_manifest(tmp_path: 
         }
     )
 
-    payload = filter_disclosures_payload(
-        {
-            "root_directory": str(root),
-            "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환사채",
-                }
-            ],
-        }
-    )
-
-    assert payload["source_type"] == "sqlite_manifest"
-    assert payload["source_sqlite_manifest_path"] == str(manifest_path.resolve())
-    assert payload["summary"]["source_body_files"] == 0
-    assert payload["summary"]["matched_disclosures"] == 1
-    assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
+    with pytest.raises(FileNotFoundError, match="Classification artifact not found"):
+        filter_disclosures_payload({"classification_path": str(root)})
 
 
-def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(tmp_path: Path) -> None:
+def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_column(
+    tmp_path: Path,
+) -> None:
     sqlite_root = tmp_path / "kind_sqlite"
     shard_root = sqlite_root / "kind.sqlite_manifest_shards"
     shard_root.mkdir(parents=True)
@@ -770,9 +771,10 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(
                 "table_name": "disclosures",
                 "summary": {"companies": 1, "disclosures": 1, "shards": 1},
                 "shards": [
-                    {
-                        "year": "2025",
-                        "relative_path": shard_path.name,
+                        {
+                            "year": "2025",
+                            "path": str(shard_path),
+                            "relative_path": shard_path.name,
                         "companies": 1,
                         "disclosures": 1,
                     }
@@ -783,22 +785,21 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_without_row_no_column(
         encoding="utf-8",
     )
 
-    payload = filter_disclosures_payload(
-        {
-            "root_directory": str(sqlite_root),
-            "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환사채",
-                }
-            ],
-        }
-    )
-
-    assert payload["summary"]["matched_disclosures"] == 1
-    assert payload["disclosures"][0]["row_no"] is None
-    assert payload["disclosures"][0]["acpt_no"] == "1"
+    with pytest.raises(
+        ValueError, match="SQLite table is missing required column: row_no"
+    ):
+        filter_disclosures_payload(
+            {
+                "root_directory": str(sqlite_root),
+                "filter_blocks": [
+                    {
+                        "field": "title",
+                        "operator": "contains",
+                        "value": "전환사채",
+                    }
+                ],
+            }
+        )
 
 
 def test_filter_disclosures_payload_rejects_direct_legacy_sqlite_manifest(tmp_path: Path) -> None:
@@ -3457,6 +3458,13 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
     )
 
     assert payload["summary"] == {"found_files": 1, "compressed_files": 1, "written_files": 1}
+    assert payload["metadata_check"] == {
+        "complete": True,
+        "expected_records": 1,
+        "matched_records": 1,
+        "missing_records": 0,
+    }
+    assert payload["warnings"] == []
     assert payload["verification"]["passed"] is True
     assert payload["verification"]["missing_records"] == 0
     assert payload["verification"]["verified_records"] == 1
@@ -3517,6 +3525,20 @@ def test_compress_disclosure_external_html_payload_reads_yearly_input(tmp_path: 
     input_directory = tmp_path / "viewer_html"
     (input_directory / "2024").mkdir(parents=True)
     (input_directory / "2025").mkdir(parents=True)
+    (input_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20240101000001",
+                        "company_name": "테스트",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     (input_directory / "2024" / "20240101000001.html").write_text(
         """
         <html><body>
@@ -3551,6 +3573,17 @@ def test_compress_disclosure_external_html_payload_reads_yearly_input(tmp_path: 
     assert "input_split_by_year" not in payload
     assert "output_split_by_year" not in payload
     assert payload["summary"] == {"found_files": 2, "compressed_files": 2, "written_files": 1}
+    assert payload["metadata_check"] == {
+        "complete": False,
+        "expected_records": 2,
+        "matched_records": 1,
+        "missing_records": 1,
+    }
+    assert payload["warnings"] == [
+        "manifest에서 외부 HTML 2건 중 1건의 metadata를 찾지 못했습니다. "
+        "누락 접수번호 예시: 20250101000001"
+    ]
+    assert f"경고: {payload['warnings'][0]}" in payload["progress_log"]
     assert payload["processing_verification"] == {
         "passed": True,
         "expected_files": 2,
@@ -8430,6 +8463,7 @@ def test_build_insight_payload_groups_disclosures(tmp_path: Path, monkeypatch) -
         start_date_iso="2025-01-01",
         end_date_iso="2025-01-31",
         price_source="fdr",
+        stock_code_override="005930",
     )
 
     assert payload["company"]["company_name"] == "테스트전자"
@@ -8474,10 +8508,31 @@ def test_build_insight_payload_extends_visible_range_for_after_close_disclosure(
         start_date_iso="2025-01-10",
         end_date_iso="2025-01-10",
         price_source="fdr",
+        stock_code_override="005930",
     )
 
     assert payload["visible_range_end"] == "2025-01-13"
     assert payload["chart"]["markers"][-1]["time"] == "2025-01-13"
+
+
+def test_build_insight_payload_requires_stock_code_override(tmp_path: Path) -> None:
+    fixture_path = _write_classification_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="종목코드를 입력해야 합니다"):
+        build_insight_payload(
+            fixture_path,
+            "005930",
+            start_date_iso="2025-01-01",
+            end_date_iso="2025-01-31",
+            price_source="fdr",
+            stock_code_override="",
+        )
+
+
+def test_default_stock_data_path_is_database_00_stock() -> None:
+    assert STOCK_DATA_DIR.name == "00-stock"
+    assert STOCK_DATA_DIR.parent.name == "database"
+    assert QUANTI_DIR == STOCK_DATA_DIR / "by_item"
 
 
 def test_list_quanti_stock_codes_accepts_parent_directory(tmp_path: Path, monkeypatch) -> None:
