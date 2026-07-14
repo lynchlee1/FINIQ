@@ -33,7 +33,7 @@ def test_run_resume_starts_from_first_missing_page(tmp_path, monkeypatch) -> Non
     )
     monkeypatch.setattr(
         download_module,
-        "_load_workflow_input",
+        "_require_current_download_input_snapshot",
         lambda _path: saved_input,
     )
     monkeypatch.setattr(

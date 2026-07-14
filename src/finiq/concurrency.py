@@ -30,8 +30,9 @@ def resolve_worker_count(
     field_name: str = "workers",
 ) -> int:
     """Resolve a worker value against the shared CPU and optional task limits."""
+    cpu_limit = available_cpu_count()
     if value in (None, ""):
-        requested = available_cpu_count()
+        requested = cpu_limit
     else:
         try:
             requested = int(value)
@@ -40,7 +41,7 @@ def resolve_worker_count(
         if requested < 1:
             raise ValueError(f"{field_name} must be >= 1")
 
-    limits = [requested, available_cpu_count()]
+    limits = [requested, cpu_limit]
     if item_count is not None:
         limits.append(max(1, item_count))
     return max(1, min(limits))

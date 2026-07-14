@@ -12,12 +12,12 @@ from typing import Any, Callable, Iterator, TypeVar
 
 from lxml import etree, html
 
+from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.web.html_parsers.common import decode_html_markup
 
 ProgressCallback = Callable[[str], None]
 _TOC_ID_RE = re.compile(r"^toc_(\d+)$")
 DEFAULT_REPORT_LIMIT = 50
-DEFAULT_HTML_SECTION_WORKERS = 8
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 T = TypeVar("T")
 
@@ -349,13 +349,7 @@ def _parse_page_size(value: Any) -> int:
 
 
 def parse_html_section_worker_count(value: Any) -> int:
-    if value in (None, ""):
-        return DEFAULT_HTML_SECTION_WORKERS
-    parsed = int(value)
-    if parsed < 1:
-        msg = "workers must be >= 1"
-        raise ValueError(msg)
-    return min(parsed, DEFAULT_HTML_SECTION_WORKERS)
+    return resolve_worker_count(value, field_name="workers")
 
 
 def _cancel_requested(cancel_check: Callable[[], bool] | None) -> bool:

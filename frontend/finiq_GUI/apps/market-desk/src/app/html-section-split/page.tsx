@@ -71,6 +71,7 @@ function defaultPatternTocIds(patterns: SectionPattern[]) {
 export default function HtmlSectionSplitPage() {
   const {
     output_root: dataRoot,
+    parallel_worker_count: parallelWorkerCount,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
     saveSetting,
@@ -80,7 +81,7 @@ export default function HtmlSectionSplitPage() {
   const [outputDirectory, setOutputDirectory] = useState("");
   const [limit, setLimit] = useState("20");
   const [reportLimit, setReportLimit] = useState("50");
-  const [workers, setWorkers] = useState("8");
+  const [workers, setWorkers] = useState("1");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [sectionPatterns, setSectionPatterns] = useState<SectionPattern[]>([]);
   const [selectedPatternTocIds, setSelectedPatternTocIds] = useState<Record<string, string[]>>({});
@@ -166,6 +167,7 @@ export default function HtmlSectionSplitPage() {
       const defaultInput = config.html_content_output_directory || "";
       setInputDirectory(defaultInput || "");
       setOutputDirectory(config.html_section_split_output_directory || "");
+      setWorkers(String(config.parallel_worker_count || 1));
     }).catch((err) => {
       setStatus(errorMessage(err));
       setIsErrorStatus(true);
@@ -264,7 +266,7 @@ export default function HtmlSectionSplitPage() {
       kind: "input",
       type: "number",
       label: "병렬 처리 개수",
-      help: "현재 기기 기준 최대 8개까지 사용합니다.",
+      help: `앱에서 확인한 CPU 수(${parallelWorkerCount}개)를 기본값과 최대값으로 사용합니다.`,
       value: workers,
       onChange: setWorkers,
       span: 2,

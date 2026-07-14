@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import tempfile
@@ -17,6 +16,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from finiq.concurrency import resolve_worker_count
 from finiq.config import QUANTIWISE_EXCEL_DIR, RESOURCES_DIR
 from finiq.data.assets_parquet_cleanup import (
     cleanup_duplicate_asset_parquet_outputs as _cleanup_duplicate_asset_parquet_outputs,
@@ -1238,9 +1238,7 @@ def cleanup_duplicate_asset_parquet_outputs(
 
 
 def _asset_excel_scan_workers(file_count: int) -> int:
-    if file_count <= 1:
-        return 1
-    return max(1, min(4, file_count, os.cpu_count() or 1))
+    return resolve_worker_count(item_count=file_count)
 
 
 def _scan_asset_excel_frames(

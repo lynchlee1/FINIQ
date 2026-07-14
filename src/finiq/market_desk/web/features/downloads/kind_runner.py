@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from finiq.concurrency import bounded_as_completed
+from finiq.concurrency import available_cpu_count, bounded_as_completed
 from finiq.data_scraper.core.client import SEARCH_RESULTS_FILENAME_TEMPLATE, download_pages
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.workflow import KindWorkflow, make_page_size_integrity_validator
@@ -36,7 +36,7 @@ def _download_payload_summary(payload: dict[str, Any]) -> list[str]:
         f"page_size={payload.get('page_size') or 100}",
         f"wait={payload.get('wait_seconds') or 1}s",
         f"timeout={payload.get('timeout') or 20}s",
-        f"workers={payload.get('worker_count') or 1}",
+        f"workers={payload.get('worker_count') or available_cpu_count()}",
         f"parallel_strategy={payload.get('parallel_strategy') or 'years'}",
         f"log_limit={payload.get('log_limit') or 20}",
         f"resume_yearly={payload.get('resume_yearly', True)}",
@@ -140,10 +140,8 @@ def _run_single(
     page_size = _as_int(payload, "page_size", 100)
     wait_seconds = _as_float(payload, "wait_seconds", 1.0)
     timeout = _as_float(payload, "timeout", 20.0)
-    parallel_strategy = _as_parallel_strategy(payload)
-    page_worker_count = (
-        _as_worker_count(payload) if parallel_strategy == "pages" else 1
-    )
+    _as_parallel_strategy(payload)
+    page_worker_count = _as_worker_count(payload)
     if wait_seconds < 0:
         raise ValueError("wait_seconds must be >= 0")
     if timeout <= 0:
@@ -391,7 +389,9 @@ def _run_yearly(
                 "disclosure_type_groups": disclosure_type_groups or {},
                 "last_report_only": last_report_only,
                 "worker_count": (
-                    requested_worker_count if parallel_strategy == "pages" else 1
+                    requested_worker_count
+                    if parallel_strategy == "pages" or len(yearly_ranges) == 1
+                    else 1
                 ),
                 "parallel_strategy": parallel_strategy,
                 "resume_yearly": resume_yearly,
@@ -575,10 +575,8 @@ def _run_resume(
         float(saved_input.get("wait_seconds_between_requests", 1.0)),
     )
     timeout = _as_float(payload, "timeout", float(saved_input.get("timeout", 20.0)))
-    parallel_strategy = _as_parallel_strategy(payload)
-    page_worker_count = (
-        _as_worker_count(payload) if parallel_strategy == "pages" else 1
-    )
+    _as_parallel_strategy(payload)
+    page_worker_count = _as_worker_count(payload)
     if wait_seconds < 0:
         raise ValueError("wait_seconds must be >= 0")
     if timeout <= 0:

@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from finiq.concurrency import resolve_worker_count
 from finiq.data_scraper.core.client import _is_valid_html
 from finiq.data_scraper.parse import disclosure_file_rows, pagination_info
 from finiq.data_scraper.workflow import inspect_download_directory_pages
@@ -267,8 +268,9 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
                 execution.get("page_size"), "page_size", 100, 100
             ),
             "timeout": _positive_int(execution.get("timeout"), "timeout", 20, 120),
-            "local_workers": _positive_int(
-                execution.get("local_workers"), "local_workers", 4, 32
+            "local_workers": resolve_worker_count(
+                execution.get("local_workers"),
+                field_name="local_workers",
             ),
             "mutable_lookback_days": MUTABLE_LOOKBACK_DAYS,
             "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
@@ -1470,7 +1472,7 @@ def _run_stage_one(
                 "start_page": 1,
                 "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
                 "timeout": execution["timeout"],
-                "worker_count": 1,
+                "worker_count": execution["local_workers"],
                 "last_report_only": False,
                 "log_limit": 20,
             }
@@ -1626,7 +1628,7 @@ def _run_stage(
                         "timeout": execution["timeout"],
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
                         "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
-                        "max_workers": 1,
+                        "max_workers": execution["local_workers"],
                         "progress_interval": 25,
                         "cancel_token": uuid.uuid4().hex,
                     },

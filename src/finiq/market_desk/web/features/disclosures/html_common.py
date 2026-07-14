@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from os import cpu_count
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 
 import requests
 
-from finiq.concurrency import bounded_as_completed
+from finiq.concurrency import bounded_as_completed, resolve_worker_count
 from finiq.config import PROJECT_ROOT
 from finiq.data_scraper.core.client import (
     KIND_DISCLOSURE_VIEWER_URL,
@@ -238,9 +237,7 @@ def _target_html_path(
 
 
 def _html_output_check_workers(total_targets: int) -> int:
-    if total_targets < 2:
-        return 1
-    return max(1, min(total_targets, cpu_count() or 1))
+    return resolve_worker_count(item_count=total_targets)
 
 
 def _iter_html_output_files(output_directory: Path) -> list[Path]:

@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 
+from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
 from finiq.market_desk.web.features.market_data.service_common import (
     _record_filter_blocks_match,
@@ -508,15 +509,11 @@ def _parse_progress_interval(value: Any) -> int:
 
 
 def _parse_parallel_workers(value: Any, total_files: int) -> int:
-    if value in (None, ""):
-        return 1
-    try:
-        requested_workers = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("parallel_workers must be an integer") from exc
-    if requested_workers < 1:
-        raise ValueError("parallel_workers must be >= 1")
-    return min(requested_workers, max(1, total_files))
+    return resolve_worker_count(
+        value,
+        item_count=total_files,
+        field_name="parallel_workers",
+    )
 
 
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:

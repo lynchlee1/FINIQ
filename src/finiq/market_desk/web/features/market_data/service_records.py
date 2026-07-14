@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
+from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.web.features.market_data.service_common import *
 
 class FilterCancelled(Exception):
     """Raised when a streaming filter request is abandoned by the client."""
 
 
-def _resolve_filter_workers(value: object, item_count: int) -> int:
-    if value in (None, ""):
-        requested = min(8, os.cpu_count() or 1)
-    else:
-        try:
-            requested = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("filter_workers must be an integer") from exc
-        if requested < 1:
-            raise ValueError("filter_workers must be >= 1")
-    if item_count <= 1:
-        return max(1, item_count)
-    return min(requested, item_count, 32)
+def _resolve_filter_workers(value: object, item_count: int | None) -> int:
+    return resolve_worker_count(
+        value,
+        item_count=item_count,
+        field_name="filter_workers",
+    )
 
 
 def _progress_interval(value: object) -> int:

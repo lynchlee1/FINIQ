@@ -164,7 +164,14 @@ function formatCompletedAt(value?: string | null) {
 }
 
 export default function DisclosureAutomationPage() {
-  const { output_root: storedRoot, html_parse_mode: storedMode, condition_presets: presets, fetchSettings, saveSetting } = useSettingsStore();
+  const {
+    output_root: storedRoot,
+    html_parse_mode: storedMode,
+    condition_presets: presets,
+    parallel_worker_count: parallelWorkerCount,
+    fetchSettings,
+    saveSetting,
+  } = useSettingsStore();
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("공시 자동화");
   const [dataRoot, setDataRoot] = useState("");
@@ -181,7 +188,7 @@ export default function DisclosureAutomationPage() {
   const [rangeEnd, setRangeEnd] = useState(7);
   const [parserMode, setParserMode] = useState("bond_issuance");
   const [pageSize, setPageSize] = useState("100");
-  const [localWorkers, setLocalWorkers] = useState("4");
+  const [localWorkers, setLocalWorkers] = useState("1");
   const [timeout, setTimeoutValue] = useState("20");
   const [downloadOptions, setDownloadOptions] = useState<DownloadOptions | null>(null);
   const [plan, setPlan] = useState<AutomationPlan | null>(null);
@@ -269,7 +276,8 @@ export default function DisclosureAutomationPage() {
       setRangeEnd(stored?.rangeEnd ?? (legacySelection.length ? Math.max(...legacySelection) : 7));
       setParserMode(stored?.parserMode || config?.html_parse_mode || "bond_issuance");
       setPageSize(String(stored?.pageSize || 100));
-      setLocalWorkers(String(stored?.localWorkers || Math.min(8, Math.max(1, window.navigator.hardwareConcurrency || 4))));
+      const workerLimit = Number(config?.parallel_worker_count || 1);
+      setLocalWorkers(String(Math.min(stored?.localWorkers || workerLimit, workerLimit)));
       setTimeoutValue(String(stored?.timeout || 20));
       const storedReview = loadJson<ReviewPattern[]>(REVIEW_STORAGE_KEY) || [];
       setReviewPatterns(storedReview);
@@ -335,7 +343,7 @@ export default function DisclosureAutomationPage() {
     execution: {
       parser_mode: parserMode,
       page_size: Number(pageSize || 100),
-      local_workers: Number(localWorkers || 1),
+      local_workers: Number(localWorkers || parallelWorkerCount || 1),
       timeout: Number(timeout || 20),
     },
   });
@@ -358,7 +366,7 @@ export default function DisclosureAutomationPage() {
       rangeEnd,
       parserMode,
       pageSize: Number(pageSize || 100),
-      localWorkers: Number(localWorkers || 1),
+      localWorkers: Number(localWorkers || parallelWorkerCount || 1),
       timeout: Number(timeout || 20),
     };
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(stored));
@@ -829,7 +837,7 @@ export default function DisclosureAutomationPage() {
                 </select>
               </Label>
               <Label className="grid gap-2 text-[var(--tv-text)]">페이지당 공시 수<Input type="number" min="1" max="100" value={pageSize} onChange={(event) => { setPageSize(event.target.value); setPlan(null); }} /></Label>
-              <Label className="grid gap-2 text-[var(--tv-text)]">로컬 worker 수<Input type="number" min="1" max="32" value={localWorkers} onChange={(event) => { setLocalWorkers(event.target.value); setPlan(null); }} /></Label>
+              <Label className="grid gap-2 text-[var(--tv-text)]">로컬 worker 수<Input type="number" min="1" max={parallelWorkerCount} value={localWorkers} onChange={(event) => { setLocalWorkers(event.target.value); setPlan(null); }} /></Label>
               <Label className="grid gap-2 text-[var(--tv-text)]">요청 timeout(초)<Input type="number" min="1" max="120" value={timeout} onChange={(event) => { setTimeoutValue(event.target.value); setPlan(null); }} /></Label>
               <div className="rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-xs leading-5 text-[var(--tv-muted)]">
                 KIND 검색·외부 HTML은 분당 최대 45회, 내부 HTML의 실제 HTTP 요청은 분당 최대 30회, 동시 요청은 1개로 고정합니다.

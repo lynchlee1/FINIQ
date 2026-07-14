@@ -19,6 +19,7 @@ export default function TablePage() {
   
   const {
     output_root: dataRoot,
+    parallel_worker_count: parallelWorkerCount,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
     saveSetting,
@@ -38,6 +39,9 @@ export default function TablePage() {
       const config = await fetchSettings();
       if (config) {
         setOutputPath(config.sqlite_output_directory || config.sqlite_manifest_path || "");
+        const workerCount = Number(config.parallel_worker_count || 1);
+        setMaxTableWorkers(workerCount);
+        setTableWorkers(String(workerCount));
       }
     } catch (err: any) {
       setStatus(err.message);
@@ -48,9 +52,6 @@ export default function TablePage() {
   }, [fetchSettings, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
-    const hardwareConcurrency = Math.max(1, Math.floor(window.navigator.hardwareConcurrency || 1));
-    setMaxTableWorkers(hardwareConcurrency);
-    setTableWorkers(String(hardwareConcurrency));
     fetchConfig();
   }, [fetchConfig]);
 
@@ -79,7 +80,7 @@ export default function TablePage() {
             : "",
           output_path: useSeparateOutputDirectory ? outputPath : "",
           table_name: "disclosures",
-          table_workers: Number(tableWorkers || maxTableWorkers || 1),
+          table_workers: Number(tableWorkers || parallelWorkerCount || 1),
         }),
       });
       

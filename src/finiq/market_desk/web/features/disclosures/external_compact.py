@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter
-from os import cpu_count
 from pathlib import Path
 from typing import Any
 
 from bs4 import Tag
 
+from finiq.concurrency import resolve_worker_count
 from finiq.data_scraper.parse._markup import (
     _clean_text,
     parse_html_with_recovery,
@@ -130,15 +130,11 @@ def _compress_external_html_file(
 
 def _external_html_compress_workers(body: dict[str, Any], total_files: int) -> int:
     raw_workers = body.get("parallel_workers", body.get("workers"))
-    if raw_workers not in (None, ""):
-        try:
-            requested_workers = int(raw_workers)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("parallel_workers must be an integer") from exc
-        if requested_workers < 1:
-            raise ValueError("parallel_workers must be >= 1")
-        return min(requested_workers, total_files)
-    return max(1, min(total_files, cpu_count() or 1))
+    return resolve_worker_count(
+        raw_workers,
+        item_count=total_files,
+        field_name="parallel_workers",
+    )
 
 
 def _verify_compressed_external_html_files(

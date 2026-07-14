@@ -156,6 +156,7 @@ export default function DownloadPage() {
     output_root: dataRoot,
     download_output_directory: separateOutputDirectory,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
+    parallel_worker_count: parallelWorkerCount,
     job_retention_minutes: jobRetentionMinutes,
     fetchSettings,
     saveSetting,
@@ -278,8 +279,9 @@ export default function DownloadPage() {
 
   const fetchOptions = useCallback(async () => {
     try {
-      const [data] = await Promise.all([fetchDownloadOptions(), fetchSettings()]);
+      const [data, config] = await Promise.all([fetchDownloadOptions(), fetchSettings()]);
       setOptions(data);
+      setWorkerCount(String(config?.parallel_worker_count || 1));
 
       if (!useSettingsStore.getState().download_output_directory && data.default_output_directory) {
         saveSetting("download_output_directory", data.default_output_directory);
@@ -1057,7 +1059,7 @@ export default function DownloadPage() {
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">워커 수</Label>
-                    <Input type="number" value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className={htmlControlClassName} />
+                    <Input type="number" min="1" max={parallelWorkerCount} value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className={htmlControlClassName} />
                   </div>
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">로그 줄 수</Label>

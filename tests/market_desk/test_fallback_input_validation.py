@@ -76,12 +76,16 @@ def test_worker_resolvers_reject_non_positive_values(resolver, args, message) ->
         resolver(*args)
 
 
-def test_missing_worker_values_keep_documented_defaults() -> None:
-    assert _parse_parallel_workers("", 2) == 1
+def test_missing_worker_values_use_cpu_and_task_limits(monkeypatch) -> None:
+    import finiq.concurrency as concurrency
+
+    monkeypatch.setattr(concurrency.os, "cpu_count", lambda: 12)
+
+    assert _parse_parallel_workers("", 2) == 2
     assert _filter_candidate_workers("", 2) == 2
-    assert 1 <= _external_html_compress_workers({"parallel_workers": ""}, 2) <= 2
-    assert 1 <= _resolve_filter_workers("", 2) <= 2
-    assert 1 <= _resolve_shard_workers("", 2) <= 2
+    assert _external_html_compress_workers({"parallel_workers": ""}, 2) == 2
+    assert _resolve_filter_workers("", 2) == 2
+    assert _resolve_shard_workers("", 2) == 2
 
 
 @pytest.mark.parametrize(
