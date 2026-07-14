@@ -129,7 +129,10 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   assert.match(tableSource, /saveSetting\("sqlite_output_directory", val\)/);
   assert.match(filterSource, /\.\.\.\(useSeparateOutputDirectory[\s\S]*?classification_path:/);
   assert.match(filterSource, /saveSetting\("html_transfer_directory", val\)/);
-  assert.match(htmlDownloadSource, /sourcePayload[\s\S]*?if \(useSeparateOutputDirectory\)/);
+  const sourcePayload = htmlDownloadSource.match(/const sourcePayload[\s\S]*?const currentSourcePath/)?.[0] ?? "";
+  assert.match(sourcePayload, /if \(variant === "external"\) \{[\s\S]*?return \{\};/);
+  assert.doesNotMatch(sourcePayload, /source_json_path/);
+  assert.doesNotMatch(htmlDownloadSource, /finiq\.kind\.filteredDisclosures/);
   assert.match(htmlDownloadSource, /output_directory: useSeparateOutputDirectory \? outputDirectory : ""/);
   assert.match(parseSource, /input_directory: useSeparateOutputDirectory \? inputDirectory : ""/);
   for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {

@@ -387,7 +387,6 @@ export function HtmlSectionSplitResults({
         isLoading={isLoadingSectionPatterns}
         onTogglePatternSection={onTogglePatternSection}
         onSetPatternSelection={onSetPatternSelection}
-        defaultSelectAll
       />
 
       {problemFiles.length ? (

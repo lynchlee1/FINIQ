@@ -100,6 +100,18 @@ test("inactive judgment settings render locked summary cards and section review 
   assert.match(sectionPatternCard, /Pending/);
 });
 
+test("download page-count conflicts require confirmation in the notification panel", async () => {
+  const page = await readFile(pagePath, "utf8");
+
+  assert.match(page, /workflow_status: "completed" \| "needs_download_confirmation" \| "needs_review"/);
+  assert.match(page, /download_confirmation: confirmedDownload/);
+  assert.match(page, /setDownloadConflicts\(conflicts\)/);
+  assert.match(page, /notificationDismissible=\{!downloadConflicts\.length\}/);
+  assert.match(page, /저장 \{conflict\.saved_pages \?\? "확인 불가"\}페이지 · KIND \{conflict\.kind_pages \?\? "확인 불가"\}페이지/);
+  assert.match(page, /전체 다시 받기/);
+  assert.match(page, /startRun\("sync", sectionRules, downloadConfirmation\)/);
+});
+
 test("automation and detail pages share the same judgment setting components", async () => {
   const [page, downloadPage, sectionResults] = await Promise.all([
     readFile(pagePath, "utf8"),

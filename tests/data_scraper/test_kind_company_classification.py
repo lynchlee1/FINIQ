@@ -596,7 +596,7 @@ def test_diagnose_kind_company_classification_reports_repair_targets(
         *args: object,
         **kwargs: object,
     ) -> tuple[list[str], dict[int, int]]:
-        return (["재다운로드는 테스트에서 생략했습니다."], {1: 100, 2: 100, 3: 100})
+        return (["재다운로드는 테스트에서 생략했습니다."], {1: 5, 2: 5, 3: 5})
 
     monkeypatch.setattr(workflow_module, "_repair_folder_pages", _stub_repair_folder_pages)
 
@@ -605,8 +605,32 @@ def test_diagnose_kind_company_classification_reports_repair_targets(
     assert report.repair_attempted is True
     assert report.repaired_folders == [str(folder.resolve())]
     assert report.repair_targets == {str(folder.resolve()): [1, 2, 3]}
-    assert report.repair_attempt_counts == {str(folder.resolve()): {1: 100, 2: 100, 3: 100}}
+    assert report.repair_attempt_counts == {str(folder.resolve()): {1: 5, 2: 5, 3: 5}}
     assert any("1페이지의 행 수가 99건으로 기대값 100건과 다릅니다" in error for error in report.integrity_errors)
+
+
+def test_repair_folder_pages_stops_after_five_failed_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = tmp_path / "20260101_20260131"
+    folder.mkdir()
+    _write_workflow_input(folder)
+    download_attempts = 0
+
+    def _fail_download_pages(**_kwargs: object) -> None:
+        nonlocal download_attempts
+        download_attempts += 1
+        raise RuntimeError("download failed")
+
+    monkeypatch.setattr(workflow_module, "download_pages", _fail_download_pages)
+
+    errors, attempt_counts = workflow_module._repair_folder_pages(folder, [1])
+
+    assert download_attempts == 5
+    assert attempt_counts == {1: 5}
+    assert len(errors) == 1
+    assert "5회 시도 후에도 복구되지 않았습니다" in errors[0]
 
 
 def test_diagnose_kind_company_classification_keeps_original_files_and_uses_sidecar_repairs(

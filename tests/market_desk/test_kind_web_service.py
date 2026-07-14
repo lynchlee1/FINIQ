@@ -329,6 +329,18 @@ def _nested_sqlite_manifest_path(path: Path) -> Path:
     return path.with_name(f"{path.stem}_shards") / path.name
 
 
+def _external_workspace_body(
+    tmp_path: Path, source_json: dict[str, Any], **body: object
+) -> dict[str, object]:
+    data_root = tmp_path / "workspace"
+    filtered_path = data_root / "03-filter" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True, exist_ok=True)
+    filtered_path.write_text(
+        json.dumps(source_json, ensure_ascii=False), encoding="utf-8"
+    )
+    return {"data_root": str(data_root), **body}
+
+
 def _build_download_result_page_html(
     *,
     page_number: int,
@@ -1414,10 +1426,11 @@ def test_download_disclosure_html_payload_uses_collected_acpt_numbers(tmp_path: 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
 
     payload = download_disclosure_html_payload(
-        {
-            "output_directory": str(tmp_path / "viewer_html"),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(tmp_path / "viewer_html"),
+        )
     )
 
     assert payload["requested_count"] == 1
@@ -1428,32 +1441,30 @@ def test_download_disclosure_html_payload_uses_collected_acpt_numbers(tmp_path: 
     assert manifest["disclosures"][0]["market"] is None
 
 
-def test_write_disclosure_html_manifest_payload_from_source_json_path(tmp_path: Path) -> None:
-    source_json_path = tmp_path / "filtered.json"
-    source_json_path.write_text(
-        json.dumps(
-            {
-                "disclosures": [
-                    {"acpt_no": "20250101000001", "market": "코스닥"},
-                    {"acpt_no": "20250101000002", "market": "유가증권"},
-                ]
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+def test_write_disclosure_html_manifest_payload_from_workspace_filtered_json(
+    tmp_path: Path,
+) -> None:
+    source_json = {
+        "disclosures": [
+            {"acpt_no": "20250101000001", "market": "코스닥"},
+            {"acpt_no": "20250101000002", "market": "유가증권"},
+        ]
+    }
     output_directory = tmp_path / "converted"
 
     payload = write_disclosure_html_manifest_payload(
-        {
-            "output_directory": str(output_directory),
-            "source_json_path": str(source_json_path),
-        }
+        _external_workspace_body(
+            tmp_path,
+            source_json,
+            output_directory=str(output_directory),
+        )
     )
 
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert payload["requested_count"] == 2
-    assert manifest["source_json_path"] == str(source_json_path)
+    assert manifest["source_json_path"] == str(
+        tmp_path / "workspace" / "03-filter" / "filtered.json"
+    )
     assert [item["acpt_no"] for item in manifest["disclosures"]] == [
         "20250101000001",
         "20250101000002",
@@ -1466,10 +1477,11 @@ def test_write_disclosure_html_manifest_payload_rejects_missing_metadata(tmp_pat
 
     with pytest.raises(ValueError, match="Missing disclosure metadata"):
         write_disclosure_html_manifest_payload(
-            {
-                "output_directory": str(output_directory),
-                "json": {"acpt_no_list": ["20250101000001"]},
-            }
+            _external_workspace_body(
+                tmp_path,
+                {"acpt_no_list": ["20250101000001"]},
+                output_directory=str(output_directory),
+            )
         )
 
     assert not (output_directory / "kind_disclosure_html_manifest.json").exists()
@@ -1618,18 +1630,19 @@ def test_download_disclosure_html_contents_payload_accepts_compressed_json_file(
     assert payload["manifest_path"] == str(tmp_path / "content_html" / "kind_disclosure_html_manifest.json")
 
 
-def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Path, monkeypatch) -> None:
+def test_download_disclosure_html_payload_ignores_source_json_path(
+    tmp_path: Path, monkeypatch
+) -> None:
     def fake_download(**kwargs):
         return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
-    source_json_path = tmp_path / "filtered-disclosures.json"
-    source_json_path.write_text(
+    ignored_source_path = tmp_path / "filtered-disclosures.json"
+    ignored_source_path.write_text(
         json.dumps(
             {
                 "disclosures": [
-                    {"acpt_no": "20250101000001", "market": "코스닥"},
-                    {"acpt_no": "20250101000002", "market": "유가증권"},
+                    {"acpt_no": "20240101000099", "market": "코스닥"},
                 ]
             },
             ensure_ascii=False,
@@ -1638,10 +1651,17 @@ def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Pat
     )
 
     payload = download_disclosure_html_payload(
-        {
-            "output_directory": str(tmp_path / "viewer_html"),
-            "source_json_path": str(source_json_path),
-        }
+        _external_workspace_body(
+            tmp_path,
+            {
+                "disclosures": [
+                    {"acpt_no": "20250101000001", "market": "코스닥"},
+                    {"acpt_no": "20250101000002", "market": "유가증권"},
+                ]
+            },
+            output_directory=str(tmp_path / "viewer_html"),
+            source_json_path=str(ignored_source_path),
+        )
     )
 
     assert payload["requested_count"] == 2
@@ -1650,7 +1670,9 @@ def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Pat
         str(tmp_path / "viewer_html" / "2025" / "20250101000002.html"),
     ]
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
-    assert manifest["source_json_path"] == str(source_json_path)
+    assert manifest["source_json_path"] == str(
+        tmp_path / "workspace" / "03-filter" / "filtered.json"
+    )
     assert manifest["disclosures"] == [
         {
             "acpt_no": "20250101000001",
@@ -1671,7 +1693,7 @@ def test_download_disclosure_html_payload_accepts_source_json_path(tmp_path: Pat
     ]
 
 
-def test_download_disclosure_html_payload_accepts_result_directory_source_json_path(
+def test_download_disclosure_html_payload_does_not_read_result_directory_source_json_path(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1689,20 +1711,19 @@ def test_download_disclosure_html_payload_accepts_result_directory_source_json_p
         _build_download_result_page_html(page_number=1, page_size=1, total_items=1)
     )
 
-    payload = download_disclosure_html_payload(
-        {
-            "output_directory": str(tmp_path / "viewer_html"),
-            "source_json_path": str(result_directory),
-        }
-    )
+    with pytest.raises(ValueError, match="filtered disclosure JSON does not exist"):
+        download_disclosure_html_payload(
+            {
+                "data_root": str(tmp_path / "workspace"),
+                "output_directory": str(tmp_path / "viewer_html"),
+                "source_json_path": str(result_directory),
+            }
+        )
 
-    assert calls == [["20250101000001"]]
-    assert payload["requested_count"] == 1
-    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
-    assert manifest["source_json_path"] == str(result_directory.resolve())
+    assert calls == []
 
 
-def test_clean_disclosure_html_output_directory_accepts_result_directory_source_json_path(
+def test_clean_disclosure_html_output_directory_does_not_read_result_directory_source_json_path(
     tmp_path: Path,
 ) -> None:
     result_directory = tmp_path / "download_results"
@@ -1711,17 +1732,15 @@ def test_clean_disclosure_html_output_directory_accepts_result_directory_source_
         _build_download_result_page_html(page_number=1, page_size=1, total_items=1)
     )
 
-    payload = clean_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(tmp_path / "viewer_html"),
-            "source_json_path": str(result_directory),
-            "dry_run": True,
-        }
-    )
-
-    assert payload["source_type"] == "external"
-    assert payload["source_path"] == str(result_directory.resolve())
-    assert payload["requested_count"] == 1
+    with pytest.raises(ValueError, match="filtered disclosure JSON does not exist"):
+        clean_disclosure_html_output_directory_payload(
+            {
+                "data_root": str(tmp_path / "workspace"),
+                "output_directory": str(tmp_path / "viewer_html"),
+                "source_json_path": str(result_directory),
+                "dry_run": True,
+            }
+        )
 
 
 def test_check_disclosure_html_output_directory_reports_existing_overlap(
@@ -1748,15 +1767,16 @@ def test_check_disclosure_html_output_directory_reports_existing_overlap(
     )
 
     payload = check_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {
+        _external_workspace_body(
+            tmp_path,
+            {
                 "disclosures": [
                     {"acpt_no": "20250101000001"},
                     {"acpt_no": "20250101000002"},
                 ]
             },
-        }
+            output_directory=str(output_directory),
+        )
     )
 
     assert payload["format"] == "kind_disclosure_html_existing_check_v1"
@@ -1786,10 +1806,11 @@ def test_check_disclosure_html_output_directory_uses_single_worker_for_single_ta
     )
 
     payload = check_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+        )
     )
 
     assert payload["has_existing"] is True
@@ -1813,17 +1834,18 @@ def test_download_disclosure_html_payload_logs_existing_html_overlap(
     )
 
     payload = download_disclosure_html_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {
+        _external_workspace_body(
+            tmp_path,
+            {
                 "disclosures": [
                     {"acpt_no": "20250101000001"},
                     {"acpt_no": "20250101000002"},
                 ]
             },
-            "skip_existing": True,
-            "progress_interval": 1,
-        }
+            output_directory=str(output_directory),
+            skip_existing=True,
+            progress_interval=1,
+        )
     )
 
     assert "기존 HTML 겹침 확인: 1/2건." in payload["progress_log"]
@@ -1849,11 +1871,12 @@ def test_download_disclosure_html_payload_logs_when_no_existing_html_overlap(
     output_directory.mkdir()
 
     payload = download_disclosure_html_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "skip_existing": True,
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            skip_existing=True,
+        )
     )
 
     assert "기존 HTML 겹침 확인: 0/1건." in payload["progress_log"]
@@ -1927,11 +1950,12 @@ def test_download_disclosure_html_payload_rejects_unexpected_resume_files(
 
     try:
         download_disclosure_html_payload(
-            {
-                "output_directory": str(output_directory),
-                "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-                "skip_existing": True,
-            }
+            _external_workspace_body(
+                tmp_path,
+                {"disclosures": [{"acpt_no": "20250101000001"}]},
+                output_directory=str(output_directory),
+                skip_existing=True,
+            )
         )
     except ValueError as exc:
         assert "HTML 저장 디렉토리에 대상 접수번호 HTML이 아닌 파일이 있습니다" in str(exc)
@@ -1957,12 +1981,13 @@ def test_clean_disclosure_html_output_directory_deletes_unexpected_external_file
     unexpected.write_text("<html></html>", encoding="utf-8")
 
     payload = clean_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "delete_confirmed": True,
-            "delete_confirmation_text": "확인했습니다.",
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            delete_confirmed=True,
+            delete_confirmation_text="확인했습니다.",
+        )
     )
 
     assert payload["source_type"] == "external"
@@ -1988,10 +2013,11 @@ def test_clean_disclosure_html_output_directory_requires_delete_confirmation(
 
     try:
         clean_disclosure_html_output_directory_payload(
-            {
-                "output_directory": str(output_directory),
-                "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            }
+            _external_workspace_body(
+                tmp_path,
+                {"disclosures": [{"acpt_no": "20250101000001"}]},
+                output_directory=str(output_directory),
+            )
         )
     except ValueError as exc:
         assert '"확인했습니다." 입력과 삭제 허가가 필요합니다' in str(exc)
@@ -2001,16 +2027,19 @@ def test_clean_disclosure_html_output_directory_requires_delete_confirmation(
     assert unexpected.exists()
 
 
-def test_clean_disclosure_html_output_directory_rejects_high_risk_directory() -> None:
+def test_clean_disclosure_html_output_directory_rejects_high_risk_directory(
+    tmp_path: Path,
+) -> None:
     root = Path(Path.cwd().anchor).resolve()
 
     with pytest.raises(ValueError, match="high-risk output_directory"):
         clean_disclosure_html_output_directory_payload(
-            {
-                "output_directory": str(root),
-                "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-                "dry_run": True,
-            }
+            _external_workspace_body(
+                tmp_path,
+                {"disclosures": [{"acpt_no": "20250101000001"}]},
+                output_directory=str(root),
+                dry_run=True,
+            )
         )
 
 
@@ -2023,11 +2052,12 @@ def test_clean_disclosure_html_output_directory_dry_run_reports_delete_count(
     unexpected.write_text("<html></html>", encoding="utf-8")
 
     payload = clean_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "dry_run": True,
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            dry_run=True,
+        )
     )
 
     assert payload["dry_run"] is True
@@ -2084,12 +2114,20 @@ def test_clean_disclosure_html_output_directory_deletes_unexpected_yearly_files(
     unexpected.write_text("<html></html>", encoding="utf-8")
 
     payload = clean_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}]},
-            "delete_confirmed": True,
-            "delete_confirmation_text": "확인했습니다.",
-        }
+        _external_workspace_body(
+            tmp_path,
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "disclosed_at": "2025-01-01",
+                    }
+                ]
+            },
+            output_directory=str(output_directory),
+            delete_confirmed=True,
+            delete_confirmation_text="확인했습니다.",
+        )
     )
 
     assert payload["deleted_count"] == 1
@@ -2107,12 +2145,13 @@ def test_clean_disclosure_html_output_directory_allows_compressed_external_json(
     compressed.write_text("{}", encoding="utf-8")
 
     payload = clean_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "delete_confirmed": True,
-            "delete_confirmation_text": "확인했습니다.",
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            delete_confirmed=True,
+            delete_confirmation_text="확인했습니다.",
+        )
     )
 
     assert payload["deleted_count"] == 0
@@ -2142,16 +2181,17 @@ def test_download_disclosure_html_payload_resumes_yearly_files(
     )
 
     payload = download_disclosure_html_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {
+        _external_workspace_body(
+            tmp_path,
+            {
                 "disclosures": [
                     {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
                     {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
                 ]
             },
-            "skip_existing": True,
-        }
+            output_directory=str(output_directory),
+            skip_existing=True,
+        )
     )
 
     assert calls == [(output_directory / "2025", ["20250101000002"])]
@@ -2732,7 +2772,7 @@ def test_split_content_html_sections_supports_legacy_section_one_paragraphs() ->
     assert "발행금액 16,000,000,000" in sections[1].html
 
 
-def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
+def test_split_content_html_sections_uses_xforms_title_boundaries_and_keeps_preamble() -> None:
     sections = split_content_html_sections(
         """
         <html>
@@ -2743,6 +2783,8 @@ def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
                 <div><span>정정신고(보고)</span></div>
                 <div class="xforms_title"><div><span>주주총회소집 결의</span></div></div>
                 <table><tbody><tr><td><span>1. 일시</span></td></tr></tbody></table>
+                <div class="xforms_title"><div><span>추가 정보</span></div></div>
+                <table><tbody><tr><td><span>2. 장소</span></td></tr></tbody></table>
               </div>
             </div>
           </body>
@@ -2751,19 +2793,23 @@ def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
     )
 
     assert [(section.toc_id, section.index, section.title) for section in sections] == [
-        ("toc_1", 1, "정정신고(보고)"),
-        ("toc_2", 2, "주주총회소집 결의"),
+        ("toc_1", 1, "주주총회소집 결의"),
+        ("toc_2", 2, "추가 정보"),
     ]
     assert 'class="xforms"' in sections[0].html
     assert 'class="xforms"' in sections[1].html
     assert "정정신고(보고)" in sections[0].html
-    assert "주주총회소집 결의" not in sections[0].html
-    assert "주주총회소집 결의" in sections[1].html
-    assert "1. 일시" in sections[1].html
-    assert "정정신고" not in sections[1].html
+    assert "주주총회소집 결의" in sections[0].html
+    assert "1. 일시" in sections[0].html
+    assert "추가 정보" not in sections[0].html
+    assert "정정신고(보고)" not in sections[1].html
+    assert "추가 정보" in sections[1].html
+    assert "2. 장소" in sections[1].html
 
 
-def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) -> None:
+def test_save_disclosure_html_sections_payload_requires_explicit_selection(
+    tmp_path: Path,
+) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     source_directory = input_directory / "2008"
@@ -2786,20 +2832,21 @@ def test_save_disclosure_html_sections_payload_writes_every_toc(tmp_path: Path) 
             "output_directory": str(output_directory),
         }
     )
-    section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
-
     assert payload["summary"] == {
         "found_files": 1,
-        "saved_files": 1,
-        "skipped_files": 0,
-        "expected_files": 1,
-        "integrity_ok": True,
+        "saved_files": 0,
+        "skipped_files": 1,
+        "expected_files": 0,
+        "integrity_ok": False,
         "missing_files": 0,
     }
-    assert "주요사항보고서" in section_html
-    assert "표지 내용" in section_html
-    assert "전환사채권 발행결정" in section_html
-    assert "발행금액 250,000,000" in section_html
+    assert payload["skipped_files"] == [
+        {
+            "source_file": str(source_directory / "20260422000832.html"),
+            "error": "missing section selection",
+        }
+    ]
+    assert not (output_directory / "2008" / "20260422000832.html").exists()
     assert not (output_directory / "toc_1").exists()
     assert not (output_directory / "2008" / "toc_1").exists()
 
@@ -2829,6 +2876,12 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
+            "section_save_rules": {
+                "toc_1 주요사항보고서 toc_2 전환사채권 발행결정": [
+                    "toc_1",
+                    "toc_2",
+                ]
+            },
         }
     )
 
@@ -3156,10 +3209,10 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
 
     assert payload["summary"] == {
         "found_files": 2,
-        "saved_files": 2,
-        "skipped_files": 0,
-        "expected_files": 2,
-        "integrity_ok": True,
+        "saved_files": 1,
+        "skipped_files": 1,
+        "expected_files": 1,
+        "integrity_ok": False,
         "missing_files": 0,
     }
     assert (output_directory / "2008" / "20260401000001.html").is_file()
@@ -3168,7 +3221,13 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
     assert "본문" not in filtered_html
     assert not (output_directory / "2008" / "20260401000001_1.html").exists()
     assert not (output_directory / "2008" / "20260401000001_2.html").exists()
-    assert (output_directory / "2008" / "20260402000001.html").is_file()
+    assert not (output_directory / "2008" / "20260402000001.html").exists()
+    assert payload["skipped_files"] == [
+        {
+            "source_file": str(source_directory / "20260402000001.html"),
+            "error": "missing section selection",
+        }
+    ]
     assert not (output_directory / "2008" / "20260402000001_1.html").exists()
     assert not (output_directory / "toc_1").exists()
     assert not (output_directory / "2008" / "toc_1").exists()
@@ -3227,6 +3286,7 @@ def test_section_save_ignores_automation_cache_below_standard_input(
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 1": ["toc_1"]},
         }
     )
 
@@ -3290,7 +3350,15 @@ def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cance
         return checks > 1
 
     payload = save_disclosure_html_sections_payload(
-        {"input_directory": str(input_directory), "output_directory": str(output_directory), "workers": 1},
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "workers": 1,
+            "section_save_rules": {
+                "toc_1 1": ["toc_1"],
+                "toc_1 2": ["toc_1"],
+            },
+        },
         cancel_check=cancel_check,
     )
 
@@ -3730,16 +3798,17 @@ def test_download_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, m
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls", fake_download)
 
     payload = download_disclosure_html_payload(
-        {
-            "output_directory": str(tmp_path / "viewer_html"),
-            "json": {
+        _external_workspace_body(
+            tmp_path,
+            {
                 "disclosures": [
                     {"acpt_no": "20250101000001"},
                     {"acpt_no": "20250101000002"},
                 ]
             },
-            "cancel_token": "cancel-test",
-        }
+            output_directory=str(tmp_path / "viewer_html"),
+            cancel_token="cancel-test",
+        )
     )
 
     assert payload["cancelled"] is True
@@ -9102,7 +9171,7 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
             "end_date": "2026-05-01",
             "company_name": "",
             "submitter_name": "",
-            "market_label": "검색대상",
+            "market_label": "전체",
             "securities_label": "전체",
             "disclosure_type_groups": {},
             "last_report_only": False,
@@ -9112,7 +9181,9 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
 
     assert res["has_existing"] is True
     assert res["ranges"][0]["status"] == "unverified"
-    assert res["ranges"][0]["metadata_status"] == "mismatch"
+    assert res["ranges"][0]["metadata_status"] == "ok"
+    assert res["ranges"][0]["filters_match"] is True
+    assert res["saved_filters"]["market_label"] == "전체"
     assert res["ranges"][0]["start_date"] == "2026-01-01"
     assert res["ranges"][0]["end_date"] == "2026-05-01"
     assert res["ranges"][0]["local_count"] is None
@@ -9145,7 +9216,7 @@ def test_inspect_folder_rejects_missing_metadata_without_repair(
                 "end_date": "2026-05-01",
                 "company_name": "",
                 "submitter_name": "",
-                "market_label": "검색대상",
+                "market_label": "전체",
                 "securities_label": "전체",
                 "disclosure_type_groups": {},
                 "last_report_only": False,
@@ -9190,7 +9261,7 @@ def test_inspect_folder_rejects_metadata_without_page_size(
                 "end_date": "2026-05-01",
                 "company_name": "",
                 "submitter_name": "",
-                "market_label": "검색대상",
+                "market_label": "전체",
                 "securities_label": "전체",
                 "disclosure_type_groups": {},
                 "last_report_only": False,
@@ -9358,7 +9429,7 @@ def test_check_existing_downloads_rejects_missing_date_range_metadata(
                 "end_date": "2026-05-01",
                 "company_name": "삼성전자",
                 "submitter_name": "",
-                "market_label": "검색대상",
+                "market_label": "전체",
                 "securities_label": "전체",
                 "disclosure_type_groups": {},
                 "last_report_only": True,

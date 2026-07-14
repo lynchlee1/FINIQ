@@ -27,12 +27,8 @@ const DOWNLOAD_VARIANTS = {
   external: {
     settingsTitle: "공시원문 외부 저장 설정",
     description: "다운로드된 공시 결과 JSON을 바탕으로 KIND 공시 뷰어 HTML을 대량 저장합니다.",
-    sourceLabel: "입력 데이터 경로 (필터 결과 JSON)",
-    sourceHelp: "공시 필터링 결과 파일(JSON)을 선택하세요.",
-    sourcePickMode: "file",
-    sourceSettingKey: "html_download_source_path",
-    sourceRequiredMessage: "입력 데이터 경로를 선택하세요.",
-    sourcePayloadKey: "source_json_path",
+    sourcePickMode: "folder",
+    sourceRequiredMessage: "작업공간 디렉토리를 선택하세요.",
     defaultDirectoryKey: "html_output_directory",
     startEndpoint: "/api/disclosures/html/download/start",
     cancelEndpoint: "/api/disclosures/html/download/cancel",
@@ -43,12 +39,8 @@ const DOWNLOAD_VARIANTS = {
   content: {
     settingsTitle: "공시원문 내부 저장 설정",
     description: "공시원문 외부 데이터 경로를 바탕으로 KIND 공시 본문 HTML을 대량 저장합니다.",
-    sourceLabel: "공시원문 외부 데이터 경로",
-    sourceHelp: "공시원문 외부 저장으로 만든 뷰어 HTML 폴더를 선택하세요.",
     sourcePickMode: "folder",
-    sourceSettingKey: "html_output_directory",
     sourceRequiredMessage: "공시원문 외부 데이터 경로를 선택하세요.",
-    sourcePayloadKey: "source_directory",
     defaultDirectoryKey: "html_content_output_directory",
     startEndpoint: "/api/disclosures/html/content-download/start",
     cancelEndpoint: "/api/disclosures/html/content-download/cancel",
@@ -208,18 +200,10 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setCompressInputDirectory(config.html_output_directory || nextOutputDirectory);
       setCompressOutputDirectory(config.html_external_compress_output_directory || nextOutputDirectory);
 
-      const transferredPayload = variant === "external" ? sessionStorage.getItem("finiq.kind.filteredDisclosures") : null;
-      if (transferredPayload) {
-        const transferReference = JSON.parse(transferredPayload);
-        setSourcePath(transferReference.source_json_path || "");
-        sessionStorage.removeItem("finiq.kind.filteredDisclosures");
-        setStatus("공시 필터에서 생성한 결과 파일을 불러왔습니다.");
-      } else if (variant === "content") {
+      if (variant === "content") {
         setSourcePath(config.html_output_directory || "");
         setContentSourceFilePath(config.html_content_compressed_json_path || "");
         setMergeOutputPath(config.html_merge_output_path || "");
-      } else if (config.html_transfer_directory) {
-        setSourcePath(config.html_transfer_directory);
       }
     }).catch(err => {
       setStatus(err.message);
@@ -236,14 +220,17 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   }, [isJobActive]);
 
   const sourcePayload = useCallback(() => {
+    if (variant === "external") {
+      return {};
+    }
     if (variant === "content" && contentSourceInputMode === "file") {
       return { source_compressed_json_path: contentSourceFilePath };
     }
     if (useSeparateOutputDirectory) {
-      return { [variantConfig.sourcePayloadKey]: sourcePath };
+      return { source_directory: sourcePath };
     }
     return {};
-  }, [contentSourceFilePath, contentSourceInputMode, sourcePath, useSeparateOutputDirectory, variant, variantConfig.sourcePayloadKey]);
+  }, [contentSourceFilePath, contentSourceInputMode, sourcePath, useSeparateOutputDirectory, variant]);
 
   const currentSourcePath = variant === "content" && contentSourceInputMode === "file" ? contentSourceFilePath : dataRoot;
   const currentSourceRequiredMessage = variant === "content" && contentSourceInputMode === "file"
@@ -569,8 +556,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       setSourcePath(settings.html_output_directory || "");
       setContentSourceFilePath(settings.html_content_compressed_json_path || "");
       setMergeOutputPath(settings.html_merge_output_path || "");
-    } else {
-      setSourcePath(settings.html_transfer_directory || "");
     }
   };
 

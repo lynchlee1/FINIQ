@@ -28,3 +28,10 @@ test("download settings persist terminal job retention with a 60 minute default"
   assert.match(page, /saveSetting\("job_retention_minutes", normalized\)/);
   assert.match(store, /job_retention_minutes: 60/);
 });
+
+test("download market defaults and restores to the full market", () => {
+  assert.match(page, /useState\("전체"\)/);
+  assert.match(page, /saved\.market_label \|\| "전체"/);
+  assert.match(page, /setMarketLabel\(saved\.market_label \|\| "전체"\)/);
+  assert.doesNotMatch(page, /검색대상/);
+});
