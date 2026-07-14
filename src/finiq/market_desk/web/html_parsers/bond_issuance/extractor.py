@@ -296,7 +296,6 @@ class BondIssuanceExtractor:
         return None
 
     def _specific_person_bond_issue_table_rows(self) -> list[list[list[str]]]:
-        source_tables: list[list[list[str]]] = []
         for table in self.context.raw_tables:
             logical_rows = table["logical_rows"]
             if logical_rows and row_contains(
@@ -310,8 +309,8 @@ class BondIssuanceExtractor:
                     and amount_index is not None
                     and name_index != amount_index
                 ):
-                    source_tables.append(rows)
-        return source_tables
+                    return [rows]
+        return []
 
     def _set_value_status(self, field_name: str, value: Any) -> None:
         status = "source_not_found" if value in (None, "", []) else "parsed"

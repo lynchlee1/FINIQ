@@ -101,6 +101,9 @@ from finiq.market_desk.web.html_parsers.common import (
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 from finiq.market_desk.analytics.quanti import list_quanti_stock_codes
 from finiq.market_desk.web.html_parsers.rights_issuance import parse_rights_issuance
+from finiq.market_desk.web.html_parsers.rights_issuance.utils import (
+    _is_rights_section_marker_row,
+)
 from finiq.data_scraper.storage.classification_store import (
     write_company_classification_artifact,
 )
@@ -6056,7 +6059,16 @@ def test_parse_ints_keeps_adjacent_ungrouped_numbers_separate() -> None:
 
 @pytest.mark.parametrize(
     "numbered_label",
-    ["1. 납입일", "1-1. 납입일", "1- 1. 납입일", "1 - 1 . 납입일"],
+    [
+        "1. 납입일",
+        "1-1. 납입일",
+        "1- 1. 납입일",
+        "1 - 1 . 납입일",
+        "I. 납입일",
+        "II-II. 납입일",
+        "Ⅰ. 납입일",
+        "Ⅱ-Ⅱ. 납입일",
+    ],
 )
 def test_row_with_label_accepts_one_or_two_level_number_prefixes(
     numbered_label: str,
@@ -6072,6 +6084,26 @@ def test_row_with_label_rejects_number_prefix_deeper_than_two_levels() -> None:
     assert row_with_label(
         [["1-1-1. 납입일", "잘못된 값"], matching_row], "납입일"
     ) == matching_row
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "1. 유상증자",
+        "I. 유상증자",
+        "Ⅰ. 유상증자",
+        "2. 무상증자",
+        "II. 무상증자",
+        "Ⅱ. 무상증자",
+    ],
+)
+def test_rights_section_marker_accepts_arabic_and_roman_numbers(marker: str) -> None:
+    assert _is_rights_section_marker_row([marker]) is True
+
+
+@pytest.mark.parametrize("marker", ["유상증자", "1-1-1. 유상증자"])
+def test_rights_section_marker_requires_supported_number_prefix(marker: str) -> None:
+    assert _is_rights_section_marker_row([marker]) is False
 
 
 def test_parse_int_distinguishes_empty_source_from_explicit_dash_zero() -> None:
@@ -8220,7 +8252,10 @@ def test_parse_rights_issuance_warns_when_third_party_target_table_is_absent() -
     body_html = """
     <html><body>
       <p class="SECTION-1">유상증자결정</p>
-      <table><tr><td>5. 증자방식</td><td>제3자배정증자</td></tr></table>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식</td><td>1,000</td></tr>
+        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
     </body></html>
     """
 
@@ -8492,6 +8527,9 @@ def test_quanti_market_registry_helpers_load_market_item_and_values(tmp_path: Pa
 
     assert item_code == "S999999"
     assert market_value_map_from_registry(registry, item_code)["2"] == "코스닥"
+    assert market_value_map_from_registry(
+        {item_code: {"name": "시장구분", "kind": "market"}}, item_code
+    ) == {}
 
 
 def test_check_existing_downloads_empty(tmp_path: Path) -> None:

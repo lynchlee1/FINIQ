@@ -522,12 +522,6 @@ class RightsIssuanceExtractor:
                 return row
         return []
 
-    def _stock_value(
-        self, section_label: str, source_labels: tuple[str, ...]
-    ) -> int | None:
-        """지정 구간에서 주식 종류 라벨 바로 다음 값을 숫자로 변환한다."""
-        return self._stock_value_with_status(section_label, source_labels)[0]
-
     def _stock_value_with_status(
         self, section_label: str, source_labels: tuple[str, ...]
     ) -> tuple[int | None, str]:
