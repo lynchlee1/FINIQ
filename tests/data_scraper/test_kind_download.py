@@ -19,9 +19,11 @@ from finiq.data_scraper.core.client import (
 )
 from finiq.data_scraper.core.payload import build_search_form
 from finiq.data_scraper.workflow import (
+    KIND_WORKFLOW_INPUT_FORMAT,
     KindWorkflow,
     inspect_download_directory_pages,
     run_download,
+    validate_kind_workflow_input_snapshot,
 )
 
 REQUEST_HEADERS = {
@@ -33,6 +35,73 @@ REQUEST_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
 }
+
+
+def _current_workflow_input(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "format": KIND_WORKFLOW_INPUT_FORMAT,
+        "request_headers": REQUEST_HEADERS,
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+        "page_size": 100,
+        "search_filters": [],
+        "disclosure_type_groups": {},
+        "last_report_only": None,
+        "include_previous_disclosures": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"start_date": "20240101"}, "must be YYYY-MM-DD"),
+        (
+            {"search_filters": [["marketType", {"bad": "shape"}]]},
+            "search_filters",
+        ),
+        (
+            {"disclosure_type_groups": {"01": {"bad": "shape"}}},
+            "disclosure_type_groups",
+        ),
+        ({"timeout": float("nan")}, "timeout must be finite"),
+        (
+            {"wait_seconds_between_requests": float("inf")},
+            "wait_seconds_between_requests must be finite",
+        ),
+    ],
+)
+def test_kind_workflow_input_validator_rejects_corrupted_current_metadata(
+    overrides: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_kind_workflow_input_snapshot(
+            _current_workflow_input(**overrides)
+        )
+
+
+def test_kind_workflow_rejects_corrupted_metadata_before_writing_or_requesting(
+    tmp_path: Path,
+) -> None:
+    workflow = KindWorkflow()
+    session = FakeSession()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=1,
+        wait_seconds_between_requests=0,
+        timeout=float("nan"),
+    )
+
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        workflow.save_search_results(session=session)
+
+    assert not (tmp_path / "kind_workflow.input.json").exists()
+    assert session.post_calls == []
 
 
 def get_form_values(form_data: list[tuple[str, str]], key: str) -> list[str]:
@@ -775,6 +844,7 @@ def test_kind_workflow_writes_input_snapshot_and_checkpoint_incrementally(
     )
 
     input_payload = json.loads(Path(result["input_snapshot_path"]).read_text(encoding="utf-8"))
+    assert input_payload["format"] == KIND_WORKFLOW_INPUT_FORMAT
     assert input_payload["start_page"] == 1
     assert input_payload["end_page"] == 2
 
@@ -791,9 +861,15 @@ def test_kind_workflow_stops_when_existing_folder_has_different_locked_page_size
     (tmp_path / "kind_workflow.input.json").write_text(
         json.dumps(
             {
+                "format": KIND_WORKFLOW_INPUT_FORMAT,
+                "request_headers": REQUEST_HEADERS,
                 "page_size": 100,
                 "start_date": "2024-01-01",
                 "end_date": "2024-12-31",
+                "search_filters": [],
+                "disclosure_type_groups": {},
+                "last_report_only": None,
+                "include_previous_disclosures": None,
             }
         ),
         encoding="utf-8",

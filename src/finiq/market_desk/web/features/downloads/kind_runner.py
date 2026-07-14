@@ -225,9 +225,7 @@ def _run_single(
             raise DownloadCancelled("download job cancelled")
         paging = _detect_pagination(output_directory)
         if paging and int(paging.get("total_pages") or 0) > 1:
-            saved_input = _load_workflow_input(output_directory)
-            if saved_input is None:
-                raise ValueError("kind_workflow.input.json is missing")
+            saved_input = _require_current_download_input_snapshot(output_directory)
             _append_progress(
                 progress_log,
                 f"SINGLE pagination_detected total_pages={int(paging['total_pages'])} total_items={int(paging.get('total_items') or 0)}",
@@ -282,9 +280,10 @@ def _yearly_task_resume_payload(task: dict[str, Any]) -> dict[str, Any] | None:
     )
     if not output_directory.is_dir():
         return None
-    if _detect_pagination(output_directory) is None:
+    if not _result_body_files(output_directory):
         return None
-    if _load_workflow_input(output_directory) is None:
+    _require_current_download_input_snapshot(output_directory)
+    if _detect_pagination(output_directory) is None:
         return None
     return {
         **task,
@@ -542,13 +541,10 @@ def _run_resume(
     if not output_directory.is_dir():
         raise ValueError(f"directory not found: {output_directory}")
 
+    saved_input = _require_current_download_input_snapshot(output_directory)
     paging = _detect_pagination(output_directory)
     if paging is None:
         raise ValueError("pagination info not found in output directory")
-
-    saved_input = _load_workflow_input(output_directory)
-    if saved_input is None:
-        raise ValueError("kind_workflow.input.json is missing")
 
     total_pages = int(paging["total_pages"])
     page_size = int(saved_input.get("page_size", 100))

@@ -15,6 +15,7 @@ from finiq.data_scraper.storage.classification_store import (
 )
 import finiq.data_scraper.workflow.workflow as workflow_module
 from finiq.data_scraper.workflow import (
+    KIND_WORKFLOW_INPUT_FORMAT,
     diagnose_kind_company_classification_integrity,
     export_kind_company_classification,
     export_kind_mode_folders,
@@ -71,6 +72,38 @@ def _row_html(
       <td></td>
     </tr>
     """
+
+
+def _write_workflow_input(
+    folder: Path,
+    *,
+    start_date: str = "2026-01-01",
+    end_date: str = "2026-01-31",
+    page_size: int = 100,
+    include_repair_timing: bool = True,
+) -> None:
+    payload: dict[str, object] = {
+        "format": KIND_WORKFLOW_INPUT_FORMAT,
+        "request_headers": {"User-Agent": "pytest"},
+        "start_date": start_date,
+        "end_date": end_date,
+        "page_size": page_size,
+        "search_filters": [],
+        "disclosure_type_groups": {},
+        "last_report_only": None,
+        "include_previous_disclosures": None,
+    }
+    if include_repair_timing:
+        payload.update(
+            {
+                "wait_seconds_between_requests": 0,
+                "timeout": 5,
+            }
+        )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def test_disclosure_rows_extract_company_market_badges_and_doc_numbers() -> None:
@@ -150,6 +183,7 @@ def test_export_kind_company_classification_recurses_and_merges_same_company(
     extra_folder = tmp_path / "ignored"
     for folder in (folder_a, folder_b, extra_folder):
         folder.mkdir(parents=True)
+        _write_workflow_input(folder)
 
     (folder_a / "000_mainGET.body").write_text("main", encoding="utf-8")
     (folder_b / "000_mainGET.body").write_text("main", encoding="utf-8")
@@ -290,6 +324,7 @@ def test_export_kind_company_classification_raises_when_any_row_is_unclassified(
 ) -> None:
     folder = tmp_path / "broken"
     folder.mkdir()
+    _write_workflow_input(folder)
     (folder / "000_mainGET.body").write_text("main", encoding="utf-8")
     (folder / "001_post_page_00001.body").write_text(
         _results_page(
@@ -363,6 +398,8 @@ def test_export_kind_company_classification_deduplicates_overlapping_disclosures
     folder_b = tmp_path / "20260115_20260215"
     folder_a.mkdir()
     folder_b.mkdir()
+    _write_workflow_input(folder_a)
+    _write_workflow_input(folder_b)
 
     duplicate_row = _row_html(
         number=1,
@@ -426,6 +463,7 @@ def test_export_kind_company_classification_detects_incomplete_folder_when_valid
 ) -> None:
     folder = tmp_path / "20260101_20260131"
     folder.mkdir()
+    _write_workflow_input(folder)
     (folder / "000_mainGET.body").write_text("main", encoding="utf-8")
     paging_markup = """
     <section class="paging-group">
@@ -457,16 +495,33 @@ def test_export_kind_company_classification_detects_incomplete_folder_when_valid
         export_kind_company_classification(tmp_path, validate_integrity=True)
 
 
+def test_company_classification_rejects_missing_metadata_before_body_or_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = tmp_path / "20260101_20260131"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(b"must not be parsed")
+    monkeypatch.setattr(
+        workflow_module,
+        "load_folder_partial_cache",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cache must not be read before metadata validation")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="metadata is missing"):
+        export_kind_company_classification(tmp_path, validate_integrity=True)
+
+
 def test_export_kind_company_classification_detects_non_last_page_under_100_rows(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     folder = tmp_path / "20260101_20260131"
     folder.mkdir()
     (folder / "000_mainGET.body").write_text("main", encoding="utf-8")
-    (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"page_size": 100}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_workflow_input(folder)
     paging_markup = """
     <section class="paging-group">
       <div class="paging type-00">
@@ -493,6 +548,11 @@ def test_export_kind_company_classification_detects_non_last_page_under_100_rows
         _results_page(rows_html, pagination_markup=paging_markup),
         encoding="utf-8",
     )
+    monkeypatch.setattr(
+        workflow_module,
+        "_repair_folder_pages",
+        lambda *_args, **_kwargs: (["repair skipped in test"], {}),
+    )
 
     with pytest.raises(ValueError, match="1페이지의 행 수가 99건으로 기대값 100건과 다릅니다"):
         export_kind_company_classification(tmp_path, validate_integrity=True)
@@ -504,10 +564,7 @@ def test_diagnose_kind_company_classification_reports_repair_targets(
 ) -> None:
     folder = tmp_path / "20260101_20260131"
     folder.mkdir()
-    (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"page_size": 100}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_workflow_input(folder)
     paging_markup = """
     <section class="paging-group">
       <div class="paging type-00">
@@ -558,18 +615,7 @@ def test_diagnose_kind_company_classification_keeps_original_files_and_uses_side
 ) -> None:
     folder = tmp_path / "20260101_20260131"
     folder.mkdir()
-    (folder / "kind_workflow.input.json").write_text(
-        json.dumps(
-            {
-                "request_headers": {"User-Agent": "pytest"},
-                "start_date": "20260101",
-                "end_date": "20260131",
-                "page_size": 100,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    _write_workflow_input(folder, include_repair_timing=False)
     paging_markup = """
     <section class="paging-group">
       <div class="paging type-00">
@@ -647,6 +693,7 @@ def test_export_kind_company_classification_reuses_partial_cache_when_folder_is_
 ) -> None:
     folder = tmp_path / "20260101_20260101"
     folder.mkdir()
+    _write_workflow_input(folder)
     (folder / "000_mainGET.body").write_text("main", encoding="utf-8")
     (folder / "001_post_page_00001.body").write_text(
         _results_page(

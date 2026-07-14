@@ -100,7 +100,7 @@ def build_download_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not output_directory.is_dir():
         raise ValueError(f"directory not found: {output_directory}")
 
-    saved_input = _load_workflow_input(output_directory) or {}
+    saved_input = _require_current_download_input_snapshot(output_directory)
     page_size = _as_int(payload, "page_size", int(saved_input.get("page_size") or 100))
     status = _download_integrity_status(output_directory, page_size)
     progress_log: deque[str] = deque(maxlen=_as_log_limit(payload))

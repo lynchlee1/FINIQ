@@ -6,7 +6,9 @@ from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 import json
+import math
 import os
 from pathlib import Path
 import threading
@@ -44,6 +46,127 @@ from finiq.data_scraper.core.payload import (
 from finiq.data_scraper.storage.result_files import KIND_REPAIR_OVERLAY_DIRNAME, result_page_number, sorted_result_page_paths
 
 KindSearchFilters = Mapping[str, object] | Sequence[tuple[str, object]] | None
+KIND_WORKFLOW_INPUT_FORMAT = "finiq_kind_workflow_input_v1"
+
+
+def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
+    """Return a current, structurally valid KIND download input snapshot."""
+    if not isinstance(snapshot, dict):
+        raise ValueError("kind_workflow.input.json must contain a JSON object")
+    actual_format = snapshot.get("format")
+    if actual_format != KIND_WORKFLOW_INPUT_FORMAT:
+        if actual_format in (None, ""):
+            raise ValueError("kind_workflow.input.json has no metadata format version")
+        raise ValueError(
+            "kind_workflow.input.json metadata format is obsolete: "
+            f"{actual_format!r} (expected {KIND_WORKFLOW_INPUT_FORMAT!r})"
+        )
+
+    required_keys = {
+        "request_headers",
+        "start_date",
+        "end_date",
+        "page_size",
+        "search_filters",
+        "disclosure_type_groups",
+        "last_report_only",
+        "include_previous_disclosures",
+    }
+    missing_keys = sorted(required_keys.difference(snapshot))
+    if missing_keys:
+        raise ValueError(
+            "kind_workflow.input.json is missing required fields: "
+            + ", ".join(missing_keys)
+        )
+
+    request_headers = snapshot["request_headers"]
+    if not isinstance(request_headers, dict) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in request_headers.items()
+    ):
+        raise ValueError("kind_workflow.input.json request_headers must be an object of strings")
+
+    start_date_raw = snapshot["start_date"]
+    end_date_raw = snapshot["end_date"]
+    try:
+        start_date = date.fromisoformat(start_date_raw)
+        end_date = date.fromisoformat(end_date_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "kind_workflow.input.json start_date and end_date must be YYYY-MM-DD"
+        ) from exc
+    if start_date.isoformat() != start_date_raw or end_date.isoformat() != end_date_raw:
+        raise ValueError(
+            "kind_workflow.input.json start_date and end_date must be YYYY-MM-DD"
+        )
+    if end_date < start_date:
+        raise ValueError("kind_workflow.input.json end_date must be on or after start_date")
+
+    page_size = snapshot["page_size"]
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size < 1:
+        raise ValueError("kind_workflow.input.json page_size must be a positive integer")
+
+    search_filters = snapshot["search_filters"]
+    search_filters_are_valid = search_filters is None or (
+        isinstance(search_filters, dict)
+        and all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in search_filters.items()
+        )
+    ) or (
+        isinstance(search_filters, list)
+        and all(
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and isinstance(item[1], str)
+            for item in search_filters
+        )
+    )
+    if not search_filters_are_valid:
+        raise ValueError(
+            "kind_workflow.input.json search_filters must be an object of strings or a string key-value list"
+        )
+    disclosure_groups = snapshot["disclosure_type_groups"]
+    disclosure_groups_are_valid = disclosure_groups is None or (
+        isinstance(disclosure_groups, dict)
+        and all(
+            isinstance(group, str)
+            and isinstance(codes, list)
+            and all(isinstance(code, str) for code in codes)
+            for group, codes in disclosure_groups.items()
+        )
+    )
+    if not disclosure_groups_are_valid:
+        raise ValueError(
+            "kind_workflow.input.json disclosure_type_groups must be an object of string lists or null"
+        )
+    for field_name in ("last_report_only", "include_previous_disclosures"):
+        if snapshot[field_name] is not None and not isinstance(
+            snapshot[field_name], bool
+        ):
+            raise ValueError(
+                f"kind_workflow.input.json {field_name} must be a boolean or null"
+            )
+    for field_name in ("wait_seconds_between_requests", "timeout"):
+        if field_name not in snapshot:
+            continue
+        value = snapshot[field_name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(
+                f"kind_workflow.input.json {field_name} must be a number"
+            )
+        if not math.isfinite(value):
+            raise ValueError(
+                f"kind_workflow.input.json {field_name} must be finite"
+            )
+        if field_name == "wait_seconds_between_requests" and value < 0:
+            raise ValueError(
+                "kind_workflow.input.json wait_seconds_between_requests must be non-negative"
+            )
+        if field_name == "timeout" and value <= 0:
+            raise ValueError("kind_workflow.input.json timeout must be positive")
+    return snapshot
 
 
 @dataclass(slots=True)
@@ -238,8 +361,8 @@ def _collect_company_records_from_folder(
     validate_integrity: bool = True,
 ) -> dict[str, Any]:
     target_folder = Path(folder).resolve()
-    input_snapshot = _load_folder_input_snapshot(target_folder) if validate_integrity else None
-    expected_page_size = int(input_snapshot.get("page_size") or 100) if input_snapshot else 100
+    input_snapshot = _load_folder_input_snapshot(target_folder)
+    expected_page_size = int(input_snapshot["page_size"])
     cached_payload = load_folder_partial_cache(
         target_folder,
         require_validated=validate_integrity,
@@ -472,15 +595,23 @@ def _collect_company_records_from_folder(
     }
 
 
-def _load_folder_input_snapshot(folder: Path) -> dict[str, Any] | None:
+def _load_folder_input_snapshot(folder: Path) -> dict[str, Any]:
     """폴더의 kind_workflow.input.json을 읽어 다운로드 파라미터를 복원한다."""
     snapshot_path = folder / "kind_workflow.input.json"
-    if not snapshot_path.exists():
-        return None
+    if not snapshot_path.is_file():
+        raise ValueError(
+            f"{folder.name}: kind_workflow.input.json metadata is missing"
+        )
     try:
-        return _load_json_file(snapshot_path)
-    except Exception:
-        return None
+        snapshot = _load_json_file(snapshot_path)
+    except Exception as exc:
+        raise ValueError(
+            f"{folder.name}: kind_workflow.input.json metadata is corrupted: {exc}"
+        ) from exc
+    try:
+        return validate_kind_workflow_input_snapshot(snapshot)
+    except ValueError as exc:
+        raise ValueError(f"{folder.name}: {exc}") from exc
 
 
 def _group_contiguous_pages(pages: list[int]) -> list[tuple[int, int]]:
@@ -577,15 +708,6 @@ def _repair_folder_pages(
         return ([], {})
 
     snapshot = _load_folder_input_snapshot(folder)
-    if snapshot is None:
-        return (
-            [
-                f"{folder.name}: kind_workflow.input.json이 없어 "
-                f"{len(page_numbers)}개 페이지를 보완할 수 없습니다."
-            ],
-            {},
-        )
-
     request_headers = dict(snapshot.get("request_headers") or {})
     start_date = str(snapshot.get("start_date") or "")
     end_date = str(snapshot.get("end_date") or "")
@@ -1106,6 +1228,7 @@ class KindWorkflowInput:
     def to_dict(self) -> dict[str, Any]:
         """현재 workflow 입력 상태를 JSON 친화적인 dict로 내보낸다."""
         return {
+            "format": KIND_WORKFLOW_INPUT_FORMAT,
             "output_directory": str(self.output_directory),
             "request_headers": dict(self.request_headers),
             "start_date": self.start_date,
@@ -1384,7 +1507,13 @@ def ensure_download_directory_integrity(
             raise ValueError(msg)
         return requested_page_size
 
-    saved_input = _load_json_file(resolved_input_snapshot_path)
+    try:
+        saved_input = _load_json_file(resolved_input_snapshot_path)
+    except Exception as exc:
+        raise ValueError(
+            f"{resolved_input_snapshot_path.name} metadata is corrupted: {exc}"
+        ) from exc
+    validate_kind_workflow_input_snapshot(saved_input)
     locked_page_size = saved_input.get("page_size")
     if locked_page_size is None:
         msg = f"{resolved_input_snapshot_path.name}에 고정된 page_size가 없습니다."
@@ -1533,7 +1662,9 @@ class KindWorkflow:
             if path is None
             else Path(path).resolve()
         )
-        _write_json_file(snapshot_path, configured_input.to_dict())
+        snapshot = configured_input.to_dict()
+        validate_kind_workflow_input_snapshot(snapshot)
+        _write_json_file(snapshot_path, snapshot)
         return snapshot_path
 
     def save_checkpoint(self, path: str | Path | None = None) -> Path:

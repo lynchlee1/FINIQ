@@ -9,6 +9,7 @@ from .workflow import (
     KindWorkflow,
     KindWorkflowCheckpoint,
     KindWorkflowInput,
+    KIND_WORKFLOW_INPUT_FORMAT,
     diagnose_kind_company_classification_integrity,
     ensure_download_directory_integrity,
     export_kind_company_classification,
@@ -20,6 +21,7 @@ from .workflow import (
     run_download,
     validate_download_directory_page_size,
     validate_downloaded_result_page,
+    validate_kind_workflow_input_snapshot,
 )
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "KindWorkflow",
     "KindWorkflowCheckpoint",
     "KindWorkflowInput",
+    "KIND_WORKFLOW_INPUT_FORMAT",
     "diagnose_kind_company_classification_integrity",
     "ensure_download_directory_integrity",
     "export_kind_company_classification",
@@ -42,4 +45,5 @@ __all__ = [
     "run_download",
     "validate_download_directory_page_size",
     "validate_downloaded_result_page",
+    "validate_kind_workflow_input_snapshot",
 ]

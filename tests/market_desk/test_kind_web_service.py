@@ -11,6 +11,7 @@ import zipfile
 import pandas as pd
 import pytest
 
+from finiq.data_scraper.workflow import KIND_WORKFLOW_INPUT_FORMAT
 from finiq.market_desk.analytics.quanti_market_history import (
     build_quanti_market_history,
     find_market_at,
@@ -376,6 +377,7 @@ def _trusted_download_input_snapshot(
     page_size: int = 100,
 ) -> dict[str, object]:
     return {
+        "format": KIND_WORKFLOW_INPUT_FORMAT,
         "request_headers": {"User-Agent": "pytest"},
         "start_date": start_date,
         "end_date": end_date,
@@ -2301,14 +2303,13 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
     dir_missing.mkdir()
     write_page(dir_missing, 1, 100, 100)
 
-    res = inspect_download_output_directory_payload({
-        "mode": "single",
-        "output_directory": str(dir_missing),
-        "page_size": 100,
-        "dry_run": True,
-    })
-    assert res["deletion_candidate_count"] == 1
-    assert "입력 스냅샷 없이 남아 있는" in res["deletion_candidates"][0]["reason"]
+    with pytest.raises(ValueError, match="metadata is missing"):
+        inspect_download_output_directory_payload({
+            "mode": "single",
+            "output_directory": str(dir_missing),
+            "page_size": 100,
+            "dry_run": True,
+        })
 
     # 7. Yearly mode
     dir_yearly = tmp_path / "yearly"
@@ -8548,6 +8549,15 @@ def test_check_existing_downloads_reports_validation_exception_as_stale(
 
     folder = tmp_path / "20260101_20260131"
     folder.mkdir()
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2026-01-01", end_date="2026-01-31"
+            )
+        ),
+        encoding="utf-8",
+    )
+    (folder / "001_post_page_00001.body").write_bytes(b"not inspected")
     monkeypatch.setattr(
         "finiq.market_desk.web.features.downloads.kind_existing._validate_single_folder",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("validation exploded")),
@@ -8965,14 +8975,8 @@ def test_check_existing_downloads_detects_metadata_missing(tmp_path: Path) -> No
     )
     # Notice kind_workflow.input.json is intentionally missing
 
-    res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
-    assert res["has_existing"] is True
-    range_info = res["ranges"][0]
-    assert range_info["status"] == "stale"
-    assert range_info["metadata_missing"] is True
-    assert range_info["start_date"] is None
-    assert range_info["end_date"] is None
-    assert range_info["error_detail"] == "Missing or invalid kind_workflow.input.json metadata."
+    with pytest.raises(ValueError, match="metadata is missing"):
+        check_existing_downloads(str(tmp_path), verify_with_kind=False)
 
 
 def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch) -> None:
@@ -8987,6 +8991,9 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
     folder = tmp_path / "20260101_20260501"
     folder.mkdir()
     (folder / "001_post_page_00001.body").write_bytes(b"corrupted html")
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(_trusted_download_input_snapshot()), encoding="utf-8"
+    )
 
     res = detect_existing_downloads(
         str(tmp_path),
@@ -9004,10 +9011,10 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
     )
 
     assert res["has_existing"] is True
-    assert res["ranges"][0]["status"] == "stale"
-    assert res["ranges"][0]["metadata_status"] == "missing"
-    assert res["ranges"][0]["start_date"] is None
-    assert res["ranges"][0]["end_date"] is None
+    assert res["ranges"][0]["status"] == "unverified"
+    assert res["ranges"][0]["metadata_status"] == "mismatch"
+    assert res["ranges"][0]["start_date"] == "2026-01-01"
+    assert res["ranges"][0]["end_date"] == "2026-05-01"
     assert res["ranges"][0]["local_count"] is None
     assert res["ranges"][0]["kind_count"] is None
 
@@ -9029,27 +9036,25 @@ def test_inspect_folder_rejects_missing_metadata_without_repair(
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
 
-    res = inspect_download_output_directory_payload(
-        {
-            "mode": "yearly",
-            "output_directory": str(tmp_path),
-            "start_date": "2026-01-01",
-            "end_date": "2026-05-01",
-            "company_name": "",
-            "submitter_name": "",
-            "market_label": "검색대상",
-            "securities_label": "전체",
-            "disclosure_type_groups": {},
-            "last_report_only": False,
-            "page_size": 100,
-            "dry_run": True,
-        }
-    )
+    with pytest.raises(ValueError, match="metadata is missing"):
+        inspect_download_output_directory_payload(
+            {
+                "mode": "yearly",
+                "output_directory": str(tmp_path),
+                "start_date": "2026-01-01",
+                "end_date": "2026-05-01",
+                "company_name": "",
+                "submitter_name": "",
+                "market_label": "검색대상",
+                "securities_label": "전체",
+                "disclosure_type_groups": {},
+                "last_report_only": False,
+                "page_size": 100,
+                "dry_run": True,
+            }
+        )
 
-    assert res["deletion_candidate_count"] == 1
-    assert res["download_needed_count"] == 0
     assert not (folder / "kind_workflow.input.json").exists()
-    assert res["deletion_candidates"][0]["reason"] == "입력 스냅샷 없이 남아 있는 다운로드 결과"
 
 
 def test_inspect_folder_rejects_metadata_without_page_size(
@@ -9076,26 +9081,24 @@ def test_inspect_folder_rejects_metadata_without_page_size(
         json.dumps(snapshot), encoding="utf-8"
     )
 
-    res = inspect_download_output_directory_payload(
-        {
-            "mode": "yearly",
-            "output_directory": str(tmp_path),
-            "start_date": "2026-01-01",
-            "end_date": "2026-05-01",
-            "company_name": "",
-            "submitter_name": "",
-            "market_label": "검색대상",
-            "securities_label": "전체",
-            "disclosure_type_groups": {},
-            "last_report_only": False,
-            "page_size": 100,
-            "dry_run": True,
-        }
-    )
+    with pytest.raises(ValueError, match="missing required fields: page_size"):
+        inspect_download_output_directory_payload(
+            {
+                "mode": "yearly",
+                "output_directory": str(tmp_path),
+                "start_date": "2026-01-01",
+                "end_date": "2026-05-01",
+                "company_name": "",
+                "submitter_name": "",
+                "market_label": "검색대상",
+                "securities_label": "전체",
+                "disclosure_type_groups": {},
+                "last_report_only": False,
+                "page_size": 100,
+                "dry_run": True,
+            }
+        )
 
-    assert res["deletion_candidate_count"] >= 1
-    assert res["download_needed_count"] == 0
-    assert res["download_needed_pages"] == 0
     assert (folder / "kind_workflow.input.json").is_file()
 
 
@@ -9116,20 +9119,14 @@ def test_check_existing_downloads_does_not_infer_missing_metadata_from_incomplet
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
 
-    res = check_existing_downloads(
-        str(tmp_path),
-        current_payload={"output_directory": str(tmp_path)},
-    )
-
-    assert res["has_existing"] is True
-    range_info = res["ranges"][0]
-    assert range_info["status"] == "stale"
-    assert range_info["metadata_missing"] is True
-    assert range_info["kind_count"] is None
-    assert range_info["error_detail"] == "Missing or invalid kind_workflow.input.json metadata."
+    with pytest.raises(ValueError, match="metadata is missing"):
+        check_existing_downloads(
+            str(tmp_path),
+            current_payload={"output_directory": str(tmp_path)},
+        )
 
 
-def test_check_existing_downloads_treats_obsolete_metadata_as_missing(tmp_path: Path, monkeypatch) -> None:
+def test_check_existing_downloads_rejects_obsolete_metadata(tmp_path: Path, monkeypatch) -> None:
     from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 
     def fail_if_called(snapshot):
@@ -9142,20 +9139,92 @@ def test_check_existing_downloads_treats_obsolete_metadata_as_missing(tmp_path: 
     (folder / "001_post_page_00001.body").write_bytes(
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
     )
+    snapshot = _trusted_download_input_snapshot()
+    snapshot["format"] = "finiq_kind_workflow_input_v0"
     (folder / "kind_workflow.input.json").write_text(
-        json.dumps({"start_date": "2026-01-01", "end_date": "2026-05-01", "page_size": 100}),
-        encoding="utf-8",
+        json.dumps(snapshot), encoding="utf-8"
     )
 
-    res = check_existing_downloads(str(tmp_path))
+    with pytest.raises(ValueError, match="metadata format is obsolete"):
+        check_existing_downloads(str(tmp_path))
 
-    assert res["has_existing"] is True
-    range_info = res["ranges"][0]
-    assert range_info["status"] == "stale"
-    assert range_info["metadata_missing"] is True
-    assert range_info["metadata_obsolete"] is True
-    assert range_info["kind_count"] is None
-    assert range_info["error_detail"] == "Missing or invalid kind_workflow.input.json metadata."
+
+def test_detect_existing_downloads_rejects_corrupted_metadata(tmp_path: Path) -> None:
+    from finiq.market_desk.web.features.downloads.kind_existing import detect_existing_downloads
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(b"corrupted html")
+    (folder / "kind_workflow.input.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="metadata is corrupted"):
+        detect_existing_downloads(str(tmp_path))
+
+
+def test_download_resume_rejects_obsolete_metadata_before_reading_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from finiq.market_desk.web.features.downloads import kind_runner
+
+    snapshot = _trusted_download_input_snapshot()
+    snapshot["format"] = "finiq_kind_workflow_input_v0"
+    (tmp_path / "kind_workflow.input.json").write_text(
+        json.dumps(snapshot), encoding="utf-8"
+    )
+    (tmp_path / "001_post_page_00001.body").write_bytes(b"not parsed")
+    monkeypatch.setattr(
+        kind_runner,
+        "_detect_pagination",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("body must not be read before metadata validation")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="metadata format is obsolete"):
+        kind_runner._run_resume({"output_directory": str(tmp_path)})
+
+
+def test_download_status_rejects_missing_metadata_before_reading_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from finiq.market_desk.web.features.downloads import kind_api
+
+    (tmp_path / "001_post_page_00001.body").write_bytes(b"not parsed")
+    monkeypatch.setattr(
+        kind_api,
+        "_download_integrity_status",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("body must not be read before metadata validation")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="metadata is missing"):
+        kind_api.build_download_status_payload({"output_directory": str(tmp_path)})
+
+
+def test_yearly_resume_probe_rejects_obsolete_metadata_before_pagination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from finiq.market_desk.web.features.downloads import kind_runner
+
+    snapshot = _trusted_download_input_snapshot()
+    snapshot["format"] = "finiq_kind_workflow_input_v0"
+    (tmp_path / "kind_workflow.input.json").write_text(
+        json.dumps(snapshot), encoding="utf-8"
+    )
+    (tmp_path / "001_post_page_00001.body").write_bytes(b"not parsed")
+    monkeypatch.setattr(
+        kind_runner,
+        "_detect_pagination",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("pagination must not be read before metadata validation")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="metadata format is obsolete"):
+        kind_runner._yearly_task_resume_payload(
+            {"output_directory": str(tmp_path)}
+        )
 
 
 def test_check_existing_downloads_rejects_missing_date_range_metadata(
@@ -9181,28 +9250,21 @@ def test_check_existing_downloads_rejects_missing_date_range_metadata(
         json.dumps(snapshot), encoding="utf-8"
     )
 
-    res = check_existing_downloads(
-        str(tmp_path),
-        current_payload={
-            "start_date": "2026-01-01",
-            "end_date": "2026-05-01",
-            "company_name": "삼성전자",
-            "submitter_name": "",
-            "market_label": "검색대상",
-            "securities_label": "전체",
-            "disclosure_type_groups": {},
-            "last_report_only": True,
-            "page_size": 100,
-        },
-    )
-
-    assert res["has_existing"] is True
-    range_info = res["ranges"][0]
-    assert range_info["status"] == "stale"
-    assert range_info["metadata_missing"] is True
-    assert range_info["metadata_obsolete"] is True
-    assert range_info["start_date"] is None
-    assert range_info["end_date"] is None
+    with pytest.raises(ValueError, match="missing required fields: start_date"):
+        check_existing_downloads(
+            str(tmp_path),
+            current_payload={
+                "start_date": "2026-01-01",
+                "end_date": "2026-05-01",
+                "company_name": "삼성전자",
+                "submitter_name": "",
+                "market_label": "검색대상",
+                "securities_label": "전체",
+                "disclosure_type_groups": {},
+                "last_report_only": True,
+                "page_size": 100,
+            },
+        )
 
 
 def test_create_metadata_route_is_not_registered() -> None:
@@ -9235,10 +9297,5 @@ def test_check_existing_downloads_single_missing_metadata_fails(tmp_path: Path, 
     """
     (tmp_path / "001_post_page_00001.body").write_text(html_content, encoding="utf-8")
 
-    res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
-    assert res["has_existing"] is True
-    assert res["earliest_date"] is None
-    assert res["latest_date"] is None
-    assert res["ranges"][0]["status"] == "stale"
-    assert res["ranges"][0]["metadata_missing"] is True
-    assert res["ranges"][0]["folder_path"] == str(tmp_path)
+    with pytest.raises(ValueError, match="metadata is missing"):
+        check_existing_downloads(str(tmp_path), verify_with_kind=False)
