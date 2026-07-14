@@ -31,22 +31,27 @@ def _comparison_frame(
     path: Path,
     account_output_payload: Callable[[Path], dict[str, Any]],
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    payload = account_output_payload(path)
-    frame = pd.read_parquet(path)
+    try:
+        payload = account_output_payload(path)
+        frame = pd.read_parquet(path)
+    except Exception as exc:
+        raise ValueError(f"Failed to read Parquet input {path.name}: {exc}") from exc
     if "date" not in frame.columns:
-        raise ValueError("Missing date column")
+        raise ValueError(f"Missing date column: {path.name}")
     raw_dates = frame["date"]
+    missing_date_mask = raw_dates.isna() | raw_dates.astype(str).str.strip().eq("")
+    if missing_date_mask.any():
+        raise ValueError(f"Missing date value: {path.name}")
     parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
-    populated_date_mask = raw_dates.notna() & raw_dates.astype(str).str.strip().ne("")
-    if (populated_date_mask & parsed_dates.isna()).any():
-        raise ValueError("Invalid date value")
+    if parsed_dates.isna().any():
+        raise ValueError(f"Invalid date value: {path.name}")
     frame["date"] = parsed_dates.dt.date
-    frame = frame.dropna(subset=["date"]).set_index("date")
+    frame = frame.set_index("date")
     if frame.index.duplicated().any():
-        raise ValueError("Duplicate date axis")
+        raise ValueError(f"Duplicate date axis: {path.name}")
     frame.columns = [str(column) for column in frame.columns]
     if frame.columns.duplicated().any():
-        raise ValueError("Duplicate code axis")
+        raise ValueError(f"Duplicate code axis: {path.name}")
     return payload, frame.sort_index()
 
 
@@ -144,7 +149,6 @@ def cleanup_duplicate_asset_parquet_outputs(
     cancel_check: Callable[[], bool] | None = None,
     emit: Callable[[Callable[[str], None] | None, str], None],
     account_output_payload: Callable[[Path], dict[str, Any]],
-    account_name_from_output_stem: Callable[[str], str],
     non_account_parquet_files: set[str],
     delete_confirmation_text: str,
 ) -> dict[str, Any]:
@@ -165,26 +169,16 @@ def cleanup_duplicate_asset_parquet_outputs(
     emit(progress_callback, f"검사 폴더: {len(scan_directories)}개")
 
     items_by_account: dict[str, list[dict[str, Any]]] = {}
-    load_errors: list[dict[str, str]] = []
     for directory in scan_directories:
         for path in sorted(directory.glob("*.parquet")):
             if cancel_check and cancel_check():
                 raise RuntimeError("Job cancelled")
             if path.name in non_account_parquet_files:
                 continue
-            try:
-                payload, frame = _comparison_frame(path, account_output_payload)
-            except Exception as exc:
-                load_errors.append(
-                    {
-                        "path": str(path),
-                        "file_name": path.name,
-                        "parent_directory": str(directory),
-                        "reason": f"읽기 실패: {exc}",
-                    }
-                )
-                continue
-            account_name = str(payload.get("account_name") or account_name_from_output_stem(path.stem))
+            payload, frame = _comparison_frame(path, account_output_payload)
+            account_name = str(payload.get("account_name") or "").strip()
+            if not account_name:
+                raise ValueError(f"Missing account_name footer metadata: {path.name}")
             items_by_account.setdefault(account_name, []).append(
                 {
                     "path": path,
@@ -282,7 +276,6 @@ def cleanup_duplicate_asset_parquet_outputs(
                         candidate_by_path[subset_item["path"]] = row
 
     deletion_candidates = sorted(candidate_by_path.values(), key=lambda item: item["path"])
-    mismatched_duplicates.extend(load_errors)
 
     if not dry_run and deletion_candidates and not _asset_parquet_delete_confirmed(
         delete_confirmed,
@@ -293,10 +286,18 @@ def cleanup_duplicate_asset_parquet_outputs(
 
     deleted_files: list[dict[str, str]] = []
     if not dry_run:
+        missing_candidates = [
+            Path(item["path"]).name
+            for item in deletion_candidates
+            if not Path(item["path"]).is_file()
+        ]
+        if missing_candidates:
+            raise ValueError(
+                f"Deletion candidate not found: {', '.join(sorted(missing_candidates))}"
+            )
         for item in deletion_candidates:
             path = Path(item["path"])
-            if path.exists():
-                path.unlink()
+            path.unlink()
             deleted_files.append(item)
 
     emit(

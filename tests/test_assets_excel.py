@@ -1927,7 +1927,19 @@ def test_cleanup_duplicate_asset_parquet_outputs_keeps_overlapping_conflicts(tmp
     assert (target_output / second_file).exists()
 
 
-def test_cleanup_duplicate_asset_parquet_outputs_rejects_invalid_dates(tmp_path):
+@pytest.mark.parametrize(
+    ("date_value", "error"),
+    [
+        ("invalid-date", "Invalid date value"),
+        (None, "Missing date value"),
+        ("", "Missing date value"),
+    ],
+)
+def test_cleanup_duplicate_asset_parquet_outputs_rejects_invalid_dates(
+    tmp_path,
+    date_value,
+    error,
+):
     target_output = tmp_path / "target-parquet"
     invalid_file = "close_20200103_20200103.parquet"
     valid_file = "close_20200103_20200103__2.parquet"
@@ -1942,7 +1954,7 @@ def test_cleanup_duplicate_asset_parquet_outputs_rejects_invalid_dates(tmp_path)
         quality={"non_null_cells": 1, "total_cells": 1, "missing_ratio": 0.0},
     )
     assets_excel_module._write_parquet_with_metadata(
-        pd.DataFrame({"date": ["invalid-date"], "A005930": [100]}),
+        pd.DataFrame({"date": [date_value], "A005930": [100]}),
         target_output / invalid_file,
         metadata,
     )
@@ -1953,15 +1965,81 @@ def test_cleanup_duplicate_asset_parquet_outputs_rejects_invalid_dates(tmp_path)
         {"A005930": [100]},
     )
 
-    payload = cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+    with pytest.raises(ValueError, match=rf"{error}: {invalid_file}"):
+        cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
 
-    assert payload["deletion_candidate_count"] == 0
-    assert any(
-        item["file_name"] == invalid_file and "Invalid date value" in item["reason"]
-        for item in payload["mismatched_duplicates"]
-    )
     assert (target_output / invalid_file).exists()
     assert (target_output / valid_file).exists()
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_rejects_missing_date_column(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    target_output.mkdir()
+    file_name = "close_20200103_20200103.parquet"
+    frame = pd.DataFrame({"A005930": [100]})
+    metadata = assets_excel_module._account_footer_metadata(
+        account_id="S00001",
+        account_name="close",
+        date_start="2020-01-03",
+        date_end="2020-01-03",
+        rows=1,
+        columns=1,
+        quality=assets_excel_module._account_quality_payload(frame),
+    )
+    assets_excel_module._write_parquet_with_metadata(
+        frame,
+        target_output / file_name,
+        metadata,
+    )
+
+    with pytest.raises(ValueError, match=rf"Missing date column: {file_name}"):
+        cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_rejects_missing_footer_metadata(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    target_output.mkdir()
+    file_name = "close_20200103_20200103.parquet"
+    pd.DataFrame(
+        {"date": [pd.Timestamp("2020-01-03")], "A005930": [100]}
+    ).to_parquet(target_output / file_name, index=False)
+
+    with pytest.raises(ValueError, match=rf"Missing Quantiwise Parquet footer metadata in {file_name}"):
+        cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_rejects_unreadable_parquet(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    target_output.mkdir()
+    file_name = "close_20200103_20200103.parquet"
+    (target_output / file_name).write_bytes(b"not parquet")
+
+    with pytest.raises(ValueError, match=rf"Failed to read Parquet input {file_name}"):
+        cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_rejects_missing_account_name(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    target_output.mkdir()
+    file_name = "close_20200103_20200103.parquet"
+    frame = pd.DataFrame({"date": [pd.Timestamp("2020-01-03")], "A005930": [100]})
+    metadata = assets_excel_module._account_footer_metadata(
+        account_id="S00001",
+        account_name="",
+        date_start="2020-01-03",
+        date_end="2020-01-03",
+        rows=1,
+        columns=1,
+        quality=assets_excel_module._account_quality_payload(frame[["A005930"]]),
+    )
+    assets_excel_module._write_parquet_with_metadata(
+        frame,
+        target_output / file_name,
+        metadata,
+    )
+
+    with pytest.raises(ValueError, match=rf"Missing account_name footer metadata: {file_name}"):
+        cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=True)
 
 
 def test_cleanup_duplicate_asset_parquet_outputs_requires_delete_confirmation(tmp_path):
@@ -1983,6 +2061,39 @@ def test_cleanup_duplicate_asset_parquet_outputs_requires_delete_confirmation(tm
         cleanup_duplicate_asset_parquet_outputs(target_output, dry_run=False)
 
     assert (target_output / "close_20200103_20200103__2.parquet").exists()
+
+
+def test_cleanup_duplicate_asset_parquet_outputs_rejects_missing_deletion_candidate(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    canonical_path = target_output / "close_20200103_20200103.parquet"
+    duplicate_path = target_output / "close_20200103_20200103__2.parquet"
+    _write_account_parquet(
+        target_output,
+        canonical_path.name,
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+    _write_account_parquet(
+        target_output,
+        duplicate_path.name,
+        ["2020-01-03"],
+        {"A005930": [100]},
+    )
+
+    def remove_duplicate(message: str) -> None:
+        if message.startswith("중복 후보 검사") and duplicate_path.exists():
+            duplicate_path.unlink()
+
+    with pytest.raises(ValueError, match=rf"Deletion candidate not found: {duplicate_path.name}"):
+        cleanup_duplicate_asset_parquet_outputs(
+            target_output,
+            dry_run=False,
+            delete_confirmed=True,
+            delete_confirmation_text="확인했습니다.",
+            progress_callback=remove_duplicate,
+        )
+
+    assert canonical_path.exists()
 
 
 def test_merge_asset_parquet_outputs_same_directory_keeps_result_when_name_matches_source(tmp_path):

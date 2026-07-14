@@ -1232,7 +1232,6 @@ def cleanup_duplicate_asset_parquet_outputs(
         cancel_check=cancel_check,
         emit=_emit,
         account_output_payload=_account_output_payload,
-        account_name_from_output_stem=_account_name_from_output_stem,
         non_account_parquet_files=NON_ACCOUNT_PARQUET_FILES,
         delete_confirmation_text=ASSET_PARQUET_DELETE_CONFIRMATION_TEXT,
     )
