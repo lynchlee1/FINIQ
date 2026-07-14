@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any
 
-from finiq.concurrency import bounded_as_completed
+from finiq.concurrency import bounded_as_completed, resolve_worker_count
 from finiq.data_scraper.workflow import inspect_download_directory_pages, validate_downloaded_result_page
 from finiq.data_scraper.workflow.workflow import _validate_downloaded_result_page_task
 
@@ -82,7 +81,7 @@ def inspect_download_output_directory_payload(
 
     page_infos: dict[str, dict[str, int]] = {}
     if files_to_validate:
-        worker_count = min(os.cpu_count() or 1, total_files)
+        worker_count = resolve_worker_count(item_count=total_files)
         executor = None
         is_cancelled = False
         try:

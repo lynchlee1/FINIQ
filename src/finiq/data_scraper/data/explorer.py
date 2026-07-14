@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import json
-import os
 from pathlib import Path
 from typing import Any
 
+from finiq.concurrency import resolve_worker_count
 from finiq.data_scraper.parse import disclosure_file_rows, html_to_json, pagination_info
 from finiq.data_scraper.storage.result_files import sorted_result_page_paths
 from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
@@ -23,10 +23,11 @@ def find_result_folders(root_directory: str | Path) -> list[Path]:
 
 
 def _resolve_folder_parallelism(parallelism: int | None, item_count: int) -> int:
-    if item_count <= 1:
-        return max(1, item_count)
-    requested = parallelism if parallelism is not None else (os.cpu_count() or 1)
-    return max(1, min(int(requested), item_count))
+    return resolve_worker_count(
+        parallelism,
+        item_count=item_count,
+        field_name="parallelism",
+    )
 
 
 def load_workflow_input(folder: str | Path) -> dict[str, Any]:

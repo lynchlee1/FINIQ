@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from finiq.concurrency import bounded_as_completed
+from finiq.concurrency import bounded_as_completed, resolve_worker_count
 from finiq.market_desk.web.features.disclosures.html_parse_support import *
 
 def _parse_with_metadata_title(
@@ -112,15 +112,11 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _filter_candidate_workers(value: Any, total_files: int) -> int:
-    if value in (None, ""):
-        return min(8, max(1, total_files))
-    try:
-        requested_workers = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("parallel_workers must be an integer") from exc
-    if requested_workers < 1:
-        raise ValueError("parallel_workers must be >= 1")
-    return min(requested_workers, max(1, total_files), 16)
+    return resolve_worker_count(
+        value,
+        item_count=total_files,
+        field_name="parallel_workers",
+    )
 
 
 def _extract_filter_candidate_from_file(

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.data.facade import load_company_classification_file
 from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
@@ -346,19 +346,11 @@ def _collect_source_folder_rows_by_year(
 
 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:
-    cpu_limit = os.cpu_count() or 1
-    if value in (None, ""):
-        requested = cpu_limit
-    else:
-        try:
-            requested = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("table_workers must be an integer") from exc
-        if requested < 1:
-            raise ValueError("table_workers must be >= 1")
-    if shard_count <= 1 or requested == 1:
-        return 1
-    return min(requested, shard_count, cpu_limit)
+    return resolve_worker_count(
+        value,
+        item_count=shard_count,
+        field_name="table_workers",
+    )
 
 
 def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) -> None:

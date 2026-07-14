@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from finiq.concurrency import bounded_as_completed
+from finiq.concurrency import bounded_as_completed, resolve_worker_count
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS, DISCLOSURE_GROUPS, MARKET_TYPES, SECURITIES_TYPES
 from finiq.data_scraper.workflow import inspect_download_directory_pages
 
@@ -310,7 +310,7 @@ def check_existing_downloads(
 
     ranges_data = list(discovery_errors)
     # Run validation checks concurrently in a ThreadPool
-    worker_count = min(10, len(candidates))
+    worker_count = resolve_worker_count(item_count=len(candidates))
     if candidates:
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             completed = bounded_as_completed(

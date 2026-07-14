@@ -43,13 +43,11 @@ def download_disclosure_html_payload(
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     progress_interval = _parse_progress_interval(body.get("progress_interval"))
-    raw_max_workers = body.get("max_workers")
-    try:
-        max_workers = 5 if raw_max_workers in (None, "") else int(raw_max_workers)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("max_workers must be an integer") from exc
-    if max_workers < 1:
-        raise ValueError("max_workers must be >= 1")
+    max_workers = resolve_worker_count(
+        body.get("max_workers"),
+        item_count=len(acpt_numbers),
+        field_name="max_workers",
+    )
     progress_log: list[str] = []
     processed_count = 0
 

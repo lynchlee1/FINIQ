@@ -45,6 +45,7 @@ function getKindDisclosureUrl(acptNo: string) {
 export default function FilterPage() {
   const {
     output_root: rootDirectory,
+    parallel_worker_count: parallelWorkerCount,
     sqlite_output_directory: tableDirectory,
     sqlite_manifest_path: tableManifestPath,
     html_transfer_directory: htmlTransferPath,
@@ -63,13 +64,15 @@ export default function FilterPage() {
   const [filterPresetPath, setFilterPresetPath] = useState("");
   const [limitUnlimited, setLimitUnlimited] = useState(true);
   const [limit, setLimit] = useState("1000");
-  const [filterWorkers, setFilterWorkers] = useState("8");
+  const [filterWorkers, setFilterWorkers] = useState("1");
   const [progressInterval, setProgressInterval] = useState("100");
   const [result, setResult] = useState<FilterResult | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
 
   useEffect(() => {
-    fetchSettings().finally(() => {
+    fetchSettings().then((config) => {
+      setFilterWorkers(String(config?.parallel_worker_count || 1));
+    }).finally(() => {
       setLoading(false);
       setStatus("공시 소스 폴더를 불러왔습니다.");
     });
@@ -101,7 +104,7 @@ export default function FilterPage() {
     limit_unlimited: limitUnlimited,
     return_limit: Number(limit || 1000),
     include_html_download_acpt_numbers: true,
-    filter_workers: Number(filterWorkers || 8),
+    filter_workers: Number(filterWorkers || parallelWorkerCount || 1),
     progress_interval: Number(progressInterval || 100),
   });
 
@@ -375,7 +378,7 @@ export default function FilterPage() {
                 </div>
               <Label className="grid gap-2 dark:text-slate-300">
                 파싱 worker 수
-                <Input type="number" min="1" max="32" step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                <Input type="number" min="1" max={parallelWorkerCount} step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
               </Label>
               <Label className="grid gap-2 dark:text-slate-300">
                 진행 표시 간격

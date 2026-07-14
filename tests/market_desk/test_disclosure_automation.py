@@ -81,6 +81,22 @@ def test_normalize_automation_profile_fixes_safe_kind_execution_settings(
     assert profile["decisions"]["s6_sections"]["unmatched_policy"] == "needs_review"
 
 
+def test_normalize_automation_profile_uses_cpu_worker_default_and_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import finiq.concurrency as concurrency
+
+    monkeypatch.setattr(concurrency.os, "cpu_count", lambda: 12)
+    payload = _profile(tmp_path)
+    payload["execution"].pop("local_workers")
+
+    assert normalize_automation_profile(payload)["execution"]["local_workers"] == 12
+
+    payload["execution"]["local_workers"] = 20
+    assert normalize_automation_profile(payload)["execution"]["local_workers"] == 12
+
+
 def test_run_start_rejects_high_risk_data_root() -> None:
     response = TestClient(app).post(
         "/api/disclosure-workflows/run/start", json=_profile(PROJECT_ROOT)

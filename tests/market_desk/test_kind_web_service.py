@@ -73,7 +73,6 @@ from finiq.market_desk.web.features.disclosures.html_parse_summary import (
     build_bond_parse_summary_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_sections import (
-    DEFAULT_HTML_SECTION_WORKERS,
     HtmlSectionSummary,
     inspect_disclosure_html_section_output_payload,
     inspect_disclosure_html_sections_payload,
@@ -1711,6 +1710,7 @@ def test_check_disclosure_html_output_directory_reports_existing_overlap(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    import finiq.concurrency as concurrency
     import finiq.market_desk.web.features.disclosures.html_common as disclosure_html
 
     used_workers: list[int] = []
@@ -1720,7 +1720,7 @@ def test_check_disclosure_html_output_directory_reports_existing_overlap(
         used_workers.append(kwargs.get("max_workers") or args[0])
         return real_executor(*args, **kwargs)
 
-    monkeypatch.setattr(disclosure_html, "cpu_count", lambda: 8)
+    monkeypatch.setattr(concurrency.os, "cpu_count", lambda: 8)
     monkeypatch.setattr(disclosure_html, "ThreadPoolExecutor", tracking_executor)
 
     output_directory = tmp_path / "viewer_html"
@@ -3312,11 +3312,17 @@ def test_split_disclosure_html_section_source_payload_splits_one_selected_file(t
     assert "발행금액 250,000,000" in payload["sections"][1]["html"]
 
 
-def test_html_section_worker_count_defaults_to_cpu_cap_and_accepts_payload_value() -> None:
-    assert DEFAULT_HTML_SECTION_WORKERS == 8
-    assert parse_html_section_worker_count(None) == 8
-    assert parse_html_section_worker_count("") == 8
+def test_html_section_worker_count_defaults_to_cpu_cap_and_accepts_payload_value(
+    monkeypatch,
+) -> None:
+    import finiq.concurrency as concurrency
+
+    monkeypatch.setattr(concurrency.os, "cpu_count", lambda: 12)
+
+    assert parse_html_section_worker_count(None) == 12
+    assert parse_html_section_worker_count("") == 12
     assert parse_html_section_worker_count("4") == 4
+    assert parse_html_section_worker_count("20") == 12
 
     with pytest.raises(ValueError, match="workers must be >= 1"):
         parse_html_section_worker_count(0)
@@ -4972,6 +4978,7 @@ def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monk
             "mode": "security_transaction",
             "skip_errors": False,
             "cancel_token": "parse-cancel-test",
+            "parallel_workers": 1,
         },
         progress_callback=progress_log.append,
     )

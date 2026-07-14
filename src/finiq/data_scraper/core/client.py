@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 
 import requests
 
-from finiq.concurrency import bounded_as_completed
+from finiq.concurrency import bounded_as_completed, resolve_worker_count
 
 from .html_rate_limit import (
     RequestSpacingLimiter,
@@ -339,7 +339,7 @@ def download_pages(
     saved_file_validator: KindSavedFileValidator | None = None,
     saved_file_callback: KindSavedFileCallback | None = None,
     cancel_check: KindCancelCheck | None = None,
-    max_workers: int = 1,
+    max_workers: int | None = None,
 ) -> None:
     """KIND 검색 결과를 순서대로 내려받아 file로 저장한다.
 
@@ -352,8 +352,11 @@ def download_pages(
         end_page=end_page,
         timeout=timeout,
     )
-    if max_workers < 1:
-        raise ValueError("max_workers must be >= 1")
+    max_workers = resolve_worker_count(
+        max_workers,
+        item_count=end_page - start_page + 1,
+        field_name="max_workers",
+    )
 
     output_directory = output_directory.resolve()
     normalized_request_headers = _normalize_request_headers(request_headers)
@@ -580,7 +583,7 @@ def download_disclosure_viewer_htmls(
     progress_callback: KindProgressCallback | None = None,
     saved_file_callback: KindViewerSavedFileCallback | None = None,
     cancel_check: KindCancelCheck | None = None,
-    max_workers: int = 5,
+    max_workers: int | None = None,
     max_retries: int = 2,
 ) -> list[Path]:
     """여러 KIND 접수번호의 뷰어 HTML을 병렬로 처리하며 무결성을 보장한다."""
@@ -590,8 +593,6 @@ def download_disclosure_viewer_htmls(
         raise ValueError("wait_seconds_between_requests must be >= 0")
     if max_requests_per_minute < 1 or max_requests_per_minute > 100:
         raise ValueError("max_requests_per_minute must be between 1 and 100")
-    if max_workers < 1:
-        raise ValueError("max_workers must be >= 1")
     if max_retries < 0:
         raise ValueError("max_retries must be >= 0")
 
@@ -599,6 +600,11 @@ def download_disclosure_viewer_htmls(
         _validate_kind_identifier(acpt_no, field_name="acpt_no")
         for acpt_no in acpt_numbers
     ]
+    max_workers = resolve_worker_count(
+        max_workers,
+        item_count=len(normalized_acpt_numbers),
+        field_name="max_workers",
+    )
     output_directory = output_directory.resolve()
     normalized_request_headers = _normalize_request_headers(request_headers)
     owns_session = session is None

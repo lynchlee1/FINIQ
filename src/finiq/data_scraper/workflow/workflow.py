@@ -9,14 +9,13 @@ from dataclasses import dataclass, field
 from datetime import date
 import json
 import math
-import os
 from pathlib import Path
 import threading
 from typing import Any
 
 import requests
 
-from finiq.concurrency import bounded_as_completed
+from finiq.concurrency import bounded_as_completed, resolve_worker_count
 from finiq.data_scraper.core.client import (
     KIND_SEARCH_PAGE_URL,
     KIND_SEARCH_RESULTS_URL,
@@ -253,10 +252,11 @@ def _iter_kind_result_dirs(root_directory: Path) -> list[Path]:
 
 
 def _resolve_folder_parallelism(parallelism: int | None, item_count: int) -> int:
-    if item_count <= 1:
-        return max(1, item_count)
-    requested = parallelism if parallelism is not None else (os.cpu_count() or 1)
-    return max(1, min(int(requested), item_count))
+    return resolve_worker_count(
+        parallelism,
+        item_count=item_count,
+        field_name="parallelism",
+    )
 
 
 def _merge_kind_body_records_by_mode(
@@ -1290,11 +1290,10 @@ def _iter_saved_result_pages(output_directory: Path) -> list[Path]:
 
 
 def _resolve_validation_parallelism(worker_count: int | None) -> int:
-    if worker_count is None:
-        return max(1, os.cpu_count() or 1)
-    if worker_count < 1:
-        raise ValueError("validation_parallelism must be >= 1")
-    return worker_count
+    return resolve_worker_count(
+        worker_count,
+        field_name="validation_parallelism",
+    )
 
 
 def _expected_rows_for_page(
@@ -1717,7 +1716,7 @@ class KindWorkflow:
         cancel_check: KindCancelCheck | None = None,
         input_snapshot_path: str | Path | None = None,
         checkpoint_path: str | Path | None = None,
-        max_workers: int = 1,
+        max_workers: int | None = None,
     ) -> dict[str, Any]:
         """저장된 입력값으로 KIND raw response를 폴더에 저장한다."""
         configured_input = self._require_input()
@@ -1822,7 +1821,7 @@ class KindWorkflow:
         cancel_check: KindCancelCheck | None = None,
         input_snapshot_path: str | Path | None = None,
         checkpoint_path: str | Path | None = None,
-        max_workers: int = 1,
+        max_workers: int | None = None,
     ) -> dict[str, Any]:
         """입력을 저장하고, 필요하면 바로 KIND raw response를 내려받는다."""
         configured_input = self.configure(

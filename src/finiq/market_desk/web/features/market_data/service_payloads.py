@@ -67,7 +67,7 @@ def filter_disclosures_payload(
         body.get("include_html_download_acpt_numbers")
     )
     progress_interval = _progress_interval(body.get("progress_interval"))
-    filter_workers = _resolve_filter_workers(body.get("filter_workers"), 32)
+    filter_workers = _resolve_filter_workers(body.get("filter_workers"), None)
 
     body_files = 0
     total_records = 0

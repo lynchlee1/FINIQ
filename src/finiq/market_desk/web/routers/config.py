@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Any, Callable, Optional
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
+from finiq.concurrency import available_cpu_count
 from finiq.config import (
     build_disclosure_workspace_path_settings,
     normalize_path,
@@ -152,7 +152,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             mode=config.html_parse_mode or "bond_issuance",
         )
         payload = {
-            "parallel_worker_count": max(1, os.cpu_count() or 1),
+            "parallel_worker_count": available_cpu_count(),
             "output_root": config.output_root,
             "quanti_dir": config.quanti_dir,
             "price_root_directory": price_root,

@@ -512,6 +512,7 @@ def test_download_pages_reports_progress_messages(tmp_path: Path) -> None:
         timeout=5,
         session=session,
         progress_callback=progress_messages.append,
+        max_workers=1,
     )
 
     assert progress_messages == [
@@ -841,6 +842,7 @@ def test_kind_workflow_writes_input_snapshot_and_checkpoint_incrementally(
     result = workflow.save_search_results(
         session=session,
         saved_file_callback=on_saved_file,
+        max_workers=1,
     )
 
     input_payload = json.loads(Path(result["input_snapshot_path"]).read_text(encoding="utf-8"))

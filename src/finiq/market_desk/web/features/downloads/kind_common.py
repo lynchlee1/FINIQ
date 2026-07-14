@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import time
@@ -17,6 +16,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from finiq.concurrency import resolve_worker_count
 from finiq.data_scraper.core.client import download_pages
 from finiq.data_scraper.core.constants import (
     DEFAULT_REQUEST_HEADERS,
@@ -249,13 +249,11 @@ def _require_current_download_input_snapshot(folder: Path) -> dict[str, Any]:
         raise DownloadInputMetadataError(f"{folder.name}: {exc}") from exc
 
 
-def _as_worker_count(payload: dict[str, Any], *, default: int | None = None) -> int:
-    cpu_count = os.cpu_count() or 1
-    fallback = default if default is not None else min(4, cpu_count)
-    worker_count = _as_int(payload, "worker_count", fallback)
-    if worker_count < 1:
-        raise ValueError("worker_count must be >= 1")
-    return min(worker_count, cpu_count)
+def _as_worker_count(payload: dict[str, Any]) -> int:
+    return resolve_worker_count(
+        payload.get("worker_count"),
+        field_name="worker_count",
+    )
 
 
 def _as_parallel_strategy(payload: dict[str, Any]) -> str:

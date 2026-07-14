@@ -50,7 +50,8 @@ test("html section split uses shared data path and execution cards", async () =>
 test("html section split exposes worker count setting and background section kind job", async () => {
   const source = await readFile(htmlSectionSplitPath, "utf8");
 
-  assert.match(source, /const \[workers, setWorkers\] = useState\("8"\)/);
+  assert.match(source, /const \[workers, setWorkers\] = useState\("1"\)/);
+  assert.match(source, /setWorkers\(String\(config\.parallel_worker_count \|\| 1\)\)/);
   assert.match(source, /label: "병렬 처리 개수"/);
   assert.match(source, /\/api\/disclosures\/html\/sections\/kinds\/start/);
   assert.match(source, /workers: parseOptionalNumber\(workers\)/);
