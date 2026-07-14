@@ -25,6 +25,21 @@ from finiq.data.assets_excel import (
 )
 
 
+DEFAULT_ACCOUNT_MAPPINGS = assets_excel_module.default_account_mappings()
+_convert_asset_excels_to_wide_parquet = convert_asset_excels_to_wide_parquet
+_inspect_asset_excel_conversion = inspect_asset_excel_conversion
+
+
+def convert_asset_excels_to_wide_parquet(*args, **kwargs):
+    kwargs.setdefault("account_mappings", DEFAULT_ACCOUNT_MAPPINGS)
+    return _convert_asset_excels_to_wide_parquet(*args, **kwargs)
+
+
+def inspect_asset_excel_conversion(*args, **kwargs):
+    kwargs.setdefault("account_mappings", DEFAULT_ACCOUNT_MAPPINGS)
+    return _inspect_asset_excel_conversion(*args, **kwargs)
+
+
 def _write_quanti_sheet(
     writer,
     sheet_name: str,
@@ -33,6 +48,8 @@ def _write_quanti_sheet(
     codes: list[str] | None = None,
     names: list[str] | None = None,
     item_labels: list[str] | None = None,
+    period_from: object = 20200101,
+    period_to: object = 20200102,
 ):
     resolved_codes = codes or ["A005930", "A000660"]
     resolved_names = names or ["삼성전자", "SK하이닉스"]
@@ -42,8 +59,8 @@ def _write_quanti_sheet(
         [0],
         ["Time Series (Company)"],
         ["Frequency", "D", "Ascending", 0],
-        ["Period(From)", 20200101],
-        ["Period(To)", 20200102],
+        ["Period(From)", period_from],
+        ["Period(To)", period_to],
         [],
         ["Code", *resolved_codes],
         ["Name", *resolved_names],
@@ -84,7 +101,10 @@ def _write_account_parquet(output_dir, file_name: str, dates: list[str], values_
     rows = {"date": [pd.Timestamp(value) for value in dates], **values_by_code}
     frame = pd.DataFrame(rows)
     account_name = assets_excel_module._account_name_from_output_stem(Path(file_name).stem)
-    account_mapping = assets_excel_module._account_mapping_for_name(account_name)
+    account_mapping = assets_excel_module._account_mapping_for_name(
+        account_name,
+        DEFAULT_ACCOUNT_MAPPINGS,
+    )
     value_frame = frame.loc[:, [column for column in frame.columns if column != "date"]]
     quality = assets_excel_module._account_quality_payload(value_frame)
     assets_excel_module._write_parquet_with_metadata(
@@ -122,15 +142,8 @@ def test_list_and_read_asset_excel(tmp_path):
         }
     ]
 
-    payload = read_asset_excel("sample.xlsx", sheet_name="prices", root_directory=tmp_path)
-
-    assert payload["file_name"] == "sample.xlsx"
-    assert payload["sheet_names"] == ["prices"]
-    assert payload["columns"] == ["code", "price"]
-    assert payload["rows"] == [
-        {"code": "005930", "price": 1000},
-        {"code": "000660", "price": 2000},
-    ]
+    with pytest.raises(ValueError, match="Missing Code marker"):
+        read_asset_excel("sample.xlsx", sheet_name="prices", root_directory=tmp_path)
 
 
 def test_read_asset_excel_sheets_does_not_load_rows(tmp_path):
@@ -152,14 +165,19 @@ def test_read_asset_excel_sheets_does_not_load_rows(tmp_path):
 
 def test_asset_excel_reader_uses_calamine_engine(tmp_path):
     excel_path = tmp_path / "sample.xlsx"
-    pd.DataFrame([{"value": 1}]).to_excel(excel_path, index=False, sheet_name="data")
+    with pd.ExcelWriter(excel_path) as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+        )
 
     excel = assets_excel_module._excel_file(excel_path)
-    payload = read_asset_excel("sample.xlsx", sheet_name="data", root_directory=tmp_path)
+    payload = read_asset_excel("sample.xlsx", sheet_name="종가", root_directory=tmp_path)
 
     assert assets_excel_module.EXCEL_ENGINE == "calamine"
     assert excel.engine == "calamine"
-    assert payload["rows"] == [{"value": 1}]
+    assert payload["rows"][0]["A005930"] == 100
 
 
 def test_read_asset_excel_quanti_preview_uses_date_code_matrix(tmp_path):
@@ -187,6 +205,88 @@ def test_read_asset_excel_quanti_preview_uses_date_code_matrix(tmp_path):
         {"date": "2020-01-02", "A005930": 101, "A000660": 201},
     ]
     assert "     Refresh     " not in payload["columns"]
+
+
+@pytest.mark.parametrize("account_mappings", [None, []])
+def test_asset_excel_conversion_requires_account_mappings(tmp_path, account_mappings):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+        )
+
+    with pytest.raises(ValueError, match="account_mappings is required"):
+        assets_excel_module.inspect_asset_excel_conversion(
+            source_dir,
+            output_dir,
+            account_mappings=account_mappings,
+        )
+    with pytest.raises(ValueError, match="account_mappings is required"):
+        assets_excel_module.convert_asset_excels_to_wide_parquet(
+            source_dir,
+            output_dir,
+            account_mappings=account_mappings,
+        )
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [["Period(From)", None], ["Period(To)", 20200102], ["Code", "A005930"], ["D A T E", "종가"]],
+        [["Period(From)", 20200101], ["Period(To)", None], ["Code", "A005930"], ["D A T E", "종가"]],
+    ],
+)
+def test_read_asset_excel_rejects_missing_preview_metadata(tmp_path, rows):
+    excel_path = tmp_path / "missing-metadata.xlsx"
+    pd.DataFrame(rows).to_excel(excel_path, sheet_name="종가", header=False, index=False)
+
+    with pytest.raises(ValueError, match="Missing preview metadata"):
+        read_asset_excel(excel_path.name, sheet_name="종가", root_directory=tmp_path)
+
+
+def test_convert_asset_excels_skips_sheet_with_missing_preview_metadata(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+            period_from=None,
+        )
+        _write_quanti_sheet(
+            writer,
+            "거래량",
+            [[pd.Timestamp("2020-01-01"), 1000, 2000]],
+        )
+
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    assert payload["sheets_processed"] == 1
+    assert payload["skipped"][0]["sheet_name"] == "종가"
+    assert "Missing preview metadata" in payload["skipped"][0]["reason"]
+    assert _output_for_sheet(payload, "거래량")["output_file"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "error"),
+    [
+        ([['D A T E', '종가'], [pd.Timestamp('2020-01-01'), 100]], "Code"),
+        ([['Code', 'A005930'], [pd.Timestamp('2020-01-01'), 100]], "D A T E"),
+        ([['Code', '005930'], ['D A T E', '종가'], [pd.Timestamp('2020-01-01'), 100]], "valid stock code"),
+    ],
+)
+def test_read_asset_excel_rejects_missing_quanti_markers_or_valid_codes(tmp_path, rows, error):
+    excel_path = tmp_path / "invalid.xlsx"
+    pd.DataFrame(rows).to_excel(excel_path, sheet_name="종가", header=False, index=False)
+
+    with pytest.raises(ValueError, match=error):
+        read_asset_excel(excel_path.name, sheet_name="종가", root_directory=tmp_path)
 
 
 def test_read_asset_excel_rejects_path_outside_assets(tmp_path):
@@ -238,8 +338,8 @@ def test_asset_excel_api(tmp_path, monkeypatch):
         "/api/assets/excels/api.xlsx",
         params={"sheet_name": "data", "source_directory": str(tmp_path)},
     )
-    assert read_response.status_code == 200
-    assert read_response.json()["rows"] == [{"name": "FINIQ"}]
+    assert read_response.status_code == 400
+    assert "Missing Code marker" in read_response.json()["detail"]
 
     stale_sheet_response = client.get(
         "/api/assets/excels/api.xlsx",
@@ -382,6 +482,116 @@ def test_convert_asset_excels_hashes_ordered_company_list_in_output_name(tmp_pat
     assert not any(output["output_file"].endswith("__2.parquet") for output in payload["outputs"].values())
 
 
+def test_convert_asset_excels_uses_numeric_suffix_for_filename_collisions(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    values_by_file = {
+        "source-a.xlsx": 100,
+        "source-b.xlsx": 999,
+        "source-c.xlsx": 999,
+    }
+    for file_name, value in values_by_file.items():
+        with pd.ExcelWriter(source_dir / file_name) as writer:
+            _write_quanti_sheet(
+                writer,
+                "종가",
+                [[pd.Timestamp("2020-01-01"), value, 200]],
+            )
+
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+
+    base_file = _expected_output_file("close", "2020-01-01", "2020-01-01", ["A005930", "A000660"])
+    first_file = _output_for_sheet(payload, "종가", "source-a.xlsx")["output_file"]
+    second_file = _output_for_sheet(payload, "종가", "source-b.xlsx")["output_file"]
+    third_file = _output_for_sheet(payload, "종가", "source-c.xlsx")["output_file"]
+    assert first_file == base_file
+    assert second_file == f"{Path(base_file).stem}__2.parquet"
+    assert third_file == f"{Path(base_file).stem}__3.parquet"
+    assert len(list(output_dir.glob("close_*.parquet"))) == 3
+    assert pd.read_parquet(output_dir / first_file)["A005930"].tolist() == [100]
+    assert pd.read_parquet(output_dir / second_file)["A005930"].tolist() == [999]
+
+
+@pytest.mark.parametrize(
+    ("account_name", "error"),
+    [
+        ("bad/name", "forbidden filename character"),
+        ("", "Output filename value is required"),
+    ],
+)
+def test_convert_asset_excels_skips_invalid_output_filename_token(
+    tmp_path,
+    account_name,
+    error,
+):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+        )
+
+    payload = assets_excel_module.convert_asset_excels_to_wide_parquet(
+        source_dir,
+        output_dir,
+        account_mappings=[
+                {
+                    "account_id": "A90001",
+                    "account_name": account_name,
+                    "sheet_name": "종가",
+                }
+        ],
+    )
+
+    assert payload["outputs"] == {}
+    assert payload["skipped"][0]["sheet_name"] == "종가"
+    assert error in payload["skipped"][0]["reason"]
+    assert not list(output_dir.glob("bad*.parquet"))
+
+
+def test_convert_asset_excels_skips_sheet_without_account_id_and_continues(tmp_path):
+    source_dir = tmp_path / "assets"
+    output_dir = tmp_path / "merged"
+    source_dir.mkdir()
+    with pd.ExcelWriter(source_dir / "source.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "종가",
+            [[pd.Timestamp("2020-01-01"), 100, 200]],
+        )
+        _write_quanti_sheet(
+            writer,
+            "거래량",
+            [[pd.Timestamp("2020-01-01"), 1000, 2000]],
+        )
+
+    payload = assets_excel_module.convert_asset_excels_to_wide_parquet(
+        source_dir,
+        output_dir,
+        account_mappings=[
+            {
+                "account_id": "",
+                "account_name": "close",
+                "sheet_name": "종가",
+            },
+            {
+                "account_id": "S00009",
+                "account_name": "volume",
+                "sheet_name": "거래량",
+            },
+        ],
+    )
+
+    assert payload["sheets_processed"] == 1
+    assert payload["skipped"][0]["sheet_name"] == "종가"
+    assert payload["skipped"][0]["reason"] == "No account ID mapping: 종가"
+    assert _output_for_sheet(payload, "거래량")["account_id"] == "S00009"
+
+
 def test_convert_asset_excels_uses_custom_account_mappings(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
@@ -408,6 +618,7 @@ def test_convert_asset_excels_uses_custom_account_mappings(tmp_path):
     assert preview_output["account_id"] == "A90001"
     assert preview_output["account_name"] == "customClose"
     assert output["output_file"] == _expected_output_file("customClose", "2020-01-01", "2020-01-01", ["A005930", "A000660"])
+    assert preview_output["output_file"] == output["output_file"]
     assert output["account_id"] == "A90001"
     assert output["account_name"] == "customClose"
     assert "account_mapping" not in payload
@@ -487,7 +698,7 @@ def test_custom_account_mappings_reject_duplicate_account_names(tmp_path):
         )
 
 
-def test_inspect_asset_excel_conversion_treats_deleted_account_mapping_as_unmapped(tmp_path):
+def test_inspect_asset_excel_conversion_rejects_deleted_all_account_mappings(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
     source_dir.mkdir()
@@ -498,19 +709,8 @@ def test_inspect_asset_excel_conversion_treats_deleted_account_mapping_as_unmapp
             [[pd.Timestamp("2020-01-01"), 100, 200]],
         )
 
-    preview = inspect_asset_excel_conversion(source_dir, output_dir, account_mappings=[])
-
-    assert preview["outputs"] == {}
-    assert preview["skipped"] == [
-        {
-            "file_name": "source-a.xlsx",
-            "relative_path": "source-a.xlsx",
-            "sheet_name": "종가",
-            "reason": "No account-name mapping",
-            "status": "unmapped",
-        }
-    ]
-    assert preview["sheets"][0]["status"] == "unmapped"
+    with pytest.raises(ValueError, match="account_mappings is required"):
+        inspect_asset_excel_conversion(source_dir, output_dir, account_mappings=[])
 
 
 def test_read_asset_parquet_preview_matches_quanti_preview_shape(tmp_path):
@@ -687,12 +887,12 @@ def test_convert_asset_excels_reports_skipped_sheet_details(tmp_path):
             "file_name": "source-a.xlsx",
             "relative_path": "source-a.xlsx",
             "sheet_name": "알수없는시트",
-            "reason": "Unmapped sheet name",
+            "reason": "No account-name mapping",
             "status": "unmapped",
         }
     ]
     assert any(
-        "건너뛴 Sheet 상세: source-a.xlsx / 알수없는시트 - Unmapped sheet name" in line
+        "건너뛴 Sheet 상세: source-a.xlsx / 알수없는시트 - No account-name mapping" in line
         for line in progress_log
     )
 
@@ -744,17 +944,38 @@ def test_convert_asset_excels_cancel_during_streaming_save_leaves_no_final_outpu
     assert not any(path.name.startswith(".quanti_parquet_write_") for path in output_dir.iterdir())
 
 
-def test_convert_asset_excels_rejects_invalid_dates_without_outputs(tmp_path):
+def test_convert_asset_excels_skips_invalid_dates_and_continues_next_sheet_and_file(tmp_path):
     source_dir = tmp_path / "assets"
     output_dir = tmp_path / "merged"
     source_dir.mkdir()
     with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
         _write_quanti_sheet(writer, "종가", [["not-a-date", 100, 200]])
+        _write_quanti_sheet(
+            writer,
+            "거래량",
+            [[pd.Timestamp("2020-01-01"), 1000, 2000]],
+        )
+    with pd.ExcelWriter(source_dir / "source-b.xlsx") as writer:
+        _write_quanti_sheet(
+            writer,
+            "시가",
+            [[pd.Timestamp("2020-01-01"), 90, 190]],
+        )
 
-    with pytest.raises(ValueError, match="Invalid date values"):
-        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert not list(output_dir.glob("*.parquet"))
+    assert payload["sheets_processed"] == 2
+    assert payload["skipped"] == [
+        {
+            "file_name": "source-a.xlsx",
+            "relative_path": "source-a.xlsx",
+            "sheet_name": "종가",
+            "reason": "Invalid date values in sheet 종가: not-a-date",
+            "status": "format_error",
+        }
+    ]
+    assert _output_for_sheet(payload, "거래량", "source-a.xlsx")["output_file"]
+    assert _output_for_sheet(payload, "시가", "source-b.xlsx")["output_file"]
 
 
 @pytest.mark.parametrize(
@@ -775,7 +996,7 @@ def test_convert_asset_excels_rejects_invalid_dates_without_outputs(tmp_path):
         ),
     ],
 )
-def test_convert_asset_excels_rejects_duplicate_axes_without_outputs(
+def test_convert_asset_excels_skips_duplicate_axes_without_sheet_output(
     tmp_path, rows, codes, error
 ):
     source_dir = tmp_path / "assets"
@@ -784,10 +1005,11 @@ def test_convert_asset_excels_rejects_duplicate_axes_without_outputs(
     with pd.ExcelWriter(source_dir / "source-a.xlsx") as writer:
         _write_quanti_sheet(writer, "종가", rows, codes=codes)
 
-    with pytest.raises(ValueError, match=error):
-        convert_asset_excels_to_wide_parquet(source_dir, output_dir)
+    payload = convert_asset_excels_to_wide_parquet(source_dir, output_dir)
 
-    assert not list(output_dir.glob("*.parquet"))
+    assert payload["outputs"] == {}
+    assert error in payload["skipped"][0]["reason"]
+    assert not list(output_dir.glob("close_*.parquet"))
 
 
 def test_convert_asset_excels_rolls_back_partial_final_promotion(tmp_path, monkeypatch):
@@ -975,6 +1197,115 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
         {"code": "A000660", "name": "SK하이닉스"},
         {"code": "A005930", "name": "삼성전자"},
     ]
+
+
+def test_merge_asset_parquet_outputs_rejects_input_without_date_column(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    target_output.mkdir()
+    missing_date_path = target_output / "close_20200103_20200103.parquet"
+    frame = pd.DataFrame({"A005930": [100]})
+    quality = assets_excel_module._account_quality_payload(frame)
+    assets_excel_module._write_parquet_with_metadata(
+        frame,
+        missing_date_path,
+        assets_excel_module._account_footer_metadata(
+            account_id="S00001",
+            account_name="close",
+            date_start="2020-01-03",
+            date_end="2020-01-03",
+            rows=1,
+            columns=1,
+            quality=quality,
+        ),
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200104_20200104.parquet",
+        ["2020-01-04"],
+        {"A005930": [101]},
+    )
+
+    with pytest.raises(ValueError, match="Missing date column.*close_20200103_20200103.parquet"):
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=[missing_date_path.name, "close_20200104_20200104.parquet"],
+        )
+
+    assert not list(merged_output.glob("*.parquet"))
+
+
+def test_merge_asset_parquet_outputs_resolves_blank_overlap_and_allows_equal_values(tmp_path):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [None], "A000660": [200]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103__2.parquet",
+        ["2020-01-03"],
+        {"A005930": [100], "A000660": [200]},
+    )
+
+    payload = merge_asset_parquet_outputs(
+        target_output,
+        merged_output,
+        selected_files=[
+            "close_20200103_20200103.parquet",
+            "close_20200103_20200103__2.parquet",
+        ],
+    )
+
+    result = pd.read_parquet(merged_output / payload["accounts"]["close"]["output_file"])
+    assert result[["A005930", "A000660"]].to_dict("records") == [
+        {"A005930": 100, "A000660": 200}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("first_value", "second_value"),
+    [
+        (100, 101),
+        (1.0, 1.0000000000005),
+        ("value", " value "),
+    ],
+)
+def test_merge_asset_parquet_outputs_rejects_different_non_blank_overlap(
+    tmp_path,
+    first_value,
+    second_value,
+):
+    target_output = tmp_path / "target-parquet"
+    merged_output = tmp_path / "merged-parquet"
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103.parquet",
+        ["2020-01-03"],
+        {"A005930": [first_value]},
+    )
+    _write_account_parquet(
+        target_output,
+        "close_20200103_20200103__2.parquet",
+        ["2020-01-03"],
+        {"A005930": [second_value]},
+    )
+
+    with pytest.raises(ValueError, match="Conflicting overlapping values"):
+        merge_asset_parquet_outputs(
+            target_output,
+            merged_output,
+            selected_files=[
+                "close_20200103_20200103.parquet",
+                "close_20200103_20200103__2.parquet",
+            ],
+        )
+
+    assert not list(merged_output.glob("*.parquet"))
 
 
 def test_inspect_parquet_output_reads_footer_metadata(tmp_path):
@@ -1884,7 +2215,7 @@ def test_inspect_asset_excel_conversion_skips_bad_quanti_sheet(tmp_path):
             "file_name": "bad.xlsx",
             "relative_path": "bad.xlsx",
             "sheet_name": "종가",
-            "reason": "Unsupported sheet format: bad.xlsx / 종가",
+            "reason": "Missing Code marker: bad.xlsx / 종가",
             "status": "format_error",
         }
     ]

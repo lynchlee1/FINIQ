@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import math
 import os
 import re
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
-from numbers import Number
 import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -31,6 +29,8 @@ CODE_NAME_MAPPING_FILE = "code_name_mapping.parquet"
 ACCOUNT_MAPPING_FILE = "account_mapping.parquet"
 NON_ACCOUNT_PARQUET_FILES = {CODE_NAME_MAPPING_FILE, ACCOUNT_MAPPING_FILE}
 ASSET_PARQUET_DELETE_CONFIRMATION_TEXT = "확인했습니다."
+FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
+VALID_STOCK_CODE_PATTERN = re.compile(r"^A\d{6}$")
 REQUIRED_ACCOUNT_METADATA_KEYS = {
     "account_id",
     "account_name",
@@ -122,23 +122,21 @@ def _normalize_account_mappings(account_mappings: list[AccountMappingInput] | No
         account_id = _normalize_label(mapping.get("account_id"))
         if not sheet_name:
             raise ValueError(f"account_mappings[{index}].sheet_name is required")
-        if not account_id:
-            raise ValueError(f"account_mappings[{index}].account_id is required")
-        if not account_name:
-            raise ValueError(f"account_mappings[{index}].account_name is required")
         if "_" in account_id:
             raise ValueError(f"account_mappings[{index}].account_id cannot contain underscore")
         if "_" in account_name:
             raise ValueError(f"account_mappings[{index}].account_name cannot contain underscore")
         if sheet_name in seen_sheets:
             raise ValueError(f"Duplicate account mapping sheet_name: {sheet_name}")
-        if account_id in seen_ids:
+        if account_id and account_id in seen_ids:
             raise ValueError(f"Duplicate account mapping account_id: {account_id}")
-        if account_name in seen_names:
+        if account_name and account_name in seen_names:
             raise ValueError(f"Duplicate account mapping account_name: {account_name}")
         seen_sheets.add(sheet_name)
-        seen_ids.add(account_id)
-        seen_names.add(account_name)
+        if account_id:
+            seen_ids.add(account_id)
+        if account_name:
+            seen_names.add(account_name)
         rows.append(
             {
                 "account_id": account_id,
@@ -147,6 +145,14 @@ def _normalize_account_mappings(account_mappings: list[AccountMappingInput] | No
             }
         )
     return rows
+
+
+def _require_account_mappings(
+    account_mappings: list[AccountMappingInput] | None,
+) -> list[AccountMapping]:
+    if not account_mappings:
+        raise ValueError("account_mappings is required and must not be empty")
+    return _normalize_account_mappings(account_mappings)
 
 
 def _account_mapping_by_sheet(account_mappings: list[AccountMappingInput] | None = None) -> dict[str, AccountMapping]:
@@ -196,21 +202,45 @@ def _date_range_label(index: pd.Index) -> str:
 
 def _safe_output_token(value: str) -> str:
     normalized = unicodedata.normalize("NFC", value).strip()
-    chars = [
-        char if char.isalnum() or char in {"-", "_", "."} else "_"
-        for char in normalized
-    ]
-    token = "_".join("".join(chars).split("_"))
-    return token or "sheet"
+    if not normalized:
+        raise ValueError("Output filename value is required")
+    invalid = sorted(
+        {
+            char
+            for char in normalized
+            if char in FORBIDDEN_FILENAME_CHARACTERS or ord(char) < 32
+        }
+    )
+    if invalid:
+        raise ValueError(
+            f"Output filename value contains a forbidden filename character: {''.join(invalid)}"
+        )
+    return normalized
 
 
 def _compact_date(value: str) -> str:
-    return str(value or "").replace("-", "") or "nodate"
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError("Output filename date is required")
+    return normalized.replace("-", "")
 
 
 def _company_list_hash(company_codes: Iterable[object]) -> str:
     company_text = "".join(_normalize_label(company_code) for company_code in company_codes)
     return hashlib.sha256(company_text.encode("utf-8")).hexdigest()
+
+
+def _resolve_output_stem(
+    output_stem: str,
+    used_stems: set[str],
+) -> str:
+    resolved_stem = output_stem
+    duplicate_index = 2
+    while resolved_stem in used_stems:
+        resolved_stem = f"{output_stem}__{duplicate_index}"
+        duplicate_index += 1
+    used_stems.add(resolved_stem)
+    return resolved_stem
 
 
 def _sheet_output_stem(
@@ -475,16 +505,6 @@ def _preview_cell_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _values_match(left: Any, right: Any) -> bool:
-    if pd.isna(left) and pd.isna(right):
-        return True
-    if pd.isna(left) or pd.isna(right):
-        return False
-    if isinstance(left, Number) and isinstance(right, Number):
-        return math.isclose(float(left), float(right), rel_tol=0, abs_tol=1e-12)
-    return _normalize_label(left) == _normalize_label(right)
-
-
 def read_asset_excel(
     file_name: str | Path,
     *,
@@ -499,31 +519,13 @@ def read_asset_excel(
     selected_sheet_name = excel.sheet_names[selected_sheet] if isinstance(selected_sheet, int) else str(selected_sheet)
 
     nrows = max(0, int(row_limit)) if row_limit is not None else None
-    quanti_preview = _read_quanti_preview_sheet(
+    return _read_quanti_preview_sheet(
         target,
         selected_sheet_name,
         row_limit=nrows,
         source_directory=Path(root_directory).expanduser().resolve(),
         sheet_names=excel.sheet_names,
     )
-    if quanti_preview is not None:
-        return quanti_preview
-
-    frame = _read_excel(target, sheet_name=selected_sheet, dtype=object, nrows=nrows)
-
-    columns = [str(column) for column in frame.columns]
-    frame.columns = columns
-    rows = _json_rows(frame)
-
-    return {
-        "file_name": target.name,
-        "relative_path": str(target.relative_to(Path(root_directory).expanduser().resolve())),
-        "sheet_name": selected_sheet_name,
-        "sheet_names": list(excel.sheet_names),
-        "columns": columns,
-        "rows": rows,
-        "row_count": len(rows),
-    }
 
 
 def read_asset_excel_sheets(
@@ -604,13 +606,19 @@ def _code_name_mappings_from_sheet(
     sheet_name: str,
     code_row: int,
     name_row: int | None,
-    code_count: int,
+    code_positions: list[int],
 ) -> list[CodeNameMapping]:
     excel_source = getattr(xlsx_path, "io", None) or getattr(xlsx_path, "_io", None)
     excel_name = Path(str(excel_source)).name if isinstance(xlsx_path, pd.ExcelFile) else xlsx_path.name
-    codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1 : code_count + 1].tolist()]
+    codes = [
+        _normalize_label(raw_frame.iloc[code_row, position + 1])
+        for position in code_positions
+    ]
     names = (
-        [_normalize_label(value) for value in raw_frame.iloc[name_row, 1 : code_count + 1].tolist()]
+        [
+            _normalize_label(raw_frame.iloc[name_row, position + 1])
+            for position in code_positions
+        ]
         if name_row is not None
         else [""] * len(codes)
     )
@@ -685,6 +693,21 @@ def _metadata_value(raw_frame: pd.DataFrame, marker: str) -> str:
     return ""
 
 
+def _preview_metadata(raw_frame: pd.DataFrame, source_label: str) -> dict[str, str]:
+    metadata = {
+        "period_from": _metadata_value(raw_frame, "Period(From)"),
+        "period_to": _metadata_value(raw_frame, "Period(To)"),
+    }
+    missing = [
+        marker
+        for marker, key in (("Period(From)", "period_from"), ("Period(To)", "period_to"))
+        if not metadata[key]
+    ]
+    if missing:
+        raise ValueError(f"Missing preview metadata in {source_label}: {', '.join(missing)}")
+    return metadata
+
+
 def _read_quanti_preview_sheet(
     xlsx_path: Path,
     sheet_name: str,
@@ -693,7 +716,7 @@ def _read_quanti_preview_sheet(
     source_directory: Path,
     sheet_names: list[str],
     column_limit: int = 12,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     raw_row_limit = None if row_limit is None else max(30, int(row_limit) + 20)
     raw_frame = _read_excel(
         xlsx_path,
@@ -705,13 +728,21 @@ def _read_quanti_preview_sheet(
     code_row = _find_marker_row(raw_frame, "Code")
     name_row = _find_marker_row(raw_frame, "Name")
     date_header_row = _find_marker_row(raw_frame, "D A T E")
-    if code_row is None or date_header_row is None:
-        return None
+    if code_row is None:
+        raise ValueError(f"Missing Code marker: {xlsx_path.name} / {sheet_name}")
+    if date_header_row is None:
+        raise ValueError(f"Missing D A T E marker: {xlsx_path.name} / {sheet_name}")
 
     codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1:].tolist()]
-    valid_positions = [index for index, code in enumerate(codes) if code]
+    valid_positions = [
+        index
+        for index, code in enumerate(codes)
+        if VALID_STOCK_CODE_PATTERN.fullmatch(code)
+    ]
     if not valid_positions:
-        return None
+        raise ValueError(f"No valid stock code found: {xlsx_path.name} / {sheet_name}")
+
+    metadata = _preview_metadata(raw_frame, f"{xlsx_path.name} / {sheet_name}")
 
     account_name = _account_name_for_sheet(sheet_name)
     names = (
@@ -750,10 +781,7 @@ def _read_quanti_preview_sheet(
         "preview_type": "quanti_matrix",
         "account_name": account_name,
         "status": "mapped" if account_name else "unmapped",
-        "metadata": {
-            "period_from": _metadata_value(raw_frame, "Period(From)"),
-            "period_to": _metadata_value(raw_frame, "Period(To)"),
-        },
+        "metadata": metadata,
         "columns": columns,
         "preview_columns": list(preview_frame.columns),
         "rows": _json_rows(preview_frame),
@@ -771,14 +799,25 @@ def _read_quanti_wide_sheet_with_mapping(
     code_row = _find_marker_row(raw_frame, "Code")
     name_row = _find_marker_row(raw_frame, "Name")
     date_header_row = _find_marker_row(raw_frame, "D A T E")
-    if code_row is None or date_header_row is None:
-        excel_source = getattr(xlsx_path, "io", None) or getattr(xlsx_path, "_io", None)
-        excel_name = Path(str(excel_source)).name if isinstance(xlsx_path, pd.ExcelFile) else xlsx_path.name
-        msg = f"Unsupported sheet format: {excel_name} / {sheet_name}"
-        raise ValueError(msg)
+    excel_source = getattr(xlsx_path, "io", None) or getattr(xlsx_path, "_io", None)
+    excel_name = Path(str(excel_source)).name if isinstance(xlsx_path, pd.ExcelFile) else xlsx_path.name
+    if code_row is None:
+        raise ValueError(f"Missing Code marker: {excel_name} / {sheet_name}")
+    if date_header_row is None:
+        raise ValueError(f"Missing D A T E marker: {excel_name} / {sheet_name}")
+    _preview_metadata(raw_frame, f"{excel_name} / {sheet_name}")
 
-    codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1:].tolist()]
-    data = raw_frame.iloc[date_header_row + 1 :, : len(codes) + 1].copy()
+    raw_codes = [_normalize_label(value) for value in raw_frame.iloc[code_row, 1:].tolist()]
+    valid_positions = [
+        index
+        for index, code in enumerate(raw_codes)
+        if VALID_STOCK_CODE_PATTERN.fullmatch(code)
+    ]
+    if not valid_positions:
+        raise ValueError(f"No valid stock code found: {excel_name} / {sheet_name}")
+    codes = [raw_codes[position] for position in valid_positions]
+    data_columns = [0, *[position + 1 for position in valid_positions]]
+    data = raw_frame.iloc[date_header_row + 1 :, data_columns].copy()
     raw_dates = data.iloc[:, 0]
     parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
     populated_date_mask = raw_dates.notna() & raw_dates.astype(str).str.strip().ne("")
@@ -800,16 +839,26 @@ def _read_quanti_wide_sheet_with_mapping(
     values.columns = codes
     values.insert(0, "date", dates)
     values = values.dropna(subset=["date"])
-    values = values.loc[:, ["date", *[column for column in codes if column]]]
+    values = values.loc[:, ["date", *codes]]
     values = values.set_index("date")
     values = values.where(pd.notna(values), None)
+
+    if values.empty:
+        raise _QuantiDataValidationError(f"No valid date values in sheet {sheet_name}")
 
     if values.index.duplicated().any():
         duplicate_dates = sorted({value.isoformat() for value in values.index[values.index.duplicated(keep=False)]})
         raise _QuantiDataValidationError(
             f"Duplicate dates in sheet {sheet_name}: {', '.join(duplicate_dates[:5])}"
         )
-    mappings = _code_name_mappings_from_sheet(raw_frame, xlsx_path, sheet_name, code_row, name_row, len(codes))
+    mappings = _code_name_mappings_from_sheet(
+        raw_frame,
+        xlsx_path,
+        sheet_name,
+        code_row,
+        name_row,
+        valid_positions,
+    )
     return values, mappings
 
 
@@ -837,8 +886,6 @@ def _find_conflicts(
     for row_date, column in candidate_mask.stack()[lambda series: series].index:
         existing_value = existing_values.at[row_date, column]
         incoming_value = incoming_values.at[row_date, column]
-        if _values_match(existing_value, incoming_value):
-            continue
         conflicts.append(
             {
                 "date": row_date.isoformat() if hasattr(row_date, "isoformat") else str(row_date),
@@ -846,7 +893,7 @@ def _find_conflicts(
                 "existing_value": str(existing_value),
                 "incoming_value": str(incoming_value),
                 "incoming_file": incoming_source["file_name"],
-                "incoming_sheet": incoming_source["sheet_name"],
+                "incoming_sheet": str(incoming_source.get("sheet_name") or ""),
             }
         )
         if len(conflicts) >= max_conflicts:
@@ -1036,7 +1083,7 @@ def _existing_account_frames(
         file_meta = _account_output_payload(parquet_path)
         frame = pd.read_parquet(parquet_path)
         if "date" not in frame.columns:
-            continue
+            raise ValueError(f"Missing date column in merge input: {parquet_path.name}")
         frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date
         frame = frame.dropna(subset=["date"]).set_index("date")
         source_info = {
@@ -1067,7 +1114,10 @@ def _parquet_account_names(directory: Path) -> list[str]:
 
 
 def _account_name_from_output_stem(stem: str) -> str:
-    match = re.match(r"^(?P<account>.+)_\d{8}_\d{8}(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?$", stem)
+    match = re.match(
+        r"^(?P<account>.+)_\d{8}_\d{8}(?:_[0-9a-f]{64})?(?:__[0-9a-f]{64})?(?:(?:__|_)\d+)?$",
+        stem,
+    )
     if match:
         return match.group("account")
     return stem
@@ -1264,8 +1314,13 @@ def _scan_asset_excel_frames(
                 continue
             try:
                 frame, mappings = _read_quanti_wide_sheet_with_mapping(excel, sheet_name)
-            except _QuantiDataValidationError:
-                raise
+                relative_path = str(xlsx_path.relative_to(source))
+                date_start = frame.index.min().isoformat() if len(frame.index) else ""
+                date_end = frame.index.max().isoformat() if len(frame.index) else ""
+                output_stem = _sheet_output_stem(account_name, date_start, date_end, frame.columns)
+                account_mapping = _account_mapping_for_name(account_name, account_mappings)
+                if not account_mapping["account_id"]:
+                    raise ValueError(f"No account ID mapping: {sheet_name}")
             except ValueError as exc:
                 summary = _sheet_summary_payload(
                     xlsx_path,
@@ -1288,11 +1343,6 @@ def _scan_asset_excel_frames(
                 _emit(progress_callback, f"  건너뜀: {summary['reason']}")
                 continue
             file_code_name_mappings.extend(mappings)
-            relative_path = str(xlsx_path.relative_to(source))
-            date_start = frame.index.min().isoformat() if len(frame.index) else ""
-            date_end = frame.index.max().isoformat() if len(frame.index) else ""
-            output_stem = _sheet_output_stem(account_name, date_start, date_end, frame.columns)
-            account_mapping = _account_mapping_for_name(account_name, account_mappings)
             source_info = {
                 "file_name": xlsx_path.name,
                 "relative_path": relative_path,
@@ -1341,12 +1391,13 @@ def _scan_asset_excel_frames(
             for future in futures:
                 file_results.append(future.result())
 
-    used_stems: dict[str, int] = {}
+    used_stems: set[str] = set()
     for file_sheets, file_sources_by_account, file_skipped, file_sheet_summaries, file_code_name_mappings in file_results:
         for output_stem, frame, source_info in file_sheets:
-            duplicate_index = used_stems.get(output_stem, 0)
-            used_stems[output_stem] = duplicate_index + 1
-            resolved_stem = output_stem if duplicate_index == 0 else f"{output_stem}__{duplicate_index + 1}"
+            resolved_stem = _resolve_output_stem(
+                output_stem,
+                used_stems,
+            )
             source_info["output_stem"] = resolved_stem
             source_info["output_file"] = f"{resolved_stem}.parquet"
             scanned_sheets.append((resolved_stem, frame, source_info))
@@ -1452,8 +1503,24 @@ def _scan_and_write_asset_excel_parquet(
                 continue
             try:
                 frame, mappings = _read_quanti_wide_sheet_with_mapping(excel, sheet_name)
-            except _QuantiDataValidationError:
-                raise
+                relative_path = str(xlsx_path.relative_to(source))
+                date_start = frame.index.min().isoformat() if len(frame.index) else ""
+                date_end = frame.index.max().isoformat() if len(frame.index) else ""
+                output_stem = _sheet_output_stem(account_name, date_start, date_end, frame.columns)
+                account_mapping = _account_mapping_for_name(account_name, account_mappings)
+                if not account_mapping["account_id"]:
+                    raise ValueError(f"No account ID mapping: {sheet_name}")
+                temp_path = temp_output / f"pending_{file_index}_{sheet_index}_{_safe_output_token(output_stem)}.parquet"
+                quality = _write_sheet_parquet_temp(
+                    frame,
+                    temp_path,
+                    metadata={
+                        "account_id": account_mapping["account_id"],
+                        "account_name": account_name,
+                        "date_start": date_start,
+                        "date_end": date_end,
+                    },
+                )
             except ValueError as exc:
                 summary = _sheet_summary_payload(
                     xlsx_path,
@@ -1477,11 +1544,6 @@ def _scan_and_write_asset_excel_parquet(
                 continue
 
             file_code_name_mappings.extend(mappings)
-            relative_path = str(xlsx_path.relative_to(source))
-            date_start = frame.index.min().isoformat() if len(frame.index) else ""
-            date_end = frame.index.max().isoformat() if len(frame.index) else ""
-            output_stem = _sheet_output_stem(account_name, date_start, date_end, frame.columns)
-            account_mapping = _account_mapping_for_name(account_name, account_mappings)
             source_info = {
                 "file_name": xlsx_path.name,
                 "relative_path": relative_path,
@@ -1495,17 +1557,6 @@ def _scan_and_write_asset_excel_parquet(
                 "rows": len(frame),
                 "columns": len(frame.columns),
             }
-            temp_path = temp_output / f"pending_{file_index}_{sheet_index}_{_safe_output_token(output_stem)}.parquet"
-            quality = _write_sheet_parquet_temp(
-                frame,
-                temp_path,
-                metadata={
-                    "account_id": account_mapping["account_id"],
-                    "account_name": account_name,
-                    "date_start": date_start,
-                    "date_end": date_end,
-                },
-            )
             summary = _sheet_summary_payload(
                 xlsx_path,
                 sheet_name,
@@ -1556,7 +1607,7 @@ def _scan_and_write_asset_excel_parquet(
     code_name_mappings: list[CodeNameMapping] = []
     temp_outputs: list[dict[str, Any]] = []
     replacements: list[tuple[Path, Path]] = []
-    used_stems: dict[str, int] = {}
+    used_stems: set[str] = set()
 
     for file_outputs, file_skipped, file_sheet_summaries, file_code_name_mappings in file_results:
         temp_outputs.extend(file_outputs)
@@ -1584,9 +1635,10 @@ def _scan_and_write_asset_excel_parquet(
         raise RuntimeError("Job cancelled")
     for sheet_index, output_item in enumerate(sorted(temp_outputs, key=lambda item: str(item["output_stem"])), start=1):
         output_stem = str(output_item["output_stem"])
-        duplicate_index = used_stems.get(output_stem, 0)
-        used_stems[output_stem] = duplicate_index + 1
-        resolved_stem = output_stem if duplicate_index == 0 else f"{output_stem}__{duplicate_index + 1}"
+        resolved_stem = _resolve_output_stem(
+            output_stem,
+            used_stems,
+        )
         source_info = output_item["source_info"]
         source_info["output_stem"] = resolved_stem
         source_info["output_file"] = f"{resolved_stem}.parquet"
@@ -1646,6 +1698,7 @@ def convert_asset_excels_to_wide_parquet(
     """Merge assets Excel sheets by account name and save each account as wide Parquet."""
     source = Path(source_directory).expanduser().resolve()
     output = Path(output_directory).expanduser().resolve()
+    normalized_account_mappings = _require_account_mappings(account_mappings)
     output.mkdir(parents=True, exist_ok=True)
 
     normalized_mode = str(write_mode or "replace").strip().lower()
@@ -1677,7 +1730,7 @@ def convert_asset_excels_to_wide_parquet(
             temp_output,
             output,
             selected_files=selected_files,
-            account_mappings=account_mappings,
+            account_mappings=normalized_account_mappings,
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
@@ -1875,10 +1928,11 @@ def inspect_asset_excel_conversion(
 ) -> dict[str, Any]:
     source = Path(source_directory).expanduser().resolve()
     output = Path(output_directory).expanduser().resolve()
+    normalized_account_mappings = _require_account_mappings(account_mappings)
     scanned_sheets, sources_by_account, skipped, sheet_summaries, code_name_mappings = _scan_asset_excel_frames(
         source,
         selected_files=selected_files,
-        account_mappings=account_mappings,
+        account_mappings=normalized_account_mappings,
     )
     output_info = inspect_asset_excel_output(output)
     normalized_mode = str(write_mode or "replace").strip().lower()
