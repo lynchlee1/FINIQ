@@ -15,20 +15,7 @@ def download_disclosure_html_payload(
         msg = "output_directory is required"
         raise ValueError(msg)
 
-    source_json = body.get("json")
-    if source_json is None:
-        source_json = body.get("payload")
-    source_json_path = body.get("source_json_path")
-    resolved_source_json_path = ""
-    if not source_json_path and isinstance(source_json, dict):
-        source_json_path = source_json.get("source_json_path")
-    if source_json_path:
-        source_json, resolved_source_json_path = _load_source_json_path_payload(
-            source_json_path
-        )
-    if source_json is None:
-        msg = "json is required"
-        raise ValueError(msg)
+    source_json, resolved_source_json_path = _load_workspace_filtered_payload(body)
 
     acpt_numbers = collect_acpt_numbers_from_json(source_json)
     if not acpt_numbers:

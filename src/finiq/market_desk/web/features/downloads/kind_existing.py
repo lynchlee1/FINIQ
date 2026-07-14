@@ -359,7 +359,7 @@ def check_existing_downloads(
             search_filters_dict = dict(input_snapshot.get("search_filters") or [])
 
             market_val = search_filters_dict.get("marketType", "")
-            market_label = "검색대상"
+            market_label = "전체"
             for label, val in MARKET_TYPES.items():
                 if val == market_val:
                     market_label = label

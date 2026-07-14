@@ -1,7 +1,7 @@
 """Safe compatibility orchestrator for the seven disclosure stages.
 
 The existing stage implementations remain the source of truth.  This module adds a
-small, fixed seven-stage coordinator, date-windowed KIND discovery, and durable
+small, fixed seven-stage coordinator, yearly KIND discovery, and durable
 stage checkpoints for the new Web UI.  It intentionally is not a generic DAG.
 """
 
@@ -14,8 +14,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from calendar import monthrange
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -63,7 +62,6 @@ from finiq.market_desk.web.features.downloads.kind_coordination import (
 )
 from finiq.market_desk.web.features.downloads.kind_existing import (
     check_existing_downloads,
-    get_current_kind_total_count,
 )
 from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
@@ -108,8 +106,6 @@ STAGE_LABELS = {
 KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE = 45
 KIND_AUTOMATION_CONTENT_REQUESTS_PER_MINUTE = 30
 KIND_AUTOMATION_WAIT_SECONDS = 60.0 / KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE
-MUTABLE_LOOKBACK_DAYS = 7
-
 ProgressCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
 
@@ -272,9 +268,11 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
                 execution.get("local_workers"),
                 field_name="local_workers",
             ),
-            "mutable_lookback_days": MUTABLE_LOOKBACK_DAYS,
             "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
         },
+        "download_confirmation": str(
+            payload.get("download_confirmation") or ""
+        ).strip(),
     }
 
 
@@ -522,57 +520,25 @@ def _automation_window_snapshot(
 
 
 def _inspect_automation_download(profile: dict[str, Any]) -> dict[str, Any]:
-    search = profile["decisions"]["s1_search"]
-    start = date.fromisoformat(search["start_date"])
-    end = date.fromisoformat(search["end_date"])
-    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
-    local_total = 0
-    kind_total = 0
-    live_checked_windows = 0
     with KIND_NETWORK_JOB_LOCK:
-        for window_start, window_end, mutable in _window_ranges(start, end):
-            folder = windows_root / f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
-            _require_current_download_input_snapshot(folder)
-            try:
-                inspected = inspect_download_directory_pages(
-                    folder,
-                    expected_page_size=profile["execution"]["page_size"],
-                    require_complete=True,
-                )
-            except Exception as exc:
-                return _inspection_failure(
-                    1,
-                    reason=f"{folder.name} 다운로드 페이지가 완전하지 않습니다: {exc}",
-                )
-            window_local_count = int(inspected.get("total_items") or 0)
-            local_total += window_local_count
-            if mutable:
-                snapshot = _automation_window_snapshot(
-                    profile, window_start, window_end
-                )
-                current_count = get_current_kind_total_count(snapshot)
-                if current_count is None:
-                    return _inspection_failure(
-                        1,
-                        reason=f"{folder.name}의 KIND 현재 건수를 확인하지 못했습니다.",
-                    )
-                if window_local_count != current_count:
-                    return _inspection_failure(
-                        1,
-                        reason=(
-                            f"{folder.name}의 로컬 건수({window_local_count})와 "
-                            f"KIND 현재 건수({current_count})가 다릅니다."
-                        ),
-                    )
-                kind_total += current_count
-                live_checked_windows += 1
+        inspected = _inspect_stage_one_downloads(
+            profile,
+            progress_callback=None,
+            cancel_check=lambda: False,
+        )
+    conflicts = inspected["conflicts"]
+    if conflicts:
+        return _inspection_failure(
+            1,
+            reason=str(conflicts[0]["reason"]),
+            details={"conflicts": conflicts},
+        )
     return _inspection_success(
         1,
-        reason="자동화 window의 모든 페이지와 KIND 현재 건수를 확인했습니다.",
+        reason="기존 연도별 다운로드와 KIND 1페이지의 전체 페이지 수가 같습니다.",
         details={
-            "local_count": local_total,
-            "mutable_kind_count": kind_total,
-            "live_checked_windows": live_checked_windows,
+            "checked_ranges": inspected["checked_ranges"],
+            "ranges": len(inspected["ranges"]),
         },
     )
 
@@ -1106,9 +1072,9 @@ def build_automation_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
         elif stage not in selected:
             action = "reuse" if checkpoint_valid else "blocked"
             reason = "" if checkpoint_valid else "이번 실행에 포함되지 않았고 재사용할 완료 결과가 없습니다."
-        elif trigger == "sync" and stage == 1:
+        elif trigger in {"sync", "resume"} and stage == 1:
             action = "process"
-            reason = "최근 날짜 window를 다시 확인합니다."
+            reason = "기존 연도별 다운로드의 1페이지를 KIND와 다시 확인합니다."
         elif checkpoint_valid and not upstream_processing:
             action = "reuse"
             reason = ""
@@ -1150,23 +1116,6 @@ def build_automation_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _window_ranges(start: date, end: date) -> list[tuple[date, date, bool]]:
-    mutable_start = max(start, end - timedelta(days=MUTABLE_LOOKBACK_DAYS - 1))
-    ranges: list[tuple[date, date, bool]] = []
-    cursor = start
-    while cursor < mutable_start:
-        month_end = date(
-            cursor.year, cursor.month, monthrange(cursor.year, cursor.month)[1]
-        )
-        chunk_end = min(month_end, mutable_start - timedelta(days=1), end)
-        ranges.append((cursor, chunk_end, False))
-        cursor = chunk_end + timedelta(days=1)
-    while cursor <= end:
-        ranges.append((cursor, cursor, True))
-        cursor += timedelta(days=1)
-    return ranges
-
-
 def _window_query(
     profile: dict[str, Any], window_start: date, window_end: date
 ) -> dict[str, Any]:
@@ -1188,25 +1137,10 @@ def _window_manifest_path(window_path: Path) -> Path:
     return window_path / "automation-window.json"
 
 
-def _window_file_summary(window_path: Path) -> tuple[int, int]:
-    files = list(window_path.rglob("*_post_page_*.body"))
-    return len(files), sum(path.stat().st_size for path in files)
-
-
-def _window_body_hash(window_path: Path) -> str:
-    digest = hashlib.sha256()
-    for body_path in sorted(window_path.rglob("*.body")):
-        digest.update(body_path.relative_to(window_path).as_posix().encode("utf-8"))
-        with body_path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _page_one_snapshot_hash(window_path: Path) -> str:
     candidates = sorted(window_path.glob("*_post_page_00001.body"))
     if len(candidates) != 1:
-        raise ValueError(f"KIND window page 1을 하나만 찾을 수 없습니다: {window_path}")
+        raise ValueError(f"KIND 1페이지를 하나만 찾을 수 없습니다: {window_path}")
     body_path = candidates[0]
     return _canonical_hash(
         {
@@ -1216,29 +1150,194 @@ def _page_one_snapshot_hash(window_path: Path) -> str:
     )
 
 
-def _owned_window_matches(window_path: Path, query_hash: str) -> bool:
-    if window_path.exists():
-        _require_current_download_input_snapshot(window_path)
+def _owned_window_manifest(window_path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(_window_manifest_path(window_path).read_text("utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not (
-        isinstance(payload, dict)
-        and payload.get("format") == AUTOMATION_WINDOW_FORMAT
-        and payload.get("query_hash") == query_hash
-        and bool(payload.get("complete"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"자동화가 만든 다운로드인지 확인할 수 없습니다: {window_path}") from exc
+    if not isinstance(payload, dict) or payload.get("format") != AUTOMATION_WINDOW_FORMAT:
+        raise ValueError(f"자동화가 만든 다운로드인지 확인할 수 없습니다: {window_path}")
+    return payload
+
+
+def _window_local_page_count(
+    profile: dict[str, Any],
+    window_path: Path,
+    window_start: date,
+    window_end: date,
+) -> int:
+    query = _window_query(profile, window_start, window_end)
+    manifest = _owned_window_manifest(window_path)
+    if (
+        manifest.get("query_hash") != _canonical_hash(query)
+        or not bool(manifest.get("complete"))
     ):
-        return False
-    try:
-        file_count, total_bytes = _window_file_summary(window_path)
-    except OSError:
-        return False
-    return (
-        file_count == payload.get("body_file_count")
-        and total_bytes == payload.get("body_total_bytes")
-        and _window_body_hash(window_path) == payload.get("data_hash")
+        raise ValueError("저장된 검색기간이나 완료 기록이 현재 설정과 다릅니다.")
+    snapshot = _require_current_download_input_snapshot(window_path)
+    expected_snapshot = _automation_window_snapshot(profile, window_start, window_end)
+    if _snapshot_semantics(snapshot) != _snapshot_semantics(expected_snapshot):
+        raise ValueError("저장된 검색 설정이 현재 설정과 다릅니다.")
+    inspected = inspect_download_directory_pages(
+        window_path,
+        expected_page_size=profile["execution"]["page_size"],
+        require_complete=True,
     )
+    total_pages = int(inspected.get("total_pages") or 0)
+    if total_pages < 1:
+        raise ValueError("저장된 페이지가 없습니다.")
+    return total_pages
+
+
+def _probe_window_page_count(
+    profile: dict[str, Any],
+    window_start: date,
+    window_end: date,
+    *,
+    progress_callback: ProgressCallback | None,
+    cancel_check: CancelCheck,
+) -> int:
+    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
+    windows_root.mkdir(parents=True, exist_ok=True)
+    name = f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
+    probe = windows_root / f".{name}.probe-{uuid.uuid4().hex}"
+    query = _window_query(profile, window_start, window_end)
+    try:
+        result = _run_single(
+            {
+                **query,
+                "output_directory": str(probe),
+                "start_page": 1,
+                "end_page": 1,
+                "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
+                "timeout": profile["execution"]["timeout"],
+                "worker_count": 1,
+                "last_report_only": False,
+                "log_limit": 20,
+            },
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        pagination = result.get("pagination") or {}
+        total_pages = int(pagination.get("total_pages") or 0)
+        if total_pages < 1:
+            raise ValueError(f"KIND 1페이지에서 전체 페이지 수를 확인하지 못했습니다: {name}")
+        return total_pages
+    finally:
+        if probe.exists():
+            shutil.rmtree(probe)
+
+
+def _download_conflict_token(
+    profile: dict[str, Any], conflicts: list[dict[str, Any]]
+) -> str:
+    return _canonical_hash(
+        {
+            "stage_config": _stage_config_hash(profile, 1),
+            "conflicts": [
+                {
+                    "range": item["range"],
+                    "code": item["code"],
+                    "saved_pages": item.get("saved_pages"),
+                    "kind_pages": item.get("kind_pages"),
+                }
+                for item in conflicts
+            ],
+        }
+    )
+
+
+def _inspect_stage_one_downloads(
+    profile: dict[str, Any],
+    *,
+    progress_callback: ProgressCallback | None,
+    cancel_check: CancelCheck,
+) -> dict[str, Any]:
+    search = profile["decisions"]["s1_search"]
+    start = date.fromisoformat(search["start_date"])
+    end = date.fromisoformat(search["end_date"])
+    ranges = _split_yearly_ranges(start, end)
+    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
+    windows_root.mkdir(parents=True, exist_ok=True)
+    desired_names = {
+        f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
+        for window_start, window_end in ranges
+    }
+    existing = {
+        child.name: child
+        for child in windows_root.iterdir()
+        if child.is_dir() and not child.name.startswith(".")
+    }
+    conflicts: list[dict[str, Any]] = []
+    checked_ranges = 0
+
+    for name in sorted(set(existing) - desired_names):
+        _owned_window_manifest(existing[name])
+        conflicts.append(
+            {
+                "range": name,
+                "code": "search_range_changed",
+                "saved_pages": None,
+                "kind_pages": None,
+                "reason": "현재 검색기간과 맞지 않는 기존 다운로드입니다.",
+            }
+        )
+
+    for window_start, window_end in ranges:
+        if cancel_check():
+            raise RuntimeError("Job cancelled")
+        name = f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
+        target = windows_root / name
+        if not target.is_dir():
+            continue
+        try:
+            saved_pages = _window_local_page_count(
+                profile, target, window_start, window_end
+            )
+            local_error = ""
+        except ValueError as exc:
+            _owned_window_manifest(target)
+            saved_pages = None
+            local_error = str(exc)
+        if checked_ranges:
+            time.sleep(KIND_AUTOMATION_WAIT_SECONDS)
+        kind_pages = _probe_window_page_count(
+            profile,
+            window_start,
+            window_end,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        checked_ranges += 1
+        if local_error:
+            conflicts.append(
+                {
+                    "range": name,
+                    "code": "saved_download_invalid",
+                    "saved_pages": saved_pages,
+                    "kind_pages": kind_pages,
+                    "reason": f"기존 다운로드를 그대로 사용할 수 없습니다: {local_error}",
+                }
+            )
+        elif saved_pages != kind_pages:
+            conflicts.append(
+                {
+                    "range": name,
+                    "code": "page_count_changed",
+                    "saved_pages": saved_pages,
+                    "kind_pages": kind_pages,
+                    "reason": "저장된 페이지 수와 KIND의 현재 페이지 수가 다릅니다.",
+                }
+            )
+
+    return {
+        "ranges": ranges,
+        "desired_names": desired_names,
+        "conflicts": conflicts,
+        "confirmation": _download_conflict_token(profile, conflicts)
+        if conflicts
+        else "",
+        "checked_ranges": checked_ranges,
+    }
 
 
 def _stage_one_windows_valid(profile: dict[str, Any]) -> bool:
@@ -1247,12 +1346,17 @@ def _stage_one_windows_valid(profile: dict[str, Any]) -> bool:
     end = date.fromisoformat(search["end_date"])
     windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
     expected_names: set[str] = set()
-    for window_start, window_end, _mutable in _window_ranges(start, end):
+    for window_start, window_end in _split_yearly_ranges(start, end):
         name = f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
         expected_names.add(name)
-        query_hash = _canonical_hash(_window_query(profile, window_start, window_end))
-        if not _owned_window_matches(windows_root / name, query_hash):
+        try:
+            _window_local_page_count(
+                profile, windows_root / name, window_start, window_end
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
             return False
+    if not windows_root.is_dir():
+        return False
     actual_names = {
         path.name
         for path in windows_root.iterdir()
@@ -1264,13 +1368,7 @@ def _stage_one_windows_valid(profile: dict[str, Any]) -> bool:
 def _replace_owned_window(target: Path, temporary: Path) -> None:
     backup = target.with_name(f".{target.name}.backup-{uuid.uuid4().hex}")
     if target.exists():
-        manifest_path = _window_manifest_path(target)
-        try:
-            owner = json.loads(manifest_path.read_text("utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(f"자동화 소유가 아닌 window를 교체할 수 없습니다: {target}") from exc
-        if not isinstance(owner, dict) or owner.get("format") != AUTOMATION_WINDOW_FORMAT:
-            raise ValueError(f"자동화 소유가 아닌 window를 교체할 수 없습니다: {target}")
+        _owned_window_manifest(target)
         os.replace(target, backup)
     try:
         os.replace(temporary, target)
@@ -1426,47 +1524,50 @@ def _run_stage_one(
     progress_callback: ProgressCallback,
     cancel_check: CancelCheck,
 ) -> dict[str, Any]:
-    search = profile["decisions"]["s1_search"]
     execution = profile["execution"]
-    start = date.fromisoformat(search["start_date"])
-    end = date.fromisoformat(search["end_date"])
     windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
     windows_root.mkdir(parents=True, exist_ok=True)
-    refreshed = 0
-    reused = 0
-    changed = 0
-    ranges = _window_ranges(start, end)
-    desired_window_names = {
-        f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
-        for window_start, window_end, _mutable in ranges
+    inspected = _inspect_stage_one_downloads(
+        profile,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
+    conflicts = inspected["conflicts"]
+    confirmation = str(inspected["confirmation"])
+    if conflicts and profile.get("download_confirmation") != confirmation:
+        return {
+            "needs_download_confirmation": True,
+            "download_conflicts": conflicts,
+            "download_confirmation": confirmation,
+            "checked_ranges": inspected["checked_ranges"],
+        }
+
+    ranges = inspected["ranges"]
+    desired_window_names = inspected["desired_names"]
+    forced_names = {
+        str(item["range"])
+        for item in conflicts
+        if item["code"] != "search_range_changed"
     }
-    for index, (window_start, window_end, mutable) in enumerate(ranges, start=1):
+    downloaded = 0
+    reused = 0
+    for index, (window_start, window_end) in enumerate(ranges, start=1):
         if cancel_check():
             raise RuntimeError("Job cancelled")
         name = f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
         target = windows_root / name
         query = _window_query(profile, window_start, window_end)
         query_hash = _canonical_hash(query)
-        should_refresh = trigger == "sync" and mutable
-        if _owned_window_matches(target, query_hash) and not should_refresh:
+        if target.is_dir() and name not in forced_names:
             reused += 1
-            progress_callback(f"window 재사용 {index}/{len(ranges)}: {name}")
+            progress_callback(f"연도별 다운로드 확인 완료 {index}/{len(ranges)}: {name}")
             continue
 
         temporary = target.with_name(f".{target.name}.part-{uuid.uuid4().hex}")
         if temporary.exists():
             shutil.rmtree(temporary)
-        progress_callback(f"window 수집 {index}/{len(ranges)}: {name}")
+        progress_callback(f"연도별 다운로드 {index}/{len(ranges)}: {name}")
         try:
-            previous_hash = ""
-            if _owned_window_matches(target, query_hash):
-                try:
-                    previous_payload = json.loads(
-                        _window_manifest_path(target).read_text("utf-8")
-                    )
-                    previous_hash = str(previous_payload.get("data_hash") or "")
-                except (OSError, json.JSONDecodeError):
-                    previous_hash = ""
             request_payload = {
                 **query,
                 "start_page": 1,
@@ -1487,7 +1588,7 @@ def _run_stage_one(
             )
             status = result.get("download_status") or {}
             if not status.get("integrity_valid"):
-                raise ValueError(f"KIND window 무결성 검사에 실패했습니다: {name}")
+                raise ValueError(f"KIND 연도별 다운로드 검사에 실패했습니다: {name}")
 
             probe = target.with_name(f".{target.name}.probe-{uuid.uuid4().hex}")
             try:
@@ -1509,10 +1610,8 @@ def _run_stage_one(
                     shutil.rmtree(probe)
             if changed_during_download:
                 raise ValueError(
-                    f"KIND window pagination 또는 본문이 실행 중 변경되었습니다: {name}"
+                    f"KIND 페이지 정보 또는 본문이 다운로드 중 변경되었습니다: {name}"
                 )
-            data_hash = _window_body_hash(temporary)
-            body_file_count, body_total_bytes = _window_file_summary(temporary)
             atomic_write_json(
                 _window_manifest_path(temporary),
                 {
@@ -1520,16 +1619,11 @@ def _run_stage_one(
                     "query_hash": query_hash,
                     "query": query,
                     "complete": True,
-                    "data_hash": data_hash,
-                    "body_file_count": body_file_count,
-                    "body_total_bytes": body_total_bytes,
                     "summary": result.get("summary") or {},
                 },
             )
             _replace_owned_window(target, temporary)
-            refreshed += 1
-            if not previous_hash or previous_hash != data_hash:
-                changed += 1
+            downloaded += 1
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
@@ -1549,20 +1643,20 @@ def _run_stage_one(
                 owner = json.loads(_window_manifest_path(child).read_text("utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 raise ValueError(
-                    f"자동화 window 경로에 소유하지 않은 항목이 있습니다: {child}"
+                    f"자동화 다운로드 폴더에 알 수 없는 항목이 있습니다: {child}"
                 ) from exc
             if not isinstance(owner, dict) or owner.get("format") != AUTOMATION_WINDOW_FORMAT:
                 raise ValueError(
-                    f"자동화 window 경로에 소유하지 않은 항목이 있습니다: {child}"
+                    f"자동화 다운로드 폴더에 알 수 없는 항목이 있습니다: {child}"
                 )
             shutil.rmtree(child)
             continue
-        raise ValueError(f"자동화 window 경로에 예상하지 않은 파일이 있습니다: {child}")
+        raise ValueError(f"자동화 다운로드 폴더에 알 수 없는 파일이 있습니다: {child}")
     return {
-        "windows": len(ranges),
-        "refreshed_windows": refreshed,
-        "reused_windows": reused,
-        "changed_windows": changed,
+        "ranges": len(ranges),
+        "downloaded_ranges": downloaded,
+        "reused_ranges": reused,
+        "checked_ranges": inspected["checked_ranges"],
         "output_directory": str(windows_root),
     }
 
@@ -1622,7 +1716,7 @@ def _run_stage(
             if targets:
                 download_result = download_disclosure_html_payload(
                     {
-                        "source_json_path": str(filtered_path),
+                        "data_root": str(root),
                         "output_directory": str(temporary),
                         "skip_existing": True,
                         "timeout": execution["timeout"],
@@ -1891,19 +1985,11 @@ def run_disclosure_automation_payload(
         return bool(cancel_check and cancel_check())
 
     stage_results: list[dict[str, Any]] = []
-    stage_one_changed: bool | None = None
     for stage_plan in plan["stages"]:
         stage = int(stage_plan["stage"])
         action = stage_plan["plan_action"]
         if cancelled():
             raise RuntimeError("Job cancelled")
-        if (
-            action == "process"
-            and stage > 1
-            and stage_one_changed is False
-            and _load_valid_checkpoint(profile, stage) is not None
-        ):
-            action = "reuse"
         if action in {"disabled", "reuse"}:
             stage_results.append(
                 {
@@ -1928,8 +2014,24 @@ def run_disclosure_automation_payload(
             ),
             cancel_check=cancelled,
         )
-        if stage == 1:
-            stage_one_changed = int(result.get("changed_windows") or 0) > 0
+        if stage == 1 and result.get("needs_download_confirmation"):
+            stage_results.append(
+                {
+                    "stage": stage,
+                    "label": stage_plan["label"],
+                    "status": "needs_download_confirmation",
+                    "result": result,
+                }
+            )
+            emit("공시내역 다운로드: 전체 다시 받기 확인 필요")
+            return {
+                "format": "finiq_disclosure_automation_run_v1",
+                "workflow_status": "needs_download_confirmation",
+                "profile_hash": plan["profile_hash"],
+                "stages": stage_results,
+                "download_conflicts": result["download_conflicts"],
+                "download_confirmation": result["download_confirmation"],
+            }
         if stage == 6 and result.get("needs_review"):
             stage_results.append(
                 {

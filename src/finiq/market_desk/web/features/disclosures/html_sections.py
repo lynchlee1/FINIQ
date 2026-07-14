@@ -144,27 +144,6 @@ def _has_class(element: etree._Element, class_name: str) -> bool:
     return class_name in set(str(element.get("class") or "").split())
 
 
-def _first_clean_text(element: etree._Element) -> str:
-    for text in element.xpath(".//text()[normalize-space()]"):
-        cleaned = _clean_text(text)
-        if cleaned:
-            return cleaned
-    return ""
-
-
-def _xforms_leading_correction_section(
-    section_children: list[etree._Element],
-) -> tuple[str, list[etree._Element]] | None:
-    for child in section_children:
-        title = _first_clean_text(child)
-        if not title:
-            continue
-        if title.startswith("정정신고"):
-            return title, section_children
-        return None
-    return None
-
-
 def _xforms_title_sections(
     document: html.HtmlElement,
 ) -> list[tuple[str, list[etree._Element]]]:
@@ -172,7 +151,7 @@ def _xforms_title_sections(
         '//*[contains(concat(" ", normalize-space(@class), " "), " xforms_title ")]'
     )
     sections: list[tuple[str, list[etree._Element]]] = []
-    correction_parent_ids: set[int] = set()
+    seen_parents: set[etree._Element] = set()
     for title_node in title_nodes:
         title = _clean_text(title_node.text_content())
         if not title:
@@ -183,18 +162,16 @@ def _xforms_title_sections(
             continue
         siblings = list(parent)
         start = siblings.index(title_node)
-        parent_id = id(parent)
-        if start > 0 and parent_id not in correction_parent_ids:
-            correction_section = _xforms_leading_correction_section(siblings[:start])
-            if correction_section is not None:
-                sections.append(correction_section)
-            correction_parent_ids.add(parent_id)
+        section_start = start
+        if parent not in seen_parents:
+            section_start = 0
+            seen_parents.add(parent)
         end = len(siblings)
         for position in range(start + 1, len(siblings)):
             if _has_class(siblings[position], "xforms_title"):
                 end = position
                 break
-        sections.append((title, siblings[start:end]))
+        sections.append((title, siblings[section_start:end]))
     return sections
 
 
@@ -823,11 +800,17 @@ def _selected_section_output(
             "error": "no sections found",
         }
     signature = _section_signature(_section_dicts_from_split_sections(sections))
-    allowed_toc_ids = section_save_rules.get(signature)
+    if signature not in section_save_rules:
+        return {
+            "status": "missing_selection",
+            "source_file": str(source_file),
+            "error": "missing section selection",
+        }
+    allowed_toc_ids = section_save_rules[signature]
     selected_sections = [
         section
         for section in sections
-        if allowed_toc_ids is None or section.toc_id in allowed_toc_ids
+        if section.toc_id in allowed_toc_ids
     ]
     return {
         "status": "ok",
@@ -997,6 +980,15 @@ def save_disclosure_html_sections_payload(
                 },
                 "saved": [],
             }
+        if selected["status"] == "missing_selection":
+            return {
+                "status": "missing_selection",
+                "skipped": {
+                    "source_file": str(source_file),
+                    "error": str(selected["error"]),
+                },
+                "saved": [],
+            }
         if int(selected.get("selected_sections") or 0) == 0:
             return {
                 "status": "no_selected_sections",
@@ -1033,6 +1025,8 @@ def save_disclosure_html_sections_payload(
                 emit(f"읽기 실패 {index}/{len(html_files)}: {source_name}")
             elif result["status"] == "no_sections":
                 emit(f"목차 없음 {index}/{len(html_files)}: {source_name}")
+            elif result["status"] == "missing_selection":
+                emit(f"목차 선택 없음 {index}/{len(html_files)}: {source_name}")
             else:
                 emit(f"선택 목차 없음 {index}/{len(html_files)}: {source_name}")
         if index == 1 or index == len(html_files) or index % 25 == 0:

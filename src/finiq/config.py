@@ -61,7 +61,6 @@ SAVED_SETTINGS_KEYS = (
     "asset_excel_cleanup_merged_items",
     "asset_excel_duplicate_scan_recursive",
     "asset_excel_account_mappings",
-    "html_download_source_path",
     "html_merge_output_path",
     "html_content_compressed_json_path",
     "html_external_compress_input_directory",
@@ -106,7 +105,6 @@ class AppConfig:
     asset_excel_cleanup_merged_items: bool = True
     asset_excel_duplicate_scan_recursive: bool = False
     asset_excel_account_mappings: list[dict[str, Any]] = field(default_factory=list)
-    html_download_source_path: str = ""
     html_merge_output_path: str = ""
     html_content_compressed_json_path: str = ""
     html_external_compress_input_directory: str = ""
@@ -151,7 +149,6 @@ def build_disclosure_workspace_path_settings(
         "sqlite_output_directory": str(root / "02-table"),
         "sqlite_manifest_path": str(root / "02-table"),
         "html_transfer_directory": str(filtered_path),
-        "html_download_source_path": str(filtered_path),
         "html_output_directory": str(external_path),
         "html_external_compress_input_directory": str(external_path),
         "html_external_compress_output_directory": str(external_path),
@@ -276,7 +273,6 @@ def init_config() -> AppConfig:
         asset_excel_cleanup_merged_items=bool(settings.get("asset_excel_cleanup_merged_items", True)),
         asset_excel_duplicate_scan_recursive=bool(settings.get("asset_excel_duplicate_scan_recursive", False)),
         asset_excel_account_mappings=settings.get("asset_excel_account_mappings", []),
-        html_download_source_path=disclosure_path("html_download_source_path"),
         html_merge_output_path=disclosure_path("html_merge_output_path"),
         html_content_compressed_json_path=disclosure_path(
             "html_content_compressed_json_path"

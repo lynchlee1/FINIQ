@@ -389,7 +389,7 @@ def _snapshot_filters_payload(snapshot: dict[str, Any]) -> dict[str, Any] | None
         search_filters_dict = dict(snapshot.get("search_filters") or [])
 
         market_val = search_filters_dict.get("marketType", "")
-        market_label = "검색대상"
+        market_label = "전체"
         for label, val in MARKET_TYPES.items():
             if val == market_val:
                 market_label = label
@@ -418,7 +418,7 @@ def _current_filters_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "company_name": str(payload.get("company_name") or ""),
         "submitter_name": str(payload.get("submitter_name") or ""),
-        "market_label": str(payload.get("market_label") or "검색대상"),
+        "market_label": str(payload.get("market_label") or "전체"),
         "securities_label": str(payload.get("securities_label") or "전체"),
         "disclosure_type_groups": _normalize_disclosure_type_groups(payload) or {},
         "last_report_only": _as_bool(payload, "last_report_only"),
@@ -435,8 +435,8 @@ def _filters_payloads_match(
         == str(saved.get("company_name") or "").strip()
         and str(current.get("submitter_name") or "").strip()
         == str(saved.get("submitter_name") or "").strip()
-        and str(current.get("market_label") or "검색대상")
-        == str(saved.get("market_label") or "검색대상")
+        and str(current.get("market_label") or "전체")
+        == str(saved.get("market_label") or "전체")
         and str(current.get("securities_label") or "전체")
         == str(saved.get("securities_label") or "전체")
         and bool(current.get("last_report_only")) == bool(saved.get("last_report_only"))

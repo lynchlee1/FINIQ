@@ -64,7 +64,7 @@ const areFiltersMatching = (
   if (!saved) return true;
   if (current.companyName.trim() !== (saved.company_name || "").trim()) return false;
   if (current.submitterName.trim() !== (saved.submitter_name || "").trim()) return false;
-  if (current.marketLabel !== (saved.market_label || "검색대상")) return false;
+  if (current.marketLabel !== (saved.market_label || "전체")) return false;
   if (current.securitiesLabel !== (saved.securities_label || "전체")) return false;
   if (current.lastReportOnly !== !!saved.last_report_only) return false;
   if (!areDisclosureGroupsMatching(current.selectedDisclosures, saved.disclosure_type_groups || {})) {
@@ -220,7 +220,7 @@ export default function DownloadPage() {
   const [endDate, setEndDate] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [submitterName, setSubmitterName] = useState("");
-  const [marketLabel, setMarketLabel] = useState("검색대상");
+  const [marketLabel, setMarketLabel] = useState("전체");
   const [securitiesLabel, setSecuritiesLabel] = useState("전체");
   const [pageSize, setPageSize] = useState("100");
   const [waitSeconds, setWaitSeconds] = useState("1");
@@ -269,7 +269,7 @@ export default function DownloadPage() {
     if (!saved) return;
     setCompanyName(saved.company_name || "");
     setSubmitterName(saved.submitter_name || "");
-    setMarketLabel(saved.market_label || "검색대상");
+    setMarketLabel(saved.market_label || "전체");
     setSecuritiesLabel(saved.securities_label || "전체");
     setSelectedDisclosures(saved.disclosure_type_groups || {});
     setLastReportOnly(!!saved.last_report_only);
