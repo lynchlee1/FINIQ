@@ -9102,7 +9102,7 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
             "end_date": "2026-05-01",
             "company_name": "",
             "submitter_name": "",
-            "market_label": "검색대상",
+            "market_label": "전체",
             "securities_label": "전체",
             "disclosure_type_groups": {},
             "last_report_only": False,
@@ -9112,7 +9112,9 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
 
     assert res["has_existing"] is True
     assert res["ranges"][0]["status"] == "unverified"
-    assert res["ranges"][0]["metadata_status"] == "mismatch"
+    assert res["ranges"][0]["metadata_status"] == "ok"
+    assert res["ranges"][0]["filters_match"] is True
+    assert res["saved_filters"]["market_label"] == "전체"
     assert res["ranges"][0]["start_date"] == "2026-01-01"
     assert res["ranges"][0]["end_date"] == "2026-05-01"
     assert res["ranges"][0]["local_count"] is None
@@ -9145,7 +9147,7 @@ def test_inspect_folder_rejects_missing_metadata_without_repair(
                 "end_date": "2026-05-01",
                 "company_name": "",
                 "submitter_name": "",
-                "market_label": "검색대상",
+                "market_label": "전체",
                 "securities_label": "전체",
                 "disclosure_type_groups": {},
                 "last_report_only": False,
@@ -9190,7 +9192,7 @@ def test_inspect_folder_rejects_metadata_without_page_size(
                 "end_date": "2026-05-01",
                 "company_name": "",
                 "submitter_name": "",
-                "market_label": "검색대상",
+                "market_label": "전체",
                 "securities_label": "전체",
                 "disclosure_type_groups": {},
                 "last_report_only": False,
@@ -9358,7 +9360,7 @@ def test_check_existing_downloads_rejects_missing_date_range_metadata(
                 "end_date": "2026-05-01",
                 "company_name": "삼성전자",
                 "submitter_name": "",
-                "market_label": "검색대상",
+                "market_label": "전체",
                 "securities_label": "전체",
                 "disclosure_type_groups": {},
                 "last_report_only": True,

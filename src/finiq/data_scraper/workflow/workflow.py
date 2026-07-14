@@ -633,7 +633,7 @@ def _group_contiguous_pages(pages: list[int]) -> list[tuple[int, int]]:
     return groups
 
 
-_MAX_PAGE_REPAIR_ATTEMPTS = 100
+_MAX_PAGE_REPAIR_ATTEMPTS = 5
 
 
 def _repair_overlay_root(folder: Path) -> Path:
