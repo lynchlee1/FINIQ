@@ -39,19 +39,25 @@ def create_download_router(config: Any) -> APIRouter:
         else:
             verify_with_kind = bool(val)
 
-        with KIND_NETWORK_JOB_LOCK:
-            return check_existing_downloads(
-                str(payload.get("output_directory") or ""),
-                verify_with_kind=verify_with_kind,
-                current_payload=payload,
-            )
+        try:
+            with KIND_NETWORK_JOB_LOCK:
+                return check_existing_downloads(
+                    str(payload.get("output_directory") or ""),
+                    verify_with_kind=verify_with_kind,
+                    current_payload=payload,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/api/download/detect-existing")
     def detect_existing_downloads_route(payload: dict[str, Any]):
-        return detect_existing_downloads(
-            str(payload.get("output_directory") or ""),
-            current_payload=payload,
-        )
+        try:
+            return detect_existing_downloads(
+                str(payload.get("output_directory") or ""),
+                current_payload=payload,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/api/download/options")
     async def get_download_options_route(response: Response):

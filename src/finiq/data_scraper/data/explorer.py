@@ -10,6 +10,7 @@ from typing import Any
 
 from finiq.data_scraper.parse import disclosure_file_rows, html_to_json, pagination_info
 from finiq.data_scraper.storage.result_files import sorted_result_page_paths
+from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
 
 
 def find_result_folders(root_directory: str | Path) -> list[Path]:
@@ -28,12 +29,18 @@ def _resolve_folder_parallelism(parallelism: int | None, item_count: int) -> int
     return max(1, min(int(requested), item_count))
 
 
-def load_workflow_input(folder: str | Path) -> dict[str, Any] | None:
+def load_workflow_input(folder: str | Path) -> dict[str, Any]:
     """Load the saved workflow input JSON for one downloaded result folder."""
     input_path = Path(folder).resolve() / "kind_workflow.input.json"
     if not input_path.exists():
-        return None
-    return json.loads(input_path.read_text(encoding="utf-8"))
+        raise ValueError(f"{input_path.parent.name}: kind_workflow.input.json metadata is missing")
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(
+            f"{input_path.parent.name}: kind_workflow.input.json metadata is corrupted: {exc}"
+        ) from exc
+    return validate_kind_workflow_input_snapshot(payload)
 
 
 def detect_pagination(folder: str | Path) -> dict[str, Any] | None:
@@ -92,7 +99,7 @@ def _build_result_folder_record(task: tuple[str, str]) -> dict[str, Any]:
     folder = Path(folder_str)
     root = Path(root_str)
     body_files = sorted_result_page_paths(folder)
-    saved_input = load_workflow_input(folder) or {}
+    saved_input = load_workflow_input(folder)
     pagination = detect_pagination(folder) or {}
     relative_folder = folder.relative_to(root) if folder != root else Path(".")
     return {

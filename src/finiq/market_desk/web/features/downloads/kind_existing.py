@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
@@ -88,37 +87,7 @@ def _validate_single_folder(
     if not body_files:
         return None
 
-    def get_dates_from_input_json(f: Path) -> dict[str, Any] | None:
-        input_path = f / "kind_workflow.input.json"
-        if input_path.is_file():
-            try:
-                data = json.loads(input_path.read_text(encoding="utf-8"))
-                return data
-            except Exception:
-                pass
-        return None
-
-    saved_input_snapshot = get_dates_from_input_json(folder)
-    metadata_path_exists = (folder / "kind_workflow.input.json").is_file()
-    metadata_obsolete = (
-        metadata_path_exists
-        and not _is_trusted_download_input_snapshot(saved_input_snapshot)
-    )
-    if not _is_trusted_download_input_snapshot(saved_input_snapshot):
-        return {
-            "start_date": None,
-            "end_date": None,
-            "folder_name": folder_name,
-            "local_count": None,
-            "kind_count": None,
-            "status": "stale",
-            "error_detail": "Missing or invalid kind_workflow.input.json metadata.",
-            "metadata_missing": True,
-            "metadata_obsolete": metadata_obsolete,
-            "folder_path": str(folder),
-        }
-
-    input_snapshot = saved_input_snapshot
+    input_snapshot = _require_current_download_input_snapshot(folder)
     start_date = date.fromisoformat(str(input_snapshot["start_date"]))
     end_date = date.fromisoformat(str(input_snapshot["end_date"]))
 
@@ -238,16 +207,6 @@ def check_existing_downloads(
     if not output_directory.is_dir():
         return {"has_existing": False}
 
-    def get_dates_from_input_json(folder: Path) -> dict[str, Any] | None:
-        input_path = folder / "kind_workflow.input.json"
-        if input_path.is_file():
-            try:
-                data = json.loads(input_path.read_text(encoding="utf-8"))
-                return data
-            except Exception:
-                pass
-        return None
-
     def stale_range(
         folder: Path,
         folder_name: str,
@@ -310,31 +269,33 @@ def check_existing_downloads(
     except Exception as exc:
         raise RuntimeError(f"Failed to inspect output directory: {exc}") from exc
 
+    if candidates:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if list(candidate[0].glob("*_post_page_*.body"))
+        ]
+        for folder, _folder_name, _folder_range in candidates:
+            _require_current_download_input_snapshot(folder)
+
     # If no yearly subfolders, check the directory itself (Single mode)
     if not candidates:
         try:
             if list(output_directory.glob("*_post_page_*.body")):
-                input_snapshot = get_dates_from_input_json(output_directory)
-                if _is_trusted_download_input_snapshot(input_snapshot):
-                    start_date = date.fromisoformat(str(input_snapshot["start_date"]))
-                    end_date = date.fromisoformat(str(input_snapshot["end_date"]))
-                    candidates.append(
-                        (
-                            output_directory,
-                            output_directory.name,
-                            (start_date, end_date),
-                        )
+                input_snapshot = _require_current_download_input_snapshot(
+                    output_directory
+                )
+                start_date = date.fromisoformat(str(input_snapshot["start_date"]))
+                end_date = date.fromisoformat(str(input_snapshot["end_date"]))
+                candidates.append(
+                    (
+                        output_directory,
+                        output_directory.name,
+                        (start_date, end_date),
                     )
-                else:
-                    discovery_errors.append(
-                        stale_range(
-                            output_directory,
-                            output_directory.name,
-                            "Missing or invalid kind_workflow.input.json metadata.",
-                            metadata_missing=True,
-                            metadata_obsolete=input_snapshot is not None,
-                        )
-                    )
+                )
+        except DownloadInputMetadataError:
+            raise
         except Exception as exc:
             discovery_errors.append(
                 stale_range(
@@ -369,6 +330,8 @@ def check_existing_downloads(
                     res = future.result()
                     if res is not None:
                         ranges_data.append(res)
+                except DownloadInputMetadataError:
+                    raise
                 except Exception as exc:
                     folder, folder_name, (folder_start, folder_end) = _candidate
                     ranges_data.append(
@@ -391,39 +354,38 @@ def check_existing_downloads(
 
     saved_filters = None
     for folder, _, _ in candidates:
-        input_snapshot = get_dates_from_input_json(folder)
-        if _is_trusted_download_input_snapshot(input_snapshot):
-            try:
-                search_filters_dict = dict(input_snapshot.get("search_filters") or [])
+        input_snapshot = _require_current_download_input_snapshot(folder)
+        try:
+            search_filters_dict = dict(input_snapshot.get("search_filters") or [])
 
-                market_val = search_filters_dict.get("marketType", "")
-                market_label = "검색대상"
-                for label, val in MARKET_TYPES.items():
-                    if val == market_val:
-                        market_label = label
-                        break
+            market_val = search_filters_dict.get("marketType", "")
+            market_label = "검색대상"
+            for label, val in MARKET_TYPES.items():
+                if val == market_val:
+                    market_label = label
+                    break
 
-                securities_val = search_filters_dict.get("securities", "")
-                securities_label = "전체"
-                for label, val in SECURITIES_TYPES.items():
-                    if val == securities_val:
-                        securities_label = label
-                        break
+            securities_val = search_filters_dict.get("securities", "")
+            securities_label = "전체"
+            for label, val in SECURITIES_TYPES.items():
+                if val == securities_val:
+                    securities_label = label
+                    break
 
-                saved_filters = {
-                    "company_name": search_filters_dict.get("searchCorpName", ""),
-                    "submitter_name": search_filters_dict.get("submitOblgNm", ""),
-                    "market_label": market_label,
-                    "securities_label": securities_label,
-                    "disclosure_type_groups": input_snapshot.get(
-                        "disclosure_type_groups"
-                    )
-                    or {},
-                    "last_report_only": bool(input_snapshot.get("last_report_only")),
-                }
-                break
-            except Exception:
-                pass
+            saved_filters = {
+                "company_name": search_filters_dict.get("searchCorpName", ""),
+                "submitter_name": search_filters_dict.get("submitOblgNm", ""),
+                "market_label": market_label,
+                "securities_label": securities_label,
+                "disclosure_type_groups": input_snapshot.get(
+                    "disclosure_type_groups"
+                )
+                or {},
+                "last_report_only": bool(input_snapshot.get("last_report_only")),
+            }
+            break
+        except Exception:
+            pass
 
     return {
         "has_existing": True,
@@ -456,7 +418,9 @@ def detect_existing_downloads(
             if not child.is_dir():
                 continue
             folder_range = _folder_date_range_from_name(child)
-            if folder_range is not None:
+            if folder_range is not None and list(
+                child.glob("*_post_page_*.body")
+            ):
                 candidates.append((child, child.name, folder_range))
     except Exception:
         pass
@@ -464,16 +428,18 @@ def detect_existing_downloads(
     if not candidates:
         try:
             if list(output_directory.glob("*_post_page_*.body")):
-                input_snapshot = _load_workflow_input(output_directory)
-                folder_range = None
-                if _is_trusted_download_input_snapshot(input_snapshot):
-                    folder_range = (
-                        date.fromisoformat(str(input_snapshot["start_date"])),
-                        date.fromisoformat(str(input_snapshot["end_date"])),
-                    )
+                input_snapshot = _require_current_download_input_snapshot(
+                    output_directory
+                )
+                folder_range = (
+                    date.fromisoformat(str(input_snapshot["start_date"])),
+                    date.fromisoformat(str(input_snapshot["end_date"])),
+                )
                 candidates.append(
                     (output_directory, output_directory.name, folder_range)
                 )
+        except DownloadInputMetadataError:
+            raise
         except Exception:
             pass
 
@@ -486,25 +452,16 @@ def detect_existing_downloads(
     ranges_data: list[dict[str, Any]] = []
     saved_filters = None
     for folder, folder_name, folder_range in candidates:
-        metadata_exists = (folder / "kind_workflow.input.json").is_file()
-        try:
-            snapshot = _load_workflow_input(folder)
-        except Exception:
-            snapshot = None
-        metadata_trusted = _is_trusted_download_input_snapshot(snapshot)
-        metadata_obsolete = metadata_exists and not metadata_trusted
+        snapshot = _require_current_download_input_snapshot(folder)
         folder_start = None
         folder_end = None
-        if metadata_trusted:
-            try:
-                folder_start = date.fromisoformat(str(snapshot["start_date"]))
-                folder_end = date.fromisoformat(str(snapshot["end_date"]))
-            except Exception:
-                pass
+        try:
+            folder_start = date.fromisoformat(str(snapshot["start_date"]))
+            folder_end = date.fromisoformat(str(snapshot["end_date"]))
+        except Exception:
+            pass
 
-        range_saved_filters = (
-            _snapshot_filters_payload(snapshot or {}) if metadata_trusted else None
-        )
+        range_saved_filters = _snapshot_filters_payload(snapshot)
         filters_match = (
             _filters_payloads_match(current_filters, range_saved_filters)
             if current_filters
@@ -513,12 +470,7 @@ def detect_existing_downloads(
         if saved_filters is None and range_saved_filters is not None:
             saved_filters = range_saved_filters
 
-        if metadata_trusted:
-            metadata_status = "ok" if filters_match else "mismatch"
-        elif metadata_obsolete:
-            metadata_status = "obsolete"
-        else:
-            metadata_status = "missing"
+        metadata_status = "ok" if filters_match else "mismatch"
 
         ranges_data.append(
             {
@@ -527,10 +479,10 @@ def detect_existing_downloads(
                 "folder_name": folder_name,
                 "local_count": None,
                 "kind_count": None,
-                "status": "unverified" if metadata_trusted else "stale",
-                "error_detail": None if metadata_trusted else "Missing or invalid kind_workflow.input.json metadata.",
-                "metadata_missing": not metadata_exists or metadata_obsolete,
-                "metadata_obsolete": metadata_obsolete,
+                "status": "unverified",
+                "error_detail": None,
+                "metadata_missing": False,
+                "metadata_obsolete": False,
                 "metadata_status": metadata_status,
                 "filters_match": filters_match,
                 "folder_path": str(folder),

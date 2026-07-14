@@ -48,16 +48,7 @@ def inspect_download_output_directory_payload(
 
         folder_body_files[folder] = body_files
 
-        try:
-            input_snapshot = _load_workflow_input(folder)
-        except Exception:
-            input_snapshot = None
-        if not _is_trusted_download_input_snapshot(input_snapshot):
-            for path in body_files + _workflow_auxiliary_files(folder):
-                candidates_by_path[str(path)] = _relative_candidate(
-                    path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과"
-                )
-            continue
+        input_snapshot = _require_current_download_input_snapshot(folder)
 
         saved_filters = _snapshot_filters_payload(input_snapshot)
         has_current_filters = {

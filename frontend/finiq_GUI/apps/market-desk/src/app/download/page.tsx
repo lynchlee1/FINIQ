@@ -143,6 +143,7 @@ export default function DownloadPage() {
       last_report_only: boolean;
     } | null;
   } | null>(null);
+  const [existingMetadataError, setExistingMetadataError] = useState<string | null>(null);
   const [checkingExisting, setCheckingExisting] = useState(false);
   const [runStarting, setRunStarting] = useState(false);
   const isRunTriggeredRef = useRef(false);
@@ -309,6 +310,7 @@ export default function DownloadPage() {
       checkExistingRequestRef.current = { id: checkExistingRequestRef.current.id + 1, key: "" };
       setCheckingExisting(false);
       setExistingData(null);
+      setExistingMetadataError(null);
       return;
     }
     const submittedPayload = {
@@ -327,13 +329,13 @@ export default function DownloadPage() {
     const requestKey = checkExistingPayloadKey(submittedPayload);
     checkExistingRequestRef.current = { id: requestId, key: requestKey };
     setCheckingExisting(true);
+    setExistingMetadataError(null);
 
     try {
       const result = await detectExistingDownload(submittedPayload);
       if (
         checkExistingRequestRef.current.id !== requestId ||
-        checkExistingRequestRef.current.key !== requestKey ||
-        dir !== useSettingsStore.getState().download_output_directory
+        checkExistingRequestRef.current.key !== requestKey
       ) {
         return;
       }
@@ -342,19 +344,23 @@ export default function DownloadPage() {
       } else {
         setExistingData(null);
       }
-    } catch {
+      setExistingMetadataError(null);
+    } catch (error) {
       if (
         checkExistingRequestRef.current.id === requestId &&
-        checkExistingRequestRef.current.key === requestKey &&
-        dir === useSettingsStore.getState().download_output_directory
+        checkExistingRequestRef.current.key === requestKey
       ) {
+        const message = error instanceof Error ? error.message : String(error);
         setExistingData(null);
+        setExistingMetadataError(message);
+        setStatus(message);
+        setIsErrorStatus(true);
+        setNotificationPanelOpen(true);
       }
     } finally {
       if (
         checkExistingRequestRef.current.id === requestId &&
-        checkExistingRequestRef.current.key === requestKey &&
-        dir === useSettingsStore.getState().download_output_directory
+        checkExistingRequestRef.current.key === requestKey
       ) {
         setCheckingExisting(false);
       }
@@ -531,9 +537,12 @@ export default function DownloadPage() {
   };
 
   const handleRun = async () => {
-    if (runStarting) return;
+    if (runStarting || checkingExisting) return;
     try {
       setRunStarting(true);
+      if (existingMetadataError) {
+        throw new Error(existingMetadataError);
+      }
       if (existingData?.saved_filters && !filtersMatch) {
         throw new Error("현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 필터를 먼저 일치시켜 주세요.");
       }
@@ -818,7 +827,7 @@ export default function DownloadPage() {
                   <Search className="mr-2 h-4 w-4" />
                   미리보기
                 </Button>
-                <Button className="w-full" onClick={handleRun} disabled={!!activeJobId || runStarting}>
+                <Button className="w-full" onClick={handleRun} disabled={!!activeJobId || runStarting || checkingExisting}>
                   {!!activeJobId || runStarting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>

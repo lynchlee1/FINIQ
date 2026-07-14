@@ -54,8 +54,7 @@ from finiq.market_desk.web.features.disclosures.table_export import (
 from finiq.market_desk.web.features.downloads.kind_runner import _run_single
 from finiq.market_desk.web.features.downloads.kind_common import (
     _download_input_snapshot_from_payload,
-    _is_trusted_download_input_snapshot,
-    _load_workflow_input,
+    _require_current_download_input_snapshot,
     _split_yearly_ranges,
 )
 from finiq.market_desk.web.features.downloads.kind_coordination import (
@@ -452,12 +451,7 @@ def _inspect_detail_download(profile: dict[str, Any]) -> dict[str, Any]:
 
     for range_start, range_end in ranges:
         folder = root / f"{range_start:%Y%m%d}_{range_end:%Y%m%d}"
-        snapshot = _load_workflow_input(folder)
-        if not _is_trusted_download_input_snapshot(snapshot):
-            return _inspection_failure(
-                1,
-                reason=f"{folder.name}의 다운로드 설정 메타데이터가 없거나 손상되었습니다.",
-            )
+        snapshot = _require_current_download_input_snapshot(folder)
         expected_snapshot = _download_input_snapshot_from_payload(
             payload,
             start=range_start,
@@ -536,6 +530,7 @@ def _inspect_automation_download(profile: dict[str, Any]) -> dict[str, Any]:
     with KIND_NETWORK_JOB_LOCK:
         for window_start, window_end, mutable in _window_ranges(start, end):
             folder = windows_root / f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
+            _require_current_download_input_snapshot(folder)
             try:
                 inspected = inspect_download_directory_pages(
                     folder,
@@ -1220,6 +1215,8 @@ def _page_one_snapshot_hash(window_path: Path) -> str:
 
 
 def _owned_window_matches(window_path: Path, query_hash: str) -> bool:
+    if window_path.exists():
+        _require_current_download_input_snapshot(window_path)
     try:
         payload = json.loads(_window_manifest_path(window_path).read_text("utf-8"))
     except (OSError, json.JSONDecodeError):

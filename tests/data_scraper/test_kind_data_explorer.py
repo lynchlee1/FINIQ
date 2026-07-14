@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
+
+from finiq.data_scraper.workflow import KIND_WORKFLOW_INPUT_FORMAT
 from finiq.data_scraper.data.explorer import (
     build_result_folder_records,
     detect_pagination,
@@ -45,6 +49,20 @@ DISCLOSURE_RESULTS_HTML = """
   </tbody>
 </table>
 """
+
+
+def _workflow_input(start_date: str, end_date: str) -> dict[str, object]:
+    return {
+        "format": KIND_WORKFLOW_INPUT_FORMAT,
+        "request_headers": {"User-Agent": "pytest"},
+        "start_date": start_date,
+        "end_date": end_date,
+        "page_size": 100,
+        "search_filters": [],
+        "disclosure_type_groups": {},
+        "last_report_only": False,
+        "include_previous_disclosures": None,
+    }
 
 
 def test_find_result_folders_discovers_nested_download_directories(tmp_path: Path) -> None:
@@ -115,7 +133,7 @@ def test_build_result_folder_records_includes_saved_input_dates(tmp_path: Path) 
     folder.mkdir()
     (folder / "001_post_page_00001.body").write_bytes(FIXTURES_DIR.joinpath("kind_response.html").read_bytes())
     (folder / "kind_workflow.input.json").write_text(
-        '{"start_date":"2024-01-01","end_date":"2024-01-31","page_size":100}',
+        json.dumps(_workflow_input("2024-01-01", "2024-01-31")),
         encoding="utf-8",
     )
 
@@ -149,13 +167,7 @@ def test_build_result_folder_records_supports_parallel_folder_scan(tmp_path: Pat
     ):
         (folder / "001_post_page_00001.body").write_bytes(FIXTURES_DIR.joinpath("kind_response.html").read_bytes())
         (folder / "kind_workflow.input.json").write_text(
-            (
-                "{"
-                f"\"start_date\":\"{start_date}\","
-                f"\"end_date\":\"{end_date}\","
-                "\"page_size\":100"
-                "}"
-            ),
+            json.dumps(_workflow_input(start_date, end_date)),
             encoding="utf-8",
         )
 
@@ -166,6 +178,17 @@ def test_build_result_folder_records_supports_parallel_folder_scan(tmp_path: Pat
         "nested/20240201_20240229",
     ]
     assert [record["end_date"] for record in records] == ["2024-01-31", "2024-02-29"]
+
+
+def test_build_result_folder_records_rejects_missing_metadata(tmp_path: Path) -> None:
+    folder = tmp_path / "20240101_20240131"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        FIXTURES_DIR.joinpath("kind_response.html").read_bytes()
+    )
+
+    with pytest.raises(ValueError, match="metadata is missing"):
+        build_result_folder_records(tmp_path)
 
 
 def test_detect_pagination_uses_numeric_page_order_for_four_digit_pages(tmp_path: Path) -> None:

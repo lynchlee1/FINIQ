@@ -26,9 +26,11 @@ from finiq.data_scraper.core.constants import (
 )
 from finiq.data_scraper.parse import pagination_info
 from finiq.data_scraper.workflow import (
+    KIND_WORKFLOW_INPUT_FORMAT,
     KindWorkflow,
     inspect_download_directory_pages,
     make_page_size_integrity_validator,
+    validate_kind_workflow_input_snapshot,
     validate_downloaded_result_page,
 )
 from finiq.data_scraper.workflow.workflow import _validate_downloaded_result_page_task
@@ -62,6 +64,10 @@ DOWNLOAD_PARALLEL_STRATEGIES = {"years", "pages"}
 
 class DownloadCancelled(Exception):
     """Raised when a running download job is cancelled by the user."""
+
+
+class DownloadInputMetadataError(ValueError):
+    """Raised before reusing a download folder with unusable input metadata."""
 
 
 def _purge_expired_download_jobs_locked(*, now: float | None = None) -> int:
@@ -131,27 +137,11 @@ def _normalize_disclosure_type_groups(
 
 
 def _is_trusted_download_input_snapshot(snapshot: dict[str, Any] | None) -> bool:
-    if not isinstance(snapshot, dict):
-        return False
-    required_keys = {
-        "request_headers",
-        "start_date",
-        "end_date",
-        "page_size",
-        "search_filters",
-        "disclosure_type_groups",
-        "last_report_only",
-        "include_previous_disclosures",
-    }
-    if not required_keys.issubset(snapshot.keys()):
-        return False
     try:
-        date.fromisoformat(str(snapshot["start_date"]))
-        date.fromisoformat(str(snapshot["end_date"]))
-        page_size = int(snapshot["page_size"])
-    except Exception:
+        validate_kind_workflow_input_snapshot(snapshot)
+    except ValueError:
         return False
-    return page_size > 0
+    return True
 
 
 def _build_search_filters(payload: dict[str, Any]) -> dict[str, str] | None:
@@ -239,6 +229,24 @@ def _load_workflow_input(folder: Path) -> dict[str, Any] | None:
     if isinstance(payload, dict):
         return payload
     return None
+
+
+def _require_current_download_input_snapshot(folder: Path) -> dict[str, Any]:
+    input_path = folder / "kind_workflow.input.json"
+    if not input_path.is_file():
+        raise DownloadInputMetadataError(
+            f"{folder.name}: kind_workflow.input.json metadata is missing"
+        )
+    try:
+        snapshot = _load_workflow_input(folder)
+    except Exception as exc:
+        raise DownloadInputMetadataError(
+            f"{folder.name}: kind_workflow.input.json metadata is corrupted: {exc}"
+        ) from exc
+    try:
+        return validate_kind_workflow_input_snapshot(snapshot)
+    except ValueError as exc:
+        raise DownloadInputMetadataError(f"{folder.name}: {exc}") from exc
 
 
 def _as_worker_count(payload: dict[str, Any], *, default: int | None = None) -> int:
@@ -349,6 +357,7 @@ def _download_input_snapshot_from_payload(
     payload: dict[str, Any], *, start: date, end: date, page_size: int
 ) -> dict[str, Any]:
     return {
+        "format": KIND_WORKFLOW_INPUT_FORMAT,
         "request_headers": DEFAULT_REQUEST_HEADERS,
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
@@ -500,12 +509,7 @@ def _folder_download_deletion_candidates(
         return []
 
     candidates: list[dict[str, str]] = []
-    input_snapshot = _load_workflow_input(folder)
-    if input_snapshot is None:
-        return [
-            _relative_candidate(path, base, "입력 스냅샷 없이 남아 있는 다운로드 결과")
-            for path in body_files
-        ]
+    input_snapshot = _require_current_download_input_snapshot(folder)
 
     locked_page_size = input_snapshot.get("page_size")
     if locked_page_size is None or int(locked_page_size) != page_size:

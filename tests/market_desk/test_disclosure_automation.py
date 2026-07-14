@@ -260,6 +260,15 @@ def test_checkpoint_is_invalid_after_output_changes(tmp_path: Path) -> None:
 def test_window_manifest_validates_body_content_hash(tmp_path: Path) -> None:
     body = tmp_path / "window_post_page_00001.body"
     body.write_bytes(b"first")
+    snapshot = automation._download_input_snapshot_from_payload(
+        {},
+        start=date(2026, 7, 1),
+        end=date(2026, 7, 1),
+        page_size=100,
+    )
+    (tmp_path / "kind_workflow.input.json").write_text(
+        json.dumps(snapshot), encoding="utf-8"
+    )
     manifest = {
         "format": automation.AUTOMATION_WINDOW_FORMAT,
         "query_hash": "query",
@@ -274,6 +283,16 @@ def test_window_manifest_validates_body_content_hash(tmp_path: Path) -> None:
     body.write_bytes(b"other")
 
     assert _owned_window_matches(tmp_path, "query") is False
+
+
+def test_window_metadata_fails_before_invalid_manifest_is_inspected(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "window_post_page_00001.body").write_bytes(b"saved body")
+    (tmp_path / "automation-window.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="metadata is missing"):
+        _owned_window_matches(tmp_path, "query")
 
 
 def test_stage_seven_passes_compressed_metadata_path(
@@ -482,6 +501,19 @@ def test_automation_download_inspection_queries_only_mutable_windows(
     raw["decisions"]["s1_search"]["start_date"] = "2026-07-01"  # type: ignore[index]
     profile = normalize_automation_profile(raw)
     live_queries: list[dict[str, object]] = []
+    search = profile["decisions"]["s1_search"]
+    start = date.fromisoformat(search["start_date"])
+    end = date.fromisoformat(search["end_date"])
+    windows_root = tmp_path / "01-list" / ".automation-windows"
+    for window_start, window_end, _mutable in _window_ranges(start, end):
+        folder = windows_root / f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
+        folder.mkdir(parents=True)
+        snapshot = automation._automation_window_snapshot(
+            profile, window_start, window_end
+        )
+        (folder / "kind_workflow.input.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
     monkeypatch.setattr(
         automation,
         "inspect_download_directory_pages",
@@ -795,6 +827,15 @@ def test_recent_window_refresh_detects_content_change_not_page_position(
         output = Path(str(payload["output_directory"]))
         output.mkdir(parents=True, exist_ok=True)
         (output / "001_post_page_00001.body").write_bytes(b"same disclosure rows")
+        snapshot = automation._download_input_snapshot_from_payload(
+            payload,
+            start=date.fromisoformat(str(payload["start_date"])),
+            end=date.fromisoformat(str(payload["end_date"])),
+            page_size=int(payload["page_size"]),
+        )
+        (output / "kind_workflow.input.json").write_text(
+            json.dumps(snapshot), encoding="utf-8"
+        )
         return {
             "download_status": {"integrity_valid": True},
             "summary": {"success": 1, "failed": 0, "total": 1},

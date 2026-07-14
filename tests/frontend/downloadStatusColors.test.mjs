@@ -16,6 +16,17 @@ test("download metadata-ready status uses success tone", async () => {
   assert.doesNotMatch(source, /handleCreateMetadata/);
 });
 
+test("download metadata detection errors block execution", async () => {
+  const source = await readFile(downloadPagePath, "utf8");
+
+  assert.match(source, /setExistingMetadataError\(message\);/);
+  assert.match(source, /setCheckingExisting\(true\);\s*setExistingMetadataError\(null\);/);
+  assert.match(source, /if \(existingMetadataError\) \{\s*throw new Error\(existingMetadataError\);/);
+  assert.match(source, /disabled=\{!!activeJobId \|\| runStarting \|\| checkingExisting\}/);
+  assert.doesNotMatch(source, /catch \{[\s\S]{0,300}setExistingData\(null\);/);
+  assert.doesNotMatch(source, /dir !== useSettingsStore\.getState\(\)\.download_output_directory/);
+});
+
 test("download colored status surfaces use contrast text tokens", async () => {
   const source = await readFile(downloadPagePath, "utf8");
   const globals = await readFile(globalsPath, "utf8");
