@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Executor, Future, wait
 from typing import TypeVar
@@ -9,6 +10,40 @@ from typing import TypeVar
 
 T = TypeVar("T")
 R = TypeVar("R")
+
+
+def available_cpu_count() -> int:
+    """Return the process-wide worker default, falling back to one CPU."""
+    try:
+        count = os.cpu_count()
+    except Exception:
+        return 1
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        return 1
+    return count
+
+
+def resolve_worker_count(
+    value: object = None,
+    *,
+    item_count: int | None = None,
+    field_name: str = "workers",
+) -> int:
+    """Resolve a worker value against the shared CPU and optional task limits."""
+    if value in (None, ""):
+        requested = available_cpu_count()
+    else:
+        try:
+            requested = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be an integer") from exc
+        if requested < 1:
+            raise ValueError(f"{field_name} must be >= 1")
+
+    limits = [requested, available_cpu_count()]
+    if item_count is not None:
+        limits.append(max(1, item_count))
+    return max(1, min(limits))
 
 
 def bounded_as_completed(

@@ -207,7 +207,6 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(payload, "root_directory", str(workspace.list))
         _set_default(payload, "output_path", str(workspace.table))
     elif normalized_kind == "filter":
-        _set_default(payload, "classification_path", str(workspace.table))
         _set_default(
             payload, "html_transfer_path", str(workspace.filtered / "filtered.json")
         )

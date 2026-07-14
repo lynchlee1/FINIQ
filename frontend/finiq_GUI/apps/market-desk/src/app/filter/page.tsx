@@ -91,10 +91,10 @@ export default function FilterPage() {
 
   const buildPayload = () => ({
     data_root: rootDirectory,
-    classification_path: useSeparateOutputDirectory
-      ? tableDirectory || tableManifestPath
-      : "",
-    html_transfer_path: useSeparateOutputDirectory ? htmlTransferPath : "",
+    ...(useSeparateOutputDirectory ? {
+      classification_path: tableDirectory || tableManifestPath,
+      html_transfer_path: htmlTransferPath,
+    } : {}),
     filter_blocks: normalizeDisclosureConditionBlocks(conditions),
     title_expression: "",
     limit: limitUnlimited ? null : Number(limit || 1000),

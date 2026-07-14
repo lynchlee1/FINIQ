@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    resolve_disclosure_workspace,
+)
 from finiq.market_desk.web.features.market_data.service_sources import *
 
 def filter_disclosures_payload(
@@ -15,13 +18,17 @@ def filter_disclosures_payload(
         raise FilterCancelled("filter cancelled")
     classification_path = str(body.get("classification_path") or "").strip()
     root_directory = str(body.get("root_directory") or "").strip()
+    data_root = str(body.get("data_root") or "").strip()
     if root_directory:
         _ensure_safe_source_root_directory(Path(root_directory).expanduser().resolve())
     if not classification_path:
-        if not root_directory:
-            msg = "classification_path or root_directory is required"
+        if data_root:
+            classification_path = str(resolve_disclosure_workspace(data_root).table)
+        elif not root_directory:
+            msg = "data_root, classification_path or root_directory is required"
             raise ValueError(msg)
-        classification_path = resolve_default_classification(root_directory) or ""
+        else:
+            classification_path = resolve_default_classification(root_directory) or ""
     sqlite_manifest_path = (
         _resolve_sqlite_manifest_path(classification_path)
         if classification_path
