@@ -75,6 +75,7 @@ type HtmlSectionSplitResultsProps = {
   problemFiles: ProblemFile[];
   sectionPatterns: SectionPattern[];
   selectedPatternTocIds: Record<string, string[]>;
+  decidedPatterns: Record<string, boolean>;
   isLoadingSectionPatterns: boolean;
   page: number;
   hasNextPage: boolean;
@@ -132,6 +133,7 @@ export function HtmlSectionSplitResults({
   problemFiles,
   sectionPatterns,
   selectedPatternTocIds,
+  decidedPatterns,
   isLoadingSectionPatterns,
   page,
   hasNextPage,
@@ -384,10 +386,10 @@ export function HtmlSectionSplitResults({
         inputDirectory={inputDirectory}
         sectionPatterns={sectionPatterns}
         selectedPatternTocIds={selectedPatternTocIds}
+        decidedPatterns={decidedPatterns}
         isLoading={isLoadingSectionPatterns}
         onTogglePatternSection={onTogglePatternSection}
         onSetPatternSelection={onSetPatternSelection}
-        defaultSelectAll
       />
 
       {problemFiles.length ? (

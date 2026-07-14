@@ -19,9 +19,10 @@ from finiq.data_scraper.core.client import (
     download_disclosure_viewer_htmls,
 )
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
-from finiq.data_scraper.parse._disclosures import disclosure_file_rows
 from finiq.data_scraper.parse._snippets import dart_main_doc_no, search_paths
-from finiq.data_scraper.storage.result_files import sorted_result_page_paths
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    resolve_disclosure_workspace,
+)
 from finiq.market_desk.web.features.disclosures.external_compact import (
     _compress_external_html_file,
     _external_html_compress_workers,
@@ -142,36 +143,11 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
     return metadata
 
 
-def _load_result_directory_disclosures(source_directory: Path) -> dict[str, Any]:
-    body_paths = sorted_result_page_paths(source_directory)
-    if not body_paths:
-        msg = f"No KIND result page body files found in source_json_path directory: {source_directory}"
-        raise ValueError(msg)
-    disclosures: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for body_path in body_paths:
-        for row in disclosure_file_rows(body_path):
-            acpt_no = str(row.get("acpt_no") or "").strip()
-            if not acpt_no or acpt_no in seen:
-                continue
-            disclosures.append(row)
-            seen.add(acpt_no)
-    if not disclosures:
-        msg = f"No acpt_no values found in KIND result page body files: {source_directory}"
-        raise ValueError(msg)
-    return {
-        "format": "kind_disclosure_result_directory_v1",
-        "source_json_path": str(source_directory),
-        "disclosures": disclosures,
-    }
-
-
-def _load_source_json_path_payload(source_json_path: Any) -> tuple[Any, str]:
-    source_path = Path(str(source_json_path)).expanduser().resolve()
-    if source_path.is_dir():
-        return _load_result_directory_disclosures(source_path), str(source_path)
+def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
+    workspace = resolve_disclosure_workspace(body.get("data_root") or "")
+    source_path = workspace.filtered / "filtered.json"
     if not source_path.is_file():
-        msg = f"source_json_path does not exist: {source_path}"
+        msg = f"filtered disclosure JSON does not exist: {source_path}"
         raise ValueError(msg)
     return json.loads(source_path.read_text(encoding="utf-8")), str(source_path)
 

@@ -823,11 +823,17 @@ def _selected_section_output(
             "error": "no sections found",
         }
     signature = _section_signature(_section_dicts_from_split_sections(sections))
+    if signature not in section_save_rules:
+        return {
+            "status": "no_save_rule",
+            "source_file": str(source_file),
+            "error": "no save rule for section pattern",
+        }
     allowed_toc_ids = section_save_rules.get(signature)
     selected_sections = [
         section
         for section in sections
-        if allowed_toc_ids is None or section.toc_id in allowed_toc_ids
+        if section.toc_id in allowed_toc_ids
     ]
     return {
         "status": "ok",
@@ -997,6 +1003,15 @@ def save_disclosure_html_sections_payload(
                 },
                 "saved": [],
             }
+        if selected["status"] == "no_save_rule":
+            return {
+                "status": "no_save_rule",
+                "skipped": {
+                    "source_file": str(source_file),
+                    "error": str(selected["error"]),
+                },
+                "saved": [],
+            }
         if int(selected.get("selected_sections") or 0) == 0:
             return {
                 "status": "no_selected_sections",
@@ -1033,6 +1048,8 @@ def save_disclosure_html_sections_payload(
                 emit(f"읽기 실패 {index}/{len(html_files)}: {source_name}")
             elif result["status"] == "no_sections":
                 emit(f"목차 없음 {index}/{len(html_files)}: {source_name}")
+            elif result["status"] == "no_save_rule":
+                emit(f"저장 규칙 없음 {index}/{len(html_files)}: {source_name}")
             else:
                 emit(f"선택 목차 없음 {index}/{len(html_files)}: {source_name}")
         if index == 1 or index == len(html_files) or index % 25 == 0:

@@ -59,15 +59,6 @@ function waitForPollingInterval(signal: AbortSignal) {
   });
 }
 
-function defaultPatternTocIds(patterns: SectionPattern[]) {
-  return Object.fromEntries(
-    patterns.map((pattern) => [
-      pattern.signature,
-      (pattern.sections || []).map((section) => section.toc_id),
-    ]),
-  );
-}
-
 export default function HtmlSectionSplitPage() {
   const {
     output_root: dataRoot,
@@ -157,6 +148,15 @@ export default function HtmlSectionSplitPage() {
   const reviewedInputDirectory = inspectResult?.input_directory || inputDirectory;
   const hasNextPage = Boolean(inspectResult?.summary?.has_next_page);
   const isJobActive = !!activeJobId;
+  const undecidedPatterns = sectionPatterns.filter(
+    (pattern) => !Object.prototype.hasOwnProperty.call(selectedPatternTocIds, pattern.signature),
+  );
+  const decidedPatterns = Object.fromEntries(
+    sectionPatterns.map((pattern) => [
+      pattern.signature,
+      Object.prototype.hasOwnProperty.call(selectedPatternTocIds, pattern.signature),
+    ]),
+  );
 
   useEffect(() => {
     activeJobIdRef.current = activeJobId;
@@ -329,7 +329,6 @@ export default function HtmlSectionSplitPage() {
         if (snapshot.status === "completed") {
           const items = snapshot.result?.items || [];
           setSectionPatterns(items);
-          setSelectedPatternTocIds(defaultPatternTocIds(items));
           return;
         }
         if (snapshot.status === "failed") {
@@ -499,8 +498,8 @@ export default function HtmlSectionSplitPage() {
   const togglePatternSection = (signature: string, tocId: string) => {
     setSelectedPatternTocIds((current) => {
       const pattern = sectionPatterns.find((item) => item.signature === signature);
-      const fallback = (pattern?.sections || []).map((section) => section.toc_id);
-      const selected = current[signature] || fallback;
+      if (!pattern) return current;
+      const selected = current[signature] || [];
       const nextSelected = selected.includes(tocId)
         ? selected.filter((item) => item !== tocId)
         : [...selected, tocId];
@@ -526,6 +525,16 @@ export default function HtmlSectionSplitPage() {
   const startSave = async () => {
     if (!dataRoot || (useSeparateOutputDirectory && !outputDirectory)) {
       setStatus("작업공간 디렉토리와 결과 데이터 경로를 확인하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (isLoadingSectionPatterns || !sectionPatterns.length) {
+      setStatus("소스 불러오기 후 저장할 목차 구성을 직접 확인하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (undecidedPatterns.length) {
+      setStatus(`Pending · 모든 목차 구성을 직접 결정하세요: ${formatInteger(undecidedPatterns.length)}개`);
       setIsErrorStatus(true);
       return;
     }
@@ -577,6 +586,7 @@ export default function HtmlSectionSplitPage() {
             problemFiles={problemFiles}
             sectionPatterns={sectionPatterns}
             selectedPatternTocIds={selectedPatternTocIds}
+            decidedPatterns={decidedPatterns}
             isLoadingSectionPatterns={isLoadingSectionPatterns}
             page={page}
             hasNextPage={hasNextPage}

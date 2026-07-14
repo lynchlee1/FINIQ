@@ -211,7 +211,9 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
             payload, "html_transfer_path", str(workspace.filtered / "filtered.json")
         )
     elif normalized_kind == "download":
-        _set_default(payload, "source_json_path", str(workspace.filtered / "filtered.json"))
+        payload.pop("json", None)
+        payload.pop("payload", None)
+        payload.pop("source_json_path", None)
         _set_default(payload, "output_directory", str(workspace.external))
     elif normalized_kind == "external_compress":
         _set_default(payload, "input_directory", str(workspace.external))

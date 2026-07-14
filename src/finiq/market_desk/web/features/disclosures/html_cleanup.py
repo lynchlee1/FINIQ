@@ -13,10 +13,6 @@ def clean_disclosure_html_output_directory_payload(
     if not output_directory:
         msg = "output_directory is required"
         raise ValueError(msg)
-    source_json = body.get("json")
-    if source_json is None:
-        source_json = body.get("payload")
-    source_json_path = body.get("source_json_path")
     source_directory_raw = str(body.get("source_directory") or "").strip()
     source_compressed_json_path_raw = str(
         body.get("source_compressed_json_path") or ""
@@ -61,15 +57,7 @@ def clean_disclosure_html_output_directory_payload(
         source_type = "content"
         source_path = str(source_directory)
     else:
-        if not source_json_path and isinstance(source_json, dict):
-            source_json_path = source_json.get("source_json_path")
-        if source_json_path:
-            source_json, source_path = _load_source_json_path_payload(source_json_path)
-        else:
-            source_path = ""
-        if source_json is None:
-            msg = "json is required"
-            raise ValueError(msg)
+        source_json, source_path = _load_workspace_filtered_payload(body)
         acpt_numbers = collect_acpt_numbers_from_json(source_json)
         if not acpt_numbers:
             msg = "No acpt_no values found in JSON"
@@ -140,10 +128,6 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
     source_compressed_json_path_raw = str(
         body.get("source_compressed_json_path") or ""
     ).strip()
-    source_json = body.get("json")
-    if source_json is None:
-        source_json = body.get("payload")
-    source_json_path = body.get("source_json_path")
     resolved_source_path = ""
 
     if source_directory_raw and source_compressed_json_path_raw:
@@ -175,15 +159,7 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         }
         resolved_source_path = str(source_directory)
     else:
-        if not source_json_path and isinstance(source_json, dict):
-            source_json_path = source_json.get("source_json_path")
-        if source_json_path:
-            source_json, resolved_source_path = _load_source_json_path_payload(
-                source_json_path
-            )
-        if source_json is None:
-            msg = "json or source_json_path is required"
-            raise ValueError(msg)
+        source_json, resolved_source_path = _load_workspace_filtered_payload(body)
         acpt_numbers = collect_acpt_numbers_from_json(source_json)
         if not acpt_numbers:
             msg = "No acpt_no values found in JSON"

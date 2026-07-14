@@ -25,7 +25,6 @@ type HtmlSectionPatternCardProps = {
   onTogglePatternSection: (signature: string, tocId: string) => void;
   onSetPatternSelection: (signature: string, tocIds: string[]) => void;
   decidedPatterns?: Record<string, boolean>;
-  defaultSelectAll?: boolean;
   pending?: boolean;
   emptyText?: string;
 };
@@ -46,7 +45,6 @@ export function HtmlSectionPatternCard({
   onTogglePatternSection,
   onSetPatternSelection,
   decidedPatterns,
-  defaultSelectAll = false,
   pending = false,
   emptyText = "소스를 불러오면 전체 디렉토리의 목차 조합 빈도가 표시됩니다.",
 }: HtmlSectionPatternCardProps) {
@@ -67,8 +65,7 @@ export function HtmlSectionPatternCard({
           {sectionPatterns.map((pattern) => {
             const sections = pattern.sections || [];
             const widthPercent = Math.max(4, Math.round((pattern.count / maxCount) * 100));
-            const selectedTocIds = selectedPatternTocIds[pattern.signature]
-              ?? (defaultSelectAll ? sections.map((section) => section.toc_id) : []);
+            const selectedTocIds = selectedPatternTocIds[pattern.signature] ?? [];
             return (
               <div key={pattern.signature} className="grid w-full grid-cols-[minmax(0,1fr)_minmax(7rem,30%)_5rem] items-start gap-3 rounded-md px-3 py-2">
                 <div className="min-w-0">

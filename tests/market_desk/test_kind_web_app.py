@@ -13,6 +13,16 @@ from finiq.market_desk.web.features.downloads.kind_common import (
     configure_download_job_retention,
 )
 
+
+def _external_workspace_body(
+    tmp_path: Path, source_json: dict, **body: object
+) -> dict[str, object]:
+    data_root = tmp_path / "workspace"
+    filtered_path = data_root / "03-filter" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True, exist_ok=True)
+    filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
+    return {"data_root": str(data_root), **body}
+
 def test_api_config(tmp_path: Path):
     # Setup mock config
     config.output_root = str(tmp_path)
@@ -399,12 +409,13 @@ def test_html_download_inspect_folder_route_deletes_unexpected_file(tmp_path: Pa
     client = TestClient(app)
     response = client.post(
         "/api/disclosures/html/download/inspect-folder",
-        json={
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "delete_confirmed": True,
-            "delete_confirmation_text": "확인했습니다.",
-        },
+        json=_external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            delete_confirmed=True,
+            delete_confirmation_text="확인했습니다.",
+        ),
     )
 
     assert response.status_code == 200
@@ -424,11 +435,12 @@ def test_html_download_inspect_folder_route_dry_run_reports_unexpected_file(tmp_
     client = TestClient(app)
     response = client.post(
         "/api/disclosures/html/download/inspect-folder",
-        json={
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "dry_run": True,
-        },
+        json=_external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            dry_run=True,
+        ),
     )
 
     assert response.status_code == 200
@@ -449,15 +461,16 @@ def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path
     client = TestClient(app)
     response = client.post(
         "/api/disclosures/html/download/check-existing",
-        json={
-            "output_directory": str(output_directory),
-            "json": {
+        json=_external_workspace_body(
+            tmp_path,
+            {
                 "disclosures": [
                     {"acpt_no": "20250101000001"},
                     {"acpt_no": "20250101000002"},
                 ]
             },
-        },
+            output_directory=str(output_directory),
+        ),
     )
 
     assert response.status_code == 200
@@ -647,15 +660,18 @@ def test_html_content_download_check_existing_route_finds_yearly_output(
     assert payload["existing_target_html_count"] == 1
 
 
-def test_html_download_inspect_folder_route_rejects_high_risk_directory() -> None:
+def test_html_download_inspect_folder_route_rejects_high_risk_directory(
+    tmp_path: Path,
+) -> None:
     client = TestClient(app)
     response = client.post(
         "/api/disclosures/html/download/inspect-folder",
-        json={
-            "output_directory": str(Path(Path.cwd().anchor).resolve()),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "dry_run": True,
-        },
+        json=_external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(Path(Path.cwd().anchor).resolve()),
+            dry_run=True,
+        ),
     )
 
     assert response.status_code == 400

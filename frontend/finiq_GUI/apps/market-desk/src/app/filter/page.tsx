@@ -21,7 +21,6 @@ import {
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 
-const TRANSFER_STORAGE_KEY = "finiq.kind.filteredDisclosures";
 const PAGE_SIZE = 20;
 
 type FilterResult = {
@@ -125,12 +124,6 @@ export default function FilterPage() {
         if (useSeparateOutputDirectory) {
           void saveSetting("html_transfer_directory", transferPath);
         }
-        sessionStorage.setItem(TRANSFER_STORAGE_KEY, JSON.stringify({
-          source_json_path: transferPath,
-          acpt_numbers: Number(payload.html_download_transfer?.acpt_numbers || 0),
-        }));
-      } else {
-        sessionStorage.removeItem(TRANSFER_STORAGE_KEY);
       }
       const saved = transferPath ? `접수번호 ${formatInteger(payload.html_download_transfer?.acpt_numbers)}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
       appendStatus(`매칭 ${formatInteger(payload.summary?.matched_disclosures)}건 중 ${formatInteger(payload.summary?.returned_disclosures)}건을 표시했고, ${saved}`, !transferPath);
