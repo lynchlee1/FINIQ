@@ -27,6 +27,9 @@ from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
     load_company_index_payload,
 )
+from finiq.market_desk.web.features.market_data.service_records import (
+    _progress_interval,
+)
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
@@ -995,6 +998,20 @@ def test_filter_disclosures_payload_deduplicates_by_acpt_no(tmp_path: Path) -> N
     assert [disclosure["acpt_no"] for disclosure in filtered_payload["disclosures"]] == ["3", "2", "1"]
     assert filtered_payload["unique_titles"] == ["주주총회소집결의", "기타 주요경영사항", "[정정]전환사채발행결정"]
     assert filtered_payload["html_download_acpt_numbers"] == ["3", "2", "1"]
+
+
+def test_filter_disclosures_payload_rejects_missing_acpt_no(tmp_path: Path) -> None:
+    payload = _classification_fixture_payload()
+    payload["companies"][0]["disclosures"][0].pop("acpt_no")
+    fixture_path = _write_classification_fixture(tmp_path, payload)
+
+    with pytest.raises(ValueError, match="acpt_no is required"):
+        filter_disclosures_payload({"classification_path": str(fixture_path)})
+
+
+def test_filter_disclosures_progress_interval_defaults_to_1000() -> None:
+    assert _progress_interval(None) == 1000
+    assert _progress_interval("invalid") == 1000
 
 
 def test_filter_disclosures_payload_supports_title_boolean_expression(tmp_path: Path) -> None:

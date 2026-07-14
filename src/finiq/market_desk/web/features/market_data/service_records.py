@@ -19,9 +19,9 @@ def _resolve_filter_workers(value: object, item_count: int | None) -> int:
 
 def _progress_interval(value: object) -> int:
     try:
-        return min(max(int(value or 100), 1), 10000)
+        return min(max(int(value or 1000), 1), 10000)
     except (TypeError, ValueError):
-        return 100
+        return 1000
 
 
 def _emit_progress(
@@ -33,7 +33,7 @@ def _emit_progress(
     total: int,
     records: int,
     force: bool = False,
-    progress_interval: int = 100,
+    progress_interval: int = 1000,
 ) -> None:
     if progress_callback is None or total <= 0:
         return
@@ -54,7 +54,7 @@ def _iter_disclosure_records(
     classification_payload: dict[str, Any],
     *,
     progress_callback: ProgressCallback | None = None,
-    progress_interval: int = 100,
+    progress_interval: int = 1000,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     companies = list(classification_payload.get("companies") or [])
@@ -98,27 +98,23 @@ def _record_sort_key(record: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def _disclosure_dedup_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
-    acpt_no = str(record.get("acpt_no") or record.get("acptno") or "").strip()
-    if acpt_no:
-        return (acpt_no, "", "", "")
-    return (
-        "",
-        str(record.get("company_id") or "").strip(),
-        str(record.get("disclosed_at") or "").strip(),
-        str(record.get("title") or "").strip(),
-    )
+    acpt_no = str(record.get("__filter_acpt_no") or "").strip()
+    if not acpt_no:
+        raise ValueError("acpt_no is required for every disclosure")
+    return (acpt_no, "", "", "")
 
 
 def _prepare_filter_record(record: dict[str, Any]) -> dict[str, Any]:
     prepared = dict(record)
+    acpt_no = str(prepared.get("acpt_no") or "").strip()
+    if not acpt_no:
+        raise ValueError("acpt_no is required for every disclosure")
     disclosed_at = str(prepared.get("disclosed_at") or "")
     title = str(prepared.get("title") or "")
     company_name = str(prepared.get("company_name") or "")
     submitter = str(prepared.get("submitter") or "")
     prepared["__filter_disclosed_date"] = disclosed_at.strip().split(" ", 1)[0]
-    prepared["__filter_acpt_no"] = str(
-        prepared.get("acpt_no") or prepared.get("acptno") or ""
-    ).strip()
+    prepared["__filter_acpt_no"] = acpt_no
     prepared["__filter_title_cf"] = title.casefold()
     prepared["__filter_company_cf"] = company_name.casefold()
     prepared["__filter_submitter_cf"] = submitter.casefold()

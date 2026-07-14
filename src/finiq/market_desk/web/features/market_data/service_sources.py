@@ -436,7 +436,7 @@ def _iter_source_disclosure_records(
     root_directory: str | Path,
     *,
     progress_callback: ProgressCallback | None = None,
-    progress_interval: int = 100,
+    progress_interval: int = 1000,
     workers: int | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     root = Path(root_directory).expanduser().resolve()

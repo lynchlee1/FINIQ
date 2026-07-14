@@ -65,7 +65,7 @@ export default function FilterPage() {
   const [limitUnlimited, setLimitUnlimited] = useState(true);
   const [limit, setLimit] = useState("1000");
   const [filterWorkers, setFilterWorkers] = useState("1");
-  const [progressInterval, setProgressInterval] = useState("100");
+  const [progressInterval, setProgressInterval] = useState("1000");
   const [result, setResult] = useState<FilterResult | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
 
@@ -105,7 +105,7 @@ export default function FilterPage() {
     return_limit: Number(limit || 1000),
     include_html_download_acpt_numbers: true,
     filter_workers: Number(filterWorkers || parallelWorkerCount || 1),
-    progress_interval: Number(progressInterval || 100),
+    progress_interval: Number(progressInterval || 1000),
   });
 
   const handleFilter = async () => {

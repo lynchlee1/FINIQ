@@ -216,6 +216,14 @@ test("disclosure filter workspace picker selects a folder", async () => {
   assert.doesNotMatch(workspacePicker, /mode="save"/);
 });
 
+test("disclosure filter defaults processing, return, and progress counts to 1000", async () => {
+  const source = await readFile(filterPagePath, "utf8");
+
+  assert.match(source, /const \[limit, setLimit\] = useState\("1000"\)/);
+  assert.match(source, /const \[progressInterval, setProgressInterval\] = useState\("1000"\)/);
+  assert.match(source, /progress_interval: Number\(progressInterval \|\| 1000\)/);
+});
+
 test("disclosure filter loads saved JSON filters and auto-applies selected presets", async () => {
   const source = await readFile(filterPagePath, "utf8");
   const conditionCardSource = await readFile(disclosureConditionCardPath, "utf8");
