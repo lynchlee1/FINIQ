@@ -1622,7 +1622,7 @@ def _run_stage(
             if targets:
                 download_result = download_disclosure_html_payload(
                     {
-                        "source_json_path": str(filtered_path),
+                        "data_root": str(root),
                         "output_directory": str(temporary),
                         "skip_existing": True,
                         "timeout": execution["timeout"],

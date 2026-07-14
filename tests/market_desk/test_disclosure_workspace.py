@@ -179,11 +179,15 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
         "download",
         {
             "data_root": str(workspace.root),
+            "json": {"disclosures": []},
+            "payload": {"disclosures": []},
             "source_json_path": str(explicit / "filtered.json"),
             "output_directory": str(explicit / "external"),
         },
     )
-    assert external["source_json_path"] == str(explicit / "filtered.json")
+    assert "json" not in external
+    assert "payload" not in external
+    assert "source_json_path" not in external
     assert external["output_directory"] == str(explicit / "external")
 
     compressed = apply_workspace_defaults(
@@ -308,7 +312,6 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
         "sqlite_output_directory": str(data_root / "02-table"),
         "sqlite_manifest_path": str(data_root / "02-table"),
         "html_transfer_directory": str(data_root / "03-filter" / "filtered.json"),
-        "html_download_source_path": str(data_root / "03-filter" / "filtered.json"),
         "html_output_directory": str(data_root / "04-external"),
         "html_external_compress_input_directory": str(data_root / "04-external"),
         "html_external_compress_output_directory": str(data_root / "04-external"),

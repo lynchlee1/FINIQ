@@ -973,7 +973,11 @@ def test_stage_four_replaces_active_membership_without_stale_html(
         )
 
     def fake_download(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
-        source = json.loads(Path(str(body["source_json_path"])).read_text("utf-8"))
+        source = json.loads(
+            (Path(str(body["data_root"])) / "03-filter" / "filtered.json").read_text(
+                "utf-8"
+            )
+        )
         output = Path(str(body["output_directory"]))
         acpt_numbers = [record["acpt_no"] for record in source["disclosures"]]
         for acpt_no in acpt_numbers:

@@ -24,6 +24,16 @@ def _valid_html(label: str = "valid") -> str:
     return f"<html><body>{label * 30}</body></html>"
 
 
+def _external_workspace_body(
+    tmp_path: Path, source_json: dict, **body: object
+) -> dict[str, object]:
+    data_root = tmp_path / "workspace"
+    filtered_path = data_root / "03-filter" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True, exist_ok=True)
+    filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
+    return {"data_root": str(data_root), **body}
+
+
 def test_external_html_resume_redownloads_invalid_existing_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -33,10 +43,11 @@ def test_external_html_resume_redownloads_invalid_existing_target(
     target.write_text("broken", encoding="utf-8")
 
     inspection = check_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+        )
     )
     assert inspection["existing_target_html_count"] == 0
     assert inspection["missing_target_html_count"] == 1
@@ -54,11 +65,12 @@ def test_external_html_resume_redownloads_invalid_existing_target(
     )
 
     result = download_disclosure_html_payload(
-        {
-            "output_directory": str(output_directory),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-            "skip_existing": True,
-        }
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            skip_existing=True,
+        )
     )
 
     assert result["saved_count"] == 1
@@ -93,10 +105,11 @@ def test_download_payload_reports_parent_cancellation(
     )
 
     result = download_disclosure_html_payload(
-        {
-            "output_directory": str(tmp_path / "external"),
-            "json": {"disclosures": [{"acpt_no": "20250101000001"}]},
-        },
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(tmp_path / "external"),
+        ),
         cancel_check=lambda: True,
     )
 
