@@ -104,17 +104,6 @@ function sheetStatusLabel(status: string | undefined): string {
   return "-";
 }
 
-function fileNameFromPath(value: string | undefined): string {
-  return String(value || "").split(/[\\/]/).filter(Boolean).pop() || "";
-}
-
-function accountNameFromParquetFile(fileName: string): string {
-  const stem = String(fileName || "").replace(/\.parquet$/i, "");
-  const match = stem.match(/^(?<account>.+)_\d{8}_\d{8}(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?$/);
-  if (match?.groups?.account) return match.groups.account;
-  return stem;
-}
-
 type OutputSortKey = "account_id" | "account_name" | "rows" | "columns" | "missing_ratio" | "non_null_cells" | "total_cells" | "date_start" | "date_end" | "sha256";
 type SortDirection = "asc" | "desc";
 
@@ -132,74 +121,42 @@ function outputSortValue(name: string, item: any, key: OutputSortKey): string | 
 }
 
 function outputRowsFromInfo(info: any): [string, any][] {
-  return mergeCandidateSourceRowsFromInfo(info);
+  return Object.entries(info?.outputs || {}) as [string, any][];
 }
 
-function outputFileNameFromRow(name: string, item: any): string {
-  const fallbackName = String(name || "");
-  return item?.output_file || fileNameFromPath(item?.path) || item?.file_name || (fallbackName.endsWith(".parquet") ? fallbackName : `${fallbackName}.parquet`);
+function outputFileNameFromRow(_name: string, item: any): string {
+  return String(item?.output_file || "");
 }
 
-function outputAccountNameFromRow(name: string, item: any): string {
-  return item?.account_name || accountNameFromParquetFile(outputFileNameFromRow(name, item));
+function outputAccountNameFromRow(_name: string, item: any): string {
+  return String(item?.account_name || "");
 }
 
-function formatCompactOutputDate(value: string | undefined): string {
-  return value && value.length === 8 ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : "";
+function outputDateStartText(_name: string, item: any): string {
+  return String(item?.date_start || "");
 }
 
-function outputDateStartText(name: string, item: any): string {
-  if (item?.date_start) return String(item.date_start);
-  const match = outputFileNameFromRow(name, item).match(/^.+_(\d{8})_\d{8}(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?\.parquet$/i);
-  return formatCompactOutputDate(match?.[1]);
+function outputDateEndText(_name: string, item: any): string {
+  return String(item?.date_end || "");
 }
 
-function outputDateEndText(name: string, item: any): string {
-  if (item?.date_end) return String(item.date_end);
-  const match = outputFileNameFromRow(name, item).match(/^.+_\d{8}_(\d{8})(?:_[0-9a-f]{64})?(?:(?:__|_)\d+)?\.parquet$/i);
-  return formatCompactOutputDate(match?.[1]);
-}
-
-function outputSha256Text(name: string, item: any): string {
-  const explicitValue = item?.companies_hash || item?.companiesHash || item?.sha256;
-  if (explicitValue) return String(explicitValue);
-  const match = outputFileNameFromRow(name, item).match(/_([0-9a-f]{64})(?:(?:__|_)\d+)?\.parquet$/i);
-  return match?.[1] || "";
+function outputSha256Text(_name: string, item: any): string {
+  return String(item?.companies_hash || "");
 }
 
 function formatOutputInteger(value: unknown): string {
   return value === undefined || value === null || value === "" ? "-" : formatInteger(value);
 }
 
-function mergeCandidateSourceRowsFromInfo(info: any): [string, any][] {
-  const rows: [string, any][] = [];
-  const seen = new Set<string>();
-  Object.entries(info?.outputs || {}).forEach(([name, item]: [string, any]) => {
-    const fileName = outputFileNameFromRow(name, item);
-    if (!fileName || seen.has(fileName)) return;
-    seen.add(fileName);
-    rows.push([name, item]);
-  });
-  (info?.parquet_files || []).forEach((fileName: string) => {
-    if (!fileName || seen.has(fileName)) return;
-    seen.add(fileName);
-    rows.push([fileName, { file_name: fileName }]);
-  });
-  return rows;
-}
-
 function mergeCandidateRowsFromInfo(info: any): [string, any][] {
-  const rows = mergeCandidateSourceRowsFromInfo(info);
+  const rows = outputRowsFromInfo(info);
   const counts: Record<string, number> = {};
-  rows.forEach(([name, item]) => {
-    const fileName = outputFileNameFromRow(name, item);
-    const accountName = accountNameFromParquetFile(fileName);
+  rows.forEach(([, item]) => {
+    const accountName = String(item?.account_name || "");
+    if (!accountName) return;
     counts[accountName] = (counts[accountName] || 0) + 1;
   });
-  return rows.filter(([name, item]) => {
-    const fileName = outputFileNameFromRow(name, item);
-    return (counts[accountNameFromParquetFile(fileName)] || 0) >= 2;
-  });
+  return rows.filter(([, item]) => (counts[String(item?.account_name || "")] || 0) >= 2);
 }
 
 function nextAccountId(mappings: AssetAccountMapping[]): string {
@@ -273,8 +230,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       setPreviewData(null);
       setParquetPayload(null);
       if (result?.output_directory) setOutputDirectory(result.output_directory);
-      const firstOutput = Object.values(result?.outputs || {}).find((item: any) => item?.output_file || item?.path) as any;
-      setSelectedParquetFile(firstOutput?.output_file || fileNameFromPath(firstOutput?.path));
+      const firstOutput = Object.values(result?.outputs || {}).find((item: any) => item?.output_file) as any;
+      setSelectedParquetFile(firstOutput?.output_file || "");
     },
   });
 
@@ -514,6 +471,15 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   };
   const sortedOutputRows = sortOutputRows(outputRows as [string, any][]);
   const sortedMergeBaseOutputRows = sortOutputRows(mergeBaseOutputRows as [string, any][]);
+  const mergeAccountByFile = useMemo(
+    () => Object.fromEntries(
+      mergeBaseOutputRows.map(([name, item]) => [
+        outputFileNameFromRow(name, item),
+        String(item?.account_name || ""),
+      ]),
+    ),
+    [mergeBaseOutputRows],
+  );
   useEffect(() => {
     if (!isMergeMode) return;
     const availableFiles = new Set(
@@ -545,18 +511,13 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           label: item?.account_name || fileName || name,
         };
       });
-      const existingOptions = (outputInfo?.parquet_files || []).map((fileName: string) => ({
-        key: fileName,
-        fileName,
-        label: fileName,
-      }));
-      return [...resultOptions, ...existingOptions].filter((item) => {
+      return resultOptions.filter((item) => {
         if (!item.fileName || !item.fileName.endsWith(".parquet") || seen.has(item.fileName)) return false;
         seen.add(item.fileName);
         return true;
       });
     },
-    [outputRows, outputInfo],
+    [outputRows],
   );
   const updatingAccountCount = useMemo(
     () => outputRows.filter(([, item]: [string, any]) => item?.will_update_existing).length,
@@ -617,11 +578,12 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const selectedMergeCountsByAccount = useMemo(() => {
     const counts: Record<string, number> = {};
     selectedMergeFiles.forEach((fileName) => {
-      const accountName = accountNameFromParquetFile(fileName);
+      const accountName = mergeAccountByFile[fileName];
+      if (!accountName) return;
       counts[accountName] = (counts[accountName] || 0) + 1;
     });
     return counts;
-  }, [selectedMergeFiles]);
+  }, [mergeAccountByFile, selectedMergeFiles]);
   const incompleteMergeGroups = useMemo(
     () => Object.entries(selectedMergeCountsByAccount).filter(([, count]) => count !== 2),
     [selectedMergeCountsByAccount],
@@ -635,8 +597,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const toggleMergeFile = (fileName: string, checked: boolean) => {
     setSelectedMergeFiles((current) => {
       const canAdd = (items: readonly string[], candidate: string) => {
-        const accountName = accountNameFromParquetFile(candidate);
-        const accountCount = items.filter((item) => accountNameFromParquetFile(item) === accountName).length;
+        const accountName = mergeAccountByFile[candidate];
+        const accountCount = items.filter((item) => mergeAccountByFile[item] === accountName).length;
         return accountCount < 2;
       };
       return applyFileSelection(current, fileName, checked, canAdd);
@@ -657,9 +619,9 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const selectableMergeFiles = useMemo(
     () => selectFirstTwoFilesPerAccount(
       sortedMergeBaseOutputRows.map(([name, item]: [string, any]) => outputFileNameFromRow(name, item)),
-      accountNameFromParquetFile,
+      (fileName) => mergeAccountByFile[fileName] || "",
     ),
-    [sortedMergeBaseOutputRows],
+    [mergeAccountByFile, sortedMergeBaseOutputRows],
   );
   const allMergeFilesSelected = selectableMergeFiles.length > 0
     && mergeSelectedCount === selectableMergeFiles.length
@@ -692,7 +654,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           {rows.map(([name, item]: [string, any]) => {
             const fileName = outputFileNameFromRow(name, item);
             const selected = selectedMergeFiles.includes(fileName);
-            const accountName = item?.account_name || accountNameFromParquetFile(fileName);
+            const accountName = String(item?.account_name || "");
             const disabled = selectable && !selected && (selectedMergeCountsByAccount[accountName] || 0) >= 2;
             return (
               <tr

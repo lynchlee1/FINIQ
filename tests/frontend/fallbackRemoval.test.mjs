@@ -57,6 +57,16 @@ test("asset Excel conversion has no filename-only resume mode", async () => {
   assert.doesNotMatch(typesSource, /resume_failed_only/);
 });
 
+test("asset Excel output rows use only backend-declared metadata", async () => {
+  const source = await readFile(`${root}/features/assets-excel/AssetExcelUtilityView.tsx`, "utf8");
+
+  assert.match(source, /Object\.entries\(info\?\.outputs \|\| \{\}\)/);
+  assert.match(source, /item\?\.companies_hash/);
+  assert.doesNotMatch(source, /info\?\.parquet_files/);
+  assert.doesNotMatch(source, /accountNameFromParquetFile|fileNameFromPath/);
+  assert.doesNotMatch(source, /match\(\/.+\\d\{8\}.+parquet/);
+});
+
 test("job API responses keep their declared payload contracts", async () => {
   const [clientSource, pollingSource, streamingSource, sectionSource, downloadSource] = await Promise.all([
     readFile(`${root}/api/client.ts`, "utf8"),

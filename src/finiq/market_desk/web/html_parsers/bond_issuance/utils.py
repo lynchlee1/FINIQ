@@ -10,7 +10,6 @@ from typing import Any
 from ..common import (
     build_base_record,
     clean_text,
-    last_int,
     last_value,
     row_containing,
     row_with_label,
@@ -66,9 +65,6 @@ class _BondRows:
     def last_labeled_value(self, label: str) -> str | None:
         row = self.with_label(label)
         return last_value(row) if len(row) > 1 else None
-
-    def last_int(self, *needles: str) -> int | None:
-        return last_int(self.containing(*needles))
 
 
 def _build_bond_parse_context(

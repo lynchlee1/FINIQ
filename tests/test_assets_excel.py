@@ -312,6 +312,9 @@ def test_convert_asset_excels_to_wide_parquet_by_account_name(tmp_path):
     assert volume_output["output_file"] == _expected_output_file("volume", "2020-01-01", "2020-01-02", ["A005930", "A000660"])
     assert stock_output["account_id"] == "S00001"
     assert stock_output["account_name"] == "close"
+    assert stock_output["companies_hash"] == hashlib.sha256(
+        b"A005930A000660"
+    ).hexdigest()
     assert stock_output["date_start"] == "2020-01-01"
     assert stock_output["date_end"] == "2020-01-02"
     assert (output_dir / stock_output["output_file"]).exists()
@@ -962,6 +965,9 @@ def test_merge_asset_parquet_outputs_combines_generated_parquet(tmp_path):
     assert payload["accounts_processed"] == 1
     assert merged_file.name == expected_merged_file
     assert payload["accounts"]["close"]["output_file"] == expected_merged_file
+    assert payload["accounts"]["close"]["companies_hash"] == hashlib.sha256(
+        b"A005930A000660"
+    ).hexdigest()
     assert stock_price["date"].astype(str).tolist() == ["2020-01-03", "2020-01-04"]
     assert stock_price.columns.tolist() == ["date", "A005930", "A000660"]
     mapping = pd.read_parquet(merged_output / "code_name_mapping.parquet")
@@ -985,6 +991,9 @@ def test_inspect_parquet_output_reads_footer_metadata(tmp_path):
 
     assert row["account_id"] == "S00001"
     assert row["account_name"] == "close"
+    assert row["companies_hash"] == hashlib.sha256(
+        b"A005930A000660"
+    ).hexdigest()
     assert row["rows"] == 2
     assert row["columns"] == 2
     assert row["quality"]["missing_ratio"] == 0.25
@@ -1831,6 +1840,11 @@ def test_inspect_asset_excel_conversion_reports_mapping_and_existing_output(tmp_
     assert preview["sheets"][0]["status"] == "mapped"
     preview_output = _output_for_sheet(preview, "종가")
     assert preview_output["will_update_existing"] is False
+    assert preview_output["date_start"] == "2020-01-01"
+    assert preview_output["date_end"] == "2020-01-01"
+    assert preview_output["companies_hash"] == hashlib.sha256(
+        b"A005930A000660"
+    ).hexdigest()
     assert "sample_rows" not in preview_output["quality"]
     assert preview["code_name_mapping"]["rows"] == 2
     assert output["code_name_mapping_exists"] is True

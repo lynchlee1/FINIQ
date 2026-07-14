@@ -344,11 +344,15 @@ def _read_account_footer_metadata(path: Path) -> dict[str, str]:
 
 def _account_output_payload(path: Path) -> dict[str, Any]:
     metadata = _read_account_footer_metadata(path)
+    company_columns = [
+        name for name in pq.ParquetFile(path).schema_arrow.names if name != "date"
+    ]
     return {
         "path": str(path),
         "output_file": path.name,
         "account_id": metadata["account_id"],
         "account_name": metadata["account_name"],
+        "companies_hash": _company_list_hash(company_columns),
         "rows": int(metadata["rows"]),
         "columns": int(metadata["columns"]),
         "date_start": metadata["date_start"],
@@ -1295,6 +1299,7 @@ def _scan_asset_excel_frames(
                 "sheet_name": sheet_name,
                 "account_name": account_name,
                 "account_id": account_mapping["account_id"],
+                "companies_hash": _company_list_hash(frame.columns),
                 "output_stem": output_stem,
                 "date_start": date_start,
                 "date_end": date_end,
@@ -1483,6 +1488,7 @@ def _scan_and_write_asset_excel_parquet(
                 "sheet_name": sheet_name,
                 "account_name": account_name,
                 "account_id": account_mapping["account_id"],
+                "companies_hash": _company_list_hash(frame.columns),
                 "output_stem": output_stem,
                 "date_start": date_start,
                 "date_end": date_end,
@@ -1609,6 +1615,7 @@ def _scan_and_write_asset_excel_parquet(
             "output_file": final_path.name,
             "account_id": source_info.get("account_id", ""),
             "account_name": source_info.get("account_name", ""),
+            "companies_hash": source_info.get("companies_hash", ""),
             "rows": source_info.get("rows", 0),
             "columns": source_info.get("columns", 0),
             "date_start": source_info.get("date_start", ""),
@@ -1820,6 +1827,7 @@ def merge_asset_parquet_outputs(
                 "output_file": parquet_path.name,
                 "account_id": account_id,
                 "account_name": account_name,
+                "companies_hash": _company_list_hash(merged.columns),
                 "rows": len(merged),
                 "columns": len(merged.columns),
                 "date_start": date_start,
@@ -1880,8 +1888,11 @@ def inspect_asset_excel_conversion(
             "output_file": f"{output_stem}.parquet",
             "account_id": source_info.get("account_id", ""),
             "account_name": source_info.get("account_name", ""),
+            "companies_hash": _company_list_hash(frame.columns),
             "rows": len(frame),
             "columns": len(frame.columns),
+            "date_start": source_info.get("date_start", ""),
+            "date_end": source_info.get("date_end", ""),
             "source_count": 1,
             "will_update_existing": False,
             "quality": _account_quality_payload(frame),

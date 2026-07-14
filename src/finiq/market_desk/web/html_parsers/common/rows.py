@@ -25,9 +25,15 @@ def row_containing(rows: list[list[str]], *needles: str) -> list[str]:
 
 
 def normalize_label(value: str) -> str:
-    """공백을 제거한 뒤 맨 앞의 한 단계 또는 두 단계 번호를 제거한다."""
+    """공백을 제거한 뒤 맨 앞의 한 단계 또는 두 단계 숫자·로마자 번호를 제거한다."""
     compact_value = value.replace(" ", "")
-    return re.sub(r"^\d+(?:-\d+)?\.", "", compact_value)
+    number = r"(?:\d+|[ivxlcdm]+|[\u2160-\u217f]+)"
+    return re.sub(
+        rf"^{number}(?:-{number})?\.",
+        "",
+        compact_value,
+        flags=re.IGNORECASE,
+    )
 
 
 def row_with_label(rows: list[list[str]], label: str) -> list[str]:

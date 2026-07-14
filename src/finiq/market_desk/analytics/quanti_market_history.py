@@ -70,7 +70,7 @@ def market_value_map_from_registry(
         raise ValueError(msg)
     values = meta.get("values")
     if values is None:
-        return dict(DEFAULT_MARKET_VALUE_MAP)
+        return {}
     if not isinstance(values, dict):
         msg = f"registry values for {item_code} must be an object"
         raise ValueError(msg)
