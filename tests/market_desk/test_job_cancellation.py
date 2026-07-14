@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 
 from finiq.market_desk.web.app import app, _run_job_worker
 from finiq.market_desk.web.jobs import job_manager
-from finiq.data.assets_excel import convert_asset_excels_to_wide_parquet
+from finiq.data.assets_excel import (
+    convert_asset_excels_to_wide_parquet,
+    default_account_mappings,
+)
 
 def test_job_manager_cancel_and_is_cancelled():
     job_id = "test-job-1"
@@ -103,6 +106,7 @@ def test_assets_excel_cancel_callback_abort(tmp_path):
         convert_asset_excels_to_wide_parquet(
             source_directory=source_dir,
             output_directory=output_dir,
+            account_mappings=default_account_mappings(),
             cancel_check=cancel_check,
         )
 
