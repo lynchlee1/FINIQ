@@ -137,8 +137,10 @@ def build_insight_payload(
     inferred_stock_code = infer_stock_code(
         company.get("company_id") or company_meta.get("company_id")
     )
-    stock_code = str(stock_code_override or inferred_stock_code or "").strip()
-    if stock_code and (not stock_code.isdigit() or len(stock_code) != 6):
+    stock_code = str(stock_code_override or "").strip()
+    if not stock_code:
+        raise ValueError("종목코드를 입력해야 합니다.")
+    if not stock_code.isdigit() or len(stock_code) != 6:
         raise ValueError("종목코드는 숫자 6자리여야 합니다.")
 
     disclosure_frame = prepare_disclosure_dataframe(company)
@@ -180,20 +182,17 @@ def build_insight_payload(
     disclosure_points = pd.DataFrame()
     visible_range_end = range_end
 
-    if stock_code:
-        try:
-            price_rows = _load_price_rows(
-                stock_code,
-                range_start=range_start,
-                range_end=extended_price_end,
-                price_source=price_source,
-                quanti_dir=quanti_dir,
-            )
-            price_frame = prepare_price_dataframe(price_rows)
-        except Exception as exc:  # pragma: no cover - network/runtime edge
-            messages.append(f"주가 데이터를 불러오지 못했습니다: {exc}")
-    else:
-        messages.append("자동 종목코드를 찾지 못해 차트를 표시하지 않았습니다.")
+    try:
+        price_rows = _load_price_rows(
+            stock_code,
+            range_start=range_start,
+            range_end=extended_price_end,
+            price_source=price_source,
+            quanti_dir=quanti_dir,
+        )
+        price_frame = prepare_price_dataframe(price_rows)
+    except Exception as exc:  # pragma: no cover - network/runtime edge
+        messages.append(f"주가 데이터를 불러오지 못했습니다: {exc}")
 
     if not price_frame.empty:
         display_frequency = _resolve_display_frequency(

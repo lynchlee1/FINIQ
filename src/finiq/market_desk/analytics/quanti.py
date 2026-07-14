@@ -38,7 +38,9 @@ def _find_column(schema_names: list[str], stock_code: str) -> str | None:
     return None
 
 
-def list_quanti_stock_codes(quanti_dir: str | Path = "resources/database/by_item") -> list[str]:
+def list_quanti_stock_codes(
+    quanti_dir: str | Path = "resources/database/00-stock/by_item",
+) -> list[str]:
     """Return all 6-digit stock codes available in the Quanti dataset."""
     quanti_path = _resolve_quanti_dir(quanti_dir)
     probe_code = next(iter(_ITEM_MAP))
@@ -62,7 +64,7 @@ def fetch_quanti_ohlcv(
     *,
     start_date: date,
     end_date: date,
-    quanti_dir: str | Path = "resources/database/by_item",
+    quanti_dir: str | Path = "resources/database/00-stock/by_item",
 ) -> list[dict[str, Any]]:
     """Return adjusted OHLCV + VWAP rows from Quanti parquet files.
 

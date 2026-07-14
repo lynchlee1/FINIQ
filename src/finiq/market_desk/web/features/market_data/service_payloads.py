@@ -34,7 +34,7 @@ def filter_disclosures_payload(
         if classification_path
         else None
     )
-    if sqlite_manifest_path is None and root_directory:
+    if sqlite_manifest_path is None and not classification_path and root_directory:
         sqlite_manifest_path = _resolve_sqlite_manifest_path(root_directory)
     source_kind = (
         "sqlite_manifest"

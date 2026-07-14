@@ -111,6 +111,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     if (res.summary?.compressed_files !== undefined) {
       lines.push(`외부 HTML 압축: ${formatInteger(res.summary.compressed_files)}`);
       lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
+      if (res.metadata_check) {
+        lines.push(`metadata 확인: ${formatInteger(res.metadata_check.matched_records)}/${formatInteger(res.metadata_check.expected_records)}`);
+        lines.push(`metadata 누락: ${formatInteger(res.metadata_check.missing_records)}`);
+      }
+      if (Array.isArray(res.warnings)) {
+        lines.push(...res.warnings.map((warning: unknown) => `경고: ${String(warning)}`));
+      }
       if (res.verification) {
         lines.push(`재검사: ${res.verification.passed ? "통과" : "누락/불일치 있음"}`);
         lines.push(`재검사 기록: ${formatInteger(res.verification.verified_records)}/${formatInteger(res.verification.expected_records)}`);

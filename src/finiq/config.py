@@ -28,7 +28,8 @@ RESOURCES_DIR = PROJECT_ROOT / "resources"
 QUANTIWISE_EXCEL_DIR = RESOURCES_DIR / "Quantiwise"
 KIND_DATA_DIR = RESOURCES_DIR / "kind"
 DATABASE_DIR = RESOURCES_DIR / "database"
-QUANTI_DIR = DATABASE_DIR / "by_item"
+STOCK_DATA_DIR = DATABASE_DIR / "00-stock"
+QUANTI_DIR = STOCK_DATA_DIR / "by_item"
 _DISCLOSURE_MODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 SAVED_SETTINGS_KEYS = (
@@ -243,7 +244,7 @@ def init_config() -> AppConfig:
         output_root=output_root,
         quanti_dir=quanti_dir,
         settings_path=str(settings_path),
-        price_root_directory=settings.get("price_root_directory", str(KIND_DATA_DIR / "price")),
+        price_root_directory=settings.get("price_root_directory", str(STOCK_DATA_DIR)),
         selected_classification_path=settings.get("selected_classification_path", str(KIND_DATA_DIR / "classification" / "all_companies.json")),
         sqlite_source_path=disclosure_path("sqlite_source_path"),
         download_output_directory=disclosure_path("download_output_directory"),
