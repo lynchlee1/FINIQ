@@ -6,6 +6,9 @@ const htmlSectionSplitPath = "frontend/finiq_GUI/apps/market-desk/src/app/html-s
 const tablePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/table/page.tsx";
 const htmlWorkflowTemplatePath = "frontend/finiq_GUI/apps/market-desk/src/components/html-workflow/HtmlWorkflowTemplate.tsx";
 const filterPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/filter/page.tsx";
+const htmlParsePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx";
+const disclosureAutomationPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/disclosure-automation/page.tsx";
+const disclosureConditionPresetsPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureConditionPresets.ts";
 const disclosureConditionCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureConditionFilterCard.tsx";
 const utilityPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/utility/page.tsx";
 const assetsExcelViewPath = "frontend/finiq_GUI/apps/market-desk/src/features/assets-excel/AssetExcelUtilityView.tsx";
@@ -219,6 +222,18 @@ test("disclosure filter workspace picker selects a folder", async () => {
   assert.doesNotMatch(workspacePicker, /mode="save"/);
 });
 
+test("disclosure filter requires a parser mode for mode-folder output", async () => {
+  const source = await readFile(filterPagePath, "utf8");
+
+  assert.match(source, /const \[mode, setMode\] = useState\(""\)/);
+  assert.match(source, /mode,\s*\.\.\.\(useSeparateOutputDirectory/);
+  assert.match(source, /if \(!mode\) \{[\s\S]*?파싱 모드를 선택하세요/);
+  assert.match(source, /\{ key: "bond_issuance", label: "사채발행파싱" \}/);
+  assert.match(source, /\{ key: "rights_issuance", label: "유무상증자파싱" \}/);
+  assert.match(source, /\{ key: "shareholder_meeting", label: "주주총회파싱" \}/);
+  assert.match(source, /saveSetting\("html_parse_mode", event\.target\.value\)/);
+});
+
 test("disclosure filter defaults processing, return, and progress counts to 1000", async () => {
   const source = await readFile(filterPagePath, "utf8");
 
@@ -241,6 +256,30 @@ test("disclosure filter loads saved JSON filters and auto-applies selected prese
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
   assert.doesNotMatch(source, /<Label className="dark:text-slate-300">필터 결과 JSON<\/Label>/);
   assert.doesNotMatch(source, /onClick=\{loadPreset\} disabled=\{!selectedPreset\}>불러오기/);
+});
+
+test("disclosure condition presets use only the workspace JSON store", async () => {
+  const sources = await Promise.all([
+    readFile(filterPagePath, "utf8"),
+    readFile(htmlParsePagePath, "utf8"),
+    readFile(disclosureAutomationPagePath, "utf8"),
+  ]);
+
+  for (const source of sources) {
+    assert.match(source, /listDisclosureConditionPresets/);
+    assert.match(source, /saveDisclosureConditionPreset/);
+    assert.match(source, /renameDisclosureConditionPreset/);
+    assert.match(source, /deleteDisclosureConditionPreset/);
+    assert.doesNotMatch(source, /condition_presets/);
+    assert.doesNotMatch(source, /saveSetting\("condition_presets"/);
+  }
+
+  const storeSource = await readFile(disclosureConditionPresetsPath, "utf8");
+  assert.match(storeSource, /const endpoint = "\/api\/disclosures\/filter\/presets"/);
+  assert.match(storeSource, /data_root: dataRoot, action: "list"/);
+  assert.match(storeSource, /data_root: dataRoot, action: "save", preset/);
+  assert.match(storeSource, /action: "rename"/);
+  assert.match(storeSource, /action: "delete"/);
 });
 
 test("graph card typography follows standard card sizing", async () => {

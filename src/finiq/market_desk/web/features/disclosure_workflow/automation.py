@@ -75,6 +75,7 @@ from .layout import (
     atomic_write_json,
     prepare_disclosure_workspace_payload,
     resolve_disclosure_workspace,
+    validate_workspace_mode,
 )
 
 
@@ -228,7 +229,11 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(execution, dict):
         raise ValueError("execution must be an object")
     parser_mode = str(execution.get("parser_mode") or "bond_issuance").strip()
-    if parser_mode not in {"bond_issuance", "rights_issuance"}:
+    if parser_mode not in {
+        "bond_issuance",
+        "rights_issuance",
+        "shareholder_meeting",
+    }:
         raise ValueError("unsupported parser_mode")
 
     return {
@@ -305,7 +310,7 @@ def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
     paths = {
         1: [root / "01-list" / ".automation-windows"],
         2: [root / "02-table"],
-        3: [root / "03-filter" / "filtered.json"],
+        3: [root / "03-filter" / mode / "filtered.json"],
         4: [
             root / "04-external" / "compressed-external-html.json",
             root / "04-external" / ".automation-current",
@@ -559,6 +564,15 @@ def _table_manifest(profile: dict[str, Any]) -> Path:
     return path
 
 
+def _filter_result_path(profile: dict[str, Any]) -> Path:
+    return (
+        Path(profile["data_root"])
+        / "03-filter"
+        / profile["execution"]["parser_mode"]
+        / "filtered.json"
+    )
+
+
 def _filter_signature(payload: dict[str, Any]) -> str:
     filters = dict(payload.get("filters") or {})
     filters.pop("filter_workers", None)
@@ -667,14 +681,14 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
-    root = Path(profile["data_root"])
-    output_path = root / "03-filter" / "filtered.json"
+    output_path = _filter_result_path(profile)
     actual = _read_json_object(output_path)
     if actual is None:
         return _inspection_failure(3, reason="필터 결과 JSON이 없거나 손상되었습니다.")
     expected = filter_disclosures_payload(
         {
             "classification_path": str(_table_manifest(profile)),
+            "mode": profile["execution"]["parser_mode"],
             "filter_blocks": profile["decisions"]["s3_selection"]["filter_blocks"],
             "include_html_download_acpt_numbers": True,
             "filter_workers": profile["execution"]["local_workers"],
@@ -698,10 +712,10 @@ def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
 
 def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
-    filtered_path = root / "03-filter" / "filtered.json"
     output_directory = root / "04-external"
-    filtered = _read_json_object(filtered_path) or {}
-    expected_acpt_numbers = list(filtered.get("html_download_acpt_numbers") or [])
+    expected_acpt_numbers = [
+        acpt_no for acpt_no, _year in _active_workspace_disclosure_targets(root)
+    ]
     if not expected_acpt_numbers:
         compressed = _read_json_object(
             output_directory / "compressed-external-html.json"
@@ -734,7 +748,7 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
         )
     checked = check_disclosure_html_output_directory_payload(
         {
-            "source_json_path": str(filtered_path),
+            "data_root": str(root),
             "output_directory": str(output_directory),
         }
     )
@@ -904,7 +918,7 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
                 "mode": mode,
                 "input_directory": str(input_directory),
                 "output_directory": temporary,
-                "filtered_metadata_path": str(root / "03-filter" / "filtered.json"),
+                "filtered_metadata_path": str(_filter_result_path(profile)),
                 "compressed_metadata_path": str(
                     root / "04-external" / "compressed-external-html.json"
                 ),
@@ -1462,6 +1476,22 @@ def _active_disclosure_targets(filtered_path: Path) -> list[tuple[str, str]]:
     return targets
 
 
+def _active_workspace_disclosure_targets(root: Path) -> list[tuple[str, str]]:
+    targets: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    filtered_paths = sorted((root / "03-filter").glob("*/filtered.json"))
+    if not filtered_paths:
+        raise ValueError("필터 mode 폴더의 filtered.json을 찾을 수 없습니다.")
+    for filtered_path in filtered_paths:
+        validate_workspace_mode(filtered_path.parent.name)
+        for acpt_no, year in _active_disclosure_targets(filtered_path):
+            if acpt_no in seen:
+                continue
+            seen.add(acpt_no)
+            targets.append((acpt_no, year))
+    return targets
+
+
 def _copy_reusable_active_html(
     current: Path, temporary: Path, targets: list[tuple[str, str]]
 ) -> int:
@@ -1485,9 +1515,7 @@ def _copy_reusable_active_html(
 def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
     try:
         root = Path(profile["data_root"])
-        expected_targets = _active_disclosure_targets(
-            root / "03-filter" / "filtered.json"
-        )
+        expected_targets = _active_workspace_disclosure_targets(root)
         expected_membership = set(expected_targets)
         current = (
             root
@@ -1697,9 +1725,11 @@ def _run_stage(
             cancel_check=cancel_check,
         )
     if stage == 3:
+        mode = execution["parser_mode"]
         result = filter_disclosures_payload(
             {
                 "classification_path": str(root / "02-table"),
+                "mode": mode,
                 "filter_blocks": profile["decisions"]["s3_selection"]["filter_blocks"],
                 "include_html_download_acpt_numbers": True,
                 "filter_workers": execution["local_workers"],
@@ -1708,11 +1738,11 @@ def _run_stage(
             progress_callback=progress_callback,
             cancel_check=cancel_check,
         )
-        atomic_write_json(root / "03-filter" / "filtered.json", result)
+        result["mode"] = mode
+        atomic_write_json(root / "03-filter" / mode / "filtered.json", result)
         return result
     if stage == 4:
-        filtered_path = root / "03-filter" / "filtered.json"
-        targets = _active_disclosure_targets(filtered_path)
+        targets = _active_workspace_disclosure_targets(root)
         current = root / "04-external" / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
         compressed_path = root / "04-external" / "compressed-external-html.json"
@@ -1817,8 +1847,7 @@ def _run_stage(
             if temporary.exists():
                 shutil.rmtree(temporary)
     if stage == 5:
-        filtered_path = root / "03-filter" / "filtered.json"
-        targets = _active_disclosure_targets(filtered_path)
+        targets = _active_workspace_disclosure_targets(root)
         current = root / "05-internal" / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
         try:
@@ -1944,7 +1973,7 @@ def _run_stage(
                 "mode": mode,
                 "input_directory": str(root / "06-sections" / ".automation-current"),
                 "output_directory": str(root / "07-converted" / mode),
-                "filtered_metadata_path": str(root / "03-filter" / "filtered.json"),
+                "filtered_metadata_path": str(_filter_result_path(profile)),
                 "compressed_metadata_path": str(
                     root / "04-external" / "compressed-external-html.json"
                 ),

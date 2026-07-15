@@ -334,7 +334,7 @@ def _external_workspace_body(
     tmp_path: Path, source_json: dict[str, Any], **body: object
 ) -> dict[str, object]:
     data_root = tmp_path / "workspace"
-    filtered_path = data_root / "03-filter" / "filtered.json"
+    filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
     filtered_path.write_text(
         json.dumps(source_json, ensure_ascii=False), encoding="utf-8"
@@ -1740,13 +1740,48 @@ def test_write_disclosure_html_manifest_payload_from_workspace_filtered_json(
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert payload["requested_count"] == 2
     assert manifest["source_json_path"] == str(
-        tmp_path / "workspace" / "03-filter" / "filtered.json"
+        tmp_path
+        / "workspace"
+        / "03-filter"
+        / "bond_issuance"
+        / "filtered.json"
     )
     assert [item["acpt_no"] for item in manifest["disclosures"]] == [
         "20250101000001",
         "20250101000002",
     ]
     assert manifest["disclosures"][0]["market"] == "코스닥"
+
+
+def test_write_disclosure_html_manifest_payload_combines_mode_filter_folders(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    for mode, acpt_no in (
+        ("bond_issuance", "20250101000001"),
+        ("rights_issuance", "20250101000002"),
+    ):
+        filtered_path = data_root / "03-filter" / mode / "filtered.json"
+        filtered_path.parent.mkdir(parents=True)
+        filtered_path.write_text(
+            json.dumps({"disclosures": [{"acpt_no": acpt_no}]}),
+            encoding="utf-8",
+        )
+
+    payload = write_disclosure_html_manifest_payload(
+        {
+            "data_root": str(data_root),
+            "output_directory": str(tmp_path / "converted"),
+        }
+    )
+
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert payload["requested_count"] == 2
+    assert manifest["source_json_path"] == str(data_root / "03-filter")
+    assert [record["acpt_no"] for record in manifest["disclosures"]] == [
+        "20250101000001",
+        "20250101000002",
+    ]
 
 
 def test_write_disclosure_html_manifest_payload_rejects_missing_metadata(tmp_path: Path) -> None:
@@ -1948,7 +1983,11 @@ def test_download_disclosure_html_payload_ignores_source_json_path(
     ]
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["source_json_path"] == str(
-        tmp_path / "workspace" / "03-filter" / "filtered.json"
+        tmp_path
+        / "workspace"
+        / "03-filter"
+        / "bond_issuance"
+        / "filtered.json"
     )
     assert manifest["disclosures"] == [
         {
@@ -1998,6 +2037,25 @@ def test_download_disclosure_html_payload_does_not_read_result_directory_source_
         )
 
     assert calls == []
+
+
+def test_download_disclosure_html_payload_rejects_flat_filter_result(
+    tmp_path: Path,
+) -> None:
+    flat_result = tmp_path / "workspace" / "03-filter" / "filtered.json"
+    flat_result.parent.mkdir(parents=True)
+    flat_result.write_text(
+        json.dumps({"disclosures": [{"acpt_no": "20250101000001"}]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"03-filter/<mode>/filtered.json"):
+        download_disclosure_html_payload(
+            {
+                "data_root": str(tmp_path / "workspace"),
+                "output_directory": str(tmp_path / "viewer_html"),
+            }
+        )
 
 
 def test_clean_disclosure_html_output_directory_does_not_read_result_directory_source_json_path(

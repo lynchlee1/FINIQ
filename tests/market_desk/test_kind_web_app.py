@@ -18,7 +18,7 @@ def _external_workspace_body(
     tmp_path: Path, source_json: dict, **body: object
 ) -> dict[str, object]:
     data_root = tmp_path / "workspace"
-    filtered_path = data_root / "03-filter" / "filtered.json"
+    filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
     filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
     return {"data_root": str(data_root), **body}
@@ -348,7 +348,10 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
         "POST",
         "/api/disclosures/filter",
         headers={"Accept": "application/x-ndjson"},
-        json={"html_transfer_path": str(transfer_dir)},
+        json={
+            "mode": "bond_issuance",
+            "html_transfer_path": str(transfer_dir),
+        },
     ) as response:
         assert response.status_code == 200
         events = [json.loads(line) for line in response.iter_lines() if line]
@@ -359,11 +362,59 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     transfer_path = Path(transfer["path"])
     assert transfer["acpt_numbers"] == 2
     assert transfer_path.is_file()
-    assert transfer_path.parent == transfer_dir.resolve()
+    assert transfer_path == (
+        transfer_dir / "bond_issuance" / "filtered.json"
+    ).resolve()
+    assert result["mode"] == "bond_issuance"
+
+
+def test_filter_disclosures_requires_mode_folder(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        web_app,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: {
+            "format": "kind_disclosure_filter_v1",
+            "disclosures": [],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter",
+        json={"html_transfer_path": str(tmp_path / "filtered")},
+    )
+
+    assert response.status_code == 400
+    assert "mode" in response.json()["detail"]
+
+
+def test_filter_disclosures_rejects_json_output_path_before_filtering(
+    tmp_path: Path, monkeypatch
+) -> None:
+    called = False
+
+    def fake_filter(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return {"format": "kind_disclosure_filter_v1", "disclosures": []}
+
+    monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter)
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter",
+        json={
+            "mode": "bond_issuance",
+            "html_transfer_path": str(tmp_path / "filtered.json"),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "directory" in response.json()["detail"]
+    assert called is False
 
 
 def test_load_disclosure_filter_preset_reads_result_json_filters(tmp_path: Path) -> None:
-    source_path = tmp_path / "filtered-disclosures.json"
+    source_path = tmp_path / "bond_issuance" / "filtered.json"
+    source_path.parent.mkdir()
     filter_blocks = [
         {
             "field": "title",
@@ -392,9 +443,105 @@ def test_load_disclosure_filter_preset_reads_result_json_filters(tmp_path: Path)
     assert response.status_code == 200
     payload = response.json()
     assert payload["format"] == "kind_disclosure_filter_preset_v1"
-    assert payload["name"] == "filtered-disclosures"
+    assert payload["name"] == "bond_issuance"
+    assert payload["mode"] == "bond_issuance"
     assert payload["source_json_path"] == str(source_path.resolve())
     assert payload["condition_blocks"] == filter_blocks
+
+
+def test_disclosure_filter_presets_are_saved_in_workspace_json(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    preset = {
+        "name": "전환사채",
+        "mode": "bond_issuance",
+        "condition_blocks": [
+            {"field": "title", "operator": "contains", "value": "전환사채"}
+        ],
+    }
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/filter/presets",
+        json={"data_root": str(data_root), "action": "save", "preset": preset},
+    )
+
+    assert response.status_code == 200
+    presets_path = data_root / "03-filter" / "presets.json"
+    assert response.json()["path"] == str(presets_path.resolve())
+    assert response.json()["presets"] == [preset]
+    assert json.loads(presets_path.read_text(encoding="utf-8")) == {
+        "format": "finiq_disclosure_filter_presets_v1",
+        "presets": [preset],
+    }
+
+
+def test_disclosure_filter_presets_list_missing_workspace_file_as_empty(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter/presets",
+        json={"data_root": str(data_root), "action": "list"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["presets"] == []
+    assert not (data_root / "03-filter" / "presets.json").exists()
+
+
+def test_disclosure_filter_presets_rename_and_delete_workspace_entry(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    client = TestClient(app)
+    save_response = client.post(
+        "/api/disclosures/filter/presets",
+        json={
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "name": "기존 이름",
+                "mode": "rights_issuance",
+                "condition_blocks": [],
+            },
+        },
+    )
+    assert save_response.status_code == 200
+
+    rename_response = client.post(
+        "/api/disclosures/filter/presets",
+        json={
+            "data_root": str(data_root),
+            "action": "rename",
+            "name": "기존 이름",
+            "new_name": "새 이름",
+        },
+    )
+    assert rename_response.status_code == 200
+    assert rename_response.json()["presets"][0]["name"] == "새 이름"
+
+    delete_response = client.post(
+        "/api/disclosures/filter/presets",
+        json={"data_root": str(data_root), "action": "delete", "name": "새 이름"},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["presets"] == []
+
+
+def test_disclosure_filter_presets_reject_invalid_workspace_json(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    presets_path = data_root / "03-filter" / "presets.json"
+    presets_path.parent.mkdir(parents=True)
+    presets_path.write_text("[]", encoding="utf-8")
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter/presets",
+        json={"data_root": str(data_root), "action": "list"},
+    )
+
+    assert response.status_code == 400
+    assert "presets.json" in response.json()["detail"]
 
 
 def test_html_download_inspect_folder_route_deletes_unexpected_file(tmp_path: Path) -> None:

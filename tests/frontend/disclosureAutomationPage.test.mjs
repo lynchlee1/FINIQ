@@ -45,6 +45,7 @@ test("automation page uses a continuous work range and in-page settings actions"
   assert.doesNotMatch(page, /1·3·6|1–7|01-list부터|07-converted|Stage 1|Stage 6/);
   assert.doesNotMatch(page, /<th[^>]*>사용<\/th>|<th[^>]*>이번 실행<\/th>|<th[^>]*>설정<\/th>/);
   assert.doesNotMatch(page, /\{stage\.number\}<\/span>/);
+  assert.match(page, /<option value="shareholder_meeting">shareholder_meeting<\/option>/);
 });
 
 test("automation range is selected directly by dragging task-table controls", async () => {

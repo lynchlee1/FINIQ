@@ -640,7 +640,7 @@ def test_filter_inspection_recomputes_current_filter_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    output_path = tmp_path / "03-filter" / "filtered.json"
+    output_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
     output_path.parent.mkdir(parents=True)
     expected = {
         "format": "kind_disclosure_filter_v1",
@@ -686,10 +686,21 @@ def test_html_inspections_require_complete_current_membership(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    filtered_path = tmp_path / "03-filter" / "filtered.json"
+    filtered_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True)
     filtered_path.write_text(
-        json.dumps({"html_download_acpt_numbers": ["1", "2"]})
+        json.dumps(
+            {
+                "disclosures": [
+                    {"acpt_no": "20260101000001"},
+                    {"acpt_no": "20260101000002"},
+                ],
+                "html_download_acpt_numbers": [
+                    "20260101000001",
+                    "20260101000002",
+                ],
+            }
+        )
     )
     complete = {
         "requested_count": 2,
@@ -697,7 +708,7 @@ def test_html_inspections_require_complete_current_membership(
         "missing_target_html_count": 0,
         "invalid_target_html_count": 0,
         "unexpected_file_count": 0,
-        "existing_target_acpt_numbers": ["1", "2"],
+        "existing_target_acpt_numbers": ["20260101000001", "20260101000002"],
     }
     monkeypatch.setattr(
         automation,
@@ -1082,7 +1093,7 @@ def test_stage_four_replaces_active_membership_without_stale_html(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    filtered_path = tmp_path / "03-filter" / "filtered.json"
+    filtered_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True)
 
     def write_filtered(acpt_numbers: list[str]) -> None:
@@ -1100,9 +1111,12 @@ def test_stage_four_replaces_active_membership_without_stale_html(
 
     def fake_download(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
         source = json.loads(
-            (Path(str(body["data_root"])) / "03-filter" / "filtered.json").read_text(
-                "utf-8"
-            )
+            (
+                Path(str(body["data_root"]))
+                / "03-filter"
+                / "bond_issuance"
+                / "filtered.json"
+            ).read_text("utf-8")
         )
         output = Path(str(body["output_directory"]))
         acpt_numbers = [record["acpt_no"] for record in source["disclosures"]]
@@ -1181,7 +1195,7 @@ def test_stage_four_rejects_compressed_record_without_main_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    filtered_path = tmp_path / "03-filter" / "filtered.json"
+    filtered_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True)
     filtered_path.write_text(
         json.dumps(

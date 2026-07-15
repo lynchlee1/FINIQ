@@ -207,9 +207,8 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(payload, "root_directory", str(workspace.list))
         _set_default(payload, "output_path", str(workspace.table))
     elif normalized_kind == "filter":
-        _set_default(
-            payload, "html_transfer_path", str(workspace.filtered / "filtered.json")
-        )
+        payload["mode"] = validate_workspace_mode(payload.get("mode"))
+        _set_default(payload, "html_transfer_path", str(workspace.filtered))
     elif normalized_kind == "download":
         payload.pop("json", None)
         payload.pop("payload", None)
@@ -237,7 +236,7 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(
             payload,
             "filtered_metadata_path",
-            str(workspace.filtered / "filtered.json"),
+            str(workspace.filtered / mode / "filtered.json"),
         )
         _set_default(
             payload,

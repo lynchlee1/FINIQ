@@ -28,7 +28,7 @@ def _external_workspace_body(
     tmp_path: Path, source_json: dict, **body: object
 ) -> dict[str, object]:
     data_root = tmp_path / "workspace"
-    filtered_path = data_root / "03-filter" / "filtered.json"
+    filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
     filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
     return {"data_root": str(data_root), **body}
