@@ -18,6 +18,7 @@ import {
   makeEmptyDisclosureCondition,
   normalizeDisclosureConditionBlocks,
   type DisclosureConditionBlock,
+  type DisclosureConditionPreset,
   type DisclosureConditionPresetPayload,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import {
@@ -36,6 +37,12 @@ import { formatInteger } from "@/lib/format";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import type { DownloadOptions } from "@/features/download/types";
 import { pickPath } from "@/lib/fileDialog";
+import {
+  deleteDisclosureConditionPreset,
+  listDisclosureConditionPresets,
+  renameDisclosureConditionPreset,
+  saveDisclosureConditionPreset,
+} from "@/lib/disclosureConditionPresets";
 
 const PROFILE_STORAGE_KEY = "finiq.disclosureAutomation.profile.v1";
 const REVIEW_STORAGE_KEY = "finiq.disclosureAutomation.review.v1";
@@ -177,7 +184,6 @@ export default function DisclosureAutomationPage() {
   const {
     output_root: storedRoot,
     html_parse_mode: storedMode,
-    condition_presets: presets,
     parallel_worker_count: parallelWorkerCount,
     fetchSettings,
     saveSetting,
@@ -212,6 +218,7 @@ export default function DisclosureAutomationPage() {
   const [reviewDecided, setReviewDecided] = useState<Record<string, boolean>>({});
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
+  const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [filterPresetPath, setFilterPresetPath] = useState("");
   const [notification, setNotification] = useState("");
   const searchSettingsRef = useRef<HTMLDivElement | null>(null);
@@ -308,6 +315,20 @@ export default function DisclosureAutomationPage() {
       setIsErrorStatus(true);
     }).finally(() => setLoading(false));
   }, [fetchSettings, setIsErrorStatus]);
+
+  useEffect(() => {
+    if (!dataRoot.trim()) {
+      setPresets([]);
+      return;
+    }
+    listDisclosureConditionPresets(dataRoot).then((response) => {
+      setPresets(response.presets);
+    }).catch((error) => {
+      setPresets([]);
+      setNotification(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    });
+  }, [dataRoot, setIsErrorStatus]);
 
   useEffect(() => {
     setWorkspaceInspections({});
@@ -517,6 +538,7 @@ export default function DisclosureAutomationPage() {
 
   const applyPreset = (preset: DisclosureConditionPresetPayload, message: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
+    if (preset.mode) setParserMode(preset.mode);
     if (preset.name) setPresetName(preset.name);
     setNotification(message);
     setIsErrorStatus(false);
@@ -533,23 +555,35 @@ export default function DisclosureAutomationPage() {
     applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
   };
 
-  const savePreset = () => {
+  const savePreset = async () => {
     const nextName = presetName.trim();
     if (!nextName) {
       setNotification("저장할 프리셋 이름을 입력하세요.");
       setIsErrorStatus(true);
       return;
     }
-    const next = (presets || []).filter((item: any) => item.name !== nextName);
-    next.push({ name: nextName, condition_blocks: normalizedConditions });
-    next.sort((a: any, b: any) => a.name.localeCompare(b.name, "ko"));
-    void saveSetting("condition_presets", next);
-    setSelectedPreset(nextName);
-    setNotification(`조건검색 프리셋을 저장했습니다: ${nextName}`);
-    setIsErrorStatus(false);
+    if (!dataRoot.trim()) {
+      setNotification("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      const response = await saveDisclosureConditionPreset(dataRoot, {
+        name: nextName,
+        mode: parserMode,
+        condition_blocks: normalizedConditions,
+      });
+      setPresets(response.presets);
+      setSelectedPreset(nextName);
+      setNotification(`조건검색 프리셋을 저장했습니다: ${nextName}`);
+      setIsErrorStatus(false);
+    } catch (error) {
+      setNotification(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    }
   };
 
-  const renamePreset = () => {
+  const renamePreset = async () => {
     if (!selectedPreset) return;
     const nextName = presetName.trim();
     if (!nextName) {
@@ -562,13 +596,22 @@ export default function DisclosureAutomationPage() {
       setIsErrorStatus(true);
       return;
     }
-    const next = (presets || []).map((item: any) => item.name === selectedPreset ? { ...item, name: nextName } : item);
-    next.sort((a: any, b: any) => a.name.localeCompare(b.name, "ko"));
-    void saveSetting("condition_presets", next);
-    setSelectedPreset(nextName);
-    setPresetName(nextName);
-    setNotification(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${nextName}`);
-    setIsErrorStatus(false);
+    if (!dataRoot.trim()) {
+      setNotification("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      const response = await renameDisclosureConditionPreset(dataRoot, selectedPreset, nextName);
+      setPresets(response.presets);
+      setSelectedPreset(nextName);
+      setPresetName(nextName);
+      setNotification(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${nextName}`);
+      setIsErrorStatus(false);
+    } catch (error) {
+      setNotification(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    }
   };
 
   const loadFilterPresetFromJson = async () => {
@@ -591,14 +634,24 @@ export default function DisclosureAutomationPage() {
     }
   };
 
-  const deletePreset = () => {
+  const deletePreset = async () => {
     if (!selectedPreset) return;
-    const next = (presets || []).filter((item: any) => item.name !== selectedPreset);
-    void saveSetting("condition_presets", next);
-    setPresetName((value) => value === selectedPreset ? "" : value);
-    setSelectedPreset("");
-    setNotification(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
-    setIsErrorStatus(false);
+    if (!dataRoot.trim()) {
+      setNotification("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
+      setPresets(response.presets);
+      setPresetName((value) => value === selectedPreset ? "" : value);
+      setSelectedPreset("");
+      setNotification(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
+      setIsErrorStatus(false);
+    } catch (error) {
+      setNotification(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    }
   };
 
   const decideReviewPattern = (pattern: ReviewPattern, tocIds: string[]) => {
@@ -878,10 +931,11 @@ export default function DisclosureAutomationPage() {
               <Label className="grid gap-2 text-[var(--tv-text)]">이름
                 <Input value={name} onChange={(event) => { setName(event.target.value); setPlan(null); }} />
               </Label>
-              <Label className="grid gap-2 text-[var(--tv-text)]">parser mode
+              <Label className="grid gap-2 text-[var(--tv-text)]">파싱 모드
                 <select value={parserMode} onChange={(event) => { setParserMode(event.target.value); setPlan(null); }} className="h-9 rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-3 text-sm">
                   <option value="bond_issuance">bond_issuance</option>
                   <option value="rights_issuance">rights_issuance</option>
+                  <option value="shareholder_meeting">shareholder_meeting</option>
                 </select>
               </Label>
               <Label className="grid gap-2 text-[var(--tv-text)]">페이지당 공시 수<Input type="number" min="1" max="100" value={pageSize} onChange={(event) => { setPageSize(event.target.value); setPlan(null); }} /></Label>

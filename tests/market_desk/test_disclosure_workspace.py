@@ -76,14 +76,14 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     assert table["root_directory"] == str(workspace.list)
     assert table["output_path"] == str(workspace.table)
     filtered = apply_workspace_defaults(
-        "filter", {"data_root": str(workspace.root)}
+        "filter", {"data_root": str(workspace.root), "mode": "bond_issuance"}
     )
     assert "classification_path" not in filtered
     assert (
         _manifest_output_path(table["output_path"], workspace.list).parent
         == workspace.table
     )
-    assert filtered["html_transfer_path"] == str(workspace.filtered / "filtered.json")
+    assert filtered["html_transfer_path"] == str(workspace.filtered)
     external = apply_workspace_defaults("download", {"data_root": str(workspace.root)})
     assert external["output_directory"] == str(workspace.external)
     internal = apply_workspace_defaults(
@@ -105,7 +105,7 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
         workspace.converted / "bond_issuance"
     )
     assert converted["filtered_metadata_path"] == str(
-        workspace.filtered / "filtered.json"
+        workspace.filtered / "bond_issuance" / "filtered.json"
     )
     assert converted["compressed_metadata_path"] == str(
         workspace.external / "compressed-external-html.json"
@@ -136,12 +136,13 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
         "filter",
         {
             "data_root": str(workspace.root),
+            "mode": "bond_issuance",
             "classification_path": str(explicit / "table"),
-            "html_transfer_path": str(explicit / "filtered.json"),
+            "html_transfer_path": str(explicit / "filter-results"),
         },
     )
     assert filtered["classification_path"] == str(explicit / "table")
-    assert filtered["html_transfer_path"] == str(explicit / "filtered.json")
+    assert filtered["html_transfer_path"] == str(explicit / "filter-results")
 
     downloaded = apply_workspace_defaults(
         "kind_download",
@@ -289,16 +290,18 @@ def test_existing_filter_route_uses_workspace_stage_paths(
     monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter)
 
     response = TestClient(app).post(
-        "/api/disclosures/filter", json={"data_root": str(data_root)}
+        "/api/disclosures/filter",
+        json={"data_root": str(data_root), "mode": "bond_issuance"},
     )
 
     assert response.status_code == 200
     assert captured["data_root"] == str(data_root)
+    assert captured["mode"] == "bond_issuance"
     assert "classification_path" not in captured
-    assert captured["html_transfer_path"] == str(
-        data_root / "03-filter" / "filtered.json"
-    )
-    assert (data_root / "03-filter" / "filtered.json").is_file()
+    assert captured["html_transfer_path"] == str(data_root / "03-filter")
+    assert (
+        data_root / "03-filter" / "bond_issuance" / "filtered.json"
+    ).is_file()
 
 
 def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
@@ -311,7 +314,7 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
         "sqlite_source_path": str(data_root / "01-list"),
         "sqlite_output_directory": str(data_root / "02-table"),
         "sqlite_manifest_path": str(data_root / "02-table"),
-        "html_transfer_directory": str(data_root / "03-filter" / "filtered.json"),
+        "html_transfer_directory": str(data_root / "03-filter"),
         "html_output_directory": str(data_root / "04-external"),
         "html_external_compress_input_directory": str(data_root / "04-external"),
         "html_external_compress_output_directory": str(data_root / "04-external"),
