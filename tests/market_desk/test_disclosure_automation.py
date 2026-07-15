@@ -512,7 +512,7 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     manifest_path.parent.mkdir(parents=True)
     manifest = {
         "source_type": "source_folder",
-        "source_path": str(tmp_path / "01-list"),
+        "source_path": str(tmp_path / "01-list" / ".automation-windows"),
         "summary": {"source_rows": 1, "duplicate_rows": 0, "disclosures": 1},
     }
     monkeypatch.setattr(automation, "_table_manifest", lambda _profile: manifest_path)
@@ -618,7 +618,7 @@ def test_table_source_discovery_ignores_nested_automation_windows(
     assert _find_source_body_files(hidden_root) == [hidden]
 
 
-def test_detail_table_manifest_selects_current_standard_source(tmp_path: Path) -> None:
+def test_detail_table_manifest_selects_current_automation_source(tmp_path: Path) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
     table_root = tmp_path / "02-table"
     detail_manifest = table_root / "sqlite_manifest.json"
@@ -628,7 +628,7 @@ def test_detail_table_manifest_selects_current_standard_source(tmp_path: Path) -
             {
                 "format": "finiq_disclosure_table_manifest_v1",
                 "source_type": "source_folder",
-                "source_path": str(tmp_path / "01-list"),
+                "source_path": str(tmp_path / "01-list" / ".automation-windows"),
             }
         )
     )

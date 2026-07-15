@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import threading
 from typing import Any
 
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
@@ -14,6 +15,7 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
 
 FILTER_PRESETS_FORMAT = "finiq_disclosure_filter_presets_v1"
 FILTER_PRESETS_FILENAME = "presets.json"
+_PRESETS_LOCK = threading.RLock()
 
 
 def _preset_path(data_root: object) -> Path:
@@ -75,35 +77,36 @@ def _write_presets(path: Path, presets: list[dict[str, Any]]) -> None:
 def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
     path = _preset_path(payload.get("data_root"))
     action = str(payload.get("action") or "").strip()
-    presets = _read_presets(path)
+    with _PRESETS_LOCK:
+        presets = _read_presets(path)
 
-    if action == "list":
-        pass
-    elif action == "save":
-        preset = _normalize_preset(payload.get("preset"))
-        presets = [item for item in presets if item["name"] != preset["name"]]
-        presets.append(preset)
-        _write_presets(path, presets)
-    elif action == "rename":
-        name = _normalize_name(payload.get("name"))
-        new_name = _normalize_name(payload.get("new_name"), field="new_name")
-        if not any(item["name"] == name for item in presets):
-            raise ValueError(f"Preset not found: {name}")
-        if name != new_name and any(item["name"] == new_name for item in presets):
-            raise ValueError(f"Preset already exists: {new_name}")
-        presets = [
-            {**item, "name": new_name} if item["name"] == name else item
-            for item in presets
-        ]
-        _write_presets(path, presets)
-    elif action == "delete":
-        name = _normalize_name(payload.get("name"))
-        if not any(item["name"] == name for item in presets):
-            raise ValueError(f"Preset not found: {name}")
-        presets = [item for item in presets if item["name"] != name]
-        _write_presets(path, presets)
-    else:
-        raise ValueError("preset action must be one of: list, save, rename, delete")
+        if action == "list":
+            pass
+        elif action == "save":
+            preset = _normalize_preset(payload.get("preset"))
+            presets = [item for item in presets if item["name"] != preset["name"]]
+            presets.append(preset)
+            _write_presets(path, presets)
+        elif action == "rename":
+            name = _normalize_name(payload.get("name"))
+            new_name = _normalize_name(payload.get("new_name"), field="new_name")
+            if not any(item["name"] == name for item in presets):
+                raise ValueError(f"Preset not found: {name}")
+            if name != new_name and any(item["name"] == new_name for item in presets):
+                raise ValueError(f"Preset already exists: {new_name}")
+            presets = [
+                {**item, "name": new_name} if item["name"] == name else item
+                for item in presets
+            ]
+            _write_presets(path, presets)
+        elif action == "delete":
+            name = _normalize_name(payload.get("name"))
+            if not any(item["name"] == name for item in presets):
+                raise ValueError(f"Preset not found: {name}")
+            presets = [item for item in presets if item["name"] != name]
+            _write_presets(path, presets)
+        else:
+            raise ValueError("preset action must be one of: list, save, rename, delete")
 
     return {
         "format": FILTER_PRESETS_FORMAT,

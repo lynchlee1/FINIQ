@@ -550,7 +550,7 @@ def _inspect_automation_download(profile: dict[str, Any]) -> dict[str, Any]:
 
 def _table_manifest(profile: dict[str, Any]) -> Path:
     root = Path(profile["data_root"])
-    expected_source = (root / "01-list").resolve()
+    expected_source = (root / "01-list" / ".automation-windows").resolve()
     path = root / "02-table" / "sqlite_manifest.json"
     try:
         manifest = _load_sqlite_manifest(path)
@@ -621,7 +621,7 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
     manifest = _load_sqlite_manifest(manifest_path)
     _validate_sqlite_manifest_counts(manifest_path, manifest)
     source_path = Path(str(manifest.get("source_path") or "")).expanduser().resolve()
-    expected_source = (root / "01-list").resolve()
+    expected_source = (root / "01-list" / ".automation-windows").resolve()
     if manifest.get("source_type") != "source_folder" or source_path != expected_source:
         return _inspection_failure(
             2,

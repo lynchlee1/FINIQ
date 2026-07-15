@@ -395,7 +395,9 @@ def _collect_company_records_from_folder(
             "body_files": int(cached_payload.get("body_files") or 0),
             "parsed_disclosures": int(cached_payload.get("parsed_disclosures") or 0),
             "classified_disclosures": int(cached_payload.get("classified_disclosures") or 0),
-            "intra_folder_duplicates": 0,
+            "intra_folder_duplicates": int(
+                cached_payload.get("intra_folder_duplicates") or 0
+            ),
             "integrity_errors": [],
             "repair_pages": [],
             "folder_path": str(target_folder),
@@ -611,6 +613,7 @@ def _collect_company_records_from_folder(
             body_files=body_files,
             parsed_disclosures=parsed_disclosures,
             classified_disclosures=classified_disclosures,
+            intra_folder_duplicates=intra_folder_duplicates,
             companies=companies,
         )
 

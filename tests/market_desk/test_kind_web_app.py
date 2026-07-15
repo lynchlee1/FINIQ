@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from fastapi.testclient import TestClient
 import finiq.market_desk.web.app as web_app
+import finiq.market_desk.web.features.disclosures.filter_presets as filter_presets
 from finiq.market_desk.web.app import _normalize_file_dialog_mode, app, config
 from finiq.config import AppConfig
 from finiq.market_desk.web.jobs import JobManager, job_manager
@@ -473,6 +474,58 @@ def test_disclosure_filter_presets_are_saved_in_workspace_json(tmp_path: Path) -
         "format": "finiq_disclosure_filter_presets_v1",
         "presets": [preset],
     }
+
+
+def test_disclosure_filter_presets_serialize_concurrent_saves(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_root = tmp_path / "workspace"
+    original_read = filter_presets._read_presets
+    active_reads = 0
+    maximum_active_reads = 0
+    counter_lock = threading.Lock()
+    start = threading.Barrier(2)
+
+    def slow_read(path: Path) -> list[dict[str, object]]:
+        nonlocal active_reads, maximum_active_reads
+        with counter_lock:
+            active_reads += 1
+            maximum_active_reads = max(maximum_active_reads, active_reads)
+        try:
+            time.sleep(0.05)
+            return original_read(path)
+        finally:
+            with counter_lock:
+                active_reads -= 1
+
+    monkeypatch.setattr(filter_presets, "_read_presets", slow_read)
+
+    def save(name: str) -> None:
+        start.wait()
+        filter_presets.manage_filter_presets_payload(
+            {
+                "data_root": str(data_root),
+                "action": "save",
+                "preset": {
+                    "name": name,
+                    "mode": "bond_issuance",
+                    "condition_blocks": [],
+                },
+            }
+        )
+
+    threads = [threading.Thread(target=save, args=(name,)) for name in ("A", "B")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    saved = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "list"}
+    )
+    assert maximum_active_reads == 1
+    assert [preset["name"] for preset in saved["presets"]] == ["A", "B"]
 
 
 def test_disclosure_filter_presets_list_missing_workspace_file_as_empty(
