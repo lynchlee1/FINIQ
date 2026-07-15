@@ -50,11 +50,13 @@ export type DisclosureConditionBlock = {
 
 export type DisclosureConditionPreset = {
   name: string;
+  mode: string;
   condition_blocks: DisclosureConditionBlock[];
 };
 
 export type DisclosureConditionPresetPayload = {
   name?: string;
+  mode?: string;
   condition_blocks?: unknown;
   source_json_path?: string;
 };

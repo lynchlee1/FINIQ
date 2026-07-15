@@ -16,6 +16,7 @@ import {
   makeEmptyDisclosureCondition,
   normalizeDisclosureConditionBlocks,
   type DisclosureConditionBlock,
+  type DisclosureConditionPreset,
   type DisclosureConditionPresetPayload,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
@@ -29,6 +30,12 @@ import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { apiPost } from "@/api/client";
 import { pickPath } from "@/lib/fileDialog";
+import {
+  deleteDisclosureConditionPreset,
+  listDisclosureConditionPresets,
+  renameDisclosureConditionPreset,
+  saveDisclosureConditionPreset,
+} from "@/lib/disclosureConditionPresets";
 
 type ParseExecutionOptionConfig = {
   field: string;
@@ -188,7 +195,6 @@ export default function HtmlParsePage() {
   const {
     output_root: dataRoot,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
-    condition_presets: presets,
     fetchSettings,
     parallel_worker_count: defaultParallelWorkers,
     saveSetting,
@@ -263,6 +269,7 @@ export default function HtmlParsePage() {
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
+  const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [filterPresetPath, setFilterPresetPath] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
@@ -307,6 +314,20 @@ export default function HtmlParsePage() {
     });
   }, [defaultParallelWorkers, fetchSettings, setStatus, setIsErrorStatus]);
 
+  useEffect(() => {
+    if (!dataRoot?.trim()) {
+      setPresets([]);
+      return;
+    }
+    listDisclosureConditionPresets(dataRoot).then((response) => {
+      setPresets(response.presets);
+    }).catch((error) => {
+      setPresets([]);
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    });
+  }, [dataRoot, setIsErrorStatus, setStatus]);
+
   const handleWorkspaceDirectoryChange = async (val: string) => {
     filterCandidatesRequestIdRef.current += 1;
     setFilterCandidatesLoading(false);
@@ -343,26 +364,41 @@ export default function HtmlParsePage() {
 
   const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
+    if (preset.mode && PARSE_MODE_CONFIGS[preset.mode]) {
+      setParseMode(preset.mode);
+      void saveSetting("html_parse_mode", preset.mode);
+    }
     if (preset.name) setPresetName(preset.name);
     setStatus(statusMessage);
     setIsErrorStatus(false);
-  }, [setIsErrorStatus, setStatus]);
+  }, [saveSetting, setIsErrorStatus, setStatus]);
 
-  const savePreset = () => {
+  const savePreset = async () => {
     const name = presetName.trim();
     if (!name) {
       setStatus("저장할 프리셋 이름을 입력하세요.");
       setIsErrorStatus(true);
       return;
     }
-    const next = (presets || []).filter((item: any) => item.name !== name);
-    next.push({ name, condition_blocks: normalizeDisclosureConditionBlocks(conditions) });
-    next.sort((a: any, b: any) => a.name.localeCompare(b.name, "ko"));
-
-    saveSetting("condition_presets", next);
-    setSelectedPreset(name);
-    setStatus(`조건검색 프리셋을 저장했습니다: ${name}`);
-    setIsErrorStatus(false);
+    if (!dataRoot?.trim()) {
+      setStatus("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      const response = await saveDisclosureConditionPreset(dataRoot, {
+        name,
+        mode: parseMode,
+        condition_blocks: normalizeDisclosureConditionBlocks(conditions),
+      });
+      setPresets(response.presets);
+      setSelectedPreset(name);
+      setStatus(`조건검색 프리셋을 저장했습니다: ${name}`);
+      setIsErrorStatus(false);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    }
   };
 
   const loadPreset = (name: string) => {
@@ -375,7 +411,7 @@ export default function HtmlParsePage() {
     applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
   };
 
-  const renamePreset = () => {
+  const renamePreset = async () => {
     if (!selectedPreset) return;
     const name = presetName.trim();
     if (!name) {
@@ -394,14 +430,22 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
       return;
     }
-    const next = (presets || []).map((item: any) => item.name === selectedPreset ? { ...item, name } : item);
-    next.sort((a: any, b: any) => a.name.localeCompare(b.name, "ko"));
-
-    saveSetting("condition_presets", next);
-    setSelectedPreset(name);
-    setPresetName(name);
-    setStatus(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${name}`);
-    setIsErrorStatus(false);
+    if (!dataRoot?.trim()) {
+      setStatus("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      const response = await renameDisclosureConditionPreset(dataRoot, selectedPreset, name);
+      setPresets(response.presets);
+      setSelectedPreset(name);
+      setPresetName(name);
+      setStatus(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${name}`);
+      setIsErrorStatus(false);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    }
   };
 
   const loadFilterPresetFromJson = async () => {
@@ -424,14 +468,24 @@ export default function HtmlParsePage() {
     }
   };
 
-  const deletePreset = () => {
+  const deletePreset = async () => {
     if (!selectedPreset) return;
-    const next = (presets || []).filter((item: any) => item.name !== selectedPreset);
-    saveSetting("condition_presets", next);
-    setPresetName((value) => value === selectedPreset ? "" : value);
-    setSelectedPreset("");
-    setStatus(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
-    setIsErrorStatus(false);
+    if (!dataRoot?.trim()) {
+      setStatus("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    try {
+      const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
+      setPresets(response.presets);
+      setPresetName((value) => value === selectedPreset ? "" : value);
+      setSelectedPreset("");
+      setStatus(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
+      setIsErrorStatus(false);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    }
   };
 
   useEffect(() => {
