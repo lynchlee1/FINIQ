@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from finiq.concurrency import bounded_as_completed
-from finiq.data_scraper.parse._markup import decode_html_markup
+from finiq.data_scraper.parse import disclosure_file_rows
+from finiq.data_scraper.storage.result_files import (
+    effective_result_page_paths,
+    result_page_number,
+)
 from finiq.market_desk.web.features.market_data.service_records import *
+
 
 def _looks_like_sqlite_manifest(path: Path) -> bool:
     if not path.is_file():
@@ -20,33 +25,21 @@ def _resolve_sqlite_manifest_path(path: str | Path) -> Path | None:
     candidate = Path(path).expanduser().resolve()
     if candidate.is_file():
         if not _looks_like_sqlite_manifest(candidate):
-            if candidate.name.endswith(".sqlite_manifest.json"):
+            if candidate.name == "sqlite_manifest.json":
                 msg = f"Not a FINIQ disclosure SQLite manifest: {candidate}"
                 raise ValueError(msg)
             return None
-        if not candidate.parent.name.endswith("_shards"):
-            msg = f"SQLite manifest must be inside a *_shards directory: {candidate}"
+        if candidate.name != "sqlite_manifest.json":
+            msg = f"SQLite manifest must be named sqlite_manifest.json: {candidate}"
             raise ValueError(msg)
         return candidate
     if not candidate.is_dir():
-        if candidate.name.endswith(".sqlite_manifest.json"):
+        if candidate.name == "sqlite_manifest.json":
             raise FileNotFoundError(f"SQLite manifest not found: {candidate}")
         return None
-    if candidate.name.endswith("_shards"):
-        nested_manifest = candidate / f"{candidate.name.removesuffix('_shards')}.json"
-        if not nested_manifest.is_file():
-            raise FileNotFoundError(f"SQLite manifest not found: {nested_manifest}")
-        if not _looks_like_sqlite_manifest(nested_manifest):
-            msg = f"Not a FINIQ disclosure SQLite manifest: {nested_manifest}"
-            raise ValueError(msg)
-        return nested_manifest
-    manifests = sorted(candidate.glob("*_shards/*.sqlite_manifest.json"))
-    if not manifests:
+    manifest_path = candidate / "sqlite_manifest.json"
+    if not manifest_path.is_file():
         return None
-    if len(manifests) != 1:
-        msg = f"Expected exactly one SQLite manifest in {candidate}, found {len(manifests)}"
-        raise ValueError(msg)
-    manifest_path = manifests[0]
     if not _looks_like_sqlite_manifest(manifest_path):
         msg = f"Not a FINIQ disclosure SQLite manifest: {manifest_path}"
         raise ValueError(msg)
@@ -119,6 +112,56 @@ def _validate_sqlite_manifest_counts(
             f"manifest={manifest_path}, summary={int(summary_total)}, shards={shard_total}"
         )
         raise ValueError(msg)
+
+    if manifest.get("source_type") == "source_folder":
+        summary = manifest.get("summary", {})
+        source_rows = summary.get("source_rows")
+        duplicate_rows = summary.get("duplicate_rows")
+        if source_rows is None or duplicate_rows is None:
+            msg = f"SQLite manifest is missing source row counts: {manifest_path}"
+            raise ValueError(msg)
+        pages = manifest.get("pages")
+        if not isinstance(pages, list) or not pages:
+            msg = f"SQLite manifest is missing page row counts: {manifest_path}"
+            raise ValueError(msg)
+        page_source_rows = 0
+        page_written_rows = 0
+        page_duplicate_rows = 0
+        for page in pages:
+            if not isinstance(page, dict):
+                raise ValueError(f"SQLite manifest has an invalid page record: {manifest_path}")
+            current_source_rows = int(page.get("source_rows") or 0)
+            current_written_rows = int(page.get("written_rows") or 0)
+            current_duplicate_rows = int(page.get("duplicate_rows") or 0)
+            if current_source_rows != current_written_rows + current_duplicate_rows:
+                msg = (
+                    "SQLite manifest page did not account for every source row: "
+                    f"manifest={manifest_path}, page={page.get('source_page')}, "
+                    f"source_rows={current_source_rows}, rows={current_written_rows}, "
+                    f"duplicates={current_duplicate_rows}"
+                )
+                raise ValueError(msg)
+            page_source_rows += current_source_rows
+            page_written_rows += current_written_rows
+            page_duplicate_rows += current_duplicate_rows
+        if (
+            page_source_rows != int(source_rows)
+            or page_written_rows != shard_total
+            or page_duplicate_rows != int(duplicate_rows)
+        ):
+            msg = (
+                "SQLite manifest did not account for every source disclosure row: "
+                "page totals do not match the disclosure summary, "
+                f"manifest={manifest_path}"
+            )
+            raise ValueError(msg)
+        if int(source_rows) != shard_total + int(duplicate_rows):
+            msg = (
+                "SQLite manifest did not account for every source disclosure row: "
+                f"manifest={manifest_path}, source_rows={int(source_rows)}, "
+                f"rows={shard_total}, duplicates={int(duplicate_rows)}"
+            )
+            raise ValueError(msg)
 
 
 def _sqlite_table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
@@ -197,168 +240,49 @@ def _iter_sqlite_manifest_disclosure_records(
             connection.close()
 
 
-def _element_text(node: html.HtmlElement | None) -> str:
-    if node is None:
-        return ""
-    return _clean_text(" ".join(text for text in node.itertext()))
-
-
-def _display_text(node: html.HtmlElement | None) -> str:
-    if node is None:
-        return ""
-    return _clean_text(node.text_content())
-
-
-def _title_flags(title: str) -> list[str]:
-    flags: list[str] = []
-    for match in _TITLE_FLAG_RE.finditer(title):
-        flag = _clean_text(match.group(1))
-        if flag and flag not in flags:
-            flags.append(flag)
-    return flags
-
-
-def _has_later_correction(disclosure_cell: html.HtmlElement) -> bool:
-    return any(
-        _clean_text(image_tag.get("alt")) == _LATER_CORRECTION_LABEL
-        for image_tag in disclosure_cell.xpath(".//img")
-    )
-
-
-def _companysummary_onclick(onclick_value: object) -> str | None:
-    match = _COMPANYSUMMARY_OPEN_RE.search(str(onclick_value or ""))
-    if match is None:
-        return None
-    return match.group("company_id").strip() or None
-
-
-def _disclosure_onclick(onclick_value: object) -> tuple[str | None, str | None]:
-    match = _OPEN_DISCLS_VIEWER_RE.search(str(onclick_value or ""))
-    if match is None:
-        return (None, None)
-    return (
-        match.group("acpt_no").strip() or None,
-        match.group("doc_no").strip() or None,
-    )
-
-
-def _find_disclosure_results_table(root: html.HtmlElement) -> html.HtmlElement | None:
-    for table_tag in root.xpath("//table"):
-        summary = _clean_text(table_tag.get("summary"))
-        if "회사명" in summary and "공시제목" in summary:
-            return table_tag
-    tables = root.xpath(
-        "//table[contains(concat(' ', normalize-space(@class), ' '), ' list ')]"
-    )
-    return tables[0] if tables else None
-
-
-def _build_source_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any] | None:
-    cells = row_tag.xpath("./td")
-    if len(cells) < 5:
-        return None
-
-    company_cell = cells[2]
-    disclosure_cell = cells[3]
-    submitter_cell = cells[4]
-    company_links = company_cell.xpath(".//a[@id='companysum']") or company_cell.xpath(
-        ".//a"
-    )
-    company_link = company_links[0] if company_links else None
-    disclosure_links = disclosure_cell.xpath(".//a")
-    disclosure_link = disclosure_links[0] if disclosure_links else None
-
-    company_name = ""
-    company_id = None
-    if company_link is not None:
-        company_name = _clean_text(
-            company_link.get("title") or _element_text(company_link)
-        )
-        company_id = _companysummary_onclick(company_link.get("onclick"))
-    if not company_name:
-        company_name = _element_text(company_cell)
-
-    labels = [
-        _clean_text(image_tag.get("alt")) for image_tag in company_cell.xpath(".//img")
-    ]
-    labels = [label for label in labels if label]
-    market = labels[0] if labels else None
-    badges = labels[1:] if len(labels) > 1 else []
-
-    acpt_no, doc_no = _disclosure_onclick(
-        disclosure_link.get("onclick") if disclosure_link is not None else None
-    )
-    title_attr = ""
-    title_display = ""
-    if disclosure_link is not None:
-        title_attr = _clean_text(disclosure_link.get("title"))
-        title_display = _display_text(disclosure_link)
-    title = title_display or title_attr
-    if not title:
-        title = _display_text(disclosure_cell)
-        title_display = title
-    title_flags = _title_flags(title_display or title)
-
-    return {
-        "company_key": _clean_text(company_id or company_name),
-        "row_no": _element_text(cells[0]),
-        "company_name": company_name,
-        "company_id": company_id,
-        "market": market,
-        "badges": badges,
-        "disclosed_at": _element_text(cells[1]),
-        "title": title,
-        "title_attr": title_attr,
-        "title_base": title_attr,
-        "title_display": title_display or title,
-        "title_flags": title_flags,
-        "is_correction_report": "정정" in title_flags,
-        "has_later_correction": _has_later_correction(disclosure_cell),
-        "acpt_no": acpt_no,
-        "doc_no": doc_no,
-        "submitter": _element_text(submitter_cell),
-    }
-
-
 def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
-    markup = decode_html_markup(file_path.read_bytes())
-    parser = html.HTMLParser(recover=True, huge_tree=True)
     try:
-        root = html.document_fromstring(markup, parser=parser)
-    except etree.ParserError as exc:
-        raise ValueError(f"Failed to parse KIND disclosure result page: {file_path}") from exc
-    table_tag = _find_disclosure_results_table(root)
-    if table_tag is None:
-        raise ValueError(f"KIND disclosure result table is missing: {file_path}")
+        parsed_rows = disclosure_file_rows(file_path)
+    except ValueError as exc:
+        raise ValueError(f"{exc}: {file_path}") from exc
 
-    parent_tags = table_tag.xpath("./tbody") or [table_tag]
     rows: list[dict[str, Any]] = []
-    for parent_tag in parent_tags:
-        for row_tag in parent_tag.xpath("./tr"):
-            row = _build_source_disclosure_row(row_tag)
-            if row is not None:
-                row["source_file"] = str(file_path)
-                row["source_page"] = _result_page_number(file_path)
-                rows.append(row)
+    for parsed_row in parsed_rows:
+        row = dict(parsed_row)
+        row["company_key"] = _clean_text(
+            row.get("company_id") or row.get("company_name")
+        )
+        row["source_file"] = str(file_path)
+        row["source_page"] = _result_page_number(file_path)
+        rows.append(row)
     return rows
 
 
 def _find_source_body_files(root: Path) -> list[Path]:
-    return sorted(
-        (
-            path
-            for path in root.rglob("*_post_page_*.body")
-            if not any(
-                part.startswith(".")
-                for part in path.relative_to(root).parts[:-1]
-            )
-        ),
-        key=lambda path: (
-            str(path.parent.relative_to(root)),
-            _result_page_number(path),
-            path.name,
-        ),
-    )
+    resolved_root = root.resolve()
+    source_folders = {
+        path.parent.resolve()
+        for path in resolved_root.rglob("*_post_page_*.body")
+        if not any(
+            part.startswith(".")
+            for part in path.relative_to(resolved_root).parts[:-1]
+        )
+    }
+    return [
+        path
+        for _folder, path in sorted(
+            (
+                (folder, path)
+                for folder in source_folders
+                for path in effective_result_page_paths(folder)
+            ),
+            key=lambda item: (
+                str(item[0].relative_to(resolved_root)),
+                result_page_number(item[1]),
+                item[1].name,
+            ),
+        )
+    ]
 
 
 def _ensure_safe_source_root_directory(root: Path) -> None:
@@ -417,18 +341,8 @@ def _parse_source_body_files_cached(
                 parsed_by_path[body_path] = future.result()
 
     records: list[dict[str, Any]] = []
-    seen_keys: set[tuple[str, str, str, str]] = set()
     for body_path in body_paths:
         for record in parsed_by_path.get(body_path, []):
-            key = (
-                str(record.get("acpt_no") or ""),
-                str(record.get("company_id") or ""),
-                str(record.get("disclosed_at") or ""),
-                str(record.get("title") or ""),
-            )
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
             records.append(_prepare_filter_record(record))
     return (tuple(records), len(body_paths))
 

@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from finiq.concurrency import resolve_worker_count
+from finiq.data_scraper.storage.result_files import (
+    result_page_number,
+    sorted_result_page_paths,
+)
 from finiq.market_desk.data.facade import load_company_classification_file
 from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
@@ -23,7 +27,9 @@ from finiq.market_desk.web.features.market_data.service_sources import (
 TABLE_SCHEMA_VERSION = 2
 DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
+MANIFEST_FILENAME = "sqlite_manifest.json"
 SQLITE_FORMAT = "finiq_disclosure_table_sqlite_shard"
+_MAX_SOURCE_PAGE_REREAD_ATTEMPTS = 5
 
 
 def _date_part(value: object) -> str:
@@ -68,41 +74,22 @@ def _normalize_table_name(value: object) -> str:
 
 
 def _default_output_path(classification_path: Path) -> Path:
-    return classification_path.with_name(
-        f"{classification_path.stem}.sqlite_manifest.json"
-    )
+    return classification_path.with_name(MANIFEST_FILENAME)
 
 
 def _shard_directory(manifest_path: Path) -> Path:
-    if manifest_path.parent.name.endswith("_shards"):
-        return manifest_path.parent
-    return manifest_path.with_name(f"{manifest_path.stem}_shards")
-
-
-def _manifest_path_inside_shard_directory(manifest_path: Path) -> Path:
-    if manifest_path.parent.name.endswith("_shards"):
-        return manifest_path
-    shard_root = manifest_path.with_name(f"{manifest_path.stem}_shards")
-    return shard_root / manifest_path.name
+    return manifest_path.parent
 
 
 def _manifest_output_path(raw_path: str, classification_path: Path) -> Path:
     if not raw_path:
-        return _manifest_path_inside_shard_directory(
-            _default_output_path(classification_path)
-        ).resolve()
+        return _default_output_path(classification_path).resolve()
     output_path = _normalize_workspace_resource_path(
         Path(raw_path).expanduser(), allow_missing_leaf=True
     ).resolve()
-    if output_path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}:
-        return _manifest_path_inside_shard_directory(
-            output_path.with_suffix(".sqlite_manifest.json")
-        )
     if output_path.suffix:
-        return _manifest_path_inside_shard_directory(output_path)
-    return _manifest_path_inside_shard_directory(
-        output_path / _default_output_path(classification_path).name
-    )
+        return output_path.with_name(MANIFEST_FILENAME)
+    return output_path / MANIFEST_FILENAME
 
 
 def _source_has_body_files(path: Path) -> bool:
@@ -287,24 +274,33 @@ def _collect_classification_rows_by_year(
 def _collect_source_folder_rows_by_year(
     source_folder: Path,
     cancel_check: Callable[[], bool] | None = None,
-) -> tuple[dict[str, list[dict[str, Any]]], int, int]:
+) -> tuple[dict[str, list[dict[str, Any]]], int, int, int, int, list[dict[str, Any]]]:
     rows_by_year: dict[str, list[dict[str, Any]]] = {}
-    seen_keys: set[tuple[str, str, str, str]] = set()
+    seen_acpt_nos: set[str] = set()
     company_keys: set[str] = set()
+    pages: list[dict[str, Any]] = []
     row_count = 0
+    source_row_count = 0
+    duplicate_row_count = 0
     for body_path in _find_source_body_files(source_folder):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
-        for record in _parse_source_body_file(body_path):
-            key = (
-                str(record.get("acpt_no") or ""),
-                str(record.get("company_id") or ""),
-                str(record.get("disclosed_at") or ""),
-                str(record.get("title") or ""),
-            )
-            if key in seen_keys:
+        page_source_rows = 0
+        page_written_rows = 0
+        page_duplicate_rows = 0
+        records, reread_attempts = _read_source_page_records(
+            body_path,
+            cancel_check=cancel_check,
+        )
+        for record in records:
+            source_row_count += 1
+            page_source_rows += 1
+            acpt_no = str(record.get("acpt_no") or "").strip()
+            if acpt_no in seen_acpt_nos:
+                duplicate_row_count += 1
+                page_duplicate_rows += 1
                 continue
-            seen_keys.add(key)
+            seen_acpt_nos.add(acpt_no)
             disclosed_at = record.get("disclosed_at")
             row = {
                 "row_no": record.get("row_no"),
@@ -326,7 +322,7 @@ def _collect_source_folder_rows_by_year(
                 ),
                 "is_correction_report": 1 if record.get("is_correction_report") else 0,
                 "has_later_correction": 1 if record.get("has_later_correction") else 0,
-                "acpt_no": record.get("acpt_no") or record.get("acptno"),
+                "acpt_no": acpt_no,
                 "doc_no": record.get("doc_no"),
                 "submitter": record.get("submitter"),
                 "source_file": record.get("source_file"),
@@ -342,7 +338,81 @@ def _collect_source_folder_rows_by_year(
                 company_keys.add(company_key)
             rows_by_year.setdefault(_row_year(row), []).append(row)
             row_count += 1
-    return rows_by_year, len(company_keys), row_count
+            page_written_rows += 1
+        page_number = result_page_number(body_path)
+        pages.append(
+            {
+                "source_file": str(body_path),
+                "source_page": page_number,
+                "source_rows": page_source_rows,
+                "written_rows": page_written_rows,
+                "duplicate_rows": page_duplicate_rows,
+                "reread_attempts": reread_attempts,
+            }
+        )
+    return (
+        rows_by_year,
+        len(company_keys),
+        row_count,
+        source_row_count,
+        duplicate_row_count,
+        pages,
+    )
+
+
+def _read_source_page_records(
+    body_path: Path,
+    *,
+    cancel_check: Callable[[], bool] | None,
+) -> tuple[list[dict[str, Any]], int]:
+    last_error: Exception | None = None
+    for reread_attempt in range(_MAX_SOURCE_PAGE_REREAD_ATTEMPTS + 1):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
+        try:
+            records = _parse_source_body_file(body_path)
+            if any(
+                not str(record.get("acpt_no") or "").strip()
+                for record in records
+            ):
+                raise ValueError(
+                    f"acpt_no is required for every disclosure: {body_path}"
+                )
+        except (OSError, UnicodeError, ValueError) as error:
+            last_error = error
+            continue
+        return records, reread_attempt
+    raise ValueError(
+        f"Failed to read source disclosure page after "
+        f"{_MAX_SOURCE_PAGE_REREAD_ATTEMPTS} retries: {body_path}: {last_error}"
+    ) from last_error
+
+
+def _validate_source_page_ranges(
+    source_folder: Path,
+    *,
+    cancel_check: Callable[[], bool] | None,
+) -> None:
+    source_folders = sorted(
+        {
+            path.parent.resolve()
+            for path in source_folder.rglob("kind_workflow.input.json")
+            if not any(
+                part.startswith(".")
+                for part in path.relative_to(source_folder).parts[:-1]
+            )
+        }
+    )
+    for folder in source_folders:
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
+        if not any(
+            result_page_number(path) >= 1
+            for path in sorted_result_page_paths(folder)
+        ):
+            raise ValueError(
+                f"{folder}: kind_workflow.input.json이 있지만 공시 결과 페이지가 없습니다."
+            )
 
 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:
@@ -711,10 +781,32 @@ def build_disclosure_table_payload(
             payload, cancel_check=cancel_check
         )
         _validate_classification_disclosure_counts(payload, row_count, source_path)
+        source_row_count = row_count
+        duplicate_row_count = 0
+        pages: list[dict[str, Any]] = []
     else:
-        rows_by_year, companies, row_count = _collect_source_folder_rows_by_year(
-            source_path, cancel_check=cancel_check
+        _validate_source_page_ranges(
+            source_path,
+            cancel_check=cancel_check,
         )
+        (
+            rows_by_year,
+            companies,
+            row_count,
+            source_row_count,
+            duplicate_row_count,
+            pages,
+        ) = _collect_source_folder_rows_by_year(
+            source_path,
+            cancel_check=cancel_check,
+        )
+    if source_row_count != row_count + duplicate_row_count:
+        msg = (
+            "SQLite export did not account for every source disclosure row: "
+            f"source={source_path}, source_rows={source_row_count}, "
+            f"written={row_count}, duplicates={duplicate_row_count}"
+        )
+        raise ValueError(msg)
     shard_workers = _resolve_shard_workers(
         body.get("table_workers", body.get("shard_workers")), len(rows_by_year)
     )
@@ -753,9 +845,12 @@ def build_disclosure_table_payload(
         "table_name": table_name,
         "summary": {
             "companies": companies,
+            "source_rows": source_row_count,
+            "duplicate_rows": duplicate_row_count,
             "disclosures": row_count,
             "shards": len(shards),
         },
+        "pages": pages,
         "shards": shards,
     }
     _write_manifest(manifest_path, manifest)
@@ -773,6 +868,8 @@ def build_disclosure_table_payload(
         "table_name": table_name,
         "summary": {
             "companies": companies,
+            "source_rows": source_row_count,
+            "duplicate_rows": duplicate_row_count,
             "disclosures": row_count,
             "shards": len(shards),
             "fts_enabled": all(shard["fts_enabled"] for shard in shards)
@@ -780,5 +877,6 @@ def build_disclosure_table_payload(
             else False,
             "schema_version": TABLE_SCHEMA_VERSION,
         },
+        "pages": pages,
         "shards": shards,
     }

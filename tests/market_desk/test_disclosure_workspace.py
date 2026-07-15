@@ -80,7 +80,7 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     )
     assert "classification_path" not in filtered
     assert (
-        _manifest_output_path(table["output_path"], workspace.list).parent.parent
+        _manifest_output_path(table["output_path"], workspace.list).parent
         == workspace.table
     )
     assert filtered["html_transfer_path"] == str(workspace.filtered / "filtered.json")

@@ -11,6 +11,7 @@ import zipfile
 import pandas as pd
 import pytest
 
+import finiq.market_desk.web.features.disclosures.table_export as table_export_module
 from finiq.config import QUANTI_DIR, STOCK_DATA_DIR
 from finiq.data_scraper.workflow import KIND_WORKFLOW_INPUT_FORMAT
 from finiq.market_desk.analytics.quanti_market_history import (
@@ -325,8 +326,8 @@ EXPECTED_PARSE_MODES = {
 }
 
 
-def _nested_sqlite_manifest_path(path: Path) -> Path:
-    return path.with_name(f"{path.stem}_shards") / path.name
+def _sqlite_manifest_path(path: Path) -> Path:
+    return path.parent / "sqlite_manifest.json"
 
 
 def _external_workspace_body(
@@ -600,7 +601,7 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
@@ -635,21 +636,25 @@ def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Pa
     assert payload["html_download_acpt_numbers"] == ["20250102000001"]
 
 
-def test_filter_disclosures_payload_rejects_multiple_manifests_in_directory(
+def test_filter_disclosures_payload_uses_standard_manifest_name(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
-    for name in ("first", "second"):
-        build_disclosure_table_payload(
-            {
-                "classification_path": str(source_root),
-                "output_path": str(sqlite_root / f"{name}.sqlite_manifest.json"),
-            }
-        )
+    requested_path = sqlite_root / "custom.sqlite_manifest.json"
+    build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(requested_path),
+        }
+    )
 
-    with pytest.raises(ValueError, match="Expected exactly one SQLite manifest"):
-        filter_disclosures_payload({"root_directory": str(sqlite_root)})
+    payload = filter_disclosures_payload({"root_directory": str(sqlite_root)})
+
+    assert not requested_path.exists()
+    assert payload["source_sqlite_manifest_path"] == str(
+        (sqlite_root / "sqlite_manifest.json").resolve()
+    )
 
 
 def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path) -> None:
@@ -658,7 +663,7 @@ def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path
     source_root.mkdir(parents=True)
     _write_source_body_fixture(source_root)
     output_path = data_root / "02-table" / "kind.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
@@ -677,7 +682,7 @@ def test_filter_disclosures_payload_rejects_missing_manifest_shard_path(tmp_path
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
@@ -686,13 +691,13 @@ def test_filter_disclosures_payload_rejects_missing_manifest_shard_path(tmp_path
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for shard in manifest["shards"]:
-        shard["path"] = str(tmp_path / "stale" / "kind.sqlite_manifest_shards" / Path(shard["path"]).name)
+        shard["path"] = str(tmp_path / "stale" / Path(shard["path"]).name)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="SQLite shard not found"):
         filter_disclosures_payload(
             {
-                "root_directory": str(sqlite_root / "kind.sqlite_manifest_shards"),
+                "root_directory": str(sqlite_root),
                 "filter_blocks": [
                     {
                         "field": "title",
@@ -711,7 +716,7 @@ def test_filter_disclosures_payload_does_not_search_nested_kind_sqlite_manifest(
     root = tmp_path / "kind_kosdaq"
     sqlite_root = root / "kind_sqlite"
     output_path = sqlite_root / "kind_kosdaq.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
@@ -727,7 +732,7 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_colum
     tmp_path: Path,
 ) -> None:
     sqlite_root = tmp_path / "kind_sqlite"
-    shard_root = sqlite_root / "kind.sqlite_manifest_shards"
+    shard_root = sqlite_root
     shard_root.mkdir(parents=True)
     shard_path = shard_root / "2025.sqlite"
     connection = sqlite3.connect(shard_path)
@@ -775,7 +780,7 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_colum
         connection.commit()
     finally:
         connection.close()
-    manifest_path = shard_root / "kind.sqlite_manifest.json"
+    manifest_path = shard_root / "sqlite_manifest.json"
     manifest_path.write_text(
         json.dumps(
             {
@@ -814,7 +819,9 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_colum
         )
 
 
-def test_filter_disclosures_payload_rejects_direct_legacy_sqlite_manifest(tmp_path: Path) -> None:
+def test_filter_disclosures_payload_rejects_nonstandard_sqlite_manifest_name(
+    tmp_path: Path,
+) -> None:
     manifest_path = tmp_path / "kind.sqlite_manifest.json"
     manifest_path.write_text(
         json.dumps(
@@ -829,7 +836,7 @@ def test_filter_disclosures_payload_rejects_direct_legacy_sqlite_manifest(tmp_pa
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match=r"must be inside a \*_shards directory"):
+    with pytest.raises(ValueError, match="must be named sqlite_manifest.json"):
         filter_disclosures_payload({"classification_path": str(manifest_path)})
 
 
@@ -839,7 +846,7 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
     source_root = _write_source_body_fixture(tmp_path)
     sqlite_root = tmp_path / "kind_sqlite"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
             "classification_path": str(source_root),
@@ -851,6 +858,48 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="SQLite shard disclosure count mismatch"):
+        filter_disclosures_payload({"root_directory": str(sqlite_root)})
+
+
+def test_filter_disclosures_payload_rejects_unaccounted_source_rows(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    sqlite_root = tmp_path / "kind_sqlite"
+    output_path = sqlite_root / "kind.sqlite_manifest.json"
+    manifest_path = _sqlite_manifest_path(output_path)
+    build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(output_path),
+        }
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["summary"]["source_rows"] = 3
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="did not account for every source disclosure row"):
+        filter_disclosures_payload({"root_directory": str(sqlite_root)})
+
+
+def test_filter_disclosures_payload_rejects_unaccounted_page_rows(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    sqlite_root = tmp_path / "kind_sqlite"
+    output_path = sqlite_root / "kind.sqlite_manifest.json"
+    manifest_path = _sqlite_manifest_path(output_path)
+    build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(output_path),
+        }
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["pages"][0]["written_rows"] = 1
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="page did not account for every source row"):
         filter_disclosures_payload({"root_directory": str(sqlite_root)})
 
 
@@ -1172,7 +1221,7 @@ def test_filter_disclosures_payload_supports_exact_match_operator(tmp_path: Path
 def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: Path) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
     output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
 
     payload = build_disclosure_table_payload(
         {
@@ -1194,6 +1243,7 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert manifest["shards"][0]["year"] == "2025"
 
     shard_path = Path(manifest["shards"][0]["path"])
+    assert shard_path.parent == manifest_path.parent
     connection = sqlite3.connect(shard_path)
     try:
         rows = connection.execute(
@@ -1227,7 +1277,7 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
 def test_build_disclosure_table_payload_writes_yearly_shards_in_parallel(tmp_path: Path) -> None:
     fixture_path = _write_multiyear_classification_fixture(tmp_path)
     output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
     progress_log: list[str] = []
 
     payload = build_disclosure_table_payload(
@@ -1260,7 +1310,7 @@ def test_build_disclosure_table_payload_writes_yearly_shards_in_parallel(tmp_pat
 def test_build_disclosure_table_payload_cancelled_parallel_shards_skips_manifest(tmp_path: Path) -> None:
     fixture_path = _write_multiyear_classification_fixture(tmp_path)
     output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
     should_cancel = False
 
     def progress_callback(message: str) -> None:
@@ -1299,7 +1349,7 @@ def test_build_disclosure_table_payload_accepts_nested_folder_path(tmp_path: Pat
     )
 
     assert payload["source_classification_path"] == str(fixture_path.resolve())
-    assert Path(payload["output_path"]).name == "kind.company_classification.sample.sqlite_manifest.json"
+    assert Path(payload["output_path"]).name == "sqlite_manifest.json"
     assert Path(payload["shards"][0]["path"]).name == "2025.sqlite"
     assert payload["summary"]["disclosures"] == 3
 
@@ -1342,7 +1392,7 @@ def test_build_disclosure_table_payload_rejects_malformed_disclosure_item(
 def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     output_path = tmp_path / "kind.sqlite_manifest.json"
-    manifest_path = _nested_sqlite_manifest_path(output_path)
+    manifest_path = _sqlite_manifest_path(output_path)
 
     payload = build_disclosure_table_payload(
         {
@@ -1352,11 +1402,236 @@ def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Pat
     )
 
     assert payload["source_type"] == "source_folder"
+    assert payload["summary"]["source_rows"] == 2
+    assert payload["summary"]["duplicate_rows"] == 0
     assert payload["summary"]["disclosures"] == 2
     assert payload["summary"]["shards"] == 1
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["source_type"] == "source_folder"
+    assert manifest["summary"]["source_rows"] == 2
+    assert manifest["summary"]["duplicate_rows"] == 0
     assert manifest["shards"][0]["year"] == "2025"
+
+
+def test_build_disclosure_table_payload_rereads_only_failed_source_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "01-list"
+    folder = source_root / "20250101_20251231"
+    folder.mkdir(parents=True)
+    page_one = _build_download_result_page_html(
+        page_number=1,
+        page_size=1,
+        total_items=2,
+    )
+    page_two = _build_download_result_page_html(
+        page_number=2,
+        page_size=1,
+        total_items=2,
+    ).replace(b"20250101000001", b"20250101000002")
+    (folder / "001_post_page_00001.body").write_bytes(page_one)
+    (folder / "002_post_page_00002.body").write_bytes(page_two)
+    original_parse = table_export_module._parse_source_body_file
+    read_counts: dict[int, int] = {1: 0, 2: 0}
+
+    def _parse_with_transient_failure(body_path: Path) -> list[dict[str, Any]]:
+        page_number = table_export_module.result_page_number(body_path)
+        read_counts[page_number] += 1
+        if page_number == 2 and read_counts[page_number] == 1:
+            raise OSError("temporary read failure")
+        return original_parse(body_path)
+
+    monkeypatch.setattr(
+        table_export_module,
+        "_parse_source_body_file",
+        _parse_with_transient_failure,
+    )
+
+    payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(tmp_path / "02-table"),
+        }
+    )
+
+    assert read_counts == {1: 1, 2: 2}
+    assert payload["summary"]["source_rows"] == 2
+    assert payload["summary"]["disclosures"] == 2
+    assert [page["source_page"] for page in payload["pages"]] == [1, 2]
+    assert payload["pages"][0]["reread_attempts"] == 0
+    assert payload["pages"][1]["reread_attempts"] == 1
+    assert payload["pages"][1]["source_rows"] == 1
+    assert payload["pages"][1]["written_rows"] == 1
+    assert payload["pages"][1]["duplicate_rows"] == 0
+    assert payload["pages"][1]["source_file"] == str(
+        folder / "002_post_page_00002.body"
+    )
+
+
+def test_build_disclosure_table_payload_retries_source_page_without_acpt_no(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "01-list"
+    folder = source_root / "20250101_20251231"
+    folder.mkdir(parents=True)
+    valid_page = _build_download_result_page_html(
+        page_number=1,
+        page_size=1,
+        total_items=1,
+    )
+    (folder / "001_post_page_00001.body").write_bytes(
+        valid_page.replace(b"20250101000001", b"")
+    )
+    original_parse = table_export_module._parse_source_body_file
+    read_count = 0
+
+    def _count_parse(body_path: Path) -> list[dict[str, Any]]:
+        nonlocal read_count
+        read_count += 1
+        return original_parse(body_path)
+
+    monkeypatch.setattr(table_export_module, "_parse_source_body_file", _count_parse)
+
+    with pytest.raises(ValueError, match="acpt_no is required"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
+
+    assert read_count == 6
+
+
+def test_build_disclosure_table_payload_rejects_metadata_range_without_pages(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    empty_range = source_root / "20250201_20250228"
+    empty_range.mkdir()
+    (empty_range / "kind_workflow.input.json").write_text(
+        json.dumps(_trusted_download_input_snapshot()),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="공시 결과 페이지가 없습니다"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
+
+
+def test_build_disclosure_table_payload_rejects_duplicate_source_page_numbers(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "01-list"
+    folder = source_root / "20250101_20251231"
+    folder.mkdir(parents=True)
+    page = _build_download_result_page_html(
+        page_number=1,
+        page_size=1,
+        total_items=1,
+    )
+    (folder / "001_post_page_00001.body").write_bytes(page)
+    (folder / "002_post_page_00001.body").write_bytes(page)
+
+    with pytest.raises(ValueError, match="중복되는 페이지 번호 1"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
+
+
+def test_build_disclosure_table_payload_deduplicates_source_rows_by_acpt_no(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace(
+            "20250103000001", "20250102000001"
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "kind.sqlite_manifest.json"
+    manifest_path = _sqlite_manifest_path(output_path)
+
+    payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(output_path),
+        }
+    )
+
+    assert payload["summary"]["source_rows"] == 2
+    assert payload["summary"]["duplicate_rows"] == 1
+    assert payload["summary"]["disclosures"] == 1
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["summary"]["source_rows"] == 2
+    assert manifest["summary"]["duplicate_rows"] == 1
+    assert manifest["summary"]["disclosures"] == 1
+
+    with sqlite3.connect(manifest["shards"][0]["path"]) as connection:
+        rows = connection.execute(
+            "SELECT acpt_no FROM disclosures"
+        ).fetchall()
+
+    assert rows == [("20250102000001",)]
+
+
+def test_source_filter_counts_exact_duplicate_rows_by_acpt_no(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    text = body_path.read_text(encoding="utf-8")
+    first_start = text.index("<tr>")
+    first_end = text.index("</tr>", first_start) + len("</tr>")
+    second_start = text.index("<tr>", first_end)
+    second_end = text.index("</tr>", second_start) + len("</tr>")
+    body_path.write_text(
+        text[:second_start] + text[first_start:first_end] + text[second_end:],
+        encoding="utf-8",
+    )
+
+    table_payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(tmp_path / "02-table"),
+        }
+    )
+    source_payload = filter_disclosures_payload(
+        {"root_directory": str(source_root), "filter_blocks": []}
+    )
+
+    assert table_payload["summary"]["source_rows"] == 2
+    assert table_payload["summary"]["duplicate_rows"] == 1
+    assert source_payload["summary"]["source_disclosures"] == 2
+    assert source_payload["summary"]["duplicate_disclosures"] == 1
+    assert source_payload["summary"]["matched_disclosures"] == 1
+
+
+def test_build_disclosure_table_payload_rejects_source_row_without_acpt_no(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace(
+            "openDisclsViewer('20250103000001','')",
+            "openDisclsViewer('','')",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="acpt_no is required for every disclosure"):
+        build_disclosure_table_payload({"classification_path": str(source_root)})
 
 
 def test_build_disclosure_table_payload_recovers_misnested_resource_path(
@@ -1382,7 +1657,9 @@ def test_build_disclosure_table_payload_recovers_misnested_resource_path(
 
     assert payload["source_type"] == "source_folder"
     assert payload["source_path"] == str(source_root.resolve())
-    assert payload["output_path"] == str(_nested_sqlite_manifest_path(source_root / "kind.sqlite_manifest.json").resolve())
+    assert payload["output_path"] == str(
+        _sqlite_manifest_path(source_root / "kind.sqlite_manifest.json").resolve()
+    )
     assert payload["summary"]["disclosures"] == 2
 
 
@@ -5826,15 +6103,24 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     (viewer_dir / "20250101000001.html").write_text(
-        "<table><tr><td>5. 증자방식</td><td>제3자배정증자</td></tr></table>",
+        "<table>"
+        "<tr><td>1. 신주의 종류와 수</td><td>보통주식</td><td>1</td></tr>"
+        "<tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>"
+        "</table>",
         encoding="utf-8",
     )
     (viewer_dir / "20250101000002.html").write_text(
-        "<table><tr><td>5. 증자방식</td><td>일반공모증자</td></tr></table>",
+        "<table>"
+        "<tr><td>1. 신주의 종류와 수</td><td>보통주식</td><td>1</td></tr>"
+        "<tr><td>5. 증자방식</td><td>일반공모증자</td></tr>"
+        "</table>",
         encoding="utf-8",
     )
     (viewer_dir / "20250101000003.html").write_text(
-        "<table><tr><td>5. 증자방식</td><td>제3자배정증자</td></tr></table>",
+        "<table>"
+        "<tr><td>1. 신주의 종류와 수</td><td>보통주식</td><td>1</td></tr>"
+        "<tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>"
+        "</table>",
         encoding="utf-8",
     )
 
