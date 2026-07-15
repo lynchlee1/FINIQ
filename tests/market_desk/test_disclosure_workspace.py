@@ -34,8 +34,10 @@ def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
         "01-list",
         "02-table",
         "03-filter",
-        "04-external",
-        "05-internal",
+        "04-external-html-download",
+        "04-external-html-download/bond_issuance",
+        "04-external-html-download/rights_issuance",
+        "05-internal-html-download",
         "06-sections",
         "07-converted",
         "07-converted/bond_issuance",
@@ -83,13 +85,31 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
         _manifest_output_path(table["output_path"], workspace.list).parent
         == workspace.table
     )
-    assert filtered["html_transfer_path"] == str(workspace.filtered)
-    external = apply_workspace_defaults("download", {"data_root": str(workspace.root)})
-    assert external["output_directory"] == str(workspace.external)
-    internal = apply_workspace_defaults(
-        "content_download", {"data_root": str(workspace.root)}
+    assert filtered["external_html_transfer_path"] == str(workspace.filtered)
+    external = apply_workspace_defaults(
+        "external_html_download",
+        {"data_root": str(workspace.root), "mode": "bond_issuance"},
     )
-    assert internal["source_directory"] == str(workspace.external)
+    assert external["output_directory"] == str(
+        workspace.external / "bond_issuance"
+    )
+    compressed = apply_workspace_defaults(
+        "external_html_compress",
+        {"data_root": str(workspace.root), "mode": "bond_issuance"},
+    )
+    assert compressed["input_directory"] == str(
+        workspace.external / "bond_issuance"
+    )
+    assert compressed["output_directory"] == str(
+        workspace.external / "bond_issuance"
+    )
+    internal = apply_workspace_defaults(
+        "internal_html_download",
+        {"data_root": str(workspace.root), "mode": "bond_issuance"},
+    )
+    assert internal["source_compressed_json_path"] == str(
+        workspace.external / "bond_issuance" / "compressed-external-html.json"
+    )
     assert internal["output_directory"] == str(workspace.internal)
     sections = apply_workspace_defaults(
         "section_save", {"data_root": str(workspace.root)}
@@ -108,7 +128,7 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
         workspace.filtered / "bond_issuance" / "filtered.json"
     )
     assert converted["compressed_metadata_path"] == str(
-        workspace.external / "compressed-external-html.json"
+        workspace.external / "bond_issuance" / "compressed-external-html.json"
     )
 
 
@@ -138,11 +158,11 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
             "data_root": str(workspace.root),
             "mode": "bond_issuance",
             "classification_path": str(explicit / "table"),
-            "html_transfer_path": str(explicit / "filter-results"),
+            "external_html_transfer_path": str(explicit / "filter-results"),
         },
     )
     assert filtered["classification_path"] == str(explicit / "table")
-    assert filtered["html_transfer_path"] == str(explicit / "filter-results")
+    assert filtered["external_html_transfer_path"] == str(explicit / "filter-results")
 
     downloaded = apply_workspace_defaults(
         "kind_download",
@@ -177,9 +197,10 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
     assert table["output_path"] == str(explicit / "table")
 
     external = apply_workspace_defaults(
-        "download",
+        "external_html_download",
         {
             "data_root": str(workspace.root),
+            "mode": "bond_issuance",
             "json": {"disclosures": []},
             "payload": {"disclosures": []},
             "source_json_path": str(explicit / "filtered.json"),
@@ -192,9 +213,10 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
     assert external["output_directory"] == str(explicit / "external")
 
     compressed = apply_workspace_defaults(
-        "external_compress",
+        "external_html_compress",
         {
             "data_root": str(workspace.root),
+            "mode": "bond_issuance",
             "input_directory": str(explicit / "external"),
             "output_directory": str(explicit / "compressed"),
         },
@@ -203,9 +225,10 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
     assert compressed["output_directory"] == str(explicit / "compressed")
 
     internal = apply_workspace_defaults(
-        "content_download",
+        "internal_html_download",
         {
             "data_root": str(workspace.root),
+            "mode": "bond_issuance",
             "source_compressed_json_path": str(explicit / "compressed.json"),
             "output_directory": str(explicit / "internal"),
         },
@@ -236,7 +259,7 @@ def test_workspace_prepare_api(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json()["format"] == "finiq_disclosure_workspace_v1"
-    assert Path(response.json()["paths"]["internal"]).name == "05-internal"
+    assert Path(response.json()["paths"]["internal"]).name == "05-internal-html-download"
 
 
 def test_workspace_prepare_preserves_existing_modes(tmp_path: Path) -> None:
@@ -250,6 +273,10 @@ def test_workspace_prepare_preserves_existing_modes(tmp_path: Path) -> None:
     )
 
     assert result["modes"] == ["bond_issuance", "rights_issuance"]
+    assert set(result["paths"]["external"]) == {
+        "bond_issuance",
+        "rights_issuance",
+    }
     assert set(result["paths"]["converted"]) == {
         "bond_issuance",
         "rights_issuance",
@@ -284,7 +311,7 @@ def test_existing_filter_route_uses_workspace_stage_paths(
         return {
             "format": "kind_disclosure_filter_v1",
             "disclosures": [],
-            "html_download_acpt_numbers": [],
+            "external_html_download_acpt_numbers": [],
         }
 
     monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter)
@@ -298,7 +325,7 @@ def test_existing_filter_route_uses_workspace_stage_paths(
     assert captured["data_root"] == str(data_root)
     assert captured["mode"] == "bond_issuance"
     assert "classification_path" not in captured
-    assert captured["html_transfer_path"] == str(data_root / "03-filter")
+    assert captured["external_html_transfer_path"] == str(data_root / "03-filter")
     assert (
         data_root / "03-filter" / "bond_issuance" / "filtered.json"
     ).is_file()
@@ -314,15 +341,15 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
         "sqlite_source_path": str(data_root / "01-list"),
         "sqlite_output_directory": str(data_root / "02-table"),
         "sqlite_manifest_path": str(data_root / "02-table"),
-        "html_transfer_directory": str(data_root / "03-filter"),
-        "html_output_directory": str(data_root / "04-external"),
-        "html_external_compress_input_directory": str(data_root / "04-external"),
-        "html_external_compress_output_directory": str(data_root / "04-external"),
-        "html_content_compressed_json_path": str(
-            data_root / "04-external" / "compressed-external-html.json"
+        "external_html_transfer_directory": str(data_root / "03-filter"),
+        "external_html_output_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
+        "external_html_compress_input_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
+        "external_html_compress_output_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
+        "external_html_compressed_json_path": str(
+            data_root / "04-external-html-download" / "bond_issuance" / "compressed-external-html.json"
         ),
-        "html_content_output_directory": str(data_root / "05-internal"),
-        "html_merge_output_path": str(data_root / "05-internal" / "merged"),
+        "internal_html_output_directory": str(data_root / "05-internal-html-download"),
+        "internal_html_merge_output_path": str(data_root / "05-internal-html-download" / "merged"),
         "html_section_split_output_directory": str(data_root / "06-sections"),
         "html_parse_output_directory": str(
             data_root / "07-converted" / "bond_issuance"
@@ -387,8 +414,8 @@ def test_init_config_preserves_saved_stage_paths(
                 "output_root": str(data_root),
                 "download_output_directory": str(tmp_path / "legacy-list"),
                 "sqlite_output_directory": str(tmp_path / "legacy-table"),
-                "html_output_directory": str(tmp_path / "legacy-external"),
-                "html_content_output_directory": str(tmp_path / "legacy-internal"),
+                "external_html_output_directory": str(tmp_path / "legacy-external"),
+                "internal_html_output_directory": str(tmp_path / "legacy-internal"),
                 "html_section_split_output_directory": str(tmp_path / "legacy-sections"),
                 "html_parse_output_directory": str(tmp_path / "legacy-converted"),
             }
@@ -403,8 +430,8 @@ def test_init_config_preserves_saved_stage_paths(
 
     assert loaded.download_output_directory == str(tmp_path / "legacy-list")
     assert loaded.sqlite_output_directory == str(tmp_path / "legacy-table")
-    assert loaded.html_output_directory == str(tmp_path / "legacy-external")
-    assert loaded.html_content_output_directory == str(tmp_path / "legacy-internal")
+    assert loaded.external_html_output_directory == str(tmp_path / "legacy-external")
+    assert loaded.internal_html_output_directory == str(tmp_path / "legacy-internal")
     assert loaded.html_section_split_output_directory == str(tmp_path / "legacy-sections")
     assert loaded.html_parse_output_directory == str(tmp_path / "legacy-converted")
 
@@ -494,7 +521,7 @@ def test_config_api_returns_saved_stage_paths(
     }
 
 
-def test_changing_parse_mode_updates_only_mode_workspace_paths(
+def test_changing_parse_mode_updates_mode_workspace_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data_root = tmp_path / "resources"
@@ -504,6 +531,16 @@ def test_changing_parse_mode_updates_only_mode_workspace_paths(
     monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
     monkeypatch.setattr(app_config, "html_parse_output_directory", "old-parse")
     monkeypatch.setattr(app_config, "html_parse_result_path", "old-result")
+    monkeypatch.setattr(app_config, "external_html_output_directory", "old-external")
+    monkeypatch.setattr(
+        app_config, "external_html_compress_input_directory", "old-compress-input"
+    )
+    monkeypatch.setattr(
+        app_config, "external_html_compress_output_directory", "old-compress-output"
+    )
+    monkeypatch.setattr(
+        app_config, "external_html_compressed_json_path", "old-compressed-json"
+    )
     monkeypatch.setattr(app_config, "download_output_directory", "custom-download")
 
     response = TestClient(app).post(
@@ -518,6 +555,13 @@ def test_changing_parse_mode_updates_only_mode_workspace_paths(
     assert response.json()["html_parse_result_path"] == expected[
         "html_parse_result_path"
     ]
+    for key in (
+        "external_html_output_directory",
+        "external_html_compress_input_directory",
+        "external_html_compress_output_directory",
+        "external_html_compressed_json_path",
+    ):
+        assert response.json()[key] == expected[key]
     assert response.json()["download_output_directory"] == "custom-download"
     assert not data_root.exists()
 
@@ -535,7 +579,7 @@ def test_root_save_preserves_explicit_stage_path_in_same_request(
         "/api/settings",
         json={
             "output_root": str(data_root),
-            "html_output_directory": str(custom_external),
+            "external_html_output_directory": str(custom_external),
         },
     )
 
@@ -544,7 +588,7 @@ def test_root_save_preserves_explicit_stage_path_in_same_request(
     assert response.json()["download_output_directory"] == expected[
         "download_output_directory"
     ]
-    assert response.json()["html_output_directory"] == str(custom_external)
+    assert response.json()["external_html_output_directory"] == str(custom_external)
 
 
 def test_saving_individual_stage_path_preserves_manual_value(
@@ -558,14 +602,14 @@ def test_saving_individual_stage_path_preserves_manual_value(
 
     response = TestClient(app).post(
         "/api/settings",
-        json={"html_output_directory": str(tmp_path / "custom-external")},
+        json={"external_html_output_directory": str(tmp_path / "custom-external")},
     )
 
     custom_external = str(tmp_path / "custom-external")
     assert response.status_code == 200
-    assert response.json()["html_output_directory"] == custom_external
+    assert response.json()["external_html_output_directory"] == custom_external
     saved = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert saved["html_output_directory"] == custom_external
+    assert saved["external_html_output_directory"] == custom_external
 
 
 def test_blank_output_root_is_rejected_without_mutating_config(

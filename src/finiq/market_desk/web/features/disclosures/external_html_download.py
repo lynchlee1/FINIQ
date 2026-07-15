@@ -1,15 +1,15 @@
-"""Disclosure viewer HTML download payload helpers."""
+"""Disclosure external HTML download payload helpers."""
 
 from __future__ import annotations
 
 from finiq.market_desk.web.features.disclosures.html_common import *
 
-def download_disclosure_html_payload(
+def download_disclosure_external_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Download KIND viewer HTML files for receipt numbers found in the request JSON."""
+    """Download KIND external HTML files for receipt numbers found in the request JSON."""
     output_directory = str(body.get("output_directory") or "").strip()
     if not output_directory:
         msg = "output_directory is required"
@@ -46,7 +46,7 @@ def download_disclosure_html_payload(
     def handle_progress(message: str) -> None:
         nonlocal processed_count
         if message.startswith(
-            ("Saved KIND viewer HTML ", "Skipping existing KIND viewer HTML")
+            ("Saved KIND external HTML ", "Skipping existing KIND external HTML")
         ):
             processed_count += 1
             if processed_count % progress_interval == 0:
@@ -54,7 +54,7 @@ def download_disclosure_html_payload(
                     f"HTML 저장 중간 확인: {processed_count}/{len(acpt_numbers)}건 처리."
                 )
             return
-        if message.startswith("Fetching KIND viewer HTML "):
+        if message.startswith("Fetching KIND external HTML "):
             return
         emit(message)
 
@@ -95,9 +95,14 @@ def download_disclosure_html_payload(
         else:
             emit(f"새로 저장할 대상: {output_summary['missing_target_html_count']}건.")
         for acpt_no, path in existing_paths_by_acpt_no.items():
-            handle_progress(f"Skipping existing KIND viewer HTML: {path}")
+            handle_progress(f"Skipping existing KIND external HTML: {path}")
     try:
         downloaded_paths = []
+        raw_max_retries = body.get("max_retries")
+        if raw_max_retries is None or raw_max_retries == "":
+            max_retries = 5
+        else:
+            max_retries = int(raw_max_retries)
         if download_acpt_numbers:
             grouped_acpt_numbers: dict[str, list[str]] = {}
             for acpt_no in download_acpt_numbers:
@@ -106,7 +111,7 @@ def download_disclosure_html_payload(
                 )
             for year, group_acpt_numbers in grouped_acpt_numbers.items():
                 downloaded_paths.extend(
-                    download_disclosure_viewer_htmls(
+                    download_disclosure_external_htmls(
                         output_directory=resolved_output_directory / year,
                         request_headers=DEFAULT_REQUEST_HEADERS,
                         acpt_numbers=group_acpt_numbers,
@@ -122,7 +127,7 @@ def download_disclosure_html_payload(
                         cancel_check=lambda: _is_cancelled(cancel_token)
                         or bool(cancel_check and cancel_check()),
                         max_workers=max_workers,
-                        max_retries=int(body.get("max_retries") or 2),
+                        max_retries=max_retries,
                     )
                 )
         saved_paths_by_acpt_no = dict(existing_paths_by_acpt_no)
@@ -136,6 +141,9 @@ def download_disclosure_html_payload(
     finally:
         _clear_cancel_token(cancel_token)
     saved_acpt_numbers = [path.stem for path in saved_paths]
+    missing_acpt_numbers = [
+        acpt_no for acpt_no in acpt_numbers if acpt_no not in saved_paths_by_acpt_no
+    ]
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
         source_json_path=resolved_source_json_path,
@@ -147,12 +155,14 @@ def download_disclosure_html_payload(
         f"HTML 저장 {'중지' if cancelled else '완료'}: 저장 파일 {len(saved_paths)}/{len(acpt_numbers)}건."
     )
     return {
-        "format": "kind_disclosure_html_download_v1",
+        "format": "kind_disclosure_external_html_download_v1",
+        "mode": validate_workspace_mode(body.get("mode")),
         "output_directory": str(resolved_output_directory),
         "requested_count": len(acpt_numbers),
         "saved_count": len(saved_paths),
         "cancelled": cancelled,
         "acpt_numbers": acpt_numbers,
+        "missing_acpt_numbers": missing_acpt_numbers,
         "saved_files": [str(path) for path in saved_paths],
         "manifest_path": str(manifest_path),
         "progress_log": progress_log[-100:],

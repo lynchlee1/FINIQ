@@ -88,7 +88,7 @@ const DISCLOSURE_PARSE_MODES: ParseModeConfig[] = [
   },
 ];
 
-const HTML_PARSE_RELATED_ROUTES = "/html-content-download /html-parse /html-change-log";
+const HTML_PARSE_RELATED_ROUTES = "/internal-html-download /html-parse /html-change-log";
 const PARSE_MODE_CONFIGS = Object.fromEntries(DISCLOSURE_PARSE_MODES.map((mode) => [mode.key, mode])) as Record<string, ParseModeConfig>;
 const WARNING_OPEN_PAGE_SIZE = 20;
 type FilterCandidate = DisclosureFilterCandidate & {

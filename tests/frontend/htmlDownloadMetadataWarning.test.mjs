@@ -3,13 +3,13 @@ import fs from "node:fs";
 import test from "node:test";
 
 const page = fs.readFileSync(
-  "frontend/finiq_GUI/apps/market-desk/src/app/html-download/_components/HtmlDownloadPageView.tsx",
+  "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
   "utf8",
 );
 
-test("external HTML compression displays missing metadata warnings", () => {
+test("external HTML compression only displays successful metadata verification", () => {
   assert.match(page, /res\.metadata_check/);
-  assert.match(page, /metadata 누락/);
-  assert.match(page, /res\.warnings\.map/);
-  assert.match(page, /`경고: \$\{String\(warning\)\}`/);
+  assert.match(page, /metadata 확인/);
+  assert.doesNotMatch(page, /metadata 누락/);
+  assert.doesNotMatch(page, /res\.warnings\.map/);
 });

@@ -11,7 +11,7 @@ def compress_disclosure_external_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Extract compact metadata from downloaded KIND viewer HTML files into one JSON."""
+    """Extract compact metadata from downloaded KIND external HTML files into one JSON."""
     input_directory_raw = str(
         body.get("input_directory") or body.get("source_directory") or ""
     ).strip()
@@ -38,7 +38,7 @@ def compress_disclosure_external_html_payload(
     if limit is not None:
         html_files = html_files[:limit]
     if not html_files:
-        msg = "No external viewer HTML files found in input_directory"
+        msg = "No external HTML files found in input_directory"
         raise ValueError(msg)
 
     manifest_path = input_directory / HTML_MANIFEST_FILENAME
@@ -57,10 +57,9 @@ def compress_disclosure_external_html_payload(
         - len(missing_metadata_acpt_numbers),
         "missing_records": len(missing_metadata_acpt_numbers),
     }
-    warnings: list[str] = []
     if missing_metadata_acpt_numbers:
         sample = ", ".join(missing_metadata_acpt_numbers[:10])
-        warnings.append(
+        raise ValueError(
             f"manifest에서 외부 HTML {len(html_files)}건 중 "
             f"{len(missing_metadata_acpt_numbers)}건의 metadata를 찾지 못했습니다. "
             f"누락 접수번호 예시: {sample}"
@@ -81,7 +80,9 @@ def compress_disclosure_external_html_payload(
             for index, (year, html_path) in enumerate(html_files)
         ):
             index, year, acpt_no, record = _compress_external_html_file(args)
-            record["metadata"] = metadata.get(acpt_no) or {}
+            expected_acpt_no = html_files[index][1].stem
+            record["metadata"] = metadata[expected_acpt_no]
+            record["title"] = str(metadata[expected_acpt_no].get("title") or "")
             indexed_records[index] = (year, acpt_no, record)
             completed_count = index + 1
             if completed_count % 100 == 0:
@@ -102,7 +103,9 @@ def compress_disclosure_external_html_payload(
             )
             for completed_count, (future, _item) in enumerate(completed, start=1):
                 index, year, acpt_no, record = future.result()
-                record["metadata"] = metadata.get(acpt_no) or {}
+                expected_acpt_no = html_files[index][1].stem
+                record["metadata"] = metadata[expected_acpt_no]
+                record["title"] = str(metadata[expected_acpt_no].get("title") or "")
                 indexed_records[index] = (year, acpt_no, record)
                 if completed_count % 100 == 0:
                     emit(
@@ -128,9 +131,6 @@ def compress_disclosure_external_html_payload(
         "외부 HTML 압축 병렬 결과 확인: "
         f"{processing_verification['processed_files']}/{processing_verification['expected_files']}건 처리."
     )
-    for warning in warnings:
-        emit(f"경고: {warning}")
-
     records: list[dict[str, Any]] = []
     for indexed_record in indexed_records:
         assert indexed_record is not None
@@ -181,7 +181,6 @@ def compress_disclosure_external_html_payload(
         },
         "written_files": written_files,
         "metadata_check": metadata_check,
-        "warnings": warnings,
         "processing_verification": processing_verification,
         "verification": verification,
         "progress_log": progress_log[-100:],

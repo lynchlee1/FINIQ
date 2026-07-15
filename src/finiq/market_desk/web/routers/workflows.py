@@ -86,18 +86,18 @@ def _write_transfer_file(
         "format": payload.get("format", ""),
         "path": str(transfer_path),
         "acpt_numbers": len(
-            payload.get("html_download_acpt_numbers")
+            payload.get("external_html_download_acpt_numbers")
             or payload.get("acptNumbers")
             or []
         ),
     }
 
 
-def _attach_html_download_transfer(
+def _attach_external_html_download_transfer(
     payload: dict[str, Any], *, output_directory: str, mode: object
 ) -> dict[str, Any]:
     if payload.get("format") == "kind_disclosure_filter_v1":
-        payload["html_download_transfer"] = _write_transfer_file(
+        payload["external_html_download_transfer"] = _write_transfer_file(
             payload,
             output_directory=output_directory,
             mode=mode,
@@ -161,8 +161,8 @@ def create_workflows_router(
         try:
             body = apply_workspace_defaults("filter", await request.json())
             body["mode"] = validate_workspace_mode(body.get("mode"))
-            body["html_transfer_path"] = _filter_output_directory(
-                body.get("html_transfer_path")
+            body["external_html_transfer_path"] = _filter_output_directory(
+                body.get("external_html_transfer_path")
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -182,10 +182,10 @@ def create_workflows_router(
                             ),
                             cancel_check=cancel_event.is_set,
                         )
-                        _attach_html_download_transfer(
+                        _attach_external_html_download_transfer(
                             payload,
                             output_directory=str(
-                                body.get("html_transfer_path") or ""
+                                body.get("external_html_transfer_path") or ""
                             ).strip(),
                             mode=body.get("mode"),
                         )
@@ -208,10 +208,10 @@ def create_workflows_router(
             return StreamingResponse(generate(), media_type="application/x-ndjson")
         try:
             payload = filter_disclosures_payload(body)
-            _attach_html_download_transfer(
+            _attach_external_html_download_transfer(
                 payload,
                 output_directory=str(
-                    body.get("html_transfer_path") or ""
+                    body.get("external_html_transfer_path") or ""
                 ).strip(),
                 mode=body.get("mode"),
             )
@@ -347,72 +347,80 @@ def create_workflows_router(
             raise HTTPException(status_code=404, detail="Job not found")
         return {"status": "success", "job_id": job_id}
 
-    @router.post("/api/disclosures/html/download/start")
-    async def start_html_download(
+    @router.post("/api/disclosures/external-html-download/start")
+    async def start_external_html_download(
         payload: dict[str, Any], background_tasks: BackgroundTasks
     ):
         return _start_background_job(
-            kind="download",
+            kind="external_html_download",
             payload=payload,
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
         )
 
-    @router.post("/api/disclosures/html/download/cancel")
-    async def cancel_html_download_route(payload: dict[str, Any]):
+    @router.post("/api/disclosures/external-html-download/cancel")
+    async def cancel_external_html_download_route(payload: dict[str, Any]):
         return cancel_disclosure_html_download(str(payload.get("cancel_token") or ""))
 
-    @router.post("/api/disclosures/html/download/inspect-folder")
-    def inspect_html_download_folder(payload: dict[str, Any]):
+    @router.post("/api/disclosures/external-html-download/inspect-folder")
+    def inspect_external_html_download_folder(payload: dict[str, Any]):
         try:
-            return clean_disclosure_html_output_directory_payload(payload)
+            return clean_disclosure_html_output_directory_payload(
+                apply_workspace_defaults("external_html_download", payload)
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.post("/api/disclosures/html/download/check-existing")
-    def check_html_download_folder(payload: dict[str, Any]):
+    @router.post("/api/disclosures/external-html-download/check-existing")
+    def check_external_html_download_folder(payload: dict[str, Any]):
         try:
-            return check_disclosure_html_output_directory_payload(payload)
+            return check_disclosure_html_output_directory_payload(
+                apply_workspace_defaults("external_html_download", payload)
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.post("/api/disclosures/html/download/compress/start")
-    async def start_html_external_compress(
+    @router.post("/api/disclosures/external-html-download/compress/start")
+    async def start_external_html_compress(
         payload: dict[str, Any], background_tasks: BackgroundTasks
     ):
         return _start_background_job(
-            kind="external_compress",
+            kind="external_html_compress",
             payload=payload,
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
         )
 
-    @router.post("/api/disclosures/html/content-download/start")
-    async def start_html_content_download(
+    @router.post("/api/disclosures/internal-html-download/start")
+    async def start_internal_html_download(
         payload: dict[str, Any], background_tasks: BackgroundTasks
     ):
         return _start_background_job(
-            kind="content_download",
+            kind="internal_html_download",
             payload=payload,
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
         )
 
-    @router.post("/api/disclosures/html/content-download/cancel")
-    async def cancel_html_content_download_route(payload: dict[str, Any]):
+    @router.post("/api/disclosures/internal-html-download/cancel")
+    async def cancel_internal_html_download_route(payload: dict[str, Any]):
         return cancel_disclosure_html_download(str(payload.get("cancel_token") or ""))
 
-    @router.post("/api/disclosures/html/content-download/inspect-folder")
-    def inspect_html_content_download_folder(payload: dict[str, Any]):
+    @router.post("/api/disclosures/internal-html-download/inspect-folder")
+    def inspect_internal_html_download_folder(payload: dict[str, Any]):
         try:
-            return clean_disclosure_html_output_directory_payload(payload)
+            return clean_disclosure_html_output_directory_payload(
+                apply_workspace_defaults("internal_html_download", payload)
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.post("/api/disclosures/html/content-download/check-existing")
-    def check_html_content_download_folder(payload: dict[str, Any]):
+    @router.post("/api/disclosures/internal-html-download/check-existing")
+    def check_internal_html_download_folder(payload: dict[str, Any]):
         try:
-            return check_disclosure_html_output_directory_payload(payload)
+            return check_disclosure_html_output_directory_payload(
+                apply_workspace_defaults("internal_html_download", payload)
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -423,12 +431,12 @@ def create_workflows_router(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.post("/api/disclosures/html/content-download/merge/start")
-    async def start_html_content_merge(
+    @router.post("/api/disclosures/internal-html-download/merge/start")
+    async def start_internal_html_merge(
         payload: dict[str, Any], background_tasks: BackgroundTasks
     ):
         return _start_background_job(
-            kind="content_merge",
+            kind="internal_html_merge",
             payload=payload,
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,

@@ -29,6 +29,9 @@ class DisclosureWorkspace:
     sections: Path
     converted: Path
 
+    def external_mode(self, mode: str) -> Path:
+        return self.external / validate_workspace_mode(mode)
+
     def converted_mode(self, mode: str) -> Path:
         return self.converted / validate_workspace_mode(mode)
 
@@ -39,7 +42,10 @@ class DisclosureWorkspace:
             "list": str(self.list),
             "table": str(self.table),
             "filter": str(self.filtered),
-            "external": str(self.external),
+            "external_root": str(self.external),
+            "external": {
+                mode: str(self.external_mode(mode)) for mode in normalized_modes
+            },
             "internal": str(self.internal),
             "sections": str(self.sections),
             "converted_root": str(self.converted),
@@ -83,8 +89,8 @@ def resolve_disclosure_workspace(
         list=root / "01-list",
         table=root / "02-table",
         filtered=root / "03-filter",
-        external=root / "04-external",
-        internal=root / "05-internal",
+        external=root / "04-external-html-download",
+        internal=root / "05-internal-html-download",
         sections=root / "06-sections",
         converted=root / "07-converted",
     )
@@ -158,6 +164,7 @@ def prepare_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, A
     )
     workspace = resolve_disclosure_workspace(workspace.root, create=True)
     for mode in modes:
+        workspace.external_mode(mode).mkdir(parents=True, exist_ok=True)
         workspace.converted_mode(mode).mkdir(parents=True, exist_ok=True)
 
     manifest = {
@@ -208,20 +215,27 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(payload, "output_path", str(workspace.table))
     elif normalized_kind == "filter":
         payload["mode"] = validate_workspace_mode(payload.get("mode"))
-        _set_default(payload, "html_transfer_path", str(workspace.filtered))
-    elif normalized_kind == "download":
+        _set_default(payload, "external_html_transfer_path", str(workspace.filtered))
+    elif normalized_kind == "external_html_download":
+        mode = validate_workspace_mode(payload.get("mode"))
         payload.pop("json", None)
         payload.pop("payload", None)
         payload.pop("source_json_path", None)
-        _set_default(payload, "output_directory", str(workspace.external))
-    elif normalized_kind == "external_compress":
-        _set_default(payload, "input_directory", str(workspace.external))
-        _set_default(payload, "output_directory", str(workspace.external))
-    elif normalized_kind == "content_download":
+        _set_default(payload, "output_directory", str(workspace.external_mode(mode)))
+    elif normalized_kind == "external_html_compress":
+        mode = validate_workspace_mode(payload.get("mode"))
+        _set_default(payload, "input_directory", str(workspace.external_mode(mode)))
+        _set_default(payload, "output_directory", str(workspace.external_mode(mode)))
+    elif normalized_kind == "internal_html_download":
+        mode = validate_workspace_mode(payload.get("mode"))
         if not str(payload.get("source_compressed_json_path") or "").strip():
-            _set_default(payload, "source_directory", str(workspace.external))
+            _set_default(
+                payload,
+                "source_compressed_json_path",
+                str(workspace.external_mode(mode) / "compressed-external-html.json"),
+            )
         _set_default(payload, "output_directory", str(workspace.internal))
-    elif normalized_kind == "content_merge":
+    elif normalized_kind == "internal_html_merge":
         _set_default(payload, "input_directory", str(workspace.internal))
         _set_default(payload, "output_directory", str(workspace.internal / "merged"))
     elif normalized_kind in {"section_inspect", "section_kinds", "section_list"}:
@@ -241,7 +255,7 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(
             payload,
             "compressed_metadata_path",
-            str(workspace.external / "compressed-external-html.json"),
+            str(workspace.external_mode(mode) / "compressed-external-html.json"),
         )
     return payload
 

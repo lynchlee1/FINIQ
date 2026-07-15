@@ -66,11 +66,11 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
   "html-processing": {
     id: "html-processing",
     label: "원문 처리",
-    basePath: "/html-download",
+    basePath: "/external-html-download",
     layout: "review",
     steps: [
-      { href: "/html-download", step: 1, label: "공시원문 외부 저장" },
-      { href: "/html-content-download", step: 2, label: "공시원문 내부 저장" },
+      { href: "/external-html-download", step: 1, label: "공시원문 외부 저장" },
+      { href: "/internal-html-download", step: 2, label: "공시원문 내부 저장" },
       { href: "/html-section-split", step: 3, label: "공시원문 목차 분리" },
       { href: "/html-parse", step: 4, label: "공시원문 변환" },
       { href: "/html-change-log", step: 5, label: "공시 정정내역 한눈에" },

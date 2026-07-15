@@ -8,14 +8,14 @@ import pytest
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
 )
-from finiq.market_desk.web.features.disclosures.html_content_download import (
-    download_disclosure_content_htmls,
-    download_disclosure_html_contents_payload,
+from finiq.market_desk.web.features.disclosures.internal_html_download import (
+    download_disclosure_internal_htmls,
+    download_disclosure_internal_html_payload,
 )
-from finiq.market_desk.web.features.disclosures.html_download import (
-    download_disclosure_html_payload,
+from finiq.market_desk.web.features.disclosures.external_html_download import (
+    download_disclosure_external_html_payload,
 )
-from finiq.market_desk.web.features.disclosures.html_external_compress import (
+from finiq.market_desk.web.features.disclosures.external_html_compress import (
     compress_disclosure_external_html_payload,
 )
 
@@ -31,7 +31,7 @@ def _external_workspace_body(
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
     filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
-    return {"data_root": str(data_root), **body}
+    return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
 
 def test_external_html_resume_redownloads_invalid_existing_target(
@@ -60,11 +60,11 @@ def test_external_html_resume_redownloads_invalid_existing_target(
         return [target]
 
     monkeypatch.setattr(
-        "finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls",
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
         fake_download,
     )
 
-    result = download_disclosure_html_payload(
+    result = download_disclosure_external_html_payload(
         _external_workspace_body(
             tmp_path,
             {"disclosures": [{"acpt_no": "20250101000001"}]},
@@ -77,16 +77,16 @@ def test_external_html_resume_redownloads_invalid_existing_target(
     assert target.read_text("utf-8") == _valid_html()
 
 
-def test_content_html_download_rejects_invalid_response(
+def test_internal_html_download_rejects_invalid_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "finiq.market_desk.web.features.disclosures.html_content_download._fetch_content_html",
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
         lambda *args, **kwargs: b"invalid",
     )
 
     with pytest.raises(ValueError, match="invalid HTML"):
-        download_disclosure_content_htmls(
+        download_disclosure_internal_htmls(
             output_directory=tmp_path,
             request_headers={},
             targets=[{"acpt_no": "20250101000001", "doc_no": "1"}],
@@ -100,11 +100,11 @@ def test_download_payload_reports_parent_cancellation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "finiq.market_desk.web.features.disclosures.html_download.download_disclosure_viewer_htmls",
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
         lambda **kwargs: [],
     )
 
-    result = download_disclosure_html_payload(
+    result = download_disclosure_external_html_payload(
         _external_workspace_body(
             tmp_path,
             {"disclosures": [{"acpt_no": "20250101000001"}]},
@@ -114,11 +114,12 @@ def test_download_payload_reports_parent_cancellation(
     )
 
     assert result["cancelled"] is True
+    assert result["missing_acpt_numbers"] == ["20250101000001"]
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["disclosures"] == []
 
 
-def test_content_download_cancellation_manifest_lists_only_saved_files(
+def test_internal_html_download_cancellation_manifest_lists_only_saved_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     external_directory = tmp_path / "external"
@@ -128,11 +129,11 @@ def test_content_download_cancellation_manifest_lists_only_saved_files(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "finiq.market_desk.web.features.disclosures.html_content_download.download_disclosure_content_htmls",
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
         lambda **kwargs: [],
     )
 
-    result = download_disclosure_html_contents_payload(
+    result = download_disclosure_internal_html_payload(
         {
             "output_directory": str(tmp_path / "content"),
             "source_directory": str(external_directory),
@@ -145,11 +146,17 @@ def test_content_download_cancellation_manifest_lists_only_saved_files(
     assert manifest["disclosures"] == []
 
 
-def test_external_compression_rejects_receipt_number_mismatching_filename(
+def test_external_html_compression_rejects_receipt_number_mismatching_filename(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "external"
     (input_directory / "2025").mkdir(parents=True)
+    (input_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {"disclosures": [{"acpt_no": "20250101000001", "title": "KIND 제목"}]}
+        ),
+        encoding="utf-8",
+    )
     (input_directory / "2025" / "20250101000001.html").write_text(
         """
         <html><body>

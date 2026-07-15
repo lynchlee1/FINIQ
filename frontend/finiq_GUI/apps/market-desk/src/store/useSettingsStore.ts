@@ -13,10 +13,10 @@ interface SettingsState {
   disclosure_separate_output_directory: boolean;
   sqlite_output_directory: string;
   sqlite_manifest_path: string;
-  html_output_directory: string;
-  html_content_output_directory: string;
+  external_html_output_directory: string;
+  internal_html_output_directory: string;
   html_section_split_output_directory: string;
-  html_transfer_directory: string;
+  external_html_transfer_directory: string;
   html_parse_output_directory: string;
   html_parse_result_path: string;
   html_parse_mode: string;
@@ -32,10 +32,10 @@ interface SettingsState {
   asset_excel_cleanup_merged_items: boolean;
   asset_excel_duplicate_scan_recursive: boolean;
   asset_excel_account_mappings: any[];
-  html_merge_output_path: string;
-  html_content_compressed_json_path: string;
-  html_external_compress_input_directory: string;
-  html_external_compress_output_directory: string;
+  internal_html_merge_output_path: string;
+  external_html_compressed_json_path: string;
+  external_html_compress_input_directory: string;
+  external_html_compress_output_directory: string;
   integrated_data_values: Record<string, string>;
   change_log_date_thresholds: Record<string, number>;
   change_log_numeric_thresholds: Record<string, number>;
@@ -61,10 +61,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   disclosure_separate_output_directory: false,
   sqlite_output_directory: "",
   sqlite_manifest_path: "",
-  html_output_directory: "",
-  html_content_output_directory: "",
+  external_html_output_directory: "",
+  internal_html_output_directory: "",
   html_section_split_output_directory: "",
-  html_transfer_directory: "",
+  external_html_transfer_directory: "",
   html_parse_output_directory: "",
   html_parse_result_path: "",
   html_parse_mode: "",
@@ -80,10 +80,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   asset_excel_cleanup_merged_items: true,
   asset_excel_duplicate_scan_recursive: false,
   asset_excel_account_mappings: [],
-  html_merge_output_path: "",
-  html_content_compressed_json_path: "",
-  html_external_compress_input_directory: "",
-  html_external_compress_output_directory: "",
+  internal_html_merge_output_path: "",
+  external_html_compressed_json_path: "",
+  external_html_compress_input_directory: "",
+  external_html_compress_output_directory: "",
   integrated_data_values: {},
   change_log_date_thresholds: {},
   change_log_numeric_thresholds: {},

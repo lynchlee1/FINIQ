@@ -11,8 +11,8 @@ from finiq.market_desk.analytics.ontology_graph import _resolve_frequency
 from finiq.market_desk.web.features.disclosures.external_compact import (
     _external_html_compress_workers,
 )
-from finiq.market_desk.web.features.disclosures.html_download import (
-    download_disclosure_html_payload,
+from finiq.market_desk.web.features.disclosures.external_html_download import (
+    download_disclosure_external_html_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
     _parse_filter_blocks,
@@ -106,9 +106,10 @@ def test_html_download_rejects_invalid_worker_values(tmp_path, value, message) -
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match=message):
-        download_disclosure_html_payload(
+        download_disclosure_external_html_payload(
             {
                 "data_root": str(tmp_path / "workspace"),
+                "mode": "bond_issuance",
                 "output_directory": str(tmp_path / "html"),
                 "max_workers": value,
             }

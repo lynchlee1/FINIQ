@@ -158,7 +158,7 @@ export default function HtmlSectionSplitPage() {
 
   useEffect(() => {
     fetchSettings().then((config) => {
-      const defaultInput = config.html_content_output_directory || "";
+      const defaultInput = config.internal_html_output_directory || "";
       setInputDirectory(defaultInput || "");
       setOutputDirectory(config.html_section_split_output_directory || "");
       setWorkers(String(config.parallel_worker_count || 1));
@@ -189,7 +189,7 @@ export default function HtmlSectionSplitPage() {
     sectionPatternAbortControllerRef.current = null;
     if (await saveSetting("output_root", value)) {
       const settings = useSettingsStore.getState();
-      setInputDirectory(settings.html_content_output_directory || "");
+      setInputDirectory(settings.internal_html_output_directory || "");
       setOutputDirectory(settings.html_section_split_output_directory || "");
     }
     setInspectResult(null);

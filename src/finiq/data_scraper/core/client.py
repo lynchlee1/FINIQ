@@ -54,7 +54,7 @@ def _is_valid_html(path: Path) -> bool:
     """Check if the saved file is a valid HTML (basic check)."""
     if not path.exists():
         return False
-    if path.stat().st_size < 100:  # Too small to be a valid KIND viewer HTML
+    if path.stat().st_size < 100:  # Too small to be a valid KIND external HTML
         return False
     try:
         content = path.read_text(encoding="utf-8", errors="ignore")
@@ -542,7 +542,7 @@ def fetch_disclosure_viewer_html(
     output_directory = output_directory.resolve()
     output_path = output_directory / _build_viewer_html_filename(normalized_acpt_no)
     if skip_existing and output_path.exists():
-        _report_progress(progress_callback, f"Skipping existing KIND viewer HTML: {output_path}")
+        _report_progress(progress_callback, f"Skipping existing KIND external HTML: {output_path}")
         return output_path
 
     normalized_request_headers = _normalize_request_headers(request_headers)
@@ -552,7 +552,7 @@ def fetch_disclosure_viewer_html(
     try:
         _report_progress(
             progress_callback,
-            f"Fetching KIND viewer HTML acpt_no={normalized_acpt_no} doc_no={normalized_doc_no or '-'}...",
+            f"Fetching KIND external HTML acpt_no={normalized_acpt_no} doc_no={normalized_doc_no or '-'}...",
         )
         response = _request_disclosure_viewer_page(
             active_session,
@@ -562,7 +562,7 @@ def fetch_disclosure_viewer_html(
             timeout=timeout,
         )
         _save_response_content(output_path, response)
-        _report_progress(progress_callback, f"Saved KIND viewer HTML to: {output_path}")
+        _report_progress(progress_callback, f"Saved KIND external HTML to: {output_path}")
     finally:
         if owns_session:
             active_session.close()
@@ -570,7 +570,7 @@ def fetch_disclosure_viewer_html(
     return output_path
 
 
-def download_disclosure_viewer_htmls(
+def download_disclosure_external_htmls(
     *,
     output_directory: Path,
     request_headers: Mapping[str, object],
@@ -584,7 +584,7 @@ def download_disclosure_viewer_htmls(
     saved_file_callback: KindViewerSavedFileCallback | None = None,
     cancel_check: KindCancelCheck | None = None,
     max_workers: int | None = None,
-    max_retries: int = 2,
+    max_retries: int = 5,
 ) -> list[Path]:
     """여러 KIND 접수번호의 뷰어 HTML을 병렬로 처리하며 무결성을 보장한다."""
     if timeout <= 0:
@@ -650,7 +650,7 @@ def download_disclosure_viewer_htmls(
         output_path = output_directory / _build_viewer_html_filename(acpt_no)
         
         if skip_existing and _is_valid_html(output_path):
-            _report_progress(progress_callback, f"Skipping existing KIND viewer HTML: {output_path}")
+            _report_progress(progress_callback, f"Skipping existing KIND external HTML: {output_path}")
             with lock:
                 saved_paths[acpt_no] = output_path
                 valid_acpt_numbers.add(acpt_no)
@@ -666,7 +666,7 @@ def download_disclosure_viewer_htmls(
         try:
             _report_progress(
                 progress_callback,
-                f"Fetching KIND viewer HTML acpt_no={acpt_no} (retry={current_retry})...",
+                f"Fetching KIND external HTML acpt_no={acpt_no} (retry={current_retry})...",
             )
             response = _request_disclosure_viewer_page(
                 get_worker_session(),
@@ -758,7 +758,7 @@ __all__ = [
     "KIND_SEARCH_RESULTS_URL",
     "SEARCH_RESULTS_FILENAME_TEMPLATE",
     "VIEWER_HTML_FILENAME_TEMPLATE",
-    "download_disclosure_viewer_htmls",
+    "download_disclosure_external_htmls",
     "fetch_disclosure_viewer_html",
     "fetch_search_page",
     "KindCancelCheck",

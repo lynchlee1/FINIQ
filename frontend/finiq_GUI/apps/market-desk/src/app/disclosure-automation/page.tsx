@@ -51,8 +51,8 @@ const STAGES = [
   { number: 1, key: "s1_download", label: "공시내역 다운로드", target: "search" },
   { number: 2, key: "s2_table", label: "공시내역 변환", target: null },
   { number: 3, key: "s3_filter", label: "공시내역 필터링", target: "filter" },
-  { number: 4, key: "s4_external_html", label: "공시원문 외부 저장", target: null },
-  { number: 5, key: "s5_content_html", label: "공시원문 내부 저장", target: null },
+  { number: 4, key: "s4_external_html_download", label: "공시원문 외부 저장", target: null },
+  { number: 5, key: "s5_internal_html_download", label: "공시원문 내부 저장", target: null },
   { number: 6, key: "s6_sections", label: "공시원문 목차 분리", target: "sections" },
   { number: 7, key: "s7_parse", label: "공시원문 변환", target: null },
 ] as const;
@@ -866,7 +866,7 @@ export default function DisclosureAutomationPage() {
 
           <div ref={sectionSettingsRef} className="scroll-mt-6 space-y-4">
             {sectionSettingsSelected || reviewPatterns.length ? <HtmlSectionPatternCard
-              inputDirectory={`${dataRoot}/05-internal/.automation-current`}
+              inputDirectory={`${dataRoot}/05-internal-html-download/.automation-current`}
               sectionPatterns={reviewPatterns}
               selectedPatternTocIds={reviewSelections}
               isLoading={false}

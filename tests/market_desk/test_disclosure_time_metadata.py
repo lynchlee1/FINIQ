@@ -92,7 +92,14 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
         data_root / "03-filter" / "bond_issuance" / "filtered.json",
         disclosed_at="2025-01-02 18:42",
     )
-    (data_root / "04-external" / "compressed-external-html.json").write_text(
+    compressed_path = (
+        data_root
+        / "04-external-html-download"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+    compressed_path.parent.mkdir(parents=True, exist_ok=True)
+    compressed_path.write_text(
         json.dumps({"records": []}), encoding="utf-8"
     )
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
@@ -111,7 +118,10 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
         data_root / "03-filter" / "bond_issuance" / "filtered.json"
     )
     assert payload["compressed_metadata_path"] == str(
-        data_root / "04-external" / "compressed-external-html.json"
+        data_root
+        / "04-external-html-download"
+        / "bond_issuance"
+        / "compressed-external-html.json"
     )
     assert result["records"][0]["disclosed_at"] == "2025-01-02 18:42"
     preview = build_parse_preview_payload(payload)

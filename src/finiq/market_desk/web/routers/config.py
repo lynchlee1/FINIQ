@@ -42,10 +42,10 @@ class SettingsUpdate(BaseModel):
     disclosure_separate_output_directory: Optional[bool] = None
     sqlite_output_directory: Optional[str] = None
     sqlite_manifest_path: Optional[str] = None
-    html_output_directory: Optional[str] = None
-    html_content_output_directory: Optional[str] = None
+    external_html_output_directory: Optional[str] = None
+    internal_html_output_directory: Optional[str] = None
     html_section_split_output_directory: Optional[str] = None
-    html_transfer_directory: Optional[str] = None
+    external_html_transfer_directory: Optional[str] = None
     html_parse_output_directory: Optional[str] = None
     html_parse_result_path: Optional[str] = None
     html_parse_mode: Optional[str] = None
@@ -61,10 +61,10 @@ class SettingsUpdate(BaseModel):
     asset_excel_cleanup_merged_items: Optional[bool] = None
     asset_excel_duplicate_scan_recursive: Optional[bool] = None
     asset_excel_account_mappings: Optional[list[dict[str, Any]]] = None
-    html_merge_output_path: Optional[str] = None
-    html_content_compressed_json_path: Optional[str] = None
-    html_external_compress_input_directory: Optional[str] = None
-    html_external_compress_output_directory: Optional[str] = None
+    internal_html_merge_output_path: Optional[str] = None
+    external_html_compressed_json_path: Optional[str] = None
+    external_html_compress_input_directory: Optional[str] = None
+    external_html_compress_output_directory: Optional[str] = None
     integrated_data_values: Optional[dict[str, str]] = None
     change_log_date_thresholds: Optional[dict[str, float]] = None
     change_log_numeric_thresholds: Optional[dict[str, float]] = None
@@ -163,14 +163,14 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             or workspace_defaults["sqlite_output_directory"],
             "sqlite_manifest_path": config.sqlite_manifest_path
             or workspace_defaults["sqlite_manifest_path"],
-            "html_output_directory": config.html_output_directory
-            or workspace_defaults["html_output_directory"],
-            "html_content_output_directory": config.html_content_output_directory
-            or workspace_defaults["html_content_output_directory"],
+            "external_html_output_directory": config.external_html_output_directory
+            or workspace_defaults["external_html_output_directory"],
+            "internal_html_output_directory": config.internal_html_output_directory
+            or workspace_defaults["internal_html_output_directory"],
             "html_section_split_output_directory": config.html_section_split_output_directory
             or workspace_defaults["html_section_split_output_directory"],
-            "html_transfer_directory": config.html_transfer_directory
-            or workspace_defaults["html_transfer_directory"],
+            "external_html_transfer_directory": config.external_html_transfer_directory
+            or workspace_defaults["external_html_transfer_directory"],
             "html_parse_output_directory": config.html_parse_output_directory
             or workspace_defaults["html_parse_output_directory"],
             "html_parse_result_path": config.html_parse_result_path
@@ -194,14 +194,14 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "asset_excel_cleanup_merged_items": config.asset_excel_cleanup_merged_items,
             "asset_excel_duplicate_scan_recursive": config.asset_excel_duplicate_scan_recursive,
             "asset_excel_account_mappings": config.asset_excel_account_mappings,
-            "html_merge_output_path": config.html_merge_output_path
-            or workspace_defaults["html_merge_output_path"],
-            "html_content_compressed_json_path": config.html_content_compressed_json_path
-            or workspace_defaults["html_content_compressed_json_path"],
-            "html_external_compress_input_directory": config.html_external_compress_input_directory
-            or workspace_defaults["html_external_compress_input_directory"],
-            "html_external_compress_output_directory": config.html_external_compress_output_directory
-            or workspace_defaults["html_external_compress_output_directory"],
+            "internal_html_merge_output_path": config.internal_html_merge_output_path
+            or workspace_defaults["internal_html_merge_output_path"],
+            "external_html_compressed_json_path": config.external_html_compressed_json_path
+            or workspace_defaults["external_html_compressed_json_path"],
+            "external_html_compress_input_directory": config.external_html_compress_input_directory
+            or workspace_defaults["external_html_compress_input_directory"],
+            "external_html_compress_output_directory": config.external_html_compress_output_directory
+            or workspace_defaults["external_html_compress_output_directory"],
             "integrated_data_values": config.integrated_data_values,
             "change_log_date_thresholds": config.change_log_date_thresholds,
             "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
@@ -297,6 +297,10 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 else {
                     key: workspace_settings[key]
                     for key in (
+                        "external_html_output_directory",
+                        "external_html_compress_input_directory",
+                        "external_html_compress_output_directory",
+                        "external_html_compressed_json_path",
                         "html_parse_output_directory",
                         "html_parse_result_path",
                     )

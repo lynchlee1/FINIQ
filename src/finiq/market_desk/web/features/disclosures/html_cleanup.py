@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from finiq.market_desk.web.features.disclosures import html_content_download
+from finiq.market_desk.web.features.disclosures import internal_html_download
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 def clean_disclosure_html_output_directory_payload(
@@ -25,11 +25,11 @@ def clean_disclosure_html_output_directory_payload(
         source_compressed_json_path = (
             Path(source_compressed_json_path_raw).expanduser().resolve()
         )
-        compressed_payload = html_content_download._load_compressed_external_html_file_payload(
+        compressed_payload = internal_html_download._load_compressed_external_html_file_payload(
             source_compressed_json_path
         )
         targets, _manifest_payload = (
-            html_content_download._collect_content_cleanup_targets_from_compressed_payload(compressed_payload)
+            internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(compressed_payload)
         )
         targets = _apply_limit_to_targets(targets, body.get("limit"))
         acpt_numbers = [target["acpt_no"] for target in targets]
@@ -43,7 +43,7 @@ def clean_disclosure_html_output_directory_payload(
     elif source_directory_raw:
         source_directory = Path(source_directory_raw).expanduser().resolve()
         targets, _manifest_payload = (
-            html_content_download._collect_content_cleanup_targets_from_external_directory(
+            internal_html_download._collect_internal_cleanup_targets_from_external_directory(
                 source_directory,
             )
         )
@@ -137,10 +137,10 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         source_compressed_json_path = (
             Path(source_compressed_json_path_raw).expanduser().resolve()
         )
-        source_json = html_content_download._load_compressed_external_html_file_payload(
+        source_json = internal_html_download._load_compressed_external_html_file_payload(
             source_compressed_json_path
         )
-        targets, manifest_payload = html_content_download._collect_content_targets_from_compressed_payload(
+        targets, manifest_payload = internal_html_download._collect_internal_targets_from_compressed_payload(
             source_json
         )
         targets = _apply_limit_to_targets(targets, body.get("limit"))
@@ -149,7 +149,7 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         resolved_source_path = str(source_compressed_json_path)
     elif source_directory_raw:
         source_directory = Path(source_directory_raw).expanduser().resolve()
-        targets, manifest_payload = html_content_download._collect_content_targets_from_external_directory(
+        targets, manifest_payload = internal_html_download._collect_internal_targets_from_external_directory(
             source_directory,
         )
         targets = _apply_limit_to_targets(targets, body.get("limit"))
