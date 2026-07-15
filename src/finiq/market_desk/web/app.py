@@ -12,10 +12,10 @@ from finiq.data.assets_excel import (
     convert_asset_excels_to_wide_parquet,
     merge_asset_parquet_outputs,
 )
-from finiq.market_desk.web.features.disclosures.html_content_download import download_disclosure_html_contents_payload
-from finiq.market_desk.web.features.disclosures.html_content_merge import merge_disclosure_content_html_payload
-from finiq.market_desk.web.features.disclosures.html_download import download_disclosure_html_payload
-from finiq.market_desk.web.features.disclosures.html_external_compress import compress_disclosure_external_html_payload
+from finiq.market_desk.web.features.disclosures.internal_html_download import download_disclosure_internal_html_payload
+from finiq.market_desk.web.features.disclosures.internal_html_merge import merge_disclosure_internal_html_payload
+from finiq.market_desk.web.features.disclosures.external_html_download import download_disclosure_external_html_payload
+from finiq.market_desk.web.features.disclosures.external_html_compress import compress_disclosure_external_html_payload
 from finiq.market_desk.web.features.disclosures.html_parse_common import parse_disclosure_html_payload
 from finiq.market_desk.web.features.disclosures.html_sections import (
     inspect_disclosure_html_sections_payload,
@@ -142,10 +142,10 @@ def _run_asset_parquet_duplicate_cleanup_job(
 
 
 JOB_HANDLERS: dict[str, JobHandler] = {
-    "download": download_disclosure_html_payload,
-    "external_compress": compress_disclosure_external_html_payload,
-    "content_download": download_disclosure_html_contents_payload,
-    "content_merge": merge_disclosure_content_html_payload,
+    "external_html_download": download_disclosure_external_html_payload,
+    "external_html_compress": compress_disclosure_external_html_payload,
+    "internal_html_download": download_disclosure_internal_html_payload,
+    "internal_html_merge": merge_disclosure_internal_html_payload,
     "parse": parse_disclosure_html_payload,
     "section_inspect": inspect_disclosure_html_sections_payload,
     "section_kinds": summarize_disclosure_html_section_kinds_payload,
@@ -178,7 +178,11 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
         if "cancel_check" in sig.parameters:
             kwargs["cancel_check"] = lambda: job_manager.is_cancelled(job_id)
 
-        if kind in {"download", "content_download", "disclosure_automation"}:
+        if kind in {
+            "external_html_download",
+            "internal_html_download",
+            "disclosure_automation",
+        }:
             progress_callback("다른 KIND 네트워크 작업이 끝날 때까지 대기합니다.")
             with KIND_NETWORK_JOB_LOCK:
                 result = handler(apply_workspace_defaults(kind, payload), **kwargs)

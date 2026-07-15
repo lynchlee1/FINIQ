@@ -42,10 +42,10 @@ SAVED_SETTINGS_KEYS = (
     "disclosure_separate_output_directory",
     "sqlite_output_directory",
     "sqlite_manifest_path",
-    "html_output_directory",
-    "html_content_output_directory",
+    "external_html_output_directory",
+    "internal_html_output_directory",
     "html_section_split_output_directory",
-    "html_transfer_directory",
+    "external_html_transfer_directory",
     "html_parse_output_directory",
     "html_parse_result_path",
     "html_parse_mode",
@@ -61,10 +61,10 @@ SAVED_SETTINGS_KEYS = (
     "asset_excel_cleanup_merged_items",
     "asset_excel_duplicate_scan_recursive",
     "asset_excel_account_mappings",
-    "html_merge_output_path",
-    "html_content_compressed_json_path",
-    "html_external_compress_input_directory",
-    "html_external_compress_output_directory",
+    "internal_html_merge_output_path",
+    "external_html_compressed_json_path",
+    "external_html_compress_input_directory",
+    "external_html_compress_output_directory",
     "integrated_data_values",
     "change_log_date_thresholds",
     "change_log_numeric_thresholds",
@@ -85,10 +85,10 @@ class AppConfig:
     disclosure_separate_output_directory: bool = False
     sqlite_output_directory: str = ""
     sqlite_manifest_path: str = ""
-    html_output_directory: str = ""
-    html_content_output_directory: str = ""
+    external_html_output_directory: str = ""
+    internal_html_output_directory: str = ""
     html_section_split_output_directory: str = ""
-    html_transfer_directory: str = ""
+    external_html_transfer_directory: str = ""
     html_parse_output_directory: str = ""
     html_parse_result_path: str = ""
     html_parse_mode: str = ""
@@ -104,10 +104,10 @@ class AppConfig:
     asset_excel_cleanup_merged_items: bool = True
     asset_excel_duplicate_scan_recursive: bool = False
     asset_excel_account_mappings: list[dict[str, Any]] = field(default_factory=list)
-    html_merge_output_path: str = ""
-    html_content_compressed_json_path: str = ""
-    html_external_compress_input_directory: str = ""
-    html_external_compress_output_directory: str = ""
+    internal_html_merge_output_path: str = ""
+    external_html_compressed_json_path: str = ""
+    external_html_compress_input_directory: str = ""
+    external_html_compress_output_directory: str = ""
     integrated_data_values: dict[str, str] = field(default_factory=dict)
     change_log_date_thresholds: dict[str, float] = field(default_factory=dict)
     change_log_numeric_thresholds: dict[str, float] = field(default_factory=dict)
@@ -140,21 +140,21 @@ def build_disclosure_workspace_path_settings(
         raise ValueError("Invalid disclosure parser mode")
     converted_path = root / "07-converted" / normalized_mode
     filtered_path = root / "03-filter"
-    external_path = root / "04-external"
+    external_path = root / "04-external-html-download" / normalized_mode
     return {
         "download_output_directory": str(root / "01-list"),
         "sqlite_source_path": str(root / "01-list"),
         "sqlite_output_directory": str(root / "02-table"),
         "sqlite_manifest_path": str(root / "02-table"),
-        "html_transfer_directory": str(filtered_path),
-        "html_output_directory": str(external_path),
-        "html_external_compress_input_directory": str(external_path),
-        "html_external_compress_output_directory": str(external_path),
-        "html_content_compressed_json_path": str(
+        "external_html_transfer_directory": str(filtered_path),
+        "external_html_output_directory": str(external_path),
+        "external_html_compress_input_directory": str(external_path),
+        "external_html_compress_output_directory": str(external_path),
+        "external_html_compressed_json_path": str(
             external_path / "compressed-external-html.json"
         ),
-        "html_content_output_directory": str(root / "05-internal"),
-        "html_merge_output_path": str(root / "05-internal" / "merged"),
+        "internal_html_output_directory": str(root / "05-internal-html-download"),
+        "internal_html_merge_output_path": str(root / "05-internal-html-download" / "merged"),
         "html_section_split_output_directory": str(root / "06-sections"),
         "html_parse_output_directory": str(converted_path),
         "html_parse_result_path": str(
@@ -248,14 +248,14 @@ def init_config() -> AppConfig:
         ),
         sqlite_output_directory=disclosure_path("sqlite_output_directory"),
         sqlite_manifest_path=disclosure_path("sqlite_manifest_path"),
-        html_output_directory=disclosure_path("html_output_directory"),
-        html_content_output_directory=disclosure_path(
-            "html_content_output_directory"
+        external_html_output_directory=disclosure_path("external_html_output_directory"),
+        internal_html_output_directory=disclosure_path(
+            "internal_html_output_directory"
         ),
         html_section_split_output_directory=disclosure_path(
             "html_section_split_output_directory"
         ),
-        html_transfer_directory=disclosure_path("html_transfer_directory"),
+        external_html_transfer_directory=disclosure_path("external_html_transfer_directory"),
         html_parse_output_directory=disclosure_path("html_parse_output_directory"),
         html_parse_result_path=disclosure_path("html_parse_result_path"),
         html_parse_mode=html_parse_mode,
@@ -271,15 +271,15 @@ def init_config() -> AppConfig:
         asset_excel_cleanup_merged_items=bool(settings.get("asset_excel_cleanup_merged_items", True)),
         asset_excel_duplicate_scan_recursive=bool(settings.get("asset_excel_duplicate_scan_recursive", False)),
         asset_excel_account_mappings=settings.get("asset_excel_account_mappings", []),
-        html_merge_output_path=disclosure_path("html_merge_output_path"),
-        html_content_compressed_json_path=disclosure_path(
-            "html_content_compressed_json_path"
+        internal_html_merge_output_path=disclosure_path("internal_html_merge_output_path"),
+        external_html_compressed_json_path=disclosure_path(
+            "external_html_compressed_json_path"
         ),
-        html_external_compress_input_directory=disclosure_path(
-            "html_external_compress_input_directory"
+        external_html_compress_input_directory=disclosure_path(
+            "external_html_compress_input_directory"
         ),
-        html_external_compress_output_directory=disclosure_path(
-            "html_external_compress_output_directory"
+        external_html_compress_output_directory=disclosure_path(
+            "external_html_compress_output_directory"
         ),
         integrated_data_values=settings.get("integrated_data_values", {}),
         change_log_date_thresholds=settings.get("change_log_date_thresholds", {}),

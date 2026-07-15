@@ -1,4 +1,4 @@
-"""Compact KIND external viewer HTML into metadata records."""
+"""Compact KIND external HTML into metadata records."""
 
 from __future__ import annotations
 
@@ -53,15 +53,10 @@ def _compact_external_viewer_html(html_markup: str | bytes) -> dict[str, Any]:
     parsed = viewer_html(html_markup)
     soup = parse_html_with_recovery(html_markup)
 
-    title_tag = soup.find("title")
     header_tag = soup.find("h1", class_="ttl")
-    title = parsed.get("title") or ""
-    if not title and isinstance(title_tag, Tag):
-        title = _clean_text(title_tag.get_text())
 
     return {
         "acpt_no": parsed.get("acpt_no"),
-        "title": title,
         "header": parsed.get("header")
         or (
             _clean_text(header_tag.get_text(separator=" ", strip=True))
@@ -117,7 +112,7 @@ def _compress_external_html_file(
     acpt_no = str(parsed.get("acpt_no") or html_path.stem).strip()
     record = {
         "acpt_no": acpt_no,
-        "title": parsed.get("title") or parsed.get("header") or "",
+        "title": "",
         "header": parsed.get("header") or "",
         "selected_main_doc_no": parsed.get("selected_main_doc_no"),
         "metadata": {},

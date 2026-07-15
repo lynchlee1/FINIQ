@@ -1,4 +1,4 @@
-"""KIND content HTML section splitting helpers."""
+"""KIND internal HTML section splitting helpers."""
 
 from __future__ import annotations
 
@@ -220,8 +220,8 @@ def _inspect_xforms_sections(document: html.HtmlElement) -> list[HtmlSectionSumm
     ]
 
 
-def split_content_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
-    """Split a KIND content HTML document by top-level TOC headings."""
+def split_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
+    """Split a KIND internal HTML document by top-level TOC headings."""
     parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
     document = html.fromstring(decode_html_markup(html_markup), parser=parser)
     children = _body_direct_children(document)
@@ -259,8 +259,8 @@ def split_content_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
     return sections
 
 
-def inspect_content_html_sections(html_markup: str | bytes) -> list[HtmlSectionSummary]:
-    """Read only top-level TOC metadata from a KIND content HTML document."""
+def inspect_internal_html_sections(html_markup: str | bytes) -> list[HtmlSectionSummary]:
+    """Read only top-level TOC metadata from a KIND internal HTML document."""
     parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
     document = html.fromstring(decode_html_markup(html_markup), parser=parser)
     children = _body_direct_children(document)
@@ -409,7 +409,7 @@ def _source_document(input_directory: Path, source_file: Path) -> dict[str, str]
 def _source_document_with_sections(
     input_directory: Path, source_file: Path
 ) -> dict[str, Any]:
-    sections = inspect_content_html_sections(source_file.read_bytes())
+    sections = inspect_internal_html_sections(source_file.read_bytes())
     return {
         **_source_document(input_directory, source_file),
         "section_count": len(sections),
@@ -629,7 +629,7 @@ def split_disclosure_html_section_source_payload(
         str(body.get("input_directory") or "").strip(),
         str(body.get("source_name") or ""),
     )
-    sections = split_content_html_sections(source_file.read_bytes())
+    sections = split_internal_html_sections(source_file.read_bytes())
     return {
         "format": "finiq_disclosure_html_section_source_split_v1",
         "input_directory": str(input_directory),
@@ -673,7 +673,7 @@ def inspect_disclosure_html_sections_payload(
 
     def inspect_one(source_file: Path) -> dict[str, Any]:
         try:
-            sections = inspect_content_html_sections(source_file.read_bytes())
+            sections = inspect_internal_html_sections(source_file.read_bytes())
         except Exception as exc:
             return {
                 "status": "read_failed",
@@ -786,7 +786,7 @@ def _selected_section_output(
     section_save_rules: dict[str, set[str]],
 ) -> dict[str, Any]:
     try:
-        sections = split_content_html_sections(source_file.read_bytes())
+        sections = split_internal_html_sections(source_file.read_bytes())
     except Exception as exc:
         return {
             "status": "read_failed",

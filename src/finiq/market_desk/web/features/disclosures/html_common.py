@@ -1,4 +1,4 @@
-"""KIND disclosure viewer HTML download helpers for the web UI."""
+"""KIND disclosure HTML download helpers for the web UI."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from finiq.data_scraper.core.client import (
     KIND_DISCLOSURE_VIEWER_URL,
     VIEWER_HTML_FILENAME_TEMPLATE,
     _is_valid_html,
-    download_disclosure_viewer_htmls,
+    download_disclosure_external_htmls,
 )
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.parse._snippets import dart_main_doc_no, search_paths
@@ -146,39 +146,11 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
 
 def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
     workspace = resolve_disclosure_workspace(body.get("data_root") or "")
-    requested_mode = str(body.get("mode") or "").strip()
-    if requested_mode:
-        mode = validate_workspace_mode(requested_mode)
-        source_paths = [workspace.filtered / mode / "filtered.json"]
-    else:
-        source_paths = []
-        if workspace.filtered.is_dir():
-            for mode_directory in sorted(workspace.filtered.iterdir()):
-                if not mode_directory.is_dir() or mode_directory.name.startswith("."):
-                    continue
-                source_path = mode_directory / "filtered.json"
-                if not source_path.is_file():
-                    continue
-                validate_workspace_mode(mode_directory.name)
-                source_paths.append(source_path)
-    if not source_paths or any(not path.is_file() for path in source_paths):
-        expected = (
-            source_paths[0]
-            if source_paths
-            else workspace.filtered / "<mode>" / "filtered.json"
-        )
-        raise ValueError(f"filtered disclosure JSON does not exist: {expected}")
-
-    mode_payloads = {
-        path.parent.name: json.loads(path.read_text(encoding="utf-8"))
-        for path in source_paths
-    }
-    if len(source_paths) == 1:
-        return next(iter(mode_payloads.values())), str(source_paths[0])
-    return {
-        "format": "kind_disclosure_filter_collection_v1",
-        "modes": mode_payloads,
-    }, str(workspace.filtered)
+    mode = validate_workspace_mode(body.get("mode"))
+    source_path = workspace.filtered / mode / "filtered.json"
+    if not source_path.is_file():
+        raise ValueError(f"filtered disclosure JSON does not exist: {source_path}")
+    return json.loads(source_path.read_text(encoding="utf-8")), str(source_path)
 
 
 def _year_from_disclosure(
@@ -554,7 +526,7 @@ def _collect_yearly_html_files(input_directory: Path) -> list[tuple[str, Path]]:
     return files
 
 
-def _resolve_content_merge_output_directory(
+def _resolve_internal_html_merge_output_directory(
     output_directory_raw: str, input_directory: Path
 ) -> Path:
     output_directory = (

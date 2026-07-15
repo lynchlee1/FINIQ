@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 
 import finiq.data_scraper.core.html_rate_limit as rate_limit_module
-import finiq.market_desk.web.features.disclosures.html_content_download as content_module
-from finiq.data_scraper.core.client import download_disclosure_viewer_htmls
+import finiq.market_desk.web.features.disclosures.internal_html_download as internal_module
+from finiq.data_scraper.core.client import download_disclosure_external_htmls
 
 
 class _ViewerResponse:
@@ -60,7 +60,7 @@ def test_external_and_content_html_share_one_request_limiter(
     monkeypatch.setattr(rate_limit_module, "_HTML_DOWNLOAD_RATE_LIMITER", limiter)
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
-    external_paths = download_disclosure_viewer_htmls(
+    external_paths = download_disclosure_external_htmls(
         output_directory=tmp_path / "external",
         request_headers={},
         acpt_numbers=["20260101000001"],
@@ -70,7 +70,7 @@ def test_external_and_content_html_share_one_request_limiter(
         max_retries=0,
     )
 
-    def fake_fetch_content_html(
+    def fake_fetch_internal_html(
         *args: Any,
         before_request=None,
         **kwargs: Any,
@@ -80,8 +80,8 @@ def test_external_and_content_html_share_one_request_limiter(
         before_request()
         return ("<html><body>" + ("content " * 30) + "</body></html>").encode()
 
-    monkeypatch.setattr(content_module, "_fetch_content_html", fake_fetch_content_html)
-    content_paths = content_module.download_disclosure_content_htmls(
+    monkeypatch.setattr(internal_module, "_fetch_internal_html", fake_fetch_internal_html)
+    internal_paths = internal_module.download_disclosure_internal_htmls(
         output_directory=tmp_path / "content",
         request_headers={},
         targets=[{"acpt_no": "20260101000002", "doc_no": "20260101000003"}],
@@ -90,7 +90,7 @@ def test_external_and_content_html_share_one_request_limiter(
     )
 
     assert len(external_paths) == 1
-    assert len(content_paths) == 1
+    assert len(internal_paths) == 1
     assert len(limiter._request_timestamps) == 3
 
 

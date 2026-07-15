@@ -1,15 +1,15 @@
-"""Disclosure content HTML merge payload helpers."""
+"""Disclosure internal HTML merge payload helpers."""
 
 from __future__ import annotations
 
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 
-def merge_disclosure_content_html_payload(
+def merge_disclosure_internal_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Merge downloaded KIND content HTML files into JSON."""
+    """Merge downloaded KIND internal HTML files into JSON."""
     input_directory_raw = str(
         body.get("input_directory") or body.get("source_directory") or ""
     ).strip()
@@ -18,7 +18,7 @@ def merge_disclosure_content_html_payload(
         raise ValueError(msg)
     input_directory = Path(input_directory_raw).expanduser().resolve()
     limit = _parse_merge_limit(body.get("limit"))
-    output_directory = _resolve_content_merge_output_directory(
+    output_directory = _resolve_internal_html_merge_output_directory(
         str(body.get("output_directory") or "").strip(), input_directory
     )
 
@@ -33,7 +33,7 @@ def merge_disclosure_content_html_payload(
     if limit is not None:
         html_files = html_files[:limit]
     if not html_files:
-        msg = "No content HTML files found in input_directory"
+        msg = "No internal HTML files found in input_directory"
         raise ValueError(msg)
 
     emit(f"내부 HTML 병합 대상 {len(html_files)}건을 찾았습니다.")
@@ -54,9 +54,9 @@ def merge_disclosure_content_html_payload(
     written_files: list[str] = []
     output_directory.mkdir(parents=True, exist_ok=True)
     for year, records in sorted(records_by_year.items()):
-        year_output_path = output_directory / f"merged-content-html-{year}.json"
+        year_output_path = output_directory / f"merged-internal-html-{year}.json"
         payload = {
-            "format": "finiq_disclosure_content_html_merge_v1",
+            "format": "finiq_disclosure_internal_html_merge_v1",
             "input_directory": str(input_directory),
             "output_path": str(year_output_path),
             "year": year,
@@ -70,7 +70,7 @@ def merge_disclosure_content_html_payload(
         emit(f"연도별 JSON 저장 완료: {year_output_path}")
 
     return {
-        "format": "finiq_disclosure_content_html_merge_result_v1",
+        "format": "finiq_disclosure_internal_html_merge_result_v1",
         "input_directory": str(input_directory),
         "output_directory": str(output_directory),
         "summary": {

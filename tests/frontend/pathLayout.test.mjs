@@ -110,7 +110,7 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   const tableSource = await readFile(tablePagePath, "utf8");
   const filterSource = await readFile(filterPagePath, "utf8");
   const htmlDownloadSource = await readFile(
-    "frontend/finiq_GUI/apps/market-desk/src/app/html-download/_components/HtmlDownloadPageView.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
     "utf8",
   );
   const parseSource = await readFile(
@@ -131,7 +131,8 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   assert.match(tableSource, /root_directory: useSeparateOutputDirectory/);
   assert.match(tableSource, /saveSetting\("sqlite_output_directory", val\)/);
   assert.match(filterSource, /\.\.\.\(useSeparateOutputDirectory[\s\S]*?classification_path:/);
-  assert.match(filterSource, /saveSetting\("html_transfer_directory", val\)/);
+  assert.match(filterSource, /saveSetting\("external_html_transfer_directory", val\)/);
+  assert.doesNotMatch(filterSource, /saveSetting\("external_html_transfer_directory", transferPath\)/);
   const sourcePayload = htmlDownloadSource.match(/const sourcePayload[\s\S]*?const currentSourcePath/)?.[0] ?? "";
   assert.match(sourcePayload, /if \(variant === "external"\) \{[\s\S]*?return \{\};/);
   assert.doesNotMatch(sourcePayload, /source_json_path/);
@@ -172,7 +173,7 @@ test("data path cards omit descriptions and keep compact title spacing", async (
   const tableSource = await readFile(tablePagePath, "utf8");
   const sectionSplitSource = await readFile(htmlSectionSplitPath, "utf8");
   const downloadSource = await readFile(
-    "frontend/finiq_GUI/apps/market-desk/src/app/html-download/_components/HtmlDownloadPageView.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
     "utf8",
   );
   const templateSource = await readFile(

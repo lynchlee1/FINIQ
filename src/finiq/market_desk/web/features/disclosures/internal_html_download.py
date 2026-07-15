@@ -1,4 +1,4 @@
-"""Disclosure content HTML download helpers."""
+"""Disclosure internal HTML download helpers."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from finiq.data_scraper.core.html_rate_limit import (
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 
-def _fetch_content_html(
+def _fetch_internal_html(
     session: requests.Session,
     *,
     acpt_no: str,
@@ -80,7 +80,7 @@ def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, 
     return payload
 
 
-def _collect_content_targets_from_compressed_payload(
+def _collect_internal_targets_from_compressed_payload(
     payload: dict[str, Any],
 ) -> tuple[list[dict[str, str]], Any]:
     targets: list[dict[str, str]] = []
@@ -133,12 +133,12 @@ def _collect_content_targets_from_compressed_payload(
         targets.append({"acpt_no": acpt_no, "doc_no": doc_no, "year": year})
         seen.add(acpt_no)
     if not targets:
-        msg = "No content targets found in compressed external HTML JSON"
+        msg = "No internal HTML targets found in compressed external HTML JSON"
         raise ValueError(msg)
     return targets, payload
 
 
-def _collect_content_cleanup_targets_from_compressed_payload(
+def _collect_internal_cleanup_targets_from_compressed_payload(
     payload: dict[str, Any],
 ) -> tuple[list[dict[str, str]], Any]:
     targets: list[dict[str, str]] = []
@@ -158,12 +158,12 @@ def _collect_content_cleanup_targets_from_compressed_payload(
         targets.append({"acpt_no": acpt_no, "doc_no": "", "year": year})
         seen.add(acpt_no)
     if not targets:
-        msg = "No content targets found in compressed external HTML JSON"
+        msg = "No internal HTML targets found in compressed external HTML JSON"
         raise ValueError(msg)
     return targets, payload
 
 
-def _collect_content_targets_from_external_directory(
+def _collect_internal_targets_from_external_directory(
     source_directory: Path,
 ) -> tuple[list[dict[str, str]], Any]:
     if not source_directory.is_dir():
@@ -186,7 +186,7 @@ def _collect_content_targets_from_external_directory(
 
     compressed_payload = _load_compressed_external_html_payload(source_directory)
     if compressed_payload is not None:
-        return _collect_content_targets_from_compressed_payload(compressed_payload)
+        return _collect_internal_targets_from_compressed_payload(compressed_payload)
 
     target_by_acpt_no: dict[str, dict[str, str]] = {}
     html_paths = []
@@ -220,12 +220,12 @@ def _collect_content_targets_from_external_directory(
     )
     targets = [target_by_acpt_no[acpt_no] for acpt_no in ordered_acpt_numbers]
     if not targets:
-        msg = "No external viewer HTML files found in source_directory"
+        msg = "No external HTML files found in source_directory"
         raise ValueError(msg)
     return targets, manifest_payload
 
 
-def _collect_content_cleanup_targets_from_external_directory(
+def _collect_internal_cleanup_targets_from_external_directory(
     source_directory: Path,
 ) -> tuple[list[dict[str, str]], Any]:
     if not source_directory.is_dir():
@@ -246,7 +246,7 @@ def _collect_content_cleanup_targets_from_external_directory(
 
     compressed_payload = _load_compressed_external_html_payload(source_directory)
     if compressed_payload is not None:
-        return _collect_content_cleanup_targets_from_compressed_payload(
+        return _collect_internal_cleanup_targets_from_compressed_payload(
             compressed_payload
         )
 
@@ -274,12 +274,12 @@ def _collect_content_cleanup_targets_from_external_directory(
     )
     targets = [target_by_acpt_no[acpt_no] for acpt_no in ordered_acpt_numbers]
     if not targets:
-        msg = "No external viewer HTML files found in source_directory"
+        msg = "No external HTML files found in source_directory"
         raise ValueError(msg)
     return targets, manifest_payload
 
 
-def download_disclosure_content_htmls(
+def download_disclosure_internal_htmls(
     *,
     output_directory: Path,
     request_headers: dict[str, object],
@@ -317,7 +317,7 @@ def download_disclosure_content_htmls(
             cancel_check,
             spacing_limiter=spacing_limiter,
         ):
-            raise InterruptedError("content HTML download cancelled")
+            raise InterruptedError("internal HTML download cancelled")
 
     with requests.Session() as session:
         for target in targets:
@@ -331,16 +331,16 @@ def download_disclosure_content_htmls(
             if skip_existing and _is_valid_html(output_path):
                 if progress_callback is not None:
                     progress_callback(
-                        f"Skipping existing KIND content HTML: {output_path}"
+                        f"Skipping existing KIND internal HTML: {output_path}"
                     )
                 saved_paths.append(output_path)
                 continue
             if progress_callback is not None:
                 progress_callback(
-                    f"Fetching KIND content HTML acpt_no={acpt_no} doc_no={doc_no}..."
+                    f"Fetching KIND internal HTML acpt_no={acpt_no} doc_no={doc_no}..."
                 )
             try:
-                content = _fetch_content_html(
+                internal_html = _fetch_internal_html(
                     session,
                     acpt_no=acpt_no,
                     doc_no=doc_no,
@@ -351,19 +351,19 @@ def download_disclosure_content_htmls(
             except InterruptedError:
                 break
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(content)
+            output_path.write_bytes(internal_html)
             if not _is_valid_html(output_path):
                 output_path.unlink(missing_ok=True)
                 raise ValueError(
-                    f"Downloaded content for acpt_no={acpt_no} is invalid HTML"
+                    f"Downloaded internal response for acpt_no={acpt_no} is invalid HTML"
                 )
             saved_paths.append(output_path)
             if progress_callback is not None:
-                progress_callback(f"Saved KIND content HTML to: {output_path}")
+                progress_callback(f"Saved KIND internal HTML to: {output_path}")
     return saved_paths
 
 
-def download_disclosure_html_contents_payload(
+def download_disclosure_internal_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
@@ -387,12 +387,12 @@ def download_disclosure_html_contents_payload(
     if source_compressed_json_path_raw:
         source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
         compressed_payload = _load_compressed_external_html_file_payload(source_path)
-        targets, manifest_payload = _collect_content_targets_from_compressed_payload(
+        targets, manifest_payload = _collect_internal_targets_from_compressed_payload(
             compressed_payload
         )
     else:
         source_path = Path(source_directory_raw).expanduser().resolve()
-        targets, manifest_payload = _collect_content_targets_from_external_directory(
+        targets, manifest_payload = _collect_internal_targets_from_external_directory(
             source_path,
         )
 
@@ -423,7 +423,7 @@ def download_disclosure_html_contents_payload(
     def handle_progress(message: str) -> None:
         nonlocal processed_count
         if message.startswith(
-            ("Saved KIND content HTML ", "Skipping existing KIND content HTML")
+            ("Saved KIND internal HTML ", "Skipping existing KIND internal HTML")
         ):
             processed_count += 1
             emit(message)
@@ -432,7 +432,7 @@ def download_disclosure_html_contents_payload(
                     f"HTML 내부 저장 중간 확인: {processed_count}/{len(acpt_numbers)}건 처리."
                 )
             return
-        if message.startswith("Fetching KIND content HTML "):
+        if message.startswith("Fetching KIND internal HTML "):
             emit(message)
             return
         emit(message)
@@ -475,7 +475,7 @@ def download_disclosure_html_contents_payload(
         else:
             emit(f"새로 저장할 대상: {output_summary['missing_target_html_count']}건.")
         for acpt_no, path in existing_paths_by_acpt_no.items():
-            handle_progress(f"Skipping existing KIND content HTML: {path}")
+            handle_progress(f"Skipping existing KIND internal HTML: {path}")
     try:
         downloaded_paths = []
         if download_acpt_numbers:
@@ -486,7 +486,7 @@ def download_disclosure_html_contents_payload(
                 grouped_targets.setdefault(target_years[acpt_no], []).append(target)
             for year, group_targets in grouped_targets.items():
                 downloaded_paths.extend(
-                    download_disclosure_content_htmls(
+                    download_disclosure_internal_htmls(
                         output_directory=resolved_output_directory / year,
                         request_headers=DEFAULT_REQUEST_HEADERS,
                         targets=[
@@ -528,7 +528,7 @@ def download_disclosure_html_contents_payload(
         f"HTML 내부 저장 {'중지' if cancelled else '완료'}: 저장 파일 {len(saved_paths)}/{len(acpt_numbers)}건."
     )
     return {
-        "format": "kind_disclosure_html_content_download_v1",
+        "format": "kind_disclosure_internal_html_download_v1",
         "output_directory": str(resolved_output_directory),
         "requested_count": len(acpt_numbers),
         "saved_count": len(saved_paths),

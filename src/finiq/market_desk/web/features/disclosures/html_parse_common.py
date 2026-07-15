@@ -1,4 +1,4 @@
-"""KIND disclosure viewer HTML parsing helpers for the web UI."""
+"""KIND disclosure HTML parsing helpers for the web UI."""
 
 from __future__ import annotations
 
@@ -1283,7 +1283,7 @@ def parse_disclosure_html_payload(
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Parse downloaded KIND viewer HTML files with the selected mode parser."""
+    """Parse downloaded KIND section HTML files with the selected mode parser."""
     request = _build_parse_request(body, cancel_check=cancel_check)
     state = ParseRunState(progress_callback=progress_callback)
     _clear_cancel_token(request.cancel_token)

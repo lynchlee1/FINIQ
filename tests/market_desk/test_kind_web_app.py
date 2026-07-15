@@ -22,7 +22,7 @@ def _external_workspace_body(
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
     filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
-    return {"data_root": str(data_root), **body}
+    return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
 def test_api_config(tmp_path: Path):
     # Setup mock config
@@ -337,7 +337,7 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
         return {
             "format": "kind_disclosure_filter_v1",
             "summary": {"matched_disclosures": 2, "returned_disclosures": 2},
-            "html_download_acpt_numbers": ["1", "2"],
+            "external_html_download_acpt_numbers": ["1", "2"],
             "disclosures": [],
         }
 
@@ -351,7 +351,7 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
         headers={"Accept": "application/x-ndjson"},
         json={
             "mode": "bond_issuance",
-            "html_transfer_path": str(transfer_dir),
+            "external_html_transfer_path": str(transfer_dir),
         },
     ) as response:
         assert response.status_code == 200
@@ -359,7 +359,7 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
 
     assert any(event["type"] == "progress" and event["progress"]["completed"] == 1 for event in events)
     result = next(event["payload"] for event in events if event["type"] == "result")
-    transfer = result["html_download_transfer"]
+    transfer = result["external_html_download_transfer"]
     transfer_path = Path(transfer["path"])
     assert transfer["acpt_numbers"] == 2
     assert transfer_path.is_file()
@@ -381,7 +381,7 @@ def test_filter_disclosures_requires_mode_folder(tmp_path: Path, monkeypatch) ->
 
     response = TestClient(app).post(
         "/api/disclosures/filter",
-        json={"html_transfer_path": str(tmp_path / "filtered")},
+        json={"external_html_transfer_path": str(tmp_path / "filtered")},
     )
 
     assert response.status_code == 400
@@ -404,7 +404,7 @@ def test_filter_disclosures_rejects_json_output_path_before_filtering(
         "/api/disclosures/filter",
         json={
             "mode": "bond_issuance",
-            "html_transfer_path": str(tmp_path / "filtered.json"),
+            "external_html_transfer_path": str(tmp_path / "filtered.json"),
         },
     )
 
@@ -608,7 +608,7 @@ def test_html_download_inspect_folder_route_deletes_unexpected_file(tmp_path: Pa
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/download/inspect-folder",
+        "/api/disclosures/external-html-download/inspect-folder",
         json=_external_workspace_body(
             tmp_path,
             {"disclosures": [{"acpt_no": "20250101000001"}]},
@@ -634,7 +634,7 @@ def test_html_download_inspect_folder_route_dry_run_reports_unexpected_file(tmp_
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/download/inspect-folder",
+        "/api/disclosures/external-html-download/inspect-folder",
         json=_external_workspace_body(
             tmp_path,
             {"disclosures": [{"acpt_no": "20250101000001"}]},
@@ -660,7 +660,7 @@ def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/download/check-existing",
+        "/api/disclosures/external-html-download/check-existing",
         json=_external_workspace_body(
             tmp_path,
             {
@@ -681,7 +681,39 @@ def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path
     assert payload["missing_target_html_count"] == 1
 
 
-def test_html_content_download_inspect_folder_route_uses_yearly_layout(tmp_path: Path) -> None:
+def test_external_html_check_existing_route_uses_workspace_default_output(
+    tmp_path: Path,
+) -> None:
+    body = _external_workspace_body(
+        tmp_path,
+        {"disclosures": [{"acpt_no": "20250101000001"}]},
+        output_directory="",
+    )
+    output_directory = (
+        tmp_path
+        / "workspace"
+        / "04-external-html-download"
+        / "bond_issuance"
+        / "2025"
+    )
+    output_directory.mkdir(parents=True)
+    (output_directory / "20250101000001.html").write_text(
+        "<html><body>" + ("valid " * 30) + "</body></html>",
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).post(
+        "/api/disclosures/external-html-download/check-existing",
+        json=body,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["existing_target_html_count"] == 1
+    assert payload["output_directory"] == str(output_directory.parent.resolve())
+
+
+def test_internal_html_download_inspect_folder_route_uses_yearly_layout(tmp_path: Path) -> None:
     source_directory = tmp_path / "viewer_html"
     source_year_directory = source_directory / "2025"
     source_year_directory.mkdir(parents=True)
@@ -703,7 +735,7 @@ def test_html_content_download_inspect_folder_route_uses_yearly_layout(tmp_path:
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/content-download/inspect-folder",
+        "/api/disclosures/internal-html-download/inspect-folder",
         json={
             "source_directory": str(source_directory),
             "output_directory": str(output_directory),
@@ -719,7 +751,7 @@ def test_html_content_download_inspect_folder_route_uses_yearly_layout(tmp_path:
     assert payload["deletion_candidates"][0]["name"] == "2024/20240101000001.html"
 
 
-def test_html_content_download_inspect_folder_uses_fast_source_scan(tmp_path: Path) -> None:
+def test_internal_html_download_inspect_folder_uses_fast_source_scan(tmp_path: Path) -> None:
     source_directory = tmp_path / "viewer_html"
     (source_directory / "2025").mkdir(parents=True)
     (source_directory / "2025" / "20250101000001.html").write_text(
@@ -730,7 +762,7 @@ def test_html_content_download_inspect_folder_uses_fast_source_scan(tmp_path: Pa
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/content-download/inspect-folder",
+        "/api/disclosures/internal-html-download/inspect-folder",
         json={
             "source_directory": str(source_directory),
             "output_directory": str(output_directory),
@@ -745,7 +777,7 @@ def test_html_content_download_inspect_folder_uses_fast_source_scan(tmp_path: Pa
     assert payload["deletion_candidate_count"] == 0
 
 
-def test_html_content_download_check_existing_route_uses_yearly_layout(tmp_path: Path) -> None:
+def test_internal_html_download_check_existing_route_uses_yearly_layout(tmp_path: Path) -> None:
     source_directory = tmp_path / "viewer_html"
     source_year_directory = source_directory / "2025"
     source_year_directory.mkdir(parents=True)
@@ -768,7 +800,7 @@ def test_html_content_download_check_existing_route_uses_yearly_layout(tmp_path:
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/content-download/check-existing",
+        "/api/disclosures/internal-html-download/check-existing",
         json={
             "source_directory": str(source_directory),
             "output_directory": str(output_directory),
@@ -784,7 +816,7 @@ def test_html_content_download_check_existing_route_uses_yearly_layout(tmp_path:
     assert payload["missing_target_html_count"] == 0
 
 
-def test_html_content_download_check_existing_route_uses_compressed_json_year(
+def test_internal_html_download_check_existing_route_uses_compressed_json_year(
     tmp_path: Path,
 ) -> None:
     compressed_path = tmp_path / "compressed-external-html.json"
@@ -808,7 +840,7 @@ def test_html_content_download_check_existing_route_uses_compressed_json_year(
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/content-download/check-existing",
+        "/api/disclosures/internal-html-download/check-existing",
         json={
             "source_compressed_json_path": str(compressed_path),
             "output_directory": str(output_directory),
@@ -821,7 +853,55 @@ def test_html_content_download_check_existing_route_uses_compressed_json_year(
     assert payload["requested_count"] == 1
 
 
-def test_html_content_download_check_existing_route_finds_yearly_output(
+def test_internal_html_check_existing_route_uses_workspace_defaults(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    compressed_path = (
+        data_root
+        / "04-external-html-download"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+    compressed_path.parent.mkdir(parents=True)
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "year": "2025",
+                        "selected_main_doc_no": "20250101000999",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = data_root / "05-internal-html-download" / "2025"
+    output_directory.mkdir(parents=True)
+    (output_directory / "20250101000001.html").write_text(
+        "<html><body>" + ("valid " * 30) + "</body></html>",
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).post(
+        "/api/disclosures/internal-html-download/check-existing",
+        json={
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "output_directory": "",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["existing_target_html_count"] == 1
+    assert payload["output_directory"] == str(output_directory.parent.resolve())
+
+
+def test_internal_html_download_check_existing_route_finds_yearly_output(
     tmp_path: Path,
 ) -> None:
     compressed_path = tmp_path / "compressed-external-html.json"
@@ -848,7 +928,7 @@ def test_html_content_download_check_existing_route_finds_yearly_output(
 
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/content-download/check-existing",
+        "/api/disclosures/internal-html-download/check-existing",
         json={
             "source_compressed_json_path": str(compressed_path),
             "output_directory": str(output_directory),
@@ -865,7 +945,7 @@ def test_html_download_inspect_folder_route_rejects_high_risk_directory(
 ) -> None:
     client = TestClient(app)
     response = client.post(
-        "/api/disclosures/html/download/inspect-folder",
+        "/api/disclosures/external-html-download/inspect-folder",
         json=_external_workspace_body(
             tmp_path,
             {"disclosures": [{"acpt_no": "20250101000001"}]},

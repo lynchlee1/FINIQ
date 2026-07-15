@@ -18,10 +18,10 @@ import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 
-type DownloadVariant = "external" | "content";
-type ContentSourceInputMode = "folder" | "file";
+type DownloadVariant = "external" | "internal";
+type InternalSourceInputMode = "folder" | "file";
 type ExternalTaskMode = "download" | "compress";
-type ContentTaskMode = "download" | "merge";
+type InternalTaskMode = "download" | "merge";
 
 const DOWNLOAD_VARIANTS = {
   external: {
@@ -29,23 +29,23 @@ const DOWNLOAD_VARIANTS = {
     description: "다운로드된 공시 결과 JSON을 바탕으로 KIND 공시 뷰어 HTML을 대량 저장합니다.",
     sourcePickMode: "folder",
     sourceRequiredMessage: "작업공간 디렉토리를 선택하세요.",
-    defaultDirectoryKey: "html_output_directory",
-    startEndpoint: "/api/disclosures/html/download/start",
-    cancelEndpoint: "/api/disclosures/html/download/cancel",
-    inspectEndpoint: "/api/disclosures/html/download/inspect-folder",
-    checkExistingEndpoint: "/api/disclosures/html/download/check-existing",
+    defaultDirectoryKey: "external_html_output_directory",
+    startEndpoint: "/api/disclosures/external-html-download/start",
+    cancelEndpoint: "/api/disclosures/external-html-download/cancel",
+    inspectEndpoint: "/api/disclosures/external-html-download/inspect-folder",
+    checkExistingEndpoint: "/api/disclosures/external-html-download/check-existing",
     stopMessage: "공시원문 외부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
-  content: {
+  internal: {
     settingsTitle: "공시원문 내부 저장 설정",
     description: "공시원문 외부 데이터 경로를 바탕으로 KIND 공시 본문 HTML을 대량 저장합니다.",
     sourcePickMode: "folder",
     sourceRequiredMessage: "공시원문 외부 데이터 경로를 선택하세요.",
-    defaultDirectoryKey: "html_content_output_directory",
-    startEndpoint: "/api/disclosures/html/content-download/start",
-    cancelEndpoint: "/api/disclosures/html/content-download/cancel",
-    inspectEndpoint: "/api/disclosures/html/content-download/inspect-folder",
-    checkExistingEndpoint: "/api/disclosures/html/content-download/check-existing",
+    defaultDirectoryKey: "internal_html_output_directory",
+    startEndpoint: "/api/disclosures/internal-html-download/start",
+    cancelEndpoint: "/api/disclosures/internal-html-download/cancel",
+    inspectEndpoint: "/api/disclosures/internal-html-download/inspect-folder",
+    checkExistingEndpoint: "/api/disclosures/internal-html-download/check-existing",
     stopMessage: "공시원문 내부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
 } as const;
@@ -63,11 +63,12 @@ async function readJsonResponse(response: Response, fallbackMessage: string) {
   }
 }
 
-export function HtmlDownloadPageView({ variant = "external" }: { variant?: DownloadVariant }) {
+export function DisclosureHtmlDownloadPageView({ variant = "external" }: { variant?: DownloadVariant }) {
   const variantConfig = DOWNLOAD_VARIANTS[variant];
 
   const {
     output_root: dataRoot,
+    html_parse_mode: htmlParseMode,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
     saveSetting,
@@ -105,10 +106,6 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       lines.push(`저장 JSON: ${formatInteger(res.summary.written_files)}`);
       if (res.metadata_check) {
         lines.push(`metadata 확인: ${formatInteger(res.metadata_check.matched_records)}/${formatInteger(res.metadata_check.expected_records)}`);
-        lines.push(`metadata 누락: ${formatInteger(res.metadata_check.missing_records)}`);
-      }
-      if (Array.isArray(res.warnings)) {
-        lines.push(...res.warnings.map((warning: unknown) => `경고: ${String(warning)}`));
       }
       if (res.verification) {
         lines.push(`재검사: ${res.verification.passed ? "통과" : "누락/불일치 있음"}`);
@@ -143,9 +140,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   const [outputDirectory, setOutputDirectory] = useState("");
   const [sourcePath, setSourcePath] = useState("");
   const [externalTaskMode, setExternalTaskMode] = useState<ExternalTaskMode>("download");
-  const [contentTaskMode, setContentTaskMode] = useState<ContentTaskMode>("download");
-  const [contentSourceInputMode, setContentSourceInputMode] = useState<ContentSourceInputMode>("folder");
-  const [contentSourceFilePath, setContentSourceFilePath] = useState("");
+  const [internalTaskMode, setInternalTaskMode] = useState<InternalTaskMode>("download");
+  const [internalSourceInputMode, setInternalSourceInputMode] = useState<InternalSourceInputMode>("folder");
+  const [internalSourceFilePath, setInternalSourceFilePath] = useState("");
   const [compressInputDirectory, setCompressInputDirectory] = useState("");
   const [compressOutputDirectory, setCompressOutputDirectory] = useState("");
   const [compressWorkers, setCompressWorkers] = useState("");
@@ -197,13 +194,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     fetchSettings().then((config) => {
       const nextOutputDirectory = config[variantConfig.defaultDirectoryKey] || "";
       setOutputDirectory(nextOutputDirectory);
-      setCompressInputDirectory(config.html_output_directory || nextOutputDirectory);
-      setCompressOutputDirectory(config.html_external_compress_output_directory || nextOutputDirectory);
+      setCompressInputDirectory(config.external_html_output_directory || nextOutputDirectory);
+      setCompressOutputDirectory(config.external_html_compress_output_directory || nextOutputDirectory);
 
-      if (variant === "content") {
-        setSourcePath(config.html_output_directory || "");
-        setContentSourceFilePath(config.html_content_compressed_json_path || "");
-        setMergeOutputPath(config.html_merge_output_path || "");
+      if (variant === "internal") {
+        setSourcePath(config.external_html_output_directory || "");
+        setInternalSourceFilePath(config.external_html_compressed_json_path || "");
+        setMergeOutputPath(config.internal_html_merge_output_path || "");
       }
     }).catch(err => {
       setStatus(err.message);
@@ -223,22 +220,23 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     if (variant === "external") {
       return {};
     }
-    if (variant === "content" && contentSourceInputMode === "file") {
-      return { source_compressed_json_path: contentSourceFilePath };
+    if (variant === "internal" && internalSourceInputMode === "file") {
+      return { source_compressed_json_path: internalSourceFilePath };
     }
     if (useSeparateOutputDirectory) {
       return { source_directory: sourcePath };
     }
     return {};
-  }, [contentSourceFilePath, contentSourceInputMode, sourcePath, useSeparateOutputDirectory, variant]);
+  }, [internalSourceFilePath, internalSourceInputMode, sourcePath, useSeparateOutputDirectory, variant]);
 
-  const currentSourcePath = variant === "content" && contentSourceInputMode === "file" ? contentSourceFilePath : dataRoot;
-  const currentSourceRequiredMessage = variant === "content" && contentSourceInputMode === "file"
+  const currentSourcePath = variant === "internal" && internalSourceInputMode === "file" ? internalSourceFilePath : dataRoot;
+  const currentSourceRequiredMessage = variant === "internal" && internalSourceInputMode === "file"
     ? "외부 HTML 압축 JSON 파일을 선택하세요."
     : variantConfig.sourceRequiredMessage;
 
   const buildRunPayload = useCallback((cancelToken: string) => ({
       data_root: dataRoot,
+      mode: htmlParseMode,
       output_directory: useSeparateOutputDirectory ? outputDirectory : "",
       ...sourcePayload(),
       timeout: Number(timeout),
@@ -250,6 +248,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       cancel_token: cancelToken,
   }), [
     dataRoot,
+    htmlParseMode,
     outputDirectory,
     useSeparateOutputDirectory,
     sourcePayload,
@@ -278,6 +277,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
 
   const buildCleanupPayload = useCallback((dryRun: boolean) => ({
     data_root: dataRoot,
+    mode: htmlParseMode,
     output_directory: useSeparateOutputDirectory ? outputDirectory : "",
     ...sourcePayload(),
     limit: limit ? Number(limit) : null,
@@ -286,6 +286,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     delete_confirmation_text: deleteConfirmationText,
   }), [
     dataRoot,
+    htmlParseMode,
     outputDirectory,
     useSeparateOutputDirectory,
     sourcePayload,
@@ -495,8 +496,8 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     }
   };
 
-  const handleMergeContentHtml = async () => {
-    if (variant !== "content") return;
+  const handleMergeInternalHtml = async () => {
+    if (variant !== "internal") return;
     if (!dataRoot || (useSeparateOutputDirectory && !mergeOutputPath)) {
       setStatus("작업공간 디렉토리와 병합 결과 데이터 경로를 확인하세요.");
       setIsErrorStatus(true);
@@ -508,7 +509,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       output_directory: useSeparateOutputDirectory ? mergeOutputPath || outputDirectory : "",
       limit: limit ? Number(limit) : null,
     };
-    startJob("/api/disclosures/html/content-download/merge/start", payload);
+    startJob("/api/disclosures/internal-html-download/merge/start", payload);
   };
 
   const handleCompressExternalHtml = async () => {
@@ -525,24 +526,25 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     }
     const payload = {
       data_root: dataRoot,
+      mode: htmlParseMode,
       input_directory: useSeparateOutputDirectory ? compressInputDirectory : "",
       output_directory: useSeparateOutputDirectory ? compressOutputDirectory : "",
       parallel_workers: compressWorkers ? Number(compressWorkers) : null,
     };
-    startJob("/api/disclosures/html/download/compress/start", payload);
+    startJob("/api/disclosures/external-html-download/compress/start", payload);
   };
 
   const saveOutputDirectory = (val: string) => {
     setOutputDirectory(val);
     saveSetting(variantConfig.defaultDirectoryKey, val);
-    if (variant === "content") {
+    if (variant === "internal") {
       setMergeOutputPath(val);
     }
   };
 
-  const saveContentSourceFilePath = (val: string) => {
-    setContentSourceFilePath(val);
-    saveSetting("html_content_compressed_json_path", val);
+  const saveInternalSourceFilePath = (val: string) => {
+    setInternalSourceFilePath(val);
+    saveSetting("external_html_compressed_json_path", val);
   };
 
   const saveWorkspaceDirectory = async (val: string) => {
@@ -550,12 +552,12 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     const settings = useSettingsStore.getState();
     const nextOutputDirectory = settings[variantConfig.defaultDirectoryKey] || "";
     setOutputDirectory(nextOutputDirectory);
-    setCompressInputDirectory(settings.html_output_directory || "");
-    setCompressOutputDirectory(settings.html_external_compress_output_directory || "");
-    if (variant === "content") {
-      setSourcePath(settings.html_output_directory || "");
-      setContentSourceFilePath(settings.html_content_compressed_json_path || "");
-      setMergeOutputPath(settings.html_merge_output_path || "");
+    setCompressInputDirectory(settings.external_html_output_directory || "");
+    setCompressOutputDirectory(settings.external_html_compress_output_directory || "");
+    if (variant === "internal") {
+      setSourcePath(settings.external_html_output_directory || "");
+      setInternalSourceFilePath(settings.external_html_compressed_json_path || "");
+      setMergeOutputPath(settings.internal_html_merge_output_path || "");
     }
   };
 
@@ -563,11 +565,11 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
     {
       id: "sourcePath",
       kind: "path",
-      label: variant === "content" && contentSourceInputMode === "file" ? "입력 데이터 경로 (외부 HTML 압축 JSON)" : "작업공간 디렉토리",
+      label: variant === "internal" && internalSourceInputMode === "file" ? "입력 데이터 경로 (외부 HTML 압축 JSON)" : "작업공간 디렉토리",
       help: undefined,
-      mode: variant === "content" && contentSourceInputMode === "file" ? "file" : variantConfig.sourcePickMode,
-      value: variant === "content" && contentSourceInputMode === "file" ? currentSourcePath : dataRoot,
-      onChange: variant === "content" && contentSourceInputMode === "file" ? saveContentSourceFilePath : saveWorkspaceDirectory,
+      mode: variant === "internal" && internalSourceInputMode === "file" ? "file" : variantConfig.sourcePickMode,
+      value: variant === "internal" && internalSourceInputMode === "file" ? currentSourcePath : dataRoot,
+      onChange: variant === "internal" && internalSourceInputMode === "file" ? saveInternalSourceFilePath : saveWorkspaceDirectory,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
     },
@@ -613,9 +615,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       value: compressOutputDirectory,
       onChange: (val) => {
         setCompressOutputDirectory(val);
-        saveSetting("html_external_compress_output_directory", val);
+        saveSetting("external_html_compress_output_directory", val);
         saveSetting(
-          "html_content_compressed_json_path",
+          "external_html_compressed_json_path",
           val ? `${val.replace(/\/$/, "")}/compressed-external-html.json` : "",
         );
       },
@@ -654,9 +656,9 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
       value: mergeOutputPath || outputDirectory,
       onChange: (val) => {
         setMergeOutputPath(val);
-        saveSetting("html_merge_output_path", val);
+        saveSetting("internal_html_merge_output_path", val);
       },
-      placeholder: outputDirectory || "/path/to/content_html/merged",
+      placeholder: outputDirectory || "/path/to/internal_html/merged",
       span: 4,
     } satisfies HtmlWorkflowField] : []),
   ];
@@ -708,22 +710,22 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
   }
 
   const isExternalCompressMode = variant === "external" && externalTaskMode === "compress";
-  const isContentMergeMode = variant === "content" && contentTaskMode === "merge";
+  const isInternalMergeMode = variant === "internal" && internalTaskMode === "merge";
   const showSaveWorkflow =
     (variant === "external" && externalTaskMode === "download") ||
-    (variant === "content" && contentTaskMode === "download");
+    (variant === "internal" && internalTaskMode === "download");
 
   return (
     <HtmlWorkflowPage
-      eyebrow={variant === "external" ? "External HTML Save" : "Content HTML Save"}
+      eyebrow={variant === "external" ? "External HTML Save" : "Internal HTML Save"}
       title={isExternalCompressMode
         ? "외부 HTML 압축"
-        : isContentMergeMode
+        : isInternalMergeMode
           ? "내부 HTML 병합"
           : variantConfig.settingsTitle}
       description={isExternalCompressMode
         ? "저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
-        : isContentMergeMode
+        : isInternalMergeMode
           ? "저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다."
           : variantConfig.description}
       actions={variant === "external" ? (
@@ -749,24 +751,24 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             외부 HTML 압축
           </Button>
         </div>
-      ) : variant === "content" ? (
+      ) : variant === "internal" ? (
         <div className="inline-flex rounded-md border border-[color:var(--tv-border)] p-1">
           <Button
             type="button"
-            variant={contentTaskMode === "download" ? "default" : "ghost"}
+            variant={internalTaskMode === "download" ? "default" : "ghost"}
             size="sm"
             className="h-8"
-            onClick={() => setContentTaskMode("download")}
+            onClick={() => setInternalTaskMode("download")}
           >
             <FolderOpen className="mr-2 h-4 w-4" />
             내부 HTML 저장
           </Button>
           <Button
             type="button"
-            variant={contentTaskMode === "merge" ? "default" : "ghost"}
+            variant={internalTaskMode === "merge" ? "default" : "ghost"}
             size="sm"
             className="h-8"
-            onClick={() => setContentTaskMode("merge")}
+            onClick={() => setInternalTaskMode("merge")}
           >
             <FileJson className="mr-2 h-4 w-4" />
             내부 HTML 병합
@@ -779,24 +781,24 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
           {showSaveWorkflow && (
             <HtmlWorkflowCard
               title="데이터 경로"
-              actions={variant === "content" ? (
+              actions={variant === "internal" ? (
                 <div className="inline-flex gap-1 rounded-md border border-[color:var(--tv-border)] p-1">
                   <Button
                     type="button"
-                    variant={contentSourceInputMode === "folder" ? "default" : "ghost"}
+                    variant={internalSourceInputMode === "folder" ? "default" : "ghost"}
                     size="sm"
                     className="h-8"
-                    onClick={() => setContentSourceInputMode("folder")}
+                    onClick={() => setInternalSourceInputMode("folder")}
                   >
                     <FolderOpen className="mr-2 h-4 w-4" />
                     폴더 입력
                   </Button>
                   <Button
                     type="button"
-                    variant={contentSourceInputMode === "file" ? "default" : "ghost"}
+                    variant={internalSourceInputMode === "file" ? "default" : "ghost"}
                     size="sm"
                     className="h-8"
-                    onClick={() => setContentSourceInputMode("file")}
+                    onClick={() => setInternalSourceInputMode("file")}
                   >
                     <FileJson className="mr-2 h-4 w-4" />
                     JSON 파일 입력
@@ -920,13 +922,13 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
             </Card>
           )}
 
-          {isContentMergeMode && (
+          {isInternalMergeMode && (
             <HtmlWorkflowCard
               title="내부 HTML 병합"
               description="저장된 KIND 공시 본문 HTML들을 하나의 JSON으로 병합합니다. 로컬 파일 처리이므로 최대 요청/분은 적용되지 않습니다."
             >
                 <HtmlWorkflowForm fields={mergeFields} />
-                <Button variant="outline" className="h-10 w-full" onClick={handleMergeContentHtml} disabled={isJobActive}>
+                <Button variant="outline" className="h-10 w-full" onClick={handleMergeInternalHtml} disabled={isJobActive}>
                   <FileJson className="mr-2 h-4 w-4" />
                   내부 HTML 병합
                 </Button>
@@ -1024,7 +1026,7 @@ export function HtmlDownloadPageView({ variant = "external" }: { variant?: Downl
                   </div>
                   <HtmlWorkflowForm fields={compressionSettingFields} />
                 </div>
-              ) : isContentMergeMode ? (
+              ) : isInternalMergeMode ? (
                 <div className="space-y-3">
                   <div className="border-b border-[color:var(--tv-border)] pb-2">
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>

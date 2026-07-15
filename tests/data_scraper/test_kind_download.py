@@ -12,7 +12,7 @@ import pytest
 
 import finiq.data_scraper.core.html_rate_limit as rate_limit_module
 from finiq.data_scraper.core.client import (
-    download_disclosure_viewer_htmls,
+    download_disclosure_external_htmls,
     download_pages,
     fetch_disclosure_viewer_html,
     fetch_search_page,
@@ -540,7 +540,7 @@ def test_fetch_search_page_refreshes_main_get_body(tmp_path: Path) -> None:
     assert len(session.get_calls) == 1
 
 
-def test_download_disclosure_viewer_htmls_rate_limits(
+def test_download_disclosure_external_htmls_rate_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -557,7 +557,7 @@ def test_download_disclosure_viewer_htmls_rate_limits(
 
     # Request 3 items with max_requests_per_minute=2
     # First 2 should pass immediately, 3rd should wait.
-    saved_paths = download_disclosure_viewer_htmls(
+    saved_paths = download_disclosure_external_htmls(
         output_directory=tmp_path,
         request_headers=REQUEST_HEADERS,
         acpt_numbers=["20260108000150", "20260318000871", "20260401001020"],
@@ -578,7 +578,7 @@ def test_download_disclosure_viewer_htmls_rate_limits(
     assert all(s == 0.1 for s in sleep_calls)
 
 
-def test_download_disclosure_viewer_htmls_skips_existing_valid_html(
+def test_download_disclosure_external_htmls_skips_existing_valid_html(
     tmp_path: Path,
 ) -> None:
     existing_path = tmp_path / "20260108000150.html"
@@ -588,7 +588,7 @@ def test_download_disclosure_viewer_htmls_skips_existing_valid_html(
     session = ViewerFakeSession()
     progress_messages: list[str] = []
 
-    saved_paths = download_disclosure_viewer_htmls(
+    saved_paths = download_disclosure_external_htmls(
         output_directory=tmp_path,
         request_headers=REQUEST_HEADERS,
         acpt_numbers=["20260108000150"],
@@ -599,17 +599,17 @@ def test_download_disclosure_viewer_htmls_skips_existing_valid_html(
 
     assert saved_paths == [existing_path]
     assert session.get_calls == []
-    assert progress_messages == [f"Skipping existing KIND viewer HTML: {existing_path}"]
+    assert progress_messages == [f"Skipping existing KIND external HTML: {existing_path}"]
 
 
-def test_download_disclosure_viewer_htmls_replaces_invalid_existing_html(
+def test_download_disclosure_external_htmls_replaces_invalid_existing_html(
     tmp_path: Path,
 ) -> None:
     existing_path = tmp_path / "20260108000150.html"
     existing_path.write_text("broken", encoding="utf-8")
     session = ViewerFakeSession()
 
-    saved_paths = download_disclosure_viewer_htmls(
+    saved_paths = download_disclosure_external_htmls(
         output_directory=tmp_path,
         request_headers=REQUEST_HEADERS,
         acpt_numbers=["20260108000150"],
@@ -622,9 +622,9 @@ def test_download_disclosure_viewer_htmls_replaces_invalid_existing_html(
     assert existing_path.read_text("utf-8").startswith("<html><body>")
 
 
-def test_download_disclosure_viewer_htmls_rejects_rates_over_kind_limit(tmp_path: Path) -> None:
+def test_download_disclosure_external_htmls_rejects_rates_over_kind_limit(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="max_requests_per_minute"):
-        download_disclosure_viewer_htmls(
+        download_disclosure_external_htmls(
             output_directory=tmp_path,
             request_headers=REQUEST_HEADERS,
             acpt_numbers=["20260108000150"],
@@ -632,7 +632,7 @@ def test_download_disclosure_viewer_htmls_rejects_rates_over_kind_limit(tmp_path
         )
 
 
-def test_download_disclosure_viewer_htmls_reports_failures_without_error_log(
+def test_download_disclosure_external_htmls_reports_failures_without_error_log(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -643,7 +643,7 @@ def test_download_disclosure_viewer_htmls_reports_failures_without_error_log(
 
     monkeypatch.setattr("finiq.data_scraper.core.client._request_disclosure_viewer_page", fail_request)
 
-    saved_paths = download_disclosure_viewer_htmls(
+    saved_paths = download_disclosure_external_htmls(
         output_directory=tmp_path,
         request_headers=REQUEST_HEADERS,
         acpt_numbers=["20260108000150"],
@@ -656,6 +656,35 @@ def test_download_disclosure_viewer_htmls_reports_failures_without_error_log(
     assert saved_paths == []
     assert "Permanently failed to download 1 files: 20260108000150" in progress_messages
     assert not (tmp_path / "download_errors.log").exists()
+
+
+def test_download_disclosure_external_htmls_retries_failures_five_times_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    def fail_request(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client._request_disclosure_viewer_page",
+        fail_request,
+    )
+
+    saved_paths = download_disclosure_external_htmls(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        acpt_numbers=["20260108000150"],
+        timeout=5,
+        session=ViewerFakeSession(),
+        max_workers=1,
+    )
+
+    assert saved_paths == []
+    assert attempts == 6
 
 
 def test_kind_workflow_can_store_inputs_without_saving(tmp_path: Path) -> None:

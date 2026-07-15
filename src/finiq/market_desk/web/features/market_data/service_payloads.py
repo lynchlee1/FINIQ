@@ -63,8 +63,8 @@ def filter_disclosures_payload(
     acpt_numbers = _normalize_acpt_numbers(body.get("acpt_numbers"))
     limit = None
     limit_unlimited = True
-    include_html_download_acpt_numbers = bool(
-        body.get("include_html_download_acpt_numbers")
+    include_external_html_download_acpt_numbers = bool(
+        body.get("include_external_html_download_acpt_numbers")
     )
     progress_interval = _progress_interval(body.get("progress_interval"))
     filter_workers = _resolve_filter_workers(body.get("filter_workers"), None)
@@ -94,7 +94,7 @@ def filter_disclosures_payload(
         )
         total_records = len(records)
     filtered: list[dict[str, Any]] = []
-    html_download_acpt_heap: list[tuple[tuple[str, str, str], int, str]] = []
+    external_html_download_acpt_heap: list[tuple[tuple[str, str, str], int, str]] = []
     seen_disclosure_keys: set[tuple[str, str, str, str]] = set()
     matched_count = 0
     duplicate_count = 0
@@ -153,8 +153,8 @@ def filter_disclosures_payload(
                 continue
             seen_disclosure_keys.add(dedup_key)
             matched_count += 1
-            if include_html_download_acpt_numbers and acpt_no:
-                html_download_acpt_heap.append(
+            if include_external_html_download_acpt_numbers and acpt_no:
+                external_html_download_acpt_heap.append(
                     (_record_sort_key(record), index, acpt_no)
                 )
             filtered.append(record)
@@ -224,9 +224,9 @@ def filter_disclosures_payload(
         "unique_titles": _unique_disclosure_titles(public_limited),
         "disclosures": public_limited,
     }
-    if include_html_download_acpt_numbers:
-        payload["html_download_acpt_numbers"] = [
-            item[2] for item in sorted(html_download_acpt_heap, reverse=True)
+    if include_external_html_download_acpt_numbers:
+        payload["external_html_download_acpt_numbers"] = [
+            item[2] for item in sorted(external_html_download_acpt_heap, reverse=True)
         ]
     return payload
 

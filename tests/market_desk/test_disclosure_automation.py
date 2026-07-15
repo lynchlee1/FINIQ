@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from finiq.config import PROJECT_ROOT
-from finiq.market_desk.web.features.disclosures import html_content_download
+from finiq.market_desk.web.features.disclosures import internal_html_download
 from finiq.market_desk.web.features.disclosure_workflow import automation
 from finiq.market_desk.web.features.disclosure_workflow.automation import (
     AUTOMATION_CHECKPOINT_FORMAT,
@@ -39,8 +39,8 @@ def _profile(root: Path, **overrides: object) -> dict[str, object]:
             "s1_download": True,
             "s2_table": True,
             "s3_filter": True,
-            "s4_external_html": True,
-            "s5_content_html": True,
+            "s4_external_html_download": True,
+            "s5_internal_html_download": True,
             "s6_sections": True,
             "s7_parse": True,
         },
@@ -158,8 +158,8 @@ def test_resume_reuses_valid_stage_checkpoints_when_stage_one_is_not_selected(
             else:
                 output_path.mkdir(parents=True, exist_ok=True)
     owner_files = {
-        4: ("automation-external.json", AUTOMATION_EXTERNAL_FORMAT),
-        5: ("automation-internal.json", AUTOMATION_INTERNAL_FORMAT),
+        4: ("automation-external-html-download.json", AUTOMATION_EXTERNAL_FORMAT),
+        5: ("automation-internal-html-download.json", AUTOMATION_INTERNAL_FORMAT),
         6: ("automation-sections.json", AUTOMATION_SECTIONS_FORMAT),
     }
     for stage, (filename, owner_format) in owner_files.items():
@@ -293,7 +293,10 @@ def test_stage_seven_passes_compressed_metadata_path(
     )
 
     assert captured["compressed_metadata_path"] == str(
-        tmp_path / "04-external" / "compressed-external-html.json"
+        tmp_path
+        / "04-external-html-download"
+        / "bond_issuance"
+        / "compressed-external-html.json"
     )
     assert "external_metadata_path" not in captured
     assert "cancel_token" not in captured
@@ -324,7 +327,7 @@ def test_stage_two_passes_parent_cancel_check(
     assert captured_kwargs["cancel_check"] is cancel_check
 
 
-def test_content_download_rate_limits_each_actual_kind_request(
+def test_internal_html_download_rate_limits_each_actual_kind_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import finiq.data_scraper.core.html_rate_limit as rate_limit_module
@@ -352,9 +355,9 @@ def test_content_download_rate_limits_each_actual_kind_request(
         sleeps.append(seconds)
         clock["now"] += seconds
 
-    monkeypatch.setattr(html_content_download.requests, "Session", Session)
+    monkeypatch.setattr(internal_html_download.requests, "Session", Session)
     monkeypatch.setattr(
-        html_content_download, "search_paths", lambda _content: {"doc_loc_path": "https://kind.krx.co.kr/body"}
+        internal_html_download, "search_paths", lambda _content: {"doc_loc_path": "https://kind.krx.co.kr/body"}
     )
     monkeypatch.setattr("time.time", lambda: clock["now"])
     monkeypatch.setattr("time.sleep", sleep)
@@ -365,7 +368,7 @@ def test_content_download_rate_limits_each_actual_kind_request(
         rate_limit_module.SlidingWindowRateLimiter(100),
     )
 
-    saved = html_content_download.download_disclosure_content_htmls(
+    saved = internal_html_download.download_disclosure_internal_htmls(
         output_directory=tmp_path,
         request_headers={},
         targets=[{"acpt_no": "20260712000001", "doc_no": "1"}],
@@ -651,7 +654,7 @@ def test_filter_inspection_recomputes_current_filter_result(
         "filters": {"filter_blocks": [], "filter_workers": 4},
         "summary": {"matched_disclosures": 1},
         "disclosures": [{"acpt_no": "1"}],
-        "html_download_acpt_numbers": ["1"],
+        "external_html_download_acpt_numbers": ["1"],
     }
     output_path.write_text(json.dumps(expected))
     monkeypatch.setattr(
@@ -695,7 +698,7 @@ def test_html_inspections_require_complete_current_membership(
                     {"acpt_no": "20260101000001"},
                     {"acpt_no": "20260101000002"},
                 ],
-                "html_download_acpt_numbers": [
+                "external_html_download_acpt_numbers": [
                     "20260101000001",
                     "20260101000002",
                 ],
@@ -1157,7 +1160,7 @@ def test_stage_four_replaces_active_membership_without_stale_html(
             "verification": {"passed": True},
         }
 
-    monkeypatch.setattr(automation, "download_disclosure_html_payload", fake_download)
+    monkeypatch.setattr(automation, "download_disclosure_external_html_payload", fake_download)
     monkeypatch.setattr(
         automation, "compress_disclosure_external_html_payload", fake_compress
     )
@@ -1179,10 +1182,15 @@ def test_stage_four_replaces_active_membership_without_stale_html(
         cancel_check=lambda: False,
     )
 
-    current = tmp_path / "04-external" / ".automation-current"
+    current = (
+        tmp_path
+        / "04-external-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
     assert [path.stem for path in current.rglob("*.html")] == ["20260712000001"]
     compressed = json.loads(
-        (tmp_path / "04-external" / "compressed-external-html.json").read_text(
+        (tmp_path / "04-external-html-download" / "bond_issuance" / "compressed-external-html.json").read_text(
             "utf-8"
         )
     )
@@ -1231,7 +1239,7 @@ def test_stage_four_rejects_compressed_record_without_main_document(
         )
         return {"verification": {"passed": True}}
 
-    monkeypatch.setattr(automation, "download_disclosure_html_payload", fake_download)
+    monkeypatch.setattr(automation, "download_disclosure_external_html_payload", fake_download)
     monkeypatch.setattr(
         automation, "compress_disclosure_external_html_payload", fake_compress
     )

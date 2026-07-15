@@ -18,8 +18,8 @@ test("disclosure automation navigation keeps all seven detail routes", async () 
     "/download",
     "/table",
     "/filter",
-    "/html-download",
-    "/html-content-download",
+    "/external-html-download",
+    "/internal-html-download",
     "/html-section-split",
     "/html-parse",
   ]) {

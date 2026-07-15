@@ -44,7 +44,7 @@ type FilterResult = {
     unique_acpt_numbers?: number;
   };
   disclosures?: any[];
-  html_download_transfer?: {
+  external_html_download_transfer?: {
     path?: string;
     acpt_numbers?: number;
   };
@@ -61,7 +61,7 @@ export default function FilterPage() {
     parallel_worker_count: parallelWorkerCount,
     sqlite_output_directory: tableDirectory,
     sqlite_manifest_path: tableManifestPath,
-    html_transfer_directory: htmlTransferPath,
+    external_html_transfer_directory: htmlTransferPath,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
     saveSetting,
@@ -130,14 +130,14 @@ export default function FilterPage() {
     mode,
     ...(useSeparateOutputDirectory ? {
       classification_path: tableDirectory || tableManifestPath,
-      html_transfer_path: htmlTransferPath,
+      external_html_transfer_path: htmlTransferPath,
     } : {}),
     filter_blocks: normalizeDisclosureConditionBlocks(conditions),
     title_expression: "",
     limit: limitUnlimited ? null : Number(limit || 1000),
     limit_unlimited: limitUnlimited,
     return_limit: Number(limit || 1000),
-    include_html_download_acpt_numbers: true,
+    include_external_html_download_acpt_numbers: true,
     filter_workers: Number(filterWorkers || parallelWorkerCount || 1),
     progress_interval: Number(progressInterval || 1000),
   });
@@ -159,13 +159,8 @@ export default function FilterPage() {
 
     await streamJob("/api/disclosures/filter", buildPayload(), (payload: FilterResult) => {
       setResult(payload);
-      const transferPath = String(payload.html_download_transfer?.path || "").trim();
-      if (transferPath) {
-        if (useSeparateOutputDirectory) {
-          void saveSetting("html_transfer_directory", transferPath);
-        }
-      }
-      const saved = transferPath ? `접수번호 ${formatInteger(payload.html_download_transfer?.acpt_numbers)}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
+      const transferPath = String(payload.external_html_download_transfer?.path || "").trim();
+      const saved = transferPath ? `접수번호 ${formatInteger(payload.external_html_download_transfer?.acpt_numbers)}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
       appendStatus(`매칭 ${formatInteger(payload.summary?.matched_disclosures)}건 중 ${formatInteger(payload.summary?.returned_disclosures)}건을 표시했고, ${saved}`, !transferPath);
     });
   };
@@ -326,7 +321,7 @@ export default function FilterPage() {
             <PathPickerInput 
               mode="folder"
               value={htmlTransferPath || ""}
-              onChange={(val) => saveSetting("html_transfer_directory", val)}
+              onChange={(val) => saveSetting("external_html_transfer_directory", val)}
               onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
             />
           </div>}

@@ -39,7 +39,7 @@ def test_job_retention_setting_expires_both_job_api_types(
         assert setting_response.json()["job_retention_minutes"] == 1
 
         generic_response = client.post(
-            "/api/disclosures/html/download/start",
+            "/api/disclosures/external-html-download/start",
             json={
                 "data_root": str(tmp_path),
                 "separate_output_directory": True,
