@@ -2067,6 +2067,161 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
         str(tmp_path / "content_html" / "2025" / "20250101000001.html")
     ]
     assert payload["manifest_path"] == str(tmp_path / "content_html" / "kind_disclosure_html_manifest.json")
+    assert payload["verification"] == {
+        "passed": True,
+        "complete": True,
+        "expected_records": 1,
+        "saved_records": 1,
+        "missing_records": 0,
+        "unexpected_records": 0,
+        "duplicate_records": 0,
+        "missing_acpt_numbers": [],
+        "unexpected_acpt_numbers": [],
+        "duplicate_acpt_numbers": [],
+    }
+
+
+def test_download_disclosure_internal_html_payload_rejects_duplicate_compressed_records(
+    tmp_path: Path,
+) -> None:
+    compressed_path = tmp_path / "compressed-external-html.json"
+    record = {
+        "acpt_no": "20250101000001",
+        "selected_main_doc_no": "20250101000999",
+    }
+    compressed_path.write_text(
+        json.dumps({"records": [record, record]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate acpt_no values.*20250101000001"):
+        download_disclosure_internal_html_payload(
+            {
+                "output_directory": str(tmp_path / "content_html"),
+                "source_compressed_json_path": str(compressed_path),
+            }
+        )
+
+
+def test_download_disclosure_internal_html_payload_requires_selected_main_doc_no(
+    tmp_path: Path,
+) -> None:
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "docs": [
+                            {
+                                "select_id": "mainDoc",
+                                "doc_no": "20250101000999",
+                                "selected": True,
+                            }
+                        ],
+                        "main_docs": [{"doc_no": "20250101000888"}],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="selected main docNo not found"):
+        download_disclosure_internal_html_payload(
+            {
+                "output_directory": str(tmp_path / "content_html"),
+                "source_compressed_json_path": str(compressed_path),
+            }
+        )
+
+
+@pytest.mark.parametrize("invalid_year", ["../2025", "/tmp/2025"])
+def test_download_disclosure_internal_html_payload_rejects_unsafe_compressed_year(
+    tmp_path: Path,
+    monkeypatch,
+    invalid_year: str,
+) -> None:
+    def fail_download(**kwargs):
+        raise AssertionError("invalid compressed year must fail before download")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fail_download,
+    )
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000999",
+                        "year": invalid_year,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="invalid year in compressed external HTML JSON"):
+        download_disclosure_internal_html_payload(
+            {
+                "output_directory": str(tmp_path / "content_html"),
+                "source_compressed_json_path": str(compressed_path),
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("returned_acpt_numbers", "mismatch_name"),
+    [
+        (["20250101000001", "20250101000001"], "duplicates"),
+        ([], "missing"),
+        (["20250101000001", "20250101000002"], "unexpected"),
+    ],
+)
+def test_download_disclosure_internal_html_payload_rejects_result_membership_mismatch(
+    tmp_path: Path,
+    monkeypatch,
+    returned_acpt_numbers: list[str],
+    mismatch_name: str,
+) -> None:
+    def fake_download(**kwargs):
+        output_directory = Path(kwargs["output_directory"])
+        return [
+            output_directory / f"{acpt_no}.html"
+            for acpt_no in returned_acpt_numbers
+        ]
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fake_download,
+    )
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000999",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=rf"membership.*{mismatch_name}="):
+        download_disclosure_internal_html_payload(
+            {
+                "output_directory": str(tmp_path / "content_html"),
+                "source_compressed_json_path": str(compressed_path),
+            }
+        )
 
 
 def test_download_disclosure_external_html_payload_ignores_source_json_path(
@@ -3097,7 +3252,7 @@ def test_download_disclosure_internal_html_payload_prefers_compressed_external_j
     ]
 
 
-def test_download_disclosure_internal_html_payload_reads_compact_docs_json(
+def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_sot(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -3160,7 +3315,7 @@ def test_download_disclosure_internal_html_payload_reads_compact_docs_json(
     assert calls == [
         (
             tmp_path / "content_html" / "2025",
-            [{"acpt_no": "20250101000001", "doc_no": "20250101000999"}],
+            [{"acpt_no": "20250101000001", "doc_no": "20250101000000"}],
         )
     ]
     assert payload["saved_files"] == [

@@ -1163,6 +1163,7 @@ def test_stage_four_replaces_active_membership_without_stale_html(
         records = [
             {
                 "acpt_no": path.stem,
+                "selected_main_doc_no": f"{path.stem}99",
                 "docs": [
                     {
                         "select_id": "mainDoc",
