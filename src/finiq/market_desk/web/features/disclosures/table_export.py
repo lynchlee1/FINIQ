@@ -14,13 +14,13 @@ from finiq.data_scraper.storage.result_files import (
     result_page_number,
     sorted_result_page_paths,
 )
+from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
 from finiq.market_desk.data.facade import load_company_classification_file
 from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
     resolve_default_classification,
 )
 from finiq.market_desk.web.features.market_data.service_sources import (
-    _find_source_body_files,
     _parse_source_body_file,
 )
 
@@ -93,7 +93,24 @@ def _manifest_output_path(raw_path: str, classification_path: Path) -> Path:
 
 
 def _source_has_body_files(path: Path) -> bool:
-    return path.is_dir() and bool(_find_source_body_files(path))
+    return path.is_dir() and bool(_find_original_source_body_files(path))
+
+
+def _find_original_source_body_files(root: Path) -> list[Path]:
+    resolved_root = root.resolve()
+    source_folders = {
+        path.parent.resolve()
+        for path in resolved_root.rglob("*_post_page_*.body")
+        if not any(
+            part.startswith(".")
+            for part in path.relative_to(resolved_root).parts[:-1]
+        )
+    }
+    return [
+        path
+        for folder in sorted(source_folders)
+        for path in sorted_result_page_paths(folder)
+    ]
 
 
 def _workspace_resource_bases() -> list[Path]:
@@ -282,7 +299,7 @@ def _collect_source_folder_rows_by_year(
     row_count = 0
     source_row_count = 0
     duplicate_row_count = 0
-    for body_path in _find_source_body_files(source_folder):
+    for body_path in _find_original_source_body_files(source_folder):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
         page_source_rows = 0
@@ -393,26 +410,53 @@ def _validate_source_page_ranges(
     *,
     cancel_check: Callable[[], bool] | None,
 ) -> None:
-    source_folders = sorted(
-        {
-            path.parent.resolve()
-            for path in source_folder.rglob("kind_workflow.input.json")
-            if not any(
-                part.startswith(".")
-                for part in path.relative_to(source_folder).parts[:-1]
-            )
-        }
+    source_folders = {
+        path.parent.resolve()
+        for path in source_folder.rglob("kind_workflow.input.json")
+        if not any(
+            part.startswith(".")
+            for part in path.relative_to(source_folder).parts[:-1]
+        )
+    }
+    source_folders.update(
+        path.parent.resolve()
+        for path in source_folder.rglob("*_post_page_*.body")
+        if not any(
+            part.startswith(".")
+            for part in path.relative_to(source_folder).parts[:-1]
+        )
     )
-    for folder in source_folders:
+    for folder in sorted(source_folders):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
-        if not any(
-            result_page_number(path) >= 1
-            for path in sorted_result_page_paths(folder)
-        ):
+        metadata_path = folder / "kind_workflow.input.json"
+        if not metadata_path.is_file():
+            raise ValueError(f"{folder}: kind_workflow.input.json metadata is missing")
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            validate_kind_workflow_input_snapshot(metadata)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+            raise ValueError(
+                f"{folder}: kind_workflow.input.json metadata is invalid: {error}"
+            ) from error
+
+        page_paths = sorted_result_page_paths(folder)
+        if not any(result_page_number(path) >= 1 for path in page_paths):
             raise ValueError(
                 f"{folder}: kind_workflow.input.json이 있지만 공시 결과 페이지가 없습니다."
             )
+        page_numbers: dict[int, int] = {}
+        for path in page_paths:
+            page_number = result_page_number(path)
+            page_numbers[page_number] = page_numbers.get(page_number, 0) + 1
+        duplicate_pages = sorted(
+            page_number
+            for page_number, count in page_numbers.items()
+            if page_number >= 1 and count > 1
+        )
+        if duplicate_pages:
+            duplicate_text = ", ".join(str(page) for page in duplicate_pages)
+            raise ValueError(f"{folder}: 중복되는 페이지 번호 {duplicate_text}이 있습니다.")
 
 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:

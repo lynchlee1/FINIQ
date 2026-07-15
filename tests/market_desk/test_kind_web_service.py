@@ -480,6 +480,15 @@ def _write_multiyear_classification_fixture(tmp_path: Path) -> Path:
 def _write_source_body_fixture(tmp_path: Path) -> Path:
     source_dir = tmp_path / "20250101_20250131"
     source_dir.mkdir()
+    (source_dir / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01",
+                end_date="2025-01-31",
+            )
+        ),
+        encoding="utf-8",
+    )
     (source_dir / "001_post_page_00001.body").write_text(
         """
         <html><body>
@@ -1425,6 +1434,79 @@ def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Pat
     assert manifest["shards"][0]["year"] == "2025"
 
 
+def test_build_disclosure_table_payload_rejects_source_folder_without_metadata(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    next(source_root.rglob("kind_workflow.input.json")).unlink()
+
+    with pytest.raises(ValueError, match="metadata is missing"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
+
+
+def test_build_disclosure_table_payload_rejects_invalid_source_metadata(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    next(source_root.rglob("kind_workflow.input.json")).write_text(
+        "[]", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="metadata is invalid"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
+
+
+def test_build_disclosure_table_payload_ignores_repair_overlay(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    source_folder = next(
+        path.parent for path in source_root.rglob("kind_workflow.input.json")
+    )
+    original_page = source_folder / "001_post_page_00001.body"
+    overlay_page = (
+        source_folder
+        / ".kind_page_repairs"
+        / "page_00001"
+        / "attempt_001"
+        / "001_post_page_00001.body"
+    )
+    overlay_page.parent.mkdir(parents=True)
+    overlay_page.write_text("not a disclosure page", encoding="utf-8")
+    (source_folder / ".kind_page_repairs" / "manifest.json").write_text(
+        json.dumps(
+            {
+                "pages": {
+                    "1": {
+                        "page_path": str(overlay_page.relative_to(source_folder)),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_disclosure_table_payload(
+        {
+            "classification_path": str(source_root),
+            "output_path": str(tmp_path / "02-table"),
+        }
+    )
+
+    assert payload["summary"]["source_rows"] == 2
+    assert payload["pages"][0]["source_file"] == str(original_page)
+
+
 def test_build_disclosure_table_payload_rereads_only_failed_source_page(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1432,6 +1514,16 @@ def test_build_disclosure_table_payload_rereads_only_failed_source_page(
     source_root = tmp_path / "01-list"
     folder = source_root / "20250101_20251231"
     folder.mkdir(parents=True)
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01",
+                end_date="2025-12-31",
+                page_size=1,
+            )
+        ),
+        encoding="utf-8",
+    )
     page_one = _build_download_result_page_html(
         page_number=1,
         page_size=1,
@@ -1488,6 +1580,16 @@ def test_build_disclosure_table_payload_retries_source_page_without_acpt_no(
     source_root = tmp_path / "01-list"
     folder = source_root / "20250101_20251231"
     folder.mkdir(parents=True)
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01",
+                end_date="2025-12-31",
+                page_size=1,
+            )
+        ),
+        encoding="utf-8",
+    )
     valid_page = _build_download_result_page_html(
         page_number=1,
         page_size=1,
@@ -1543,6 +1645,16 @@ def test_build_disclosure_table_payload_rejects_duplicate_source_page_numbers(
     source_root = tmp_path / "01-list"
     folder = source_root / "20250101_20251231"
     folder.mkdir(parents=True)
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01",
+                end_date="2025-12-31",
+                page_size=1,
+            )
+        ),
+        encoding="utf-8",
+    )
     page = _build_download_result_page_html(
         page_number=1,
         page_size=1,

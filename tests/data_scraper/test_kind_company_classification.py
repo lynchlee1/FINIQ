@@ -731,29 +731,34 @@ def test_export_kind_company_classification_reuses_partial_cache_when_folder_is_
     folder.mkdir()
     _write_workflow_input(folder)
     (folder / "000_mainGET.body").write_text("main", encoding="utf-8")
+    duplicate_row = _row_html(
+        number=1,
+        disclosed_at="2026-01-01 09:00",
+        company_name="에이컴퍼니",
+        company_id="A001",
+        market="코스닥",
+        badges=[],
+        title="주요사항보고서",
+        acpt_no="20260101000001",
+        doc_no=None,
+        submitter="에이컴퍼니",
+    )
     (folder / "001_post_page_00001.body").write_text(
-        _results_page(
-            _row_html(
-                number=1,
-                disclosed_at="2026-01-01 09:00",
-                company_name="에이컴퍼니",
-                company_id="A001",
-                market="코스닥",
-                badges=[],
-                title="주요사항보고서",
-                acpt_no="20260101000001",
-                doc_no=None,
-                submitter="에이컴퍼니",
-            )
-        ),
+        _results_page(duplicate_row + duplicate_row),
         encoding="utf-8",
     )
 
-    export_kind_company_classification(tmp_path, compact=False, validate_integrity=False)
+    first = export_kind_company_classification(
+        tmp_path, compact=False, validate_integrity=False
+    )
+    assert first.disclosures == 1
     assert company_classification_partial_path(folder).exists()
 
     def _unexpected_parse(_: str | bytes) -> list[dict[str, object]]:
         raise AssertionError("partial cache should prevent reparsing unchanged folders")
 
     monkeypatch.setattr(workflow_module, "disclosure_rows", _unexpected_parse)
-    export_kind_company_classification(tmp_path, compact=False, validate_integrity=False)
+    second = export_kind_company_classification(
+        tmp_path, compact=False, validate_integrity=False
+    )
+    assert second.disclosures == 1
