@@ -45,7 +45,6 @@ from finiq.market_desk.web.features.disclosures.html_common import (
 from finiq.market_desk.web.features.disclosures.internal_html_download import (
     download_disclosure_internal_html_payload,
 )
-from finiq.market_desk.web.features.disclosures.internal_html_merge import merge_disclosure_internal_html_payload
 from finiq.market_desk.web.features.disclosures.external_html_download import (
     download_disclosure_external_html_payload,
 )
@@ -3880,51 +3879,6 @@ def test_html_section_worker_count_defaults_to_cpu_cap_and_accepts_payload_value
         parse_html_section_worker_count(0)
 
 
-def test_merge_disclosure_internal_html_payload_writes_yearly_json(tmp_path: Path) -> None:
-    input_directory = tmp_path / "content_html"
-    (input_directory / "2024").mkdir(parents=True)
-    (input_directory / "2025").mkdir()
-    (input_directory / "2024" / "20240101000001.html").write_text("<html>old</html>", encoding="utf-8")
-    (input_directory / "2025" / "20250101000001.html").write_text("<html>new</html>", encoding="utf-8")
-    output_directory = tmp_path / "merged"
-
-    payload = merge_disclosure_internal_html_payload(
-        {
-            "input_directory": str(input_directory),
-            "output_directory": str(output_directory),
-        }
-    )
-
-    assert payload["summary"] == {"found_files": 2, "merged_files": 2, "written_files": 2}
-    assert payload["written_files"] == [
-        str(output_directory / "merged-internal-html-2024.json"),
-        str(output_directory / "merged-internal-html-2025.json"),
-    ]
-    saved_2024 = json.loads((output_directory / "merged-internal-html-2024.json").read_text(encoding="utf-8"))
-    saved_2025 = json.loads((output_directory / "merged-internal-html-2025.json").read_text(encoding="utf-8"))
-    assert saved_2024["year"] == "2024"
-    assert saved_2024["records"][0]["html"] == "<html>old</html>"
-    assert saved_2025["year"] == "2025"
-    assert saved_2025["records"][0]["html"] == "<html>new</html>"
-
-
-def test_merge_disclosure_internal_html_payload_rejects_invalid_utf8(tmp_path: Path) -> None:
-    input_directory = tmp_path / "content_html"
-    (input_directory / "2025").mkdir(parents=True)
-    (input_directory / "2025" / "20250101000001.html").write_bytes(b"\xff")
-    output_directory = tmp_path / "merged"
-
-    with pytest.raises(UnicodeDecodeError):
-        merge_disclosure_internal_html_payload(
-            {
-                "input_directory": str(input_directory),
-                "output_directory": str(output_directory),
-            }
-        )
-
-    assert not output_directory.exists()
-
-
 def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path: Path) -> None:
     input_directory = tmp_path / "viewer_html"
     (input_directory / "2025").mkdir(parents=True)
@@ -6558,11 +6512,11 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "/api/disclosures/external-html-download/check-existing" in download_component_html
     assert "/api/disclosures/internal-html-download/check-existing" in download_component_html
     assert "externalTaskMode" in download_component_html
-    assert "internalTaskMode" in download_component_html
+    assert "internalTaskMode" not in download_component_html
     assert "외부 HTML 저장" in download_component_html
-    assert "내부 HTML 저장" in download_component_html
     assert "외부 HTML 압축" in download_component_html
-    assert "내부 HTML 병합" in download_component_html
+    assert "내부 HTML 병합" not in download_component_html
+    assert "/api/disclosures/internal-html-download/merge/start" not in download_component_html
     assert "작업공간 디렉토리" in download_component_html
     assert "압축 JSON 데이터 경로" in download_component_html
     assert "압축 설정" not in download_component_html

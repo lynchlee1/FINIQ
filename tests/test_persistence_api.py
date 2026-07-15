@@ -52,7 +52,6 @@ def test_html_download_settings_persist(tmp_path: Path):
     client = TestClient(app)
 
     payload = {
-        "internal_html_merge_output_path": str(tmp_path / "merged"),
         "external_html_compressed_json_path": str(tmp_path / "compressed.json"),
         "external_html_compress_input_directory": str(tmp_path / "html"),
         "external_html_compress_output_directory": str(tmp_path / "compressed"),
@@ -69,8 +68,21 @@ def test_html_download_settings_persist(tmp_path: Path):
 
     assert resp.status_code == 200
     data = resp.json()
+    assert "internal_html_merge_output_path" not in data
     for key, value in payload.items():
         assert data[key] == str(Path(value).resolve())
+
+
+def test_internal_html_merge_route_is_removed(tmp_path: Path):
+    config.settings_path = str(tmp_path / "settings.json")
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/disclosures/internal-html-download/merge/start",
+        json={"data_root": str(tmp_path)},
+    )
+
+    assert resp.status_code == 404
 
 
 def test_html_section_split_output_directory_persists(tmp_path: Path):

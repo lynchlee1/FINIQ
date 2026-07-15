@@ -61,7 +61,6 @@ SAVED_SETTINGS_KEYS = (
     "asset_excel_cleanup_merged_items",
     "asset_excel_duplicate_scan_recursive",
     "asset_excel_account_mappings",
-    "internal_html_merge_output_path",
     "external_html_compressed_json_path",
     "external_html_compress_input_directory",
     "external_html_compress_output_directory",
@@ -104,7 +103,6 @@ class AppConfig:
     asset_excel_cleanup_merged_items: bool = True
     asset_excel_duplicate_scan_recursive: bool = False
     asset_excel_account_mappings: list[dict[str, Any]] = field(default_factory=list)
-    internal_html_merge_output_path: str = ""
     external_html_compressed_json_path: str = ""
     external_html_compress_input_directory: str = ""
     external_html_compress_output_directory: str = ""
@@ -153,8 +151,9 @@ def build_disclosure_workspace_path_settings(
         "external_html_compressed_json_path": str(
             external_path / "compressed-external-html.json"
         ),
-        "internal_html_output_directory": str(root / "05-internal-html-download"),
-        "internal_html_merge_output_path": str(root / "05-internal-html-download" / "merged"),
+        "internal_html_output_directory": str(
+            root / "05-internal-html-download" / normalized_mode
+        ),
         "html_section_split_output_directory": str(root / "06-sections"),
         "html_parse_output_directory": str(converted_path),
         "html_parse_result_path": str(
@@ -233,6 +232,14 @@ def init_config() -> AppConfig:
     def disclosure_path(key: str) -> str:
         if migrated_legacy_root:
             return disclosure_paths[key]
+        saved_path = settings.get(key)
+        if (
+            key == "internal_html_output_directory"
+            and saved_path
+            and Path(saved_path).resolve()
+            == Path(output_root).resolve() / "05-internal-html-download"
+        ):
+            return disclosure_paths[key]
         return settings.get(key, disclosure_paths[key])
     
     return AppConfig(
@@ -271,7 +278,6 @@ def init_config() -> AppConfig:
         asset_excel_cleanup_merged_items=bool(settings.get("asset_excel_cleanup_merged_items", True)),
         asset_excel_duplicate_scan_recursive=bool(settings.get("asset_excel_duplicate_scan_recursive", False)),
         asset_excel_account_mappings=settings.get("asset_excel_account_mappings", []),
-        internal_html_merge_output_path=disclosure_path("internal_html_merge_output_path"),
         external_html_compressed_json_path=disclosure_path(
             "external_html_compressed_json_path"
         ),

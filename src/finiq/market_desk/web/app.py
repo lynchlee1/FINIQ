@@ -13,7 +13,6 @@ from finiq.data.assets_excel import (
     merge_asset_parquet_outputs,
 )
 from finiq.market_desk.web.features.disclosures.internal_html_download import download_disclosure_internal_html_payload
-from finiq.market_desk.web.features.disclosures.internal_html_merge import merge_disclosure_internal_html_payload
 from finiq.market_desk.web.features.disclosures.external_html_download import download_disclosure_external_html_payload
 from finiq.market_desk.web.features.disclosures.external_html_compress import compress_disclosure_external_html_payload
 from finiq.market_desk.web.features.disclosures.html_parse_common import parse_disclosure_html_payload
@@ -145,7 +144,6 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "external_html_download": download_disclosure_external_html_payload,
     "external_html_compress": compress_disclosure_external_html_payload,
     "internal_html_download": download_disclosure_internal_html_payload,
-    "internal_html_merge": merge_disclosure_internal_html_payload,
     "parse": parse_disclosure_html_payload,
     "section_inspect": inspect_disclosure_html_sections_payload,
     "section_kinds": summarize_disclosure_html_section_kinds_payload,
