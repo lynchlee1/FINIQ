@@ -53,7 +53,7 @@ const STAGES = [
 type StageKey = (typeof STAGES)[number]["key"];
 type StageToggleState = Record<StageKey, boolean>;
 type PlanAction = "disabled" | "reuse" | "process" | "review" | "blocked";
-type RunStageStatus = "disabled" | "reused" | "succeeded" | "needs_review" | "failed";
+type RunStageStatus = "disabled" | "reused" | "succeeded" | "needs_download_confirmation" | "needs_review" | "failed";
 
 type PlanStage = {
   stage: number;
@@ -83,9 +83,18 @@ type WorkspaceInspection = { stage: InspectionStage };
 
 type ReviewPattern = SectionPattern;
 
+type DownloadConflict = {
+  range: string;
+  saved_pages?: number | null;
+  kind_pages?: number | null;
+  reason: string;
+};
+
 type AutomationRunResult = {
-  workflow_status: "completed" | "needs_review";
+  workflow_status: "completed" | "needs_download_confirmation" | "needs_review";
   stages: { stage: number; label: string; status: RunStageStatus; completed_at?: string }[];
+  download_conflicts?: DownloadConflict[];
+  download_confirmation?: string;
   review_patterns?: ReviewPattern[];
   output_path?: string;
 };
@@ -152,6 +161,7 @@ function runStatusLabel(status?: RunStageStatus) {
   if (status === "disabled") return "사용 안 함";
   if (status === "reused") return "완료 · 재사용";
   if (status === "succeeded") return "완료";
+  if (status === "needs_download_confirmation") return "확인 필요";
   if (status === "needs_review") return "Pending";
   if (status === "failed") return "실패";
   return "대기 중";
@@ -195,6 +205,8 @@ export default function DisclosureAutomationPage() {
   const [workspaceInspections, setWorkspaceInspections] = useState<Record<number, InspectionStage>>({});
   const [inspectingStage, setInspectingStage] = useState<number | null>(null);
   const [runResult, setRunResult] = useState<AutomationRunResult | null>(null);
+  const [downloadConflicts, setDownloadConflicts] = useState<DownloadConflict[]>([]);
+  const [downloadConfirmation, setDownloadConfirmation] = useState("");
   const [reviewPatterns, setReviewPatterns] = useState<ReviewPattern[]>([]);
   const [reviewSelections, setReviewSelections] = useState<Record<string, string[]>>({});
   const [reviewDecided, setReviewDecided] = useState<Record<string, boolean>>({});
@@ -231,6 +243,16 @@ export default function DisclosureAutomationPage() {
     formatStatus,
     onSuccess: (result: AutomationRunResult) => {
       setRunResult(result);
+      if (result.workflow_status === "needs_download_confirmation") {
+        const conflicts = result.download_conflicts || [];
+        setDownloadConflicts(conflicts);
+        setDownloadConfirmation(result.download_confirmation || "");
+        setNotification(`페이지 수 충돌 ${formatInteger(conflicts.length)}개를 확인하세요.`);
+        setIsErrorStatus(true);
+        return;
+      }
+      setDownloadConflicts([]);
+      setDownloadConfirmation("");
       if (result.workflow_status === "needs_review") {
         const patterns = result.review_patterns || [];
         setReviewPatterns(patterns);
@@ -320,6 +342,7 @@ export default function DisclosureAutomationPage() {
   const buildProfile = (
     trigger: "sync" | "resume" | "review",
     sectionRulesOverride: Record<string, string[]> = sectionRules,
+    confirmedDownload = "",
   ) => ({
     name,
     data_root: dataRoot,
@@ -346,6 +369,7 @@ export default function DisclosureAutomationPage() {
       local_workers: Number(localWorkers || parallelWorkerCount || 1),
       timeout: Number(timeout || 20),
     },
+    download_confirmation: confirmedDownload,
   });
 
   const saveProfile = async (
@@ -415,12 +439,13 @@ export default function DisclosureAutomationPage() {
   const startRun = async (
     trigger: "sync" | "resume" | "review",
     sectionRulesOverride: Record<string, string[]> = sectionRules,
+    confirmedDownload = "",
   ) => {
     try {
       await saveProfile(sectionRulesOverride);
       const nextPlan = await apiPost<AutomationPlan>(
         "/api/disclosure-workflows/plan",
-        buildProfile(trigger, sectionRulesOverride),
+        buildProfile(trigger, sectionRulesOverride, confirmedDownload),
       );
       setPlan(nextPlan);
       if (!nextPlan?.execution_allowed) {
@@ -433,7 +458,7 @@ export default function DisclosureAutomationPage() {
       setIsErrorStatus(false);
       const started = await apiPost<{ job_id: string }>(
         "/api/disclosure-workflows/run/start",
-        buildProfile(trigger, sectionRulesOverride),
+        buildProfile(trigger, sectionRulesOverride, confirmedDownload),
       );
       startPolling(started.job_id);
     } catch (error) {
@@ -450,7 +475,7 @@ export default function DisclosureAutomationPage() {
     setPlan(null);
   };
 
-  const rangeSelectionDisabled = !!activeJobId || !!reviewPatterns.length;
+  const rangeSelectionDisabled = !!activeJobId || !!downloadConflicts.length || !!reviewPatterns.length;
 
   const selectRangeThrough = (value: number) => {
     const anchor = rangeDragAnchorRef.current;
@@ -579,6 +604,11 @@ export default function DisclosureAutomationPage() {
   const decideReviewPattern = (pattern: ReviewPattern, tocIds: string[]) => {
     setReviewSelections((current) => ({ ...current, [pattern.signature]: tocIds }));
     setReviewDecided((current) => ({ ...current, [pattern.signature]: true }));
+  };
+
+  const confirmDownloadConflicts = () => {
+    if (!downloadConfirmation) return;
+    void startRun("sync", sectionRules, downloadConfirmation);
   };
 
   const runAfterReview = async () => {
@@ -811,8 +841,8 @@ export default function DisclosureAutomationPage() {
             <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
               <Button variant="outline" onClick={() => void saveProfile().then(() => setNotification("공시 자동화 설정을 저장했습니다.")).catch((error) => setNotification(error.message))} disabled={!!activeJobId}><Save className="mr-2 h-4 w-4" />설정 저장</Button>
               <Button variant="outline" onClick={() => void refreshPlan("sync")} disabled={!!activeJobId}><RefreshCw className="mr-2 h-4 w-4" />실행 계획</Button>
-              <Button onClick={() => void startRun("sync")} disabled={!!activeJobId || !!reviewPatterns.length}>{activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}동기화</Button>
-              <Button variant="outline" onClick={() => void startRun("resume")} disabled={!!activeJobId || !!reviewPatterns.length}><Play className="mr-2 h-4 w-4" />이어서 실행</Button>
+              <Button onClick={() => void startRun("sync")} disabled={!!activeJobId || !!downloadConflicts.length || !!reviewPatterns.length}>{activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}동기화</Button>
+              <Button variant="outline" onClick={() => void startRun("resume")} disabled={!!activeJobId || !!downloadConflicts.length || !!reviewPatterns.length}><Play className="mr-2 h-4 w-4" />이어서 실행</Button>
               <Button variant="outline" onClick={cancelJob} disabled={!activeJobId}><Square className="mr-2 h-4 w-4" />취소</Button>
             </CardContent>
           </Card>
@@ -821,9 +851,27 @@ export default function DisclosureAutomationPage() {
         <ActionDock
           activityActive={!!activeJobId}
           activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} isCancellable={!!activeJobId} onCancel={cancelJob} />}
-          notificationActive={isErrorStatus || !!reviewPatterns.length || !!notification}
-          notificationResetKey={`${notification}:${reviewPatterns.length}`}
-          notificationContent={<div className="space-y-2 text-sm text-[var(--tv-text)]"><p className="whitespace-pre-wrap">{notification || "알림 없음"}</p>{reviewPatterns.length ? <p className="font-medium text-amber-700 dark:text-amber-300">Pending · 목차 조합 {formatInteger(reviewPatterns.length)}개를 결정하세요.</p> : null}</div>}
+          notificationActive={isErrorStatus || !!downloadConflicts.length || !!reviewPatterns.length || !!notification}
+          notificationDismissible={!downloadConflicts.length}
+          notificationResetKey={`${notification}:${downloadConfirmation}:${reviewPatterns.length}`}
+          notificationContent={
+            <div className="space-y-3 text-sm text-[var(--tv-text)]">
+              <p className="whitespace-pre-wrap">{notification || "알림 없음"}</p>
+              {downloadConflicts.length ? <>
+                <ul className="space-y-2">
+                  {downloadConflicts.map((conflict) => <li key={conflict.range} className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                    <p className="font-medium">{conflict.range}</p>
+                    <p>{conflict.reason}</p>
+                    {conflict.saved_pages != null || conflict.kind_pages != null ? <p>저장 {conflict.saved_pages ?? "확인 불가"}페이지 · KIND {conflict.kind_pages ?? "확인 불가"}페이지</p> : null}
+                  </li>)}
+                </ul>
+                <Button onClick={confirmDownloadConflicts} disabled={!!activeJobId || !downloadConfirmation}>
+                  <RefreshCw className="mr-2 h-4 w-4" />전체 다시 받기
+                </Button>
+              </> : null}
+              {reviewPatterns.length ? <p className="font-medium text-amber-700 dark:text-amber-300">Pending · 목차 조합 {formatInteger(reviewPatterns.length)}개를 결정하세요.</p> : null}
+            </div>
+          }
           settingsTitle="실행 설정"
           settingsContent={
             <div className="space-y-4">

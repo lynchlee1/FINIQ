@@ -1072,7 +1072,7 @@ def build_automation_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
         elif stage not in selected:
             action = "reuse" if checkpoint_valid else "blocked"
             reason = "" if checkpoint_valid else "이번 실행에 포함되지 않았고 재사용할 완료 결과가 없습니다."
-        elif trigger == "sync" and stage == 1:
+        elif trigger in {"sync", "resume"} and stage == 1:
             action = "process"
             reason = "기존 연도별 다운로드의 1페이지를 KIND와 다시 확인합니다."
         elif checkpoint_valid and not upstream_processing:
@@ -1140,7 +1140,7 @@ def _window_manifest_path(window_path: Path) -> Path:
 def _page_one_snapshot_hash(window_path: Path) -> str:
     candidates = sorted(window_path.glob("*_post_page_00001.body"))
     if len(candidates) != 1:
-        raise ValueError(f"KIND window page 1을 하나만 찾을 수 없습니다: {window_path}")
+        raise ValueError(f"KIND 1페이지를 하나만 찾을 수 없습니다: {window_path}")
     body_path = candidates[0]
     return _canonical_hash(
         {
@@ -1269,7 +1269,6 @@ def _inspect_stage_one_downloads(
     }
     conflicts: list[dict[str, Any]] = []
     checked_ranges = 0
-    reusable_names: set[str] = set()
 
     for name in sorted(set(existing) - desired_names):
         _owned_window_manifest(existing[name])
@@ -1329,8 +1328,6 @@ def _inspect_stage_one_downloads(
                     "reason": "저장된 페이지 수와 KIND의 현재 페이지 수가 다릅니다.",
                 }
             )
-        else:
-            reusable_names.add(name)
 
     return {
         "ranges": ranges,
@@ -1340,7 +1337,6 @@ def _inspect_stage_one_downloads(
         if conflicts
         else "",
         "checked_ranges": checked_ranges,
-        "reusable_names": reusable_names,
     }
 
 
@@ -1372,13 +1368,7 @@ def _stage_one_windows_valid(profile: dict[str, Any]) -> bool:
 def _replace_owned_window(target: Path, temporary: Path) -> None:
     backup = target.with_name(f".{target.name}.backup-{uuid.uuid4().hex}")
     if target.exists():
-        manifest_path = _window_manifest_path(target)
-        try:
-            owner = json.loads(manifest_path.read_text("utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(f"자동화 소유가 아닌 window를 교체할 수 없습니다: {target}") from exc
-        if not isinstance(owner, dict) or owner.get("format") != AUTOMATION_WINDOW_FORMAT:
-            raise ValueError(f"자동화 소유가 아닌 window를 교체할 수 없습니다: {target}")
+        _owned_window_manifest(target)
         os.replace(target, backup)
     try:
         os.replace(temporary, target)
@@ -1653,15 +1643,15 @@ def _run_stage_one(
                 owner = json.loads(_window_manifest_path(child).read_text("utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 raise ValueError(
-                    f"자동화 window 경로에 소유하지 않은 항목이 있습니다: {child}"
+                    f"자동화 다운로드 폴더에 알 수 없는 항목이 있습니다: {child}"
                 ) from exc
             if not isinstance(owner, dict) or owner.get("format") != AUTOMATION_WINDOW_FORMAT:
                 raise ValueError(
-                    f"자동화 window 경로에 소유하지 않은 항목이 있습니다: {child}"
+                    f"자동화 다운로드 폴더에 알 수 없는 항목이 있습니다: {child}"
                 )
             shutil.rmtree(child)
             continue
-        raise ValueError(f"자동화 window 경로에 예상하지 않은 파일이 있습니다: {child}")
+        raise ValueError(f"자동화 다운로드 폴더에 알 수 없는 파일이 있습니다: {child}")
     return {
         "ranges": len(ranges),
         "downloaded_ranges": downloaded,
