@@ -17,16 +17,16 @@ from finiq.market_desk.web.features.disclosure_workflow.automation import (
     AUTOMATION_SECTIONS_FORMAT,
     _checkpoint_path,
     _load_valid_checkpoint,
-    _owned_window_matches,
     _run_stage,
+    _run_stage_one,
+    _split_yearly_ranges,
     _stage_config_hash,
     _stage_output_fingerprint,
     _stage_output_paths,
-    _window_body_hash,
-    _window_ranges,
     build_automation_plan_payload,
     inspect_disclosure_workspace_payload,
     normalize_automation_profile,
+    run_disclosure_automation_payload,
 )
 from finiq.market_desk.web.app import app
 
@@ -77,7 +77,7 @@ def test_normalize_automation_profile_fixes_safe_kind_execution_settings(
 
     assert profile["data_root"] == str(tmp_path.resolve())
     assert profile["execution"]["max_requests_per_minute"] == 45
-    assert profile["execution"]["mutable_lookback_days"] == 7
+    assert "mutable_lookback_days" not in profile["execution"]
     assert profile["decisions"]["s6_sections"]["unmatched_policy"] == "needs_review"
 
 
@@ -118,23 +118,18 @@ def test_normalize_automation_profile_rejects_non_incremental_last_report_only(
         normalize_automation_profile(payload)
 
 
-def test_window_ranges_use_sealed_months_and_seven_mutable_days() -> None:
-    ranges = _window_ranges(date(2026, 5, 20), date(2026, 7, 12))
-
-    assert ranges[:3] == [
-        (date(2026, 5, 20), date(2026, 5, 31), False),
-        (date(2026, 6, 1), date(2026, 6, 30), False),
-        (date(2026, 7, 1), date(2026, 7, 5), False),
+def test_automation_download_ranges_are_yearly() -> None:
+    assert _split_yearly_ranges(date(2025, 5, 20), date(2026, 7, 12)) == [
+        (date(2025, 5, 20), date(2025, 12, 31)),
+        (date(2026, 1, 1), date(2026, 7, 12)),
     ]
-    assert ranges[3] == (date(2026, 7, 6), date(2026, 7, 6), True)
-    assert ranges[-1] == (date(2026, 7, 12), date(2026, 7, 12), True)
-    assert sum(1 for _start, _end, mutable in ranges if mutable) == 7
 
 
-def test_plan_propagates_stage_one_sync_to_downstream_processing(
-    tmp_path: Path,
+@pytest.mark.parametrize("trigger", ["sync", "resume"])
+def test_plan_propagates_stage_one_check_to_downstream_processing(
+    tmp_path: Path, trigger: str,
 ) -> None:
-    plan = build_automation_plan_payload({**_profile(tmp_path), "trigger": "sync"})
+    plan = build_automation_plan_payload({**_profile(tmp_path), "trigger": trigger})
 
     assert plan["execution_allowed"] is True
     assert [stage["plan_action"] for stage in plan["stages"]] == [
@@ -149,10 +144,11 @@ def test_plan_propagates_stage_one_sync_to_downstream_processing(
     assert plan["kind_limit"] == {"max_requests_per_minute": 45, "max_in_flight": 1}
 
 
-def test_resume_reuses_valid_stage_checkpoints(
+def test_resume_reuses_valid_stage_checkpoints_when_stage_one_is_not_selected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     raw = _profile(tmp_path)
+    raw["execution_mask"] = [2, 3, 4, 5, 6, 7]
     profile = normalize_automation_profile(raw)
     for stage in range(1, 8):
         for output_path in _stage_output_paths(profile, stage):
@@ -271,44 +267,6 @@ def test_checkpoint_is_invalid_after_output_changes(tmp_path: Path) -> None:
     artifact.write_text('{"changed": true}', encoding="utf-8")
 
     assert _load_valid_checkpoint(profile, 2) is None
-
-
-def test_window_manifest_validates_body_content_hash(tmp_path: Path) -> None:
-    body = tmp_path / "window_post_page_00001.body"
-    body.write_bytes(b"first")
-    snapshot = automation._download_input_snapshot_from_payload(
-        {},
-        start=date(2026, 7, 1),
-        end=date(2026, 7, 1),
-        page_size=100,
-    )
-    (tmp_path / "kind_workflow.input.json").write_text(
-        json.dumps(snapshot), encoding="utf-8"
-    )
-    manifest = {
-        "format": automation.AUTOMATION_WINDOW_FORMAT,
-        "query_hash": "query",
-        "complete": True,
-        "body_file_count": 1,
-        "body_total_bytes": 5,
-        "data_hash": _window_body_hash(tmp_path),
-    }
-    (tmp_path / "automation-window.json").write_text(json.dumps(manifest), encoding="utf-8")
-    assert _owned_window_matches(tmp_path, "query") is True
-
-    body.write_bytes(b"other")
-
-    assert _owned_window_matches(tmp_path, "query") is False
-
-
-def test_window_metadata_fails_before_invalid_manifest_is_inspected(
-    tmp_path: Path,
-) -> None:
-    (tmp_path / "window_post_page_00001.body").write_bytes(b"saved body")
-    (tmp_path / "automation-window.json").write_text("{", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="metadata is missing"):
-        _owned_window_matches(tmp_path, "query")
 
 
 def test_stage_seven_passes_compressed_metadata_path(
@@ -510,42 +468,40 @@ def test_workspace_inspection_rejects_incomplete_download(
     assert "completeness" in result["reason"]
 
 
-def test_automation_download_inspection_queries_only_mutable_windows(
+def test_automation_download_inspection_queries_every_saved_year(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     raw = _profile(tmp_path)
-    raw["decisions"]["s1_search"]["start_date"] = "2026-07-01"  # type: ignore[index]
+    raw["decisions"]["s1_search"]["start_date"] = "2025-07-01"  # type: ignore[index]
     profile = normalize_automation_profile(raw)
-    live_queries: list[dict[str, object]] = []
+    live_queries: list[tuple[date, date]] = []
     search = profile["decisions"]["s1_search"]
     start = date.fromisoformat(search["start_date"])
     end = date.fromisoformat(search["end_date"])
     windows_root = tmp_path / "01-list" / ".automation-windows"
-    for window_start, window_end, _mutable in _window_ranges(start, end):
+    for window_start, window_end in _split_yearly_ranges(start, end):
         folder = windows_root / f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
         folder.mkdir(parents=True)
-        snapshot = automation._automation_window_snapshot(
-            profile, window_start, window_end
-        )
-        (folder / "kind_workflow.input.json").write_text(
-            json.dumps(snapshot), encoding="utf-8"
-        )
     monkeypatch.setattr(
         automation,
-        "inspect_download_directory_pages",
-        lambda *_args, **_kwargs: {"total_items": 1},
+        "_window_local_page_count",
+        lambda *_args, **_kwargs: 2,
     )
     monkeypatch.setattr(
         automation,
-        "get_current_kind_total_count",
-        lambda snapshot: live_queries.append(snapshot) or 1,
+        "_probe_window_page_count",
+        lambda _profile, window_start, window_end, **_kwargs: live_queries.append(
+            (window_start, window_end)
+        )
+        or 2,
     )
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
 
     result = automation._inspect_automation_download(profile)
 
     assert result["confirmed"] is True
-    assert result["details"]["live_checked_windows"] == 7
-    assert len(live_queries) == 7
+    assert result["details"]["checked_ranges"] == 2
+    assert live_queries == _split_yearly_ranges(start, end)
 
 
 def test_table_inspection_compares_source_records_and_sqlite_shards(
@@ -830,19 +786,98 @@ def test_parse_inspection_compares_mode_inputs_filters_membership_and_mtime(
     assert mismatch["confirmed"] is False
 
 
-def test_recent_window_refresh_detects_content_change_not_page_position(
+def _write_automation_window(
+    profile: dict[str, object],
+    root: Path,
+    window_start: date,
+    window_end: date,
+) -> Path:
+    folder = root / "01-list" / ".automation-windows" / f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
+    folder.mkdir(parents=True)
+    query = automation._window_query(profile, window_start, window_end)
+    snapshot = automation._automation_window_snapshot(profile, window_start, window_end)
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(snapshot), encoding="utf-8"
+    )
+    (folder / "automation-window.json").write_text(
+        json.dumps(
+            {
+                "format": automation.AUTOMATION_WINDOW_FORMAT,
+                "query_hash": automation._canonical_hash(query),
+                "complete": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (folder / "001_post_page_00001.body").write_text("saved", encoding="utf-8")
+    return folder
+
+
+def test_stage_one_probes_every_saved_year_and_keeps_matching_downloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _profile(tmp_path)
+    raw["decisions"]["s1_search"]["start_date"] = "2025-07-01"  # type: ignore[index]
+    profile = normalize_automation_profile(raw)
+    ranges = _split_yearly_ranges(date(2025, 7, 1), date(2026, 7, 12))
+    pages = {}
+    for index, (window_start, window_end) in enumerate(ranges, start=2):
+        folder = _write_automation_window(
+            profile, tmp_path, window_start, window_end
+        )
+        pages[folder.name] = index
+
+    monkeypatch.setattr(
+        automation,
+        "inspect_download_directory_pages",
+        lambda folder, **_kwargs: {"total_pages": pages[Path(folder).name]},
+    )
+    calls: list[tuple[str, str]] = []
+
+    def fake_run_single(payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        calls.append((str(payload["start_date"]), str(payload["end_date"])))
+        name = f"{str(payload['start_date']).replace('-', '')}_{str(payload['end_date']).replace('-', '')}"
+        return {"pagination": {"total_pages": pages[name]}}
+
+    monkeypatch.setattr(automation, "_run_single", fake_run_single)
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+
+    result = _run_stage_one(
+        profile,
+        trigger="sync",
+        progress_callback=lambda _message: None,
+        cancel_check=lambda: False,
+    )
+
+    assert result["checked_ranges"] == 2
+    assert result["reused_ranges"] == 2
+    assert result["downloaded_ranges"] == 0
+    assert calls == [(start.isoformat(), end.isoformat()) for start, end in ranges]
+
+
+def test_stage_one_requires_confirmation_before_page_count_conflict_redownload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     raw = _profile(tmp_path)
     raw["decisions"]["s1_search"]["start_date"] = "2026-07-12"  # type: ignore[index]
     profile = normalize_automation_profile(raw)
+    target = _write_automation_window(
+        profile, tmp_path, date(2026, 7, 12), date(2026, 7, 12)
+    )
+    marker = target / "keep-until-confirmed.txt"
+    marker.write_text("old result", encoding="utf-8")
+    monkeypatch.setattr(
+        automation,
+        "inspect_download_directory_pages",
+        lambda *_args, **_kwargs: {"total_pages": 2},
+    )
+    calls: list[dict[str, object]] = []
 
-    def fake_run_single(
-        payload: dict[str, object], **_kwargs: object
-    ) -> dict[str, object]:
+    def fake_run_single(payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        calls.append(payload)
         output = Path(str(payload["output_directory"]))
         output.mkdir(parents=True, exist_ok=True)
-        (output / "001_post_page_00001.body").write_bytes(b"same disclosure rows")
+        (output / "001_post_page_00001.body").write_text("current", encoding="utf-8")
         snapshot = automation._download_input_snapshot_from_payload(
             payload,
             start=date.fromisoformat(str(payload["start_date"])),
@@ -852,38 +887,120 @@ def test_recent_window_refresh_detects_content_change_not_page_position(
         (output / "kind_workflow.input.json").write_text(
             json.dumps(snapshot), encoding="utf-8"
         )
+        if payload.get("end_page") == 1:
+            return {"pagination": {"total_pages": 3}}
         return {
+            "pagination": {"total_pages": 3},
             "download_status": {"integrity_valid": True},
-            "summary": {"success": 1, "failed": 0, "total": 1},
+            "summary": {"success": 3, "failed": 0, "total": 3},
         }
 
     monkeypatch.setattr(automation, "_run_single", fake_run_single)
+    monkeypatch.setattr(automation, "_page_one_snapshot_hash", lambda _path: "same")
     monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(
-        automation,
-        "disclosure_file_rows",
-        lambda path: [{"body": Path(path).read_text("utf-8")}],
-    )
-    first = automation._run_stage_one(
-        profile,
-        trigger="sync",
-        progress_callback=lambda _message: None,
-        cancel_check=lambda: False,
-    )
-    second = automation._run_stage_one(
+
+    pending = _run_stage_one(
         profile,
         trigger="sync",
         progress_callback=lambda _message: None,
         cancel_check=lambda: False,
     )
 
-    assert first["changed_windows"] == 1
-    assert second["changed_windows"] == 0
-    assert second["refreshed_windows"] == 1
+    assert pending["needs_download_confirmation"] is True
+    assert pending["download_conflicts"] == [
+        {
+            "range": "20260712_20260712",
+            "code": "page_count_changed",
+            "saved_pages": 2,
+            "kind_pages": 3,
+            "reason": "저장된 페이지 수와 KIND의 현재 페이지 수가 다릅니다.",
+        }
+    ]
+    assert marker.read_text("utf-8") == "old result"
+    assert all(call.get("end_page") == 1 for call in calls)
+
+    profile["download_confirmation"] = pending["download_confirmation"]
+    completed = _run_stage_one(
+        profile,
+        trigger="sync",
+        progress_callback=lambda _message: None,
+        cancel_check=lambda: False,
+    )
+
+    assert completed["downloaded_ranges"] == 1
+    assert not marker.exists()
+    assert sum(call.get("end_page") is None for call in calls) == 1
+
+
+def test_automation_stops_after_download_conflict_until_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executed: list[int] = []
+
+    def fake_run_stage(stage: int, *_args: object, **_kwargs: object) -> dict[str, object]:
+        executed.append(stage)
+        if stage != 1:
+            pytest.fail("later stages must not start before download confirmation")
+        return {
+            "needs_download_confirmation": True,
+            "download_conflicts": [{"range": "2026", "reason": "페이지 수가 다릅니다."}],
+            "download_confirmation": "confirmation-token",
+        }
+
+    monkeypatch.setattr(automation, "_run_stage", fake_run_stage)
+
+    result = run_disclosure_automation_payload(
+        {**_profile(tmp_path), "trigger": "sync"}
+    )
+
+    assert executed == [1]
+    assert result["workflow_status"] == "needs_download_confirmation"
+    assert result["download_confirmation"] == "confirmation-token"
+
+
+def test_stage_one_check_does_not_skip_selected_downstream_stages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    plan = {
+        "execution_allowed": True,
+        "profile": profile,
+        "trigger": "sync",
+        "profile_hash": "profile",
+        "stages": [
+            {
+                "stage": stage,
+                "label": automation.STAGE_LABELS[stage],
+                "plan_action": "process",
+            }
+            for stage in range(1, 8)
+        ],
+    }
+    executed: list[int] = []
+
+    def fake_run_stage(stage: int, *_args: object, **_kwargs: object) -> dict[str, object]:
+        executed.append(stage)
+        return {
+            "reused_ranges": 1,
+            "downloaded_ranges": 0,
+        } if stage == 1 else {"summary": {}}
+
+    monkeypatch.setattr(automation, "build_automation_plan_payload", lambda _payload: plan)
+    monkeypatch.setattr(automation, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        automation,
+        "_load_valid_checkpoint",
+        lambda *_args, **_kwargs: {"status": "succeeded"},
+    )
+
+    result = run_disclosure_automation_payload(_profile(tmp_path))
+
+    assert result["workflow_status"] == "completed"
+    assert executed == list(range(1, 8))
 
 
 @pytest.mark.parametrize("changed_part", ["pagination", "body"])
-def test_recent_window_change_during_download_fails_without_retry(
+def test_yearly_download_change_during_download_fails_without_retry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     changed_part: str,
@@ -920,7 +1037,7 @@ def test_recent_window_change_during_download_fails_without_retry(
     monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(automation, "disclosure_file_rows", fake_disclosure_rows)
 
-    with pytest.raises(ValueError, match="pagination 또는 본문이 실행 중 변경"):
+    with pytest.raises(ValueError, match="페이지 정보 또는 본문이 다운로드 중 변경"):
         automation._run_stage_one(
             profile,
             trigger="sync",
