@@ -940,7 +940,9 @@ def test_html_section_source_split_route_returns_selected_disclosure_sections(tm
     assert "발행금액 250,000,000" in data["sections"][1]["html"]
 
 
-def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) -> None:
+def test_html_section_save_start_route_saves_all_explicitly_selected_toc_sections(
+    tmp_path: Path,
+) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     source_directory = input_directory / "2008"
@@ -960,7 +962,16 @@ def test_html_section_save_start_route_saves_all_toc_sections(tmp_path: Path) ->
     client = TestClient(app)
     response = client.post(
         "/api/disclosures/html/sections/save/start",
-        json={"input_directory": str(input_directory), "output_directory": str(output_directory)},
+        json={
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {
+                "toc_1 주요사항보고서 toc_2 전환사채권 발행결정": [
+                    "toc_1",
+                    "toc_2",
+                ]
+            },
+        },
     )
 
     assert response.status_code == 200

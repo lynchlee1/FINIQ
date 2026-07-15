@@ -2772,7 +2772,7 @@ def test_split_content_html_sections_supports_legacy_section_one_paragraphs() ->
     assert "발행금액 16,000,000,000" in sections[1].html
 
 
-def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
+def test_split_content_html_sections_uses_xforms_title_boundaries_and_keeps_preamble() -> None:
     sections = split_content_html_sections(
         """
         <html>
@@ -2783,6 +2783,8 @@ def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
                 <div><span>정정신고(보고)</span></div>
                 <div class="xforms_title"><div><span>주주총회소집 결의</span></div></div>
                 <table><tbody><tr><td><span>1. 일시</span></td></tr></tbody></table>
+                <div class="xforms_title"><div><span>추가 정보</span></div></div>
+                <table><tbody><tr><td><span>2. 장소</span></td></tr></tbody></table>
               </div>
             </div>
           </body>
@@ -2791,19 +2793,23 @@ def test_split_content_html_sections_uses_xforms_title_fallback() -> None:
     )
 
     assert [(section.toc_id, section.index, section.title) for section in sections] == [
-        ("toc_1", 1, "정정신고(보고)"),
-        ("toc_2", 2, "주주총회소집 결의"),
+        ("toc_1", 1, "주주총회소집 결의"),
+        ("toc_2", 2, "추가 정보"),
     ]
     assert 'class="xforms"' in sections[0].html
     assert 'class="xforms"' in sections[1].html
     assert "정정신고(보고)" in sections[0].html
-    assert "주주총회소집 결의" not in sections[0].html
-    assert "주주총회소집 결의" in sections[1].html
-    assert "1. 일시" in sections[1].html
-    assert "정정신고" not in sections[1].html
+    assert "주주총회소집 결의" in sections[0].html
+    assert "1. 일시" in sections[0].html
+    assert "추가 정보" not in sections[0].html
+    assert "정정신고(보고)" not in sections[1].html
+    assert "추가 정보" in sections[1].html
+    assert "2. 장소" in sections[1].html
 
 
-def test_save_disclosure_html_sections_payload_requires_matching_rule(tmp_path: Path) -> None:
+def test_save_disclosure_html_sections_payload_requires_explicit_selection(
+    tmp_path: Path,
+) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     source_directory = input_directory / "2008"
@@ -2837,7 +2843,7 @@ def test_save_disclosure_html_sections_payload_requires_matching_rule(tmp_path: 
     assert payload["skipped_files"] == [
         {
             "source_file": str(source_directory / "20260422000832.html"),
-            "error": "no save rule for section pattern",
+            "error": "missing section selection",
         }
     ]
     assert not (output_directory / "2008" / "20260422000832.html").exists()
@@ -2870,6 +2876,12 @@ def test_save_disclosure_html_sections_payload_continues_after_files_without_toc
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
+            "section_save_rules": {
+                "toc_1 주요사항보고서 toc_2 전환사채권 발행결정": [
+                    "toc_1",
+                    "toc_2",
+                ]
+            },
         }
     )
 
@@ -3213,7 +3225,7 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
     assert payload["skipped_files"] == [
         {
             "source_file": str(source_directory / "20260402000001.html"),
-            "error": "no save rule for section pattern",
+            "error": "missing section selection",
         }
     ]
     assert not (output_directory / "2008" / "20260402000001_1.html").exists()
@@ -3274,6 +3286,7 @@ def test_section_save_ignores_automation_cache_below_standard_input(
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 1": ["toc_1"]},
         }
     )
 
@@ -3337,7 +3350,15 @@ def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cance
         return checks > 1
 
     payload = save_disclosure_html_sections_payload(
-        {"input_directory": str(input_directory), "output_directory": str(output_directory), "workers": 1},
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "workers": 1,
+            "section_save_rules": {
+                "toc_1 1": ["toc_1"],
+                "toc_1 2": ["toc_1"],
+            },
+        },
         cancel_check=cancel_check,
     )
 
