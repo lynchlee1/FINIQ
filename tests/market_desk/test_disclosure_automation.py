@@ -508,22 +508,26 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    manifest_path = tmp_path / "02-table" / "source_shards" / "source.sqlite_manifest.json"
+    manifest_path = tmp_path / "02-table" / "sqlite_manifest.json"
     manifest_path.parent.mkdir(parents=True)
+    manifest = {
+        "source_type": "source_folder",
+        "source_path": str(tmp_path / "01-list"),
+        "summary": {"source_rows": 1, "duplicate_rows": 0, "disclosures": 1},
+    }
     monkeypatch.setattr(automation, "_table_manifest", lambda _profile: manifest_path)
-    monkeypatch.setattr(
-        automation,
-        "_load_sqlite_manifest",
-        lambda _path: {
-            "source_type": "source_folder",
-            "source_path": str(tmp_path / "01-list"),
-        },
-    )
+    monkeypatch.setattr(automation, "_load_sqlite_manifest", lambda _path: manifest)
     monkeypatch.setattr(automation, "_validate_sqlite_manifest_counts", lambda *_args: None)
     results = iter(
         [
-            {"disclosures": [{"acpt_no": "1"}]},
-            {"disclosures": [{"acpt_no": "1"}]},
+            {
+                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
+                "disclosures": [{"acpt_no": "1"}],
+            },
+            {
+                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
+                "disclosures": [{"acpt_no": "1"}],
+            },
         ]
     )
     monkeypatch.setattr(automation, "filter_disclosures_payload", lambda *_args, **_kwargs: next(results))
@@ -534,8 +538,14 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
 
     changed_results = iter(
         [
-            {"disclosures": [{"acpt_no": "1"}]},
-            {"disclosures": [{"acpt_no": "2"}]},
+            {
+                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
+                "disclosures": [{"acpt_no": "1"}],
+            },
+            {
+                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
+                "disclosures": [{"acpt_no": "2"}],
+            },
         ]
     )
     monkeypatch.setattr(
@@ -549,14 +559,25 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     assert mismatch["confirmed"] is False
     assert "레코드" in mismatch["reason"]
 
-    duplicate_count_results = iter(
+    manifest["summary"] = {
+        "source_rows": 2,
+        "duplicate_rows": 1,
+        "disclosures": 1,
+    }
+    duplicate_results = iter(
         [
             {
-                "summary": {"source_disclosures": 2},
+                "summary": {
+                    "source_disclosures": 2,
+                    "duplicate_disclosures": 1,
+                },
                 "disclosures": [{"acpt_no": "1"}],
             },
             {
-                "summary": {"source_disclosures": 1},
+                "summary": {
+                    "source_disclosures": 1,
+                    "duplicate_disclosures": 0,
+                },
                 "disclosures": [{"acpt_no": "1"}],
             },
         ]
@@ -564,14 +585,17 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     monkeypatch.setattr(
         automation,
         "filter_disclosures_payload",
-        lambda *_args, **_kwargs: next(duplicate_count_results),
+        lambda *_args, **_kwargs: next(duplicate_results),
     )
 
-    count_mismatch = automation._inspect_detail_table(profile)
+    duplicate_result = automation._inspect_detail_table(profile)
 
-    assert count_mismatch["confirmed"] is False
-    assert count_mismatch["details"]["source_rows"] == 2
-    assert count_mismatch["details"]["table_rows"] == 1
+    assert duplicate_result["confirmed"] is True
+    assert duplicate_result["details"] == {
+        "source_rows": 2,
+        "duplicate_rows": 1,
+        "records": 1,
+    }
 
 
 def test_table_source_discovery_ignores_nested_automation_windows(
@@ -597,23 +621,8 @@ def test_table_source_discovery_ignores_nested_automation_windows(
 def test_detail_table_manifest_selects_current_standard_source(tmp_path: Path) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
     table_root = tmp_path / "02-table"
-    automation_manifest = (
-        table_root
-        / ".automation-windows_shards"
-        / ".automation-windows.sqlite_manifest.json"
-    )
-    detail_manifest = table_root / "01-list_shards" / "01-list.sqlite_manifest.json"
-    automation_manifest.parent.mkdir(parents=True)
-    detail_manifest.parent.mkdir(parents=True)
-    automation_manifest.write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_table_manifest_v1",
-                "source_type": "source_folder",
-                "source_path": str(tmp_path / "01-list" / ".automation-windows"),
-            }
-        )
-    )
+    detail_manifest = table_root / "sqlite_manifest.json"
+    table_root.mkdir(parents=True)
     detail_manifest.write_text(
         json.dumps(
             {

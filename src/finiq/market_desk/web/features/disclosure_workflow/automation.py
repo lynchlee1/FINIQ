@@ -546,22 +546,17 @@ def _inspect_automation_download(profile: dict[str, Any]) -> dict[str, Any]:
 def _table_manifest(profile: dict[str, Any]) -> Path:
     root = Path(profile["data_root"])
     expected_source = (root / "01-list").resolve()
-    matches: list[Path] = []
-    for path in sorted((root / "02-table").glob("*_shards/*.sqlite_manifest.json")):
-        try:
-            manifest = _load_sqlite_manifest(path)
-            source_path = Path(
-                str(manifest.get("source_path") or "")
-            ).expanduser().resolve()
-        except (OSError, ValueError, json.JSONDecodeError):
-            continue
-        if manifest.get("source_type") == "source_folder" and source_path == expected_source:
-            matches.append(path)
-    if not matches:
+    path = root / "02-table" / "sqlite_manifest.json"
+    try:
+        manifest = _load_sqlite_manifest(path)
+        source_path = Path(
+            str(manifest.get("source_path") or "")
+        ).expanduser().resolve()
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("공시내역 변환 매니페스트를 찾을 수 없습니다.") from error
+    if manifest.get("source_type") != "source_folder" or source_path != expected_source:
         raise ValueError("공시내역 변환 매니페스트를 찾을 수 없습니다.")
-    if len(matches) > 1:
-        raise ValueError("현재 다운로드 경로를 가리키는 변환 매니페스트가 여러 개입니다.")
-    return matches[0]
+    return path
 
 
 def _filter_signature(payload: dict[str, Any]) -> str:
@@ -633,14 +628,19 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
             "filter_workers": profile["execution"]["local_workers"],
         }
     )
-    source_count = int(
-        (source_result.get("summary") or {}).get("source_disclosures") or 0
-    )
-    table_count = int(
-        (table_result.get("summary") or {}).get("source_disclosures") or 0
-    )
+    source_summary = source_result.get("summary") or {}
+    table_summary = table_result.get("summary") or {}
+    manifest_summary = manifest.get("summary") or {}
+    source_count = int(source_summary.get("source_disclosures") or 0)
+    source_duplicate_count = int(source_summary.get("duplicate_disclosures") or 0)
+    table_count = int(table_summary.get("source_disclosures") or 0)
+    table_duplicate_count = int(table_summary.get("duplicate_disclosures") or 0)
     if (
-        source_count != table_count
+        source_count != table_count + source_duplicate_count
+        or table_duplicate_count != 0
+        or int(manifest_summary.get("source_rows") or 0) != source_count
+        or int(manifest_summary.get("duplicate_rows") or 0)
+        != source_duplicate_count
         or source_result.get("disclosures") != table_result.get("disclosures")
     ):
         return _inspection_failure(
@@ -648,7 +648,9 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
             reason="다운로드 원본과 SQLite 공시 레코드가 일치하지 않습니다.",
             details={
                 "source_rows": source_count,
+                "source_duplicate_rows": source_duplicate_count,
                 "table_rows": table_count,
+                "table_duplicate_rows": table_duplicate_count,
                 "source_records": len(source_result.get("disclosures") or []),
                 "table_records": len(table_result.get("disclosures") or []),
             },
@@ -656,7 +658,11 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
     return _inspection_success(
         2,
         reason="다운로드 원본, SQLite 매니페스트와 실제 shard 레코드가 모두 일치합니다.",
-        details={"records": len(table_result.get("disclosures") or [])},
+        details={
+            "source_rows": source_count,
+            "duplicate_rows": source_duplicate_count,
+            "records": len(table_result.get("disclosures") or []),
+        },
     )
 
 

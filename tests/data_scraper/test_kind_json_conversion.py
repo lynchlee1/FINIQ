@@ -22,8 +22,51 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
 def test_disclosure_rows_rejects_missing_results_table() -> None:
-    with pytest.raises(ValueError, match="result table is missing"):
+    with pytest.raises(ValueError, match="result table is missing or ambiguous"):
         disclosure_rows("<html><body>no disclosure table</body></html>")
+
+
+def test_disclosure_rows_rejects_class_only_results_table() -> None:
+    html = """
+    <table class="list">
+      <tbody><tr><td>1</td></tr></tbody>
+    </table>
+    """
+
+    with pytest.raises(ValueError, match="result table is missing or ambiguous"):
+        disclosure_rows(html)
+
+
+def test_disclosure_rows_rejects_results_table_without_tbody() -> None:
+    html = """
+    <table summary="번호, 시간, 회사명, 공시제목, 제출인">
+      <tr><td>1</td></tr>
+    </table>
+    """
+
+    with pytest.raises(ValueError, match="exactly one tbody"):
+        disclosure_rows(html)
+
+
+def test_disclosure_rows_rejects_multiple_results_tables() -> None:
+    html = """
+    <table summary="회사명 공시제목"><tbody></tbody></table>
+    <table summary="회사명 공시제목"><tbody></tbody></table>
+    """
+
+    with pytest.raises(ValueError, match="result table is missing or ambiguous"):
+        disclosure_rows(html)
+
+
+def test_disclosure_rows_rejects_short_body_row() -> None:
+    html = """
+    <table summary="회사명 공시제목">
+      <tbody><tr><td>1</td></tr></tbody>
+    </table>
+    """
+
+    with pytest.raises(ValueError, match="fewer than 5 cells"):
+        disclosure_rows(html)
 
 
 def test_decode_html_markup_rejects_undecodable_bytes(monkeypatch) -> None:

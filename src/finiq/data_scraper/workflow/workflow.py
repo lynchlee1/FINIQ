@@ -42,7 +42,12 @@ from finiq.data_scraper.core.payload import (
     _iter_search_filter_items,
     build_search_form,
 )
-from finiq.data_scraper.storage.result_files import KIND_REPAIR_OVERLAY_DIRNAME, result_page_number, sorted_result_page_paths
+from finiq.data_scraper.storage.result_files import (
+    KIND_REPAIR_OVERLAY_DIRNAME,
+    effective_result_page_paths,
+    result_page_number,
+    sorted_result_page_paths,
+)
 
 KindSearchFilters = Mapping[str, object] | Sequence[tuple[str, object]] | None
 KIND_WORKFLOW_INPUT_FORMAT = "finiq_kind_workflow_input_v1"
@@ -247,7 +252,14 @@ def _iter_target_kind_dirs(
 
 
 def _iter_kind_result_dirs(root_directory: Path) -> list[Path]:
-    result_dirs = {body_path.parent.resolve() for body_path in root_directory.rglob("*_post_page_*.body")}
+    result_dirs = {
+        body_path.parent.resolve()
+        for body_path in root_directory.rglob("*_post_page_*.body")
+        if not any(
+            part.startswith(".")
+            for part in body_path.relative_to(root_directory).parts[:-1]
+        )
+    }
     return sorted(result_dirs)
 
 
@@ -359,13 +371,18 @@ def _infer_page_size_from_inspected_pages(inspected_pages: list[dict[str, int]])
 def _collect_company_records_from_folder(
     folder: str | Path,
     validate_integrity: bool = True,
+    use_partial_cache: bool = True,
 ) -> dict[str, Any]:
     target_folder = Path(folder).resolve()
     input_snapshot = _load_folder_input_snapshot(target_folder)
     expected_page_size = int(input_snapshot["page_size"])
-    cached_payload = load_folder_partial_cache(
-        target_folder,
-        require_validated=validate_integrity,
+    cached_payload = (
+        load_folder_partial_cache(
+            target_folder,
+            require_validated=validate_integrity,
+        )
+        if use_partial_cache
+        else None
     )
     if cached_payload is not None:
         companies_by_key = {
@@ -391,6 +408,7 @@ def _collect_company_records_from_folder(
     total_pages_values: set[int] = set()
     total_items_values: set[int] = set()
     integrity_errors: list[str] = []
+    row_integrity_errors: list[str] = []
     pages_to_redownload: list[int] = []
     body_files = 0
     parsed_disclosures = 0
@@ -399,10 +417,22 @@ def _collect_company_records_from_folder(
 
     for body_path in _effective_company_result_page_paths(target_folder):
         body_files += 1
+        file_page_num = result_page_number(body_path)
         body_bytes = body_path.read_bytes()
         rows = disclosure_rows(body_bytes)
         actual_rows = len(rows)
         parsed_disclosures += actual_rows
+
+        missing_acpt_no_count = sum(
+            1 for row in rows if not str(row.get("acpt_no") or "").strip()
+        )
+        if validate_integrity and missing_acpt_no_count:
+            row_integrity_errors.append(
+                f"{target_folder.name} {file_page_num}페이지에 acpt_no가 없는 공시가 "
+                f"{missing_acpt_no_count}건 있습니다."
+            )
+            if file_page_num >= 1:
+                pages_to_redownload.append(file_page_num)
 
         for row in rows:
             company_key = str(row.get("company_id") or row.get("company_name") or "").strip()
@@ -441,7 +471,6 @@ def _collect_company_records_from_folder(
             )
 
         if validate_integrity:
-            file_page_num = result_page_number(body_path)
             paging = pagination_info(body_bytes)
             if paging is None:
                 integrity_errors.append(
@@ -565,6 +594,8 @@ def _collect_company_records_from_folder(
                 f"(차이: {abs(parsed_disclosures - resolved_total_items)}건)"
             )
 
+    integrity_errors.extend(row_integrity_errors)
+
     all_repair_pages = sorted(set(pages_to_redownload + pages_missing))
     companies = sorted(
         companies_by_key.values(),
@@ -573,7 +604,7 @@ def _collect_company_records_from_folder(
             str(item.get("company_id") or ""),
         ),
     )
-    if not integrity_errors:
+    if not integrity_errors and use_partial_cache:
         write_folder_partial_cache(
             target_folder,
             validated=validate_integrity,
@@ -652,6 +683,8 @@ def _load_repair_manifest(folder: Path) -> dict[str, Any]:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception:
         return {"pages": {}}
+    if not isinstance(payload, dict):
+        return {"pages": {}}
     pages = payload.get("pages")
     if not isinstance(pages, dict):
         return {"pages": {}}
@@ -672,26 +705,7 @@ def _repair_attempt_directory(folder: Path, page_number: int, attempt: int) -> P
 
 
 def _effective_company_result_page_paths(folder: Path) -> list[Path]:
-    page_paths: dict[int, Path] = {}
-    for body_path in sorted_result_page_paths(folder):
-        page_number = result_page_number(body_path)
-        if page_number >= 1:
-            page_paths[page_number] = body_path
-
-    manifest = _load_repair_manifest(folder)
-    for page_key, entry in dict(manifest.get("pages") or {}).items():
-        try:
-            page_number = int(page_key)
-        except (TypeError, ValueError):
-            continue
-        relative_page_path = str(dict(entry).get("page_path") or "").strip()
-        if not relative_page_path:
-            continue
-        overlay_path = (folder / relative_page_path).resolve()
-        if overlay_path.exists():
-            page_paths[page_number] = overlay_path
-
-    return [page_paths[page_number] for page_number in sorted(page_paths)]
+    return effective_result_page_paths(folder)
 
 
 def _repair_folder_pages(
@@ -699,6 +713,7 @@ def _repair_folder_pages(
     page_numbers: list[int],
     *,
     progress_callback: KindProgressCallback | None = None,
+    cancel_check: KindCancelCheck | None = None,
 ) -> tuple[list[str], dict[int, int]]:
     """입력 스냅샷을 참조해 손상되거나 누락된 페이지를 재다운로드한다.
 
@@ -733,11 +748,33 @@ def _repair_folder_pages(
     manifest_payload = _load_repair_manifest(folder)
     manifest_pages = dict(manifest_payload.get("pages") or {})
     manifest_changed = False
+    page_validator = make_page_size_integrity_validator(
+        expected_page_size=page_size,
+    )
+
+    def _repair_validator(
+        output_path: Path,
+        page_number: int | None,
+        request_data: KindSearchFormData | None,
+    ) -> None:
+        page_validator(output_path, page_number, request_data)
+        rows = disclosure_file_rows(output_path)
+        missing_acpt_no_count = sum(
+            1 for row in rows if not str(row.get("acpt_no") or "").strip()
+        )
+        if missing_acpt_no_count:
+            output_path.unlink(missing_ok=True)
+            raise ValueError(
+                f"{output_path.name}에 acpt_no가 없는 공시가 "
+                f"{missing_acpt_no_count}건 있습니다."
+            )
 
     for page_number in sorted(set(page_numbers)):
         last_error: Exception | None = None
         success = False
         for attempt in range(1, _MAX_PAGE_REPAIR_ATTEMPTS + 1):
+            if cancel_check is not None and cancel_check():
+                raise RuntimeError("Job cancelled")
             attempt_counts[page_number] = attempt
             if progress_callback is not None:
                 progress_callback(
@@ -760,14 +797,16 @@ def _repair_folder_pages(
                     wait_seconds_between_requests=wait_seconds,
                     timeout=timeout,
                     progress_callback=progress_callback,
-                    saved_file_validator=make_page_size_integrity_validator(
-                        expected_page_size=page_size,
-                    ),
+                    saved_file_validator=_repair_validator,
+                    cancel_check=cancel_check,
                 )
             except Exception as exc:
                 last_error = exc
                 continue
             candidate_path = attempt_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=page_number)
+            if not candidate_path.is_file():
+                last_error = RuntimeError("복구 페이지가 저장되지 않았습니다.")
+                continue
             manifest_pages[str(page_number)] = {
                 "attempt": attempt,
                 "page_path": str(candidate_path.relative_to(folder)),
@@ -796,13 +835,18 @@ def _collect_all_folder_summaries(
     *,
     parallelism: int | None = None,
     validate_integrity: bool = True,
+    use_partial_cache: bool = True,
 ) -> list[dict[str, Any]]:
     """모든 대상 폴더에서 회사별 레코드 요약을 수집한다."""
     worker_count = _resolve_folder_parallelism(parallelism, len(target_folders))
     folder_targets = [str(folder) for folder in target_folders]
     if worker_count == 1:
         return [
-            _collect_company_records_from_folder(folder, validate_integrity=validate_integrity)
+            _collect_company_records_from_folder(
+                folder,
+                validate_integrity=validate_integrity,
+                use_partial_cache=use_partial_cache,
+            )
             for folder in folder_targets
         ]
     try:
@@ -812,11 +856,16 @@ def _collect_all_folder_summaries(
                     _collect_company_records_from_folder,
                     folder_targets,
                     [validate_integrity] * len(folder_targets),
+                    [use_partial_cache] * len(folder_targets),
                 )
             )
     except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
         return [
-            _collect_company_records_from_folder(folder, validate_integrity=validate_integrity)
+            _collect_company_records_from_folder(
+                folder,
+                validate_integrity=validate_integrity,
+                use_partial_cache=use_partial_cache,
+            )
             for folder in folder_targets
         ]
 
@@ -891,12 +940,15 @@ def _build_company_classification_payload(
     parallelism: int | None = None,
     validate_integrity: bool = True,
     progress_callback: KindProgressCallback | None = None,
+    cancel_check: KindCancelCheck | None = None,
+    use_partial_cache: bool = True,
 ) -> tuple[dict[str, Any], KindCompanyClassificationIntegrityReport]:
     target_folders = _iter_kind_result_dirs(root_directory)
     folder_summaries = _collect_all_folder_summaries(
         target_folders,
         parallelism=parallelism,
         validate_integrity=validate_integrity,
+        use_partial_cache=use_partial_cache,
     )
 
     (
@@ -941,6 +993,7 @@ def _build_company_classification_payload(
             folder_path,
             pages,
             progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
         if errors:
             repair_remaining_errors.extend(errors)
@@ -965,6 +1018,7 @@ def _build_company_classification_payload(
         repaired_folders,
         parallelism=parallelism,
         validate_integrity=validate_integrity,
+        use_partial_cache=use_partial_cache,
     )
     all_summaries = [
         summary for summary in folder_summaries
@@ -1179,6 +1233,7 @@ def diagnose_kind_company_classification_integrity(
     parallelism: int | None = None,
     validate_integrity: bool = True,
     progress_callback: KindProgressCallback | None = None,
+    cancel_check: KindCancelCheck | None = None,
 ) -> KindCompanyClassificationIntegrityReport:
     """Diagnose integrity issues and attempt auto-repair without writing output JSON."""
     root = Path(root_directory).resolve()
@@ -1191,6 +1246,8 @@ def diagnose_kind_company_classification_integrity(
         parallelism=parallelism,
         validate_integrity=validate_integrity,
         progress_callback=progress_callback,
+        cancel_check=cancel_check,
+        use_partial_cache=False,
     )
     return integrity_report
 

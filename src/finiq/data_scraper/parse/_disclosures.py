@@ -14,7 +14,6 @@ from ._snippets import disclosure_onclick
 _COMPANYSUMMARY_OPEN_RE = re.compile(
     r"companysummary_open\(\s*['\"](?P<company_id>[^'\"]*)['\"]\s*\)"
 )
-_DISCLOSURE_TABLE_SUMMARY_TERMS = ("\ud68c\uc0ac\uba85", "\uacf5\uc2dc\uc81c\ubaa9")
 _TITLE_FLAG_RE = re.compile(r"\[([^\[\]]+)\]")
 _LATER_CORRECTION_LABEL = "해당보고서 이후에 정정된 보고서 있음"
 
@@ -28,17 +27,6 @@ def companysummary_onclick(onclick_value: str | None) -> dict[str, str | None] |
         return None
     company_id = match.group("company_id").strip() or None
     return {"company_id": company_id}
-
-
-def _find_disclosure_results_table(root: html.HtmlElement) -> html.HtmlElement | None:
-    """Return the main disclosure results table from a KIND result page."""
-    for table_tag in root.xpath("//table"):
-        summary = _clean_text(str(table_tag.get("summary") or ""))
-        if all(term in summary for term in _DISCLOSURE_TABLE_SUMMARY_TERMS):
-            return table_tag
-    for table_tag in root.xpath("//table[contains(concat(' ', normalize-space(@class), ' '), ' list ')]"):
-        return table_tag
-    return None
 
 
 def _pick_market_and_badges(company_cell: html.HtmlElement) -> tuple[str | None, list[str]]:
@@ -80,10 +68,10 @@ def _has_later_correction(disclosure_cell: html.HtmlElement) -> bool:
     )
 
 
-def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any] | None:
+def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any]:
     cells = row_tag.xpath("./td")
     if len(cells) < 5:
-        return None
+        raise ValueError("KIND disclosure result row has fewer than 5 cells")
 
     company_cell = cells[2]
     disclosure_cell = cells[3]
@@ -150,19 +138,20 @@ def disclosure_rows(html_markup: str | bytes) -> list[dict[str, Any]]:
         root = html.document_fromstring(decoded_markup, parser=parser)
     except etree.ParserError as exc:
         raise ValueError("Failed to parse KIND disclosure result page") from exc
-    table_tag = _find_disclosure_results_table(root)
-    if table_tag is None:
-        raise ValueError("KIND disclosure result table is missing")
+    table_tags = root.xpath(
+        "//table[contains(@summary, '회사명') and contains(@summary, '공시제목')]"
+    )
+    if len(table_tags) != 1:
+        raise ValueError("KIND disclosure result table is missing or ambiguous")
+    table_tag = table_tags[0]
 
     tbody_tags = table_tag.xpath("./tbody")
-    parent_tags: list[html.HtmlElement] = tbody_tags if tbody_tags else [table_tag]
+    if len(tbody_tags) != 1:
+        raise ValueError("KIND disclosure result table must contain exactly one tbody")
 
     rows: list[dict[str, Any]] = []
-    for parent_tag in parent_tags:
-        for row_tag in parent_tag.xpath("./tr"):
-            row = _build_disclosure_row(row_tag)
-            if row is not None:
-                rows.append(row)
+    for row_tag in tbody_tags[0].xpath("./tr"):
+        rows.append(_build_disclosure_row(row_tag))
     return rows
 
 

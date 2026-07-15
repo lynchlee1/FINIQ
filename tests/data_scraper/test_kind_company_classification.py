@@ -13,6 +13,7 @@ from finiq.data_scraper.storage.classification_store import (
     folder_partial_signature,
     load_company_classification_artifact,
 )
+from finiq.data_scraper.storage.result_files import effective_result_page_paths
 import finiq.data_scraper.workflow.workflow as workflow_module
 from finiq.data_scraper.workflow import (
     KIND_WORKFLOW_INPUT_FORMAT,
@@ -20,6 +21,17 @@ from finiq.data_scraper.workflow import (
     export_kind_company_classification,
     export_kind_mode_folders,
 )
+
+
+def test_non_object_repair_manifest_is_ignored(tmp_path: Path) -> None:
+    body_path = tmp_path / "001_post_page_00001.body"
+    body_path.write_text("original", encoding="utf-8")
+    repair_root = tmp_path / ".kind_page_repairs"
+    repair_root.mkdir()
+    (repair_root / "manifest.json").write_text("[]", encoding="utf-8")
+
+    assert effective_result_page_paths(tmp_path) == [body_path]
+    assert workflow_module._load_repair_manifest(tmp_path) == {"pages": {}}
 
 
 def _results_page(rows_html: str, pagination_markup: str = "") -> str:
