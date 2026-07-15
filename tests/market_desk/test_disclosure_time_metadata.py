@@ -89,7 +89,7 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
     source_path.parent.mkdir(parents=True)
     source_path.write_text("<html></html>", encoding="utf-8")
     _write_filtered(
-        data_root / "03-filter" / "filtered.json",
+        data_root / "03-filter" / "bond_issuance" / "filtered.json",
         disclosed_at="2025-01-02 18:42",
     )
     (data_root / "04-external" / "compressed-external-html.json").write_text(
@@ -108,7 +108,7 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
     result = parse_disclosure_html_payload(payload)
 
     assert payload["filtered_metadata_path"] == str(
-        data_root / "03-filter" / "filtered.json"
+        data_root / "03-filter" / "bond_issuance" / "filtered.json"
     )
     assert payload["compressed_metadata_path"] == str(
         data_root / "04-external" / "compressed-external-html.json"

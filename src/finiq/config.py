@@ -68,7 +68,6 @@ SAVED_SETTINGS_KEYS = (
     "integrated_data_values",
     "change_log_date_thresholds",
     "change_log_numeric_thresholds",
-    "condition_presets",
     "job_retention_minutes",
 )
 
@@ -112,7 +111,6 @@ class AppConfig:
     integrated_data_values: dict[str, str] = field(default_factory=dict)
     change_log_date_thresholds: dict[str, float] = field(default_factory=dict)
     change_log_numeric_thresholds: dict[str, float] = field(default_factory=dict)
-    condition_presets: list[dict[str, Any]] = field(default_factory=list)
     job_retention_minutes: int = 60
 
 def get_default_settings_path() -> Path:
@@ -141,7 +139,7 @@ def build_disclosure_workspace_path_settings(
     if _DISCLOSURE_MODE_RE.fullmatch(normalized_mode) is None:
         raise ValueError("Invalid disclosure parser mode")
     converted_path = root / "07-converted" / normalized_mode
-    filtered_path = root / "03-filter" / "filtered.json"
+    filtered_path = root / "03-filter"
     external_path = root / "04-external"
     return {
         "download_output_directory": str(root / "01-list"),
@@ -286,6 +284,5 @@ def init_config() -> AppConfig:
         integrated_data_values=settings.get("integrated_data_values", {}),
         change_log_date_thresholds=settings.get("change_log_date_thresholds", {}),
         change_log_numeric_thresholds=settings.get("change_log_numeric_thresholds", {}),
-        condition_presets=settings.get("condition_presets", []),
         job_retention_minutes=job_retention_minutes,
     )

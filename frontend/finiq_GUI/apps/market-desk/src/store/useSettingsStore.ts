@@ -39,7 +39,6 @@ interface SettingsState {
   integrated_data_values: Record<string, string>;
   change_log_date_thresholds: Record<string, number>;
   change_log_numeric_thresholds: Record<string, number>;
-  condition_presets: any[];
   job_retention_minutes: number;
   
   // Actions
@@ -88,7 +87,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   integrated_data_values: {},
   change_log_date_thresholds: {},
   change_log_numeric_thresholds: {},
-  condition_presets: [],
   job_retention_minutes: 60,
 
   updateSettings: (newSettings) => set((state) => ({ ...state, ...newSettings })),

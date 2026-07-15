@@ -5,7 +5,6 @@ import queue
 import tempfile
 import threading
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,6 +16,9 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
     write_disclosure_html_manifest_payload,
+)
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    manage_filter_presets_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
     cancel_disclosure_html_download,
@@ -52,32 +54,33 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
     atomic_write_json,
     prepare_disclosure_workspace_payload,
+    validate_workspace_mode,
 )
 
 FilterDisclosuresPayload = Callable[..., dict[str, Any]]
 RunJobWorker = Callable[[str, str, dict[str, Any]], None]
 
 
-def _write_transfer_file(
-    config: Any, payload: dict[str, Any], requested_path: str = ""
-) -> dict[str, Any]:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    if requested_path:
-        transfer_path = Path(requested_path).expanduser().resolve()
-        if transfer_path.suffix.lower() != ".json":
-            transfer_path = (
-                transfer_path
-                / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
-            )
-    else:
-        transfer_dir = (
-            Path(config.output_root).expanduser().resolve() / ".finiq" / "transfers"
-        )
-        transfer_path = (
-            transfer_dir
-            / f"filtered-disclosures-{timestamp}-{uuid.uuid4().hex[:8]}.json"
-        )
+def _filter_output_directory(value: object) -> str:
+    output_text = str(value or "").strip()
+    if not output_text:
+        raise ValueError("filter output directory is required")
+    output_root = Path(output_text).expanduser().resolve()
+    if output_root.suffix.lower() == ".json" or (
+        output_root.exists() and not output_root.is_dir()
+    ):
+        raise ValueError("filter output path must be a directory")
+    return str(output_root)
 
+
+def _write_transfer_file(
+    payload: dict[str, Any], *, output_directory: str, mode: object
+) -> dict[str, Any]:
+    normalized_mode = validate_workspace_mode(mode)
+    output_root = Path(_filter_output_directory(output_directory))
+    transfer_path = output_root / normalized_mode / "filtered.json"
+
+    payload["mode"] = normalized_mode
     atomic_write_json(transfer_path, payload)
     return {
         "format": payload.get("format", ""),
@@ -91,21 +94,24 @@ def _write_transfer_file(
 
 
 def _attach_html_download_transfer(
-    config: Any, payload: dict[str, Any], requested_path: str = ""
+    payload: dict[str, Any], *, output_directory: str, mode: object
 ) -> dict[str, Any]:
     if payload.get("format") == "kind_disclosure_filter_v1":
         payload["html_download_transfer"] = _write_transfer_file(
-            config, payload, requested_path=requested_path
+            payload,
+            output_directory=output_directory,
+            mode=mode,
         )
     return payload
 
 
 def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
     source_path = Path(source_json_path).expanduser().resolve()
-    if source_path.suffix.lower() != ".json":
-        raise ValueError("필터 결과 JSON 파일을 선택하세요.")
+    if source_path.name != "filtered.json":
+        raise ValueError("모드 폴더의 filtered.json 파일을 선택하세요.")
     if not source_path.is_file():
         raise ValueError(f"필터 결과 JSON 파일을 찾을 수 없습니다: {source_path}")
+    mode = validate_workspace_mode(source_path.parent.name)
 
     payload = json.loads(source_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -117,7 +123,8 @@ def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
     return {
         "format": "kind_disclosure_filter_preset_v1",
         "source_json_path": str(source_path),
-        "name": source_path.stem,
+        "name": mode,
+        "mode": mode,
         "condition_blocks": filter_blocks,
     }
 
@@ -144,7 +151,6 @@ def _start_background_job(
 
 def create_workflows_router(
     *,
-    config: Any,
     filter_disclosures_payload: FilterDisclosuresPayload,
     run_job_worker: RunJobWorker,
 ) -> APIRouter:
@@ -152,7 +158,14 @@ def create_workflows_router(
 
     @router.post("/api/disclosures/filter")
     async def filter_disclosures(request: Request):
-        body = apply_workspace_defaults("filter", await request.json())
+        try:
+            body = apply_workspace_defaults("filter", await request.json())
+            body["mode"] = validate_workspace_mode(body.get("mode"))
+            body["html_transfer_path"] = _filter_output_directory(
+                body.get("html_transfer_path")
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         accept = request.headers.get("Accept", "")
         if "application/x-ndjson" in accept:
 
@@ -170,11 +183,11 @@ def create_workflows_router(
                             cancel_check=cancel_event.is_set,
                         )
                         _attach_html_download_transfer(
-                            config,
                             payload,
-                            requested_path=str(
+                            output_directory=str(
                                 body.get("html_transfer_path") or ""
                             ).strip(),
+                            mode=body.get("mode"),
                         )
                         events.put({"type": "result", "payload": payload})
                     except Exception as e:
@@ -196,9 +209,11 @@ def create_workflows_router(
         try:
             payload = filter_disclosures_payload(body)
             _attach_html_download_transfer(
-                config,
                 payload,
-                requested_path=str(body.get("html_transfer_path") or "").strip(),
+                output_directory=str(
+                    body.get("html_transfer_path") or ""
+                ).strip(),
+                mode=body.get("mode"),
             )
             return payload
         except Exception as exc:
@@ -211,6 +226,13 @@ def create_workflows_router(
             raise HTTPException(status_code=400, detail="필터 결과 JSON 경로를 선택하세요.")
         try:
             return _load_filter_preset_file(source_json_path)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/filter/presets")
+    async def manage_disclosure_filter_presets(payload: dict[str, Any]):
+        try:
+            return manage_filter_presets_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

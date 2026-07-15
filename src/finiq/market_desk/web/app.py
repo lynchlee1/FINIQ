@@ -224,7 +224,6 @@ app.include_router(
 app.include_router(create_download_router(config))
 app.include_router(
     create_workflows_router(
-        config=config,
         filter_disclosures_payload=_filter_disclosures_payload,
         run_job_worker=_run_job_worker,
     )

@@ -69,14 +69,6 @@ DISPLAY_FREQUENCY_OPTIONS = ("자동", "일봉", "주봉", "월봉")
 KIND_UI_DATE_MIN = date(1990, 1, 1)
 MARKER_PLACEMENT = "candle_below"
 _RESULT_PAGE_NUMBER_RE = re.compile(r"_post_page_(?P<page>\d+)\.body$")
-_COMPANYSUMMARY_OPEN_RE = re.compile(
-    r"companysummary_open\(\s*['\"](?P<company_id>[^'\"]*)['\"]\s*\)"
-)
-_OPEN_DISCLS_VIEWER_RE = re.compile(
-    r"openDisclsViewer\(\s*['\"](?P<acpt_no>[^'\"]*)['\"]\s*,\s*['\"](?P<doc_no>[^'\"]*)['\"]\s*\)"
-)
-_TITLE_FLAG_RE = re.compile(r"\[([^\[\]]+)\]")
-_LATER_CORRECTION_LABEL = "해당보고서 이후에 정정된 보고서 있음"
 
 
 def _company_key(company: dict[str, Any]) -> str:

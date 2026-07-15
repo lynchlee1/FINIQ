@@ -68,7 +68,6 @@ class SettingsUpdate(BaseModel):
     integrated_data_values: Optional[dict[str, str]] = None
     change_log_date_thresholds: Optional[dict[str, float]] = None
     change_log_numeric_thresholds: Optional[dict[str, float]] = None
-    condition_presets: Optional[list[dict[str, Any]]] = None
     job_retention_minutes: Optional[int] = None
 
 
@@ -206,7 +205,6 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "integrated_data_values": config.integrated_data_values,
             "change_log_date_thresholds": config.change_log_date_thresholds,
             "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
-            "condition_presets": config.condition_presets,
             "job_retention_minutes": config.job_retention_minutes,
             "range_options": list(INSIGHT_RANGE_OPTIONS),
             "display_frequency_options": list(DISPLAY_FREQUENCY_OPTIONS),
@@ -273,7 +271,6 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 "integrated_data_values",
                 "change_log_date_thresholds",
                 "change_log_numeric_thresholds",
-                "condition_presets",
                 "asset_excel_account_mappings",
             ) and isinstance(value, (dict, list)):
                 normalized = value

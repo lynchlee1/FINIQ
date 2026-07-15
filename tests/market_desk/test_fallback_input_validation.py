@@ -93,7 +93,13 @@ def test_missing_worker_values_use_cpu_and_task_limits(monkeypatch) -> None:
     [("many", "max_workers must be an integer"), (0, "max_workers must be >= 1")],
 )
 def test_html_download_rejects_invalid_worker_values(tmp_path, value, message) -> None:
-    filtered_path = tmp_path / "workspace" / "03-filter" / "filtered.json"
+    filtered_path = (
+        tmp_path
+        / "workspace"
+        / "03-filter"
+        / "bond_issuance"
+        / "filtered.json"
+    )
     filtered_path.parent.mkdir(parents=True)
     filtered_path.write_text(
         json.dumps({"disclosures": [{"acpt_no": "20250101000001"}]}),
