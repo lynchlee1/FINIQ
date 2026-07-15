@@ -169,7 +169,7 @@ def test_external_html_compression_rejects_receipt_number_mismatching_filename(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="membership does not match"):
+    with pytest.raises(ValueError, match="does not match input filename"):
         compress_disclosure_external_html_payload(
             {
                 "input_directory": str(input_directory),

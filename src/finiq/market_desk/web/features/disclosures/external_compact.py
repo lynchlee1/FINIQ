@@ -53,16 +53,8 @@ def _compact_external_viewer_html(html_markup: str | bytes) -> dict[str, Any]:
     parsed = viewer_html(html_markup)
     soup = parse_html_with_recovery(html_markup)
 
-    header_tag = soup.find("h1", class_="ttl")
-
     return {
         "acpt_no": parsed.get("acpt_no"),
-        "header": parsed.get("header")
-        or (
-            _clean_text(header_tag.get_text(separator=" ", strip=True))
-            if isinstance(header_tag, Tag)
-            else ""
-        ),
         "selected_main_doc_no": parsed.get("selected_main_doc_no"),
         "selects": [
             _compact_select_tag(select_tag)
@@ -109,11 +101,16 @@ def _compress_external_html_file(
 ) -> tuple[int, str, str, dict[str, Any]]:
     index, year, html_path = args
     parsed = _compact_external_viewer_html(html_path.read_bytes())
-    acpt_no = str(parsed.get("acpt_no") or html_path.stem).strip()
+    acpt_no = html_path.stem
+    embedded_acpt_no = str(parsed.get("acpt_no") or "").strip()
+    if embedded_acpt_no and embedded_acpt_no != acpt_no:
+        raise ValueError(
+            f"External HTML acpt_no {embedded_acpt_no} does not match "
+            f"input filename {html_path.name}"
+        )
     record = {
         "acpt_no": acpt_no,
         "title": "",
-        "header": parsed.get("header") or "",
         "selected_main_doc_no": parsed.get("selected_main_doc_no"),
         "metadata": {},
         "docs": _compact_document_options(parsed.get("selects") or []),

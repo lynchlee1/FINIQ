@@ -3958,7 +3958,6 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
           <form name="docdownloadform" id="docdownloadform">
             <input type="hidden" name="docLocPath" id="docLocPath" value="/external/path" />
           </form>
-          <input type="hidden" name="acptNo" value="20250101000001" />
           <input type="hidden" name="tempTitle" value="뷰어 제목" />
           <h1 class="ttl">테스트 (123456)</h1>
           <select id="mainDoc">
@@ -4012,7 +4011,6 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
     assert set(saved["records"][0]) == {
         "acpt_no",
         "title",
-        "header",
         "selected_main_doc_no",
         "metadata",
         "docs",
@@ -4052,6 +4050,51 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
             "selected": False,
         },
     ]
+
+
+def test_compress_disclosure_external_html_payload_rejects_mismatched_embedded_acpt_no(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "viewer_html"
+    (input_directory / "2025").mkdir(parents=True)
+    (input_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {"acpt_no": "20250101000001", "title": "첫 번째 제목"},
+                    {"acpt_no": "20250101000002", "title": "두 번째 제목"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    for filename_acpt_no, embedded_acpt_no in (
+        ("20250101000001", "20250101000002"),
+        ("20250101000002", "20250101000001"),
+    ):
+        (input_directory / "2025" / f"{filename_acpt_no}.html").write_text(
+            f"""
+            <html><body>
+              <input type="hidden" name="acptNo" value="{embedded_acpt_no}" />
+              <select id="mainDoc">
+                <option value="20250101000999|Y" selected="selected">본문</option>
+              </select>
+            </body></html>
+            """,
+            encoding="utf-8",
+        )
+    output_path = tmp_path / "compressed" / "compressed-external-html.json"
+
+    with pytest.raises(ValueError, match="does not match input filename"):
+        compress_disclosure_external_html_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_path.parent),
+            }
+        )
+
+    assert not output_path.exists()
 
 
 def test_compress_disclosure_external_html_payload_rejects_missing_manifest_metadata(tmp_path: Path) -> None:
