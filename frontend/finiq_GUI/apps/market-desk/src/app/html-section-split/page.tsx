@@ -148,14 +148,8 @@ export default function HtmlSectionSplitPage() {
   const reviewedInputDirectory = inspectResult?.input_directory || inputDirectory;
   const hasNextPage = Boolean(inspectResult?.summary?.has_next_page);
   const isJobActive = !!activeJobId;
-  const undecidedPatterns = sectionPatterns.filter(
+  const patternsWithoutSelection = sectionPatterns.filter(
     (pattern) => !Object.prototype.hasOwnProperty.call(selectedPatternTocIds, pattern.signature),
-  );
-  const decidedPatterns = Object.fromEntries(
-    sectionPatterns.map((pattern) => [
-      pattern.signature,
-      Object.prototype.hasOwnProperty.call(selectedPatternTocIds, pattern.signature),
-    ]),
   );
 
   useEffect(() => {
@@ -533,8 +527,8 @@ export default function HtmlSectionSplitPage() {
       setIsErrorStatus(true);
       return;
     }
-    if (undecidedPatterns.length) {
-      setStatus(`Pending · 모든 목차 구성을 직접 결정하세요: ${formatInteger(undecidedPatterns.length)}개`);
+    if (patternsWithoutSelection.length) {
+      setStatus(`모든 목차 구성에서 저장할 목차를 선택하세요: ${formatInteger(patternsWithoutSelection.length)}개`);
       setIsErrorStatus(true);
       return;
     }
@@ -586,7 +580,6 @@ export default function HtmlSectionSplitPage() {
             problemFiles={problemFiles}
             sectionPatterns={sectionPatterns}
             selectedPatternTocIds={selectedPatternTocIds}
-            decidedPatterns={decidedPatterns}
             isLoadingSectionPatterns={isLoadingSectionPatterns}
             page={page}
             hasNextPage={hasNextPage}

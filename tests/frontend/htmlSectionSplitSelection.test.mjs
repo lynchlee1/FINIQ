@@ -13,8 +13,9 @@ test("HTML section save requires an explicit decision for every TOC pattern", as
 
   assert.doesNotMatch(pageSource, /defaultPatternTocIds/);
   assert.match(pageSource, /const selected = current\[signature\] \|\| \[\]/);
-  assert.match(pageSource, /const undecidedPatterns = sectionPatterns\.filter/);
-  assert.match(pageSource, /모든 목차 구성을 직접 결정하세요/);
+  assert.match(pageSource, /const patternsWithoutSelection = sectionPatterns\.filter/);
+  assert.match(pageSource, /모든 목차 구성에서 저장할 목차를 선택하세요/);
+  assert.doesNotMatch(pageSource, /decidedPatterns|undecidedPatterns|Pending|결정됨/);
   assert.match(cardSource, /selectedPatternTocIds\[pattern\.signature\] \?\? \[\]/);
   assert.doesNotMatch(cardSource, /defaultSelectAll/);
 });
