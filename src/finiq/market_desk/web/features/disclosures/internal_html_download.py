@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 from finiq.data_scraper.core.html_rate_limit import (
     RequestSpacingLimiter,
     wait_for_html_download_request_slot,
@@ -80,58 +82,65 @@ def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, 
     return payload
 
 
+def _validated_compressed_records(
+    payload: dict[str, Any],
+) -> list[tuple[dict[str, Any], str]]:
+    records = payload.get("records")
+    if not isinstance(records, list):
+        msg = "compressed external HTML JSON records is not a list"
+        raise ValueError(msg)
+
+    validated: list[tuple[dict[str, Any], str]] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            msg = f"compressed external HTML JSON record is not an object: index={index}"
+            raise ValueError(msg)
+        acpt_no = str(record.get("acpt_no") or "").strip()
+        if not acpt_no.isdigit():
+            msg = f"invalid acpt_no in compressed external HTML JSON: index={index}"
+            raise ValueError(msg)
+        validated.append((record, acpt_no))
+
+    counts = Counter(acpt_no for _record, acpt_no in validated)
+    duplicate_acpt_numbers = sorted(
+        acpt_no for acpt_no, count in counts.items() if count > 1
+    )
+    if duplicate_acpt_numbers:
+        msg = (
+            "duplicate acpt_no values in compressed external HTML JSON: "
+            + ", ".join(duplicate_acpt_numbers[:10])
+        )
+        raise ValueError(msg)
+    return validated
+
+
+def _compressed_record_year(record: dict[str, Any], acpt_no: str) -> str:
+    year = str(record.get("year") or "").strip()
+    if year:
+        if len(year) != 4 or not year.isdigit():
+            msg = (
+                "invalid year in compressed external HTML JSON: "
+                f"acpt_no={acpt_no} year={year!r}"
+            )
+            raise ValueError(msg)
+        return year
+    return _year_from_disclosure(
+        acpt_no,
+        record.get("metadata") if isinstance(record.get("metadata"), dict) else None,
+    )
+
+
 def _collect_internal_targets_from_compressed_payload(
     payload: dict[str, Any],
 ) -> tuple[list[dict[str, str]], Any]:
     targets: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for record in payload.get("records") or []:
-        if not isinstance(record, dict):
-            continue
-        acpt_no = str(record.get("acpt_no") or "").strip()
-        if not acpt_no.isdigit() or acpt_no in seen:
-            continue
-        doc_no = ""
-        for document in record.get("docs") or []:
-            if not isinstance(document, dict):
-                continue
-            if str(document.get("select_id") or "").strip() != "mainDoc":
-                continue
-            candidate = str(document.get("doc_no") or "").strip()
-            if candidate and document.get("selected"):
-                doc_no = candidate
-                break
-        if not doc_no:
-            doc_no = str(record.get("selected_main_doc_no") or "").strip()
-        if not doc_no:
-            for document in record.get("docs") or []:
-                if not isinstance(document, dict):
-                    continue
-                if str(document.get("select_id") or "").strip() != "mainDoc":
-                    continue
-                candidate = str(document.get("doc_no") or "").strip()
-                if candidate:
-                    doc_no = candidate
-                    break
-        if not doc_no:
-            for main_doc in record.get("main_docs") or []:
-                if not isinstance(main_doc, dict):
-                    continue
-                candidate = str(main_doc.get("doc_no") or "").strip()
-                if candidate:
-                    doc_no = candidate
-                    break
+    for record, acpt_no in _validated_compressed_records(payload):
+        doc_no = str(record.get("selected_main_doc_no") or "").strip()
         if not doc_no:
             msg = f"selected main docNo not found in compressed external HTML JSON: {acpt_no}"
             raise ValueError(msg)
-        year = str(record.get("year") or "").strip() or _year_from_disclosure(
-            acpt_no,
-            record.get("metadata")
-            if isinstance(record.get("metadata"), dict)
-            else None,
-        )
+        year = _compressed_record_year(record, acpt_no)
         targets.append({"acpt_no": acpt_no, "doc_no": doc_no, "year": year})
-        seen.add(acpt_no)
     if not targets:
         msg = "No internal HTML targets found in compressed external HTML JSON"
         raise ValueError(msg)
@@ -142,21 +151,9 @@ def _collect_internal_cleanup_targets_from_compressed_payload(
     payload: dict[str, Any],
 ) -> tuple[list[dict[str, str]], Any]:
     targets: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for record in payload.get("records") or []:
-        if not isinstance(record, dict):
-            continue
-        acpt_no = str(record.get("acpt_no") or "").strip()
-        if not acpt_no.isdigit() or acpt_no in seen:
-            continue
-        year = str(record.get("year") or "").strip() or _year_from_disclosure(
-            acpt_no,
-            record.get("metadata")
-            if isinstance(record.get("metadata"), dict)
-            else None,
-        )
+    for record, acpt_no in _validated_compressed_records(payload):
+        year = _compressed_record_year(record, acpt_no)
         targets.append({"acpt_no": acpt_no, "doc_no": "", "year": year})
-        seen.add(acpt_no)
     if not targets:
         msg = "No internal HTML targets found in compressed external HTML JSON"
         raise ValueError(msg)
@@ -363,6 +360,48 @@ def download_disclosure_internal_htmls(
     return saved_paths
 
 
+def _verify_internal_download_membership(
+    *,
+    expected_acpt_numbers: list[str],
+    saved_paths: list[Path],
+    allow_missing: bool,
+) -> dict[str, Any]:
+    expected = set(expected_acpt_numbers)
+    actual_acpt_numbers = [path.stem for path in saved_paths]
+    actual = set(actual_acpt_numbers)
+    counts = Counter(actual_acpt_numbers)
+    duplicate_acpt_numbers = sorted(
+        acpt_no for acpt_no, count in counts.items() if count > 1
+    )
+    missing_acpt_numbers = sorted(expected - actual)
+    unexpected_acpt_numbers = sorted(actual - expected)
+    passed = (
+        not duplicate_acpt_numbers
+        and not unexpected_acpt_numbers
+        and (allow_missing or not missing_acpt_numbers)
+    )
+    verification = {
+        "passed": passed,
+        "complete": not missing_acpt_numbers,
+        "expected_records": len(expected_acpt_numbers),
+        "saved_records": len(actual_acpt_numbers),
+        "missing_records": len(missing_acpt_numbers),
+        "unexpected_records": len(unexpected_acpt_numbers),
+        "duplicate_records": len(duplicate_acpt_numbers),
+        "missing_acpt_numbers": missing_acpt_numbers,
+        "unexpected_acpt_numbers": unexpected_acpt_numbers,
+        "duplicate_acpt_numbers": duplicate_acpt_numbers,
+    }
+    if not passed:
+        raise ValueError(
+            "Internal HTML download membership does not match requested targets: "
+            f"duplicates={duplicate_acpt_numbers[:10]}, "
+            f"missing={missing_acpt_numbers[:10]}, "
+            f"unexpected={unexpected_acpt_numbers[:10]}"
+        )
+    return verification
+
+
 def download_disclosure_internal_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
@@ -506,6 +545,12 @@ def download_disclosure_internal_html_payload(
                         or bool(cancel_check and cancel_check()),
                     )
                 )
+        cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
+        verification = _verify_internal_download_membership(
+            expected_acpt_numbers=acpt_numbers,
+            saved_paths=[*existing_paths_by_acpt_no.values(), *downloaded_paths],
+            allow_missing=cancelled,
+        )
         saved_paths_by_acpt_no = dict(existing_paths_by_acpt_no)
         saved_paths_by_acpt_no.update({path.stem: path for path in downloaded_paths})
         saved_paths = [
@@ -513,7 +558,6 @@ def download_disclosure_internal_html_payload(
             for acpt_no in acpt_numbers
             if acpt_no in saved_paths_by_acpt_no
         ]
-        cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
     finally:
         _clear_cancel_token(cancel_token)
     saved_acpt_numbers = [path.stem for path in saved_paths]
@@ -536,5 +580,6 @@ def download_disclosure_internal_html_payload(
         "acpt_numbers": acpt_numbers,
         "saved_files": [str(path) for path in saved_paths],
         "manifest_path": str(manifest_path),
+        "verification": verification,
         "progress_log": progress_log[-100:],
     }
