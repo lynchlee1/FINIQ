@@ -32,7 +32,6 @@ interface SettingsState {
   asset_excel_cleanup_merged_items: boolean;
   asset_excel_duplicate_scan_recursive: boolean;
   asset_excel_account_mappings: any[];
-  internal_html_merge_output_path: string;
   external_html_compressed_json_path: string;
   external_html_compress_input_directory: string;
   external_html_compress_output_directory: string;
@@ -80,7 +79,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   asset_excel_cleanup_merged_items: true,
   asset_excel_duplicate_scan_recursive: false,
   asset_excel_account_mappings: [],
-  internal_html_merge_output_path: "",
   external_html_compressed_json_path: "",
   external_html_compress_input_directory: "",
   external_html_compress_output_directory: "",

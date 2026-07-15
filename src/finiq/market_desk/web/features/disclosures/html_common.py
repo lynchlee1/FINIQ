@@ -526,17 +526,4 @@ def _collect_yearly_html_files(input_directory: Path) -> list[tuple[str, Path]]:
     return files
 
 
-def _resolve_internal_html_merge_output_directory(
-    output_directory_raw: str, input_directory: Path
-) -> Path:
-    output_directory = (
-        Path(output_directory_raw).expanduser().resolve()
-        if output_directory_raw
-        else input_directory / "merged"
-    )
-    if output_directory.suffix.lower() == ".json":
-        raise ValueError("output_directory must be a directory path")
-    return output_directory
-
-
 __all__ = [name for name in globals() if not name.startswith("__")]

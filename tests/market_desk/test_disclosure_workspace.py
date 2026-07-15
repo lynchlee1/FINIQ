@@ -38,6 +38,8 @@ def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
         "04-external-html-download/bond_issuance",
         "04-external-html-download/rights_issuance",
         "05-internal-html-download",
+        "05-internal-html-download/bond_issuance",
+        "05-internal-html-download/rights_issuance",
         "06-sections",
         "07-converted",
         "07-converted/bond_issuance",
@@ -56,6 +58,9 @@ def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
     assert result["paths"]["list"] == str(data_root / "01-list")
     assert result["paths"]["converted"]["bond_issuance"] == str(
         data_root / "07-converted" / "bond_issuance"
+    )
+    assert result["paths"]["internal"]["bond_issuance"] == str(
+        data_root / "05-internal-html-download" / "bond_issuance"
     )
 
 
@@ -110,11 +115,24 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     assert internal["source_compressed_json_path"] == str(
         workspace.external / "bond_issuance" / "compressed-external-html.json"
     )
-    assert internal["output_directory"] == str(workspace.internal)
-    sections = apply_workspace_defaults(
-        "section_save", {"data_root": str(workspace.root)}
+    assert internal["output_directory"] == str(
+        workspace.internal / "bond_issuance"
     )
-    assert sections["input_directory"] == str(workspace.internal)
+    rights_internal = apply_workspace_defaults(
+        "internal_html_download",
+        {"data_root": str(workspace.root), "mode": "rights_issuance"},
+    )
+    assert rights_internal["output_directory"] == str(
+        workspace.internal / "rights_issuance"
+    )
+    assert rights_internal["output_directory"] != internal["output_directory"]
+    sections = apply_workspace_defaults(
+        "section_save",
+        {"data_root": str(workspace.root), "mode": "bond_issuance"},
+    )
+    assert sections["input_directory"] == str(
+        workspace.internal / "bond_issuance"
+    )
     assert sections["output_directory"] == str(workspace.sections)
     converted = apply_workspace_defaults(
         "parse", {"data_root": str(workspace.root), "mode": "bond_issuance"}
@@ -259,7 +277,9 @@ def test_workspace_prepare_api(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json()["format"] == "finiq_disclosure_workspace_v1"
-    assert Path(response.json()["paths"]["internal"]).name == "05-internal-html-download"
+    assert response.json()["paths"]["internal"]["bond_issuance"] == str(
+        tmp_path / "workspace" / "05-internal-html-download" / "bond_issuance"
+    )
 
 
 def test_workspace_prepare_preserves_existing_modes(tmp_path: Path) -> None:
@@ -274,6 +294,10 @@ def test_workspace_prepare_preserves_existing_modes(tmp_path: Path) -> None:
 
     assert result["modes"] == ["bond_issuance", "rights_issuance"]
     assert set(result["paths"]["external"]) == {
+        "bond_issuance",
+        "rights_issuance",
+    }
+    assert set(result["paths"]["internal"]) == {
         "bond_issuance",
         "rights_issuance",
     }
@@ -348,8 +372,9 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
         "external_html_compressed_json_path": str(
             data_root / "04-external-html-download" / "bond_issuance" / "compressed-external-html.json"
         ),
-        "internal_html_output_directory": str(data_root / "05-internal-html-download"),
-        "internal_html_merge_output_path": str(data_root / "05-internal-html-download" / "merged"),
+        "internal_html_output_directory": str(
+            data_root / "05-internal-html-download" / "bond_issuance"
+        ),
         "html_section_split_output_directory": str(data_root / "06-sections"),
         "html_parse_output_directory": str(
             data_root / "07-converted" / "bond_issuance"
@@ -434,6 +459,36 @@ def test_init_config_preserves_saved_stage_paths(
     assert loaded.internal_html_output_directory == str(tmp_path / "legacy-internal")
     assert loaded.html_section_split_output_directory == str(tmp_path / "legacy-sections")
     assert loaded.html_parse_output_directory == str(tmp_path / "legacy-converted")
+
+
+def test_init_config_migrates_saved_legacy_standard_internal_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "database"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "output_root": str(data_root),
+                "html_parse_mode": "rights_issuance",
+                "internal_html_output_directory": str(
+                    data_root / "05-internal-html-download"
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        finiq_config, "get_default_settings_path", lambda: settings_path
+    )
+
+    loaded = finiq_config.init_config()
+
+    assert loaded.internal_html_output_directory == str(
+        data_root.resolve()
+        / "05-internal-html-download"
+        / "rights_issuance"
+    )
 
 
 def test_init_config_migrates_legacy_default_kind_root_to_resources(
@@ -532,6 +587,7 @@ def test_changing_parse_mode_updates_mode_workspace_paths(
     monkeypatch.setattr(app_config, "html_parse_output_directory", "old-parse")
     monkeypatch.setattr(app_config, "html_parse_result_path", "old-result")
     monkeypatch.setattr(app_config, "external_html_output_directory", "old-external")
+    monkeypatch.setattr(app_config, "internal_html_output_directory", "old-internal")
     monkeypatch.setattr(
         app_config, "external_html_compress_input_directory", "old-compress-input"
     )
@@ -560,6 +616,7 @@ def test_changing_parse_mode_updates_mode_workspace_paths(
         "external_html_compress_input_directory",
         "external_html_compress_output_directory",
         "external_html_compressed_json_path",
+        "internal_html_output_directory",
     ):
         assert response.json()[key] == expected[key]
     assert response.json()["download_output_directory"] == "custom-download"

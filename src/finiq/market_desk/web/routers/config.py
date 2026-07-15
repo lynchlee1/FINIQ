@@ -61,7 +61,6 @@ class SettingsUpdate(BaseModel):
     asset_excel_cleanup_merged_items: Optional[bool] = None
     asset_excel_duplicate_scan_recursive: Optional[bool] = None
     asset_excel_account_mappings: Optional[list[dict[str, Any]]] = None
-    internal_html_merge_output_path: Optional[str] = None
     external_html_compressed_json_path: Optional[str] = None
     external_html_compress_input_directory: Optional[str] = None
     external_html_compress_output_directory: Optional[str] = None
@@ -194,8 +193,6 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "asset_excel_cleanup_merged_items": config.asset_excel_cleanup_merged_items,
             "asset_excel_duplicate_scan_recursive": config.asset_excel_duplicate_scan_recursive,
             "asset_excel_account_mappings": config.asset_excel_account_mappings,
-            "internal_html_merge_output_path": config.internal_html_merge_output_path
-            or workspace_defaults["internal_html_merge_output_path"],
             "external_html_compressed_json_path": config.external_html_compressed_json_path
             or workspace_defaults["external_html_compressed_json_path"],
             "external_html_compress_input_directory": config.external_html_compress_input_directory
@@ -301,6 +298,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                         "external_html_compress_input_directory",
                         "external_html_compress_output_directory",
                         "external_html_compressed_json_path",
+                        "internal_html_output_directory",
                         "html_parse_output_directory",
                         "html_parse_result_path",
                     )

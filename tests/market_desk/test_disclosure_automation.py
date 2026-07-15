@@ -713,10 +713,16 @@ def test_html_inspections_require_complete_current_membership(
         "unexpected_file_count": 0,
         "existing_target_acpt_numbers": ["20260101000001", "20260101000002"],
     }
+    checked_payloads: list[dict[str, object]] = []
+
+    def check_html(payload: dict[str, object]) -> dict[str, object]:
+        checked_payloads.append(payload)
+        return complete
+
     monkeypatch.setattr(
         automation,
         "check_disclosure_html_output_directory_payload",
-        lambda _payload: complete,
+        check_html,
     )
     monkeypatch.setattr(
         automation,
@@ -731,6 +737,12 @@ def test_html_inspections_require_complete_current_membership(
 
     assert automation._inspect_detail_external_html(profile)["confirmed"] is True
     assert automation._inspect_detail_internal_html(profile)["confirmed"] is True
+    assert checked_payloads[-1]["output_directory"] == str(
+        tmp_path
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
 
     monkeypatch.setattr(
         automation,
@@ -762,6 +774,15 @@ def test_section_inspection_uses_current_rules_and_exact_output(
     assert captured["section_save_rules"] == profile["decisions"]["s6_sections"][
         "section_save_rules"
     ]
+    assert captured["input_directory"] == str(
+        tmp_path
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
+    assert captured["output_directory"] == str(
+        tmp_path / "06-sections" / ".automation-current"
+    )
 
 
 def test_parse_inspection_compares_mode_inputs_filters_membership_and_mtime(
@@ -1292,6 +1313,12 @@ def test_stage_six_allows_an_empty_filtered_result(
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
     stage_five_output = _stage_output_paths(profile, 5)[0]
+    assert stage_five_output == (
+        tmp_path
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
     stage_five_output.mkdir(parents=True)
 
     monkeypatch.setattr(

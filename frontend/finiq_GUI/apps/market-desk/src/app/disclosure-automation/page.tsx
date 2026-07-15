@@ -866,7 +866,7 @@ export default function DisclosureAutomationPage() {
 
           <div ref={sectionSettingsRef} className="scroll-mt-6 space-y-4">
             {sectionSettingsSelected || reviewPatterns.length ? <HtmlSectionPatternCard
-              inputDirectory={`${dataRoot}/05-internal-html-download/.automation-current`}
+              inputDirectory={`${dataRoot}/05-internal-html-download/${parserMode}/.automation-current`}
               sectionPatterns={reviewPatterns}
               selectedPatternTocIds={reviewSelections}
               isLoading={false}

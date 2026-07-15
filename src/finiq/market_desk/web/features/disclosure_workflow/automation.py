@@ -293,6 +293,14 @@ def _external_mode_directory(profile: dict[str, Any]) -> Path:
     )
 
 
+def _internal_mode_directory(profile: dict[str, Any]) -> Path:
+    return (
+        Path(profile["data_root"])
+        / "05-internal-html-download"
+        / validate_workspace_mode(profile["execution"]["parser_mode"])
+    )
+
+
 def _checkpoint_path(profile: dict[str, Any], stage: int) -> Path:
     return _automation_root(profile) / "checkpoints" / f"stage-{stage}.json"
 
@@ -323,7 +331,7 @@ def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
             _external_mode_directory(profile) / "compressed-external-html.json",
             _external_mode_directory(profile) / ".automation-current",
         ],
-        5: [root / "05-internal-html-download" / ".automation-current"],
+        5: [_internal_mode_directory(profile) / ".automation-current"],
         6: [root / "06-sections" / ".automation-current"],
         7: [root / "07-converted" / mode / f"parsed-{mode}.json"],
     }
@@ -816,7 +824,9 @@ def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
             "source_compressed_json_path": str(
                 _external_mode_directory(profile) / "compressed-external-html.json"
             ),
-            "output_directory": str(root / "05-internal-html-download"),
+            "output_directory": str(
+                _internal_mode_directory(profile) / ".automation-current"
+            ),
         }
     )
     requested = int(checked.get("requested_count") or 0)
@@ -842,8 +852,12 @@ def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
     checked = inspect_disclosure_html_section_output_payload(
         {
-            "input_directory": str(root / "05-internal-html-download"),
-            "output_directory": str(root / "06-sections"),
+            "input_directory": str(
+                _internal_mode_directory(profile) / ".automation-current"
+            ),
+            "output_directory": str(
+                root / "06-sections" / ".automation-current"
+            ),
             "section_save_rules": profile["decisions"]["s6_sections"][
                 "section_save_rules"
             ],
@@ -1051,8 +1065,7 @@ def _load_valid_checkpoint(profile: dict[str, Any], stage: int) -> dict[str, Any
             AUTOMATION_EXTERNAL_FORMAT,
         ),
         5: (
-            Path(profile["data_root"])
-            / "05-internal-html-download"
+            _internal_mode_directory(profile)
             / ".automation-current"
             / "automation-internal-html-download.json",
             AUTOMATION_INTERNAL_FORMAT,
@@ -1524,7 +1537,7 @@ def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
         current = (
             _external_mode_directory(profile)
             if stage == 4
-            else root / "05-internal-html-download"
+            else _internal_mode_directory(profile)
         ) / ".automation-current"
         actual_files = sorted(current.rglob("*.html"))
         actual_membership = {(path.stem, path.parent.name) for path in actual_files}
@@ -1862,7 +1875,7 @@ def _run_stage(
     if stage == 5:
         mode = execution["parser_mode"]
         targets = _active_workspace_disclosure_targets(root, mode)
-        current = root / "05-internal-html-download" / ".automation-current"
+        current = _internal_mode_directory(profile) / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
         try:
             temporary.mkdir(parents=True, exist_ok=True)
@@ -1915,7 +1928,9 @@ def _run_stage(
     if stage == 6:
         pattern_result = summarize_disclosure_html_section_kinds_payload(
             {
-                "input_directory": str(root / "05-internal-html-download" / ".automation-current"),
+                "input_directory": str(
+                    _internal_mode_directory(profile) / ".automation-current"
+                ),
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,
@@ -1952,7 +1967,9 @@ def _run_stage(
         try:
             result = save_disclosure_html_sections_payload(
                 {
-                    "input_directory": str(root / "05-internal-html-download" / ".automation-current"),
+                    "input_directory": str(
+                        _internal_mode_directory(profile) / ".automation-current"
+                    ),
                     "output_directory": str(temporary),
                     "workers": execution["local_workers"],
                     "section_save_rules": rules,

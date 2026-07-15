@@ -879,7 +879,9 @@ def test_internal_html_check_existing_route_uses_workspace_defaults(
         ),
         encoding="utf-8",
     )
-    output_directory = data_root / "05-internal-html-download" / "2025"
+    output_directory = (
+        data_root / "05-internal-html-download" / "bond_issuance" / "2025"
+    )
     output_directory.mkdir(parents=True)
     (output_directory / "20250101000001.html").write_text(
         "<html><body>" + ("valid " * 30) + "</body></html>",

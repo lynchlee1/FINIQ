@@ -99,6 +99,8 @@ test("html section split keeps workspace paths directly editable", async () => {
   assert.match(pathFields, /\.\.\.\(useSeparateOutputDirectory \? \[\{/);
   assert.match(pathFields, /onChange: handleOutputDirectoryChange/);
   assert.match(pageSource, /data_root: dataRoot/);
+  assert.match(pageSource, /html_parse_mode: htmlParseMode/);
+  assert.match(pageSource, /mode: htmlParseMode/);
   assert.match(resultsSource, /DisclosureSeparateOutputDirectorySetting id="section-split-separate-output-directory"/);
 });
 

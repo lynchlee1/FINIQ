@@ -62,6 +62,7 @@ function waitForPollingInterval(signal: AbortSignal) {
 export default function HtmlSectionSplitPage() {
   const {
     output_root: dataRoot,
+    html_parse_mode: htmlParseMode,
     parallel_worker_count: parallelWorkerCount,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
@@ -538,6 +539,7 @@ export default function HtmlSectionSplitPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data_root: dataRoot,
+          mode: htmlParseMode,
           input_directory: useSeparateOutputDirectory ? inputDirectory : "",
           output_directory: useSeparateOutputDirectory ? outputDirectory : "",
           workers: parseOptionalNumber(workers),

@@ -431,17 +431,6 @@ def create_workflows_router(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.post("/api/disclosures/internal-html-download/merge/start")
-    async def start_internal_html_merge(
-        payload: dict[str, Any], background_tasks: BackgroundTasks
-    ):
-        return _start_background_job(
-            kind="internal_html_merge",
-            payload=payload,
-            background_tasks=background_tasks,
-            run_job_worker=run_job_worker,
-        )
-
     @router.post("/api/disclosures/html/parse/start")
     async def start_html_parse(
         payload: dict[str, Any], background_tasks: BackgroundTasks

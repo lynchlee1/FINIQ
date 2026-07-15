@@ -32,6 +32,9 @@ class DisclosureWorkspace:
     def external_mode(self, mode: str) -> Path:
         return self.external / validate_workspace_mode(mode)
 
+    def internal_mode(self, mode: str) -> Path:
+        return self.internal / validate_workspace_mode(mode)
+
     def converted_mode(self, mode: str) -> Path:
         return self.converted / validate_workspace_mode(mode)
 
@@ -46,7 +49,10 @@ class DisclosureWorkspace:
             "external": {
                 mode: str(self.external_mode(mode)) for mode in normalized_modes
             },
-            "internal": str(self.internal),
+            "internal_root": str(self.internal),
+            "internal": {
+                mode: str(self.internal_mode(mode)) for mode in normalized_modes
+            },
             "sections": str(self.sections),
             "converted_root": str(self.converted),
             "converted": {
@@ -165,6 +171,7 @@ def prepare_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, A
     workspace = resolve_disclosure_workspace(workspace.root, create=True)
     for mode in modes:
         workspace.external_mode(mode).mkdir(parents=True, exist_ok=True)
+        workspace.internal_mode(mode).mkdir(parents=True, exist_ok=True)
         workspace.converted_mode(mode).mkdir(parents=True, exist_ok=True)
 
     manifest = {
@@ -234,14 +241,15 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
                 "source_compressed_json_path",
                 str(workspace.external_mode(mode) / "compressed-external-html.json"),
             )
-        _set_default(payload, "output_directory", str(workspace.internal))
-    elif normalized_kind == "internal_html_merge":
-        _set_default(payload, "input_directory", str(workspace.internal))
-        _set_default(payload, "output_directory", str(workspace.internal / "merged"))
+        _set_default(payload, "output_directory", str(workspace.internal_mode(mode)))
     elif normalized_kind in {"section_inspect", "section_kinds", "section_list"}:
-        _set_default(payload, "input_directory", str(workspace.internal))
+        if not str(payload.get("input_directory") or "").strip():
+            mode = validate_workspace_mode(payload.get("mode"))
+            _set_default(payload, "input_directory", str(workspace.internal_mode(mode)))
     elif normalized_kind == "section_save":
-        _set_default(payload, "input_directory", str(workspace.internal))
+        if not str(payload.get("input_directory") or "").strip():
+            mode = validate_workspace_mode(payload.get("mode"))
+            _set_default(payload, "input_directory", str(workspace.internal_mode(mode)))
         _set_default(payload, "output_directory", str(workspace.sections))
     elif normalized_kind == "parse":
         mode = validate_workspace_mode(payload.get("mode"))
