@@ -37,13 +37,30 @@ test("top navigation separates disclosure, price data, and utility scopes", asyn
 test("sidebar definitions match the narrowed top-level workflows", async () => {
   const { getSidebarDefinition } = await loadNavigation();
 
+  const disclosureSidebar = getSidebarDefinition("disclosure-build");
   assert.deepEqual(
-    getSidebarDefinition("disclosure-build").groups.map((group) => group.label),
+    disclosureSidebar.groups.map((group) => group.label),
     ["공시 자동화", "공시 제목 분석", "공시 내용 분석"],
   );
   assert.deepEqual(
-    getSidebarDefinition("disclosure-build").groups[0].steps.map((step) => step.href),
+    disclosureSidebar.groups[0].steps.map((step) => step.href),
     ["/disclosure-automation"],
+  );
+  assert.ok(disclosureSidebar.groups.every((group) => group.numbered));
+  assert.deepEqual(
+    disclosureSidebar.groups.flatMap((group) => group.steps.map((step) => [step.step, step.href])),
+    [
+      [0, "/disclosure-automation"],
+      [1, "/download"],
+      [2, "/table"],
+      [3, "/filter"],
+      [4, "/external-html-download"],
+      [5, "/internal-html-download"],
+      [6, "/html-section-split"],
+      [7, "/html-parse"],
+      [8, "/html-change-log"],
+      [9, "/html-bond-summary"],
+    ],
   );
 
   const priceDataSidebar = getSidebarDefinition("price-data");

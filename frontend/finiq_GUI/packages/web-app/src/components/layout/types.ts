@@ -7,6 +7,7 @@ export type WorkflowTab = {
 export type SidebarGroup = {
   label: string;
   steps: WorkflowTab[];
+  numbered?: boolean;
 };
 
 export type SidebarDefinition = {

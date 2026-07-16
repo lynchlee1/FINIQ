@@ -5555,6 +5555,13 @@ def test_build_parse_change_log_payload_requires_mode_for_result_folder(tmp_path
         build_parse_change_log_payload({"output_path": str(tmp_path)})
 
 
+def test_build_parse_change_log_payload_rejects_missing_result_file(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="파싱 결과 파일을 찾을 수 없습니다"):
+        build_parse_change_log_payload(
+            {"output_path": str(tmp_path), "mode": "bond_issuance"}
+        )
+
+
 @pytest.mark.parametrize("suffix", [".json", ".txt"])
 def test_build_parse_change_log_payload_rejects_missing_result_file_path(
     tmp_path: Path, suffix: str
