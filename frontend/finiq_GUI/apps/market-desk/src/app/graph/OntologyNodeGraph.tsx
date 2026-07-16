@@ -29,6 +29,8 @@ export type OntologyNodeGraphProps = {
   panel: OntologyPanel | null;
   selectedCompanyLabel: string;
   loading: boolean;
+  graphData?: GraphData;
+  layoutKey?: string;
 };
 
 function graphNodeId(prefix: string, value: string) {
@@ -120,13 +122,13 @@ function buildOntologyGraphData(
   return { nodes, edges };
 }
 
-export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel, loading }: OntologyNodeGraphProps) {
+export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel, loading, graphData, layoutKey }: OntologyNodeGraphProps) {
   const graphFrameRef = useRef<HTMLDivElement | null>(null);
   const [searchValue, setSearchValue] = useState("");
   const [jumpToNodeId, setJumpToNodeId] = useState<string | undefined>(undefined);
   const ontologyGraph = useMemo(
-    () => buildOntologyGraphData(selectedCompany, panel, selectedCompanyLabel),
-    [panel, selectedCompany, selectedCompanyLabel],
+    () => graphData ?? buildOntologyGraphData(selectedCompany, panel, selectedCompanyLabel),
+    [graphData, panel, selectedCompany, selectedCompanyLabel],
   );
   const {
     graph,
@@ -199,7 +201,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
       : [...filters.nodeTypes, type];
     updateFilters({ ...filters, nodeTypes: nextNodeTypes });
   };
-  const layoutKeySuffix = selectedCompany?.stock_code || panel?.company.stock_code || "default";
+  const layoutKeySuffix = layoutKey || selectedCompany?.stock_code || panel?.company.stock_code || "default";
   const handleSaveLayout = () => {
     const layoutState = visibleGraph.nodes.map((node) => ({
       id: node.id,

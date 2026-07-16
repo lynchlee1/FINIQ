@@ -4,6 +4,10 @@ export type WorkflowTab = {
   label: string;
 };
 
+export type SidebarStep = Omit<WorkflowTab, "step"> & {
+  step?: number;
+};
+
 export type WorkflowId =
   | "ontology"
   | "disclosure-build"
@@ -23,7 +27,7 @@ export type WorkflowDefinition = {
 
 export type SidebarGroup = {
   label: string;
-  steps: WorkflowTab[];
+  steps: SidebarStep[];
   numbered?: boolean;
 };
 
@@ -75,7 +79,7 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
       { href: "/html-section-split", step: 6, label: "공시원문 목차 분리" },
       { href: "/html-parse", step: 7, label: "공시원문 변환" },
       { href: "/html-change-log", step: 8, label: "공시 정정내역 한눈에" },
-      { href: "/html-bond-summary", step: 9, label: "발행내역 한눈에" },
+      { href: "/disclosure-graph", step: 9, label: "공시 관계 그래프" },
     ],
   },
   utility: {
@@ -101,6 +105,10 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
   },
 };
 
+export const DISCLOSURE_REVIEW_TOOLS: SidebarStep[] = [
+  { href: "/html-bond-summary", label: "발행내역 한눈에" },
+];
+
 export const NAV_ITEMS: NavItem[] = [
   { href: WORKFLOWS.ontology.basePath, label: "Ontology", paths: WORKFLOWS.ontology.steps.map((tab) => tab.href), layout: "canvas", workflowId: "ontology" },
   {
@@ -109,6 +117,7 @@ export const NAV_ITEMS: NavItem[] = [
     paths: [
       ...WORKFLOWS["disclosure-build"].steps.map((tab) => tab.href),
       ...WORKFLOWS["html-processing"].steps.map((tab) => tab.href),
+      ...DISCLOSURE_REVIEW_TOOLS.map((tab) => tab.href),
     ],
     layout: WORKFLOWS["disclosure-build"].layout,
     workflowId: "disclosure-build",
@@ -188,6 +197,10 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
         steps: WORKFLOWS["html-processing"].steps,
         numbered: true,
       },
+      {
+        label: "결과 검수",
+        steps: DISCLOSURE_REVIEW_TOOLS,
+      },
     ],
   };
 }
@@ -204,6 +217,8 @@ export function getPageTitle(pathname: string): string | undefined {
     const activeStep = workflow.steps.find((step) => step.href === pathname);
     if (activeStep) return activeStep.label;
   }
+  const reviewTool = DISCLOSURE_REVIEW_TOOLS.find((tool) => tool.href === pathname);
+  if (reviewTool) return reviewTool.label;
   return getActiveNavItem(pathname)?.label;
 }
 

@@ -40,15 +40,18 @@ test("sidebar definitions match the narrowed top-level workflows", async () => {
   const disclosureSidebar = getSidebarDefinition("disclosure-build");
   assert.deepEqual(
     disclosureSidebar.groups.map((group) => group.label),
-    ["공시 자동화", "공시 제목 분석", "공시 내용 분석"],
+    ["공시 자동화", "공시 제목 분석", "공시 내용 분석", "결과 검수"],
   );
   assert.deepEqual(
     disclosureSidebar.groups[0].steps.map((step) => step.href),
     ["/disclosure-automation"],
   );
-  assert.ok(disclosureSidebar.groups.every((group) => group.numbered));
+  assert.ok(disclosureSidebar.groups.slice(0, 3).every((group) => group.numbered));
+  assert.equal(disclosureSidebar.groups[3].numbered, undefined);
   assert.deepEqual(
-    disclosureSidebar.groups.flatMap((group) => group.steps.map((step) => [step.step, step.href])),
+    disclosureSidebar.groups
+      .filter((group) => group.numbered)
+      .flatMap((group) => group.steps.map((step) => [step.step, step.href])),
     [
       [0, "/disclosure-automation"],
       [1, "/download"],
@@ -59,8 +62,12 @@ test("sidebar definitions match the narrowed top-level workflows", async () => {
       [6, "/html-section-split"],
       [7, "/html-parse"],
       [8, "/html-change-log"],
-      [9, "/html-bond-summary"],
+      [9, "/disclosure-graph"],
     ],
+  );
+  assert.deepEqual(
+    disclosureSidebar.groups[3].steps.map((step) => [step.step, step.href, step.label]),
+    [[undefined, "/html-bond-summary", "발행내역 한눈에"]],
   );
 
   const priceDataSidebar = getSidebarDefinition("price-data");

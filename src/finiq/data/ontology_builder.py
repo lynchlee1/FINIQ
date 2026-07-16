@@ -1043,11 +1043,11 @@ def export_ontology_to_web_json(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     out_data = {
+        "format": "finiq_disclosure_graph_v1",
         "metadata": metadata or {},
         "nodes": web_nodes,
         "edges": web_edges
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(out_data, f, ensure_ascii=False, indent=2)
-
 
