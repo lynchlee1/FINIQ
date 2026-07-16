@@ -133,6 +133,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
     visibleGraph,
     visibleDegreeMap,
     style,
+    stylePresets,
     layout,
     selectedNodeIds,
     selectedEdgeIds,
@@ -153,6 +154,8 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
     filters,
     updateFilters,
     updateLayout,
+    applyPreset,
+    savePreset,
     setSimulationRunning,
     undo,
     redo,
@@ -516,14 +519,11 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
           style={style}
           layout={layout}
           nodeTypes={Array.from(new Set(visibleGraph.nodes.map((node) => node.type)))}
-          presetNames={Object.keys(STYLE_PRESETS)}
+          presetNames={Object.keys(stylePresets)}
           onStyleChange={setStyle}
           onLayoutChange={updateLayout}
-          onPresetChange={(presetName) => {
-            const preset = STYLE_PRESETS[presetName];
-            if (preset) setStyle(preset);
-          }}
-          onPresetSave={() => {}}
+          onPresetChange={applyPreset}
+          onPresetSave={savePreset}
         />
       }
     />

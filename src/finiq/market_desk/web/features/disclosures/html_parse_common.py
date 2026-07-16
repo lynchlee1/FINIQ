@@ -524,26 +524,29 @@ def _parse_parallel_workers(value: Any, total_files: int) -> int:
 
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
     resolved_root = input_directory.resolve()
-    candidates = [*resolved_root.glob("*.html"), *resolved_root.glob("*/*.html")]
+    year_directories = sorted(
+        path
+        for path in resolved_root.iterdir()
+        if path.is_dir() and len(path.name) == 4 and path.name.isdigit()
+    )
+    candidates = [
+        path
+        for year_directory in year_directories
+        for path in year_directory.glob("*.html")
+    ]
     resolved_files: set[Path] = set()
     for path in candidates:
-        if any(
-            part.startswith(".")
-            for part in path.relative_to(resolved_root).parts[:-1]
-        ):
-            continue
         resolved_path = path.resolve()
         try:
-            resolved_path.relative_to(resolved_root)
+            relative_path = resolved_path.relative_to(resolved_root)
         except ValueError:
             continue
         if (
-            resolved_path.suffix.lower() == ".html"
+            len(relative_path.parts) == 2
+            and len(relative_path.parts[0]) == 4
+            and relative_path.parts[0].isdigit()
+            and resolved_path.suffix.lower() == ".html"
             and resolved_path.is_file()
-            and (
-                resolved_path.parent == resolved_root
-                or resolved_path.parent.parent == resolved_root
-            )
         ):
             resolved_files.add(resolved_path)
 
@@ -734,9 +737,6 @@ def _build_parse_request(
     )
 
 WARNING_LEVEL_KEYS = ("weak_warning", "medium_warning", "strong_warning")
-_BOND_MAIN_TABLE_MISSING_WARNING = (
-    "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
-)
 _BOND_INVESTOR_TABLE_MISSING_WARNING = (
     "사채 발행 투자자 표를 찾지 못했습니다. "
     "HTML 양식이 예상과 달라 투자자 필드가 비어 있을 수 있습니다."
@@ -955,8 +955,6 @@ def _record_warning_texts(record: dict[str, Any], key: str) -> list[str]:
 
 
 def _warning_code(warning: str) -> str:
-    if warning == _BOND_MAIN_TABLE_MISSING_WARNING:
-        return "bond_main_table_missing"
     if warning == _BOND_INVESTOR_TABLE_MISSING_WARNING:
         return "bond_investor_table_missing"
     if warning.startswith("발행목적: 자금조달 목적 합계"):

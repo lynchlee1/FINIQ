@@ -3,6 +3,7 @@
 
 @source "../../../../packages/ui/src/**/*.tsx";
 @source "../../../../packages/web-app/src/**/*.tsx";
+@source "../../../../packages/graph-viewer/src/**/*.tsx";
 
 @theme {
   --font-sans: var(--font-inter), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;

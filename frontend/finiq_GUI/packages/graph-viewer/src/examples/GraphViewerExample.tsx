@@ -16,6 +16,7 @@ export function GraphViewerExample() {
   const viewer = useGraphViewer()
   const [activeTab, setActiveTab] = useState<'network' | 'splc' | 'rmap' | 'kogrid' | 'database'>('network')
   const [focusEntityId, setFocusEntityId] = useState<string>('samsung-elec')
+  const [jumpToNodeId, setJumpToNodeId] = useState<string | undefined>(undefined)
 
   const refreshGraphData = useCallback(async () => {
     try {
@@ -56,6 +57,26 @@ export function GraphViewerExample() {
   const handleGraphUpdate = useCallback((updatedGraph: GraphData) => {
     viewer.replaceGraph(updatedGraph)
   }, [viewer.replaceGraph])
+
+  const handleHideSelected = useCallback(() => {
+    viewer.selectedNodeIds.forEach((nodeId) => viewer.onContextAction('node', nodeId, 'hide'))
+    viewer.selectedEdgeIds.forEach((edgeId) => viewer.onContextAction('edge', edgeId, 'hide'))
+    viewer.onBackgroundClick()
+  }, [viewer.onBackgroundClick, viewer.onContextAction, viewer.selectedEdgeIds, viewer.selectedNodeIds])
+
+  const handleApplyNeighborhood = useCallback(() => {
+    const nodeId = Array.from(viewer.selectedNodeIds)[0]
+    if (nodeId) {
+      viewer.onContextAction('node', nodeId, 'neighbors')
+    }
+  }, [viewer.onContextAction, viewer.selectedNodeIds])
+
+  const handleJumpSelected = useCallback(() => {
+    const nodeId = Array.from(viewer.selectedNodeIds)[0]
+    if (!nodeId) return
+    setJumpToNodeId(undefined)
+    requestAnimationFrame(() => setJumpToNodeId(nodeId))
+  }, [viewer.selectedNodeIds])
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden font-sans">
@@ -169,7 +190,7 @@ export function GraphViewerExample() {
                     onContextAction={viewer.onContextAction}
                     onVisibleBounds={viewer.onVisibleBounds}
                     onUnpinAll={viewer.unpinAllNodes}
-                    jumpToNodeId={undefined}
+                    jumpToNodeId={jumpToNodeId}
                     showToolbar={true}
                   />
                 )}
@@ -232,10 +253,10 @@ export function GraphViewerExample() {
                   }
                 }}
                 onPinNode={(id, pin) => viewer.onContextAction('node', id, pin ? 'pin' : 'unpin')}
-                onHideSelected={() => {}}
-                onShowHidden={() => {}}
-                onApplyNeighborhood={() => {}}
-                onJumpSelected={() => {}}
+                onHideSelected={handleHideSelected}
+                onShowHidden={viewer.showAll}
+                onApplyNeighborhood={handleApplyNeighborhood}
+                onJumpSelected={handleJumpSelected}
               />
             </aside>
           </>

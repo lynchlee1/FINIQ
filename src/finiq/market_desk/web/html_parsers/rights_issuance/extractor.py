@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from ..common import (
+    clean_text,
     column_index,
     parse_int,
     parse_ints,
@@ -24,17 +25,6 @@ RIGHTS_FIELD_EXTRACTION_RULES = {
     "상장예정일": "메인 표 > '신주의 상장 예정일'|'신주의 상장예정일' 라벨 행 > 마지막 값",
     "발행대상자": "'제3자배정 대상자' 표 > 대상자명 + 배정주식수",
 }
-FUNDING_PURPOSE_LABELS = [
-    ("시설자금", ("시설자금",)),
-    ("영업양수자금", ("영업양수자금",)),
-    ("운영자금", ("운영자금",)),
-    ("채무상환자금", ("채무상환자금",)),
-    (
-        "타법인 증권 취득자금",
-        ("타법인 증권 취득자금", "타법인유가증권취득자금"),
-    ),
-    ("기타자금", ("기타자금",)),
-]
 ISSUE_TARGET_TOTAL_LABEL_TOKENS = {"계", "합계", "소계", "총계"}
 STOCK_STATUS_DETAIL_FIELDS = {
     "신주의 종류와 수",
@@ -80,12 +70,15 @@ class RightsIssuanceExtractor:
             return "-"
         purposes: list[list[Any]] = []
         found_purpose_amount = False
-        for label, source_labels in FUNDING_PURPOSE_LABELS:
-            row = self._funding_purpose_row(source_labels)
-            value = parse_int(row[-1], dash_as_zero=True) if row else None
+        for row in self.rows.values:
+            purpose_index = self._funding_purpose_index(row)
+            if purpose_index is None or purpose_index + 1 >= len(row):
+                continue
+            label = self._clean_funding_purpose_label(row[purpose_index + 1])
+            value = self._funding_purpose_amount(row, purpose_index)
             if value is not None:
                 found_purpose_amount = True
-            if value:
+            if label and value:
                 purposes.append([label, value])
         if found_purpose_amount:
             self._set_field_status(
@@ -125,7 +118,7 @@ class RightsIssuanceExtractor:
             and not self._is_not_applicable("발행가액")
             and funding_purposes
             and stock_value_total is not None
-            and abs(stock_value_total - funding_total) > 9
+            and stock_value_total != funding_total
         ):
             self._append_warning(
                 f"발행목적: 신주의 종류와 수와 발행가액의 곱({stock_value_total:,})이 자금조달 목적 합계({funding_total:,})와 일치하지 않습니다.",
@@ -177,6 +170,7 @@ class RightsIssuanceExtractor:
         return self._stock_values(
             "신주 발행가액",
             warning_field_name="발행가액",
+            prefer_positive_after_zero=False,
         )
 
     def get_issue_method(self) -> str | None:
@@ -228,7 +222,6 @@ class RightsIssuanceExtractor:
             self._set_field_status("발행대상자", "not_applicable")
             return "-"
         stock_total = self._sum_amounts(stock_counts)
-        found_empty_target_table = False
         for table in self.context.extraction_tables:
             logical_rows = table["logical_rows"]
             if not logical_rows or not row_contains(
@@ -265,12 +258,8 @@ class RightsIssuanceExtractor:
                 stock_total=stock_total,
             )
             if targets:
-                if self._sum_amounts(targets) == stock_total:
-                    self._set_field_status("발행대상자", "parsed")
-                    return targets
-                continue
-            found_empty_target_table = True
-        if found_empty_target_table:
+                self._set_field_status("발행대상자", "parsed")
+                return targets
             self._warn_if_missing("발행대상자", None)
             return None
         issue_method = self.get_issue_method()
@@ -371,8 +360,7 @@ class RightsIssuanceExtractor:
         return targets
 
     def _issue_target_amount(self, value: str) -> int | None:
-        amount_text = re.sub(r"-?\d[\d,]*(?:\.\d+)?\s*%", "", value)
-        amounts = parse_ints(amount_text)
+        amounts = parse_ints(value)
         if not amounts:
             return None
         return sum(amounts)
@@ -476,13 +464,16 @@ class RightsIssuanceExtractor:
         section_label: str,
         *,
         warning_field_name: str | None = None,
+        prefer_positive_after_zero: bool = True,
     ) -> list[list[Any]]:
         """보통주와 기타주식 값을 일관된 순서로 배열하여 반환한다."""
         values: list[list[Any]] = []
         item_statuses: dict[str, str] = {}
         for output_label, source_labels in STOCK_LABELS.items():
             parsed, item_status = self._stock_value_with_status(
-                section_label, source_labels
+                section_label,
+                source_labels,
+                prefer_positive_after_zero=prefer_positive_after_zero,
             )
             item_statuses[output_label] = item_status
             values.append([output_label, parsed])
@@ -505,15 +496,34 @@ class RightsIssuanceExtractor:
                 )
         return values
 
-    def _funding_purpose_row(self, source_labels: tuple[str, ...]) -> list[str]:
-        for source_label in source_labels:
-            row = self.rows.containing("자금조달의 목적", source_label)
-            if row:
-                return row
-        return []
+    def _funding_purpose_index(self, row: list[str]) -> int | None:
+        for index, cell in enumerate(row):
+            if row_contains([cell], "자금조달의 목적"):
+                return index
+        return None
+
+    def _clean_funding_purpose_label(self, value: str) -> str | None:
+        label = clean_text(value)
+        label = re.sub(r"\(\s*원\s*\)", "", label)
+        label = re.sub(r"\s*원$", "", label)
+        label = clean_text(label.strip(" -_/·,"))
+        return label or None
+
+    def _funding_purpose_amount(
+        self, row: list[str], purpose_index: int
+    ) -> int | None:
+        for cell in reversed(row[purpose_index + 2 :]):
+            parsed = parse_int(cell, dash_as_zero=True)
+            if parsed is not None:
+                return parsed
+        return None
 
     def _stock_value_with_status(
-        self, section_label: str, source_labels: tuple[str, ...]
+        self,
+        section_label: str,
+        source_labels: tuple[str, ...],
+        *,
+        prefer_positive_after_zero: bool,
     ) -> tuple[int | None, str]:
         """지정 구간에서 주식 종류 라벨 바로 다음 값을 숫자와 상태로 변환한다."""
         dash_seen = False
@@ -529,6 +539,8 @@ class RightsIssuanceExtractor:
                 if parsed is None:
                     continue
                 if parsed == 0:
+                    if not prefer_positive_after_zero:
+                        return 0, "explicit_zero"
                     dash_seen = True
                     continue
                 return parsed, "parsed"

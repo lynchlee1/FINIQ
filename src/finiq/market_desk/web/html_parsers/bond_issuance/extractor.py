@@ -98,9 +98,7 @@ class BondIssuanceExtractor:
         self.strong_warnings: list[str] = []
         self.field_parse_status: dict[str, str] = {}
         if not self.rows.values:
-            self._append_warning(
-                "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
-            )
+            raise ValueError("bond issuance condition table is required")
 
     def extract_round_from_bond_type_row(self) -> str | None:
         value = self.rows.value_after("사채의 종류", "회차")

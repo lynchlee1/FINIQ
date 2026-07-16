@@ -886,7 +886,7 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
     payload = _read_json_object(path)
     if payload is None or payload.get("format") != "finiq_disclosure_html_parse_v1":
         return _inspection_failure(7, reason="공시원문 변환 결과가 없거나 손상되었습니다.")
-    input_directory = (root / "06-sections").resolve()
+    input_directory = (root / "06-sections" / ".automation-current").resolve()
     saved_input = Path(str(payload.get("input_directory") or "")).expanduser().resolve()
     filters = payload.get("filter_settings") or {}
     html_files = (
