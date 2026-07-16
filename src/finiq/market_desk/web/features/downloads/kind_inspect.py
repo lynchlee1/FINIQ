@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any
 
-from finiq.concurrency import bounded_as_completed, resolve_worker_count
-from finiq.data_scraper.workflow import inspect_download_directory_pages, validate_downloaded_result_page
-from finiq.data_scraper.workflow.workflow import _validate_downloaded_result_page_task
+from finiq.data_scraper.workflow import inspect_download_directory_pages
 
 from finiq.market_desk.web.features.downloads.kind_common import *
 
@@ -32,9 +28,8 @@ def inspect_download_output_directory_payload(
     base, targets = _download_cleanup_targets(payload)
     dry_run = bool(payload.get("dry_run", False))
 
-    files_to_validate: list[tuple[Path, int]] = []
     candidates_by_path: dict[str, dict[str, str]] = {}
-    folder_body_files: dict[Path, list[Path]] = {}
+    precomputed_statuses: dict[str, dict[str, int]] = {}
 
     log("연도별 대상 폴더 수집 중...")
     for folder, page_size in targets:
@@ -44,8 +39,6 @@ def inspect_download_output_directory_payload(
         body_files = _result_body_files(folder)
         if not body_files:
             continue
-
-        folder_body_files[folder] = body_files
 
         input_snapshot = _require_current_download_input_snapshot(folder)
 
@@ -72,129 +65,19 @@ def inspect_download_output_directory_payload(
             for path in body_files + _workflow_auxiliary_files(folder):
                 candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
             continue
-
-        for path in body_files:
-            files_to_validate.append((path, page_size))
-
-    total_files = len(files_to_validate)
-    log(f"검증 대상 파일 {total_files}개 수집 완료. 1패스 병렬 무결성 검사 시작...")
-
-    page_infos: dict[str, dict[str, int]] = {}
-    if files_to_validate:
-        worker_count = resolve_worker_count(item_count=total_files)
-        executor = None
-        is_cancelled = False
         try:
-            executor = ProcessPoolExecutor(max_workers=worker_count)
-            completed_count = 0
-            completed = bounded_as_completed(
-                executor,
-                files_to_validate,
-                lambda item: executor.submit(
-                    _validate_downloaded_result_page_task,
-                    (str(item[0]), item[1]),
-                ),
-                max_pending=worker_count * 2,
+            precomputed_statuses[str(folder)] = inspect_download_directory_pages(
+                folder,
+                expected_page_size=page_size,
+                require_complete=False,
+                validation_parallelism=1,
             )
-            for future, (path, _page_size) in completed:
-                if cancel_check is not None and cancel_check():
-                    is_cancelled = True
-                    try:
-                        executor.shutdown(wait=False, cancel_futures=True)
-                    except TypeError:
-                        executor.shutdown(wait=False)
-                    raise DownloadCancelled("Folder inspection cancelled by the user")
-                try:
-                    page_infos[str(path)] = future.result()
-                except BrokenProcessPool:
-                    raise
-                except Exception as exc:
-                    candidates_by_path[str(path)] = _relative_candidate(
-                        path, base, str(exc)
-                    )
-                completed_count += 1
-                if completed_count % 500 == 0 or completed_count == total_files:
-                    log(f"파일 무결성 검증 중... ({completed_count}/{total_files})")
-        except (BrokenProcessPool, OSError, PermissionError, RuntimeError):
-            if is_cancelled:
-                raise
-            log("멀티프로세싱 검증 실패로 인해 싱글스레드 순차 검증으로 전환합니다...")
-            for path, page_size in files_to_validate:
-                check_cancel()
-                try:
-                    page_infos[str(path)] = validate_downloaded_result_page(
-                        path, expected_page_size=page_size
-                    )
-                except Exception as exc:
-                    candidates_by_path[str(path)] = _relative_candidate(
-                        path, base, str(exc)
-                    )
-        finally:
-            if executor is not None and not is_cancelled:
-                try:
-                    executor.shutdown(wait=True, cancel_futures=False)
-                except TypeError:
-                    executor.shutdown(wait=True)
+        except (OSError, ValueError) as exc:
+            reason = str(exc)
+            for path in body_files + _workflow_auxiliary_files(folder):
+                candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
 
-    log("폴더 간 페이지 번호 연속성 및 메타데이터 일관성 검사 중...")
-    precomputed_statuses: dict[str, dict[str, int]] = {}
-    for folder, page_size in targets:
-        check_cancel()
-        if folder not in folder_body_files:
-            continue
-        body_files = folder_body_files[folder]
-
-        folder_candidates = [
-            path for path in body_files if str(path) in candidates_by_path
-        ]
-        if folder_candidates:
-            continue
-
-        folder_page_infos = {}
-        for path in body_files:
-            info = page_infos.get(str(path))
-            if info is not None:
-                folder_page_infos[path] = info
-
-        if len(folder_page_infos) != len(body_files):
-            continue
-
-        page_numbers = set()
-        total_pages_values = set()
-        total_items_values = set()
-        for path, info in folder_page_infos.items():
-            current_page = int(info["current_page"])
-            if current_page in page_numbers:
-                for p in body_files:
-                    candidates_by_path[str(p)] = _relative_candidate(
-                        p, base, f"중복되는 페이지 번호 {current_page}"
-                    )
-                break
-            page_numbers.add(current_page)
-            total_pages_values.add(int(info["total_pages"]))
-            total_items_values.add(int(info["total_items"]))
-        else:
-            if len(total_pages_values) != 1 or len(total_items_values) != 1:
-                reason = "페이지들 사이의 전체 페이지 수 또는 건수가 다릅니다."
-                for p in body_files:
-                    candidates_by_path[str(p)] = _relative_candidate(p, base, reason)
-            else:
-                downloaded_pages = len(body_files)
-                total_pages = next(iter(total_pages_values))
-                total_items = next(iter(total_items_values))
-                expected_prefix = set(range(1, downloaded_pages + 1))
-                if page_numbers != expected_prefix:
-                    reason = f"페이지 번호가 1부터 연속적이지 않습니다: {sorted(page_numbers)}"
-                    for p in body_files:
-                        candidates_by_path[str(p)] = _relative_candidate(
-                            p, base, reason
-                        )
-                else:
-                    precomputed_statuses[str(folder)] = {
-                        "downloaded_pages": downloaded_pages,
-                        "total_pages": total_pages,
-                        "total_items": total_items,
-                    }
+    log("연도별 폴더 무결성 검사 완료.")
 
     deletion_candidates = sorted(
         candidates_by_path.values(), key=lambda item: item["name"]

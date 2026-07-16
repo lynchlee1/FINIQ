@@ -41,7 +41,6 @@ SAVED_SETTINGS_KEYS = (
     "download_output_directory",
     "disclosure_separate_output_directory",
     "sqlite_output_directory",
-    "sqlite_manifest_path",
     "external_html_output_directory",
     "internal_html_output_directory",
     "html_section_split_output_directory",
@@ -83,7 +82,6 @@ class AppConfig:
     download_output_directory: str = ""
     disclosure_separate_output_directory: bool = False
     sqlite_output_directory: str = ""
-    sqlite_manifest_path: str = ""
     external_html_output_directory: str = ""
     internal_html_output_directory: str = ""
     html_section_split_output_directory: str = ""
@@ -123,10 +121,7 @@ def get_default_settings_path() -> Path:
 def normalize_path(value: str) -> str:
     if not value or not str(value).strip():
         return ""
-    try:
-        return str(Path(value).expanduser().resolve())
-    except Exception:
-        return str(value)
+    return str(Path(value).expanduser().resolve())
 
 
 def build_disclosure_workspace_path_settings(
@@ -143,7 +138,6 @@ def build_disclosure_workspace_path_settings(
         "download_output_directory": str(root / "01-list"),
         "sqlite_source_path": str(root / "01-list"),
         "sqlite_output_directory": str(root / "02-table"),
-        "sqlite_manifest_path": str(root / "02-table"),
         "external_html_transfer_directory": str(filtered_path),
         "external_html_output_directory": str(external_path),
         "external_html_compress_input_directory": str(external_path),
@@ -208,53 +202,36 @@ def init_config() -> AppConfig:
     settings_path = get_default_settings_path()
     settings = load_settings(settings_path)
 
-    saved_output_root = str(settings.get("output_root") or "").strip()
-    migrated_legacy_root = (
-        not saved_output_root
-        or Path(saved_output_root).resolve() == KIND_DATA_DIR.resolve()
-    )
-    if migrated_legacy_root:
-        output_root = str(RESOURCES_DIR)
-    else:
-        output_root = saved_output_root
+    output_root = str(settings.get("output_root") or "").strip()
     quanti_dir = settings.get("quanti_dir", str(QUANTI_DIR))
-    html_parse_mode = settings.get("html_parse_mode") or "bond_issuance"
+    html_parse_mode = str(settings.get("html_parse_mode") or "").strip()
     try:
         job_retention_minutes = int(settings.get("job_retention_minutes", 60))
-    except (TypeError, ValueError):
-        job_retention_minutes = 60
+    except (TypeError, ValueError) as exc:
+        raise ValueError("job_retention_minutes must be a positive integer") from exc
     if job_retention_minutes < 1:
-        job_retention_minutes = 60
-    disclosure_paths = build_disclosure_workspace_path_settings(
-        output_root, mode=html_parse_mode
+        raise ValueError("job_retention_minutes must be a positive integer")
+    disclosure_paths = (
+        build_disclosure_workspace_path_settings(output_root, mode=html_parse_mode)
+        if output_root and html_parse_mode
+        else {}
     )
 
     def disclosure_path(key: str) -> str:
-        if migrated_legacy_root:
-            return disclosure_paths[key]
-        saved_path = settings.get(key)
-        if (
-            key == "internal_html_output_directory"
-            and saved_path
-            and Path(saved_path).resolve()
-            == Path(output_root).resolve() / "05-internal-html-download"
-        ):
-            return disclosure_paths[key]
-        return settings.get(key, disclosure_paths[key])
+        return str(settings.get(key) or disclosure_paths.get(key, ""))
     
     return AppConfig(
         output_root=output_root,
         quanti_dir=quanti_dir,
         settings_path=str(settings_path),
         price_root_directory=settings.get("price_root_directory", str(STOCK_DATA_DIR)),
-        selected_classification_path=settings.get("selected_classification_path", str(KIND_DATA_DIR / "classification" / "all_companies.json")),
+        selected_classification_path=settings.get("selected_classification_path", ""),
         sqlite_source_path=disclosure_path("sqlite_source_path"),
         download_output_directory=disclosure_path("download_output_directory"),
         disclosure_separate_output_directory=bool(
             settings.get("disclosure_separate_output_directory", False)
         ),
         sqlite_output_directory=disclosure_path("sqlite_output_directory"),
-        sqlite_manifest_path=disclosure_path("sqlite_manifest_path"),
         external_html_output_directory=disclosure_path("external_html_output_directory"),
         internal_html_output_directory=disclosure_path(
             "internal_html_output_directory"

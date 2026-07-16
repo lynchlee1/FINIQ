@@ -9,11 +9,9 @@ from finiq.data_scraper.data.facade import load_company_classification_file
 from finiq.data_scraper.parse import companysummary_onclick, disclosure_rows
 from finiq.data_scraper.storage.classification_store import (
     company_classification_partial_path,
-    company_classification_shard_dir,
     folder_partial_signature,
     load_company_classification_artifact,
 )
-from finiq.data_scraper.storage.result_files import effective_result_page_paths
 import finiq.data_scraper.workflow.workflow as workflow_module
 from finiq.data_scraper.workflow import (
     KIND_WORKFLOW_INPUT_FORMAT,
@@ -22,19 +20,14 @@ from finiq.data_scraper.workflow import (
     export_kind_mode_folders,
 )
 
-
-def test_non_object_repair_manifest_is_ignored(tmp_path: Path) -> None:
-    body_path = tmp_path / "001_post_page_00001.body"
-    body_path.write_text("original", encoding="utf-8")
-    repair_root = tmp_path / ".kind_page_repairs"
-    repair_root.mkdir()
-    (repair_root / "manifest.json").write_text("[]", encoding="utf-8")
-
-    assert effective_result_page_paths(tmp_path) == [body_path]
-    assert workflow_module._load_repair_manifest(tmp_path) == {"pages": {}}
-
-
 def _results_page(rows_html: str, pagination_markup: str = "") -> str:
+    if not pagination_markup:
+        row_count = rows_html.count("<tr")
+        pagination_markup = (
+            '<section class="paging-group"><div class="paging type-00">'
+            f"전체 <em>{row_count}</em>건 : <strong>1</strong>/1"
+            "</div></section>"
+        )
     return f"""
     <html><body>
       <table class="list type-00" summary="번호, 시간, 회사명, 공시제목, 제출인, 차트/주가">
@@ -92,7 +85,6 @@ def _write_workflow_input(
     start_date: str = "2026-01-01",
     end_date: str = "2026-01-31",
     page_size: int = 100,
-    include_repair_timing: bool = True,
 ) -> None:
     payload: dict[str, object] = {
         "format": KIND_WORKFLOW_INPUT_FORMAT,
@@ -104,14 +96,9 @@ def _write_workflow_input(
         "disclosure_type_groups": {},
         "last_report_only": None,
         "include_previous_disclosures": None,
+        "wait_seconds_between_requests": 0,
+        "timeout": 5,
     }
-    if include_repair_timing:
-        payload.update(
-            {
-                "wait_seconds_between_requests": 0,
-                "timeout": 5,
-            }
-        )
     (folder / "kind_workflow.input.json").write_text(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",
@@ -288,7 +275,6 @@ def test_export_kind_company_classification_recurses_and_merges_same_company(
         tmp_path,
         compact=False,
         parallelism=2,
-        validate_integrity=False,
     )
 
     assert result.source_folders == 3
@@ -296,7 +282,7 @@ def test_export_kind_company_classification_recurses_and_merges_same_company(
     assert result.companies == 4
     assert result.disclosures == 5
 
-    output_path = tmp_path / "kind.company_classification.json"
+    output_path = tmp_path / "kind.company_classification.sqlite"
     index_payload = load_company_classification_artifact(output_path)
     payload = load_company_classification_file(output_path)
 
@@ -355,10 +341,10 @@ def test_export_kind_company_classification_raises_when_any_row_is_unclassified(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="parsed 1 disclosures but classified 0"):
-        export_kind_company_classification(tmp_path, validate_integrity=False)
+    with pytest.raises(ValueError, match="companysum link"):
+        export_kind_company_classification(tmp_path)
 
-    assert not (tmp_path / "kind.company_classification.json").exists()
+    assert not (tmp_path / "kind.company_classification.sqlite").exists()
 
 
 def test_export_kind_mode_folders_supports_parallel_folder_exports(tmp_path: Path) -> None:
@@ -450,14 +436,13 @@ def test_export_kind_company_classification_deduplicates_overlapping_disclosures
         tmp_path,
         compact=False,
         parallelism=2,
-        validate_integrity=False,
     )
 
     assert result.companies == 1
     assert result.disclosures == 2
 
-    index_payload = load_company_classification_artifact(tmp_path / "kind.company_classification.json")
-    payload = load_company_classification_file(tmp_path / "kind.company_classification.json")
+    index_payload = load_company_classification_artifact(tmp_path / "kind.company_classification.sqlite")
+    payload = load_company_classification_file(tmp_path / "kind.company_classification.sqlite")
     assert index_payload["format"] == "company_classification_index_v2"
     assert payload["summary"]["disclosures"] == 2
     disclosures = payload["companies"][0]["disclosures"]
@@ -504,7 +489,7 @@ def test_export_kind_company_classification_detects_incomplete_folder_when_valid
     )
 
     with pytest.raises(ValueError, match="회사별 분류 저장을 중단했습니다. 페이지 무결성 검사를 통과하지 못했습니다."):
-        export_kind_company_classification(tmp_path, validate_integrity=True)
+        export_kind_company_classification(tmp_path)
 
 
 def test_company_classification_rejects_missing_metadata_before_body_or_cache(
@@ -523,7 +508,7 @@ def test_company_classification_rejects_missing_metadata_before_body_or_cache(
     )
 
     with pytest.raises(ValueError, match="metadata is missing"):
-        export_kind_company_classification(tmp_path, validate_integrity=True)
+        export_kind_company_classification(tmp_path)
 
 
 def test_export_kind_company_classification_detects_non_last_page_under_100_rows(
@@ -560,19 +545,12 @@ def test_export_kind_company_classification_detects_non_last_page_under_100_rows
         _results_page(rows_html, pagination_markup=paging_markup),
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        workflow_module,
-        "_repair_folder_pages",
-        lambda *_args, **_kwargs: (["repair skipped in test"], {}),
-    )
-
     with pytest.raises(ValueError, match="1페이지의 행 수가 99건으로 기대값 100건과 다릅니다"):
-        export_kind_company_classification(tmp_path, validate_integrity=True)
+        export_kind_company_classification(tmp_path)
 
 
-def test_diagnose_kind_company_classification_reports_repair_targets(
+def test_diagnose_kind_company_classification_reports_integrity_errors_without_repair(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     folder = tmp_path / "20260101_20260131"
     folder.mkdir()
@@ -604,123 +582,9 @@ def test_diagnose_kind_company_classification_reports_repair_targets(
         encoding="utf-8",
     )
 
-    def _stub_repair_folder_pages(
-        *args: object,
-        **kwargs: object,
-    ) -> tuple[list[str], dict[int, int]]:
-        return (["재다운로드는 테스트에서 생략했습니다."], {1: 5, 2: 5, 3: 5})
+    report = diagnose_kind_company_classification_integrity(tmp_path)
 
-    monkeypatch.setattr(workflow_module, "_repair_folder_pages", _stub_repair_folder_pages)
-
-    report = diagnose_kind_company_classification_integrity(tmp_path, validate_integrity=True)
-
-    assert report.repair_attempted is True
-    assert report.repaired_folders == [str(folder.resolve())]
-    assert report.repair_targets == {str(folder.resolve()): [1, 2, 3]}
-    assert report.repair_attempt_counts == {str(folder.resolve()): {1: 5, 2: 5, 3: 5}}
     assert any("1페이지의 행 수가 99건으로 기대값 100건과 다릅니다" in error for error in report.integrity_errors)
-
-
-def test_repair_folder_pages_stops_after_five_failed_attempts(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    folder = tmp_path / "20260101_20260131"
-    folder.mkdir()
-    _write_workflow_input(folder)
-    download_attempts = 0
-
-    def _fail_download_pages(**_kwargs: object) -> None:
-        nonlocal download_attempts
-        download_attempts += 1
-        raise RuntimeError("download failed")
-
-    monkeypatch.setattr(workflow_module, "download_pages", _fail_download_pages)
-
-    errors, attempt_counts = workflow_module._repair_folder_pages(folder, [1])
-
-    assert download_attempts == 5
-    assert attempt_counts == {1: 5}
-    assert len(errors) == 1
-    assert "5회 시도 후에도 복구되지 않았습니다" in errors[0]
-
-
-def test_diagnose_kind_company_classification_keeps_original_files_and_uses_sidecar_repairs(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    folder = tmp_path / "20260101_20260131"
-    folder.mkdir()
-    _write_workflow_input(folder, include_repair_timing=False)
-    paging_markup = """
-    <section class="paging-group">
-      <div class="paging type-00">
-        전체 <em>250</em>건 : <strong>1</strong>/3
-      </div>
-    </section>
-    """
-    original_rows_html = "\n".join(
-        _row_html(
-            number=index,
-            disclosed_at="2026-01-01 09:00",
-            company_name=f"원본회사{index}",
-            company_id=f"O{index:05d}",
-            market="코스닥",
-            badges=[],
-            title="원본공시",
-            acpt_no=f"2026010101{index:04d}",
-            doc_no=None,
-            submitter=f"원본회사{index}",
-        )
-        for index in range(1, 100)
-    )
-    original_page = folder / "001_post_page_00001.body"
-    original_page.write_text(
-        _results_page(original_rows_html, pagination_markup=paging_markup),
-        encoding="utf-8",
-    )
-    original_text = original_page.read_text(encoding="utf-8")
-
-    def _stub_download_pages(**kwargs: object) -> None:
-        output_directory = Path(str(kwargs["output_directory"]))
-        page_number = int(kwargs["start_page"])
-        output_directory.mkdir(parents=True, exist_ok=True)
-        expected_rows = 100 if page_number < 3 else 50
-        pagination_markup_for_page = f"""
-        <section class="paging-group">
-          <div class="paging type-00">
-            전체 <em>250</em>건 : <strong>{page_number}</strong>/3
-          </div>
-        </section>
-        """
-        rows_html = "\n".join(
-            _row_html(
-                number=index,
-                disclosed_at="2026-01-01 09:00",
-                company_name=f"복구회사{page_number}_{index}",
-                company_id=f"R{page_number}{index:04d}",
-                market="코스닥",
-                badges=[],
-                title="복구공시",
-                acpt_no=f"20260102{page_number:02d}{index:04d}",
-                doc_no=None,
-                submitter=f"복구회사{page_number}_{index}",
-            )
-            for index in range(1, expected_rows + 1)
-        )
-        (output_directory / f"{page_number:03d}_post_page_{page_number:05d}.body").write_text(
-            _results_page(rows_html, pagination_markup=pagination_markup_for_page),
-            encoding="utf-8",
-        )
-
-    monkeypatch.setattr(workflow_module, "download_pages", _stub_download_pages)
-
-    report = diagnose_kind_company_classification_integrity(tmp_path, validate_integrity=True)
-
-    assert report.integrity_errors == []
-    assert original_page.read_text(encoding="utf-8") == original_text
-    assert (folder / ".kind_page_repairs" / "manifest.json").exists()
-    assert (folder / ".kind_page_repairs" / "page_00001" / "attempt_001" / "001_post_page_00001.body").exists()
 
 
 def test_export_kind_company_classification_reuses_partial_cache_when_folder_is_unchanged(
@@ -748,9 +612,7 @@ def test_export_kind_company_classification_reuses_partial_cache_when_folder_is_
         encoding="utf-8",
     )
 
-    first = export_kind_company_classification(
-        tmp_path, compact=False, validate_integrity=False
-    )
+    first = export_kind_company_classification(tmp_path, compact=False)
     assert first.disclosures == 1
     assert company_classification_partial_path(folder).exists()
 
@@ -758,7 +620,5 @@ def test_export_kind_company_classification_reuses_partial_cache_when_folder_is_
         raise AssertionError("partial cache should prevent reparsing unchanged folders")
 
     monkeypatch.setattr(workflow_module, "disclosure_rows", _unexpected_parse)
-    second = export_kind_company_classification(
-        tmp_path, compact=False, validate_integrity=False
-    )
+    second = export_kind_company_classification(tmp_path, compact=False)
     assert second.disclosures == 1

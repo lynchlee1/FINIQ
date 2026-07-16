@@ -66,6 +66,7 @@ def test_final_parse_record_preserves_kind_disclosed_at(
             "output_directory": str(tmp_path / "converted"),
             "mode": "bond_issuance",
             "skip_errors": False,
+            "filtered_metadata_path": str(tmp_path / "filtered.json"),
         }
     )
 
@@ -100,7 +101,14 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
     )
     compressed_path.parent.mkdir(parents=True, exist_ok=True)
     compressed_path.write_text(
-        json.dumps({"records": []}), encoding="utf-8"
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "summary": {"found_files": 0, "compressed_files": 0},
+                "records": [],
+            }
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
     payload = apply_workspace_defaults(
@@ -210,6 +218,7 @@ def test_duplicate_kind_metadata_is_rejected(
     filtered_path.write_text(
         json.dumps(
             {
+                "format": "kind_disclosure_filter_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250102000001",

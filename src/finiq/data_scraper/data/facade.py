@@ -78,8 +78,7 @@ def company_classification_is_stale(
     if not company_classification_artifact_complete(destination):
         return True
 
-    artifact_path = destination if destination.exists() else destination.with_suffix(".sqlite")
-    destination_mtime = artifact_path.stat().st_mtime
+    destination_mtime = destination.stat().st_mtime
     return any(body_path.stat().st_mtime > destination_mtime for body_path in body_files)
 
 

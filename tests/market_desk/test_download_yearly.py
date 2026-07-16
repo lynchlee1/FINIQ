@@ -10,61 +10,7 @@ import finiq.market_desk.web.features.downloads.kind_runner as download_module
 from finiq.market_desk.web.features.downloads.kind_common import _detect_pagination
 
 
-def test_run_resume_starts_from_first_missing_page(tmp_path, monkeypatch) -> None:
-    for page_number in (1, 2, 4):
-        (tmp_path / f"{page_number:03d}_post_page_{page_number:05d}.body").write_bytes(
-            b"saved"
-        )
-
-    saved_input = {
-        "request_headers": {},
-        "start_date": "2024-01-01",
-        "end_date": "2024-12-31",
-        "page_size": 100,
-        "wait_seconds_between_requests": 0,
-        "timeout": 1,
-    }
-    received_start_pages: list[int] = []
-
-    monkeypatch.setattr(
-        download_module,
-        "_detect_pagination",
-        lambda _path: {"total_pages": 4, "downloaded_pages": 3},
-    )
-    monkeypatch.setattr(
-        download_module,
-        "_require_current_download_input_snapshot",
-        lambda _path: saved_input,
-    )
-    monkeypatch.setattr(
-        download_module,
-        "_download_integrity_status",
-        lambda _path, _page_size: {"total_pages": 4, "downloaded_pages": 3},
-    )
-
-    def fake_validate(page_path: Path, *, expected_page_size: int) -> dict[str, int]:
-        if not page_path.is_file():
-            raise ValueError("missing page")
-        return {"current_page": int(page_path.name[:3])}
-
-    def fake_download_pages(**kwargs: Any) -> None:
-        received_start_pages.append(int(kwargs["start_page"]))
-
-    monkeypatch.setattr(download_module, "validate_downloaded_result_page", fake_validate)
-    monkeypatch.setattr(download_module, "download_pages", fake_download_pages)
-
-    download_module._run_resume(
-        {
-            "output_directory": str(tmp_path),
-            "parallel_strategy": "pages",
-            "worker_count": 2,
-        }
-    )
-
-    assert received_start_pages == [3]
-
-
-def test_detect_pagination_uses_earlier_page_when_latest_is_corrupt(
+def test_detect_pagination_rejects_latest_page_when_it_is_corrupt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     first = tmp_path / "001_post_page_00001.body"
@@ -80,12 +26,7 @@ def test_detect_pagination_uses_earlier_page_when_latest_is_corrupt(
 
     result = _detect_pagination(tmp_path)
 
-    assert result == {
-        "total_pages": 2,
-        "total_items": 150,
-        "downloaded_pages": 2,
-        "latest_file": first.name,
-    }
+    assert result is None
 
 
 def test_detect_pagination_sorts_four_digit_pages_numerically(
@@ -115,7 +56,6 @@ def test_run_yearly_returns_promptly_when_parallel_worker_fails(tmp_path, monkey
     def fake_run_yearly_task(
         task: dict[str, Any],
         *,
-        resume_yearly: bool,
         progress_callback: Any | None = None,
         cancel_check: Any | None = None,
     ) -> dict[str, Any]:
@@ -160,7 +100,6 @@ def test_run_yearly_pages_strategy_processes_years_sequentially(
     def fake_run_yearly_task(
         task: dict[str, Any],
         *,
-        resume_yearly: bool,
         progress_callback: Any | None = None,
         cancel_check: Any | None = None,
     ) -> dict[str, Any]:

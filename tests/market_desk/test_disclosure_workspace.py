@@ -87,7 +87,7 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     )
     assert "classification_path" not in filtered
     assert (
-        _manifest_output_path(table["output_path"], workspace.list).parent
+        _manifest_output_path(table["output_path"]).parent
         == workspace.table
     )
     assert filtered["external_html_transfer_path"] == str(workspace.filtered)
@@ -170,17 +170,15 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
     assert payload["filtered_metadata_path"] == str(explicit / "filtered.json")
     assert payload["compressed_metadata_path"] == str(explicit / "compressed.json")
 
-    filtered = apply_workspace_defaults(
-        "filter",
-        {
-            "data_root": str(workspace.root),
-            "mode": "bond_issuance",
-            "classification_path": str(explicit / "table"),
-            "external_html_transfer_path": str(explicit / "filter-results"),
-        },
-    )
-    assert filtered["classification_path"] == str(explicit / "table")
-    assert filtered["external_html_transfer_path"] == str(explicit / "filter-results")
+    with pytest.raises(ValueError, match="classification_path is not supported"):
+        apply_workspace_defaults(
+            "filter",
+            {
+                "data_root": str(workspace.root),
+                "mode": "bond_issuance",
+                "classification_path": str(explicit / "table"),
+            },
+        )
 
     downloaded = apply_workspace_defaults(
         "kind_download",
@@ -219,15 +217,9 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
         {
             "data_root": str(workspace.root),
             "mode": "bond_issuance",
-            "json": {"disclosures": []},
-            "payload": {"disclosures": []},
-            "source_json_path": str(explicit / "filtered.json"),
             "output_directory": str(explicit / "external"),
         },
     )
-    assert "json" not in external
-    assert "payload" not in external
-    assert "source_json_path" not in external
     assert external["output_directory"] == str(explicit / "external")
 
     compressed = apply_workspace_defaults(
@@ -364,7 +356,6 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
         "download_output_directory": str(data_root / "01-list"),
         "sqlite_source_path": str(data_root / "01-list"),
         "sqlite_output_directory": str(data_root / "02-table"),
-        "sqlite_manifest_path": str(data_root / "02-table"),
         "external_html_transfer_directory": str(data_root / "03-filter"),
         "external_html_output_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
         "external_html_compress_input_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
@@ -388,7 +379,7 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
     }
 
 
-def test_init_config_uses_workspace_paths_when_only_root_is_saved(
+def test_init_config_does_not_invent_mode_or_workspace_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data_root = tmp_path / "resources"
@@ -402,8 +393,10 @@ def test_init_config_uses_workspace_paths_when_only_root_is_saved(
 
     loaded = finiq_config.init_config()
 
-    expected = disclosure_workspace_settings(data_root, mode="bond_issuance")
-    assert {key: getattr(loaded, key) for key in expected} == expected
+    assert loaded.output_root == str(data_root.resolve())
+    assert loaded.html_parse_mode == ""
+    for key in disclosure_workspace_settings(data_root, mode="bond_issuance"):
+        assert getattr(loaded, key) == ""
     assert loaded.disclosure_separate_output_directory is False
     assert loaded.job_retention_minutes == 60
 
@@ -461,7 +454,7 @@ def test_init_config_preserves_saved_stage_paths(
     assert loaded.html_parse_output_directory == str(tmp_path / "legacy-converted")
 
 
-def test_init_config_migrates_saved_legacy_standard_internal_path(
+def test_init_config_preserves_saved_legacy_standard_internal_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data_root = tmp_path / "database"
@@ -485,13 +478,11 @@ def test_init_config_migrates_saved_legacy_standard_internal_path(
     loaded = finiq_config.init_config()
 
     assert loaded.internal_html_output_directory == str(
-        data_root.resolve()
-        / "05-internal-html-download"
-        / "rights_issuance"
+        data_root.resolve() / "05-internal-html-download"
     )
 
 
-def test_init_config_migrates_legacy_default_kind_root_to_resources(
+def test_init_config_preserves_saved_kind_root_without_migration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings_path = tmp_path / "settings.json"
@@ -505,11 +496,8 @@ def test_init_config_migrates_legacy_default_kind_root_to_resources(
 
     loaded = finiq_config.init_config()
 
-    assert loaded.output_root == str(finiq_config.RESOURCES_DIR)
-    expected = disclosure_workspace_settings(
-        finiq_config.RESOURCES_DIR, mode="bond_issuance"
-    )
-    assert {key: getattr(loaded, key) for key in expected} == expected
+    assert loaded.output_root == str(finiq_config.KIND_DATA_DIR)
+    assert loaded.html_parse_mode == ""
 
 
 def test_saving_only_output_root_updates_paths_without_preparing_workspace(

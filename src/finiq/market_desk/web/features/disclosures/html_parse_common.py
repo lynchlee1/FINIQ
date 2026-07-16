@@ -15,6 +15,7 @@ from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
 from finiq.market_desk.web.features.market_data.service_common import (
     _record_filter_blocks_match,
+    _validate_filter_blocks,
 )
 from finiq.market_desk.web.html_parsers import (
     parse_asset_transaction,
@@ -243,20 +244,15 @@ def _load_html_parse_metadata(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     metadata_index: dict[str, dict[str, Any]] = {}
     families: dict[str, dict[str, Any]] = {}
-    filtered_path = filtered_metadata_path or input_directory.parent / "filtered.json"
-    compressed_path = (
-        compressed_metadata_path
-        or input_directory.parent / "compressed-external-html.json"
-    )
     filtered_metadata_index: dict[str, dict[str, Any]] = {}
     compressed_metadata_index: dict[str, dict[str, Any]] = {}
-    if filtered_path.is_file():
-        filtered_metadata_index = _load_filtered_metadata_index(filtered_path)
-    if compressed_path.is_file():
+    if filtered_metadata_path is not None:
+        filtered_metadata_index = _load_filtered_metadata_index(filtered_metadata_path)
+    if compressed_metadata_path is not None:
         (
             compressed_metadata_index,
             compressed_families,
-        ) = _load_compressed_external_html_metadata_index(compressed_path)
+        ) = _load_compressed_external_html_metadata_index(compressed_metadata_path)
         families.update(compressed_families)
     for acpt_no in sorted(set(filtered_metadata_index) | set(compressed_metadata_index)):
         metadata: dict[str, Any] = {}
@@ -266,10 +262,10 @@ def _load_html_parse_metadata(
     return metadata_index, families
 
 
-def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     acpt_no = str(item.get("acpt_no") or "")
-    if not acpt_no:
-        return None
+    if not acpt_no.isdigit():
+        raise ValueError("filtered metadata acpt_no must contain digits")
     return acpt_no, {
         "market": _normalize_listing_market(item.get("market")),
         "company_name": str(item.get("company_name") or "").strip(),
@@ -279,10 +275,10 @@ def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]] 
 
 def _compressed_external_html_metadata_item(
     item: dict[str, Any]
-) -> tuple[str, dict[str, Any]] | None:
+) -> tuple[str, dict[str, Any]]:
     acpt_no = str(item.get("acpt_no") or "")
-    if not acpt_no:
-        return None
+    if not acpt_no.isdigit():
+        raise ValueError("compressed metadata acpt_no must contain digits")
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
     return acpt_no, {
         "title": str(item.get("title") or "").strip(),
@@ -296,21 +292,20 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, An
         payload = json.loads(filtered_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"필터 결과 JSON을 읽을 수 없습니다: {filtered_path}") from exc
-    if not isinstance(payload, dict):
-        return {}
+    if not isinstance(payload, dict) or payload.get("format") != "kind_disclosure_filter_v1":
+        raise ValueError(f"필터 결과 JSON 형식이 올바르지 않습니다: {filtered_path}")
     metadata_index: dict[str, dict[str, Any]] = {}
-    disclosures = [
-        item for item in payload.get("disclosures") or [] if isinstance(item, dict)
-    ]
-    for item in disclosures:
+    disclosures = payload.get("disclosures")
+    if not isinstance(disclosures, list):
+        raise ValueError(f"필터 결과 disclosures가 배열이 아닙니다: {filtered_path}")
+    for index, item in enumerate(disclosures):
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"filtered disclosures[{index}] must be an object")
         parsed = _filtered_metadata_item(item)
-        if parsed is not None:
-            acpt_no, metadata = parsed
-            if acpt_no in metadata_index:
-                raise ValueError(f"duplicate KIND metadata acpt_no: {acpt_no}")
-            metadata_index[acpt_no] = metadata
+        acpt_no, metadata = parsed
+        if acpt_no in metadata_index:
+            raise ValueError(f"duplicate KIND metadata acpt_no: {acpt_no}")
+        metadata_index[acpt_no] = metadata
     return metadata_index
 
 
@@ -323,14 +318,23 @@ def _load_compressed_external_html_metadata_index(
         raise ValueError(
             f"외부 HTML 압축 JSON을 읽을 수 없습니다: {compressed_path}"
         ) from exc
-    if not isinstance(payload, dict):
-        return {}, {}
-    records = [item for item in payload.get("records") or [] if isinstance(item, dict)]
+    if (
+        not isinstance(payload, dict)
+        or payload.get("format") != "finiq_disclosure_external_html_docs_v1"
+    ):
+        raise ValueError(f"외부 HTML 압축 JSON 형식이 올바르지 않습니다: {compressed_path}")
+    records = payload.get("records")
+    if not isinstance(records, list):
+        raise ValueError(f"외부 HTML 압축 records가 배열이 아닙니다: {compressed_path}")
     selected_doc_to_record: dict[str, dict[str, Any]] = {}
-    for item in records:
+    for index, item in enumerate(records):
+        if not isinstance(item, dict):
+            raise ValueError(f"compressed records[{index}] must be an object")
+        if not isinstance(item.get("metadata"), dict):
+            raise ValueError(f"compressed records[{index}].metadata must be an object")
         selected_doc_no = str(item.get("selected_main_doc_no") or "").strip()
         if not selected_doc_no:
-            continue
+            raise ValueError(f"compressed records[{index}].selected_main_doc_no is required")
         if selected_doc_no in selected_doc_to_record:
             raise ValueError(
                 f"duplicate external metadata selected_main_doc_no: {selected_doc_no}"
@@ -339,21 +343,18 @@ def _load_compressed_external_html_metadata_index(
     metadata_index: dict[str, dict[str, Any]] = {}
     families: dict[str, dict[str, Any]] = {}
     for item in records:
-        if not isinstance(item, dict):
-            continue
         parsed = _compressed_external_html_metadata_item(item)
-        if parsed is not None:
-            acpt_no, metadata = parsed
-            if acpt_no in metadata_index:
-                raise ValueError(f"duplicate external metadata acpt_no: {acpt_no}")
-            family = _external_html_correction_family(item, selected_doc_to_record)
-            if family is not None:
-                family_id, current_sequence, members = family
-                metadata["family_id"] = family_id
-                metadata["current_sequence"] = current_sequence
-                metadata["family_member_count"] = len(members)
-                families.setdefault(family_id, {"members": members})
-            metadata_index[acpt_no] = metadata
+        acpt_no, metadata = parsed
+        if acpt_no in metadata_index:
+            raise ValueError(f"duplicate external metadata acpt_no: {acpt_no}")
+        family = _external_html_correction_family(item, selected_doc_to_record)
+        if family is not None:
+            family_id, current_sequence, members = family
+            metadata["family_id"] = family_id
+            metadata["current_sequence"] = current_sequence
+            metadata["family_member_count"] = len(members)
+            families.setdefault(family_id, {"members": members})
+        metadata_index[acpt_no] = metadata
     return metadata_index, families
 
 
@@ -377,7 +378,12 @@ def _external_html_correction_family(
         member_record = selected_doc_to_record.get(doc_no)
         if member_record is None:
             return None
-        metadata = member_record.get("metadata") or {}
+        metadata = member_record["metadata"]
+        disclosed_at = str(metadata.get("disclosed_at") or "").strip()
+        if not disclosed_at:
+            raise ValueError(
+                f"correction family metadata.disclosed_at is required: doc_no={doc_no}"
+            )
         title = str(doc.get("text") or "").strip()
         members.append(
             {
@@ -385,7 +391,7 @@ def _external_html_correction_family(
                 "acpt_no": str(member_record.get("acpt_no") or ""),
                 "doc_no": doc_no,
                 "title": title,
-                "disclosed_at": str(metadata.get("disclosed_at") or "").strip(),
+                "disclosed_at": disclosed_at,
                 "is_correction_report": _external_doc_is_correction(doc, title),
             }
         )
@@ -591,9 +597,7 @@ def _parse_record_filters(value: Any) -> list[dict[str, Any]]:
 def _parse_filter_blocks(value: Any) -> list[dict[str, Any]]:
     if value is None:
         return []
-    if not isinstance(value, list):
-        raise ValueError("filter_blocks must be a list")
-    return value
+    return _validate_filter_blocks(value)
 
 
 def _parse_skip_errors(body: dict[str, Any]) -> bool:
@@ -721,7 +725,7 @@ def _build_parse_request(
         skip_errors=_parse_skip_errors(body),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
         parallel_workers=_parse_parallel_workers(
-            body.get("parallel_workers", body.get("workers")), len(html_files)
+            body.get("parallel_workers"), len(html_files)
         ),
         cancel_token=cancel_token,
         cancel_check=cancel_check,
@@ -736,9 +740,6 @@ _BOND_MAIN_TABLE_MISSING_WARNING = (
 _BOND_INVESTOR_TABLE_MISSING_WARNING = (
     "사채 발행 투자자 표를 찾지 못했습니다. "
     "HTML 양식이 예상과 달라 투자자 필드가 비어 있을 수 있습니다."
-)
-_RIGHTS_ISSUE_TYPE_MISSING_WARNING = (
-    "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
 )
 
 
@@ -958,8 +959,6 @@ def _warning_code(warning: str) -> str:
         return "bond_main_table_missing"
     if warning == _BOND_INVESTOR_TABLE_MISSING_WARNING:
         return "bond_investor_table_missing"
-    if warning == _RIGHTS_ISSUE_TYPE_MISSING_WARNING:
-        return "rights_issue_type_missing"
     if warning.startswith("발행목적: 자금조달 목적 합계"):
         return "bond_funding_purpose_sum_mismatch"
     if warning.startswith("투자자: 발행권면총액 합계"):

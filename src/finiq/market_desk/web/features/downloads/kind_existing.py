@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from finiq.concurrency import bounded_as_completed, resolve_worker_count
-from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS, DISCLOSURE_GROUPS, MARKET_TYPES, SECURITIES_TYPES
+from finiq.data_scraper.core.constants import DISCLOSURE_GROUPS, MARKET_TYPES, SECURITIES_TYPES
 from finiq.data_scraper.workflow import inspect_download_directory_pages
 
 from finiq.market_desk.web.features.downloads.kind_common import *
@@ -22,15 +22,13 @@ def get_current_kind_total_count(input_snapshot: dict[str, Any]) -> int | None:
         from finiq.data_scraper.core.payload import build_search_form
         from finiq.data_scraper.parse import pagination_info
 
-        request_headers = (
-            input_snapshot.get("request_headers") or DEFAULT_REQUEST_HEADERS
-        )
+        request_headers = input_snapshot["request_headers"]
 
         request_data = build_search_form(
             page_number=1,
-            start_date=input_snapshot.get("start_date") or "",
-            end_date=input_snapshot.get("end_date") or "",
-            page_size=input_snapshot.get("page_size") or 100,
+            start_date=input_snapshot["start_date"],
+            end_date=input_snapshot["end_date"],
+            page_size=input_snapshot["page_size"],
             search_filters=input_snapshot.get("search_filters"),
             disclosure_type_groups=input_snapshot.get("disclosure_type_groups"),
             last_report_only=input_snapshot.get("last_report_only"),

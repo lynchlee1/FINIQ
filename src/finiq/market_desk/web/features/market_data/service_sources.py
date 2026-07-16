@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from finiq.concurrency import bounded_as_completed
 from finiq.data_scraper.parse import disclosure_file_rows
-from finiq.data_scraper.storage.result_files import (
-    effective_result_page_paths,
-    result_page_number,
-)
+from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.market_desk.web.features.market_data.service_records import *
 
 
@@ -21,29 +17,21 @@ def _looks_like_sqlite_manifest(path: Path) -> bool:
     return payload.get("format") == "finiq_disclosure_table_manifest_v1"
 
 
-def _resolve_sqlite_manifest_path(path: str | Path) -> Path | None:
+def _resolve_sqlite_manifest_path(path: str | Path) -> Path:
     candidate = Path(path).expanduser().resolve()
-    if candidate.is_file():
-        if not _looks_like_sqlite_manifest(candidate):
-            if candidate.name == "sqlite_manifest.json":
-                msg = f"Not a FINIQ disclosure SQLite manifest: {candidate}"
-                raise ValueError(msg)
-            return None
-        if candidate.name != "sqlite_manifest.json":
-            msg = f"SQLite manifest must be named sqlite_manifest.json: {candidate}"
-            raise ValueError(msg)
-        return candidate
-    if not candidate.is_dir():
-        if candidate.name == "sqlite_manifest.json":
-            raise FileNotFoundError(f"SQLite manifest not found: {candidate}")
-        return None
-    manifest_path = candidate / "sqlite_manifest.json"
-    if not manifest_path.is_file():
-        return None
-    if not _looks_like_sqlite_manifest(manifest_path):
-        msg = f"Not a FINIQ disclosure SQLite manifest: {manifest_path}"
+    if candidate.is_dir():
+        raise ValueError(
+            f"SQLite manifest path must be the sqlite_manifest.json file: {candidate}"
+        )
+    if not candidate.is_file():
+        raise FileNotFoundError(f"SQLite manifest path not found: {candidate}")
+    if candidate.name != "sqlite_manifest.json":
+        msg = f"SQLite manifest must be named sqlite_manifest.json: {candidate}"
         raise ValueError(msg)
-    return manifest_path
+    if not _looks_like_sqlite_manifest(candidate):
+        msg = f"Not a FINIQ disclosure SQLite manifest: {candidate}"
+        raise ValueError(msg)
+    return candidate
 
 
 def _load_sqlite_manifest(manifest_path: Path) -> dict[str, Any]:
@@ -56,12 +44,9 @@ def _load_sqlite_manifest(manifest_path: Path) -> dict[str, Any]:
 
 def _sqlite_manifest_total_disclosures(manifest: dict[str, Any]) -> int:
     summary_count = manifest.get("summary", {}).get("disclosures")
-    if summary_count is not None:
-        return int(summary_count)
-    return sum(
-        int(shard.get("disclosures") or 0)
-        for shard in list(manifest.get("shards") or [])
-    )
+    if summary_count is None:
+        raise ValueError("SQLite manifest summary.disclosures is required")
+    return int(summary_count)
 
 
 def _quoted_sqlite_identifier(value: str) -> str:
@@ -249,138 +234,14 @@ def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for parsed_row in parsed_rows:
         row = dict(parsed_row)
-        row["company_key"] = _clean_text(
-            row.get("company_id") or row.get("company_name")
-        )
+        company_id = _clean_text(row.get("company_id"))
+        if not company_id:
+            raise ValueError(f"company_id is required: {file_path}")
+        row["company_key"] = company_id
         row["source_file"] = str(file_path)
         row["source_page"] = _result_page_number(file_path)
         rows.append(row)
     return rows
-
-
-def _find_source_body_files(root: Path) -> list[Path]:
-    resolved_root = root.resolve()
-    source_folders = {
-        path.parent.resolve()
-        for path in resolved_root.rglob("*_post_page_*.body")
-        if not any(
-            part.startswith(".")
-            for part in path.relative_to(resolved_root).parts[:-1]
-        )
-    }
-    return [
-        path
-        for _folder, path in sorted(
-            (
-                (folder, path)
-                for folder in source_folders
-                for path in effective_result_page_paths(folder)
-            ),
-            key=lambda item: (
-                str(item[0].relative_to(resolved_root)),
-                result_page_number(item[1]),
-                item[1].name,
-            ),
-        )
-    ]
-
-
-def _ensure_safe_source_root_directory(root: Path) -> None:
-    risky_directories = {
-        Path(root.anchor).resolve(),
-        Path.home().resolve(),
-        PROJECT_ROOT.resolve(),
-    }
-    risky_directories.update(PROJECT_ROOT.resolve().parents)
-    if root in risky_directories:
-        msg = f"Refusing to recursively inspect high-risk root_directory: {root}"
-        raise ValueError(msg)
-
-
-def _source_cache_key(root: Path, body_paths: list[Path]) -> tuple[str, int, int, int]:
-    latest_modified_ns = 0
-    total_size = 0
-    for body_path in body_paths:
-        stat_result = body_path.stat()
-        latest_modified_ns = max(latest_modified_ns, stat_result.st_mtime_ns)
-        total_size += stat_result.st_size
-    return (str(root), len(body_paths), latest_modified_ns, total_size)
-
-
-@lru_cache(maxsize=4)
-def _parse_source_body_files_cached(
-    root_path: str,
-    body_count: int,
-    latest_modified_ns: int,
-    total_size: int,
-    workers: int,
-) -> tuple[tuple[dict[str, Any], ...], int]:
-    root = Path(root_path)
-    body_paths = _find_source_body_files(root)
-    if not body_paths:
-        return ((), 0)
-
-    worker_count = _resolve_filter_workers(workers, len(body_paths))
-    parsed_by_path: dict[Path, list[dict[str, Any]]] = {}
-    if worker_count == 1:
-        for body_path in body_paths:
-            parsed_by_path[body_path] = _parse_source_body_file(body_path)
-    else:
-        with ThreadPoolExecutor(
-            max_workers=worker_count, thread_name_prefix="kind-filter"
-        ) as executor:
-            completed = bounded_as_completed(
-                executor,
-                body_paths,
-                lambda body_path: executor.submit(
-                    _parse_source_body_file, body_path
-                ),
-                max_pending=worker_count * 2,
-            )
-            for future, body_path in completed:
-                parsed_by_path[body_path] = future.result()
-
-    records: list[dict[str, Any]] = []
-    for body_path in body_paths:
-        for record in parsed_by_path.get(body_path, []):
-            records.append(_prepare_filter_record(record))
-    return (tuple(records), len(body_paths))
-
-
-def _iter_source_disclosure_records(
-    root_directory: str | Path,
-    *,
-    progress_callback: ProgressCallback | None = None,
-    progress_interval: int = 1000,
-    workers: int | None = None,
-) -> tuple[list[dict[str, Any]], int]:
-    root = Path(root_directory).expanduser().resolve()
-    if not root.is_dir():
-        msg = f"root_directory is not a directory: {root}"
-        raise ValueError(msg)
-    _ensure_safe_source_root_directory(root)
-    body_paths = _find_source_body_files(root)
-    folders: dict[Path, list[Path]] = {}
-    for body_path in body_paths:
-        folders.setdefault(body_path.parent, []).append(body_path)
-    records_tuple, body_file_count = _parse_source_body_files_cached(
-        *_source_cache_key(root, body_paths),
-        _resolve_filter_workers(workers, len(body_paths)),
-    )
-    records = list(records_tuple)
-    for index, folder_path in enumerate(sorted(folders), start=1):
-        _emit_progress(
-            progress_callback,
-            source_type="source_folder",
-            unit_label="폴더",
-            completed=index,
-            total=len(folders),
-            records=len(records),
-            progress_interval=progress_interval,
-        )
-    return (records, body_file_count)
-
-
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

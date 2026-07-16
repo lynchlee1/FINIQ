@@ -18,10 +18,17 @@ def _resolve_filter_workers(value: object, item_count: int | None) -> int:
 
 
 def _progress_interval(value: object) -> int:
-    try:
-        return min(max(int(value or 1000), 1), 10000)
-    except (TypeError, ValueError):
+    if value in (None, ""):
         return 1000
+    if isinstance(value, bool):
+        raise ValueError("progress_interval must be an integer")
+    try:
+        interval = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("progress_interval must be an integer") from exc
+    if interval < 1 or interval > 10000:
+        raise ValueError("progress_interval must be between 1 and 10000")
+    return interval
 
 
 def _emit_progress(
@@ -48,42 +55,6 @@ def _emit_progress(
             "records": records,
         }
     )
-
-
-def _iter_disclosure_records(
-    classification_payload: dict[str, Any],
-    *,
-    progress_callback: ProgressCallback | None = None,
-    progress_interval: int = 1000,
-) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    companies = list(classification_payload.get("companies") or [])
-    for index, company in enumerate(companies, start=1):
-        company_key = _company_key(company)
-        company_name = company.get("company_name")
-        company_id = company.get("company_id")
-        market = company.get("market")
-        for disclosure in list(company.get("disclosures") or []):
-            record = dict(disclosure)
-            record.update(
-                {
-                    "company_key": company_key,
-                    "company_name": company_name,
-                    "company_id": company_id,
-                    "market": market,
-                }
-            )
-            records.append(record)
-        _emit_progress(
-            progress_callback,
-            source_type="classification",
-            unit_label="JSON 항목",
-            completed=index,
-            total=len(companies),
-            records=len(records),
-            progress_interval=progress_interval,
-        )
-    return records
 
 
 def _record_sort_key(record: dict[str, Any]) -> tuple[str, str, str]:
@@ -140,47 +111,6 @@ def _unique_disclosure_titles(records: list[dict[str, Any]]) -> list[str]:
         seen_titles.add(title)
         titles.append(title)
     return titles
-
-
-def _classification_cache_key(classification_path: str | Path) -> tuple[str, int, int]:
-    target = Path(classification_path).expanduser().resolve()
-    stat_result = target.stat()
-    return (str(target), stat_result.st_mtime_ns, stat_result.st_size)
-
-
-@lru_cache(maxsize=8)
-def _load_classification_records_cached(
-    classification_path: str,
-    modified_ns: int,
-    file_size: int,
-) -> tuple[tuple[dict[str, Any], ...], int]:
-    payload = load_company_classification_file(classification_path)
-    records = [
-        _prepare_filter_record(record) for record in _iter_disclosure_records(payload)
-    ]
-    return (tuple(records), len(list(payload.get("companies") or [])))
-
-
-def _load_classification_disclosure_records(
-    classification_path: str | Path,
-    *,
-    progress_callback: ProgressCallback | None = None,
-) -> list[dict[str, Any]]:
-    cache_key = _classification_cache_key(classification_path)
-    cached_records, company_count = _load_classification_records_cached(*cache_key)
-    records = list(cached_records)
-    _emit_progress(
-        progress_callback,
-        source_type="classification",
-        unit_label="JSON 항목",
-        completed=company_count,
-        total=company_count,
-        records=len(records),
-        force=True,
-    )
-    return records
-
-
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

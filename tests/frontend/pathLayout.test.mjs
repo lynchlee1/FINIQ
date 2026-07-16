@@ -54,7 +54,9 @@ test("html section split exposes worker count setting and background section kin
   const source = await readFile(htmlSectionSplitPath, "utf8");
 
   assert.match(source, /const \[workers, setWorkers\] = useState\("1"\)/);
-  assert.match(source, /setWorkers\(String\(config\.parallel_worker_count \|\| 1\)\)/);
+  assert.match(source, /const workerCount = Number\(config\.parallel_worker_count\)/);
+  assert.match(source, /setWorkers\(String\(workerCount\)\)/);
+  assert.doesNotMatch(source, /config\.parallel_worker_count \|\| 1/);
   assert.match(source, /label: "병렬 처리 개수"/);
   assert.match(source, /\/api\/disclosures\/html\/sections\/kinds\/start/);
   assert.match(source, /workers: parseOptionalNumber\(workers\)/);
@@ -132,7 +134,7 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   assert.match(tableSource, /useSeparateOutputDirectory && <div/);
   assert.match(tableSource, /root_directory: useSeparateOutputDirectory/);
   assert.match(tableSource, /saveSetting\("sqlite_output_directory", val\)/);
-  assert.match(filterSource, /\.\.\.\(useSeparateOutputDirectory[\s\S]*?classification_path:/);
+  assert.doesNotMatch(filterSource, /classification_path:/);
   assert.match(filterSource, /saveSetting\("external_html_transfer_directory", val\)/);
   assert.doesNotMatch(filterSource, /saveSetting\("external_html_transfer_directory", transferPath\)/);
   const sourcePayload = htmlDownloadSource.match(/const sourcePayload[\s\S]*?const currentSourcePath/)?.[0] ?? "";
@@ -237,12 +239,13 @@ test("disclosure filter requires a parser mode for mode-folder output", async ()
   assert.match(source, /saveSetting\("html_parse_mode", event\.target\.value\)/);
 });
 
-test("disclosure filter defaults processing, return, and progress counts to 1000", async () => {
+test("disclosure filter initializes counts to 1000 and submits them without fallback", async () => {
   const source = await readFile(filterPagePath, "utf8");
 
   assert.match(source, /const \[limit, setLimit\] = useState\("1000"\)/);
   assert.match(source, /const \[progressInterval, setProgressInterval\] = useState\("1000"\)/);
-  assert.match(source, /progress_interval: Number\(progressInterval \|\| 1000\)/);
+  assert.match(source, /progress_interval: configuredProgressInterval/);
+  assert.doesNotMatch(source, /Number\(progressInterval \|\| 1000\)/);
 });
 
 test("disclosure filter loads saved JSON filters and auto-applies selected presets", async () => {

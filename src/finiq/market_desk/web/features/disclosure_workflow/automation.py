@@ -426,6 +426,8 @@ def _detail_download_payload(profile: dict[str, Any]) -> dict[str, Any]:
         "disclosure_type_groups": search["disclosure_type_groups"],
         "last_report_only": False,
         "page_size": profile["execution"]["page_size"],
+        "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
+        "timeout": profile["execution"]["timeout"],
     }
 
 
@@ -438,6 +440,8 @@ def _snapshot_semantics(snapshot: dict[str, Any]) -> dict[str, Any]:
         "disclosure_type_groups",
         "last_report_only",
         "include_previous_disclosures",
+        "wait_seconds_between_requests",
+        "timeout",
     )
     return {key: snapshot.get(key) for key in keys}
 
@@ -533,6 +537,8 @@ def _automation_window_snapshot(
             "securities_label": search["securities_label"],
             "disclosure_type_groups": search["disclosure_type_groups"],
             "last_report_only": False,
+            "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
+            "timeout": profile["execution"]["timeout"],
         },
         start=window_start,
         end=window_end,
@@ -596,9 +602,7 @@ def _filter_signature(payload: dict[str, Any]) -> str:
         {
             "format": payload.get("format"),
             "source_type": payload.get("source_type"),
-            "source_classification_path": payload.get("source_classification_path"),
             "source_sqlite_manifest_path": payload.get("source_sqlite_manifest_path"),
-            "source_root_directory": payload.get("source_root_directory"),
             "filters": filters,
             "summary": payload.get("summary"),
             "disclosures": payload.get("disclosures"),
@@ -644,34 +648,25 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
             reason="공시내역 변환 입력 경로가 현재 다운로드 경로와 다릅니다.",
             details={"expected": str(expected_source), "actual": str(source_path)},
         )
-    source_result = filter_disclosures_payload(
-        {
-            "root_directory": str(expected_source),
-            "filter_blocks": [],
-            "filter_workers": profile["execution"]["local_workers"],
-        }
-    )
     table_result = filter_disclosures_payload(
         {
-            "classification_path": str(manifest_path),
+            "data_root": str(root),
             "filter_blocks": [],
             "filter_workers": profile["execution"]["local_workers"],
         }
     )
-    source_summary = source_result.get("summary") or {}
     table_summary = table_result.get("summary") or {}
     manifest_summary = manifest.get("summary") or {}
-    source_count = int(source_summary.get("source_disclosures") or 0)
-    source_duplicate_count = int(source_summary.get("duplicate_disclosures") or 0)
+    source_count = int(manifest_summary.get("source_rows") or 0)
+    source_duplicate_count = int(manifest_summary.get("duplicate_rows") or 0)
+    manifest_disclosures = int(manifest_summary.get("disclosures") or 0)
     table_count = int(table_summary.get("source_disclosures") or 0)
     table_duplicate_count = int(table_summary.get("duplicate_disclosures") or 0)
     if (
-        source_count != table_count + source_duplicate_count
+        source_count != manifest_disclosures + source_duplicate_count
+        or table_count != manifest_disclosures
         or table_duplicate_count != 0
-        or int(manifest_summary.get("source_rows") or 0) != source_count
-        or int(manifest_summary.get("duplicate_rows") or 0)
-        != source_duplicate_count
-        or source_result.get("disclosures") != table_result.get("disclosures")
+        or len(table_result.get("disclosures") or []) != manifest_disclosures
     ):
         return _inspection_failure(
             2,
@@ -681,7 +676,6 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
                 "source_duplicate_rows": source_duplicate_count,
                 "table_rows": table_count,
                 "table_duplicate_rows": table_duplicate_count,
-                "source_records": len(source_result.get("disclosures") or []),
                 "table_records": len(table_result.get("disclosures") or []),
             },
         )
@@ -697,13 +691,14 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
+    root = Path(profile["data_root"])
     output_path = _filter_result_path(profile)
     actual = _read_json_object(output_path)
     if actual is None:
         return _inspection_failure(3, reason="필터 결과 JSON이 없거나 손상되었습니다.")
     expected = filter_disclosures_payload(
         {
-            "classification_path": str(_table_manifest(profile)),
+            "data_root": str(root),
             "mode": profile["execution"]["parser_mode"],
             "filter_blocks": profile["decisions"]["s3_selection"]["filter_blocks"],
             "include_external_html_download_acpt_numbers": True,
@@ -799,7 +794,7 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
             {
                 "input_directory": str(output_directory),
                 "output_directory": temporary,
-                "workers": profile["execution"]["local_workers"],
+                "parallel_workers": profile["execution"]["local_workers"],
             }
         )
         rebuilt_compressed = _read_json_object(
@@ -1713,7 +1708,7 @@ def _run_stage(
         return build_disclosure_table_payload(
             {
                 "data_root": str(root),
-                "classification_path": str(root / "01-list" / ".automation-windows"),
+                "root_directory": str(root / "01-list" / ".automation-windows"),
                 "output_path": str(root / "02-table"),
                 "table_name": "disclosures",
                 "table_workers": execution["local_workers"],
@@ -1725,7 +1720,7 @@ def _run_stage(
         mode = execution["parser_mode"]
         result = filter_disclosures_payload(
             {
-                "classification_path": str(root / "02-table"),
+                "data_root": str(root),
                 "mode": mode,
                 "filter_blocks": profile["decisions"]["s3_selection"]["filter_blocks"],
                 "include_external_html_download_acpt_numbers": True,
@@ -1773,7 +1768,7 @@ def _run_stage(
                     {
                         "input_directory": str(temporary),
                         "output_directory": str(temporary),
-                        "workers": execution["local_workers"],
+                        "parallel_workers": execution["local_workers"],
                     },
                     progress_callback=progress_callback,
                 )

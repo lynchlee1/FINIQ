@@ -70,13 +70,9 @@ def resolve_default_classification(root_directory: str | Path) -> str | None:
     files = list_classification_files(root)
     if not files:
         return None
-    for preferred_name in (
-        "kind.company_classification.json",
-        "kind.company_classification.sample.json",
-    ):
-        for file_info in files:
-            if Path(file_info["path"]).name == preferred_name:
-                return file_info["path"]
+    for file_info in files:
+        if Path(file_info["path"]).name == "kind.company_classification.sqlite":
+            return file_info["path"]
     return files[0]["path"]
 
 

@@ -12,7 +12,9 @@ test("market desk stores runtime parallel worker count in temporary settings sta
   assert.match(source, /parallel_worker_count: number/);
   assert.match(source, /runtime_info_loaded: boolean/);
   assert.match(source, /fetchRuntimeInfo: \(\) => Promise<any>/);
-  assert.match(source, /parallel_worker_count: Number\(config\.parallel_worker_count \|\| 1\)/);
+  assert.match(source, /const workerCount = Number\(config\.parallel_worker_count\)/);
+  assert.match(source, /parallel_worker_count must be a positive integer/);
+  assert.doesNotMatch(source, /config\.parallel_worker_count \|\| 1/);
   assert.match(source, /"parallel_worker_count" \| "runtime_info_loaded"/);
 });
 

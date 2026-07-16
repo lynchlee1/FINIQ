@@ -12,9 +12,11 @@ def compress_disclosure_external_html_payload(
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Extract compact metadata from downloaded KIND external HTML files into one JSON."""
-    input_directory_raw = str(
-        body.get("input_directory") or body.get("source_directory") or ""
-    ).strip()
+    if "source_directory" in body:
+        raise ValueError(
+            "source_directory is not supported; use input_directory"
+        )
+    input_directory_raw = str(body.get("input_directory") or "").strip()
     if not input_directory_raw:
         msg = "input_directory is required"
         raise ValueError(msg)

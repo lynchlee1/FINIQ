@@ -336,19 +336,14 @@ def _external_workspace_body(
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
     filtered_path.write_text(
-        json.dumps(source_json, ensure_ascii=False), encoding="utf-8"
-    )
-    return {"data_root": str(data_root), "mode": "bond_issuance", **body}
-
-
-def _external_workspace_body(
-    tmp_path: Path, source_json: dict[str, Any], **body: object
-) -> dict[str, object]:
-    data_root = tmp_path / "workspace"
-    filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
-    filtered_path.parent.mkdir(parents=True, exist_ok=True)
-    filtered_path.write_text(
-        json.dumps(source_json, ensure_ascii=False), encoding="utf-8"
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                **source_json,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
     )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
@@ -413,7 +408,49 @@ def _trusted_download_input_snapshot(
         "disclosure_type_groups": {},
         "last_report_only": False,
         "include_previous_disclosures": None,
+        "wait_seconds_between_requests": 1.0,
+        "timeout": 20.0,
     }
+
+
+def _filter_block(**overrides: object) -> dict[str, object]:
+    return {
+        "connector": "",
+        "open_count": 0,
+        "close_count": 0,
+        "not": False,
+        "ignore_spaces": False,
+        "clean_search": False,
+        **overrides,
+    }
+
+
+def _html_parse_metadata_paths(
+    *,
+    filtered_path: Path | None = None,
+    compressed_path: Path | None = None,
+) -> dict[str, str]:
+    paths: dict[str, str] = {}
+    if filtered_path is not None:
+        payload = json.loads(filtered_path.read_text(encoding="utf-8"))
+        payload["format"] = "kind_disclosure_filter_v1"
+        for disclosure in payload["disclosures"]:
+            disclosure.setdefault("disclosed_at", "2025-01-01 09:00")
+        filtered_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        paths["filtered_metadata_path"] = str(filtered_path)
+    if compressed_path is not None:
+        payload = json.loads(compressed_path.read_text(encoding="utf-8"))
+        payload["format"] = "finiq_disclosure_external_html_docs_v1"
+        for record in payload["records"]:
+            record.setdefault("selected_main_doc_no", f"{record['acpt_no']}01")
+            record.setdefault("metadata", {})
+        compressed_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        paths["compressed_metadata_path"] = str(compressed_path)
+    return paths
 
 
 def _classification_fixture_payload() -> dict[str, object]:
@@ -460,7 +497,7 @@ def _classification_fixture_payload() -> dict[str, object]:
 def _write_classification_fixture(
     tmp_path: Path, payload: dict[str, object] | None = None
 ) -> Path:
-    fixture_path = tmp_path / "kind.company_classification.sample.json"
+    fixture_path = tmp_path / "kind.company_classification.sqlite"
     return write_company_classification_artifact(
         fixture_path,
         payload or _classification_fixture_payload(),
@@ -468,12 +505,86 @@ def _write_classification_fixture(
     )
 
 
-def _write_multiyear_classification_fixture(tmp_path: Path) -> Path:
-    payload = _classification_fixture_payload()
-    payload["companies"][0]["disclosures"][0]["disclosed_at"] = "2023-01-02 09:00:00"
-    payload["companies"][0]["disclosures"][1]["disclosed_at"] = "2024-01-10 09:00:00"
-    payload["companies"][0]["disclosures"][2]["disclosed_at"] = "2025-01-15 09:00:00"
-    return _write_classification_fixture(tmp_path, payload)
+def _write_filter_manifest_fixture(
+    tmp_path: Path, payload: dict[str, object] | None = None
+) -> Path:
+    source_payload = payload or _classification_fixture_payload()
+    rows_by_year: dict[str, list[dict[str, Any]]] = {}
+    company_keys: set[str] = set()
+    for company in source_payload["companies"]:
+        company_key = str(company["company_id"])
+        company_keys.add(company_key)
+        for row_number, disclosure in enumerate(company["disclosures"], start=1):
+            disclosed_at = str(disclosure.get("disclosed_at") or "")
+            year = disclosed_at[:4]
+            row = {
+                "row_no": str(row_number),
+                "company_key": company_key,
+                "company_name": company.get("company_name"),
+                "company_id": company.get("company_id"),
+                "market": company.get("market"),
+                "badges_json": json.dumps(company.get("badges") or []),
+                "disclosed_at": disclosed_at,
+                "disclosed_date": disclosed_at.split(" ", 1)[0],
+                "title": disclosure.get("title"),
+                "title_attr": disclosure.get("title_attr"),
+                "title_base": disclosure.get("title_base"),
+                "title_display": disclosure.get("title_display"),
+                "title_flags_json": json.dumps(disclosure.get("title_flags") or []),
+                "is_correction_report": int(bool(disclosure.get("is_correction_report"))),
+                "has_later_correction": int(bool(disclosure.get("has_later_correction"))),
+                "acpt_no": disclosure.get("acpt_no"),
+                "doc_no": disclosure.get("doc_no"),
+                "submitter": disclosure.get("submitter"),
+                "source_file": "fixture.body",
+                "source_page": 1,
+            }
+            rows_by_year.setdefault(year, []).append(row)
+
+    table_root = tmp_path / "02-table"
+    manifest_path = table_root / "sqlite_manifest.json"
+    shards = [
+        table_export_module._write_sqlite_shard(
+            shard_path=table_root / f"{year}.sqlite",
+            rows=rows,
+            source_path=tmp_path,
+            source_type="source_folder",
+            table_name="disclosures",
+            shard_year=year,
+        )
+        for year, rows in sorted(rows_by_year.items())
+    ]
+    row_count = sum(len(rows) for rows in rows_by_year.values())
+    table_export_module._write_manifest(
+        manifest_path,
+        {
+            "format": "finiq_disclosure_table_manifest_v1",
+            "schema_version": 2,
+            "source_type": "source_folder",
+            "source_path": str(tmp_path),
+            "manifest_path": str(manifest_path),
+            "shard_root": str(table_root),
+            "table_name": "disclosures",
+            "summary": {
+                "companies": len(company_keys),
+                "source_rows": row_count,
+                "duplicate_rows": 0,
+                "disclosures": row_count,
+                "shards": len(shards),
+            },
+            "pages": [
+                {
+                    "source_file": "fixture.body",
+                    "source_page": 1,
+                    "source_rows": row_count,
+                    "written_rows": row_count,
+                    "duplicate_rows": 0,
+                }
+            ],
+            "shards": shards,
+        },
+    )
+    return manifest_path
 
 
 def _write_source_body_fixture(tmp_path: Path) -> Path:
@@ -542,12 +653,12 @@ def test_load_company_index_payload_filters_market(tmp_path: Path) -> None:
 
 
 def test_filter_disclosures_payload_filters_by_title_and_date(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    manifest_path = _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
-            "title_keyword": "전환사채",
+            "data_root": str(tmp_path),
+            "title_keywords": "전환사채",
             "start_date": "2025-01-01",
             "end_date": "2025-01-05",
         }
@@ -560,116 +671,55 @@ def test_filter_disclosures_payload_filters_by_title_and_date(tmp_path: Path) ->
     assert payload["unique_titles"] == ["[정정]전환사채발행결정"]
 
 
-def test_filter_disclosures_payload_resolves_classification_from_root_directory(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
-
-    payload = filter_disclosures_payload(
-        {
-            "root_directory": str(tmp_path),
-            "title_keyword": "전환사채",
-        }
-    )
-
-    assert payload["source_classification_path"] == str(fixture_path.resolve())
-    assert payload["summary"]["matched_disclosures"] == 1
-    assert payload["disclosures"][0]["acpt_no"] == "1"
+def test_filter_disclosures_payload_rejects_root_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="root_directory is not supported"):
+        filter_disclosures_payload({"root_directory": str(tmp_path)})
 
 
-def test_filter_disclosures_payload_reads_source_folder_without_classification_json(tmp_path: Path) -> None:
+def test_filter_disclosures_payload_rejects_source_folder(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
-    progress_events = []
-
-    payload = filter_disclosures_payload(
-        {
-            "root_directory": str(source_root),
-            "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환사채",
-                }
-            ],
-        },
-        progress_callback=progress_events.append,
-    )
-
-    assert payload["source_type"] == "source_folder"
-    assert payload["source_classification_path"] == ""
-    assert payload["summary"]["source_body_files"] == 1
-    assert payload["summary"]["matched_disclosures"] == 1
-    assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
-    assert payload["disclosures"][0]["doc_no"] == "20250102009999"
-    assert payload["disclosures"][0]["company_name"] == "테스트전자"
-    assert payload["disclosures"][0]["title"] == "[정정]전환사채발행결정"
-    assert payload["disclosures"][0]["title_attr"] == "전환사채발행결정"
-    assert payload["disclosures"][0]["title_flags"] == ["정정"]
-    assert payload["disclosures"][0]["is_correction_report"] is True
-    assert payload["disclosures"][0]["has_later_correction"] is True
-    assert payload["disclosures"][0]["source_page"] == 1
-    assert any(event["unit_label"] == "폴더" and event["completed"] == 1 for event in progress_events)
-    assert any(event["unit_label"] == "공시" and event["total"] == 2 for event in progress_events)
+    with pytest.raises(ValueError, match="root_directory is not supported"):
+        filter_disclosures_payload({"root_directory": str(source_root)})
 
 
-def test_filter_disclosures_payload_rejects_high_risk_source_root() -> None:
+def test_filter_disclosures_payload_rejects_root_directory_before_path_resolution() -> None:
     root = Path(Path.cwd().anchor).resolve()
 
-    with pytest.raises(ValueError, match="high-risk root_directory"):
+    with pytest.raises(ValueError, match="root_directory is not supported"):
         filter_disclosures_payload({"root_directory": str(root)})
 
 
-def test_filter_disclosures_payload_reads_sqlite_manifest_directory(tmp_path: Path) -> None:
-    source_root = _write_source_body_fixture(tmp_path)
-    sqlite_root = tmp_path / "kind_sqlite"
-    output_path = sqlite_root / "kind.sqlite_manifest.json"
-    manifest_path = _sqlite_manifest_path(output_path)
-    build_disclosure_table_payload(
-        {
-            "classification_path": str(source_root),
-            "output_path": str(output_path),
-        }
-    )
+def test_filter_disclosures_payload_requires_data_root() -> None:
+    with pytest.raises(ValueError, match="data_root is required"):
+        filter_disclosures_payload({})
 
-    payload = filter_disclosures_payload(
-        {
-            "root_directory": str(sqlite_root),
-            "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환사채",
-                }
-            ],
-            "include_external_html_download_acpt_numbers": True,
-        }
-    )
 
-    assert payload["source_type"] == "sqlite_manifest"
-    assert payload["source_sqlite_manifest_path"] == str(manifest_path.resolve())
-    assert payload["summary"]["source_disclosures"] == 2
-    assert payload["summary"]["matched_disclosures"] == 1
-    assert payload["disclosures"][0]["acpt_no"] == "20250102000001"
-    assert payload["disclosures"][0]["doc_no"] == "20250102009999"
-    assert payload["disclosures"][0]["title"] == "[정정]전환사채발행결정"
-    assert payload["disclosures"][0]["title_flags"] == ["정정"]
-    assert payload["disclosures"][0]["is_correction_report"] == 1
-    assert payload["disclosures"][0]["has_later_correction"] == 1
-    assert payload["external_html_download_acpt_numbers"] == ["20250102000001"]
+@pytest.mark.parametrize("direct_path", ["02-table", "02-table/sqlite_manifest.json"])
+def test_filter_disclosures_payload_rejects_direct_manifest_inputs(
+    tmp_path: Path, direct_path: str
+) -> None:
+    with pytest.raises(ValueError, match="classification_path is not supported"):
+        filter_disclosures_payload(
+            {"classification_path": str(tmp_path / direct_path)}
+        )
 
 
 def test_filter_disclosures_payload_uses_standard_manifest_name(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
-    sqlite_root = tmp_path / "kind_sqlite"
+    data_root = tmp_path / "workspace"
+    sqlite_root = data_root / "02-table"
     requested_path = sqlite_root / "custom.sqlite_manifest.json"
+    manifest_path = _sqlite_manifest_path(requested_path)
     build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(requested_path),
         }
     )
 
-    payload = filter_disclosures_payload({"root_directory": str(sqlite_root)})
+    payload = filter_disclosures_payload({"data_root": str(data_root)})
 
     assert not requested_path.exists()
     assert payload["source_sqlite_manifest_path"] == str(
@@ -686,7 +736,7 @@ def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path
     manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
@@ -700,12 +750,13 @@ def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path
 
 def test_filter_disclosures_payload_rejects_missing_manifest_shard_path(tmp_path: Path) -> None:
     source_root = _write_source_body_fixture(tmp_path)
-    sqlite_root = tmp_path / "kind_sqlite"
+    data_root = tmp_path / "workspace"
+    sqlite_root = data_root / "02-table"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
     manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
@@ -717,13 +768,13 @@ def test_filter_disclosures_payload_rejects_missing_manifest_shard_path(tmp_path
     with pytest.raises(ValueError, match="SQLite shard not found"):
         filter_disclosures_payload(
             {
-                "root_directory": str(sqlite_root),
+                "data_root": str(data_root),
                 "filter_blocks": [
-                    {
-                        "field": "title",
-                        "operator": "contains",
-                        "value": "전환사채",
-                    }
+                    _filter_block(
+                        field="title",
+                        operator="contains",
+                        value="전환사채",
+                    )
                 ],
             }
         )
@@ -734,24 +785,24 @@ def test_filter_disclosures_payload_does_not_search_nested_kind_sqlite_manifest(
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
     root = tmp_path / "kind_kosdaq"
-    sqlite_root = root / "kind_sqlite"
+    sqlite_root = root / "nested-table"
     output_path = sqlite_root / "kind_kosdaq.sqlite_manifest.json"
     manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
 
-    with pytest.raises(FileNotFoundError, match="Classification artifact not found"):
-        filter_disclosures_payload({"classification_path": str(root)})
+    with pytest.raises(FileNotFoundError, match="02-table/sqlite_manifest.json"):
+        filter_disclosures_payload({"data_root": str(root)})
 
 
 def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_column(
     tmp_path: Path,
 ) -> None:
-    sqlite_root = tmp_path / "kind_sqlite"
+    sqlite_root = tmp_path / "02-table"
     shard_root = sqlite_root
     shard_root.mkdir(parents=True)
     shard_path = shard_root / "2025.sqlite"
@@ -827,13 +878,11 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_colum
     ):
         filter_disclosures_payload(
             {
-                "root_directory": str(sqlite_root),
+                "data_root": str(tmp_path),
                 "filter_blocks": [
-                    {
-                        "field": "title",
-                        "operator": "contains",
-                        "value": "전환사채",
-                    }
+                    _filter_block(
+                        field="title", operator="contains", value="전환사채"
+                    )
                 ],
             }
         )
@@ -842,7 +891,9 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_colum
 def test_filter_disclosures_payload_rejects_nonstandard_sqlite_manifest_name(
     tmp_path: Path,
 ) -> None:
-    manifest_path = tmp_path / "kind.sqlite_manifest.json"
+    table_root = tmp_path / "02-table"
+    table_root.mkdir(parents=True)
+    manifest_path = table_root / "kind.sqlite_manifest.json"
     manifest_path.write_text(
         json.dumps(
             {
@@ -856,20 +907,20 @@ def test_filter_disclosures_payload_rejects_nonstandard_sqlite_manifest_name(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="must be named sqlite_manifest.json"):
-        filter_disclosures_payload({"classification_path": str(manifest_path)})
+    with pytest.raises(FileNotFoundError, match="02-table/sqlite_manifest.json"):
+        filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
 def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
-    sqlite_root = tmp_path / "kind_sqlite"
+    sqlite_root = tmp_path / "02-table"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
     manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
@@ -878,19 +929,19 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="SQLite shard disclosure count mismatch"):
-        filter_disclosures_payload({"root_directory": str(sqlite_root)})
+        filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
 def test_filter_disclosures_payload_rejects_unaccounted_source_rows(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
-    sqlite_root = tmp_path / "kind_sqlite"
+    sqlite_root = tmp_path / "02-table"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
     manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
@@ -899,19 +950,19 @@ def test_filter_disclosures_payload_rejects_unaccounted_source_rows(
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="did not account for every source disclosure row"):
-        filter_disclosures_payload({"root_directory": str(sqlite_root)})
+        filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
 def test_filter_disclosures_payload_rejects_unaccounted_page_rows(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
-    sqlite_root = tmp_path / "kind_sqlite"
+    sqlite_root = tmp_path / "02-table"
     output_path = sqlite_root / "kind.sqlite_manifest.json"
     manifest_path = _sqlite_manifest_path(output_path)
     build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
@@ -920,33 +971,32 @@ def test_filter_disclosures_payload_rejects_unaccounted_page_rows(
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="page did not account for every source row"):
-        filter_disclosures_payload({"root_directory": str(sqlite_root)})
+        filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
-def test_filter_disclosures_payload_reports_json_progress(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+def test_filter_disclosures_payload_reports_sqlite_progress(tmp_path: Path) -> None:
+    fixture_path = _write_filter_manifest_fixture(tmp_path)
     progress_events = []
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "progress_interval": 1,
         },
         progress_callback=progress_events.append,
     )
 
-    assert payload["source_type"] == "classification"
+    assert payload["source_type"] == "sqlite_manifest"
     assert payload["summary"]["matched_disclosures"] == 3
-    assert any(event["unit_label"] == "JSON 항목" and event["completed"] == 1 for event in progress_events)
     assert any(event["unit_label"] == "공시" and event["total"] == 3 for event in progress_events)
 
 
 def test_filter_disclosures_payload_supports_title_include_and_exclude_keywords(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "title_keywords": "전환사채\n주주총회",
             "exclude_title_keywords": "주주총회",
             "title_match_mode": "or",
@@ -980,18 +1030,18 @@ def test_filter_disclosures_payload_supports_clean_search_title_blocks(tmp_path:
         }
     )
     payload["summary"]["disclosures"] = 4
-    fixture_path = _write_classification_fixture(tmp_path, payload)
+    _write_filter_manifest_fixture(tmp_path, payload)
 
     filtered_payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "공정공시공시내용",
-                    "clean_search": True,
-                }
+                _filter_block(
+                    field="title",
+                    operator="contains",
+                    value="공정공시공시내용",
+                    clean_search=True,
+                )
             ],
         }
     )
@@ -1010,20 +1060,20 @@ def test_filter_disclosures_payload_cleans_unique_titles_and_places_them_before_
         }
     )
     payload["summary"]["disclosures"] = 4
-    fixture_path = _write_classification_fixture(tmp_path, payload)
+    _write_filter_manifest_fixture(tmp_path, payload)
 
-    filtered_payload = filter_disclosures_payload({"classification_path": str(fixture_path)})
+    filtered_payload = filter_disclosures_payload({"data_root": str(tmp_path)})
 
     assert filtered_payload["unique_titles"][0] == "공정공시공시내용"
     assert list(filtered_payload).index("unique_titles") < list(filtered_payload).index("disclosures")
 
 
 def test_filter_disclosures_payload_can_return_without_limit(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "limit": 1,
             "limit_unlimited": True,
         }
@@ -1037,11 +1087,11 @@ def test_filter_disclosures_payload_can_return_without_limit(tmp_path: Path) -> 
 
 
 def test_filter_disclosures_payload_ignores_return_limit(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "limit_unlimited": True,
             "return_limit": 1,
             "include_external_html_download_acpt_numbers": True,
@@ -1064,11 +1114,11 @@ def test_filter_disclosures_payload_deduplicates_by_acpt_no(tmp_path: Path) -> N
     duplicate["title"] = "다른 제목"
     payload["companies"][0]["disclosures"].append(duplicate)
     payload["summary"]["disclosures"] = 4
-    fixture_path = _write_classification_fixture(tmp_path, payload)
+    _write_filter_manifest_fixture(tmp_path, payload)
 
     filtered_payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "include_external_html_download_acpt_numbers": True,
         }
     )
@@ -1085,23 +1135,24 @@ def test_filter_disclosures_payload_deduplicates_by_acpt_no(tmp_path: Path) -> N
 def test_filter_disclosures_payload_rejects_missing_acpt_no(tmp_path: Path) -> None:
     payload = _classification_fixture_payload()
     payload["companies"][0]["disclosures"][0].pop("acpt_no")
-    fixture_path = _write_classification_fixture(tmp_path, payload)
+    _write_filter_manifest_fixture(tmp_path, payload)
 
     with pytest.raises(ValueError, match="acpt_no is required"):
-        filter_disclosures_payload({"classification_path": str(fixture_path)})
+        filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
 def test_filter_disclosures_progress_interval_defaults_to_1000() -> None:
     assert _progress_interval(None) == 1000
-    assert _progress_interval("invalid") == 1000
+    with pytest.raises(ValueError, match="must be an integer"):
+        _progress_interval("invalid")
 
 
 def test_filter_disclosures_payload_supports_title_boolean_expression(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "title_expression": '"전환사채" AND "발행결정" OR ("주주총회" AND NOT "정정")',
         }
     )
@@ -1110,31 +1161,29 @@ def test_filter_disclosures_payload_supports_title_boolean_expression(tmp_path: 
 
 
 def test_filter_disclosures_payload_supports_field_filter_blocks(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환사채",
-                },
-                {
-                    "connector": "OR",
-                    "open_count": 1,
-                    "field": "market",
-                    "operator": "equals",
-                    "value": "코스피",
-                },
-                {
-                    "connector": "AND",
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "주주총회",
-                    "close_count": 1,
-                },
+                _filter_block(
+                    field="title", operator="contains", value="전환사채"
+                ),
+                _filter_block(
+                    connector="OR",
+                    open_count=1,
+                    field="market",
+                    operator="equals",
+                    value="코스피",
+                ),
+                _filter_block(
+                    connector="AND",
+                    field="title",
+                    operator="contains",
+                    value="주주총회",
+                    close_count=1,
+                ),
             ],
         }
     )
@@ -1143,18 +1192,18 @@ def test_filter_disclosures_payload_supports_field_filter_blocks(tmp_path: Path)
 
 
 def test_filter_disclosures_payload_can_ignore_spaces_in_block_values(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환 사채 발행",
-                    "ignore_spaces": True,
-                },
+                _filter_block(
+                    field="title",
+                    operator="contains",
+                    value="전환 사채 발행",
+                    ignore_spaces=True,
+                ),
             ],
         }
     )
@@ -1163,42 +1212,42 @@ def test_filter_disclosures_payload_can_ignore_spaces_in_block_values(tmp_path: 
 
 
 def test_filter_disclosures_payload_supports_nested_bond_issuance_filter_blocks(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "filter_blocks": [
-                {
-                    "open_count": 2,
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "전환사채",
-                    "ignore_spaces": True,
-                },
-                {
-                    "connector": "OR",
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "교환사채",
-                    "ignore_spaces": True,
-                    "close_count": 1,
-                },
-                {
-                    "connector": "OR",
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "신주인수권부사채",
-                    "ignore_spaces": True,
-                    "close_count": 1,
-                },
-                {
-                    "connector": "AND",
-                    "field": "title",
-                    "operator": "contains",
-                    "value": "발행",
-                    "ignore_spaces": True,
-                },
+                _filter_block(
+                    open_count=2,
+                    field="title",
+                    operator="contains",
+                    value="전환사채",
+                    ignore_spaces=True,
+                ),
+                _filter_block(
+                    connector="OR",
+                    field="title",
+                    operator="contains",
+                    value="교환사채",
+                    ignore_spaces=True,
+                    close_count=1,
+                ),
+                _filter_block(
+                    connector="OR",
+                    field="title",
+                    operator="contains",
+                    value="신주인수권부사채",
+                    ignore_spaces=True,
+                    close_count=1,
+                ),
+                _filter_block(
+                    connector="AND",
+                    field="title",
+                    operator="contains",
+                    value="발행",
+                    ignore_spaces=True,
+                ),
             ],
         }
     )
@@ -1207,31 +1256,29 @@ def test_filter_disclosures_payload_supports_nested_bond_issuance_filter_blocks(
 
 
 def test_filter_disclosures_payload_supports_exact_match_operator(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    _write_filter_manifest_fixture(tmp_path)
 
     partial_payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "filter_blocks": [
-                {
-                    "field": "title",
-                    "operator": "exact_match",
-                    "value": "전환사채",
-                },
+                _filter_block(
+                    field="title", operator="exact_match", value="전환사채"
+                ),
             ],
         }
     )
     exact_payload = filter_disclosures_payload(
         {
-            "classification_path": str(fixture_path),
+            "data_root": str(tmp_path),
             "filter_blocks": [
-                    {
-                        "field": "title",
-                        "operator": "exact_match",
-                        "value": "[정정]전환사채발행결정",
-                    },
-                ],
-            }
+                _filter_block(
+                    field="title",
+                    operator="exact_match",
+                    value="[정정]전환사채발행결정",
+                ),
+            ],
+        }
     )
 
     assert partial_payload["disclosures"] == []
@@ -1239,21 +1286,21 @@ def test_filter_disclosures_payload_supports_exact_match_operator(tmp_path: Path
 
 
 def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: Path) -> None:
-    fixture_path = _write_classification_fixture(tmp_path)
+    source_root = _write_source_body_fixture(tmp_path)
     output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
     manifest_path = _sqlite_manifest_path(output_path)
 
     payload = build_disclosure_table_payload(
         {
-            "classification_path": str(fixture_path),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
             "table_name": "disclosures",
         }
     )
 
     assert payload["format"] == "finiq_disclosure_table_build_v1"
-    assert payload["summary"]["companies"] == 1
-    assert payload["summary"]["disclosures"] == 3
+    assert payload["summary"]["companies"] == 2
+    assert payload["summary"]["disclosures"] == 2
     assert payload["summary"]["shards"] == 1
     assert not output_path.exists()
     assert manifest_path.exists()
@@ -1284,9 +1331,9 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
         "전환사채발행결정",
         '["정정"]',
         1,
-        0,
-        "1",
-        "10",
+        1,
+        "20250102000001",
+        "20250102009999",
     )
     assert metadata["format"] == "finiq_disclosure_table_sqlite"
     assert metadata["shard_format"] == "finiq_disclosure_table_sqlite_shard"
@@ -1294,119 +1341,18 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert metadata["table_name"] == "disclosures"
 
 
-def test_build_disclosure_table_payload_writes_yearly_shards_in_parallel(tmp_path: Path) -> None:
-    fixture_path = _write_multiyear_classification_fixture(tmp_path)
-    output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
-    manifest_path = _sqlite_manifest_path(output_path)
-    progress_log: list[str] = []
-
-    payload = build_disclosure_table_payload(
-        {
-            "classification_path": str(fixture_path),
-            "output_path": str(output_path),
-            "table_name": "disclosures",
-            "table_workers": 2,
-        },
-        progress_callback=progress_log.append,
-    )
-
-    assert payload["summary"]["disclosures"] == 3
-    assert payload["summary"]["shards"] == 3
-    assert [shard["year"] for shard in payload["shards"]] == ["2023", "2024", "2025"]
-    assert any("workers=2" in message for message in progress_log)
-
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert [shard["year"] for shard in manifest["shards"]] == ["2023", "2024", "2025"]
-    for shard in manifest["shards"]:
-        shard_path = Path(shard["path"])
-        connection = sqlite3.connect(shard_path)
-        try:
-            row_count = connection.execute("SELECT COUNT(*) FROM disclosures").fetchone()[0]
-        finally:
-            connection.close()
-        assert row_count == 1
-
-
-def test_build_disclosure_table_payload_cancelled_parallel_shards_skips_manifest(tmp_path: Path) -> None:
-    fixture_path = _write_multiyear_classification_fixture(tmp_path)
-    output_path = tmp_path / "kind.disclosures.sqlite_manifest.json"
-    manifest_path = _sqlite_manifest_path(output_path)
-    should_cancel = False
-
-    def progress_callback(message: str) -> None:
-        nonlocal should_cancel
-        if "샤드 생성 예약" in message:
-            should_cancel = True
-
-    def cancel_check() -> bool:
-        return should_cancel
-
-    with pytest.raises(RuntimeError, match="Job cancelled"):
-        build_disclosure_table_payload(
-            {
-                "classification_path": str(fixture_path),
-                "output_path": str(output_path),
-                "table_name": "disclosures",
-                "table_workers": 2,
-            },
-            progress_callback=progress_callback,
-            cancel_check=cancel_check,
-        )
-
-    assert not output_path.exists()
-    assert not manifest_path.exists()
-
-
-def test_build_disclosure_table_payload_accepts_nested_folder_path(tmp_path: Path) -> None:
-    nested = tmp_path / "nested" / "current_shape"
-    nested.mkdir(parents=True)
-    fixture_path = _write_classification_fixture(nested)
-
-    payload = build_disclosure_table_payload(
-        {
-            "classification_path": str(nested),
-        }
-    )
-
-    assert payload["source_classification_path"] == str(fixture_path.resolve())
-    assert Path(payload["output_path"]).name == "sqlite_manifest.json"
-    assert Path(payload["shards"][0]["path"]).name == "2025.sqlite"
-    assert payload["summary"]["disclosures"] == 3
-
-
-def test_build_disclosure_table_payload_rejects_unloaded_classification_disclosures(
-    tmp_path: Path,
-) -> None:
-    payload = _classification_fixture_payload()
-    payload["summary"]["disclosures"] = 4
-    fixture_path = _write_classification_fixture(tmp_path, payload)
-
-    with pytest.raises(ValueError, match="summary does not match loaded disclosures"):
-        build_disclosure_table_payload({"classification_path": str(fixture_path)})
-
-
-def test_build_disclosure_table_payload_rejects_malformed_disclosure_item(
+def test_build_disclosure_table_payload_rejects_classification_input(
     tmp_path: Path,
 ) -> None:
     fixture_path = _write_classification_fixture(tmp_path)
-    payload = _classification_fixture_payload()
-    payload["companies"][0]["disclosures"].append("not-a-disclosure")
-    payload["summary"]["disclosures"] = 4
-    with sqlite3.connect(fixture_path) as connection:
-        connection.execute(
-            "UPDATE metadata SET value = ? WHERE key = 'summary'",
-            (json.dumps(payload["summary"], ensure_ascii=False),),
-        )
-        connection.execute(
-            "UPDATE companies SET raw_json = ? WHERE company_key = ?",
-            (
-                json.dumps(payload["companies"][0], ensure_ascii=False),
-                "005930",
-            ),
-        )
 
-    with pytest.raises(ValueError, match=r"disclosures\[3\] must be an object"):
-        build_disclosure_table_payload({"classification_path": str(fixture_path)})
+    with pytest.raises(ValueError, match="classification_path is not supported"):
+        build_disclosure_table_payload(
+            {
+                "classification_path": str(fixture_path),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
 
 
 def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Path) -> None:
@@ -1416,7 +1362,7 @@ def test_build_disclosure_table_payload_accepts_source_body_folder(tmp_path: Pat
 
     payload = build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
@@ -1442,7 +1388,7 @@ def test_build_disclosure_table_payload_rejects_source_folder_without_metadata(
     with pytest.raises(ValueError, match="metadata is missing"):
         build_disclosure_table_payload(
             {
-                "classification_path": str(source_root),
+            "root_directory": str(source_root),
                 "output_path": str(tmp_path / "02-table"),
             }
         )
@@ -1459,7 +1405,7 @@ def test_build_disclosure_table_payload_rejects_invalid_source_metadata(
     with pytest.raises(ValueError, match="metadata is invalid"):
         build_disclosure_table_payload(
             {
-                "classification_path": str(source_root),
+            "root_directory": str(source_root),
                 "output_path": str(tmp_path / "02-table"),
             }
         )
@@ -1497,7 +1443,7 @@ def test_build_disclosure_table_payload_ignores_repair_overlay(
 
     payload = build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(tmp_path / "02-table"),
         }
     )
@@ -1506,7 +1452,7 @@ def test_build_disclosure_table_payload_ignores_repair_overlay(
     assert payload["pages"][0]["source_file"] == str(original_page)
 
 
-def test_build_disclosure_table_payload_rereads_only_failed_source_page(
+def test_build_disclosure_table_payload_does_not_reread_failed_source_page(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1551,28 +1497,18 @@ def test_build_disclosure_table_payload_rereads_only_failed_source_page(
         _parse_with_transient_failure,
     )
 
-    payload = build_disclosure_table_payload(
-        {
-            "classification_path": str(source_root),
-            "output_path": str(tmp_path / "02-table"),
-        }
-    )
+    with pytest.raises(OSError, match="temporary read failure"):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
 
-    assert read_counts == {1: 1, 2: 2}
-    assert payload["summary"]["source_rows"] == 2
-    assert payload["summary"]["disclosures"] == 2
-    assert [page["source_page"] for page in payload["pages"]] == [1, 2]
-    assert payload["pages"][0]["reread_attempts"] == 0
-    assert payload["pages"][1]["reread_attempts"] == 1
-    assert payload["pages"][1]["source_rows"] == 1
-    assert payload["pages"][1]["written_rows"] == 1
-    assert payload["pages"][1]["duplicate_rows"] == 0
-    assert payload["pages"][1]["source_file"] == str(
-        folder / "002_post_page_00002.body"
-    )
+    assert read_counts == {1: 1, 2: 1}
 
 
-def test_build_disclosure_table_payload_retries_source_page_without_acpt_no(
+def test_build_disclosure_table_payload_does_not_retry_source_page_without_acpt_no(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1607,15 +1543,15 @@ def test_build_disclosure_table_payload_retries_source_page_without_acpt_no(
 
     monkeypatch.setattr(table_export_module, "_parse_source_body_file", _count_parse)
 
-    with pytest.raises(ValueError, match="acpt_no is required"):
+    with pytest.raises(ValueError, match="missing acpt_no"):
         build_disclosure_table_payload(
             {
-                "classification_path": str(source_root),
+            "root_directory": str(source_root),
                 "output_path": str(tmp_path / "02-table"),
             }
         )
 
-    assert read_count == 6
+    assert read_count == 1
 
 
 def test_build_disclosure_table_payload_rejects_metadata_range_without_pages(
@@ -1632,7 +1568,7 @@ def test_build_disclosure_table_payload_rejects_metadata_range_without_pages(
     with pytest.raises(ValueError, match="공시 결과 페이지가 없습니다"):
         build_disclosure_table_payload(
             {
-                "classification_path": str(source_root),
+            "root_directory": str(source_root),
                 "output_path": str(tmp_path / "02-table"),
             }
         )
@@ -1665,7 +1601,7 @@ def test_build_disclosure_table_payload_rejects_duplicate_source_page_numbers(
     with pytest.raises(ValueError, match="중복되는 페이지 번호 1"):
         build_disclosure_table_payload(
             {
-                "classification_path": str(source_root),
+            "root_directory": str(source_root),
                 "output_path": str(tmp_path / "02-table"),
             }
         )
@@ -1687,7 +1623,7 @@ def test_build_disclosure_table_payload_deduplicates_source_rows_by_acpt_no(
 
     payload = build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(output_path),
         }
     )
@@ -1708,7 +1644,7 @@ def test_build_disclosure_table_payload_deduplicates_source_rows_by_acpt_no(
     assert rows == [("20250102000001",)]
 
 
-def test_source_filter_counts_exact_duplicate_rows_by_acpt_no(
+def test_sqlite_filter_uses_table_deduplication_result(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
@@ -1725,18 +1661,18 @@ def test_source_filter_counts_exact_duplicate_rows_by_acpt_no(
 
     table_payload = build_disclosure_table_payload(
         {
-            "classification_path": str(source_root),
+            "root_directory": str(source_root),
             "output_path": str(tmp_path / "02-table"),
         }
     )
     source_payload = filter_disclosures_payload(
-        {"root_directory": str(source_root), "filter_blocks": []}
+        {"data_root": str(tmp_path), "filter_blocks": []}
     )
 
     assert table_payload["summary"]["source_rows"] == 2
     assert table_payload["summary"]["duplicate_rows"] == 1
-    assert source_payload["summary"]["source_disclosures"] == 2
-    assert source_payload["summary"]["duplicate_disclosures"] == 1
+    assert source_payload["summary"]["source_disclosures"] == 1
+    assert source_payload["summary"]["duplicate_disclosures"] == 0
     assert source_payload["summary"]["matched_disclosures"] == 1
 
 
@@ -1753,40 +1689,30 @@ def test_build_disclosure_table_payload_rejects_source_row_without_acpt_no(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="acpt_no is required for every disclosure"):
-        build_disclosure_table_payload({"classification_path": str(source_root)})
+    with pytest.raises(ValueError, match="missing acpt_no"):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
 
 
-def test_build_disclosure_table_payload_recovers_misnested_resource_path(
+def test_build_disclosure_table_payload_rejects_missing_source_path(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace = tmp_path / "FINIQ"
-    source_parent = workspace / "resources" / "kind_kosdaq"
-    source_parent.mkdir(parents=True)
-    source_root = _write_source_body_fixture(source_parent)
-    package_dir = workspace / "finiq.market_desk"
-    package_dir.mkdir(parents=True)
-    monkeypatch.chdir(package_dir)
+    missing_root = tmp_path / "missing-source"
 
-    misnested_root = package_dir / "resources" / "kind_kosdaq"
-    payload = build_disclosure_table_payload(
-        {
-            "root_directory": str(misnested_root),
-            "classification_path": str(misnested_root),
-            "output_path": str(misnested_root / "kind.sqlite_manifest.json"),
-        }
-    )
-
-    assert payload["source_type"] == "source_folder"
-    assert payload["source_path"] == str(source_root.resolve())
-    assert payload["output_path"] == str(
-        _sqlite_manifest_path(source_root / "kind.sqlite_manifest.json").resolve()
-    )
-    assert payload["summary"]["disclosures"] == 2
+    with pytest.raises(FileNotFoundError, match="KIND source directory not found"):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(missing_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
 
 
-def test_build_disclosure_table_payload_falls_back_to_root_when_raw_path_is_output_dir(
+def test_build_disclosure_table_payload_rejects_classification_path_with_root(
     tmp_path: Path,
 ) -> None:
     source_base = tmp_path / "source"
@@ -1794,29 +1720,28 @@ def test_build_disclosure_table_payload_falls_back_to_root_when_raw_path_is_outp
     source_root = _write_source_body_fixture(source_base)
     output_dir = tmp_path / "kind_sqlite"
 
-    payload = build_disclosure_table_payload(
-        {
-            "root_directory": str(source_root),
-            "classification_path": str(output_dir),
-            "output_path": str(output_dir / "kind.sqlite_manifest.json"),
-        }
-    )
-
-    assert payload["source_type"] == "source_folder"
-    assert payload["source_path"] == str(source_root.resolve())
-    assert payload["summary"]["disclosures"] == 2
+    with pytest.raises(ValueError, match="classification_path is not supported"):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "classification_path": str(output_dir),
+                "output_path": str(output_dir / "kind.sqlite_manifest.json"),
+            }
+        )
 
 
-def test_collect_acpt_numbers_from_json_is_recursive_and_unique() -> None:
+def test_collect_acpt_numbers_from_json_requires_canonical_records() -> None:
     payload = {
         "disclosures": [
             {"acpt_no": "20250101000001"},
-            {"nested": {"acptno": "20250101000002"}},
-            {"acptNo": "20250101000001"},
+            {"acpt_no": "20250101000002"},
         ]
     }
 
     assert collect_acpt_numbers_from_json(payload) == ["20250101000001", "20250101000002"]
+
+    with pytest.raises(ValueError, match="acpt_no must contain digits"):
+        collect_acpt_numbers_from_json({"disclosures": [{"acptNo": "20250101000001"}]})
 
 
 def test_download_disclosure_external_html_payload_uses_collected_acpt_numbers(tmp_path: Path, monkeypatch) -> None:
@@ -2037,12 +1962,13 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
     compressed_path.write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_external_html_compress_v1",
+                "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "year": "2025",
-                        "selected_main_doc_no": "20250101000999",
+                        {
+                            "acpt_no": "20250101000001",
+                            "year": "2025",
+                            "selected_main_doc_no": "20250101000999",
+                            "metadata": {},
                     }
                 ],
             }
@@ -2090,7 +2016,12 @@ def test_download_disclosure_internal_html_payload_rejects_duplicate_compressed_
         "selected_main_doc_no": "20250101000999",
     }
     compressed_path.write_text(
-        json.dumps({"records": [record, record]}),
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [record, record],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -2110,6 +2041,7 @@ def test_download_disclosure_internal_html_payload_requires_selected_main_doc_no
     compressed_path.write_text(
         json.dumps(
             {
+                "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
                     {
                         "acpt_no": "20250101000001",
@@ -2154,6 +2086,7 @@ def test_download_disclosure_internal_html_payload_rejects_unsafe_compressed_yea
     compressed_path.write_text(
         json.dumps(
             {
+                "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
                     {
                         "acpt_no": "20250101000001",
@@ -2204,6 +2137,7 @@ def test_download_disclosure_internal_html_payload_rejects_result_membership_mis
     compressed_path.write_text(
         json.dumps(
             {
+                "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
                     {
                         "acpt_no": "20250101000001",
@@ -2224,74 +2158,22 @@ def test_download_disclosure_internal_html_payload_rejects_result_membership_mis
         )
 
 
-def test_download_disclosure_external_html_payload_ignores_source_json_path(
-    tmp_path: Path, monkeypatch
+def test_download_disclosure_external_html_payload_rejects_source_json_path(
+    tmp_path: Path,
 ) -> None:
-    def fake_download(**kwargs):
-        return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
-
-    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls", fake_download)
-    ignored_source_path = tmp_path / "filtered-disclosures.json"
-    ignored_source_path.write_text(
-        json.dumps(
-            {
-                "disclosures": [
-                    {"acpt_no": "20240101000099", "market": "코스닥"},
-                ]
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    payload = download_disclosure_external_html_payload(
-        _external_workspace_body(
-            tmp_path,
-            {
-                "disclosures": [
-                    {"acpt_no": "20250101000001", "market": "코스닥"},
-                    {"acpt_no": "20250101000002", "market": "유가증권"},
-                ]
-            },
-            output_directory=str(tmp_path / "viewer_html"),
-            source_json_path=str(ignored_source_path),
+    unsupported_source_path = tmp_path / "filtered-disclosures.json"
+    with pytest.raises(ValueError, match="source_json_path is not supported"):
+        download_disclosure_external_html_payload(
+            _external_workspace_body(
+                tmp_path,
+                {"disclosures": [{"acpt_no": "20250101000001"}]},
+                output_directory=str(tmp_path / "viewer_html"),
+                source_json_path=str(unsupported_source_path),
+            )
         )
-    )
-
-    assert payload["requested_count"] == 2
-    assert payload["saved_files"] == [
-        str(tmp_path / "viewer_html" / "2025" / "20250101000001.html"),
-        str(tmp_path / "viewer_html" / "2025" / "20250101000002.html"),
-    ]
-    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
-    assert manifest["source_json_path"] == str(
-        tmp_path
-        / "workspace"
-        / "03-filter"
-        / "bond_issuance"
-        / "filtered.json"
-    )
-    assert manifest["disclosures"] == [
-        {
-            "acpt_no": "20250101000001",
-            "market": "코스닥",
-            "company_name": None,
-            "company_id": None,
-            "disclosed_at": None,
-            "title": None,
-        },
-        {
-            "acpt_no": "20250101000002",
-            "market": "유가증권",
-            "company_name": None,
-            "company_id": None,
-            "disclosed_at": None,
-            "title": None,
-        },
-    ]
 
 
-def test_download_disclosure_external_html_payload_does_not_read_result_directory_source_json_path(
+def test_download_disclosure_external_html_payload_rejects_result_directory_source_json_path(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -2309,7 +2191,7 @@ def test_download_disclosure_external_html_payload_does_not_read_result_director
         _build_download_result_page_html(page_number=1, page_size=1, total_items=1)
     )
 
-    with pytest.raises(ValueError, match="filtered disclosure JSON does not exist"):
+    with pytest.raises(ValueError, match="source_json_path is not supported"):
         download_disclosure_external_html_payload(
             {
                 "data_root": str(tmp_path / "workspace"),
@@ -2342,7 +2224,7 @@ def test_download_disclosure_external_html_payload_rejects_flat_filter_result(
         )
 
 
-def test_clean_disclosure_external_html_output_directory_does_not_read_result_directory_source_json_path(
+def test_clean_disclosure_external_html_output_directory_rejects_source_json_path(
     tmp_path: Path,
 ) -> None:
     result_directory = tmp_path / "download_results"
@@ -2351,7 +2233,7 @@ def test_clean_disclosure_external_html_output_directory_does_not_read_result_di
         _build_download_result_page_html(page_number=1, page_size=1, total_items=1)
     )
 
-    with pytest.raises(ValueError, match="filtered disclosure JSON does not exist"):
+    with pytest.raises(ValueError, match="source_json_path is not supported"):
         clean_disclosure_html_output_directory_payload(
             {
                 "data_root": str(tmp_path / "workspace"),
@@ -2845,8 +2727,11 @@ def test_inspect_download_output_directory_requires_confirmation_for_mismatch(
     )
 
     assert dry_run_payload["deleted_count"] == 0
-    assert dry_run_payload["deletion_candidate_count"] == 1
-    assert dry_run_payload["deletion_candidates"][0]["name"] == "001_post_page_00001.body"
+    assert dry_run_payload["deletion_candidate_count"] == 2
+    assert {item["name"] for item in dry_run_payload["deletion_candidates"]} == {
+        "001_post_page_00001.body",
+        "kind_workflow.input.json",
+    }
     assert body_path.exists()
 
     with pytest.raises(ValueError, match='"확인했습니다." 입력과 삭제 허가가 필요합니다'):
@@ -2887,9 +2772,10 @@ def test_inspect_download_output_directory_deletes_confirmed_mismatch(
         }
     )
 
-    assert payload["deleted_count"] == 1
+    assert payload["deleted_count"] == 2
     assert payload["summary"] == {"success": 0, "failed": 0, "total": 0}
     assert not body_path.exists()
+    assert not (output_directory / "kind_workflow.input.json").exists()
 
 
 def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> None:
@@ -2914,7 +2800,7 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
         "page_size": 100,
         "dry_run": True,
     })
-    assert res["deletion_candidate_count"] == 1
+    assert res["deletion_candidate_count"] == 2
     assert "무결성 검사 실패" in res["deletion_candidates"][0]["reason"]
 
     # 2. Duplicate page
@@ -2931,7 +2817,7 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
         "page_size": 100,
         "dry_run": True,
     })
-    assert res["deletion_candidate_count"] == 2
+    assert res["deletion_candidate_count"] == 3
     assert "중복되는 페이지 번호" in res["deletion_candidates"][0]["reason"]
 
     # 3. Page gap
@@ -2947,7 +2833,7 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
         "page_size": 100,
         "dry_run": True,
     })
-    assert res["deletion_candidate_count"] == 2
+    assert res["deletion_candidate_count"] == 3
     assert "연속적이지 않습니다" in res["deletion_candidates"][0]["reason"]
 
     # 4. Inconsistent totals
@@ -2964,8 +2850,8 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
         "page_size": 100,
         "dry_run": True,
     })
-    assert res["deletion_candidate_count"] == 2
-    assert "전체 페이지 수 또는 건수가 다릅니다" in res["deletion_candidates"][0]["reason"]
+    assert res["deletion_candidate_count"] == 3
+    assert "전체 페이지 수 또는 전체 건수가 서로 다릅니다" in res["deletion_candidates"][0]["reason"]
 
     # 5. Page_size mismatch (metadata vs request)
     dir_ps_meta = tmp_path / "ps_meta"
@@ -2994,7 +2880,7 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
         "page_size": 100,
         "dry_run": True,
     })
-    assert res["deletion_candidate_count"] == 1
+    assert res["deletion_candidate_count"] == 2
     assert "기대값" in res["deletion_candidates"][0]["reason"]
 
     # 6. Missing snapshot
@@ -3032,7 +2918,7 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
         "start_date": "2024-01-01",
         "end_date": "2025-12-31",
     })
-    assert res["deletion_candidate_count"] == 1
+    assert res["deletion_candidate_count"] == 2
     assert "20250101_20251231" in res["deletion_candidates"][0]["path"]
     assert "기대값" in res["deletion_candidates"][0]["reason"]
 
@@ -3221,12 +3107,13 @@ def test_download_disclosure_internal_html_payload_prefers_compressed_external_j
     (external_dir / "compressed-external-html.json").write_text(
         json.dumps(
             {
-                "format": "finiq_disclosure_external_html_compress_v1",
+                "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
                     {
                         "acpt_no": "20250101000001",
                         "year": "2025",
                         "selected_main_doc_no": "20250101000999",
+                        "metadata": {},
                     }
                 ],
             }
@@ -4056,6 +3943,7 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
     (input_directory / "kind_disclosure_html_manifest.json").write_text(
         json.dumps(
             {
+                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20250101000001",
@@ -4185,6 +4073,7 @@ def test_compress_disclosure_external_html_payload_rejects_mismatched_embedded_a
     (input_directory / "kind_disclosure_html_manifest.json").write_text(
         json.dumps(
             {
+                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {"acpt_no": "20250101000001", "title": "첫 번째 제목"},
                     {"acpt_no": "20250101000002", "title": "두 번째 제목"},
@@ -4229,6 +4118,7 @@ def test_compress_disclosure_external_html_payload_rejects_missing_manifest_meta
     (input_directory / "kind_disclosure_html_manifest.json").write_text(
         json.dumps(
             {
+                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
                         "acpt_no": "20240101000001",
@@ -4281,6 +4171,7 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
     (input_directory / "kind_disclosure_html_manifest.json").write_text(
         json.dumps(
             {
+                "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {"acpt_no": "20250101000001", "title": "첫 번째 제목"},
                     {"acpt_no": "20250101000002", "title": "두 번째 제목"},
@@ -4307,7 +4198,7 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
         {
             "input_directory": str(input_directory),
             "output_directory": str(tmp_path / "compressed"),
-            "workers": 2,
+            "parallel_workers": 2,
         }
     )
 
@@ -4319,6 +4210,15 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
     assert "병렬 처리: 2개 워커" in payload["progress_log"]
     assert [record["acpt_no"] for record in saved["records"]] == ["20250101000001", "20250101000002"]
     assert [record["title"] for record in saved["records"]] == ["첫 번째 제목", "두 번째 제목"]
+
+
+def test_compress_disclosure_external_html_payload_rejects_source_directory(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="source_directory is not supported"):
+        compress_disclosure_external_html_payload(
+            {"source_directory": str(tmp_path / "viewer_html")}
+        )
 
 
 def test_check_disclosure_external_html_output_directory_uses_compressed_json_year(
@@ -4496,6 +4396,9 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
             "skip_errors": False,
+            **_html_parse_metadata_paths(
+                compressed_path=tmp_path / "compressed-external-html.json"
+            ),
         }
     )
     stored = json.loads(output_path.read_text(encoding="utf-8"))
@@ -4550,6 +4453,7 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
             "skip_errors": False,
+            **_html_parse_metadata_paths(filtered_path=tmp_path / "filtered.json"),
         }
     )
 
@@ -4557,7 +4461,7 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
     assert payload["records"][0]["corp_name"] == "테스트발행사"
 
 
-def test_parse_disclosure_html_payload_uses_input_parent_metadata(
+def test_parse_disclosure_html_payload_uses_explicit_metadata_path(
     tmp_path: Path, monkeypatch
 ) -> None:
     input_root = tmp_path / "input"
@@ -4622,6 +4526,9 @@ def test_parse_disclosure_html_payload_uses_input_parent_metadata(
             "output_directory": str(tmp_path / "output"),
             "mode": "bond_issuance",
             "skip_errors": False,
+            **_html_parse_metadata_paths(
+                filtered_path=source_dir / "filtered.json"
+            ),
         }
     )
 
@@ -4777,6 +4684,10 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
             "output_directory": str(bond_dir),
             "mode": "bond_issuance",
             "skip_errors": False,
+            **_html_parse_metadata_paths(
+                filtered_path=bond_dir / "filtered.json",
+                compressed_path=bond_dir / "compressed-external-html.json",
+            ),
         }
     )
 
@@ -4852,6 +4763,9 @@ def test_parse_disclosure_html_payload_does_not_fallback_to_metadata_display_tit
             "output_directory": str(bond_dir),
             "mode": "bond_issuance",
             "skip_errors": False,
+            **_html_parse_metadata_paths(
+                filtered_path=bond_dir / "filtered.json"
+            ),
         }
     )
 
@@ -5170,7 +5084,15 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
 
     monkeypatch.setitem(PARSER_REGISTRY, "rights_issuance", fake_parser)
 
-    metadata_index, families = _load_html_parse_metadata(input_dir)
+    metadata_paths = _html_parse_metadata_paths(
+        filtered_path=input_dir.parent / "filtered.json",
+        compressed_path=input_dir.parent / "compressed-external-html.json",
+    )
+    metadata_index, families = _load_html_parse_metadata(
+        input_dir,
+        filtered_metadata_path=Path(metadata_paths["filtered_metadata_path"]),
+        compressed_metadata_path=Path(metadata_paths["compressed_metadata_path"]),
+    )
     assert all(
         "correction_families" not in metadata
         for metadata in metadata_index.values()
@@ -5186,6 +5108,7 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
             "output_directory": str(tmp_path),
             "mode": "rights_issuance",
             "skip_errors": False,
+            **metadata_paths,
         }
     )
 
@@ -5464,6 +5387,10 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
             "input_directory": str(input_dir),
             "mode": "bond_issuance",
             "limit": 1,
+            **_html_parse_metadata_paths(
+                filtered_path=bond_dir / "filtered.json",
+                compressed_path=bond_dir / "compressed-external-html.json",
+            ),
         }
     )
 
@@ -5835,7 +5762,7 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
     assert "progress_log" not in stored
 
 
-def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path: Path) -> None:
+def test_parse_disclosure_html_payload_rejects_missing_rights_title(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     html_path = viewer_dir / "20250101000001.html"
@@ -5849,63 +5776,15 @@ def test_parse_disclosure_html_payload_reports_rights_issuance_warnings(tmp_path
         encoding="utf-8",
     )
 
-    progress_log: list[str] = []
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(viewer_dir),
-            "output_directory": str(tmp_path),
-            "mode": "rights_issuance",
-            "skip_errors": False,
-        },
-        progress_callback=progress_log.append,
-    )
-
-    assert payload["mode"] == "rights_issuance"
-    assert payload["warnings"]
-    assert payload["warnings"][:2] == [
-        {
-            "index": 1,
-            "total": 1,
-            "mode": "rights_issuance",
-            "acpt_no": "20250101000001",
-            "warning": "주입 제목이 없습니다.",
-            "level": "strong_warning",
-            "warning_code": "parse_warning",
-        },
-        {
-            "index": 1,
-            "total": 1,
-            "mode": "rights_issuance",
-            "acpt_no": "20250101000001",
-            "warning": "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다.",
-            "level": "strong_warning",
-            "warning_code": "rights_issue_type_missing",
-        },
-    ]
-    assert all("source_file" not in item for item in payload["warnings"])
-    strong_warnings = [
-        item["warning"]
-        for item in payload["warnings"]
-        if item["level"] == "strong_warning"
-    ]
-    assert payload["warning_report_counts"] == {
-        "count": len(payload["warnings"]),
-        "report_count": 1,
-        "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
-        "medium_warning": {"count": 0, "report_count": 0, "reports": {}},
-        "strong_warning": {
-            "count": len(strong_warnings),
-            "report_count": 1,
-            "reports": {
-                "20250101000001": {
-                    "count": len(strong_warnings),
-                    "warnings": strong_warnings,
-                }
-            },
-        },
-    }
-    assert "progress_log" not in payload
-    assert any("파싱 경고 1/1: 20250101000001.html" in line for line in progress_log)
+    with pytest.raises(ValueError, match="rights issuance title is required"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(viewer_dir),
+                "output_directory": str(tmp_path),
+                "mode": "rights_issuance",
+                "skip_errors": False,
+            }
+        )
 
 
 def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_path: Path, monkeypatch) -> None:
@@ -6194,28 +6073,21 @@ def test_parse_disclosure_html_payload_discards_warnings_when_filter_fails(
 
     monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
 
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(viewer_dir),
-            "output_directory": str(tmp_path),
-            "mode": "security_transaction",
-            "parallel_workers": parallel_workers,
-            "skip_errors": True,
-            "filter_blocks": [
-                {"field": "title", "operator": "unsupported", "value": "x"}
-            ],
-        }
-    )
-
-    assert payload["summary"] == {
-        "found_files": 2,
-        "parsed_files": 0,
-        "failed_files": 2,
-    }
-    assert payload["records"] == []
-    assert payload["warnings"] == []
-    assert [error["acpt_no"] for error in payload["errors"]] == list(acpt_numbers)
-    assert all(error["error_type"] == "ValueError" for error in payload["errors"])
+    with pytest.raises(ValueError, match="operator is invalid"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(viewer_dir),
+                "output_directory": str(tmp_path),
+                "mode": "security_transaction",
+                "parallel_workers": parallel_workers,
+                "skip_errors": True,
+                "filter_blocks": [
+                    _filter_block(
+                        field="title", operator="unsupported", value="x"
+                    )
+                ],
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -6284,7 +6156,7 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
             "skip_errors": False,
             "parallel_workers": 2,
             "filter_blocks": [
-                {"field": "title", "operator": "contains", "value": "증자"}
+                _filter_block(field="title", operator="contains", value="증자")
             ],
         },
         progress_callback=progress_log.append,
@@ -6295,7 +6167,7 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
     assert [record["acpt_no"] for record in payload["records"]] == ["20250101000003"]
     assert payload["filter_settings"] == {
         "filter_blocks": [
-            {"field": "title", "operator": "contains", "value": "증자"}
+            _filter_block(field="title", operator="contains", value="증자")
         ],
         "record_filters": [],
     }
@@ -6332,7 +6204,7 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
             "parallel_workers": 1,
             "progress_interval": 2,
             "filter_blocks": [
-                {"field": "title", "operator": "contains", "value": "증자"}
+                _filter_block(field="title", operator="contains", value="증자")
             ],
         },
         progress_callback=progress_log.append,
@@ -6458,6 +6330,26 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
         "</table>",
         encoding="utf-8",
     )
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": acpt_no,
+                        "title": "유상증자결정",
+                    }
+                    for acpt_no in (
+                        "20250101000001",
+                        "20250101000002",
+                        "20250101000003",
+                    )
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     payload = build_parse_filter_candidates_payload(
         {
@@ -6465,6 +6357,7 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
             "mode": "rights_issuance",
             "field": "증자방식",
             "parallel_workers": 1,
+            **_html_parse_metadata_paths(compressed_path=compressed_path),
         }
     )
 
@@ -6946,7 +6839,7 @@ def test_metadata_title_lookup_uses_full_filename_stem() -> None:
     )
 
 
-def test_parse_disclosure_html_payload_preserves_full_stem_in_metadata_and_warnings(
+def test_parse_disclosure_html_payload_rejects_nonnumeric_metadata_acpt_no(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "viewer_html"
@@ -6986,22 +6879,18 @@ def test_parse_disclosure_html_payload_preserves_full_stem_in_metadata_and_warni
         encoding="utf-8",
     )
 
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(input_directory),
-            "output_directory": str(tmp_path),
-            "mode": "bond_issuance",
-            "skip_errors": False,
-        }
-    )
-
-    assert payload["records"][0]["acpt_no"] == " report "
-    assert payload["records"][0]["corp_name"] == "공백식별자회사"
-    assert payload["records"][0]["disclosed_at"] == "2025-01-02 09:00:00"
-    assert payload["records"][0]["title"] == "전환사채권 발행결정"
-    assert payload["records"][0]["doc_no"] == "20250102000011"
-    assert payload["warnings"][0]["acpt_no"] == " report "
-    assert " report " in payload["warning_report_counts"]["strong_warning"]["reports"]
+    with pytest.raises(ValueError, match="acpt_no must contain digits"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path),
+                "mode": "bond_issuance",
+                "skip_errors": False,
+                **_html_parse_metadata_paths(
+                    filtered_path=tmp_path / "filtered.json"
+                ),
+            }
+        )
 
 
 def test_parse_bond_issuance_extracts_kind_sample_fields() -> None:
@@ -7252,6 +7141,10 @@ def test_parse_disclosure_html_payload_injects_compressed_title_for_bond_parser(
             "skip_errors": False,
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
+            **_html_parse_metadata_paths(
+                filtered_path=tmp_path / "filtered.json",
+                compressed_path=tmp_path / "compressed-external-html.json",
+            ),
         }
     )
 
@@ -7306,6 +7199,9 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
             "skip_errors": False,
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
+            **_html_parse_metadata_paths(
+                compressed_path=tmp_path / "compressed-external-html.json"
+            ),
         }
     )
 
@@ -7408,6 +7304,10 @@ def test_parse_disclosure_html_payload_injects_compressed_title_for_rights_parse
             "skip_errors": False,
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
+            **_html_parse_metadata_paths(
+                filtered_path=tmp_path / "filtered.json",
+                compressed_path=tmp_path / "compressed-external-html.json",
+            ),
         }
     )
 
@@ -8164,7 +8064,11 @@ def test_parse_rights_issuance_extracts_kind_stockissue_fields() -> None:
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 2_495_327], ["기타주식", 0]]
     assert parsed["field_parse_status"]["신주의 종류와 수"] == "parsed"
@@ -8363,11 +8267,17 @@ def test_parse_rights_issuance_classifies_consistency_warnings_by_level(tmp_path
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["증자 전 발행주식총수"] == [["보통주식", 100], ["기타주식", 20]]
     assert parsed["field_parse_status"]["증자 전 발행주식총수"] == "parsed"
-    assert any("배정주식수 합계" in warning for warning in parsed["weak_warning"])
+    assert parsed["발행대상자"] is None
+    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
+    assert not any("배정주식수 합계" in warning for warning in parsed["weak_warning"])
     assert any("자금조달 목적 합계" in warning for warning in parsed["weak_warning"])
     assert any("0이 아닌 주식 종류가 둘 이상" in warning for warning in parsed["medium_warning"])
 
@@ -8394,7 +8304,11 @@ def test_parse_rights_issuance_excludes_bottom_duplicate_total_issue_target(tmp_
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] == [["테스트조합", 5_806_443]]
     assert not any(
@@ -8403,7 +8317,7 @@ def test_parse_rights_issuance_excludes_bottom_duplicate_total_issue_target(tmp_
     )
 
 
-def test_parse_rights_issuance_keeps_duplicate_total_when_not_bottom_issue_target(tmp_path: Path) -> None:
+def test_parse_rights_issuance_rejects_mismatching_duplicate_target_total(tmp_path: Path) -> None:
     fixture_path = tmp_path / "20250102000011.html"
     body_html = """
     <html><body>
@@ -8424,19 +8338,21 @@ def test_parse_rights_issuance_keeps_duplicate_total_when_not_bottom_issue_targe
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
-    assert parsed["발행대상자"] == [
-        ["인수금액 총계", 5_806_443],
-        ["테스트조합", 5_806_443],
-    ]
+    assert parsed["발행대상자"] is None
+    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
     assert any(
-        "배정주식수 합계" in warning
-        for warning in parsed.get("parse_warnings", [])
+        warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed.get("strong_warning", [])
     )
 
 
-def test_parse_rights_issuance_keeps_unsplit_total_like_bottom_issue_target(tmp_path: Path) -> None:
+def test_parse_rights_issuance_rejects_mismatching_unsplit_target_total(tmp_path: Path) -> None:
     fixture_path = tmp_path / "20250102000012.html"
     body_html = """
     <html><body>
@@ -8454,15 +8370,17 @@ def test_parse_rights_issuance_keeps_unsplit_total_like_bottom_issue_target(tmp_
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
-    assert parsed["발행대상자"] == [
-        ["테스트조합", 5_806_443],
-        ["인수금액총계", 5_806_443],
-    ]
+    assert parsed["발행대상자"] is None
+    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
     assert any(
-        "배정주식수 합계" in warning
-        for warning in parsed.get("parse_warnings", [])
+        warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
+        for warning in parsed.get("strong_warning", [])
     )
 
 
@@ -8482,7 +8400,11 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert not any(
         "자금조달 목적 합계" in warning
@@ -8506,7 +8428,11 @@ def test_parse_rights_issuance_checks_funding_total_with_issue_price(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행목적"] == [["타법인 증권 취득자금", 1_000]]
     assert not any(
@@ -8533,7 +8459,11 @@ def test_parse_rights_issuance_sums_multiple_target_amounts_in_one_cell(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] == [["투자자A 투자자B", 200_000]]
     assert not any(
@@ -8560,7 +8490,11 @@ def test_parse_rights_issuance_sums_ungrouped_target_amounts_in_one_cell(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] == [["투자자A 투자자B", 200]]
     assert not any(
@@ -8587,7 +8521,11 @@ def test_parse_rights_issuance_ignores_target_amount_percentage_annotation(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] == [["투자자A", 100_000]]
     assert not any(
@@ -8632,7 +8570,11 @@ def test_parse_rights_issuance_keeps_valid_target_table_after_correction_history
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] == [["테스트조합", 10]]
     assert len(parsed["raw_tables"]) == 5
@@ -8656,7 +8598,11 @@ def test_parse_rights_issuance_ignores_non_extraction_correction_history_table(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 10], ["기타주식", None]]
     assert parsed["field_parse_status_detail"]["신주의 종류와 수"] == {
@@ -8690,7 +8636,11 @@ def test_parse_rights_issuance_saves_empty_source_cells_as_null_with_strong_warn
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["신주의 종류와 수"] == [["보통주식", None], ["기타주식", None]]
     assert parsed["발행목적"] is None
@@ -8725,7 +8675,11 @@ def test_parse_rights_issuance_classifies_explicit_zero_stock_counts_as_weak_war
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert any(
         warning.startswith("신주의 종류와 수:")
@@ -8757,7 +8711,11 @@ def test_parse_rights_issuance_tracks_stock_count_status_by_stock_type(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["field_parse_status"]["신주의 종류와 수"] == "parsed"
     assert parsed["field_parse_status_detail"]["신주의 종류와 수"] == {
@@ -8786,7 +8744,11 @@ def test_parse_rights_issuance_strong_warns_for_zero_common_pre_issuance_stock(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["field_parse_status"]["증자 전 발행주식총수"] == "parsed"
     assert parsed["field_parse_status_detail"]["증자 전 발행주식총수"] == {
@@ -8912,7 +8874,11 @@ def test_parse_rights_issuance_marks_multiple_dash_target_rows_as_one_undisclose
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] == [["-", 0]]
     assert parsed["field_parse_status"]["발행대상자"] == "explicit_zero"
@@ -8960,7 +8926,11 @@ def test_parse_rights_issuance_does_not_mark_dash_name_with_amount_as_undisclose
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] is None
     assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
@@ -8983,7 +8953,11 @@ def test_parse_rights_issuance_does_not_mark_non_dash_placeholder_as_undisclosed
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] is None
     assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
@@ -8998,7 +8972,10 @@ def test_parse_rights_issuance_still_extracts_single_named_target_row() -> None:
     body_html = """
     <html><body>
       <p class="SECTION-1">유상증자결정</p>
-      <table><tr><td>5. 증자방식</td><td>제3자배정증자</td></tr></table>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>1,000</td></tr>
+        <tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>
+      </table>
       <table>
         <tr><th>제3자배정 대상자</th><th>배정주식수 (주)</th></tr>
         <tr><td>테스트조합</td><td>1,000</td></tr>
@@ -9006,7 +8983,11 @@ def test_parse_rights_issuance_still_extracts_single_named_target_row() -> None:
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] == [["테스트조합", 1_000]]
     assert parsed["field_parse_status"]["발행대상자"] == "parsed"
@@ -9028,7 +9009,11 @@ def test_parse_rights_issuance_warns_when_third_party_target_table_is_absent() -
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
 
     assert parsed["발행대상자"] is None
     assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
@@ -9038,7 +9023,7 @@ def test_parse_rights_issuance_warns_when_third_party_target_table_is_absent() -
     )
 
 
-def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
+def test_parse_rights_issuance_rejects_missing_or_unknown_title(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000004.html"
@@ -9050,62 +9035,24 @@ def test_parse_rights_issuance_warns_when_title_does_not_identify_type(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
+    with pytest.raises(ValueError, match="rights issuance title is required"):
+        parse_rights_issuance(
+            body_html.encode("utf-8"),
+            file_path=fixture_path,
+        )
 
-    assert parsed["title"] == ""
-    assert parsed["신주의 종류와 수"] == [["보통주식", None], ["기타주식", None]]
-    assert parsed["증자 전 발행주식총수"] == [
-        ["보통주식", None],
-        ["기타주식", None],
-    ]
-    assert parsed["발행목적"] is None
-    assert parsed["발행가액"] == [["보통주식", None], ["기타주식", None]]
-    assert parsed["증자방식"] is None
-    assert parsed["납입일"] is None
-    assert parsed["신주권교부예정일"] is None
-    assert parsed["상장예정일"] is None
-    assert parsed["field_parse_status_detail"]["신주의 종류와 수"] == {
-        "보통주식": "source_not_found",
-        "기타주식": "source_not_found",
-    }
-    assert parsed["field_parse_status_detail"]["발행가액"] == {
-        "보통주식": "source_not_found",
-        "기타주식": "source_not_found",
-    }
-    for field_name in ("신주의 종류와 수", "증자 전 발행주식총수", "발행가액"):
-        for stock_type in ("보통주식", "기타주식"):
-            assert any(
-                warning.startswith(
-                    f"{field_name}({stock_type}): 정해진 출처에서 값을 찾지 못했습니다."
-                )
-                for warning in parsed["strong_warning"]
-            )
-    assert "주입 제목이 없습니다." in parsed["parse_warnings"]
-    assert "주입 제목이 없습니다." in parsed["strong_warning"]
-    assert (
-        "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
-        in parsed["parse_warnings"]
-    )
-    assert (
-        "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
-        in parsed["strong_warning"]
-    )
-    assert any(
-        warning.startswith("신주의 종류와 수: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed["parse_warnings"]
-    )
-    assert any(
-        warning.startswith("증자방식: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed["parse_warnings"]
-    )
-    assert all(
-        warning in parsed["strong_warning"]
-        for warning in parsed["parse_warnings"]
-        if ": 정해진 출처에서 값을 찾지 못했습니다." in warning
-    )
+    with pytest.raises(
+        ValueError,
+        match="must identify paid, bonus, or mixed issuance",
+    ):
+        parse_rights_issuance(
+            body_html.encode("utf-8"),
+            file_path=fixture_path,
+            title="기타공시",
+        )
 
 
-def test_parse_rights_issuance_does_not_infer_bonus_type_from_table(
+def test_parse_rights_issuance_rejects_unknown_title_instead_of_inferring_from_table(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000005.html"
@@ -9120,18 +9067,15 @@ def test_parse_rights_issuance_does_not_infer_bonus_type_from_table(
     </body></html>
     """
 
-    parsed = parse_rights_issuance(body_html.encode("utf-8"), file_path=fixture_path)
-
-    assert parsed["증자방식"] is None
-    assert "주입 제목이 없습니다." in parsed["parse_warnings"]
-    assert (
-        "주입 제목에서 유상증자/무상증자 유형을 확인하지 못했습니다. 일부 필드가 비어 있을 수 있습니다."
-        in parsed["parse_warnings"]
-    )
-    assert any(
-        warning.startswith("발행가액: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed["parse_warnings"]
-    )
+    with pytest.raises(
+        ValueError,
+        match="must identify paid, bonus, or mixed issuance",
+    ):
+        parse_rights_issuance(
+            body_html.encode("utf-8"),
+            file_path=fixture_path,
+            title="기타공시",
+        )
 
 
 def test_build_insight_payload_groups_disclosures(tmp_path: Path, monkeypatch) -> None:
@@ -9953,29 +9897,6 @@ def test_detect_existing_downloads_rejects_corrupted_metadata(tmp_path: Path) ->
         detect_existing_downloads(str(tmp_path))
 
 
-def test_download_resume_rejects_obsolete_metadata_before_reading_body(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from finiq.market_desk.web.features.downloads import kind_runner
-
-    snapshot = _trusted_download_input_snapshot()
-    snapshot["format"] = "finiq_kind_workflow_input_v0"
-    (tmp_path / "kind_workflow.input.json").write_text(
-        json.dumps(snapshot), encoding="utf-8"
-    )
-    (tmp_path / "001_post_page_00001.body").write_bytes(b"not parsed")
-    monkeypatch.setattr(
-        kind_runner,
-        "_detect_pagination",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("body must not be read before metadata validation")
-        ),
-    )
-
-    with pytest.raises(ValueError, match="metadata format is obsolete"):
-        kind_runner._run_resume({"output_directory": str(tmp_path)})
-
-
 def test_download_status_rejects_missing_metadata_before_reading_body(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -9992,31 +9913,6 @@ def test_download_status_rejects_missing_metadata_before_reading_body(
 
     with pytest.raises(ValueError, match="metadata is missing"):
         kind_api.build_download_status_payload({"output_directory": str(tmp_path)})
-
-
-def test_yearly_resume_probe_rejects_obsolete_metadata_before_pagination(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from finiq.market_desk.web.features.downloads import kind_runner
-
-    snapshot = _trusted_download_input_snapshot()
-    snapshot["format"] = "finiq_kind_workflow_input_v0"
-    (tmp_path / "kind_workflow.input.json").write_text(
-        json.dumps(snapshot), encoding="utf-8"
-    )
-    (tmp_path / "001_post_page_00001.body").write_bytes(b"not parsed")
-    monkeypatch.setattr(
-        kind_runner,
-        "_detect_pagination",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("pagination must not be read before metadata validation")
-        ),
-    )
-
-    with pytest.raises(ValueError, match="metadata format is obsolete"):
-        kind_runner._yearly_task_resume_payload(
-            {"output_directory": str(tmp_path)}
-        )
 
 
 def test_check_existing_downloads_rejects_missing_date_range_metadata(

@@ -231,7 +231,6 @@ export default function DownloadPage() {
   const [startPage, setStartPage] = useState("1");
   const [endPage, setEndPage] = useState("");
   const [lastReportOnly, setLastReportOnly] = useState(false);
-  const [resumeYearly, setResumeYearly] = useState(true);
   const [logLimit, setLogLimit] = useState("20");
   const [selectedDisclosures, setSelectedDisclosures] = useState<Record<string, string[]>>({});
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
@@ -281,7 +280,11 @@ export default function DownloadPage() {
     try {
       const [data, config] = await Promise.all([fetchDownloadOptions(), fetchSettings()]);
       setOptions(data);
-      setWorkerCount(String(config?.parallel_worker_count || 1));
+      const workerCount = Number(config?.parallel_worker_count);
+      if (!Number.isInteger(workerCount) || workerCount < 1) {
+        throw new Error("parallel_worker_count must be a positive integer");
+      }
+      setWorkerCount(String(workerCount));
 
       if (!useSettingsStore.getState().download_output_directory && data.default_output_directory) {
         saveSetting("download_output_directory", data.default_output_directory);
@@ -431,7 +434,6 @@ export default function DownloadPage() {
     start_page: Number(startPage),
     end_page: endPage ? Number(endPage) : null,
     last_report_only: lastReportOnly,
-    resume_yearly: resumeYearly,
     disclosure_type_groups: selectedDisclosures,
   });
 
@@ -1033,10 +1035,6 @@ export default function DownloadPage() {
                   <div className="flex items-center space-x-2">
                     <Checkbox id="lastReportOnly" checked={lastReportOnly} onCheckedChange={(v) => setLastReportOnly(!!v)} className="border-[color:var(--tv-border)]" />
                     <Label htmlFor="lastReportOnly" className="cursor-pointer dark:text-slate-300">최종보고서만</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="resumeYearly" checked={resumeYearly} onCheckedChange={(v) => setResumeYearly(!!v)} className="border-[color:var(--tv-border)]" />
-                    <Label htmlFor="resumeYearly" className="cursor-pointer dark:text-slate-300">연간 작업 재개</Label>
                   </div>
                 </div>
 

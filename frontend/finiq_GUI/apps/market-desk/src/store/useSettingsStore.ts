@@ -12,7 +12,6 @@ interface SettingsState {
   download_output_directory: string;
   disclosure_separate_output_directory: boolean;
   sqlite_output_directory: string;
-  sqlite_manifest_path: string;
   external_html_output_directory: string;
   internal_html_output_directory: string;
   html_section_split_output_directory: string;
@@ -59,7 +58,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   download_output_directory: "",
   disclosure_separate_output_directory: false,
   sqlite_output_directory: "",
-  sqlite_manifest_path: "",
   external_html_output_directory: "",
   internal_html_output_directory: "",
   html_section_split_output_directory: "",
@@ -90,13 +88,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   updateSettings: (newSettings) => set((state) => ({ ...state, ...newSettings })),
 
   fetchSettings: async () => {
-    try {
-      const config = await apiGet<any>("/api/config");
-      set((state) => ({ ...state, ...config, runtime_info_loaded: true }));
-      return config;
-    } catch (err) {
-      console.error("Failed to fetch settings:", err);
+    const config = await apiGet<any>("/api/config");
+    const workerCount = Number(config.parallel_worker_count);
+    if (!Number.isInteger(workerCount) || workerCount < 1) {
+      throw new Error("parallel_worker_count must be a positive integer");
     }
+    set((state) => ({ ...state, ...config, runtime_info_loaded: true }));
+    return config;
   },
 
   fetchRuntimeInfo: async () => {
@@ -106,44 +104,36 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         parallel_worker_count: state.parallel_worker_count,
       };
     }
-    try {
-      const config = await apiGet<any>("/api/config");
-      set((current) => ({
-        ...current,
-        parallel_worker_count: Number(config.parallel_worker_count || 1),
-        runtime_info_loaded: true,
-      }));
-      return config;
-    } catch (err) {
-      console.error("Failed to fetch runtime info:", err);
+    const config = await apiGet<any>("/api/config");
+    const workerCount = Number(config.parallel_worker_count);
+    if (!Number.isInteger(workerCount) || workerCount < 1) {
+      throw new Error("parallel_worker_count must be a positive integer");
     }
+    set((current) => ({
+      ...current,
+      parallel_worker_count: workerCount,
+      runtime_info_loaded: true,
+    }));
+    return config;
   },
 
   saveSetting: async (key, value) => {
-    const previousValue = get()[key];
-    set((state) => ({ ...state, [key]: value }));
     try {
       const config = await apiPost<any>("/api/settings", { [key]: value });
       set((state) => ({ ...state, ...config }));
       return true;
     } catch (err) {
-      set((state) => ({ ...state, [key]: previousValue }));
       console.error(`Failed to save setting ${String(key)}:`, err);
       return false;
     }
   },
 
   saveSettings: async (payload) => {
-    const previousValues = Object.fromEntries(
-      Object.keys(payload).map((key) => [key, get()[key as keyof SettingsState]]),
-    ) as Partial<SettingsState>;
-    set((state) => ({ ...state, ...payload }));
     try {
       const config = await apiPost<any>("/api/settings", payload);
       set((state) => ({ ...state, ...config }));
       return true;
     } catch (err) {
-      set((state) => ({ ...state, ...previousValues }));
       console.error(`Failed to save settings:`, err);
       return false;
     }

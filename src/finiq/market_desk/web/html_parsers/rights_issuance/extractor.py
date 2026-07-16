@@ -228,7 +228,6 @@ class RightsIssuanceExtractor:
             self._set_field_status("발행대상자", "not_applicable")
             return "-"
         stock_total = self._sum_amounts(stock_counts)
-        fallback_targets: list[list[Any]] | None = None
         found_empty_target_table = False
         for table in self.context.extraction_tables:
             logical_rows = table["logical_rows"]
@@ -269,13 +268,8 @@ class RightsIssuanceExtractor:
                 if self._sum_amounts(targets) == stock_total:
                     self._set_field_status("발행대상자", "parsed")
                     return targets
-                if fallback_targets is None:
-                    fallback_targets = targets
                 continue
             found_empty_target_table = True
-        if fallback_targets is not None:
-            self._set_field_status("발행대상자", "parsed")
-            return fallback_targets
         if found_empty_target_table:
             self._warn_if_missing("발행대상자", None)
             return None
@@ -394,7 +388,7 @@ class RightsIssuanceExtractor:
         if self.context.issuance_type == "mixed":
             bonus_index = self._bonus_section_index(rows)
             if bonus_index is None:
-                return rows if section == "paid" else []
+                raise ValueError("mixed rights issuance table is missing the bonus section marker")
             if section == "paid":
                 return rows[:bonus_index]
             return rows[bonus_index + 1 :]
@@ -456,10 +450,6 @@ class RightsIssuanceExtractor:
             )
             for output_label, source_labels in STOCK_LABELS.items()
         }
-        if all(value is None for value in by_label.values()):
-            fallback = self._section_last_value(rows, section_label)
-            if fallback not in (None, "", "-"):
-                by_label["보통주식"] = fallback
         return [[label, by_label[label]] for label in STOCK_LABELS]
 
     def _section_stock_text_value(

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from finiq.concurrency import available_cpu_count, bounded_as_completed
-from finiq.data_scraper.core.client import SEARCH_RESULTS_FILENAME_TEMPLATE, download_pages
+from finiq.data_scraper.core.client import download_pages
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.workflow import KindWorkflow, make_page_size_integrity_validator
 
@@ -39,7 +39,6 @@ def _download_payload_summary(payload: dict[str, Any]) -> list[str]:
         f"workers={payload.get('worker_count') or available_cpu_count()}",
         f"parallel_strategy={payload.get('parallel_strategy') or 'years'}",
         f"log_limit={payload.get('log_limit') or 20}",
-        f"resume_yearly={payload.get('resume_yearly', True)}",
     ]
 
 
@@ -236,7 +235,7 @@ def _run_single(
                 end_date=saved_input["end_date"],
                 start_page=2,
                 end_page=int(paging["total_pages"]),
-                page_size=int(saved_input.get("page_size", page_size)),
+                page_size=int(saved_input["page_size"]),
                 search_filters=saved_input.get("search_filters") or None,
                 disclosure_type_groups=saved_input.get("disclosure_type_groups")
                 or None,
@@ -245,11 +244,11 @@ def _run_single(
                     "include_previous_disclosures"
                 ),
                 wait_seconds_between_requests=wait_seconds,
-                timeout=float(saved_input.get("timeout", timeout)),
+                timeout=float(saved_input["timeout"]),
                 progress_callback=local_progress_callback,
                 cancel_check=cancel_check,
                 saved_file_validator=make_page_size_integrity_validator(
-                    expected_page_size=int(saved_input.get("page_size", page_size)),
+                    expected_page_size=int(saved_input["page_size"]),
                 ),
                 max_workers=page_worker_count,
             )
@@ -267,55 +266,16 @@ def _run_single(
         "progress_log": list(progress_log),
     }
 
-
-def _run_yearly_chunk(payload: dict[str, Any]) -> dict[str, Any]:
-    return _run_single(payload)
-
-
-def _yearly_task_resume_payload(task: dict[str, Any]) -> dict[str, Any] | None:
-    output_directory = (
-        Path(str(task.get("output_directory") or "")).expanduser().resolve()
-    )
-    if not output_directory.is_dir():
-        return None
-    if not _result_body_files(output_directory):
-        return None
-    _require_current_download_input_snapshot(output_directory)
-    if _detect_pagination(output_directory) is None:
-        return None
-    return {
-        **task,
-        "mode": "resume",
-        "start_date": "",
-        "end_date": "",
-    }
-
-
 def _run_yearly_task(
     task: dict[str, Any],
     *,
-    resume_yearly: bool,
     progress_callback: Any | None = None,
     cancel_check: Any | None = None,
 ) -> dict[str, Any]:
     if cancel_check is not None and cancel_check():
         raise DownloadCancelled("download job cancelled")
-    resume_payload = _yearly_task_resume_payload(task) if resume_yearly else None
-    if resume_payload is None:
-        if resume_yearly:
-            _append_progress(
-                deque(maxlen=0),
-                "resume_unavailable -> full_download",
-                progress_callback,
-            )
-        return _run_single(
-            task, progress_callback=progress_callback, cancel_check=cancel_check
-        )
-    _append_progress(
-        deque(maxlen=0), "resume_available -> resume_download", progress_callback
-    )
-    return _run_resume(
-        resume_payload, progress_callback=progress_callback, cancel_check=cancel_check
+    return _run_single(
+        task, progress_callback=progress_callback, cancel_check=cancel_check
     )
 
 
@@ -350,7 +310,6 @@ def _run_yearly(
     search_filters = _build_search_filters(payload)
     disclosure_type_groups = _normalize_disclosure_type_groups(payload)
     last_report_only = _as_bool(payload, "last_report_only")
-    resume_yearly = _as_resume_yearly(payload)
     parallel_strategy = _as_parallel_strategy(payload)
     yearly_ranges = _split_yearly_ranges(start_date, end_date)
     requested_worker_count = _as_worker_count(payload)
@@ -394,7 +353,6 @@ def _run_yearly(
                     else 1
                 ),
                 "parallel_strategy": parallel_strategy,
-                "resume_yearly": resume_yearly,
                 "log_limit": payload.get("log_limit") or 20,
                 "_folder_name": folder_name,
             }
@@ -413,7 +371,6 @@ def _run_yearly(
             )
             chunk_results_by_folder[folder_name] = _run_yearly_task(
                 task,
-                resume_yearly=resume_yearly,
                 progress_callback=lambda line, folder=folder_name: _append_progress(
                     progress_log,
                     f"[{folder}] {line}",
@@ -440,7 +397,6 @@ def _run_yearly(
                 return executor.submit(
                     _run_yearly_task,
                     task,
-                    resume_yearly=resume_yearly,
                     progress_callback=lambda line, folder=folder_name: _append_progress(
                         progress_log,
                         f"[{folder}] {line}",
@@ -505,113 +461,5 @@ def _run_yearly(
         "parallel_strategy": parallel_strategy,
         "results": results,
         "summary": _aggregate_download_summary(results),
-        "progress_log": list(progress_log),
-    }
-
-
-def _first_page_needing_download(
-    output_directory: Path,
-    *,
-    total_pages: int,
-    page_size: int,
-) -> int:
-    for page_number in range(1, total_pages + 1):
-        page_path = output_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(
-            page_number=page_number
-        )
-        try:
-            validate_downloaded_result_page(
-                page_path,
-                expected_page_size=page_size,
-            )
-        except (OSError, ValueError):
-            return page_number
-    return total_pages + 1
-
-
-def _run_resume(
-    payload: dict[str, Any],
-    progress_callback: Any | None = None,
-    cancel_check: Any | None = None,
-) -> dict[str, Any]:
-    output_directory_raw = str(payload.get("output_directory") or "").strip()
-    if not output_directory_raw:
-        raise ValueError("output_directory is required")
-    output_directory = Path(output_directory_raw).expanduser().resolve()
-    if not output_directory.is_dir():
-        raise ValueError(f"directory not found: {output_directory}")
-
-    saved_input = _require_current_download_input_snapshot(output_directory)
-    paging = _detect_pagination(output_directory)
-    if paging is None:
-        raise ValueError("pagination info not found in output directory")
-
-    total_pages = int(paging["total_pages"])
-    page_size = int(saved_input.get("page_size", 100))
-    status_before = _download_integrity_status(output_directory, page_size)
-    progress_log, local_progress_callback = _build_progress_collector(
-        external_callback=progress_callback
-    )
-    _append_status_progress(progress_log, status_before, progress_callback)
-    start_page = _first_page_needing_download(
-        output_directory,
-        total_pages=total_pages,
-        page_size=page_size,
-    )
-    if start_page > total_pages:
-        return {
-            "mode": "resume",
-            "output_directory": str(output_directory),
-            "message": "all pages already downloaded",
-            "pagination": paging,
-            "download_status": status_before,
-            "summary": _download_status_summary(status_before),
-            "progress_log": list(progress_log),
-        }
-
-    wait_seconds = _as_float(
-        payload,
-        "wait_seconds",
-        float(saved_input.get("wait_seconds_between_requests", 1.0)),
-    )
-    timeout = _as_float(payload, "timeout", float(saved_input.get("timeout", 20.0)))
-    _as_parallel_strategy(payload)
-    page_worker_count = _as_worker_count(payload)
-    if wait_seconds < 0:
-        raise ValueError("wait_seconds must be >= 0")
-    if timeout <= 0:
-        raise ValueError("timeout must be > 0")
-
-    download_pages(
-        output_directory=output_directory,
-        request_headers=saved_input["request_headers"],
-        start_date=saved_input["start_date"],
-        end_date=saved_input["end_date"],
-        start_page=start_page,
-        end_page=total_pages,
-        page_size=int(saved_input.get("page_size", 100)),
-        search_filters=saved_input.get("search_filters") or None,
-        disclosure_type_groups=saved_input.get("disclosure_type_groups") or None,
-        last_report_only=saved_input.get("last_report_only"),
-        include_previous_disclosures=saved_input.get("include_previous_disclosures"),
-        wait_seconds_between_requests=wait_seconds,
-        timeout=timeout,
-        progress_callback=local_progress_callback,
-        cancel_check=cancel_check,
-        saved_file_validator=make_page_size_integrity_validator(
-            expected_page_size=page_size,
-        ),
-        max_workers=page_worker_count,
-    )
-    if cancel_check is not None and cancel_check():
-        raise DownloadCancelled("download job cancelled")
-    status_after = _download_integrity_status(output_directory, page_size)
-    _append_status_progress(progress_log, status_after, progress_callback)
-    return {
-        "mode": "resume",
-        "output_directory": str(output_directory),
-        "pagination": status_after.get("pagination"),
-        "download_status": status_after,
-        "summary": _download_status_summary(status_after),
         "progress_log": list(progress_log),
     }

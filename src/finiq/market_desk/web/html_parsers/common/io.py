@@ -6,18 +6,9 @@ from lxml import html
 
 
 def decode_html_markup(html_markup: str | bytes) -> str:
-    """HTML 마크업을 문자열로 디코딩한다.
-
-    과거 KIND 공시는 레거시 인코딩(euc-kr 등)인 경우가 많다.
-    UTF-8과 과거 KIND 인코딩을 순차적으로 시도한다.
-    """
+    """UTF-8 HTML 마크업을 문자열로 디코딩한다."""
     if isinstance(html_markup, str):
         return html_markup
-    for encoding in ("utf-8", "cp949", "euc-kr"):
-        try:
-            return html_markup.decode(encoding)
-        except UnicodeDecodeError:
-            continue
     return html_markup.decode("utf-8")
 
 

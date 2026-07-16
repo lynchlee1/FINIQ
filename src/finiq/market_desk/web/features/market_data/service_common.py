@@ -355,18 +355,77 @@ def _parse_boolean_tokens(tokens: list[object]) -> bool:
 
 
 def _record_field_value(record: dict[str, Any], field: str) -> object:
-    normalized_field = str(field or "").strip()
-    if normalized_field in {"disclosed_date", "date"}:
-        return record.get("__filter_disclosed_date") or _date_part(
-            record.get("disclosed_at")
-        )
-    if normalized_field in {"acpt_no", "acptno"}:
-        return (
-            record.get("__filter_acpt_no")
-            or record.get("acpt_no")
-            or record.get("acptno")
-        )
-    return record.get(normalized_field)
+    if field == "disclosed_date":
+        return record["__filter_disclosed_date"]
+    if field == "acpt_no":
+        return record["__filter_acpt_no"]
+    return record.get(field)
+
+
+_FILTER_FIELDS = {
+    "title",
+    "company_name",
+    "submitter",
+    "market",
+    "disclosed_date",
+    "acpt_no",
+    "company_id",
+}
+_FILTER_OPERATORS = {
+    "contains",
+    "not_contains",
+    "exact_match",
+    "equals",
+    "not_equals",
+    "starts_with",
+    "ends_with",
+    "in",
+    "before",
+    "after",
+    "on_or_before",
+    "on_or_after",
+    "between",
+    "exists",
+    "empty",
+}
+
+
+def _validate_filter_blocks(blocks: object) -> list[dict[str, Any]]:
+    if not isinstance(blocks, list):
+        raise ValueError("filter_blocks must be a list")
+    validated: list[dict[str, Any]] = []
+    for index, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            raise ValueError(f"filter_blocks[{index}] must be an object")
+        connector = block.get("connector")
+        if (index == 0 and connector != "") or (
+            index > 0 and connector not in {"AND", "OR"}
+        ):
+            raise ValueError(f"filter_blocks[{index}].connector is invalid")
+        field = block.get("field")
+        operator = block.get("operator")
+        if field not in _FILTER_FIELDS:
+            raise ValueError(f"filter_blocks[{index}].field is invalid")
+        if operator not in _FILTER_OPERATORS:
+            raise ValueError(f"filter_blocks[{index}].operator is invalid")
+        for count_key in ("open_count", "close_count"):
+            count = block.get(count_key)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                raise ValueError(
+                    f"filter_blocks[{index}].{count_key} must be a non-negative integer"
+                )
+        for boolean_key in ("not", "ignore_spaces", "clean_search"):
+            if not isinstance(block.get(boolean_key), bool):
+                raise ValueError(
+                    f"filter_blocks[{index}].{boolean_key} must be a boolean"
+                )
+        value = block.get("value")
+        if not isinstance(value, str):
+            raise ValueError(f"filter_blocks[{index}].value must be a string")
+        if not value.strip() and operator not in {"exists", "empty"}:
+            raise ValueError(f"filter_blocks[{index}].value is required")
+        validated.append(dict(block))
+    return validated
 
 
 def _split_operator_values(value: object) -> list[str]:
@@ -420,15 +479,15 @@ def _clean_search_text(value: str) -> str:
 
 
 def _condition_block_matches(record: dict[str, Any], block: dict[str, Any]) -> bool:
-    field = str(block.get("field") or "title").strip()
-    operator = str(block.get("operator") or "contains").strip()
-    expected = str(block.get("value") or "").strip()
+    field = str(block["field"])
+    operator = str(block["operator"])
+    expected = str(block["value"]).strip()
     raw_value = _record_field_value(record, field)
     actual = str(raw_value or "").strip()
-    if bool(block.get("clean_search")):
+    if block["clean_search"]:
         actual = _clean_search_text(actual)
         expected = _clean_search_text(expected)
-    if bool(block.get("ignore_spaces")):
+    if block["ignore_spaces"]:
         actual = _remove_whitespace(actual)
         expected = _remove_whitespace(expected)
     actual_folded = actual.casefold()
@@ -483,32 +542,16 @@ def _record_filter_blocks_match(record: dict[str, Any], blocks: object) -> bool:
         raise ValueError(msg)
 
     tokens: list[object] = []
-    has_condition = False
     for index, raw_block in enumerate(blocks):
-        if not isinstance(raw_block, dict):
-            msg = "filter block must be an object"
-            raise ValueError(msg)
-        expected_value = str(raw_block.get("value") or "").strip()
-        operator = str(raw_block.get("operator") or "contains").strip()
-        if not expected_value and operator not in {"exists", "empty"}:
-            continue
-        if has_condition:
-            connector = str(raw_block.get("connector") or "AND").strip().upper()
-            if connector not in {"AND", "OR"}:
-                msg = f"Unsupported filter connector: {connector}"
-                raise ValueError(msg)
-            tokens.append(connector)
-        for _ in range(int(raw_block.get("open_count") or 0)):
+        if index > 0:
+            tokens.append(raw_block["connector"])
+        for _ in range(raw_block["open_count"]):
             tokens.append("(")
-        if bool(raw_block.get("not")):
+        if raw_block["not"]:
             tokens.append("NOT")
         tokens.append(_condition_block_matches(record, raw_block))
-        for _ in range(int(raw_block.get("close_count") or 0)):
+        for _ in range(raw_block["close_count"]):
             tokens.append(")")
-        has_condition = True
-
-    if not tokens:
-        return True
     return _parse_boolean_tokens(tokens)
 
 

@@ -521,40 +521,26 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     monkeypatch.setattr(automation, "_table_manifest", lambda _profile: manifest_path)
     monkeypatch.setattr(automation, "_load_sqlite_manifest", lambda _path: manifest)
     monkeypatch.setattr(automation, "_validate_sqlite_manifest_counts", lambda *_args: None)
-    results = iter(
-        [
-            {
-                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
-                "disclosures": [{"acpt_no": "1"}],
-            },
-            {
-                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
-                "disclosures": [{"acpt_no": "1"}],
-            },
-        ]
+    monkeypatch.setattr(
+        automation,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: {
+            "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
+            "disclosures": [{"acpt_no": "1"}],
+        },
     )
-    monkeypatch.setattr(automation, "filter_disclosures_payload", lambda *_args, **_kwargs: next(results))
 
     confirmed = automation._inspect_detail_table(profile)
 
     assert confirmed["confirmed"] is True
 
-    changed_results = iter(
-        [
-            {
-                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
-                "disclosures": [{"acpt_no": "1"}],
-            },
-            {
-                "summary": {"source_disclosures": 1, "duplicate_disclosures": 0},
-                "disclosures": [{"acpt_no": "2"}],
-            },
-        ]
-    )
     monkeypatch.setattr(
         automation,
         "filter_disclosures_payload",
-        lambda *_args, **_kwargs: next(changed_results),
+        lambda *_args, **_kwargs: {
+            "summary": {"source_disclosures": 2, "duplicate_disclosures": 0},
+            "disclosures": [{"acpt_no": "1"}, {"acpt_no": "2"}],
+        },
     )
 
     mismatch = automation._inspect_detail_table(profile)
@@ -567,28 +553,16 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
         "duplicate_rows": 1,
         "disclosures": 1,
     }
-    duplicate_results = iter(
-        [
-            {
-                "summary": {
-                    "source_disclosures": 2,
-                    "duplicate_disclosures": 1,
-                },
-                "disclosures": [{"acpt_no": "1"}],
-            },
-            {
-                "summary": {
-                    "source_disclosures": 1,
-                    "duplicate_disclosures": 0,
-                },
-                "disclosures": [{"acpt_no": "1"}],
-            },
-        ]
-    )
     monkeypatch.setattr(
         automation,
         "filter_disclosures_payload",
-        lambda *_args, **_kwargs: next(duplicate_results),
+        lambda *_args, **_kwargs: {
+            "summary": {
+                "source_disclosures": 1,
+                "duplicate_disclosures": 0,
+            },
+            "disclosures": [{"acpt_no": "1"}],
+        },
     )
 
     duplicate_result = automation._inspect_detail_table(profile)
@@ -599,26 +573,6 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
         "duplicate_rows": 1,
         "records": 1,
     }
-
-
-def test_table_source_discovery_ignores_nested_automation_windows(
-    tmp_path: Path,
-) -> None:
-    from finiq.market_desk.web.features.market_data.service_sources import (
-        _find_source_body_files,
-    )
-
-    root = tmp_path / "01-list"
-    visible = root / "20260101_20261231" / "001_post_page_00001.body"
-    hidden_root = root / ".automation-windows"
-    hidden = hidden_root / "20260101_20260131" / "001_post_page_00001.body"
-    visible.parent.mkdir(parents=True)
-    hidden.parent.mkdir(parents=True)
-    visible.write_bytes(b"visible")
-    hidden.write_bytes(b"hidden")
-
-    assert _find_source_body_files(root) == [visible]
-    assert _find_source_body_files(hidden_root) == [hidden]
 
 
 def test_detail_table_manifest_selects_current_automation_source(tmp_path: Path) -> None:
@@ -648,18 +602,13 @@ def test_filter_inspection_recomputes_current_filter_result(
     expected = {
         "format": "kind_disclosure_filter_v1",
         "source_type": "sqlite_manifest",
-        "source_classification_path": "",
         "source_sqlite_manifest_path": str(tmp_path / "manifest.json"),
-        "source_root_directory": "",
         "filters": {"filter_blocks": [], "filter_workers": 4},
         "summary": {"matched_disclosures": 1},
         "disclosures": [{"acpt_no": "1"}],
         "external_html_download_acpt_numbers": ["1"],
     }
     output_path.write_text(json.dumps(expected))
-    monkeypatch.setattr(
-        automation, "_table_manifest", lambda _profile: tmp_path / "manifest.json"
-    )
     monkeypatch.setattr(
         automation,
         "filter_disclosures_payload",

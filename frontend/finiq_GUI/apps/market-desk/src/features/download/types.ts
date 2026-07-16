@@ -36,7 +36,6 @@ export type DownloadPayload = {
   start_page: number;
   end_page: number | null;
   last_report_only: boolean;
-  resume_yearly: boolean;
   disclosure_type_groups: Record<string, string[]>;
 };
 

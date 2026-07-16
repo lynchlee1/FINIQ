@@ -136,8 +136,12 @@ def _unexpected_missing_fields(classification: dict[str, str]) -> list[str]:
 
 def _parse_one(path: Path, metadata_index: dict[str, dict[str, str]]) -> dict[str, Any]:
     acpt_no = path.stem
-    metadata = metadata_index.get(acpt_no) or {}
-    title = str(metadata.get("title") or "").strip() or None
+    metadata = metadata_index.get(acpt_no)
+    if metadata is None:
+        raise ValueError(f"metadata is required for acpt_no={acpt_no}")
+    title = str(metadata.get("title") or "").strip()
+    if not title:
+        raise ValueError(f"title metadata is required for acpt_no={acpt_no}")
     record = parse_bond_issuance(path.read_bytes(), file_path=path, title=title)
     return _apply_parse_metadata(record, metadata_index, mode="bond_issuance")
 
@@ -147,6 +151,8 @@ def validate_sample(
     *,
     sample_size: int,
     seed: int,
+    filtered_metadata_path: Path,
+    compressed_metadata_path: Path,
 ) -> dict[str, Any]:
     html_files = sorted(path for path in input_directory.rglob("*.html") if path.is_file())
     if len(html_files) < sample_size:
@@ -155,7 +161,11 @@ def validate_sample(
 
     rng = random.Random(seed)
     sample = rng.sample(html_files, sample_size)
-    metadata_index, _ = _load_html_parse_metadata(input_directory)
+    metadata_index, _ = _load_html_parse_metadata(
+        input_directory,
+        filtered_metadata_path=filtered_metadata_path,
+        compressed_metadata_path=compressed_metadata_path,
+    )
 
     records: list[dict[str, Any]] = []
     missing_records: list[dict[str, Any]] = []
@@ -213,6 +223,8 @@ def main() -> int:
     parser.add_argument("--input-directory", type=Path, default=DEFAULT_INPUT_DIRECTORY)
     parser.add_argument("--sample-size", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20260629)
+    parser.add_argument("--filtered-metadata", type=Path, required=True)
+    parser.add_argument("--compressed-metadata", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
     args = parser.parse_args()
 
@@ -220,6 +232,8 @@ def main() -> int:
         args.input_directory.expanduser().resolve(),
         sample_size=args.sample_size,
         seed=args.seed,
+        filtered_metadata_path=args.filtered_metadata.expanduser().resolve(),
+        compressed_metadata_path=args.compressed_metadata.expanduser().resolve(),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

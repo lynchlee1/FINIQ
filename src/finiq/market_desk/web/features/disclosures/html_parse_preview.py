@@ -59,34 +59,24 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         filtered_metadata_path,
     )
     records: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-    for index, html_file in enumerate(html_files, start=1):
-        try:
-            html_bytes = html_file.read_bytes()
-            record = _apply_parse_metadata(
-                _record_without_raw_tables(
-                    _parse_with_metadata_title(
-                        parser,
-                        html_bytes,
-                        html_file=html_file,
-                        metadata_index=metadata_index,
-                    )
-                ),
-                metadata_index,
-                mode=requested_mode,
-            )
-            if _record_matches_filter_blocks(record, filter_blocks):
-                records.append(record)
-                if len(records) >= limit:
-                    break
-        except Exception as exc:
-            errors.append(
-                {
-                    "index": index,
-                    "acpt_no": html_file.stem,
-                    "error": str(exc),
-                }
-            )
+    for html_file in html_files:
+        html_bytes = html_file.read_bytes()
+        record = _apply_parse_metadata(
+            _record_without_raw_tables(
+                _parse_with_metadata_title(
+                    parser,
+                    html_bytes,
+                    html_file=html_file,
+                    metadata_index=metadata_index,
+                )
+            ),
+            metadata_index,
+            mode=requested_mode,
+        )
+        if _record_matches_filter_blocks(record, filter_blocks):
+            records.append(record)
+            if len(records) >= limit:
+                break
 
     return {
         "format": "finiq_parse_preview_v1",
@@ -96,7 +86,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         "summary": {
             "records": len(html_files),
             "visible_records": len(records),
-            "errors": len(errors),
+            "errors": 0,
         },
         "records": [
             _build_preview_record(
@@ -107,7 +97,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
             )
             for index, record in enumerate(records, start=1)
         ],
-        "errors": errors,
+        "errors": [],
     }
 
 
@@ -145,7 +135,9 @@ def _extract_filter_candidate_from_file(
 
 def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Return available parsed field values from every HTML file in a folder."""
-    requested_mode = str(body.get("mode") or "bond_issuance").strip()
+    requested_mode = str(body.get("mode") or "").strip()
+    if not requested_mode:
+        raise ValueError("mode is required")
     parser = PARSER_REGISTRY.get(requested_mode)
     if parser is None:
         supported_modes = ", ".join(sorted(PARSER_REGISTRY))
@@ -154,7 +146,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         )
         raise ValueError(msg)
 
-    field = str(body.get("field") or "사채발행방법").strip()
+    field = str(body.get("field") or "").strip()
     if not field:
         msg = "field is required"
         raise ValueError(msg)
@@ -181,11 +173,10 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         filtered_metadata_path,
     )
     worker_count = _filter_candidate_workers(
-        body.get("parallel_workers", body.get("workers")), len(html_files)
+        body.get("parallel_workers"), len(html_files)
     )
     candidate_counts: dict[str, int] = {}
     candidate_examples: dict[str, list[dict[str, str]]] = {}
-    errors: list[dict[str, Any]] = []
     indexed_files = list(enumerate(html_files, start=1))
 
     def record_value(value: Any, html_file: Path) -> None:
@@ -202,15 +193,6 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                         }
                     )
 
-    def record_error(index: int, html_file: Path, exc: Exception) -> None:
-        errors.append(
-            {
-                "index": index,
-                "acpt_no": html_file.stem,
-                "error": str(exc),
-            }
-        )
-
     if worker_count > 1:
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             completed = bounded_as_completed(
@@ -226,26 +208,20 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                 ),
                 max_pending=worker_count * 2,
             )
-            for future, (index, html_file) in completed:
-                try:
-                    record_value(future.result(), html_file)
-                except Exception as exc:
-                    record_error(index, html_file, exc)
+            for future, (_index, html_file) in completed:
+                record_value(future.result(), html_file)
     else:
-        for index, html_file in indexed_files:
-            try:
-                record_value(
-                    _extract_filter_candidate_from_file(
-                        html_file=html_file,
-                        parser=parser,
-                        requested_mode=requested_mode,
-                        field=field,
-                        metadata_index=metadata_index,
-                    ),
-                    html_file,
-                )
-            except Exception as exc:
-                record_error(index, html_file, exc)
+        for _index, html_file in indexed_files:
+            record_value(
+                _extract_filter_candidate_from_file(
+                    html_file=html_file,
+                    parser=parser,
+                    requested_mode=requested_mode,
+                    field=field,
+                    metadata_index=metadata_index,
+                ),
+                html_file,
+            )
 
     candidates = [
         {"value": value, "count": count, "examples": candidate_examples.get(value, [])}
@@ -261,10 +237,10 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         "summary": {
             "records": len(html_files),
             "candidates": len(candidates),
-            "errors": len(errors),
+            "errors": 0,
         },
         "candidates": candidates,
-        "errors": errors,
+        "errors": [],
     }
 
 

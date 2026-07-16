@@ -81,15 +81,16 @@ def _write_transfer_file(
     transfer_path = output_root / normalized_mode / "filtered.json"
 
     payload["mode"] = normalized_mode
+    acpt_numbers = payload.get("external_html_download_acpt_numbers")
+    if not isinstance(acpt_numbers, list):
+        raise ValueError(
+            "external_html_download_acpt_numbers must be a list"
+        )
     atomic_write_json(transfer_path, payload)
     return {
         "format": payload.get("format", ""),
         "path": str(transfer_path),
-        "acpt_numbers": len(
-            payload.get("external_html_download_acpt_numbers")
-            or payload.get("acptNumbers")
-            or []
-        ),
+        "acpt_numbers": len(acpt_numbers),
     }
 
 
@@ -161,6 +162,7 @@ def create_workflows_router(
         try:
             body = apply_workspace_defaults("filter", await request.json())
             body["mode"] = validate_workspace_mode(body.get("mode"))
+            body["include_external_html_download_acpt_numbers"] = True
             body["external_html_transfer_path"] = _filter_output_directory(
                 body.get("external_html_transfer_path")
             )

@@ -41,7 +41,6 @@ class SettingsUpdate(BaseModel):
     download_output_directory: Optional[str] = None
     disclosure_separate_output_directory: Optional[bool] = None
     sqlite_output_directory: Optional[str] = None
-    sqlite_manifest_path: Optional[str] = None
     external_html_output_directory: Optional[str] = None
     internal_html_output_directory: Optional[str] = None
     html_section_split_output_directory: Optional[str] = None
@@ -144,43 +143,59 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
 
     def config_payload(*, include_discovery: bool = False) -> dict[str, Any]:
         price_root = config.price_root_directory or str(Path(config.quanti_dir).expanduser().parent)
-        workspace_defaults = build_disclosure_workspace_path_settings(
-            config.output_root,
-            mode=config.html_parse_mode or "bond_issuance",
+        workspace_defaults = (
+            build_disclosure_workspace_path_settings(
+                config.output_root,
+                mode=config.html_parse_mode,
+            )
+            if str(config.output_root).strip() and str(config.html_parse_mode).strip()
+            else {}
         )
+
+        def workspace_value(key: str, configured: str) -> str:
+            return configured or workspace_defaults.get(key, "")
+
         payload = {
             "parallel_worker_count": available_cpu_count(),
             "output_root": config.output_root,
             "quanti_dir": config.quanti_dir,
             "price_root_directory": price_root,
-            "download_output_directory": config.download_output_directory
-            or workspace_defaults["download_output_directory"],
+            "download_output_directory": workspace_value(
+                "download_output_directory", config.download_output_directory
+            ),
             "disclosure_separate_output_directory": bool(
                 getattr(config, "disclosure_separate_output_directory", False)
             ),
-            "sqlite_output_directory": config.sqlite_output_directory
-            or workspace_defaults["sqlite_output_directory"],
-            "sqlite_manifest_path": config.sqlite_manifest_path
-            or workspace_defaults["sqlite_manifest_path"],
-            "external_html_output_directory": config.external_html_output_directory
-            or workspace_defaults["external_html_output_directory"],
-            "internal_html_output_directory": config.internal_html_output_directory
-            or workspace_defaults["internal_html_output_directory"],
-            "html_section_split_output_directory": config.html_section_split_output_directory
-            or workspace_defaults["html_section_split_output_directory"],
-            "external_html_transfer_directory": config.external_html_transfer_directory
-            or workspace_defaults["external_html_transfer_directory"],
-            "html_parse_output_directory": config.html_parse_output_directory
-            or workspace_defaults["html_parse_output_directory"],
-            "html_parse_result_path": config.html_parse_result_path
-            or workspace_defaults["html_parse_result_path"],
+            "sqlite_output_directory": workspace_value(
+                "sqlite_output_directory", config.sqlite_output_directory
+            ),
+            "external_html_output_directory": workspace_value(
+                "external_html_output_directory", config.external_html_output_directory
+            ),
+            "internal_html_output_directory": workspace_value(
+                "internal_html_output_directory", config.internal_html_output_directory
+            ),
+            "html_section_split_output_directory": workspace_value(
+                "html_section_split_output_directory",
+                config.html_section_split_output_directory,
+            ),
+            "external_html_transfer_directory": workspace_value(
+                "external_html_transfer_directory", config.external_html_transfer_directory
+            ),
+            "html_parse_output_directory": workspace_value(
+                "html_parse_output_directory", config.html_parse_output_directory
+            ),
+            "html_parse_result_path": workspace_value(
+                "html_parse_result_path", config.html_parse_result_path
+            ),
             "html_parse_mode": config.html_parse_mode,
             "price_files": [],
             "selected_price_path": config.quanti_dir,
             "classification_files": [],
             "selected_classification_path": config.selected_classification_path,
-            "sqlite_source_path": config.sqlite_source_path
-            or workspace_defaults["sqlite_source_path"],
+            "sqlite_source_path": workspace_value(
+                "sqlite_source_path", config.sqlite_source_path
+            ),
             "integrated_merge_input_path": config.integrated_merge_input_path,
             "integrated_merge_output_path": config.integrated_merge_output_path,
             "integrated_history_item_registry_path": config.integrated_history_item_registry_path,
@@ -193,12 +208,18 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "asset_excel_cleanup_merged_items": config.asset_excel_cleanup_merged_items,
             "asset_excel_duplicate_scan_recursive": config.asset_excel_duplicate_scan_recursive,
             "asset_excel_account_mappings": config.asset_excel_account_mappings,
-            "external_html_compressed_json_path": config.external_html_compressed_json_path
-            or workspace_defaults["external_html_compressed_json_path"],
-            "external_html_compress_input_directory": config.external_html_compress_input_directory
-            or workspace_defaults["external_html_compress_input_directory"],
-            "external_html_compress_output_directory": config.external_html_compress_output_directory
-            or workspace_defaults["external_html_compress_output_directory"],
+            "external_html_compressed_json_path": workspace_value(
+                "external_html_compressed_json_path",
+                config.external_html_compressed_json_path,
+            ),
+            "external_html_compress_input_directory": workspace_value(
+                "external_html_compress_input_directory",
+                config.external_html_compress_input_directory,
+            ),
+            "external_html_compress_output_directory": workspace_value(
+                "external_html_compress_output_directory",
+                config.external_html_compress_output_directory,
+            ),
             "integrated_data_values": config.integrated_data_values,
             "change_log_date_thresholds": config.change_log_date_thresholds,
             "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
@@ -279,8 +300,12 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
         workspace_setting_changed = (
             "output_root" in payload or "html_parse_mode" in payload
         )
-        if workspace_setting_changed and str(config.output_root or "").strip():
-            parse_mode = str(config.html_parse_mode or "bond_issuance").strip()
+        if (
+            workspace_setting_changed
+            and str(config.output_root or "").strip()
+            and str(config.html_parse_mode or "").strip()
+        ):
+            parse_mode = str(config.html_parse_mode).strip()
             try:
                 workspace_settings = build_disclosure_workspace_path_settings(
                     config.output_root, mode=parse_mode

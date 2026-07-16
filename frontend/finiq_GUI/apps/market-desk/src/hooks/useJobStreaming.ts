@@ -60,10 +60,22 @@ export function useJobStreaming() {
           if (!line.trim()) continue;
           const event = JSON.parse(line);
           if (event.type === "progress") {
-            const progress = event.progress || {};
-            const unit = progress.unit_label || "항목";
-            const records = Number(progress.records || 0).toLocaleString("ko-KR");
-            appendStatus(`${unit} ${Number(progress.completed || 0).toLocaleString("ko-KR")}/${Number(progress.total || 0).toLocaleString("ko-KR")} 완료 · 누적 ${records}건`);
+            const progress = event.progress;
+            if (!progress || typeof progress !== "object") {
+              throw new Error("progress event must contain an object");
+            }
+            const unit = progress.unit_label;
+            const completed = progress.completed;
+            const total = progress.total;
+            const recordCount = progress.records;
+            if (typeof unit !== "string" || !unit.trim()) {
+              throw new Error("progress.unit_label is required");
+            }
+            if (![completed, total, recordCount].every((item) => typeof item === "number" && Number.isFinite(item))) {
+              throw new Error("progress counts must be finite numbers");
+            }
+            const records = recordCount.toLocaleString("ko-KR");
+            appendStatus(`${unit} ${completed.toLocaleString("ko-KR")}/${total.toLocaleString("ko-KR")} 완료 · 누적 ${records}건`);
             if (onProgress) onProgress(progress);
           } else if (event.type === "result") {
             onResult(event.payload);
