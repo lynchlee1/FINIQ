@@ -639,6 +639,30 @@ def _selected_section_output(
     }
 
 
+def _validate_section_save_rule(
+    source_file: Path,
+    section_save_rules: dict[str, set[str]],
+) -> None:
+    sections = inspect_internal_html_sections(source_file.read_bytes())
+    signature = _section_signature(
+        [
+            {
+                "toc_id": section.toc_id,
+                "index": section.index,
+                "title": section.title,
+            }
+            for section in sections
+        ]
+    )
+    if signature not in section_save_rules:
+        raise ValueError(f"missing section selection: {source_file}")
+    selected_toc_ids = section_save_rules[signature]
+    if selected_toc_ids and not any(
+        section.toc_id in selected_toc_ids for section in sections
+    ):
+        raise ValueError(f"section selection matches no sections: {source_file}")
+
+
 def inspect_disclosure_html_section_output_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
@@ -680,12 +704,6 @@ def inspect_disclosure_html_section_output_payload(
             )
             continue
         if int(result.get("selected_sections") or 0) == 0:
-            problems.append(
-                {
-                    "source_file": str(source_file),
-                    "error": "section save rules selected no sections",
-                }
-            )
             continue
         expected[_relative_source_path(input_directory, source_file)] = str(
             result["content"]
@@ -768,6 +786,18 @@ def save_disclosure_html_sections_payload(
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
     section_save_rules = _section_save_rules(body.get("section_save_rules"))
+    for _ in _map_html_files(
+        html_files,
+        workers,
+        lambda source_file: _validate_section_save_rule(
+            source_file, section_save_rules
+        ),
+        cancel_check,
+    ):
+        pass
+    if _cancel_requested(cancel_check):
+        return {"cancelled": True}
+
     output_directory.mkdir(parents=True, exist_ok=True)
     saved_files: list[str] = []
     expected_files: list[str] = []
@@ -791,6 +821,10 @@ def save_disclosure_html_sections_payload(
                 "saved": [],
             }
         if int(selected.get("selected_sections") or 0) == 0:
+            source_relative_path = source_file.relative_to(input_directory)
+            output_path = output_directory / source_relative_path
+            if output_path.is_file():
+                output_path.unlink()
             return {
                 "status": "no_selected_sections",
                 "skipped": {
@@ -844,8 +878,7 @@ def save_disclosure_html_sections_payload(
             "skipped_files": len(skipped_files),
             "expected_files": len(expected_files),
             "integrity_ok": len(saved_files) == len(expected_files)
-            and not missing_files
-            and not skipped_files,
+            and not missing_files,
             "missing_files": len(missing_files),
         },
         "saved_files": saved_files,

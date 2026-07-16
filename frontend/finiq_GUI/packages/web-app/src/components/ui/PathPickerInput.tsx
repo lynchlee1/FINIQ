@@ -62,8 +62,11 @@ export function PathPickerInput({
         className="h-10 flex-1 text-sm dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 dark:placeholder:text-slate-600"
       />
       <Button
+        type="button"
         variant="outline"
         size="icon-lg"
+        aria-label={title}
+        title={title}
         onClick={handlePickPath}
         disabled={disabled}
         className="dark:border-[#30363d] dark:hover:bg-[#21262d]"

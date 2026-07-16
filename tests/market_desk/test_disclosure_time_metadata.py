@@ -49,14 +49,18 @@ def _write_filtered(path: Path, *, disclosed_at: str) -> None:
     )
 
 
+def _write_source_html(input_directory: Path, acpt_no: str) -> None:
+    source_path = input_directory / acpt_no[:4] / f"{acpt_no}.html"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text("<html></html>", encoding="utf-8")
+
+
 def test_final_parse_record_preserves_kind_disclosed_at(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_directory = tmp_path / "sections"
     input_directory.mkdir()
-    (input_directory / "20250102000001.html").write_text(
-        "<html></html>", encoding="utf-8"
-    )
+    _write_source_html(input_directory, "20250102000001")
     _write_filtered(tmp_path / "filtered.json", disclosed_at="2025-01-02 09:37")
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
 
@@ -143,9 +147,7 @@ def test_explicit_missing_kind_metadata_is_not_silently_ignored(
 ) -> None:
     input_directory = tmp_path / "sections"
     input_directory.mkdir()
-    (input_directory / "20250102000001.html").write_text(
-        "<html></html>", encoding="utf-8"
-    )
+    _write_source_html(input_directory, "20250102000001")
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
 
     with pytest.raises(ValueError, match="filtered_metadata_path does not exist"):
@@ -165,9 +167,7 @@ def test_explicit_kind_metadata_must_cover_every_html(
 ) -> None:
     input_directory = tmp_path / "sections"
     input_directory.mkdir()
-    (input_directory / "20250102000002.html").write_text(
-        "<html></html>", encoding="utf-8"
-    )
+    _write_source_html(input_directory, "20250102000002")
     _write_filtered(tmp_path / "filtered.json", disclosed_at="2025-01-02 09:37")
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
 
@@ -188,9 +188,7 @@ def test_explicit_kind_metadata_rejects_invalid_disclosed_at(
 ) -> None:
     input_directory = tmp_path / "sections"
     input_directory.mkdir()
-    (input_directory / "20250102000001.html").write_text(
-        "<html></html>", encoding="utf-8"
-    )
+    _write_source_html(input_directory, "20250102000001")
     _write_filtered(tmp_path / "filtered.json", disclosed_at="2025-13-40 99:99")
     monkeypatch.setitem(PARSER_REGISTRY, "bond_issuance", _fake_parser)
 
@@ -211,9 +209,7 @@ def test_duplicate_kind_metadata_is_rejected(
 ) -> None:
     input_directory = tmp_path / "sections"
     input_directory.mkdir()
-    (input_directory / "20250102000001.html").write_text(
-        "<html></html>", encoding="utf-8"
-    )
+    _write_source_html(input_directory, "20250102000001")
     filtered_path = tmp_path / "filtered.json"
     filtered_path.write_text(
         json.dumps(

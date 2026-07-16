@@ -62,13 +62,13 @@ export function RightPanel(props: RightPanelProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-4 pt-2 grid grid-cols-2 gap-2">
-          <Button variant="outline" size="xs" className="text-[11px]" onClick={onJumpSelected}>
+          <Button variant="outline" size="xs" className="text-[11px]" onClick={onJumpSelected} disabled={!selectedNode}>
             <Move className="w-3 h-3 mr-1" /> Jump
           </Button>
-          <Button variant="outline" size="xs" className="text-[11px]" onClick={onApplyNeighborhood}>
+          <Button variant="outline" size="xs" className="text-[11px]" onClick={onApplyNeighborhood} disabled={!selectedNode}>
             N-Hop
           </Button>
-          <Button variant="outline" size="xs" className="text-[11px]" onClick={onHideSelected}>
+          <Button variant="outline" size="xs" className="text-[11px]" onClick={onHideSelected} disabled={selectedNodeIds.size + selectedEdgeIds.size === 0}>
             Hide
           </Button>
           <Button variant="outline" size="xs" className="text-[11px]" onClick={onShowHidden}>
@@ -129,7 +129,9 @@ export function RightPanel(props: RightPanelProps) {
                       <Button 
                         variant="outline" 
                         size="icon-sm" 
-                        className="w-full h-7"
+                        className="h-7 flex-1"
+                        aria-label={selectedNode.pinned ? 'Unpin Node' : 'Pin Node'}
+                        title={selectedNode.pinned ? 'Unpin Node' : 'Pin Node'}
                         onClick={() => onPinNode(selectedNode.id, !selectedNode.pinned)}
                       >
                         {selectedNode.pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
@@ -137,7 +139,9 @@ export function RightPanel(props: RightPanelProps) {
                       <Button 
                         variant="destructive" 
                         size="icon-sm" 
-                        className="w-full h-7"
+                        className="h-7 flex-1"
+                        aria-label="Delete Node"
+                        title="Delete Node"
                         onClick={() => onDeleteNode(selectedNode.id)}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

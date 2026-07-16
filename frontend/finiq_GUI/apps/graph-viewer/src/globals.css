@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+@source "../../../packages/graph-viewer/src/**/*.tsx";
+@source "../../../packages/ui/src/**/*.tsx";
+
 @theme {
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));

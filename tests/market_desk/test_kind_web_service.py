@@ -453,6 +453,14 @@ def _html_parse_metadata_paths(
     return paths
 
 
+def _html_parse_file(
+    input_directory: Path, filename: str, *, year: str | None = None
+) -> Path:
+    year_directory = input_directory / (year or filename[:4])
+    year_directory.mkdir(parents=True, exist_ok=True)
+    return year_directory / filename
+
+
 def _classification_fixture_payload() -> dict[str, object]:
     return {
         "summary": {"companies": 1, "disclosures": 3},
@@ -3337,26 +3345,15 @@ def test_save_disclosure_html_sections_payload_requires_explicit_selection(
         encoding="utf-8",
     )
 
-    payload = save_disclosure_html_sections_payload(
-        {
-            "input_directory": str(input_directory),
-            "output_directory": str(output_directory),
-        }
-    )
-    assert payload["summary"] == {
-        "found_files": 1,
-        "saved_files": 0,
-        "skipped_files": 1,
-        "expected_files": 0,
-        "integrity_ok": False,
-        "missing_files": 0,
-    }
-    assert payload["skipped_files"] == [
-        {
-            "source_file": str(source_directory / "20260422000832.html"),
-            "error": "missing section selection",
-        }
-    ]
+    with pytest.raises(ValueError, match="missing section selection"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert not output_directory.exists()
     assert not (output_directory / "2008" / "20260422000832.html").exists()
     assert not (output_directory / "toc_1").exists()
     assert not (output_directory / "2008" / "toc_1").exists()
@@ -3408,6 +3405,9 @@ def test_section_save_reports_zero_rule_selection_as_integrity_failure(
     output_directory = tmp_path / "section_html"
     input_directory.mkdir()
     source = input_directory / "20260422000832.html"
+    stale_output = output_directory / source.name
+    output_directory.mkdir()
+    stale_output.write_text("stale", encoding="utf-8")
     source.write_text(
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>주요사항보고서</p></h2><p>본문</p></body></html>",
         encoding="utf-8",
@@ -3421,7 +3421,7 @@ def test_section_save_reports_zero_rule_selection_as_integrity_failure(
         }
     )
 
-    assert payload["summary"]["integrity_ok"] is False
+    assert payload["summary"]["integrity_ok"] is True
     assert payload["summary"]["skipped_files"] == 1
     assert payload["skipped_files"] == [
         {
@@ -3429,7 +3429,41 @@ def test_section_save_reports_zero_rule_selection_as_integrity_failure(
             "error": "section save rules selected no sections",
         }
     ]
-    assert not (output_directory / source.name).exists()
+    assert not stale_output.exists()
+    inspected = inspect_disclosure_html_section_output_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 주요사항보고서": []},
+        }
+    )
+    assert inspected["summary"]["integrity_ok"] is True
+
+
+def test_section_save_rejects_unknown_selected_toc_before_writing(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    source = input_directory / "20260422000832.html"
+    source.write_text(
+        "<html><head></head><body><h2 class='SECTION-1'><p>주요사항보고서</p></h2><p>본문</p></body></html>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="section selection matches no sections"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+                "section_save_rules": {
+                    "toc_1 주요사항보고서": ["toc_999"]
+                },
+            }
+        )
+
+    assert not output_directory.exists()
 
 
 def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: Path) -> None:
@@ -3696,7 +3730,9 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
     ]
 
 
-def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_rule(tmp_path: Path) -> None:
+def test_save_disclosure_html_sections_payload_rejects_incomplete_pattern_rules_before_writing(
+    tmp_path: Path,
+) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     source_directory = input_directory / "2008"
@@ -3722,38 +3758,16 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
         encoding="utf-8",
     )
 
-    payload = save_disclosure_html_sections_payload(
-        {
-            "input_directory": str(input_directory),
-            "output_directory": str(output_directory),
-            "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
-        }
-    )
+    with pytest.raises(ValueError, match="missing section selection"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+                "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
+            }
+        )
 
-    assert payload["summary"] == {
-        "found_files": 2,
-        "saved_files": 1,
-        "skipped_files": 1,
-        "expected_files": 1,
-        "integrity_ok": False,
-        "missing_files": 0,
-    }
-    assert (output_directory / "2008" / "20260401000001.html").is_file()
-    filtered_html = (output_directory / "2008" / "20260401000001.html").read_text(encoding="utf-8")
-    assert "표지" in filtered_html
-    assert "본문" not in filtered_html
-    assert not (output_directory / "2008" / "20260401000001_1.html").exists()
-    assert not (output_directory / "2008" / "20260401000001_2.html").exists()
-    assert not (output_directory / "2008" / "20260402000001.html").exists()
-    assert payload["skipped_files"] == [
-        {
-            "source_file": str(source_directory / "20260402000001.html"),
-            "error": "missing section selection",
-        }
-    ]
-    assert not (output_directory / "2008" / "20260402000001_1.html").exists()
-    assert not (output_directory / "toc_1").exists()
-    assert not (output_directory / "2008" / "toc_1").exists()
+    assert not output_directory.exists()
 
 
 def test_section_output_inspection_reuses_save_selection_and_detects_content_change(
@@ -4364,7 +4378,7 @@ def test_parse_disclosure_html_payload_rejects_unknown_mode(tmp_path: Path) -> N
 def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text(
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
         """
         <html>
           <head><title>Sample Disclosure</title></head>
@@ -4423,7 +4437,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
 def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text(
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
         """
         <html>
           <head><title>Sample Disclosure</title></head>
@@ -4468,8 +4482,12 @@ def test_parse_disclosure_html_payload_uses_explicit_metadata_path(
     source_dir = input_root / "source"
     input_dir = source_dir / "viewer_html"
     input_dir.mkdir(parents=True)
-    (input_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
-    (input_dir / "20250102000002.html").write_text("<html></html>", encoding="utf-8")
+    _html_parse_file(input_dir, "20250101000001.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+    _html_parse_file(input_dir, "20250102000002.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
     (input_root / "filtered.json").write_text(
         json.dumps(
             {
@@ -4542,7 +4560,7 @@ def test_parse_disclosure_html_payload_uses_explicit_metadata_path(
 def test_parse_disclosure_html_payload_ignores_download_manifest_metadata(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text(
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
         """
         <html>
           <body>
@@ -4593,7 +4611,7 @@ def test_parse_disclosure_html_payload_ignores_download_manifest_metadata(tmp_pa
 def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text(
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
         """
         <html>
           <head><title>Sample Disclosure</title></head>
@@ -4724,7 +4742,7 @@ def test_parse_disclosure_html_payload_does_not_fallback_to_metadata_display_tit
     bond_dir = tmp_path / "bond_issuance"
     input_dir = bond_dir / "kind_html_contents_grouped_sections"
     input_dir.mkdir(parents=True)
-    (input_dir / "20250102000003.html").write_text(
+    _html_parse_file(input_dir, "20250102000003.html").write_text(
         """
         <html>
           <body>
@@ -4786,7 +4804,7 @@ def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
     input_dir = rights_dir / "kind_html_contents_sections"
     output_dir = tmp_path / "parse_output"
     input_dir.mkdir(parents=True)
-    html_file = input_dir / "20250102000002.html"
+    html_file = _html_parse_file(input_dir, "20250102000002.html")
     html_file.write_text("<html></html>", encoding="utf-8")
 
     def fake_parser(html_text, *, file_path):
@@ -4819,7 +4837,9 @@ def test_parse_disclosure_html_payload_accepts_dotted_output_directory(
     input_dir = tmp_path / "viewer_html"
     output_dir = tmp_path / "project-1.0" / "out"
     input_dir.mkdir()
-    (input_dir / "20250102000002.html").write_text("<html></html>", encoding="utf-8")
+    _html_parse_file(input_dir, "20250102000002.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
 
     def fake_parser(html_text, *, file_path):
         return {
@@ -4849,7 +4869,7 @@ def test_parse_disclosure_html_payload_requires_output_directory(
 ) -> None:
     input_dir = tmp_path / "section_html"
     input_dir.mkdir()
-    html_file = input_dir / "20250102000002.html"
+    html_file = _html_parse_file(input_dir, "20250102000002.html")
     html_file.write_text("<html></html>", encoding="utf-8")
 
     def fake_parser(html_text, *, file_path):
@@ -4882,7 +4902,9 @@ def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_discl
         "20250103000003",
         "20250104000004",
     ):
-        (input_dir / f"{acpt_no}.html").write_text("<html></html>", encoding="utf-8")
+        _html_parse_file(input_dir, f"{acpt_no}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
 
     (input_dir.parent / "filtered.json").write_text(
         json.dumps(
@@ -4962,8 +4984,8 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
 ) -> None:
     input_dir = tmp_path / "rights_issuance" / "kind_html_contents_sections"
     input_dir.mkdir(parents=True)
-    first = input_dir / "20081210000626.html"
-    second = input_dir / "20081211000252.html"
+    first = _html_parse_file(input_dir, "20081210000626.html")
+    second = _html_parse_file(input_dir, "20081211000252.html")
     first.write_text("<html></html>", encoding="utf-8")
     second.write_text("<html></html>", encoding="utf-8")
     (input_dir.parent / "filtered.json").write_text(
@@ -5616,7 +5638,9 @@ def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monk
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for index in range(2):
-        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+        _html_parse_file(viewer_dir, f"2025010100000{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
 
     def fake_parser(html_text, *, file_path):
         cancel_disclosure_html_parse("parse-cancel-test")
@@ -5651,7 +5675,7 @@ def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monk
 def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    html_path = viewer_dir / "20250101000001.html"
+    html_path = _html_parse_file(viewer_dir, "20250101000001.html")
     html_path.write_text("<html></html>", encoding="utf-8")
     output_path = tmp_path / "parsed-security_transaction.json"
 
@@ -5689,10 +5713,12 @@ def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Pat
     assert "progress_log" not in stored
 
 
-def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_path: Path) -> None:
+def test_parse_disclosure_html_payload_rejects_missing_bond_condition_table(
+    tmp_path: Path,
+) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    html_path = viewer_dir / "20250101000001.html"
+    html_path = _html_parse_file(viewer_dir, "20250101000001.html")
     html_path.write_text(
         """
         <html>
@@ -5702,70 +5728,21 @@ def test_parse_disclosure_html_payload_warns_when_expected_form_is_missing(tmp_p
         """,
         encoding="utf-8",
     )
-    output_path = tmp_path / "parsed-bond_issuance.json"
-
-    progress_log: list[str] = []
-    payload = parse_disclosure_html_payload(
-        {
-            "input_directory": str(viewer_dir),
-            "output_directory": str(tmp_path),
-            "mode": "bond_issuance",
-            "skip_errors": False,
-        },
-        progress_callback=progress_log.append,
-    )
-    stored = json.loads(output_path.read_text(encoding="utf-8"))
-
-    assert payload["summary"]["parsed_files"] == 1
-    assert payload["summary"]["failed_files"] == 0
-    assert payload["warning_report_counts"] == {
-        "count": len(payload["warnings"]),
-        "report_count": 1,
-        "weak_warning": {"count": 0, "report_count": 0, "reports": {}},
-        "medium_warning": {"count": 0, "report_count": 0, "reports": {}},
-        "strong_warning": {
-            "count": len(payload["warnings"]),
-            "report_count": 1,
-            "reports": {
-                "20250101000001": {
-                    "count": len(payload["warnings"]),
-                    "warnings": [item["warning"] for item in payload["warnings"]],
-                }
-            },
-        },
-    }
-    assert payload["warnings"][0] == {
-        "index": 1,
-        "total": 1,
-        "mode": "bond_issuance",
-        "acpt_no": "20250101000001",
-        "warning": "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다.",
-        "level": "strong_warning",
-        "warning_code": "bond_main_table_missing",
-    }
-    assert all("source_file" not in item for item in payload["warnings"])
-    assert any(
-        item["warning"].startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
-        for item in payload["warnings"]
-    )
-    assert any(
-        item["warning_code"] == "bond_investor_table_missing"
-        for item in payload["warnings"]
-    )
-    assert payload["records"][0]["parse_warnings"] == [
-        item["warning"] for item in payload["warnings"]
-    ]
-    assert "progress_log" not in payload
-    assert any("파싱 경고 1/1: 20250101000001.html" in line for line in progress_log)
-    assert stored["warning_report_counts"] == payload["warning_report_counts"]
-    assert stored["warnings"] == payload["warnings"]
-    assert "progress_log" not in stored
+    with pytest.raises(ValueError, match="bond issuance condition table is required"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(viewer_dir),
+                "output_directory": str(tmp_path),
+                "mode": "bond_issuance",
+                "skip_errors": False,
+            }
+        )
 
 
 def test_parse_disclosure_html_payload_rejects_missing_rights_title(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    html_path = viewer_dir / "20250101000001.html"
+    html_path = _html_parse_file(viewer_dir, "20250101000001.html")
     html_path.write_text(
         """
         <html>
@@ -5791,7 +5768,9 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for index in range(3):
-        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+        _html_parse_file(viewer_dir, f"2025010100000{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
 
     def fake_parser(html_text, *, file_path):
         return {
@@ -5825,7 +5804,9 @@ def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(
 ) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
 
     def fake_parser(html_text, *, file_path):
         return {
@@ -5855,7 +5836,9 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for index in range(3):
-        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+        _html_parse_file(viewer_dir, f"2025010100000{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
 
     def fake_parser(html_text, *, file_path):
         return {
@@ -5893,7 +5876,7 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
 def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    html_path = viewer_dir / "20250101000001.html"
+    html_path = _html_parse_file(viewer_dir, "20250101000001.html")
     html_path.write_text("<html></html>", encoding="utf-8")
 
     def fake_parser(html_text, *, file_path):
@@ -5969,7 +5952,9 @@ def test_parse_disclosure_html_payload_keeps_warnings_for_filtered_records(
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for name in ("20250101000001", "20250101000002", "20250101000003"):
-        (viewer_dir / f"{name}.html").write_text("<html></html>", encoding="utf-8")
+        _html_parse_file(viewer_dir, f"{name}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
 
     issue_methods = {
         "20250101000001": "공모",
@@ -6058,7 +6043,7 @@ def test_parse_disclosure_html_payload_discards_warnings_when_filter_fails(
     viewer_dir.mkdir()
     acpt_numbers = ("20250101000001", "20250101000002")
     for acpt_no in acpt_numbers:
-        (viewer_dir / f"{acpt_no}.html").write_text(
+        _html_parse_file(viewer_dir, f"{acpt_no}.html").write_text(
             "<html></html>", encoding="utf-8"
         )
 
@@ -6129,7 +6114,9 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for name in ("20250101000001", "20250101000002", "20250101000003"):
-        (viewer_dir / f"{name}.html").write_text("<html></html>", encoding="utf-8")
+        _html_parse_file(viewer_dir, f"{name}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
 
     titles = {
         "20250101000001": "전환사채권발행결정",
@@ -6181,7 +6168,7 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for index in range(3):
-        (viewer_dir / f"2025010100000{index}.html").write_text(
+        _html_parse_file(viewer_dir, f"2025010100000{index}.html").write_text(
             "<html></html>", encoding="utf-8"
         )
 
@@ -6227,7 +6214,7 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
         ("20250101000002", "사모"),
         ("20250101000003", "공모"),
     ):
-        (viewer_dir / f"{name}.html").write_text(
+        _html_parse_file(viewer_dir, f"{name}.html").write_text(
             (
                 "<table>"
                 "<tr><td>사채의 종류</td><td>회차</td><td>1</td></tr>"
@@ -6281,7 +6268,9 @@ def test_build_parse_filter_candidates_payload_uses_parser_returned_value(
 ) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text("<html></html>", encoding="utf-8")
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
     calls = []
 
     def fake_parser(html_text, *, file_path):
@@ -6309,21 +6298,21 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
 ) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    (viewer_dir / "20250101000001.html").write_text(
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
         "<table>"
         "<tr><td>1. 신주의 종류와 수</td><td>보통주식</td><td>1</td></tr>"
         "<tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>"
         "</table>",
         encoding="utf-8",
     )
-    (viewer_dir / "20250101000002.html").write_text(
+    _html_parse_file(viewer_dir, "20250101000002.html").write_text(
         "<table>"
         "<tr><td>1. 신주의 종류와 수</td><td>보통주식</td><td>1</td></tr>"
         "<tr><td>5. 증자방식</td><td>일반공모증자</td></tr>"
         "</table>",
         encoding="utf-8",
     )
-    (viewer_dir / "20250101000003.html").write_text(
+    _html_parse_file(viewer_dir, "20250101000003.html").write_text(
         "<table>"
         "<tr><td>1. 신주의 종류와 수</td><td>보통주식</td><td>1</td></tr>"
         "<tr><td>5. 증자방식</td><td>제3자배정증자</td></tr>"
@@ -6398,7 +6387,7 @@ def test_parse_disclosure_html_payload_does_not_save_partial_result_when_not_ski
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for acpt_no in ("20250101000001", "20250101000002"):
-        (viewer_dir / f"{acpt_no}.html").write_text(
+        _html_parse_file(viewer_dir, f"{acpt_no}.html").write_text(
             "<html></html>", encoding="utf-8"
         )
     output_path = tmp_path / "parsed-security_transaction.json"
@@ -6436,7 +6425,9 @@ def test_parse_disclosure_html_payload_applies_limit(tmp_path: Path) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
     for index in range(3):
-        (viewer_dir / f"2025010100000{index}.html").write_text("<html></html>", encoding="utf-8")
+        _html_parse_file(viewer_dir, f"2025010100000{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
 
     payload = parse_disclosure_html_payload(
         {
@@ -6456,7 +6447,7 @@ def test_parse_disclosure_html_payload_applies_limit(tmp_path: Path) -> None:
 def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkeypatch) -> None:
     viewer_dir = tmp_path / "viewer_html"
     viewer_dir.mkdir()
-    html_path = viewer_dir / "20250101000001.html"
+    html_path = _html_parse_file(viewer_dir, "20250101000001.html")
     html_path.write_text("<html></html>", encoding="utf-8")
     called_paths: list[Path] = []
 
@@ -6792,23 +6783,32 @@ def test_resolve_disclosure_html_file_uses_year_directory(tmp_path: Path) -> Non
 
 
 def test_collect_html_files_rejects_duplicate_full_stems(tmp_path: Path) -> None:
-    year_directory = tmp_path / "2025"
-    year_directory.mkdir()
-    (tmp_path / "abc_def.html").write_text("<html></html>", encoding="utf-8")
-    (year_directory / "abc_def.html").write_text("<html></html>", encoding="utf-8")
+    first_year_directory = tmp_path / "2024"
+    second_year_directory = tmp_path / "2025"
+    first_year_directory.mkdir()
+    second_year_directory.mkdir()
+    (first_year_directory / "abc_def.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+    (second_year_directory / "abc_def.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
 
     with pytest.raises(ValueError, match="duplicate HTML filename stem: abc_def"):
         _collect_html_files(tmp_path, None)
 
 
-def test_collect_html_files_uses_resolved_path_once(tmp_path: Path) -> None:
-    source_path = tmp_path / "abc_def.html"
-    source_path.write_text("<html></html>", encoding="utf-8")
-    year_directory = tmp_path / "2025"
-    year_directory.mkdir()
-    (year_directory / "alias.html").symlink_to(source_path)
+def test_collect_html_files_uses_only_four_digit_year_directories(tmp_path: Path) -> None:
+    root_html = tmp_path / "root.html"
+    named_directory_html = tmp_path / "current" / "named.html"
+    nested_html = tmp_path / "2025" / "nested" / "nested.html"
+    visible = tmp_path / "2025" / "20250101000001.html"
+    named_directory_html.parent.mkdir()
+    nested_html.parent.mkdir(parents=True)
+    for path in (root_html, named_directory_html, nested_html, visible):
+        path.write_text("<html></html>", encoding="utf-8")
 
-    assert _collect_html_files(tmp_path, None) == [source_path.resolve()]
+    assert _collect_html_files(tmp_path, None) == [visible.resolve()]
 
 
 def test_collect_html_files_ignores_hidden_automation_directory(tmp_path: Path) -> None:
@@ -6844,7 +6844,7 @@ def test_parse_disclosure_html_payload_rejects_nonnumeric_metadata_acpt_no(
 ) -> None:
     input_directory = tmp_path / "viewer_html"
     input_directory.mkdir()
-    (input_directory / " report .html").write_text(
+    _html_parse_file(input_directory, " report .html", year="2025").write_text(
         "<html><body></body></html>", encoding="utf-8"
     )
     (tmp_path / "filtered.json").write_text(
@@ -7015,7 +7015,7 @@ def test_parse_bond_issuance_reads_split_span_amounts_without_sum_warning(
     )
 
 
-def test_parse_bond_issuance_uses_given_html_without_wrapper_body_lookup(
+def test_parse_bond_issuance_rejects_html_without_condition_table(
     tmp_path: Path,
 ) -> None:
     wrapper_path = tmp_path / "20080826000187.html"
@@ -7031,30 +7031,8 @@ def test_parse_bond_issuance_uses_given_html_without_wrapper_body_lookup(
     </html>
     """
 
-    parsed = parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
-
-    assert parsed["title"] == ""
-    assert "rcept_no" not in parsed
-    assert "correction_families" not in parsed
-    assert "raw_rows" not in parsed
-    assert parsed["회차"] is None
-    assert parsed["종류"] is None
-    assert parsed["발행금액"] is None
-    assert parsed["만기일"] is None
-    assert parsed["발행목적"] is None
-    assert parsed["투자자"] is None
-    assert parsed["parse_warnings"][0] == (
-        "사채 발행 주요 표를 찾지 못했습니다. HTML 양식이 예상과 달라 일부 필드가 비어 있을 수 있습니다."
-    )
-    assert any(
-        warning.startswith("발행금액: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed["parse_warnings"]
-    )
-    assert all(
-        warning in parsed["strong_warning"]
-        for warning in parsed["parse_warnings"]
-        if ": 정해진 출처에서 값을 찾지 못했습니다." in warning
-    )
+    with pytest.raises(ValueError, match="bond issuance condition table is required"):
+        parse_bond_issuance(wrapper_html.encode("utf-8"), file_path=wrapper_path)
 
 
 def test_parse_bond_issuance_uses_supplied_title_for_security_type(
@@ -7092,7 +7070,7 @@ def test_parse_disclosure_html_payload_injects_compressed_title_for_bond_parser(
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()
-    html_path = input_dir / "20250102000009.html"
+    html_path = _html_parse_file(input_dir, "20250102000009.html")
     html_path.write_text(
         """
         <html><body>
@@ -7166,7 +7144,7 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()
-    html_path = input_dir / "20250102000012.html"
+    html_path = _html_parse_file(input_dir, "20250102000012.html")
     html_path.write_text("<html><body></body></html>", encoding="utf-8")
     (tmp_path / "compressed-external-html.json").write_text(
         json.dumps(
@@ -7256,7 +7234,7 @@ def test_parse_disclosure_html_payload_injects_compressed_title_for_rights_parse
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()
-    html_path = input_dir / "20250102000011.html"
+    html_path = _html_parse_file(input_dir, "20250102000011.html")
     html_path.write_text(
         """
         <html><body>
@@ -7907,8 +7885,15 @@ def test_parse_bond_issuance_rejects_multiple_security_types_in_title(
 ) -> None:
     fixture_path = tmp_path / "20260712000001.html"
 
+    body_html = """
+    <html><body><table>
+      <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td></tr>
+      <tr><td>2. 사채의 권면총액 (원)</td><td>1,000</td></tr>
+      <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000</td></tr>
+    </table></body></html>
+    """
     parsed = parse_bond_issuance(
-        b"<html><body></body></html>",
+        body_html.encode("utf-8"),
         file_path=fixture_path,
         title=title,
     )
@@ -8214,7 +8199,7 @@ def test_parse_rights_issuance_extracts_legacy_stock_labels() -> None:
 
     assert parsed["신주의 종류와 수"] == [["보통주식", 3_600_000], ["기타주식", 0]]
     assert parsed["증자 전 발행주식총수"] == [["보통주식", 12_635_511], ["기타주식", 0]]
-    assert parsed["발행가액"] == [["보통주식", 2_000], ["기타주식", 0]]
+    assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", 0]]
     assert parsed["발행목적"] == [
         ["운영자금", 4_200_000_000],
         ["기타자금", 3_000_000_000],
@@ -8275,9 +8260,9 @@ def test_parse_rights_issuance_classifies_consistency_warnings_by_level(tmp_path
 
     assert parsed["증자 전 발행주식총수"] == [["보통주식", 100], ["기타주식", 20]]
     assert parsed["field_parse_status"]["증자 전 발행주식총수"] == "parsed"
-    assert parsed["발행대상자"] is None
-    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
-    assert not any("배정주식수 합계" in warning for warning in parsed["weak_warning"])
+    assert parsed["발행대상자"] == [["테스트조합", 10]]
+    assert parsed["field_parse_status"]["발행대상자"] == "parsed"
+    assert any("배정주식수 합계" in warning for warning in parsed["weak_warning"])
     assert any("자금조달 목적 합계" in warning for warning in parsed["weak_warning"])
     assert any("0이 아닌 주식 종류가 둘 이상" in warning for warning in parsed["medium_warning"])
 
@@ -8317,7 +8302,7 @@ def test_parse_rights_issuance_excludes_bottom_duplicate_total_issue_target(tmp_
     )
 
 
-def test_parse_rights_issuance_rejects_mismatching_duplicate_target_total(tmp_path: Path) -> None:
+def test_parse_rights_issuance_keeps_mismatching_duplicate_target_total(tmp_path: Path) -> None:
     fixture_path = tmp_path / "20250102000011.html"
     body_html = """
     <html><body>
@@ -8344,15 +8329,18 @@ def test_parse_rights_issuance_rejects_mismatching_duplicate_target_total(tmp_pa
         title="유상증자결정",
     )
 
-    assert parsed["발행대상자"] is None
-    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
+    assert parsed["발행대상자"] == [
+        ["인수금액 총계", 5_806_443],
+        ["테스트조합", 5_806_443],
+    ]
+    assert parsed["field_parse_status"]["발행대상자"] == "parsed"
     assert any(
-        warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed.get("strong_warning", [])
+        "배정주식수 합계" in warning
+        for warning in parsed.get("weak_warning", [])
     )
 
 
-def test_parse_rights_issuance_rejects_mismatching_unsplit_target_total(tmp_path: Path) -> None:
+def test_parse_rights_issuance_keeps_mismatching_unsplit_target_total(tmp_path: Path) -> None:
     fixture_path = tmp_path / "20250102000012.html"
     body_html = """
     <html><body>
@@ -8376,15 +8364,18 @@ def test_parse_rights_issuance_rejects_mismatching_unsplit_target_total(tmp_path
         title="유상증자결정",
     )
 
-    assert parsed["발행대상자"] is None
-    assert parsed["field_parse_status"]["발행대상자"] == "source_not_found"
+    assert parsed["발행대상자"] == [
+        ["테스트조합", 5_806_443],
+        ["인수금액총계", 5_806_443],
+    ]
+    assert parsed["field_parse_status"]["발행대상자"] == "parsed"
     assert any(
-        warning.startswith("발행대상자: 정해진 출처에서 값을 찾지 못했습니다.")
-        for warning in parsed.get("strong_warning", [])
+        "배정주식수 합계" in warning
+        for warning in parsed.get("weak_warning", [])
     )
 
 
-def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
+def test_parse_rights_issuance_warns_for_single_digit_amount_difference(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000011.html"
@@ -8406,7 +8397,7 @@ def test_parse_rights_issuance_ignores_single_digit_roundoff_in_amount_check(
         title="유상증자결정",
     )
 
-    assert not any(
+    assert any(
         "자금조달 목적 합계" in warning
         for warning in parsed.get("weak_warning", [])
     )
@@ -8421,7 +8412,7 @@ def test_parse_rights_issuance_checks_funding_total_with_issue_price(
       <p class="SECTION-1">유상증자결정</p>
       <table>
         <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
-        <tr><td>4. 자금조달의 목적</td><td>타법인유가증권취득자금 (원)</td><td>1,000</td></tr>
+        <tr><td>4. 자금조달의 목적</td><td>신규사업자금 (원)</td><td>1,000</td></tr>
         <tr><td>5. 증자방식</td><td>일반공모증자</td></tr>
         <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
       </table>
@@ -8434,10 +8425,36 @@ def test_parse_rights_issuance_checks_funding_total_with_issue_price(
         title="유상증자결정",
     )
 
-    assert parsed["발행목적"] == [["타법인 증권 취득자금", 1_000]]
+    assert parsed["발행목적"] == [["신규사업자금", 1_000]]
     assert not any(
         "자금조달 목적 합계" in warning
         for warning in parsed.get("weak_warning", [])
+    )
+
+
+def test_parse_rights_issuance_keeps_first_explicit_issue_price(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20250102000026.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 신주의 종류와 수</td><td>보통주식 (주)</td><td>10</td></tr>
+        <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>0</td></tr>
+        <tr><td>6. 신주 발행가액</td><td>보통주식 (원)</td><td>100</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_rights_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="유상증자결정",
+    )
+
+    assert parsed["발행가액"] == [["보통주식", 0], ["기타주식", None]]
+    assert parsed["field_parse_status_detail"]["발행가액"]["보통주식"] == (
+        "explicit_zero"
     )
 
 
@@ -8503,7 +8520,7 @@ def test_parse_rights_issuance_sums_ungrouped_target_amounts_in_one_cell(
     )
 
 
-def test_parse_rights_issuance_ignores_target_amount_percentage_annotation(
+def test_parse_rights_issuance_does_not_special_case_target_amount_percentage(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000025.html"
@@ -8527,14 +8544,14 @@ def test_parse_rights_issuance_ignores_target_amount_percentage_annotation(
         title="유상증자결정",
     )
 
-    assert parsed["발행대상자"] == [["투자자A", 100_000]]
-    assert not any(
+    assert parsed["발행대상자"] == [["투자자A", 100_100]]
+    assert any(
         "배정주식수 합계" in warning
         for warning in parsed.get("weak_warning", [])
     )
 
 
-def test_parse_rights_issuance_keeps_valid_target_table_after_correction_history_marker(
+def test_parse_rights_issuance_uses_first_target_table_without_total_matching(
     tmp_path: Path,
 ) -> None:
     fixture_path = tmp_path / "20250102000013.html"
@@ -8576,7 +8593,11 @@ def test_parse_rights_issuance_keeps_valid_target_table_after_correction_history
         title="유상증자결정",
     )
 
-    assert parsed["발행대상자"] == [["테스트조합", 10]]
+    assert parsed["발행대상자"] == [["과거조합", 5]]
+    assert any(
+        "배정주식수 합계" in warning
+        for warning in parsed.get("weak_warning", [])
+    )
     assert len(parsed["raw_tables"]) == 5
 
 

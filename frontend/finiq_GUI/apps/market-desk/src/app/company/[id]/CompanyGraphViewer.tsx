@@ -33,6 +33,7 @@ export function CompanyGraphViewer({
     visibleGraph,
     visibleDegreeMap,
     style,
+    stylePresets,
     layout,
     selectedNodeIds,
     selectedEdgeIds,
@@ -49,6 +50,8 @@ export function CompanyGraphViewer({
     filters,
     updateFilters,
     setStyle,
+    applyPreset,
+    savePreset,
     updateLayout: setLayout,
     unpinAllNodes,
   } = useGraphViewer({
@@ -289,14 +292,11 @@ export function CompanyGraphViewer({
             style={style}
             layout={layout}
             nodeTypes={Array.from(new Set(visibleGraph.nodes.map(n => n.type)))}
-            presetNames={Object.keys(STYLE_PRESETS)}
+            presetNames={Object.keys(stylePresets)}
             onStyleChange={setStyle}
             onLayoutChange={setLayout}
-            onPresetChange={(presetName) => {
-              const preset = STYLE_PRESETS[presetName]
-              if (preset) setStyle(preset)
-            }}
-            onPresetSave={() => {}}
+            onPresetChange={applyPreset}
+            onPresetSave={savePreset}
           />
         }
       />

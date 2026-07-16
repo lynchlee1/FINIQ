@@ -738,9 +738,10 @@ def test_parse_inspection_compares_mode_inputs_filters_membership_and_mtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    input_directory = tmp_path / "06-sections"
-    input_directory.mkdir()
-    source = input_directory / "20260712000001.html"
+    input_directory = tmp_path / "06-sections" / ".automation-current"
+    input_directory.mkdir(parents=True)
+    source = input_directory / "2026" / "20260712000001.html"
+    source.parent.mkdir()
     source.write_text("<html></html>")
     output_path = (
         tmp_path
