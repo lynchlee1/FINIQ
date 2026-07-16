@@ -4,9 +4,13 @@ export type WorkflowTab = {
   label: string;
 };
 
+export type SidebarStep = Omit<WorkflowTab, "step"> & {
+  step?: number;
+};
+
 export type SidebarGroup = {
   label: string;
-  steps: WorkflowTab[];
+  steps: SidebarStep[];
   numbered?: boolean;
 };
 

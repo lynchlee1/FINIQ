@@ -38,6 +38,10 @@ from finiq.market_desk.web.features.disclosures.html_parse_preview import (
 from finiq.market_desk.web.features.disclosures.html_parse_summary import (
     build_bond_parse_summary_payload,
 )
+from finiq.market_desk.web.features.disclosures.disclosure_graph import (
+    build_disclosure_graph_payload,
+    load_disclosure_graph_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_sections import (
     inspect_disclosure_html_sections_payload,
     list_disclosure_html_section_sources_payload,
@@ -563,6 +567,24 @@ def create_workflows_router(
     @router.post("/api/disclosures/html/parse/bond-summary")
     async def bond_parse_summary_route(payload: dict[str, Any]):
         return build_bond_parse_summary_payload(payload)
+
+    @router.post("/api/disclosures/graph/build")
+    async def build_disclosure_graph_route(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(build_disclosure_graph_payload, payload)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/graph/load")
+    async def load_disclosure_graph_route(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(load_disclosure_graph_payload, payload)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/html/parse/preview")
     async def parse_preview_route(payload: dict[str, Any]):

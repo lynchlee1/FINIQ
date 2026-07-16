@@ -10,10 +10,7 @@ from typing import Any
 from ..common import (
     build_base_record,
     clean_text,
-    last_value,
-    row_containing,
-    row_with_label,
-    value_after,
+    normalize_label,
 )
 
 MODE = "bond_issuance"
@@ -47,24 +44,80 @@ class _BondRows:
 
     values: list[list[str]]
 
-    def containing(self, *needles: str) -> list[str]:
-        return row_containing(self.values, *needles)
+    def matching_rows(
+        self,
+        label_cell: int,
+        labels: tuple[str, ...],
+        *,
+        starts_with: bool = False,
+        additional_label_cells: tuple[tuple[int, tuple[str, ...]], ...] = (),
+    ) -> list[list[str]]:
+        """고정 위치의 정규화된 라벨이 일치하는 행만 반환한다."""
+        return [
+            row
+            for row in self.values
+            if _label_cell_matches(
+                row,
+                label_cell,
+                labels,
+                starts_with=starts_with,
+            )
+            and all(
+                _label_cell_matches(row, cell_number, cell_labels)
+                for cell_number, cell_labels in additional_label_cells
+            )
+        ]
 
-    def with_label(self, label: str) -> list[str]:
-        return row_with_label(self.values, label)
+    def first_row_at(
+        self,
+        label_cell: int,
+        labels: tuple[str, ...],
+        *,
+        starts_with: bool = False,
+        additional_label_cells: tuple[tuple[int, tuple[str, ...]], ...] = (),
+    ) -> list[str]:
+        """고정 위치의 라벨이 일치하는 첫 행을 반환한다."""
+        rows = self.matching_rows(
+            label_cell,
+            labels,
+            starts_with=starts_with,
+            additional_label_cells=additional_label_cells,
+        )
+        return rows[0] if rows else []
 
-    def value_after(
-        self, row_needle: str, label: str, *additional_needles: str
+    def last_value_at(
+        self,
+        label_cell: int,
+        labels: tuple[str, ...],
+        *,
+        starts_with: bool = False,
+        additional_label_cells: tuple[tuple[int, tuple[str, ...]], ...] = (),
     ) -> str | None:
-        return value_after(self.containing(row_needle, *additional_needles), label)
+        """고정 위치의 라벨이 일치하는 첫 행의 맨 오른쪽 값을 반환한다."""
+        row = self.first_row_at(
+            label_cell,
+            labels,
+            starts_with=starts_with,
+            additional_label_cells=additional_label_cells,
+        )
+        return row[-1] if len(row) > label_cell else None
 
-    def last_value(self, *needles: str) -> str | None:
-        row = self.containing(*needles)
-        return last_value(row) if len(row) > 1 else None
 
-    def last_labeled_value(self, label: str) -> str | None:
-        row = self.with_label(label)
-        return last_value(row) if len(row) > 1 else None
+def _label_cell_matches(
+    row: list[str],
+    cell_number: int,
+    labels: tuple[str, ...],
+    *,
+    starts_with: bool = False,
+) -> bool:
+    index = cell_number - 1
+    if index < 0 or index >= len(row):
+        return False
+    value = normalize_label(clean_text(row[index]))
+    normalized_labels = tuple(normalize_label(label) for label in labels)
+    if starts_with:
+        return any(value.startswith(label) for label in normalized_labels)
+    return value in normalized_labels
 
 
 def _build_bond_parse_context(

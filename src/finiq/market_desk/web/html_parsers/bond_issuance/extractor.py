@@ -37,7 +37,7 @@ EXERCISE_PERIOD_LABEL_GROUPS = (
 )
 EXERCISE_TARGET_LABELS = tuple(
     label for group in EXERCISE_TARGET_LABEL_GROUPS for label in group
-)
+) + ("신주인수권행사에 따라",)
 EXERCISE_PRICE_LABELS = tuple(
     label for group in EXERCISE_PRICE_LABEL_GROUPS for label in group
 )
@@ -47,24 +47,24 @@ EXERCISE_PERIOD_LABELS = (
 )
 
 BOND_FIELD_EXTRACTION_RULES = {
-    "회차": "메인 표 > '1. 사채의 종류' 행 > '회차' 오른쪽 셀",
+    "회차": "메인 표 > N=2 '회차' 행 > N=3 값",
     "종류": "제목 > '전환사채'|'교환사채'|'신주인수권부사채' 포함 여부",
     "기업명(행사대상)": (
-        "메인 표 > 교환/전환/인수권 행사 대상 주식 종류 행 > 마지막 값"
+        "메인 표 > N=2 교환/전환/인수권 행사 대상 주식 종류 행 > 마지막 값"
     ),
-    "발행금액": "메인 표 > '사채의 권면' 행 > 라벨 오른쪽 값 셀의 마지막 숫자",
-    "발행목적": "메인 표 > '자금조달의 목적' 행 > 목적명 + 마지막 숫자",
+    "발행금액": "메인 표 > N=1 '사채의 권면' 또는 N=2 '원화기준 (원)' 행 > 마지막 값",
+    "발행목적": "메인 표 > N=1 '자금조달의 목적' 행 > N=2 목적명 + 마지막 값",
     "행사가액": (
-        "메인 표 > 전환/교환/행사가액 또는 가격 행 > 라벨 오른쪽 숫자 값"
+        "메인 표 > N=2 전환/교환/행사가액 또는 가격 행 > 마지막 값"
     ),
-    "납입일": "메인 표 > '납입일' 라벨 행 > 마지막 값",
-    "만기일": "메인 표 > '사채만기일'|'사채만기' 행 > 마지막 값",
-    "사채발행방법": "메인 표 > '사채발행방법' 행 > 마지막 값",
+    "납입일": "메인 표 > N=1 '납입일' 행 > 마지막 값",
+    "만기일": "메인 표 > N=1 '사채만기일'|'사채만기' 행 > 마지막 값",
+    "사채발행방법": "메인 표 > N=1 '사채발행방법' 행 > 마지막 값",
     "행사시작일": (
-        "메인 표 > '전환청구기간'|'교환청구기간'|'권리행사기간'|'행사기간' 행 > '시작일' 값"
+        "메인 표 > N=2 행사기간 + N=3 '시작일' 행 > 마지막 값"
     ),
     "행사종료일": (
-        "메인 표 > '전환청구기간'|'교환청구기간'|'권리행사기간'|'행사기간' 행 > '종료일' 값"
+        "메인 표 > N=2 행사기간 + N=3 '종료일' 행 > 마지막 값"
     ),
     "투자자": (
         "'특정인에 대한 대상자별 사채발행내역' 표 > 발행 대상자명 + 발행권면총액"
@@ -101,7 +101,8 @@ class BondIssuanceExtractor:
             raise ValueError("bond issuance condition table is required")
 
     def extract_round_from_bond_type_row(self) -> str | None:
-        value = self.rows.value_after("사채의 종류", "회차")
+        row = self.rows.first_row_at(2, ("회차",))
+        value = row[2] if len(row) > 2 else None
         self._set_value_status("회차", value)
         return value
 
@@ -132,14 +133,24 @@ class BondIssuanceExtractor:
     def _extract_exercise_target_stock_text_from_main_rows(self) -> str | None:
         """전환/교환/신주인수권 행사로 발행될 대상 주식 관련 문구를 추출한다."""
         for target_label in EXERCISE_TARGET_LABELS:
-            value = _target_stock_value(self.rows.values, target_label)
+            value = self.rows.last_value_at(
+                2,
+                (target_label,),
+                starts_with=True,
+            )
             if value is not None:
                 return value
         return None
 
     def extract_issue_amount_from_bond_face_value_row(self) -> int | None:
-        row = self._issue_amount_row()
-        value = self._last_int_after_first_cell(row)
+        row = self.rows.first_row_at(2, ("원화기준 (원)",))
+        if not row:
+            row = self.rows.first_row_at(
+                1,
+                ("사채의 권면",),
+                starts_with=True,
+            )
+        value = parse_int(row[-1], dash_as_zero=True) if row else None
         if value is None:
             status = "source_not_found"
         elif value == 0:
@@ -149,25 +160,13 @@ class BondIssuanceExtractor:
         self._set_field_status("발행금액", status)
         return value
 
-    def _issue_amount_row(self) -> list[str]:
-        return _issue_amount_row(self.rows.values)
-
-    def _last_int_after_first_cell(self, row: list[str]) -> int | None:
-        for cell in reversed(row[1:]):
-            parsed = parse_int(cell, dash_as_zero=True)
-            if parsed is not None:
-                return parsed
-        return None
-
     def extract_funding_purposes_from_funding_purpose_rows(
         self,
     ) -> list[list[Any]] | None:
         """자금조달 목적 행에 적힌 목적명과 금액을 표에 나온 순서대로 추출한다."""
         purposes: list[list[Any]] = []
         found_amount_source = False
-        for row in self.rows.values:
-            if not row_contains(row, "자금조달의 목적"):
-                continue
+        for row in self.rows.matching_rows(1, ("자금조달의 목적",)):
             label = self._funding_purpose_label(row)
             amount = self._funding_purpose_amount(row)
             if amount is not None:
@@ -184,29 +183,15 @@ class BondIssuanceExtractor:
         return None if status == "source_not_found" else purposes
 
     def _funding_purpose_label(self, row: list[str]) -> str | None:
-        purpose_index = self._funding_purpose_index(row)
-        if purpose_index is None or purpose_index + 1 >= len(row):
+        if len(row) < 2:
             return None
-        return self._clean_funding_purpose_label(row[purpose_index + 1])
-
-    def _funding_purpose_index(self, row: list[str]) -> int | None:
-        for index, cell in enumerate(row):
-            if row_contains([cell], "자금조달의 목적"):
-                return index
-        return None
+        return self._clean_funding_purpose_label(row[1])
 
     def _clean_funding_purpose_label(self, value: str) -> str | None:
         return _clean_funding_purpose_label(value)
 
     def _funding_purpose_amount(self, row: list[str]) -> int | None:
-        purpose_index = self._funding_purpose_index(row)
-        if purpose_index is None:
-            return None
-        for cell in reversed(row[purpose_index + 2 :]):
-            parsed = parse_int(cell, dash_as_zero=True)
-            if parsed is not None:
-                return parsed
-        return None
+        return parse_int(row[-1], dash_as_zero=True) if len(row) > 2 else None
 
     def extract_exercise_price_from_conversion_exchange_or_warrant_price_row(
         self,
@@ -214,26 +199,30 @@ class BondIssuanceExtractor:
         """전환/교환/신주인수권 행사가액을 추출한다."""
         value = None
         for price_label in EXERCISE_PRICE_LABELS:
-            value = _strict_price_value_after_label(self.rows.values, price_label)
+            raw_value = self.rows.last_value_at(
+                2,
+                (f"{price_label} (원/주)",),
+            )
+            value = _parse_strict_price_value(raw_value)
             if value is not None:
                 break
         self._set_value_status("행사가액", value)
         return value
 
     def extract_payment_date_from_payment_date_row(self) -> str | None:
-        value = self.rows.last_labeled_value("납입일")
+        value = self.rows.last_value_at(1, ("납입일",))
         self._set_value_status("납입일", value)
         return value
 
     def extract_maturity_date_from_bond_maturity_row(self) -> str | None:
-        value = self.rows.last_value("사채만기일")
+        value = self.rows.last_value_at(1, ("사채만기일",))
         if value is None:
-            value = self.rows.last_value("사채만기")
+            value = self.rows.last_value_at(1, ("사채만기",))
         self._set_value_status("만기일", value)
         return value
 
     def extract_issue_method_from_bond_issue_method_row(self) -> str | None:
-        value = self.rows.last_value("사채발행방법")
+        value = self.rows.last_value_at(1, ("사채발행방법",))
         self._set_value_status("사채발행방법", value)
         return value
 
@@ -252,7 +241,11 @@ class BondIssuanceExtractor:
     ) -> str | None:
         """전환/교환/권리행사 청구기간의 시작일 또는 종료일을 추출한다."""
         for period_label in EXERCISE_PERIOD_LABELS:
-            value = self.rows.last_value(period_label, boundary_label)
+            value = self.rows.last_value_at(
+                2,
+                (period_label,),
+                additional_label_cells=((3, (boundary_label,)),),
+            )
             if value is not None:
                 return value
         return None
@@ -323,54 +316,10 @@ class BondIssuanceExtractor:
             self.warnings.append(warning)
 
 
-def _issue_amount_row(rows: list[list[str]]) -> list[str]:
-    amount_rows = [row for row in rows if row_contains(row, "사채의 권면")]
-    for row in amount_rows:
-        if row_contains(row, "원화기준"):
-            return row
-    return amount_rows[0] if amount_rows else []
-
-
 def _first_header_index(row: list[str], label: str) -> int | None:
     for index, cell in enumerate(row):
         if row_contains([cell], label):
             return index
-    return None
-
-
-def _target_stock_value(rows: list[list[str]], label: str) -> str | None:
-    compact_label = _compact(label)
-    for row in rows:
-        if len(row) > 1 and any(
-            compact_label in _compact(cell) for cell in row[:-1]
-        ):
-            return row[-1]
-    return None
-
-
-def _strict_price_value_after_label(
-    rows: list[list[str]], label: str
-) -> int | float | None:
-    compact_label = _compact(label)
-    for row in rows:
-        for index, cell in enumerate(row):
-            if _exercise_price_label(cell) != compact_label:
-                continue
-            value = _last_strict_price_value(row[index + 1 :])
-            if value is not None:
-                return value
-    return None
-
-
-def _exercise_price_label(value: str) -> str:
-    return re.sub(r"\(원/주\)$", "", _compact(value))
-
-
-def _last_strict_price_value(values: list[str]) -> int | float | None:
-    for value in reversed(values):
-        parsed = _parse_strict_price_value(value)
-        if parsed is not None:
-            return parsed
     return None
 
 
@@ -387,7 +336,3 @@ def _parse_strict_price_value(value: str | None) -> int | float | None:
     if "." in numeric_text:
         return float(numeric_text)
     return int(numeric_text)
-
-
-def _compact(value: str) -> str:
-    return clean_text(value).replace(" ", "")
