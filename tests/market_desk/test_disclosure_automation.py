@@ -1093,27 +1093,7 @@ def test_yearly_download_change_during_download_fails_without_retry(
     assert list((tmp_path / "01-list" / ".automation-windows").iterdir()) == []
 
 
-def test_active_html_candidate_reuses_only_current_membership(tmp_path: Path) -> None:
-    current = tmp_path / "current"
-    temporary = tmp_path / "candidate"
-    (current / "2026").mkdir(parents=True)
-    keep_html = "<html><body>" + ("keep " * 30) + "</body></html>"
-    stale_html = "<html><body>" + ("stale " * 30) + "</body></html>"
-    (current / "2026" / "20260712000001.html").write_text(keep_html, encoding="utf-8")
-    (current / "2026" / "20260712000002.html").write_text(stale_html, encoding="utf-8")
-
-    copied = automation._copy_reusable_active_html(
-        current,
-        temporary,
-        [("20260712000001", "2026")],
-    )
-
-    assert copied == 1
-    assert (temporary / "2026" / "20260712000001.html").read_text("utf-8") == keep_html
-    assert not (temporary / "2026" / "20260712000002.html").exists()
-
-
-def test_stage_four_replaces_active_membership_without_stale_html(
+def test_stage_four_rebuilds_active_membership_without_reusing_html(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
@@ -1133,6 +1113,8 @@ def test_stage_four_replaces_active_membership_without_stale_html(
             encoding="utf-8",
         )
 
+    existing_before_download: list[list[Path]] = []
+
     def fake_download(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
         source = json.loads(
             (
@@ -1143,6 +1125,8 @@ def test_stage_four_replaces_active_membership_without_stale_html(
             ).read_text("utf-8")
         )
         output = Path(str(body["output_directory"]))
+        existing_before_download.append(sorted(output.rglob("*.html")))
+        assert body["skip_existing"] is False
         acpt_numbers = [record["acpt_no"] for record in source["disclosures"]]
         for acpt_no in acpt_numbers:
             path = output / "2026" / f"{acpt_no}.html"
@@ -1219,6 +1203,65 @@ def test_stage_four_replaces_active_membership_without_stale_html(
     assert [record["acpt_no"] for record in compressed["records"]] == [
         "20260712000001"
     ]
+    assert existing_before_download == [[], []]
+
+
+def test_stage_five_rebuilds_internal_html_without_reusing_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    filtered_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True)
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260712000001",
+                        "disclosed_at": "2026-07-12 09:00",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    current = (
+        tmp_path
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
+    old_path = current / "2026" / "20260712000001.html"
+    old_path.parent.mkdir(parents=True)
+    old_path.write_text("<html><body>old</body></html>", encoding="utf-8")
+    (current / "automation-internal-html-download.json").write_text(
+        json.dumps({"format": AUTOMATION_INTERNAL_FORMAT}), encoding="utf-8"
+    )
+    existing_before_download: list[Path] = []
+
+    def fake_download(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        output = Path(str(body["output_directory"]))
+        existing_before_download.extend(output.rglob("*.html"))
+        assert body["skip_existing"] is False
+        path = output / "2026" / "20260712000001.html"
+        path.parent.mkdir(parents=True)
+        path.write_text("<html><body>new</body></html>", encoding="utf-8")
+        return {"requested_count": 1, "saved_count": 1, "cancelled": False}
+
+    monkeypatch.setattr(
+        automation, "download_disclosure_internal_html_payload", fake_download
+    )
+
+    _run_stage(
+        5,
+        profile,
+        trigger="sync",
+        progress_callback=lambda _message: None,
+        cancel_check=lambda: False,
+    )
+
+    assert existing_before_download == []
+    assert old_path.read_text("utf-8") == "<html><body>new</body></html>"
 
 
 def test_stage_four_rejects_compressed_record_without_main_document(

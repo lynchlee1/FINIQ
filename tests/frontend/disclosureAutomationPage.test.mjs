@@ -60,6 +60,16 @@ test("automation range is selected directly by dragging task-table controls", as
   assert.doesNotMatch(page, /SelectTrigger|SelectContent|onStartChange|onEndChange/);
 });
 
+test("automation rejects unreadable or unsupported stored profiles", async () => {
+  const page = await readFile(pagePath, "utf8");
+
+  assert.match(page, /format: typeof PROFILE_FORMAT/);
+  assert.match(page, /stored\.format !== PROFILE_FORMAT/);
+  assert.match(page, /throw new Error\(`브라우저 저장값을 읽지 못했습니다:/);
+  assert.match(page, /if \(initializationError\) throw initializationError/);
+  assert.doesNotMatch(page, /legacySelection|steps\?:|executionMask\?:/);
+});
+
 test("automation task table uses standard card spacing and a far-right outlined settings action", async () => {
   const page = await readFile(pagePath, "utf8");
   const tableStart = page.indexOf('<CardTitle className="text-[var(--tv-text)]">작업표</CardTitle>');

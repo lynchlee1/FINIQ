@@ -1508,26 +1508,6 @@ def _active_workspace_disclosure_targets(
     return _active_disclosure_targets(filtered_path)
 
 
-def _copy_reusable_active_html(
-    current: Path, temporary: Path, targets: list[tuple[str, str]]
-) -> int:
-    if not current.is_dir():
-        return 0
-    copied = 0
-    for acpt_no, year in targets:
-        source = current / year / f"{acpt_no}.html"
-        if not source.is_file() or not _is_valid_html(source):
-            continue
-        destination = temporary / year / source.name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.link(source, destination)
-        except OSError:
-            shutil.copy2(source, destination)
-        copied += 1
-    return copied
-
-
 def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
     try:
         root = Path(profile["data_root"])
@@ -1766,14 +1746,13 @@ def _run_stage(
         compressed_path = _external_mode_directory(profile) / "compressed-external-html.json"
         try:
             temporary.mkdir(parents=True, exist_ok=True)
-            reused = _copy_reusable_active_html(current, temporary, targets)
             if targets:
                 external_html_download_result = download_disclosure_external_html_payload(
                     {
                         "data_root": str(root),
                         "mode": mode,
                         "output_directory": str(temporary),
-                        "skip_existing": True,
+                        "skip_existing": False,
                         "timeout": execution["timeout"],
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
                         "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
@@ -1836,7 +1815,6 @@ def _run_stage(
                 external_html_download_result = {
                     "requested_count": 0,
                     "saved_count": 0,
-                    "reused_count": 0,
                 }
                 compressed_payload = {
                     "format": "finiq_disclosure_external_html_docs_v1",
@@ -1854,7 +1832,6 @@ def _run_stage(
                 {
                     "format": AUTOMATION_EXTERNAL_FORMAT,
                     "active_count": len(targets),
-                    "reused_count": reused,
                     "complete": True,
                 },
             )
@@ -1879,7 +1856,6 @@ def _run_stage(
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
         try:
             temporary.mkdir(parents=True, exist_ok=True)
-            reused = _copy_reusable_active_html(current, temporary, targets)
             if targets:
                 result = download_disclosure_internal_html_payload(
                     {
@@ -1887,7 +1863,7 @@ def _run_stage(
                             _external_mode_directory(profile) / "compressed-external-html.json"
                         ),
                         "output_directory": str(temporary),
-                        "skip_existing": True,
+                        "skip_existing": False,
                         "timeout": execution["timeout"],
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
                         "max_requests_per_minute": KIND_AUTOMATION_CONTENT_REQUESTS_PER_MINUTE,
@@ -1910,7 +1886,6 @@ def _run_stage(
                 {
                     "format": AUTOMATION_INTERNAL_FORMAT,
                     "active_count": len(targets),
-                    "reused_count": reused,
                     "complete": True,
                 },
             )

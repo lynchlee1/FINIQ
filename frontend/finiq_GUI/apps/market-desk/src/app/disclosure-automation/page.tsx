@@ -45,6 +45,7 @@ import {
 } from "@/lib/disclosureConditionPresets";
 
 const PROFILE_STORAGE_KEY = "finiq.disclosureAutomation.profile.v1";
+const PROFILE_FORMAT = "finiq_disclosure_automation_profile_v1";
 const REVIEW_STORAGE_KEY = "finiq.disclosureAutomation.review.v1";
 
 const STAGES = [
@@ -107,6 +108,7 @@ type AutomationRunResult = {
 };
 
 type StoredProfile = {
+  format: typeof PROFILE_FORMAT;
   name?: string;
   startDate?: string;
   endDate?: string;
@@ -117,8 +119,6 @@ type StoredProfile = {
   disclosureTypeGroups?: Record<string, string[]>;
   conditions?: DisclosureConditionBlock[];
   sectionRules?: Record<string, string[]>;
-  steps?: Partial<StageToggleState>;
-  executionMask?: number[];
   rangeStart?: number;
   rangeEnd?: number;
   parserMode?: string;
@@ -138,12 +138,28 @@ function firstDayOfYear() {
 }
 
 function loadJson<T>(key: string): T | null {
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return null;
   try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) as T : null;
+    return JSON.parse(raw) as T;
   } catch {
-    return null;
+    throw new Error(`브라우저 저장값을 읽지 못했습니다: ${key}`);
   }
+}
+
+function loadStoredProfile(): StoredProfile | null {
+  const stored = loadJson<unknown>(PROFILE_STORAGE_KEY);
+  if (stored === null) return null;
+  if (
+    typeof stored !== "object"
+    || Array.isArray(stored)
+    || stored === null
+    || !("format" in stored)
+    || stored.format !== PROFILE_FORMAT
+  ) {
+    throw new Error("저장된 공시 자동화 설정 형식을 지원하지 않습니다.");
+  }
+  return stored as StoredProfile;
 }
 
 function planLabel(action?: PlanAction | "confirmed" | "mismatch") {
@@ -189,6 +205,7 @@ export default function DisclosureAutomationPage() {
     saveSetting,
   } = useSettingsStore();
   const [loading, setLoading] = useState(true);
+  const [initializationError, setInitializationError] = useState<Error | null>(null);
   const [name, setName] = useState("공시 자동화");
   const [dataRoot, setDataRoot] = useState("");
   const [startDate, setStartDate] = useState(firstDayOfYear());
@@ -285,7 +302,7 @@ export default function DisclosureAutomationPage() {
         (response): Promise<DownloadOptions | null> => response.ok ? response.json() : Promise.resolve(null),
       ),
     ]).then(([config, options]) => {
-      const stored = loadJson<StoredProfile>(PROFILE_STORAGE_KEY);
+      const stored = loadStoredProfile();
       setDownloadOptions(options);
       setDataRoot(config?.output_root || "");
       setName(stored?.name || "공시 자동화");
@@ -298,11 +315,8 @@ export default function DisclosureAutomationPage() {
       setDisclosureTypeGroups(stored?.disclosureTypeGroups || {});
       setConditions(normalizeDisclosureConditionBlocks(stored?.conditions));
       setSectionRules(stored?.sectionRules || {});
-      const legacySelection = stored?.executionMask?.length
-        ? stored.executionMask
-        : STAGES.filter((stage) => stored?.steps?.[stage.key] !== false).map((stage) => stage.number);
-      setRangeStart(stored?.rangeStart ?? (legacySelection.length ? Math.min(...legacySelection) : 1));
-      setRangeEnd(stored?.rangeEnd ?? (legacySelection.length ? Math.max(...legacySelection) : 7));
+      setRangeStart(stored?.rangeStart ?? 1);
+      setRangeEnd(stored?.rangeEnd ?? 7);
       setParserMode(stored?.parserMode || config?.html_parse_mode || "bond_issuance");
       setPageSize(String(stored?.pageSize || 100));
       const workerLimit = Number(config?.parallel_worker_count || 1);
@@ -311,10 +325,9 @@ export default function DisclosureAutomationPage() {
       const storedReview = loadJson<ReviewPattern[]>(REVIEW_STORAGE_KEY) || [];
       setReviewPatterns(storedReview);
     }).catch((error) => {
-      setNotification(error instanceof Error ? error.message : String(error));
-      setIsErrorStatus(true);
+      setInitializationError(error instanceof Error ? error : new Error(String(error)));
     }).finally(() => setLoading(false));
-  }, [fetchSettings, setIsErrorStatus]);
+  }, [fetchSettings]);
 
   useEffect(() => {
     if (!dataRoot.trim()) {
@@ -397,6 +410,7 @@ export default function DisclosureAutomationPage() {
     sectionRulesOverride: Record<string, string[]> = sectionRules,
   ) => {
     const stored: StoredProfile = {
+      format: PROFILE_FORMAT,
       name,
       startDate,
       endDate,
@@ -673,8 +687,8 @@ export default function DisclosureAutomationPage() {
     }
     const nextRules = { ...sectionRules, ...reviewSelections };
     setSectionRules(nextRules);
-    const stored = loadJson<StoredProfile>(PROFILE_STORAGE_KEY) || {};
-    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({ ...stored, sectionRules: nextRules }));
+    const stored = loadStoredProfile();
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({ ...stored, format: PROFILE_FORMAT, sectionRules: nextRules }));
     void startRun("review", nextRules);
   };
 
@@ -682,6 +696,7 @@ export default function DisclosureAutomationPage() {
   const planForStage = (stage: number) => plan?.stages.find((item) => item.stage === stage);
   const inspectionForStage = (stage: number) => workspaceInspections[stage];
 
+  if (initializationError) throw initializationError;
   if (loading) return <PageLoadingSpinner message="공시 자동화 설정을 불러오는 중입니다..." />;
 
   return (
