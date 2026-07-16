@@ -3330,9 +3330,9 @@ def test_split_internal_html_sections_uses_toc_boundaries(tmp_path: Path) -> Non
         <html>
           <head><style>body { width:600px; }</style></head>
           <body bgcolor="#FFFFFF">
-            <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+            <h2 class="SECTION-2" id="ignored-source-id"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
             <table><tr><td>표지 내용</td></tr></table>
-            <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
+            <h2 class="SECTION-1"><p>전환사채권 발행결정</p></h2>
             <table><tr><td>발행금액</td><td>250,000,000</td></tr></table>
           </body>
         </html>
@@ -3351,80 +3351,84 @@ def test_split_internal_html_sections_uses_toc_boundaries(tmp_path: Path) -> Non
     assert "표지 내용" not in section_payload["toc_2"].html
 
 
-def test_split_internal_html_sections_ignores_nested_and_non_numeric_toc_headings() -> None:
+def test_split_internal_html_sections_uses_direct_section_heading_regardless_of_level_and_id() -> None:
     sections = split_internal_html_sections(
         """
-        <html><body>
-          <div><h2 id="toc_1"><p>중첩 목차</p></h2><p>중첩 내용</p></div>
-          <h2 id="toc_appendix"><p>비정규 목차</p></h2>
+        <html><head></head><body>
+          <div><h2 class="SECTION-1" id="toc_1"><p>중첩 목차</p></h2><p>중첩 내용</p></div>
+          <h2 id="toc_appendix"><p>SECTION class 없는 제목</p></h2>
           <p>비정규 내용</p>
-          <h2 id="toc_2"><p>정규 목차</p></h2>
+          <h1 class="SECTION-7" id="not-a-toc-id"><p>정규 목차</p></h1>
           <p>정규 내용</p>
         </body></html>
         """
     )
 
-    assert [section.toc_id for section in sections] == ["toc_2"]
+    assert [section.toc_id for section in sections] == ["toc_1"]
     assert sections[0].title == "정규 목차"
     assert "정규 내용" in sections[0].html
     assert "중첩 내용" not in sections[0].html
 
 
-def test_split_internal_html_sections_supports_legacy_section_one_paragraphs() -> None:
-    sections = split_internal_html_sections(
-        """
-        <html><body>
-          <p class="SECTION-1"><a name="#10">주요경영사항 신고</a></p>
-          <table><tr><td>표지 내용</td></tr></table>
-          <p class="PGBRK"></p>
-          <p class="SECTION-1"><a name="#87">신주인수권부사채 발행결정</a></p>
-          <table><tr><td>발행금액 16,000,000,000</td></tr></table>
-        </body></html>
-        """
-    )
-
-    assert [(section.toc_id, section.index, section.title) for section in sections] == [
-        ("toc_1", 1, "주요경영사항 신고"),
-        ("toc_2", 2, "신주인수권부사채 발행결정"),
-    ]
-    assert "표지 내용" in sections[0].html
-    assert "신주인수권부사채 발행결정" not in sections[0].html
-    assert "발행금액 16,000,000,000" in sections[1].html
+def test_split_internal_html_sections_does_not_use_legacy_section_one_paragraphs() -> None:
+    with pytest.raises(ValueError, match="canonical SECTION heading is required"):
+        split_internal_html_sections(
+            """
+            <html><head></head><body>
+              <p class="SECTION-1"><a name="#10">주요경영사항 신고</a></p>
+              <table><tr><td>표지 내용</td></tr></table>
+              <p class="PGBRK"></p>
+              <p class="SECTION-1"><a name="#87">신주인수권부사채 발행결정</a></p>
+              <table><tr><td>발행금액 16,000,000,000</td></tr></table>
+            </body></html>
+            """
+        )
 
 
-def test_split_internal_html_sections_uses_xforms_title_boundaries_and_keeps_preamble() -> None:
-    sections = split_internal_html_sections(
-        """
-        <html>
-          <head><title>:: 70471_주주총회소집결의</title></head>
-          <body>
-            <div class="xforms">
-              <div>
-                <div><span>정정신고(보고)</span></div>
-                <div class="xforms_title"><div><span>주주총회소집 결의</span></div></div>
-                <table><tbody><tr><td><span>1. 일시</span></td></tr></tbody></table>
-                <div class="xforms_title"><div><span>추가 정보</span></div></div>
-                <table><tbody><tr><td><span>2. 장소</span></td></tr></tbody></table>
-              </div>
-            </div>
-          </body>
-        </html>
-        """
-    )
+def test_split_internal_html_sections_does_not_use_xforms_title_boundaries() -> None:
+    with pytest.raises(ValueError, match="canonical SECTION heading is required"):
+        split_internal_html_sections(
+            """
+            <html>
+              <head><title>:: 70471_주주총회소집결의</title></head>
+              <body>
+                <div class="xforms">
+                  <div>
+                    <div><span>정정신고(보고)</span></div>
+                    <div class="xforms_title"><div><span>주주총회소집 결의</span></div></div>
+                    <table><tbody><tr><td><span>1. 일시</span></td></tr></tbody></table>
+                    <div class="xforms_title"><div><span>추가 정보</span></div></div>
+                    <table><tbody><tr><td><span>2. 장소</span></td></tr></tbody></table>
+                  </div>
+                </div>
+              </body>
+            </html>
+            """
+        )
 
-    assert [(section.toc_id, section.index, section.title) for section in sections] == [
-        ("toc_1", 1, "주주총회소집 결의"),
-        ("toc_2", 2, "추가 정보"),
-    ]
-    assert 'class="xforms"' in sections[0].html
-    assert 'class="xforms"' in sections[1].html
-    assert "정정신고(보고)" in sections[0].html
-    assert "주주총회소집 결의" in sections[0].html
-    assert "1. 일시" in sections[0].html
-    assert "추가 정보" not in sections[0].html
-    assert "정정신고(보고)" not in sections[1].html
-    assert "추가 정보" in sections[1].html
-    assert "2. 장소" in sections[1].html
+
+@pytest.mark.parametrize(
+    ("markup", "message"),
+    [
+        (
+            "<html><body><h2 class='SECTION-1' id='toc_1'>목차</h2></body></html>",
+            "HTML head is required",
+        ),
+        (
+            "<html><head></head><h2 class='SECTION-1' id='toc_1'>목차</h2></html>",
+            "HTML body is required",
+        ),
+        (
+            "<html><head></head><body><h2 class='SECTION-1' id='toc_1'></h2><div>대체 제목</div></body></html>",
+            "SECTION heading title is required",
+        ),
+    ],
+)
+def test_split_internal_html_sections_rejects_missing_canonical_structure(
+    markup: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        split_internal_html_sections(markup)
 
 
 def test_save_disclosure_html_sections_payload_requires_explicit_selection(
@@ -3436,7 +3440,7 @@ def test_save_disclosure_html_sections_payload_requires_explicit_selection(
     source_directory.mkdir(parents=True)
     (source_directory / "20260422000832.html").write_text(
         """
-        <html><body>
+        <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
           <p>표지 내용</p>
           <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
@@ -3471,55 +3475,43 @@ def test_save_disclosure_html_sections_payload_requires_explicit_selection(
     assert not (output_directory / "2008" / "toc_1").exists()
 
 
-def test_save_disclosure_html_sections_payload_continues_after_files_without_toc(tmp_path: Path) -> None:
+def test_save_disclosure_html_sections_payload_rejects_files_without_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     source_directory = input_directory / "2008"
     source_directory.mkdir(parents=True)
     (source_directory / "20260421000111.html").write_text(
-        "<html><body><p>목차 없는 문서</p></body></html>",
+        "<html><head></head><body><p>목차 없는 문서</p></body></html>",
         encoding="utf-8",
     )
     (source_directory / "20260422000832.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
         encoding="utf-8",
     )
 
-    payload = save_disclosure_html_sections_payload(
-        {
-            "input_directory": str(input_directory),
-            "output_directory": str(output_directory),
-            "section_save_rules": {
-                "toc_1 주요사항보고서 toc_2 전환사채권 발행결정": [
-                    "toc_1",
-                    "toc_2",
-                ]
-            },
-        }
-    )
+    with pytest.raises(ValueError, match="canonical SECTION heading is required"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+                "workers": 1,
+                "section_save_rules": {
+                    "toc_1 주요사항보고서 toc_2 전환사채권 발행결정": [
+                        "toc_1",
+                        "toc_2",
+                    ]
+                },
+            }
+        )
 
-    assert payload["summary"] == {
-        "found_files": 2,
-        "saved_files": 1,
-        "skipped_files": 1,
-        "expected_files": 1,
-        "integrity_ok": False,
-        "missing_files": 0,
-    }
-    assert (output_directory / "2008" / "20260422000832.html").is_file()
-    assert not (output_directory / "2008" / "20260422000832_1.html").exists()
-    assert not (output_directory / "2008" / "20260422000832_2.html").exists()
-    assert not (output_directory / "2008" / "toc_1").exists()
-    assert payload["skipped_files"] == [
-        {"source_file": str(source_directory / "20260421000111.html"), "error": "no sections found"}
-    ]
+    assert not list(output_directory.rglob("*.html"))
 
 
 def test_section_save_reports_zero_rule_selection_as_integrity_failure(
@@ -3530,7 +3522,7 @@ def test_section_save_reports_zero_rule_selection_as_integrity_failure(
     input_directory.mkdir()
     source = input_directory / "20260422000832.html"
     source.write_text(
-        "<html><body><h2 id='toc_1'><p>주요사항보고서</p></h2><p>본문</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>주요사항보고서</p></h2><p>본문</p></body></html>",
         encoding="utf-8",
     )
 
@@ -3553,14 +3545,14 @@ def test_section_save_reports_zero_rule_selection_as_integrity_failure(
     assert not (output_directory / source.name).exists()
 
 
-def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problems(tmp_path: Path) -> None:
+def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     nested_directory = input_directory / "2025" / "shareholder_meeting"
     nested_directory.mkdir(parents=True)
     (input_directory / "20260422000832.html").write_text(
         """
-        <html><body>
+        <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
           <p>표지 내용</p>
           <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
@@ -3571,23 +3563,23 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problem
     )
     (nested_directory / "20260423000533.html").write_text(
         """
-        <html><body>
+        <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
           <p>표지 내용</p>
         </body></html>
         """,
         encoding="utf-8",
     )
-    (input_directory / "20260424000211.html").write_text("<html><body><p>목차 없음</p></body></html>", encoding="utf-8")
-
-    payload = inspect_disclosure_html_sections_payload({"input_directory": str(input_directory), "report_limit": 1})
+    payload = inspect_disclosure_html_sections_payload(
+        {"input_directory": str(input_directory)}
+    )
 
     assert payload["summary"] == {
-        "found_files": 3,
+        "found_files": 2,
         "documents_with_sections": 2,
-        "files_without_sections": 1,
+        "files_without_sections": 0,
         "failed_files": 0,
-        "reported_problem_files": 1,
+        "reported_problem_files": 0,
     }
     documents = sorted(payload["documents"], key=lambda document: document["source_name"])
     assert [document["source_name"] for document in documents] == [
@@ -3600,13 +3592,7 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc_and_problem
     ]
     assert [section["toc_id"] for section in documents[0]["sections"]] == ["toc_1", "toc_2"]
     assert [section["toc_id"] for section in documents[1]["sections"]] == ["toc_1"]
-    assert payload["problem_files"] == [
-        {
-            "kind": "no_sections",
-            "source_file": str(input_directory / "20260424000211.html"),
-            "error": "",
-        }
-    ]
+    assert payload["problem_files"] == []
 
 
 def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_cancelled(
@@ -3615,11 +3601,11 @@ def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_ca
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     (input_directory / "20260401000001.html").write_text(
-        "<html><body><h2 id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
         encoding="utf-8",
     )
     (input_directory / "20260402000001.html").write_text(
-        "<html><body><h2 id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
         encoding="utf-8",
     )
     checks = 0
@@ -3646,15 +3632,47 @@ def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_ca
     assert "첫 번째" in parsed[0]
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        summarize_disclosure_html_section_kinds_payload,
+        inspect_disclosure_html_sections_payload,
+    ],
+)
+def test_html_section_summary_and_inspection_propagate_file_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: Any,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    (input_directory / "20260401000001.html").write_text(
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'>목차</h2></body></html>",
+        encoding="utf-8",
+    )
+
+    def fail_inspection(_markup: bytes) -> list[HtmlSectionSummary]:
+        raise OSError("read failed")
+
+    monkeypatch.setattr(
+        disclosure_html_sections,
+        "inspect_internal_html_sections",
+        fail_inspection,
+    )
+
+    with pytest.raises(OSError, match="read failed"):
+        operation({"input_directory": str(input_directory)})
+
+
 def test_list_disclosure_html_section_sources_payload_pages_with_current_page_toc_counts(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     for index in range(22):
-        section_markup = "<h2 id='toc_1'><p>목차</p></h2>"
+        section_markup = "<h2 class='SECTION-1' id='toc_1'><p>목차</p></h2>"
         if index == 0:
-            section_markup += "<h2 id='toc_2'><p>본문</p></h2>"
+            section_markup += "<h2 class='SECTION-2' id='toc_2'><p>본문</p></h2>"
         (input_directory / f"202604{index + 1:02d}000001.html").write_text(
-            f"<html><body>{section_markup}</body></html>",
+            f"<html><head></head><body>{section_markup}</body></html>",
             encoding="utf-8",
         )
 
@@ -3696,7 +3714,7 @@ def test_list_disclosure_html_section_sources_ignores_hidden_automation_cache(
     visible = input_directory / "20260712000001.html"
     hidden = input_directory / ".automation-current" / "20260712000002.html"
     hidden.parent.mkdir()
-    markup = "<html><body><h2 id='toc_1'><p>목차</p></h2></body></html>"
+    markup = "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>목차</p></h2></body></html>"
     visible.write_text(markup, encoding="utf-8")
     hidden.write_text(markup, encoding="utf-8")
 
@@ -3720,10 +3738,10 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
     ]:
         source_file.write_text(
             """
-            <html><body>
-              <h2 id="toc_1"><p>1</p></h2>
+            <html><head></head><body>
+              <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
               <p>표지</p>
-              <h2 id="toc_2"><p>2</p></h2>
+              <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
               <p>본문</p>
             </body></html>
             """,
@@ -3731,22 +3749,20 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
         )
     (input_directory / "20260405000001.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>1</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
           <p>표지</p>
         </body></html>
         """,
         encoding="utf-8",
     )
-    (input_directory / "20260406000001.html").write_text("<html><body>목차 없음</body></html>", encoding="utf-8")
-
     payload = summarize_disclosure_html_section_kinds_payload({"input_directory": str(input_directory)})
 
     assert payload["format"] == "finiq_disclosure_html_section_kind_summary_v1"
     assert payload["summary"] == {
-        "found_files": 6,
+        "found_files": 5,
         "documents_with_sections": 5,
-        "files_without_sections": 1,
+        "files_without_sections": 0,
         "failed_files": 0,
         "unique_kinds": 2,
     }
@@ -3800,10 +3816,10 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
     source_directory.mkdir(parents=True)
     (source_directory / "20260401000001.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>1</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
           <p>표지</p>
-          <h2 id="toc_2"><p>2</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
           <p>본문</p>
         </body></html>
         """,
@@ -3811,8 +3827,8 @@ def test_save_disclosure_html_sections_payload_filters_toc_sections_by_pattern_r
     )
     (source_directory / "20260402000001.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>단독</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>단독</p></h2>
           <p>단독 본문</p>
         </body></html>
         """,
@@ -3862,9 +3878,9 @@ def test_section_output_inspection_reuses_save_selection_and_detects_content_cha
     source = input_directory / "20260401000001.html"
     source.write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>1</p></h2><p>표지</p>
-          <h2 id="toc_2"><p>2</p></h2><p>본문</p>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2><p>표지</p>
+          <h2 class="SECTION-2" id="toc_2"><p>2</p></h2><p>본문</p>
         </body></html>
         """,
         encoding="utf-8",
@@ -3898,7 +3914,7 @@ def test_section_save_ignores_automation_cache_below_standard_input(
     hidden = input_directory / ".automation-current" / "20260101000002.html"
     visible.parent.mkdir(parents=True)
     hidden.parent.mkdir(parents=True)
-    html = "<html><body><h2 id='toc_1'><p>1</p></h2><p>본문</p></body></html>"
+    html = "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2><p>본문</p></body></html>"
     visible.write_text(html)
     hidden.write_text(html)
 
@@ -3922,10 +3938,10 @@ def test_save_disclosure_html_sections_payload_preserves_multiple_selected_secti
     source_directory.mkdir(parents=True)
     (source_directory / "20260401000001.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>1</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
           <p>표지</p>
-          <h2 id="toc_2"><p>2</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
           <p>본문</p>
         </body></html>
         """,
@@ -3955,11 +3971,11 @@ def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cance
     source_directory = input_directory / "2008"
     source_directory.mkdir(parents=True)
     (source_directory / "20260401000001.html").write_text(
-        "<html><body><h2 id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
         encoding="utf-8",
     )
     (source_directory / "20260402000001.html").write_text(
-        "<html><body><h2 id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
         encoding="utf-8",
     )
     checks = 0
@@ -3994,10 +4010,10 @@ def test_split_disclosure_html_section_source_payload_splits_one_selected_file(t
     source_file = nested_directory / "20260422000832.html"
     source_file.write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
