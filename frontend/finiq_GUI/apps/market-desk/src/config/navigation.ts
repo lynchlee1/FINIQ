@@ -24,6 +24,7 @@ export type WorkflowDefinition = {
 export type SidebarGroup = {
   label: string;
   steps: WorkflowTab[];
+  numbered?: boolean;
 };
 
 export type SidebarDefinition = {
@@ -57,10 +58,10 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     basePath: "/disclosure-automation",
     layout: "job",
     steps: [
-      { href: "/disclosure-automation", step: 1, label: "공시 자동화" },
-      { href: "/download", step: 2, label: "공시내역 다운로드" },
-      { href: "/table", step: 3, label: "공시내역 변환" },
-      { href: "/filter", step: 4, label: "공시내역 필터링" },
+      { href: "/disclosure-automation", step: 0, label: "공시 자동화" },
+      { href: "/download", step: 1, label: "공시내역 다운로드" },
+      { href: "/table", step: 2, label: "공시내역 변환" },
+      { href: "/filter", step: 3, label: "공시내역 필터링" },
     ],
   },
   "html-processing": {
@@ -69,12 +70,12 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
     basePath: "/external-html-download",
     layout: "review",
     steps: [
-      { href: "/external-html-download", step: 1, label: "공시원문 외부 저장" },
-      { href: "/internal-html-download", step: 2, label: "공시원문 내부 저장" },
-      { href: "/html-section-split", step: 3, label: "공시원문 목차 분리" },
-      { href: "/html-parse", step: 4, label: "공시원문 변환" },
-      { href: "/html-change-log", step: 5, label: "공시 정정내역 한눈에" },
-      { href: "/html-bond-summary", step: 6, label: "발행내역 한눈에" },
+      { href: "/external-html-download", step: 4, label: "공시원문 외부 저장" },
+      { href: "/internal-html-download", step: 5, label: "공시원문 내부 저장" },
+      { href: "/html-section-split", step: 6, label: "공시원문 목차 분리" },
+      { href: "/html-parse", step: 7, label: "공시원문 변환" },
+      { href: "/html-change-log", step: 8, label: "공시 정정내역 한눈에" },
+      { href: "/html-bond-summary", step: 9, label: "발행내역 한눈에" },
     ],
   },
   utility: {
@@ -175,14 +176,17 @@ export function getSidebarDefinition(workflowId: WorkflowId): SidebarDefinition 
       {
         label: "공시 자동화",
         steps: [WORKFLOWS["disclosure-build"].steps[0]],
+        numbered: true,
       },
       {
         label: "공시 제목 분석",
         steps: WORKFLOWS["disclosure-build"].steps.slice(1),
+        numbered: true,
       },
       {
         label: "공시 내용 분석",
         steps: WORKFLOWS["html-processing"].steps,
+        numbered: true,
       },
     ],
   };

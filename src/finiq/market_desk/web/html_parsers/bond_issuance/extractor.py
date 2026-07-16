@@ -135,12 +135,6 @@ class BondIssuanceExtractor:
             value = _target_stock_value(self.rows.values, target_label)
             if value is not None:
                 return value
-        for target_label in EXERCISE_TARGET_LABELS:
-            value = _target_stock_value_after_adjacent_kind_cell(
-                self.rows.values, target_label
-            )
-            if value is not None:
-                return value
         return None
 
     def extract_issue_amount_from_bond_face_value_row(self) -> int | None:
@@ -346,70 +340,12 @@ def _first_header_index(row: list[str], label: str) -> int | None:
 
 def _target_stock_value(rows: list[list[str]], label: str) -> str | None:
     compact_label = _compact(label)
-    row = next((item for item in rows if row_contains(item, label)), None)
-    if row is None:
-        return None
-    for index, cell in enumerate(row[:-1]):
-        compact_cell = _compact(cell)
-        if compact_label not in compact_cell:
-            continue
-        if "대상" in compact_label and not (
-            compact_cell == compact_label
-            or "종류" in compact_cell
-            or "유가증권" in compact_cell
+    for row in rows:
+        if len(row) > 1 and any(
+            compact_label in _compact(cell) for cell in row[:-1]
         ):
-            continue
-        if "대상" not in compact_label and "종류" not in compact_cell:
-            continue
-        return row[index + 1]
-    for cell in row:
-        value = _target_stock_value_inside_cell(cell, label)
-        if value is not None:
-            return value
+            return row[-1]
     return None
-
-
-def _target_stock_value_after_adjacent_kind_cell(
-    rows: list[list[str]], label: str
-) -> str | None:
-    compact_label = _compact(label)
-    if "대상" in compact_label:
-        return None
-    row = next((item for item in rows if row_contains(item, label)), None)
-    if row is None:
-        return None
-    for index, cell in enumerate(row[:-2]):
-        if compact_label not in _compact(cell):
-            continue
-        if _compact(row[index + 1]) == "종류":
-            return row[index + 2]
-    return None
-
-
-def _target_stock_value_inside_cell(cell: str, label: str) -> str | None:
-    label_pattern = r"\s*".join(map(re.escape, _compact(label)))
-    suffix_pattern = r"(?:종류|유가증권)" if "대상" in _compact(label) else r"종류"
-    pattern = re.compile(
-        rf"{label_pattern}[^:：]{{0,40}}{suffix_pattern}\s*[:：]\s*(?P<value>.+)"
-    )
-    match = pattern.search(cell)
-    if match is None:
-        return None
-    value = _trim_inline_target_value(match.group("value"))
-    if not value or len(value) > 120:
-        return None
-    return value
-
-
-def _trim_inline_target_value(value: str) -> str | None:
-    text = clean_text(value)
-    text = re.split(
-        r"\s+(?:\(\d+\)|\d+\)|\d+\.\s|[가-하]\.|\d+\s*[①②③④⑤⑥⑦⑧⑨⑩]|[①②③④⑤⑥⑦⑧⑨⑩])",
-        text,
-        maxsplit=1,
-    )[0]
-    text = clean_text(text.strip(" .;:：-/"))
-    return text or None
 
 
 def _strict_price_value_after_label(
@@ -418,10 +354,7 @@ def _strict_price_value_after_label(
     compact_label = _compact(label)
     for row in rows:
         for index, cell in enumerate(row):
-            compact_cell = _compact(cell)
-            if compact_label not in compact_cell:
-                continue
-            if _is_exercise_price_explanation_cell(compact_cell):
+            if _exercise_price_label(cell) != compact_label:
                 continue
             value = _last_strict_price_value(row[index + 1 :])
             if value is not None:
@@ -429,8 +362,8 @@ def _strict_price_value_after_label(
     return None
 
 
-def _is_exercise_price_explanation_cell(compact_cell: str) -> bool:
-    return any(word in compact_cell for word in ("결정방법", "조정", "한도"))
+def _exercise_price_label(value: str) -> str:
+    return re.sub(r"\(원/주\)$", "", _compact(value))
 
 
 def _last_strict_price_value(values: list[str]) -> int | float | None:

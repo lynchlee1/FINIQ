@@ -257,10 +257,7 @@ def _is_major_change(
 def _get_cached_payload(path: Path) -> dict[str, Any]:
     path = path.resolve()
     path_str = str(path)
-    try:
-        mtime = path.stat().st_mtime
-    except FileNotFoundError:
-        return {}
+    mtime = path.stat().st_mtime
 
     with _CACHE_LOCK:
         cached = _PARSE_CACHE.get(path_str)
