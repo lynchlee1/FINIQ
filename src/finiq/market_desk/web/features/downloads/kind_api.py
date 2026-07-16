@@ -10,7 +10,7 @@ from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS, DISCLOSUR
 from finiq.data_scraper.workflow import KindWorkflow
 
 from finiq.market_desk.web.features.downloads.kind_common import *
-from finiq.market_desk.web.features.downloads.kind_runner import _run_resume, _run_single, _run_yearly
+from finiq.market_desk.web.features.downloads.kind_runner import _run_single, _run_yearly
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
 )
@@ -101,7 +101,7 @@ def build_download_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"directory not found: {output_directory}")
 
     saved_input = _require_current_download_input_snapshot(output_directory)
-    page_size = _as_int(payload, "page_size", int(saved_input.get("page_size") or 100))
+    page_size = _as_int(payload, "page_size", int(saved_input["page_size"]))
     status = _download_integrity_status(output_directory, page_size)
     progress_log: deque[str] = deque(maxlen=_as_log_limit(payload))
     _append_status_progress(progress_log, status)
@@ -130,8 +130,4 @@ def run_download_action(
         return _run_yearly(
             payload, progress_callback=progress_callback, cancel_check=cancel_check
         )
-    if mode == "resume":
-        return _run_resume(
-            payload, progress_callback=progress_callback, cancel_check=cancel_check
-        )
-    raise ValueError("mode must be one of: single, yearly, resume")
+    raise ValueError("mode must be one of: single, yearly")

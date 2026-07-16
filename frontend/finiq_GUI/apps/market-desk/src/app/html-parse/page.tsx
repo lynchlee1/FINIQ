@@ -92,7 +92,7 @@ const HTML_PARSE_RELATED_ROUTES = "/internal-html-download /html-parse /html-cha
 const PARSE_MODE_CONFIGS = Object.fromEntries(DISCLOSURE_PARSE_MODES.map((mode) => [mode.key, mode])) as Record<string, ParseModeConfig>;
 const WARNING_OPEN_PAGE_SIZE = 20;
 type FilterCandidate = DisclosureFilterCandidate & {
-  examples?: Array<string | FilterCandidateExample>;
+  examples: FilterCandidateExample[];
 };
 
 type FilterCandidateExample = {
@@ -106,10 +106,10 @@ type ExecutionOptionExampleNotice = {
 };
 
 type ParseWarningItem = {
-  acpt_no?: string;
-  warning?: string;
-  level?: string;
-  warning_code?: string;
+  acpt_no: string;
+  warning: string;
+  level: string;
+  warning_code: string;
 };
 
 type WarningLevel = "weak_warning" | "medium_warning" | "strong_warning";
@@ -132,19 +132,26 @@ const WARNING_LEVEL_LABELS: Record<WarningLevel, string> = {
 
 const WARNING_LEVELS: WarningLevel[] = ["weak_warning", "medium_warning", "strong_warning"];
 
-const normalizeWarningLevel = (level?: string): WarningLevel => (
-  WARNING_LEVELS.includes(level as WarningLevel) ? level as WarningLevel : "medium_warning"
-);
+const normalizeWarningLevel = (level: string): WarningLevel => {
+  if (!WARNING_LEVELS.includes(level as WarningLevel)) {
+    throw new Error(`Unknown parse warning level: ${level}`);
+  }
+  return level as WarningLevel;
+};
 
-const normalizeWarningCode = (code?: string) => String(code || "parse_warning").trim() || "parse_warning";
+const normalizeWarningCode = (code: string) => {
+  const normalized = code.trim();
+  if (!normalized) throw new Error("parse warning code is required");
+  return normalized;
+};
 
 const buildWarningReports = (warnings: ParseWarningItem[]): WarningReport[] => {
   const reportMap = new Map<string, WarningReport>();
 
   warnings.forEach((item) => {
-    const warning = String(item.warning || "").trim();
-    const acptNo = String(item.acpt_no || "");
-    if (!warning || !acptNo) return;
+    const warning = item.warning.trim();
+    const acptNo = item.acpt_no.trim();
+    if (!warning || !acptNo) throw new Error("parse warning requires acpt_no and warning");
 
     const report = reportMap.get(acptNo) || {
       acptNo,
@@ -180,15 +187,18 @@ const executionOptionExampleUrl = (example: FilterCandidateExample, inputDirecto
 const normalizeFilterCandidateExamples = (
   examples: FilterCandidate["examples"],
 ): FilterCandidateExample[] => {
-  if (!Array.isArray(examples)) return [];
-  return examples.map((example) => {
-    if (typeof example === "string") {
-      return { acpt_no: example };
+  if (!Array.isArray(examples)) throw new Error("filter candidate examples must be an array");
+  return examples.map((example, index) => {
+    if (!example || typeof example !== "object") {
+      throw new Error(`filter candidate examples[${index}] must be an object`);
     }
-    return {
-      acpt_no: String(example.acpt_no || ""),
-    };
-  }).filter((example) => example.acpt_no);
+    if (typeof example.acpt_no !== "string") {
+      throw new Error(`filter candidate examples[${index}].acpt_no must be a string`);
+    }
+    const acptNo = example.acpt_no.trim();
+    if (!acptNo) throw new Error(`filter candidate examples[${index}].acpt_no is required`);
+    return { acpt_no: acptNo };
+  });
 };
 
 export default function HtmlParsePage() {
@@ -304,7 +314,10 @@ export default function HtmlParsePage() {
         setParseMode(config.html_parse_mode);
       }
 
-      const configuredParallelWorkers = Number(config.parallel_worker_count || defaultParallelWorkers || 1);
+      const configuredParallelWorkers = Number(config.parallel_worker_count);
+      if (!Number.isInteger(configuredParallelWorkers) || configuredParallelWorkers < 1) {
+        throw new Error("parallel_worker_count must be a positive integer");
+      }
       setParallelWorkers(String(configuredParallelWorkers));
     }).catch(err => {
       setStatus(err.message);
@@ -312,7 +325,7 @@ export default function HtmlParsePage() {
     }).finally(() => {
       setLoading(false);
     });
-  }, [defaultParallelWorkers, fetchSettings, setStatus, setIsErrorStatus]);
+  }, [fetchSettings, setStatus, setIsErrorStatus]);
 
   useEffect(() => {
     if (!dataRoot?.trim()) {
@@ -720,7 +733,7 @@ export default function HtmlParsePage() {
       type: "number",
       label: "병렬 워커 수",
       help: "앱 최초 접속 시 확인한 CPU 기준 기본값을 사용합니다.",
-      placeholder: String(defaultParallelWorkers || 1),
+      placeholder: String(defaultParallelWorkers),
       value: parallelWorkers,
       onChange: setParallelWorkers,
       span: 2,

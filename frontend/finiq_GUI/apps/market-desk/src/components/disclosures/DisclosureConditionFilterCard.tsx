@@ -91,25 +91,51 @@ export function makeEmptyDisclosureCondition(connector: DisclosureFilterConnecto
 }
 
 export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureConditionBlock[] {
-  if (!Array.isArray(value)) return [makeEmptyDisclosureCondition()];
+  if (!Array.isArray(value)) throw new Error("condition_blocks must be an array");
   const blocks = value.map((item, index) => {
-    const row = item as Partial<DisclosureConditionBlock>;
-    const connector = String(row.connector || "AND").toUpperCase();
-    const field = DISCLOSURE_FILTER_FIELD_OPTIONS.some(([key]) => key === row.field) ? row.field as DisclosureFilterFieldKey : "title";
-    const operator = DISCLOSURE_FILTER_OPERATOR_OPTIONS.some(([key]) => key === row.operator) ? row.operator as DisclosureFilterOperatorKey : "contains";
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`condition_blocks[${index}] must be an object`);
+    }
+    const row = item as Record<string, unknown>;
+    const connector = row.connector;
+    if ((index === 0 && connector !== "") || (index > 0 && connector !== "AND" && connector !== "OR")) {
+      throw new Error(`condition_blocks[${index}].connector is invalid`);
+    }
+    if (!DISCLOSURE_FILTER_FIELD_OPTIONS.some(([key]) => key === row.field)) {
+      throw new Error(`condition_blocks[${index}].field is invalid`);
+    }
+    if (!DISCLOSURE_FILTER_OPERATOR_OPTIONS.some(([key]) => key === row.operator)) {
+      throw new Error(`condition_blocks[${index}].operator is invalid`);
+    }
+    for (const key of ["open_count", "close_count"] as const) {
+      if (!Number.isInteger(row[key]) || Number(row[key]) < 0) {
+        throw new Error(`condition_blocks[${index}].${key} must be a non-negative integer`);
+      }
+    }
+    for (const key of ["not", "ignore_spaces", "clean_search"] as const) {
+      if (typeof row[key] !== "boolean") {
+        throw new Error(`condition_blocks[${index}].${key} must be a boolean`);
+      }
+    }
+    if (typeof row.value !== "string") {
+      throw new Error(`condition_blocks[${index}].value must be a string`);
+    }
+    if (!row.value.trim() && row.operator !== "exists" && row.operator !== "empty") {
+      throw new Error(`condition_blocks[${index}].value is required`);
+    }
     return {
-      ...makeEmptyDisclosureCondition(index === 0 || (connector !== "AND" && connector !== "OR") ? "" : connector as DisclosureFilterConnector),
-      open_count: Math.max(0, Math.floor(Number(row.open_count || 0))),
-      not: !!row.not,
-      ignore_spaces: !!row.ignore_spaces,
-      clean_search: !!row.clean_search,
-      field,
-      operator,
-      value: String(row.value || ""),
-      close_count: Math.max(0, Math.floor(Number(row.close_count || 0))),
+      connector: connector as DisclosureFilterConnector,
+      open_count: row.open_count as number,
+      not: row.not as boolean,
+      ignore_spaces: row.ignore_spaces as boolean,
+      clean_search: row.clean_search as boolean,
+      field: row.field as DisclosureFilterFieldKey,
+      operator: row.operator as DisclosureFilterOperatorKey,
+      value: row.value,
+      close_count: row.close_count as number,
     };
-  }).filter((row) => row.value.trim() || row.operator === "exists" || row.operator === "empty");
-  return blocks.length ? blocks : [makeEmptyDisclosureCondition()];
+  });
+  return blocks;
 }
 
 function countParens(value: string, paren: "(" | ")") {

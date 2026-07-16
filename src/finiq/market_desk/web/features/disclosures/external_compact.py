@@ -121,7 +121,9 @@ def _compress_external_html_file(
 
 
 def _external_html_compress_workers(body: dict[str, Any], total_files: int) -> int:
-    raw_workers = body.get("parallel_workers", body.get("workers"))
+    if "workers" in body:
+        raise ValueError("workers is not supported; use parallel_workers")
+    raw_workers = body.get("parallel_workers")
     return resolve_worker_count(
         raw_workers,
         item_count=total_files,

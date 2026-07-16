@@ -30,7 +30,10 @@ def _external_workspace_body(
     data_root = tmp_path / "workspace"
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
-    filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
+    filtered_path.write_text(
+        json.dumps({"format": "kind_disclosure_filter_v1", **source_json}),
+        encoding="utf-8",
+    )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
 
@@ -153,7 +156,12 @@ def test_external_html_compression_rejects_receipt_number_mismatching_filename(
     (input_directory / "2025").mkdir(parents=True)
     (input_directory / "kind_disclosure_html_manifest.json").write_text(
         json.dumps(
-            {"disclosures": [{"acpt_no": "20250101000001", "title": "KIND 제목"}]}
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {"acpt_no": "20250101000001", "title": "KIND 제목"}
+                ],
+            }
         ),
         encoding="utf-8",
     )

@@ -59,8 +59,6 @@ export default function FilterPage() {
   const {
     output_root: rootDirectory,
     parallel_worker_count: parallelWorkerCount,
-    sqlite_output_directory: tableDirectory,
-    sqlite_manifest_path: tableManifestPath,
     external_html_transfer_directory: htmlTransferPath,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
@@ -85,14 +83,21 @@ export default function FilterPage() {
 
   useEffect(() => {
     fetchSettings().then((config) => {
-      setFilterWorkers(String(config?.parallel_worker_count || 1));
+      const workerCount = Number(config?.parallel_worker_count);
+      if (!Number.isInteger(workerCount) || workerCount < 1) {
+        throw new Error("parallel_worker_count must be a positive integer");
+      }
+      setFilterWorkers(String(workerCount));
       const configuredMode = String(config?.html_parse_mode || "");
       setMode(FILTER_MODES.some((item) => item.key === configuredMode) ? configuredMode : "");
+      setStatus("공시 소스 폴더를 불러왔습니다.");
+    }).catch((error) => {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
     }).finally(() => {
       setLoading(false);
-      setStatus("공시 소스 폴더를 불러왔습니다.");
     });
-  }, [fetchSettings, setStatus]);
+  }, [fetchSettings, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     if (!rootDirectory?.trim()) {
@@ -125,22 +130,35 @@ export default function FilterPage() {
     return rows.slice(safeIndex * PAGE_SIZE, (safeIndex + 1) * PAGE_SIZE);
   }, [pageCount, pageIndex, result]);
 
-  const buildPayload = () => ({
-    data_root: rootDirectory,
-    mode,
-    ...(useSeparateOutputDirectory ? {
-      classification_path: tableDirectory || tableManifestPath,
-      external_html_transfer_path: htmlTransferPath,
-    } : {}),
-    filter_blocks: normalizeDisclosureConditionBlocks(conditions),
-    title_expression: "",
-    limit: limitUnlimited ? null : Number(limit || 1000),
-    limit_unlimited: limitUnlimited,
-    return_limit: Number(limit || 1000),
-    include_external_html_download_acpt_numbers: true,
-    filter_workers: Number(filterWorkers || parallelWorkerCount || 1),
-    progress_interval: Number(progressInterval || 1000),
-  });
+  const buildPayload = () => {
+    const configuredLimit = Number(limit);
+    const configuredWorkers = Number(filterWorkers);
+    const configuredProgressInterval = Number(progressInterval);
+    if (!Number.isInteger(configuredLimit) || configuredLimit < 1) {
+      throw new Error("limit must be a positive integer");
+    }
+    if (!Number.isInteger(configuredWorkers) || configuredWorkers < 1) {
+      throw new Error("filter_workers must be a positive integer");
+    }
+    if (!Number.isInteger(configuredProgressInterval) || configuredProgressInterval < 1) {
+      throw new Error("progress_interval must be a positive integer");
+    }
+    return {
+      data_root: rootDirectory,
+      mode,
+      ...(useSeparateOutputDirectory ? {
+        external_html_transfer_path: htmlTransferPath,
+      } : {}),
+      filter_blocks: normalizeDisclosureConditionBlocks(conditions),
+      title_expression: "",
+      limit: limitUnlimited ? null : configuredLimit,
+      limit_unlimited: limitUnlimited,
+      return_limit: configuredLimit,
+      include_external_html_download_acpt_numbers: true,
+      filter_workers: configuredWorkers,
+      progress_interval: configuredProgressInterval,
+    };
+  };
 
   const handleFilter = async () => {
     if (!rootDirectory?.trim()) {
@@ -153,16 +171,26 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
+    if (useSeparateOutputDirectory && !htmlTransferPath.trim()) {
+      setStatus("필터 결과 데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
 
     setResult(null);
     setPageIndex(0);
 
-    await streamJob("/api/disclosures/filter", buildPayload(), (payload: FilterResult) => {
-      setResult(payload);
-      const transferPath = String(payload.external_html_download_transfer?.path || "").trim();
-      const saved = transferPath ? `접수번호 ${formatInteger(payload.external_html_download_transfer?.acpt_numbers)}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
-      appendStatus(`매칭 ${formatInteger(payload.summary?.matched_disclosures)}건 중 ${formatInteger(payload.summary?.returned_disclosures)}건을 표시했고, ${saved}`, !transferPath);
-    });
+    try {
+      await streamJob("/api/disclosures/filter", buildPayload(), (payload: FilterResult) => {
+        setResult(payload);
+        const transferPath = String(payload.external_html_download_transfer?.path || "").trim();
+        const saved = transferPath ? `접수번호 ${formatInteger(payload.external_html_download_transfer?.acpt_numbers)}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
+        appendStatus(`매칭 ${formatInteger(payload.summary?.matched_disclosures)}건 중 ${formatInteger(payload.summary?.returned_disclosures)}건을 표시했고, ${saved}`, !transferPath);
+      });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    }
   };
 
   const savePreset = async () => {
@@ -385,11 +413,11 @@ export default function FilterPage() {
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
                 {pageRows.length ? pageRows.map((row, index) => {
-                  const acptNo = String(row.acpt_no || row.acptno || "");
+                  const acptNo = String(row.acpt_no || "");
                   const title = row.title || "";
                   return (
                     <tr key={`${acptNo}-${index}`} className="hover:bg-slate-50 dark:hover:bg-[#161b22] dark:text-slate-300">
-                      <td className="px-3 py-2 whitespace-nowrap">{String(row.disclosed_at || row.disclosed_date || "").split(" ")[0]}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{String(row.disclosed_at || "").split(" ")[0]}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{row.company_name || ""}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{row.market || ""}</td>
                       <td className="px-3 py-2 min-w-[320px]">

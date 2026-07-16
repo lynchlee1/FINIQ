@@ -211,14 +211,13 @@ def _detect_pagination(folder: Path) -> dict[str, Any] | None:
     body_files = sorted(folder.glob("*_post_page_*.body"), key=page_number)
     if not body_files:
         return None
-    for body_file in reversed(body_files):
-        info = pagination_info(body_file.read_bytes())
-        if info is None:
-            continue
-        info["downloaded_pages"] = len(body_files)
-        info["latest_file"] = body_file.name
-        return info
-    return None
+    latest_file = body_files[-1]
+    info = pagination_info(latest_file.read_bytes())
+    if info is None:
+        return None
+    info["downloaded_pages"] = len(body_files)
+    info["latest_file"] = latest_file.name
+    return info
 
 
 def _load_workflow_input(folder: Path) -> dict[str, Any] | None:
@@ -268,13 +267,6 @@ def _as_log_limit(payload: dict[str, Any], *, default: int = 20) -> int:
     if log_limit < 1:
         raise ValueError("log_limit must be >= 1")
     return min(log_limit, 500)
-
-
-def _as_resume_yearly(payload: dict[str, Any]) -> bool:
-    value = payload.get("resume_yearly")
-    if value in ("", None):
-        return True
-    return bool(_as_bool(payload, "resume_yearly"))
 
 
 def _build_progress_collector(
@@ -354,7 +346,7 @@ def _workflow_auxiliary_files(output_directory: Path) -> list[Path]:
 def _download_input_snapshot_from_payload(
     payload: dict[str, Any], *, start: date, end: date, page_size: int
 ) -> dict[str, Any]:
-    return {
+    snapshot = {
         "format": KIND_WORKFLOW_INPUT_FORMAT,
         "request_headers": DEFAULT_REQUEST_HEADERS,
         "start_date": start.isoformat(),
@@ -364,7 +356,12 @@ def _download_input_snapshot_from_payload(
         "disclosure_type_groups": _normalize_disclosure_type_groups(payload),
         "last_report_only": _as_bool(payload, "last_report_only"),
         "include_previous_disclosures": None,
+        "wait_seconds_between_requests": _as_float(
+            payload, "wait_seconds", 1.0
+        ),
+        "timeout": _as_float(payload, "timeout", 20.0),
     }
+    return validate_kind_workflow_input_snapshot(snapshot)
 
 
 def _folder_date_range_from_name(folder: Path) -> tuple[date, date] | None:
@@ -495,45 +492,6 @@ def _download_cleanup_targets(
         for chunk_start, chunk_end in _split_yearly_ranges(start_date, end_date)
     ]
     return output_directory, targets
-
-
-def _folder_download_deletion_candidates(
-    folder: Path, page_size: int, base: Path
-) -> list[dict[str, str]]:
-    if not folder.exists():
-        return []
-    body_files = _result_body_files(folder)
-    if not body_files:
-        return []
-
-    candidates: list[dict[str, str]] = []
-    input_snapshot = _require_current_download_input_snapshot(folder)
-
-    locked_page_size = input_snapshot.get("page_size")
-    if locked_page_size is None or int(locked_page_size) != page_size:
-        reason = "현재 요청의 페이지 크기와 맞지 않는 기존 다운로드 상태"
-        return [
-            _relative_candidate(path, base, reason)
-            for path in body_files + _workflow_auxiliary_files(folder)
-        ]
-
-    for path in body_files:
-        try:
-            validate_downloaded_result_page(path, expected_page_size=page_size)
-        except Exception as exc:
-            candidates.append(_relative_candidate(path, base, str(exc)))
-
-    if candidates:
-        return candidates
-
-    try:
-        inspect_download_directory_pages(
-            folder, expected_page_size=page_size, require_complete=False
-        )
-    except Exception as exc:
-        reason = str(exc)
-        return [_relative_candidate(path, base, reason) for path in body_files]
-    return []
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

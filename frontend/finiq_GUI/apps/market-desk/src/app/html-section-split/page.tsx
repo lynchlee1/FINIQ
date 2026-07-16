@@ -162,7 +162,11 @@ export default function HtmlSectionSplitPage() {
       const defaultInput = config.internal_html_output_directory || "";
       setInputDirectory(defaultInput || "");
       setOutputDirectory(config.html_section_split_output_directory || "");
-      setWorkers(String(config.parallel_worker_count || 1));
+      const workerCount = Number(config.parallel_worker_count);
+      if (!Number.isInteger(workerCount) || workerCount < 1) {
+        throw new Error("parallel_worker_count must be a positive integer");
+      }
+      setWorkers(String(workerCount));
     }).catch((err) => {
       setStatus(errorMessage(err));
       setIsErrorStatus(true);
@@ -375,6 +379,10 @@ export default function HtmlSectionSplitPage() {
       setIsLoadingSectionPatterns(false);
     }
     try {
+      const configuredPageSize = Number(limit);
+      if (!Number.isInteger(configuredPageSize) || configuredPageSize < 1) {
+        throw new Error("page_size must be a positive integer");
+      }
       const response = await fetch("/api/disclosures/html/sections/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -383,7 +391,7 @@ export default function HtmlSectionSplitPage() {
           data_root: dataRoot,
           input_directory: inputDirectory,
           page: targetPage,
-          page_size: Number(limit || 20),
+          page_size: configuredPageSize,
         }),
       });
       if (!response.ok) {

@@ -38,6 +38,23 @@ from finiq.market_desk.web.features.market_data.service_records import (
 )
 
 
+def _empty_filter_manifest(tmp_path):
+    manifest_path = tmp_path / "02-table" / "sqlite_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_table_manifest_v1",
+                "table_name": "disclosures",
+                "shards": [],
+                "summary": {"disclosures": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
 @pytest.mark.parametrize(
     ("resolver", "args", "message"),
     [
@@ -88,6 +105,11 @@ def test_missing_worker_values_use_cpu_and_task_limits(monkeypatch) -> None:
     assert _resolve_shard_workers("", 2) == 2
 
 
+def test_external_html_compress_workers_rejects_legacy_alias() -> None:
+    with pytest.raises(ValueError, match="workers is not supported"):
+        _external_html_compress_workers({"workers": 2}, 2)
+
+
 @pytest.mark.parametrize(
     ("value", "message"),
     [("many", "max_workers must be an integer"), (0, "max_workers must be >= 1")],
@@ -102,7 +124,12 @@ def test_html_download_rejects_invalid_worker_values(tmp_path, value, message) -
     )
     filtered_path.parent.mkdir(parents=True)
     filtered_path.write_text(
-        json.dumps({"disclosures": [{"acpt_no": "20250101000001"}]}),
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "disclosures": [{"acpt_no": "20250101000001"}],
+            }
+        ),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match=message):
@@ -116,20 +143,39 @@ def test_html_download_rejects_invalid_worker_values(tmp_path, value, message) -
         )
 
 
+@pytest.mark.parametrize("field", ["json", "payload", "source_json_path"])
+def test_html_download_rejects_alternate_source_fields(tmp_path, field) -> None:
+    with pytest.raises(ValueError, match=rf"{field} is not supported"):
+        download_disclosure_external_html_payload(
+            {
+                "data_root": str(tmp_path / "workspace"),
+                "mode": "bond_issuance",
+                "output_directory": str(tmp_path / "html"),
+                field: {},
+            }
+        )
+
+
 def test_filter_blocks_must_be_a_list(tmp_path) -> None:
     with pytest.raises(ValueError, match="filter_blocks must be a list"):
         _parse_filter_blocks({})
 
     with pytest.raises(ValueError, match="filter_blocks must be a list"):
         filter_disclosures_payload(
-            {"root_directory": str(tmp_path), "filter_blocks": {}}
+            {
+                "data_root": str(_empty_filter_manifest(tmp_path).parent.parent),
+                "filter_blocks": {},
+            }
         )
 
 
 def test_title_match_mode_must_be_supported(tmp_path) -> None:
     with pytest.raises(ValueError, match="title_match_mode must be one of"):
         filter_disclosures_payload(
-            {"root_directory": str(tmp_path), "title_match_mode": "xor"}
+            {
+                "data_root": str(_empty_filter_manifest(tmp_path).parent.parent),
+                "title_match_mode": "xor",
+            }
         )
 
 

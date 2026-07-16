@@ -13,48 +13,31 @@ def filter_disclosures_payload(
     progress_callback: ProgressCallback | None = None,
     cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any]:
-    """Filter a company-classification artifact and return a portable disclosure JSON."""
+    """Filter the canonical workspace SQLite manifest."""
     if cancel_check is not None and cancel_check():
         raise FilterCancelled("filter cancelled")
     classification_path = str(body.get("classification_path") or "").strip()
     root_directory = str(body.get("root_directory") or "").strip()
     data_root = str(body.get("data_root") or "").strip()
+    if classification_path:
+        raise ValueError("classification_path is not supported; use data_root")
     if root_directory:
-        _ensure_safe_source_root_directory(Path(root_directory).expanduser().resolve())
-    if not classification_path:
-        if data_root:
-            classification_path = str(resolve_disclosure_workspace(data_root).table)
-        elif not root_directory:
-            msg = "data_root, classification_path or root_directory is required"
-            raise ValueError(msg)
-        else:
-            classification_path = resolve_default_classification(root_directory) or ""
-    sqlite_manifest_path = (
-        _resolve_sqlite_manifest_path(classification_path)
-        if classification_path
-        else None
+        raise ValueError("root_directory is not supported; use data_root")
+    if not data_root:
+        raise ValueError("data_root is required")
+    sqlite_manifest_path = _resolve_sqlite_manifest_path(
+        resolve_disclosure_workspace(data_root).table / "sqlite_manifest.json"
     )
-    if sqlite_manifest_path is None and not classification_path and root_directory:
-        sqlite_manifest_path = _resolve_sqlite_manifest_path(root_directory)
-    source_kind = (
-        "sqlite_manifest"
-        if sqlite_manifest_path
-        else ("classification" if classification_path else "source_folder")
-    )
+    source_kind = "sqlite_manifest"
 
     title_expression = str(body.get("title_expression") or "").strip()
     filter_blocks = body.get("filter_blocks")
-    title_keywords = _split_keywords(
-        body.get("title_keywords") or body.get("title_keyword")
-    )
+    title_keywords = _split_keywords(body.get("title_keywords"))
     exclude_title_keywords = _split_keywords(body.get("exclude_title_keywords"))
     title_match_mode = str(body.get("title_match_mode") or "or").strip().casefold()
     if title_match_mode not in {"or", "and"}:
         raise ValueError("title_match_mode must be one of: or, and")
-    if filter_blocks is None:
-        filter_blocks = []
-    elif not isinstance(filter_blocks, list):
-        raise ValueError("filter_blocks must be a list")
+    filter_blocks = _validate_filter_blocks([] if filter_blocks is None else filter_blocks)
     company_keyword = str(body.get("company_keyword") or "").strip().casefold()
     submitter_keyword = str(body.get("submitter_keyword") or "").strip().casefold()
     market = str(body.get("market") or "전체").strip() or "전체"
@@ -69,30 +52,12 @@ def filter_disclosures_payload(
     progress_interval = _progress_interval(body.get("progress_interval"))
     filter_workers = _resolve_filter_workers(body.get("filter_workers"), None)
 
-    body_files = 0
-    total_records = 0
-    sqlite_manifest: dict[str, Any] | None = None
-    if source_kind == "sqlite_manifest" and sqlite_manifest_path is not None:
-        sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
-        _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
-        records = _iter_sqlite_manifest_disclosure_records(
-            sqlite_manifest_path, sqlite_manifest
-        )
-        total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
-    elif classification_path:
-        records = _load_classification_disclosure_records(
-            classification_path,
-            progress_callback=progress_callback,
-        )
-        total_records = len(records)
-    else:
-        records, body_files = _iter_source_disclosure_records(
-            root_directory,
-            progress_callback=progress_callback,
-            progress_interval=progress_interval,
-            workers=filter_workers,
-        )
-        total_records = len(records)
+    sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
+    _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
+    records = _iter_sqlite_manifest_disclosure_records(
+        sqlite_manifest_path, sqlite_manifest
+    )
+    total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
     filtered: list[dict[str, Any]] = []
     external_html_download_acpt_heap: list[tuple[tuple[str, str, str], int, str]] = []
     seen_disclosure_keys: set[tuple[str, str, str, str]] = set()
@@ -105,14 +70,16 @@ def filter_disclosures_payload(
         inspected_count = index
         disclosed_date = str(record.get("__filter_disclosed_date") or "")
         acpt_no = str(record.get("__filter_acpt_no") or "")
+        if (start_date or end_date) and not disclosed_date:
+            raise ValueError("disclosed_at is required when a date filter is used")
         matched = True
         if acpt_numbers and acpt_no not in acpt_numbers:
             matched = False
         if matched and market != "전체" and str(record.get("market") or "") != market:
             matched = False
-        if matched and start_date and disclosed_date and disclosed_date < start_date:
+        if matched and start_date and disclosed_date < start_date:
             matched = False
-        if matched and end_date and disclosed_date and disclosed_date > end_date:
+        if matched and end_date and disclosed_date > end_date:
             matched = False
         if matched and filter_blocks:
             matched = _record_filter_blocks_match(record, filter_blocks)
@@ -168,7 +135,7 @@ def filter_disclosures_payload(
             progress_interval=progress_interval,
         )
 
-    if source_kind == "sqlite_manifest" and inspected_count != total_records:
+    if inspected_count != total_records:
         msg = (
             "SQLite filter did not inspect every manifest disclosure: "
             f"manifest={sqlite_manifest_path}, inspected={inspected_count}, expected={total_records}"
@@ -180,22 +147,13 @@ def filter_disclosures_payload(
     payload = {
         "format": "kind_disclosure_filter_v1",
         "source_type": source_kind,
-        "source_classification_path": str(Path(classification_path).resolve())
-        if classification_path and source_kind == "classification"
-        else "",
-        "source_sqlite_manifest_path": str(sqlite_manifest_path)
-        if sqlite_manifest_path
-        else "",
-        "source_root_directory": str(Path(root_directory).expanduser().resolve())
-        if root_directory
-        else "",
+        "source_sqlite_manifest_path": str(sqlite_manifest_path),
         "filters": {
-            "filter_blocks": filter_blocks if isinstance(filter_blocks, list) else [],
+            "filter_blocks": filter_blocks,
             "title_expression": title_expression,
             "title_keywords": title_keywords,
             "exclude_title_keywords": exclude_title_keywords,
             "title_match_mode": title_match_mode,
-            "title_keyword": body.get("title_keyword") or "",
             "company_keyword": body.get("company_keyword") or "",
             "submitter_keyword": body.get("submitter_keyword") or "",
             "market": market,
@@ -209,7 +167,7 @@ def filter_disclosures_payload(
         },
         "summary": {
             "source_disclosures": total_records,
-            "source_body_files": body_files,
+            "source_body_files": 0,
             "matched_disclosures": matched_count,
             "returned_disclosures": len(public_limited),
             "duplicate_disclosures": duplicate_count,

@@ -221,13 +221,14 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(payload, "root_directory", str(workspace.list))
         _set_default(payload, "output_path", str(workspace.table))
     elif normalized_kind == "filter":
+        if str(payload.get("classification_path") or "").strip():
+            raise ValueError("classification_path is not supported; use data_root")
+        if str(payload.get("root_directory") or "").strip():
+            raise ValueError("root_directory is not supported; use data_root")
         payload["mode"] = validate_workspace_mode(payload.get("mode"))
         _set_default(payload, "external_html_transfer_path", str(workspace.filtered))
     elif normalized_kind == "external_html_download":
         mode = validate_workspace_mode(payload.get("mode"))
-        payload.pop("json", None)
-        payload.pop("payload", None)
-        payload.pop("source_json_path", None)
         _set_default(payload, "output_directory", str(workspace.external_mode(mode)))
     elif normalized_kind == "external_html_compress":
         mode = validate_workspace_mode(payload.get("mode"))

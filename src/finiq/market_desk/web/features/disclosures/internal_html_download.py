@@ -54,6 +54,9 @@ def _load_compressed_external_html_payload(
     if not isinstance(payload, dict):
         msg = f"compressed external HTML JSON is not an object: {compressed_file}"
         raise ValueError(msg)
+    if payload.get("format") != "finiq_disclosure_external_html_docs_v1":
+        msg = f"compressed external HTML JSON has an invalid format: {compressed_file}"
+        raise ValueError(msg)
     if not isinstance(payload.get("records"), list):
         msg = f"compressed external HTML JSON records is not a list: {compressed_file}"
         raise ValueError(msg)
@@ -69,6 +72,9 @@ def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, 
     payload = json.loads(source_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         msg = f"compressed external HTML JSON is not an object: {source_path}"
+        raise ValueError(msg)
+    if payload.get("format") != "finiq_disclosure_external_html_docs_v1":
+        msg = f"compressed external HTML JSON has an invalid format: {source_path}"
         raise ValueError(msg)
     file_records = payload.get("records")
     if not isinstance(file_records, list):
@@ -442,9 +448,12 @@ def download_disclosure_internal_html_payload(
         or _year_from_disclosure(target["acpt_no"])
         for target in targets
     }
-    source_json = manifest_payload or {
-        "disclosures": [{"acpt_no": acpt_no} for acpt_no in acpt_numbers]
-    }
+    source_json = manifest_payload
+    if source_json is None:
+        source_json = {
+            "format": "finiq_disclosure_html_manifest_v1",
+            "disclosures": [{"acpt_no": acpt_no} for acpt_no in acpt_numbers],
+        }
 
     cancel_token = str(body.get("cancel_token") or "").strip() or None
     _clear_cancel_token(cancel_token)

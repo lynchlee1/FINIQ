@@ -30,21 +30,15 @@ def find_company_classification_files(root_directory: str | Path) -> list[Path]:
         ]
         
         for file in files:
-            if "company_classification" not in file and "all_companies" not in file:
+            if "company_classification" not in file:
                 continue
-            if file.endswith(".partial.json"):
-                continue
-            
             path = Path(current_root) / file
-            suffix = path.suffix.lower()
-            if suffix not in {".json", ".sqlite", ".sqlite3", ".db"}:
-                continue
-            if suffix == ".json" and path.with_suffix(".sqlite").is_file():
+            if path.suffix.lower() != ".sqlite":
                 continue
             paths.append(path)
             
     return sorted(list(set(paths)))
 
 def company_classification_path(root_directory: str | Path) -> Path:
-    """Return the default company-classification JSON path for *root_directory*."""
-    return Path(root_directory).resolve() / "kind.company_classification.json"
+    """Return the canonical company-classification SQLite path."""
+    return Path(root_directory).resolve() / "kind.company_classification.sqlite"

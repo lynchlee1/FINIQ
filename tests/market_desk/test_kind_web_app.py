@@ -21,7 +21,10 @@ def _external_workspace_body(
     data_root = tmp_path / "workspace"
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
-    filtered_path.write_text(json.dumps(source_json), encoding="utf-8")
+    filtered_path.write_text(
+        json.dumps({"format": "kind_disclosure_filter_v1", **source_json}),
+        encoding="utf-8",
+    )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
 def test_api_config(tmp_path: Path):
@@ -192,7 +195,7 @@ def test_api_classifications(tmp_path: Path):
     kind_dir = tmp_path / "classification"
     kind_dir.mkdir(parents=True)
     # The name must contain 'company_classification' to be found
-    (kind_dir / "test.company_classification.json").write_text("[]")
+    (kind_dir / "test.company_classification.sqlite").write_bytes(b"")
     
     config.output_root = str(tmp_path)
     
@@ -200,7 +203,7 @@ def test_api_classifications(tmp_path: Path):
     response = client.get("/api/classifications")
     assert response.status_code == 200
     data = response.json()
-    assert any("test.company_classification.json" in f["name"] for f in data["classification_files"])
+    assert any("test.company_classification.sqlite" in f["name"] for f in data["classification_files"])
 
 def test_api_price_sources(tmp_path: Path):
     price_root = tmp_path / "price_root"

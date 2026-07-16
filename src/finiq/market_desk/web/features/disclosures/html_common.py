@@ -30,7 +30,6 @@ from finiq.market_desk.web.features.disclosures.external_compact import (
     _verify_compressed_external_html_files,
 )
 
-ACPT_NUMBER_KEYS = {"acpt_no", "acptno", "acptNo", "acpt_no_list", "acptNumbers"}
 HTML_MANIFEST_FILENAME = "kind_disclosure_html_manifest.json"
 COMPRESSED_EXTERNAL_HTML_FILENAME = "compressed-external-html.json"
 HTML_DOWNLOAD_AUXILIARY_FILENAMES = {
@@ -81,76 +80,92 @@ def _is_cancelled(token: str | None) -> bool:
 
 
 def collect_acpt_numbers_from_json(value: Any) -> list[str]:
-    """Collect unique KIND receipt numbers from nested JSON-like data."""
+    """Read receipt numbers from the canonical top-level disclosures array."""
+    if not isinstance(value, dict):
+        raise ValueError("disclosure JSON must contain an object")
+    disclosures = value.get("disclosures")
+    if not isinstance(disclosures, list):
+        raise ValueError("disclosure JSON must contain a disclosures array")
     numbers: list[str] = []
     seen: set[str] = set()
-
-    def add(raw_value: object) -> None:
-        normalized = str(raw_value or "").strip()
-        if not normalized or not normalized.isdigit() or normalized in seen:
-            return
+    for index, disclosure in enumerate(disclosures):
+        if not isinstance(disclosure, dict):
+            raise ValueError(f"disclosures[{index}] must be an object")
+        normalized = str(disclosure.get("acpt_no") or "").strip()
+        if not normalized.isdigit():
+            raise ValueError(f"disclosures[{index}].acpt_no must contain digits")
+        if normalized in seen:
+            raise ValueError(f"duplicate acpt_no in disclosures: {normalized}")
         seen.add(normalized)
         numbers.append(normalized)
-
-    def visit(item: Any) -> None:
-        if isinstance(item, dict):
-            for key, child in item.items():
-                if key in ACPT_NUMBER_KEYS:
-                    if isinstance(child, list):
-                        for child_item in child:
-                            add(child_item)
-                    else:
-                        add(child)
-                visit(child)
-            return
-        if isinstance(item, list):
-            for child in item:
-                visit(child)
-
-    visit(value)
     return numbers
 
 
 def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, Any]]:
-    metadata: dict[str, dict[str, Any]] = {}
-
-    def acpt_no_from(item: dict[str, Any]) -> str:
-        for key in ("acpt_no", "acptno", "acptNo"):
-            normalized = str(item.get(key) or "").strip()
-            if normalized.isdigit():
-                return normalized
-        return ""
-
-    def visit(item: Any) -> None:
-        if isinstance(item, dict):
-            acpt_no = acpt_no_from(item)
-            if acpt_no and acpt_no not in metadata:
-                metadata[acpt_no] = {
-                    "acpt_no": acpt_no,
-                    "market": item.get("market"),
-                    "company_name": item.get("company_name"),
-                    "company_id": item.get("company_id"),
-                    "disclosed_at": item.get("disclosed_at"),
-                    "title": item.get("title"),
+    if not isinstance(value, dict):
+        raise ValueError("disclosure JSON must contain an object")
+    payload_format = value.get("format")
+    if payload_format in {
+        "kind_disclosure_filter_v1",
+        "finiq_disclosure_html_manifest_v1",
+    }:
+        disclosures = value.get("disclosures")
+        if not isinstance(disclosures, list):
+            raise ValueError("disclosure JSON must contain a disclosures array")
+    elif payload_format == "finiq_disclosure_external_html_docs_v1":
+        records = value.get("records")
+        if not isinstance(records, list):
+            raise ValueError("compressed external HTML JSON must contain a records array")
+        disclosures = []
+        for index, record in enumerate(records):
+            if not isinstance(record, dict):
+                raise ValueError(f"records[{index}] must be an object")
+            record_metadata = record.get("metadata")
+            if not isinstance(record_metadata, dict):
+                raise ValueError(f"records[{index}].metadata must be an object")
+            disclosures.append(
+                {
+                    **record_metadata,
+                    "acpt_no": record.get("acpt_no"),
+                    "title": record.get("title"),
                 }
-            for child in item.values():
-                visit(child)
-            return
-        if isinstance(item, list):
-            for child in item:
-                visit(child)
-
-    visit(value)
+            )
+    else:
+        raise ValueError(f"unsupported disclosure JSON format: {payload_format!r}")
+    metadata: dict[str, dict[str, Any]] = {}
+    for index, disclosure in enumerate(disclosures):
+        if not isinstance(disclosure, dict):
+            raise ValueError(f"disclosures[{index}] must be an object")
+        acpt_no = str(disclosure.get("acpt_no") or "").strip()
+        if not acpt_no.isdigit():
+            raise ValueError(f"disclosures[{index}].acpt_no must contain digits")
+        if acpt_no in metadata:
+            raise ValueError(f"duplicate acpt_no in disclosures: {acpt_no}")
+        metadata[acpt_no] = {
+            "acpt_no": acpt_no,
+            "market": disclosure.get("market"),
+            "company_name": disclosure.get("company_name"),
+            "company_id": disclosure.get("company_id"),
+            "disclosed_at": disclosure.get("disclosed_at"),
+            "title": disclosure.get("title"),
+        }
     return metadata
 
 
 def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
+    for key in ("json", "payload", "source_json_path"):
+        if key in body:
+            raise ValueError(f"{key} is not supported; use data_root and mode")
     workspace = resolve_disclosure_workspace(body.get("data_root") or "")
     mode = validate_workspace_mode(body.get("mode"))
     source_path = workspace.filtered / mode / "filtered.json"
     if not source_path.is_file():
         raise ValueError(f"filtered disclosure JSON does not exist: {source_path}")
-    return json.loads(source_path.read_text(encoding="utf-8")), str(source_path)
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("format") != "kind_disclosure_filter_v1":
+        raise ValueError(f"filtered disclosure JSON has an invalid format: {source_path}")
+    collect_acpt_numbers_from_json(payload)
+    return payload, str(source_path)
 
 
 def _year_from_disclosure(

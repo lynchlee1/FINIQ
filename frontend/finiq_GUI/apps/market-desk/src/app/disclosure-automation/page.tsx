@@ -298,9 +298,10 @@ export default function DisclosureAutomationPage() {
   useEffect(() => {
     Promise.all([
       fetchSettings(),
-      fetch("/api/download/options", { cache: "no-store" }).then(
-        (response): Promise<DownloadOptions | null> => response.ok ? response.json() : Promise.resolve(null),
-      ),
+      fetch("/api/download/options", { cache: "no-store" }).then((response): Promise<DownloadOptions> => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      }),
     ]).then(([config, options]) => {
       const stored = loadStoredProfile();
       setDownloadOptions(options);
@@ -313,15 +314,36 @@ export default function DisclosureAutomationPage() {
       setMarketLabel(stored?.marketLabel || "전체");
       setSecuritiesLabel(stored?.securitiesLabel || "전체");
       setDisclosureTypeGroups(stored?.disclosureTypeGroups || {});
-      setConditions(normalizeDisclosureConditionBlocks(stored?.conditions));
+      setConditions(
+        stored?.conditions === undefined
+          ? [makeEmptyDisclosureCondition()]
+          : normalizeDisclosureConditionBlocks(stored.conditions),
+      );
       setSectionRules(stored?.sectionRules || {});
       setRangeStart(stored?.rangeStart ?? 1);
       setRangeEnd(stored?.rangeEnd ?? 7);
-      setParserMode(stored?.parserMode || config?.html_parse_mode || "bond_issuance");
-      setPageSize(String(stored?.pageSize || 100));
-      const workerLimit = Number(config?.parallel_worker_count || 1);
-      setLocalWorkers(String(Math.min(stored?.localWorkers || workerLimit, workerLimit)));
-      setTimeoutValue(String(stored?.timeout || 20));
+      const configuredParserMode = stored?.parserMode ?? config?.html_parse_mode;
+      if (!configuredParserMode) throw new Error("html_parse_mode is required");
+      setParserMode(configuredParserMode);
+      const configuredPageSize = stored?.pageSize ?? 100;
+      if (!Number.isInteger(configuredPageSize) || configuredPageSize < 1) {
+        throw new Error("pageSize must be a positive integer");
+      }
+      setPageSize(String(configuredPageSize));
+      const workerLimit = Number(config?.parallel_worker_count);
+      if (!Number.isInteger(workerLimit) || workerLimit < 1) {
+        throw new Error("parallel_worker_count must be a positive integer");
+      }
+      const configuredWorkers = stored?.localWorkers ?? workerLimit;
+      if (!Number.isInteger(configuredWorkers) || configuredWorkers < 1 || configuredWorkers > workerLimit) {
+        throw new Error(`localWorkers must be between 1 and ${workerLimit}`);
+      }
+      setLocalWorkers(String(configuredWorkers));
+      const configuredTimeout = stored?.timeout ?? 20;
+      if (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0) {
+        throw new Error("timeout must be a positive number");
+      }
+      setTimeoutValue(String(configuredTimeout));
       const storedReview = loadJson<ReviewPattern[]>(REVIEW_STORAGE_KEY) || [];
       setReviewPatterns(storedReview);
     }).catch((error) => {
@@ -360,7 +382,7 @@ export default function DisclosureAutomationPage() {
     submitterName,
   ]);
 
-  const normalizedConditions = useMemo(() => normalizeDisclosureConditionBlocks(conditions), [conditions]);
+  const validatedConditions = () => normalizeDisclosureConditionBlocks(conditions);
   const executionMask = useMemo(
     () => STAGES.filter((stage) => stage.number >= rangeStart && stage.number <= rangeEnd).map((stage) => stage.number),
     [rangeEnd, rangeStart],
@@ -373,42 +395,66 @@ export default function DisclosureAutomationPage() {
   const filterSettingsSelected = executionMask.includes(3);
   const sectionSettingsSelected = executionMask.includes(6);
 
+  const validatedExecution = () => {
+    const configuredPageSize = Number(pageSize);
+    const configuredWorkers = Number(localWorkers);
+    const configuredTimeout = Number(timeout);
+    if (!Number.isInteger(configuredPageSize) || configuredPageSize < 1) {
+      throw new Error("pageSize must be a positive integer");
+    }
+    if (!Number.isInteger(configuredWorkers) || configuredWorkers < 1) {
+      throw new Error("localWorkers must be a positive integer");
+    }
+    if (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0) {
+      throw new Error("timeout must be a positive number");
+    }
+    return {
+      pageSize: configuredPageSize,
+      localWorkers: configuredWorkers,
+      timeout: configuredTimeout,
+    };
+  };
+
   const buildProfile = (
     trigger: "sync" | "resume" | "review",
     sectionRulesOverride: Record<string, string[]> = sectionRules,
     confirmedDownload = "",
-  ) => ({
-    name,
-    data_root: dataRoot,
-    trigger,
-    steps,
-    execution_mask: executionMask,
-    decisions: {
-      s1_search: {
-        start_date: startDate,
-        end_date: endDate,
-        company_name: companyName,
-        submitter_name: submitterName,
-        market_label: marketLabel,
-        securities_label: securitiesLabel,
-        disclosure_type_groups: disclosureTypeGroups,
-        last_report_only: false,
+  ) => {
+    const execution = validatedExecution();
+    return {
+      name,
+      data_root: dataRoot,
+      trigger,
+      steps,
+      execution_mask: executionMask,
+      decisions: {
+        s1_search: {
+          start_date: startDate,
+          end_date: endDate,
+          company_name: companyName,
+          submitter_name: submitterName,
+          market_label: marketLabel,
+          securities_label: securitiesLabel,
+          disclosure_type_groups: disclosureTypeGroups,
+          last_report_only: false,
+        },
+        s3_selection: { filter_blocks: validatedConditions() },
+        s6_sections: { unmatched_policy: "needs_review", section_save_rules: sectionRulesOverride },
       },
-      s3_selection: { filter_blocks: normalizedConditions },
-      s6_sections: { unmatched_policy: "needs_review", section_save_rules: sectionRulesOverride },
-    },
-    execution: {
-      parser_mode: parserMode,
-      page_size: Number(pageSize || 100),
-      local_workers: Number(localWorkers || parallelWorkerCount || 1),
-      timeout: Number(timeout || 20),
-    },
-    download_confirmation: confirmedDownload,
-  });
+      execution: {
+        parser_mode: parserMode,
+        page_size: execution.pageSize,
+        local_workers: execution.localWorkers,
+        timeout: execution.timeout,
+      },
+      download_confirmation: confirmedDownload,
+    };
+  };
 
   const saveProfile = async (
     sectionRulesOverride: Record<string, string[]> = sectionRules,
   ) => {
+    const execution = validatedExecution();
     const stored: StoredProfile = {
       format: PROFILE_FORMAT,
       name,
@@ -419,14 +465,14 @@ export default function DisclosureAutomationPage() {
       marketLabel,
       securitiesLabel,
       disclosureTypeGroups,
-      conditions: normalizedConditions,
+      conditions: validatedConditions(),
       sectionRules: sectionRulesOverride,
       rangeStart,
       rangeEnd,
       parserMode,
-      pageSize: Number(pageSize || 100),
-      localWorkers: Number(localWorkers || parallelWorkerCount || 1),
-      timeout: Number(timeout || 20),
+      pageSize: execution.pageSize,
+      localWorkers: execution.localWorkers,
+      timeout: execution.timeout,
     };
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(stored));
     const rootSaved = dataRoot === storedRoot || await saveSetting("output_root", dataRoot);
@@ -585,7 +631,7 @@ export default function DisclosureAutomationPage() {
       const response = await saveDisclosureConditionPreset(dataRoot, {
         name: nextName,
         mode: parserMode,
-        condition_blocks: normalizedConditions,
+        condition_blocks: validatedConditions(),
       });
       setPresets(response.presets);
       setSelectedPreset(nextName);

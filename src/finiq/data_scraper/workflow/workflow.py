@@ -43,8 +43,6 @@ from finiq.data_scraper.core.payload import (
     build_search_form,
 )
 from finiq.data_scraper.storage.result_files import (
-    KIND_REPAIR_OVERLAY_DIRNAME,
-    effective_result_page_paths,
     result_page_number,
     sorted_result_page_paths,
 )
@@ -75,6 +73,8 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
         "disclosure_type_groups",
         "last_report_only",
         "include_previous_disclosures",
+        "wait_seconds_between_requests",
+        "timeout",
     }
     missing_keys = sorted(required_keys.difference(snapshot))
     if missing_keys:
@@ -153,8 +153,6 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
                 f"kind_workflow.input.json {field_name} must be a boolean or null"
             )
     for field_name in ("wait_seconds_between_requests", "timeout"):
-        if field_name not in snapshot:
-            continue
         value = snapshot[field_name]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(
@@ -205,10 +203,6 @@ class KindCompanyClassificationIntegrityReport:
     classified_disclosures: int
     duplicates_removed: int
     integrity_errors: list[str] = field(default_factory=list)
-    repair_targets: dict[str, list[int]] = field(default_factory=dict)
-    repair_attempt_counts: dict[str, dict[int, int]] = field(default_factory=dict)
-    repaired_folders: list[str] = field(default_factory=list)
-    repair_attempted: bool = False
 
 
 class KindCompanyClassificationIntegrityError(ValueError):
@@ -219,23 +213,9 @@ class KindCompanyClassificationIntegrityError(ValueError):
         details = "\n".join(f"- {err}" for err in report.integrity_errors[:10])
         if len(report.integrity_errors) > 10:
             details += f"\n- ... 외 {len(report.integrity_errors) - 10}건"
-        repair_summary = ""
-        if report.repair_targets:
-            repair_summary = (
-                "\n자동 보완 대상: "
-                + ", ".join(
-                    f"{Path(folder).name}({','.join(str(page) for page in pages)})"
-                    for folder, pages in sorted(report.repair_targets.items())
-                )
-            )
-        if report.repair_attempted and report.repaired_folders:
-            repair_summary += (
-                "\n자동 보완 시도 폴더: "
-                + ", ".join(Path(folder).name for folder in sorted(report.repaired_folders))
-            )
         super().__init__(
             "회사별 분류 저장을 중단했습니다. 페이지 무결성 검사를 통과하지 못했습니다.\n"
-            f"{details}{repair_summary}"
+            f"{details}"
         )
 
 
@@ -308,17 +288,9 @@ def _merge_company_record(
     else:
         for disclosure_item in disclosure_rows:
             acpt_no = str(disclosure_item.get("acpt_no") or "").strip()
-            dedup_key = (
-                ("acpt_no", acpt_no)
-                if acpt_no
-                else (
-                    "fallback",
-                    company_key,
-                    str(disclosure_item.get("disclosed_at") or "").strip(),
-                    str(disclosure_item.get("title") or "").strip(),
-                    str(disclosure_item.get("submitter") or "").strip(),
-                )
-            )
+            if not acpt_no:
+                raise ValueError("acpt_no is required for classification records")
+            dedup_key = ("acpt_no", acpt_no)
             if dedup_key in seen_disclosure_keys:
                 duplicates_removed += 1
                 continue
@@ -355,22 +327,8 @@ def _merge_company_record(
     return duplicates_removed
 
 
-def _infer_page_size_from_inspected_pages(inspected_pages: list[dict[str, int]]) -> int:
-    non_last_sizes = [
-        int(page_info["actual_rows"])
-        for page_info in inspected_pages
-        if int(page_info["current_page"]) < int(page_info["total_pages"])
-    ]
-    if non_last_sizes:
-        return max(non_last_sizes)
-    if inspected_pages:
-        return max(int(page_info["actual_rows"]) for page_info in inspected_pages)
-    return 0
-
-
 def _collect_company_records_from_folder(
     folder: str | Path,
-    validate_integrity: bool = True,
     use_partial_cache: bool = True,
 ) -> dict[str, Any]:
     target_folder = Path(folder).resolve()
@@ -379,16 +337,16 @@ def _collect_company_records_from_folder(
     cached_payload = (
         load_folder_partial_cache(
             target_folder,
-            require_validated=validate_integrity,
+            require_validated=True,
         )
         if use_partial_cache
         else None
     )
     if cached_payload is not None:
         companies_by_key = {
-            str(company.get("company_id") or company.get("company_name") or "").strip(): company
+            str(company.get("company_id") or "").strip(): company
             for company in list(cached_payload.get("companies") or [])
-            if str(company.get("company_id") or company.get("company_name") or "").strip()
+            if str(company.get("company_id") or "").strip()
         }
         return {
             "companies_by_key": companies_by_key,
@@ -399,7 +357,6 @@ def _collect_company_records_from_folder(
                 cached_payload.get("intra_folder_duplicates") or 0
             ),
             "integrity_errors": [],
-            "repair_pages": [],
             "folder_path": str(target_folder),
         }
 
@@ -410,14 +367,12 @@ def _collect_company_records_from_folder(
     total_pages_values: set[int] = set()
     total_items_values: set[int] = set()
     integrity_errors: list[str] = []
-    row_integrity_errors: list[str] = []
-    pages_to_redownload: list[int] = []
     body_files = 0
     parsed_disclosures = 0
     classified_disclosures = 0
     intra_folder_duplicates = 0
 
-    for body_path in _effective_company_result_page_paths(target_folder):
+    for body_path in sorted_result_page_paths(target_folder):
         body_files += 1
         file_page_num = result_page_number(body_path)
         body_bytes = body_path.read_bytes()
@@ -425,21 +380,12 @@ def _collect_company_records_from_folder(
         actual_rows = len(rows)
         parsed_disclosures += actual_rows
 
-        missing_acpt_no_count = sum(
-            1 for row in rows if not str(row.get("acpt_no") or "").strip()
-        )
-        if validate_integrity and missing_acpt_no_count:
-            row_integrity_errors.append(
-                f"{target_folder.name} {file_page_num}페이지에 acpt_no가 없는 공시가 "
-                f"{missing_acpt_no_count}건 있습니다."
-            )
-            if file_page_num >= 1:
-                pages_to_redownload.append(file_page_num)
-
         for row in rows:
-            company_key = str(row.get("company_id") or row.get("company_name") or "").strip()
+            company_key = str(row.get("company_id") or "").strip()
             if not company_key:
-                continue
+                raise ValueError(
+                    f"{target_folder.name} {file_page_num}페이지에 company_id가 없는 공시가 있습니다."
+                )
 
             classified_disclosures += 1
             company_name = str(row.get("company_name") or "").strip()
@@ -472,133 +418,69 @@ def _collect_company_records_from_folder(
                 },
             )
 
-        if validate_integrity:
-            paging = pagination_info(body_bytes)
-            if paging is None:
-                integrity_errors.append(
-                    f"{target_folder.name}/{body_path.name}에서 페이지네이션 정보를 찾지 못했습니다."
-                )
-                if file_page_num >= 1:
-                    pages_to_redownload.append(file_page_num)
-                continue
-            current_page = int(paging["current_page"])
-            total_pages = int(paging["total_pages"])
-            total_items = int(paging["total_items"])
-            if current_page in page_numbers:
-                integrity_errors.append(
-                    f"{target_folder.name}/{body_path.name}와 중복되는 페이지 번호 {current_page}가 있습니다."
-                )
-            page_numbers.add(current_page)
-            total_pages_values.add(total_pages)
-            total_items_values.add(total_items)
-            inspected_pages.append(
-                {
-                    "current_page": current_page,
-                    "total_pages": total_pages,
-                    "total_items": total_items,
-                    "actual_rows": actual_rows,
-                }
+        paging = pagination_info(body_bytes)
+        if paging is None:
+            integrity_errors.append(
+                f"{target_folder.name}/{body_path.name}에서 페이지네이션 정보를 찾지 못했습니다."
             )
+            continue
+        current_page = int(paging["current_page"])
+        total_pages = int(paging["total_pages"])
+        total_items = int(paging["total_items"])
+        if current_page in page_numbers:
+            integrity_errors.append(
+                f"{target_folder.name}/{body_path.name}와 중복되는 페이지 번호 {current_page}가 있습니다."
+            )
+        page_numbers.add(current_page)
+        total_pages_values.add(total_pages)
+        total_items_values.add(total_items)
+        inspected_pages.append(
+            {
+                "current_page": current_page,
+                "total_pages": total_pages,
+                "total_items": total_items,
+                "actual_rows": actual_rows,
+            }
+        )
 
-    pages_missing: list[int] = []
-    expected_pages: set[int] = set()
-
-    if validate_integrity and inspected_pages and not integrity_errors:
-        pages_by_total_items: dict[int, list[int]] = {}
-        for pi in inspected_pages:
-            pages_by_total_items.setdefault(int(pi["total_items"]), []).append(int(pi["current_page"]))
-
+    if inspected_pages:
         if len(total_items_values) != 1:
-            majority_total_items = max(
-                pages_by_total_items,
-                key=lambda ti: len(pages_by_total_items[ti]),
-            )
-            minority_pages_ti = [
-                page for ti, pgs in pages_by_total_items.items()
-                if ti != majority_total_items
-                for page in pgs
-            ]
-            breakdown = ", ".join(
-                f"{ti}건({len(pgs)}개 페이지)"
-                for ti, pgs in sorted(pages_by_total_items.items())
-            )
             integrity_errors.append(
-                f"{target_folder.name} 전체 건수 불일치: {breakdown}. "
-                f"기준값 {majority_total_items}건과 다른 {len(minority_pages_ti)}개 페이지를 보완 대상으로 지정합니다."
+                f"{target_folder.name} 페이지들의 전체 건수가 서로 다릅니다: "
+                f"{sorted(total_items_values)}"
             )
-            pages_to_redownload.extend(minority_pages_ti)
-            resolved_total_items = majority_total_items
-        else:
-            resolved_total_items = next(iter(total_items_values))
-
         if len(total_pages_values) != 1:
-            pages_by_total_pages: dict[int, list[int]] = {}
-            for pi in inspected_pages:
-                pages_by_total_pages.setdefault(int(pi["total_pages"]), []).append(int(pi["current_page"]))
-            majority_total_pages = max(
-                pages_by_total_pages,
-                key=lambda tp: len(pages_by_total_pages[tp]),
-            )
-            minority_pages_tp = [
-                page for tp, pgs in pages_by_total_pages.items()
-                if tp != majority_total_pages
-                for page in pgs
-            ]
-            breakdown = ", ".join(
-                f"{tp}페이지({len(pgs)}개 페이지)"
-                for tp, pgs in sorted(pages_by_total_pages.items())
-            )
             integrity_errors.append(
-                f"{target_folder.name} 전체 페이지 수 불일치: {breakdown}"
+                f"{target_folder.name} 페이지들의 전체 페이지 수가 서로 다릅니다: "
+                f"{sorted(total_pages_values)}"
             )
-            for p in minority_pages_tp:
-                if p not in pages_to_redownload:
-                    pages_to_redownload.append(p)
-            resolved_total_pages = majority_total_pages
-        else:
-            resolved_total_pages = next(iter(total_pages_values))
-
-        expected_pages = set(range(1, resolved_total_pages + 1))
-        gap_pages = sorted(expected_pages - page_numbers)
-        extra_pages = sorted(page_numbers - expected_pages)
-        if gap_pages:
-            pages_missing = gap_pages
-        if gap_pages or extra_pages:
-            detail = f"누락: {gap_pages!r}" if gap_pages else ""
-            if extra_pages:
-                detail += (", " if detail else "") + f"초과: {extra_pages!r}"
-            integrity_errors.append(
-                f"{target_folder.name} 저장된 페이지 번호가 1~{resolved_total_pages} 범위와 맞지 않습니다. "
-                f"{detail}"
-            )
-
-        if len(total_pages_values) == 1:
+        if len(total_items_values) == 1 and len(total_pages_values) == 1:
+            total_items = next(iter(total_items_values))
+            total_pages = next(iter(total_pages_values))
+            expected_pages = set(range(1, total_pages + 1))
+            if page_numbers != expected_pages:
+                integrity_errors.append(
+                    f"{target_folder.name} 저장된 페이지 번호가 1~{total_pages} 전체와 "
+                    f"일치하지 않습니다: {sorted(page_numbers)}"
+                )
             for page_info in inspected_pages:
                 expected_rows = _expected_rows_for_page(
-                    total_items=resolved_total_items,
+                    total_items=total_items,
                     current_page=int(page_info["current_page"]),
-                    total_pages=resolved_total_pages,
+                    total_pages=total_pages,
                     page_size=expected_page_size,
                 )
                 if int(page_info["actual_rows"]) != expected_rows:
                     integrity_errors.append(
                         f"{target_folder.name} {int(page_info['current_page'])}페이지의 행 수가 "
-                        f"{int(page_info['actual_rows'])}건으로 기대값 {expected_rows}건과 다릅니다. "
-                        f"(페이지 크기 {expected_page_size}, 전체 {resolved_total_items}건 중 "
-                        f"{int(page_info['current_page'])}/{resolved_total_pages}페이지)"
+                        f"{int(page_info['actual_rows'])}건으로 기대값 {expected_rows}건과 다릅니다."
                     )
-                    pages_to_redownload.append(int(page_info["current_page"]))
+            if parsed_disclosures != total_items:
+                integrity_errors.append(
+                    f"{target_folder.name}에서 파싱한 공시 {parsed_disclosures}건과 "
+                    f"페이지네이션 전체 건수 {total_items}건이 다릅니다."
+                )
 
-        if len(total_items_values) == 1 and parsed_disclosures != resolved_total_items:
-            integrity_errors.append(
-                f"{target_folder.name}에서 파싱한 공시 {parsed_disclosures}건과 "
-                f"페이지네이션 전체 건수 {resolved_total_items}건이 다릅니다. "
-                f"(차이: {abs(parsed_disclosures - resolved_total_items)}건)"
-            )
-
-    integrity_errors.extend(row_integrity_errors)
-
-    all_repair_pages = sorted(set(pages_to_redownload + pages_missing))
     companies = sorted(
         companies_by_key.values(),
         key=lambda item: (
@@ -609,7 +491,7 @@ def _collect_company_records_from_folder(
     if not integrity_errors and use_partial_cache:
         write_folder_partial_cache(
             target_folder,
-            validated=validate_integrity,
+            validated=True,
             body_files=body_files,
             parsed_disclosures=parsed_disclosures,
             classified_disclosures=classified_disclosures,
@@ -624,7 +506,6 @@ def _collect_company_records_from_folder(
         "classified_disclosures": classified_disclosures,
         "intra_folder_duplicates": intra_folder_duplicates,
         "integrity_errors": integrity_errors,
-        "repair_pages": all_repair_pages,
         "folder_path": str(target_folder),
     }
 
@@ -648,196 +529,10 @@ def _load_folder_input_snapshot(folder: Path) -> dict[str, Any]:
         raise ValueError(f"{folder.name}: {exc}") from exc
 
 
-def _group_contiguous_pages(pages: list[int]) -> list[tuple[int, int]]:
-    """페이지 번호 리스트를 연속 구간 (start, end) 튜플로 묶는다."""
-    if not pages:
-        return []
-    groups: list[tuple[int, int]] = []
-    sorted_pages = sorted(set(pages))
-    start = sorted_pages[0]
-    end = start
-    for page in sorted_pages[1:]:
-        if page == end + 1:
-            end = page
-        else:
-            groups.append((start, end))
-            start = page
-            end = page
-    groups.append((start, end))
-    return groups
-
-
-_MAX_PAGE_REPAIR_ATTEMPTS = 5
-
-
-def _repair_overlay_root(folder: Path) -> Path:
-    return folder / KIND_REPAIR_OVERLAY_DIRNAME
-
-
-def _repair_manifest_path(folder: Path) -> Path:
-    return _repair_overlay_root(folder) / "manifest.json"
-
-
-def _load_repair_manifest(folder: Path) -> dict[str, Any]:
-    manifest_path = _repair_manifest_path(folder)
-    if not manifest_path.exists():
-        return {"pages": {}}
-    try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"pages": {}}
-    if not isinstance(payload, dict):
-        return {"pages": {}}
-    pages = payload.get("pages")
-    if not isinstance(pages, dict):
-        return {"pages": {}}
-    return {"pages": dict(pages)}
-
-
-def _write_repair_manifest(folder: Path, payload: dict[str, Any]) -> None:
-    manifest_path = _repair_manifest_path(folder)
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _repair_attempt_directory(folder: Path, page_number: int, attempt: int) -> Path:
-    return _repair_overlay_root(folder) / f"page_{page_number:05d}" / f"attempt_{attempt:03d}"
-
-
-def _effective_company_result_page_paths(folder: Path) -> list[Path]:
-    return effective_result_page_paths(folder)
-
-
-def _repair_folder_pages(
-    folder: Path,
-    page_numbers: list[int],
-    *,
-    progress_callback: KindProgressCallback | None = None,
-    cancel_check: KindCancelCheck | None = None,
-) -> tuple[list[str], dict[int, int]]:
-    """입력 스냅샷을 참조해 손상되거나 누락된 페이지를 재다운로드한다.
-
-    Returns a list of remaining error messages (empty on full success).
-    """
-    if not page_numbers:
-        return ([], {})
-
-    snapshot = _load_folder_input_snapshot(folder)
-    request_headers = dict(snapshot.get("request_headers") or {})
-    start_date = str(snapshot.get("start_date") or "")
-    end_date = str(snapshot.get("end_date") or "")
-    page_size = int(snapshot.get("page_size") or 100)
-    search_filters = snapshot.get("search_filters")
-    disclosure_type_groups = snapshot.get("disclosure_type_groups")
-    last_report_only = snapshot.get("last_report_only")
-    include_previous_disclosures = snapshot.get("include_previous_disclosures")
-    wait_seconds = float(snapshot.get("wait_seconds_between_requests", 1.0))
-    timeout = float(snapshot.get("timeout", 20.0))
-
-    if not request_headers:
-        return (
-            [
-                f"{folder.name}: request_headers가 없어 "
-                f"{len(page_numbers)}개 페이지를 자동 보완할 수 없습니다."
-            ],
-            {},
-        )
-
-    remaining_errors: list[str] = []
-    attempt_counts: dict[int, int] = {}
-    manifest_payload = _load_repair_manifest(folder)
-    manifest_pages = dict(manifest_payload.get("pages") or {})
-    manifest_changed = False
-    page_validator = make_page_size_integrity_validator(
-        expected_page_size=page_size,
-    )
-
-    def _repair_validator(
-        output_path: Path,
-        page_number: int | None,
-        request_data: KindSearchFormData | None,
-    ) -> None:
-        page_validator(output_path, page_number, request_data)
-        rows = disclosure_file_rows(output_path)
-        missing_acpt_no_count = sum(
-            1 for row in rows if not str(row.get("acpt_no") or "").strip()
-        )
-        if missing_acpt_no_count:
-            output_path.unlink(missing_ok=True)
-            raise ValueError(
-                f"{output_path.name}에 acpt_no가 없는 공시가 "
-                f"{missing_acpt_no_count}건 있습니다."
-            )
-
-    for page_number in sorted(set(page_numbers)):
-        last_error: Exception | None = None
-        success = False
-        for attempt in range(1, _MAX_PAGE_REPAIR_ATTEMPTS + 1):
-            if cancel_check is not None and cancel_check():
-                raise RuntimeError("Job cancelled")
-            attempt_counts[page_number] = attempt
-            if progress_callback is not None:
-                progress_callback(
-                    f"{folder.name} {page_number}페이지 보완 시도 {attempt}/{_MAX_PAGE_REPAIR_ATTEMPTS}"
-                )
-            attempt_directory = _repair_attempt_directory(folder, page_number, attempt)
-            try:
-                download_pages(
-                    output_directory=attempt_directory,
-                    request_headers=request_headers,
-                    start_date=start_date,
-                    end_date=end_date,
-                    start_page=page_number,
-                    end_page=page_number,
-                    page_size=page_size,
-                    search_filters=search_filters,
-                    disclosure_type_groups=disclosure_type_groups,
-                    last_report_only=last_report_only,
-                    include_previous_disclosures=include_previous_disclosures,
-                    wait_seconds_between_requests=wait_seconds,
-                    timeout=timeout,
-                    progress_callback=progress_callback,
-                    saved_file_validator=_repair_validator,
-                    cancel_check=cancel_check,
-                )
-            except Exception as exc:
-                last_error = exc
-                continue
-            candidate_path = attempt_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=page_number)
-            if not candidate_path.is_file():
-                last_error = RuntimeError("복구 페이지가 저장되지 않았습니다.")
-                continue
-            manifest_pages[str(page_number)] = {
-                "attempt": attempt,
-                "page_path": str(candidate_path.relative_to(folder)),
-            }
-            manifest_changed = True
-            success = True
-            break
-
-        if success:
-            continue
-
-        remaining_errors.append(
-            f"{folder.name} {page_number}페이지 재다운로드 실패: "
-            f"{_MAX_PAGE_REPAIR_ATTEMPTS}회 시도 후에도 복구되지 않았습니다. "
-            f"마지막 오류: {last_error}"
-        )
-
-    if manifest_changed:
-        _write_repair_manifest(folder, {"pages": manifest_pages})
-
-    return (remaining_errors, attempt_counts)
-
-
 def _collect_all_folder_summaries(
     target_folders: list[Path],
     *,
     parallelism: int | None = None,
-    validate_integrity: bool = True,
     use_partial_cache: bool = True,
 ) -> list[dict[str, Any]]:
     """모든 대상 폴더에서 회사별 레코드 요약을 수집한다."""
@@ -847,7 +542,6 @@ def _collect_all_folder_summaries(
         return [
             _collect_company_records_from_folder(
                 folder,
-                validate_integrity=validate_integrity,
                 use_partial_cache=use_partial_cache,
             )
             for folder in folder_targets
@@ -858,7 +552,6 @@ def _collect_all_folder_summaries(
                 executor.map(
                     _collect_company_records_from_folder,
                     folder_targets,
-                    [validate_integrity] * len(folder_targets),
                     [use_partial_cache] * len(folder_targets),
                 )
             )
@@ -866,7 +559,6 @@ def _collect_all_folder_summaries(
         return [
             _collect_company_records_from_folder(
                 folder,
-                validate_integrity=validate_integrity,
                 use_partial_cache=use_partial_cache,
             )
             for folder in folder_targets
@@ -876,7 +568,7 @@ def _collect_all_folder_summaries(
 def _merge_folder_summaries(
     folder_summaries: list[dict[str, Any]],
     source_folder_count: int,
-) -> tuple[dict[str, Any], int, int, int, int, int, list[str], dict[str, list[int]]]:
+) -> tuple[dict[str, Any], int, int, int, int, int, list[str]]:
     """폴더 요약들을 병합해 전체 payload와 무결성 정보를 반환한다."""
     companies_by_key: dict[str, dict[str, Any]] = {}
     body_files = 0
@@ -885,7 +577,6 @@ def _merge_folder_summaries(
     seen_disclosure_keys: set[tuple[str, ...]] = set()
     duplicates_removed = 0
     all_integrity_errors: list[str] = []
-    repair_targets: dict[str, list[int]] = {}
 
     for folder_summary in folder_summaries:
         body_files += int(folder_summary["body_files"])
@@ -893,11 +584,6 @@ def _merge_folder_summaries(
         raw_classified_disclosures += int(folder_summary["classified_disclosures"])
         duplicates_removed += int(folder_summary.get("intra_folder_duplicates") or 0)
         all_integrity_errors.extend(list(folder_summary.get("integrity_errors") or []))
-        repair_pages = list(folder_summary.get("repair_pages") or [])
-        if repair_pages:
-            folder_path = str(folder_summary.get("folder_path") or "")
-            if folder_path:
-                repair_targets[folder_path] = repair_pages
         for company_key, incoming in dict(folder_summary["companies_by_key"]).items():
             duplicates_removed += _merge_company_record(
                 companies_by_key,
@@ -933,7 +619,6 @@ def _merge_folder_summaries(
         source_folder_count,
         body_files,
         all_integrity_errors,
-        repair_targets,
     )
 
 
@@ -941,16 +626,18 @@ def _build_company_classification_payload(
     root_directory: Path,
     *,
     parallelism: int | None = None,
-    validate_integrity: bool = True,
     progress_callback: KindProgressCallback | None = None,
     cancel_check: KindCancelCheck | None = None,
     use_partial_cache: bool = True,
 ) -> tuple[dict[str, Any], KindCompanyClassificationIntegrityReport]:
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("Job cancelled")
     target_folders = _iter_kind_result_dirs(root_directory)
+    if progress_callback is not None:
+        progress_callback(f"무결성 검사 대상 폴더 {len(target_folders)}개를 수집했습니다.")
     folder_summaries = _collect_all_folder_summaries(
         target_folders,
         parallelism=parallelism,
-        validate_integrity=validate_integrity,
         use_partial_cache=use_partial_cache,
     )
 
@@ -962,7 +649,6 @@ def _build_company_classification_payload(
         source_folders,
         body_files,
         integrity_errors,
-        repair_targets,
     ) = _merge_folder_summaries(folder_summaries, len(target_folders))
 
     report = KindCompanyClassificationIntegrityReport(
@@ -972,79 +658,9 @@ def _build_company_classification_payload(
         classified_disclosures=raw_classified_disclosures,
         duplicates_removed=duplicates_removed,
         integrity_errors=list(integrity_errors),
-        repair_targets=dict(repair_targets),
-        repair_attempt_counts={},
-        repaired_folders=[],
-        repair_attempted=False,
     )
-
-    if not repair_targets or not validate_integrity:
-        return (payload, report)
-
-    total_repair_pages = sum(len(pages) for pages in repair_targets.values())
-    if progress_callback is not None:
-        progress_callback(
-            f"무결성 보완 시작: {len(repair_targets)}개 폴더, {total_repair_pages}개 페이지 재다운로드"
-        )
-
-    repair_remaining_errors: list[str] = []
-    repaired_folders: list[Path] = []
-    repair_attempt_counts: dict[str, dict[int, int]] = {}
-    for folder_path_str, pages in repair_targets.items():
-        folder_path = Path(folder_path_str)
-        errors, attempt_counts = _repair_folder_pages(
-            folder_path,
-            pages,
-            progress_callback=progress_callback,
-            cancel_check=cancel_check,
-        )
-        if errors:
-            repair_remaining_errors.extend(errors)
-        if attempt_counts:
-            repair_attempt_counts[str(folder_path)] = dict(attempt_counts)
-        repaired_folders.append(folder_path)
-
-    report.repair_attempted = True
-    report.repaired_folders = [str(folder) for folder in repaired_folders]
-    report.repair_attempt_counts = repair_attempt_counts
-
-    if not repaired_folders:
-        report.integrity_errors = repair_remaining_errors + integrity_errors
-        return (payload, report)
-
-    if progress_callback is not None:
-        progress_callback(
-            f"보완 완료된 {len(repaired_folders)}개 폴더 재수집 중..."
-        )
-
-    repaired_summaries = _collect_all_folder_summaries(
-        repaired_folders,
-        parallelism=parallelism,
-        validate_integrity=validate_integrity,
-        use_partial_cache=use_partial_cache,
-    )
-    all_summaries = [
-        summary for summary in folder_summaries
-        if summary.get("folder_path") not in {str(f) for f in repaired_folders}
-    ] + repaired_summaries
-
-    (
-        payload,
-        parsed_disclosures,
-        raw_classified_disclosures,
-        duplicates_removed,
-        _,
-        body_files,
-        remaining_integrity_errors,
-        _still_broken,
-    ) = _merge_folder_summaries(all_summaries, len(target_folders))
-
-    final_errors = repair_remaining_errors + remaining_integrity_errors
-    report.body_files = body_files
-    report.parsed_disclosures = parsed_disclosures
-    report.classified_disclosures = raw_classified_disclosures
-    report.duplicates_removed = duplicates_removed
-    report.integrity_errors = final_errors
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("Job cancelled")
     return (payload, report)
 
 
@@ -1172,7 +788,6 @@ def export_kind_company_classification(
     output_path: str | Path | None = None,
     compact: bool = True,
     parallelism: int | None = None,
-    validate_integrity: bool = True,
     progress_callback: KindProgressCallback | None = None,
 ) -> KindCompanyClassificationResult:
     """Recursively classify KIND disclosures by company under one root directory."""
@@ -1184,34 +799,32 @@ def export_kind_company_classification(
     payload, integrity_report = _build_company_classification_payload(
         root,
         parallelism=parallelism,
-        validate_integrity=validate_integrity,
         progress_callback=progress_callback,
     )
     deduplicated_disclosures = int(payload["summary"]["disclosures"])
-    if validate_integrity and integrity_report.integrity_errors:
+    if integrity_report.integrity_errors:
         raise KindCompanyClassificationIntegrityError(integrity_report)
 
-    if not integrity_report.integrity_errors:
-        if integrity_report.classified_disclosures != integrity_report.parsed_disclosures:
-            msg = (
-                "Disclosure classification count mismatch: "
-                f"parsed {integrity_report.parsed_disclosures} disclosures but "
-                f"classified {integrity_report.classified_disclosures}."
-            )
-            raise ValueError(msg)
-        if deduplicated_disclosures + integrity_report.duplicates_removed != integrity_report.classified_disclosures:
-            msg = (
-                "Disclosure deduplication count mismatch: "
-                f"classified {integrity_report.classified_disclosures} disclosures but "
-                f"deduplicated result kept {deduplicated_disclosures} and removed "
-                f"{integrity_report.duplicates_removed}."
-            )
-            raise ValueError(msg)
+    if integrity_report.classified_disclosures != integrity_report.parsed_disclosures:
+        msg = (
+            "Disclosure classification count mismatch: "
+            f"parsed {integrity_report.parsed_disclosures} disclosures but "
+            f"classified {integrity_report.classified_disclosures}."
+        )
+        raise ValueError(msg)
+    if deduplicated_disclosures + integrity_report.duplicates_removed != integrity_report.classified_disclosures:
+        msg = (
+            "Disclosure deduplication count mismatch: "
+            f"classified {integrity_report.classified_disclosures} disclosures but "
+            f"deduplicated result kept {deduplicated_disclosures} and removed "
+            f"{integrity_report.duplicates_removed}."
+        )
+        raise ValueError(msg)
 
     destination = (
         Path(output_path).resolve()
         if output_path is not None
-        else root / "kind.company_classification.json"
+        else root / "kind.company_classification.sqlite"
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     write_company_classification_artifact(
@@ -1234,11 +847,10 @@ def diagnose_kind_company_classification_integrity(
     root_directory: str | Path,
     *,
     parallelism: int | None = None,
-    validate_integrity: bool = True,
     progress_callback: KindProgressCallback | None = None,
     cancel_check: KindCancelCheck | None = None,
 ) -> KindCompanyClassificationIntegrityReport:
-    """Diagnose integrity issues and attempt auto-repair without writing output JSON."""
+    """Diagnose integrity issues without modifying source pages."""
     root = Path(root_directory).resolve()
     if not root.is_dir():
         msg = f"Not a directory: {root}"
@@ -1247,7 +859,6 @@ def diagnose_kind_company_classification_integrity(
     _, integrity_report = _build_company_classification_payload(
         root,
         parallelism=parallelism,
-        validate_integrity=validate_integrity,
         progress_callback=progress_callback,
         cancel_check=cancel_check,
         use_partial_cache=False,
@@ -1573,11 +1184,7 @@ def ensure_download_directory_integrity(
             f"{resolved_input_snapshot_path.name} metadata is corrupted: {exc}"
         ) from exc
     validate_kind_workflow_input_snapshot(saved_input)
-    locked_page_size = saved_input.get("page_size")
-    if locked_page_size is None:
-        msg = f"{resolved_input_snapshot_path.name}에 고정된 page_size가 없습니다."
-        raise ValueError(msg)
-    locked_page_size = int(locked_page_size)
+    locked_page_size = int(saved_input["page_size"])
     if locked_page_size != requested_page_size:
         msg = (
             "기존 다운로드 폴더의 고정 페이지 크기와 현재 요청이 다릅니다. "

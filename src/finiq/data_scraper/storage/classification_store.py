@@ -7,14 +7,17 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .result_files import KIND_REPAIR_OVERLAY_DIRNAME, sorted_result_page_paths
+from .result_files import sorted_result_page_paths
 
 CLASSIFICATION_INDEX_FORMAT = "company_classification_index_v2"
 CLASSIFICATION_PARTIAL_FORMAT = "company_classification_partial_v2"
 DEFAULT_CLASSIFICATION_SHARD_COMPANIES = 200
 
 def _company_key(company: dict[str, Any]) -> str:
-    return str(company.get("company_id") or company.get("company_name") or "").strip()
+    company_id = str(company.get("company_id") or "").strip()
+    if not company_id:
+        raise ValueError("company_id is required for classification records")
+    return company_id
 
 def _company_disclosure_bounds(company: dict[str, Any]) -> tuple[str | None, str | None]:
     disclosed_values = [
@@ -44,11 +47,6 @@ def _build_company_index_entry(
         "shard": shard,
     }
 
-def company_classification_shard_dir(index_path: str | Path) -> Path:
-    # Kept for backward compatibility signatures if needed, but not actively used in SQLite logic
-    target = Path(index_path).resolve()
-    return target.parent / f"{target.stem}.shards"
-
 def company_classification_partial_path(folder: str | Path) -> Path:
     target = Path(folder).resolve()
     return target / "kind.company_classification.partial.json"
@@ -65,19 +63,6 @@ def folder_partial_signature(folder: str | Path) -> dict[str, Any]:
                 "mtime_ns": stat.st_mtime_ns,
             }
         )
-    repair_root = target / KIND_REPAIR_OVERLAY_DIRNAME
-    if repair_root.exists():
-        for extra_path in sorted(repair_root.rglob("*")):
-            if not extra_path.is_file():
-                continue
-            stat = extra_path.stat()
-            files.append(
-                {
-                    "name": str(extra_path.relative_to(target)),
-                    "size": stat.st_size,
-                    "mtime_ns": stat.st_mtime_ns,
-                }
-            )
     return {"files": files}
 
 def _write_json(path: Path, payload: dict[str, Any], *, compact: bool) -> None:
@@ -160,9 +145,8 @@ def _init_db(conn: sqlite3.Connection):
 
 def _sqlite_path(index_path: str | Path) -> Path:
     target = Path(index_path).resolve()
-    # If the caller provides a JSON path, we map it to .sqlite
-    if target.suffix == ".json":
-        return target.with_suffix(".sqlite")
+    if target.suffix.lower() != ".sqlite":
+        raise ValueError("classification path must use the .sqlite extension")
     return target
 
 def write_company_classification_artifact(
@@ -170,21 +154,9 @@ def write_company_classification_artifact(
     payload: dict[str, Any],
     *,
     compact: bool,
-    shard_company_count: int = DEFAULT_CLASSIFICATION_SHARD_COMPANIES,
 ) -> Path:
     target_sqlite = _sqlite_path(index_path)
     target_sqlite.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Remove existing shards directory if it exists (cleanup old architecture)
-    old_target = Path(index_path).resolve()
-    shard_dir = company_classification_shard_dir(old_target)
-    if shard_dir.exists():
-        for existing_path in shard_dir.glob("*.json"):
-            existing_path.unlink()
-        try:
-            shard_dir.rmdir()
-        except OSError:
-            pass
 
     companies = list(payload.get("companies") or [])
     
@@ -299,7 +271,6 @@ __all__ = [
     "DEFAULT_CLASSIFICATION_SHARD_COMPANIES",
     "company_classification_artifact_complete",
     "company_classification_partial_path",
-    "company_classification_shard_dir",
     "folder_partial_signature",
     "load_company_classification_artifact",
     "load_company_classification_company",

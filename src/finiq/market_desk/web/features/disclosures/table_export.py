@@ -1,4 +1,4 @@
-"""Build SQLite disclosure tables from FINIQ classification JSON."""
+"""Build SQLite disclosure tables from canonical KIND result folders."""
 
 from __future__ import annotations
 
@@ -15,11 +15,6 @@ from finiq.data_scraper.storage.result_files import (
     sorted_result_page_paths,
 )
 from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
-from finiq.market_desk.data.facade import load_company_classification_file
-from finiq.market_desk.web.features.market_data.discovery import (
-    list_classification_files,
-    resolve_default_classification,
-)
 from finiq.market_desk.web.features.market_data.service_sources import (
     _parse_source_body_file,
 )
@@ -29,38 +24,10 @@ DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
 MANIFEST_FILENAME = "sqlite_manifest.json"
 SQLITE_FORMAT = "finiq_disclosure_table_sqlite_shard"
-_MAX_SOURCE_PAGE_REREAD_ATTEMPTS = 5
 
 
 def _date_part(value: object) -> str:
     return str(value or "").strip().split(" ", 1)[0]
-
-
-def _company_key(company: dict[str, Any]) -> str:
-    return str(company.get("company_key") or "").strip()
-
-
-def _summary_disclosure_count(payload: dict[str, Any]) -> int | None:
-    summary = payload.get("summary")
-    if not isinstance(summary, dict) or summary.get("disclosures") is None:
-        return None
-    return int(summary.get("disclosures") or 0)
-
-
-def _company_disclosures(
-    company: dict[str, Any], company_index: int
-) -> list[dict[str, Any]]:
-    disclosures = company.get("disclosures")
-    if disclosures is None:
-        return []
-    if not isinstance(disclosures, list):
-        msg = f"companies[{company_index}].disclosures must be a list"
-        raise ValueError(msg)
-    for disclosure_index, disclosure in enumerate(disclosures):
-        if not isinstance(disclosure, dict):
-            msg = f"companies[{company_index}].disclosures[{disclosure_index}] must be an object"
-            raise ValueError(msg)
-    return disclosures
 
 
 def _normalize_table_name(value: object) -> str:
@@ -73,20 +40,14 @@ def _normalize_table_name(value: object) -> str:
     return table_name
 
 
-def _default_output_path(classification_path: Path) -> Path:
-    return classification_path.with_name(MANIFEST_FILENAME)
-
-
 def _shard_directory(manifest_path: Path) -> Path:
     return manifest_path.parent
 
 
-def _manifest_output_path(raw_path: str, classification_path: Path) -> Path:
+def _manifest_output_path(raw_path: str) -> Path:
     if not raw_path:
-        return _default_output_path(classification_path).resolve()
-    output_path = _normalize_workspace_resource_path(
-        Path(raw_path).expanduser(), allow_missing_leaf=True
-    ).resolve()
+        raise ValueError("output_path is required")
+    output_path = Path(raw_path).expanduser().resolve()
     if output_path.suffix:
         return output_path.with_name(MANIFEST_FILENAME)
     return output_path / MANIFEST_FILENAME
@@ -113,118 +74,15 @@ def _find_original_source_body_files(root: Path) -> list[Path]:
     ]
 
 
-def _workspace_resource_bases() -> list[Path]:
-    bases = [
-        Path.cwd(),
-        Path.cwd().parent,
-        Path(__file__).resolve().parents[3],
-        Path(__file__).resolve().parents[2],
-    ]
-    unique_bases: list[Path] = []
-    seen: set[Path] = set()
-    for base in bases:
-        resolved = base.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        unique_bases.append(resolved)
-    return unique_bases
-
-
-def _normalize_workspace_resource_path(
-    path: Path, *, allow_missing_leaf: bool = False
-) -> Path:
-    candidate = path.resolve()
-    if candidate.exists() or "resources" not in candidate.parts:
-        return candidate
-
-    resource_index = candidate.parts.index("resources")
-    relative_parts = candidate.parts[resource_index + 1 :]
-    for base in _workspace_resource_bases():
-        resource_path = (base / "resources" / Path(*relative_parts)).resolve()
-        if resource_path.exists():
-            return resource_path
-        if allow_missing_leaf and resource_path.parent.exists():
-            return resource_path
-    return candidate
-
-
-def _resolve_source(raw_path: str, root_directory: str) -> tuple[str, Path]:
-    root_path = (
-        _normalize_workspace_resource_path(Path(root_directory).expanduser())
-        if root_directory
-        else None
-    )
-
-    if raw_path:
-        candidate = _normalize_workspace_resource_path(Path(raw_path).expanduser())
-        if candidate.is_file():
-            return ("classification", candidate)
-        if candidate.is_dir():
-            resolved = resolve_default_classification(candidate)
-            if resolved:
-                return ("classification", Path(resolved).expanduser().resolve())
-            files = list_classification_files(candidate)
-            if files:
-                return ("classification", Path(files[0]["path"]).expanduser().resolve())
-            if _source_has_body_files(candidate):
-                return ("source_folder", candidate)
-            if root_path is not None:
-                if _source_has_body_files(root_path):
-                    return ("source_folder", root_path)
-                root_resolved = resolve_default_classification(root_path)
-                if root_resolved:
-                    return (
-                        "classification",
-                        Path(root_resolved).expanduser().resolve(),
-                    )
-            msg = f"classification JSON or KIND body files not found in directory: {candidate}"
-            raise FileNotFoundError(msg)
-        if root_path is not None:
-            if _source_has_body_files(root_path):
-                return ("source_folder", root_path)
-            root_resolved = resolve_default_classification(root_path)
-            if root_resolved:
-                return ("classification", Path(root_resolved).expanduser().resolve())
-        msg = f"classification JSON or KIND body folder not found: {candidate}"
-        raise FileNotFoundError(msg)
-
-    if root_path is None:
-        msg = "classification_path or root_directory is required"
-        raise ValueError(msg)
-    resolved = resolve_default_classification(root_path)
-    if resolved:
-        return ("classification", Path(resolved).expanduser().resolve())
-    if _source_has_body_files(root_path):
-        return ("source_folder", root_path)
-    msg = "classification JSON or KIND body files not found"
-    raise ValueError(msg)
-
-
-def _validate_classification_disclosure_counts(
-    payload: dict[str, Any],
-    row_count: int,
-    source_path: Path,
-) -> None:
-    companies = list(payload.get("companies") or [])
-    actual_disclosures = sum(
-        len(_company_disclosures(company, company_index))
-        for company_index, company in enumerate(companies)
-    )
-    if row_count != actual_disclosures:
-        msg = (
-            "SQLite export did not inspect every classification disclosure: "
-            f"source={source_path}, inspected={row_count}, expected={actual_disclosures}"
-        )
-        raise ValueError(msg)
-
-    summary_disclosures = _summary_disclosure_count(payload)
-    if summary_disclosures is not None and summary_disclosures != actual_disclosures:
-        msg = (
-            "Classification disclosure summary does not match loaded disclosures: "
-            f"source={source_path}, summary={summary_disclosures}, loaded={actual_disclosures}"
-        )
-        raise ValueError(msg)
+def _resolve_source(root_directory: str) -> Path:
+    if not root_directory:
+        raise ValueError("root_directory is required")
+    source_path = Path(root_directory).expanduser().resolve()
+    if not source_path.is_dir():
+        raise FileNotFoundError(f"KIND source directory not found: {source_path}")
+    if not _source_has_body_files(source_path):
+        raise ValueError(f"KIND body files not found: {source_path}")
+    return source_path
 
 
 def _row_year(row: dict[str, Any]) -> str:
@@ -232,60 +90,7 @@ def _row_year(row: dict[str, Any]) -> str:
     year = disclosed_date[:4]
     if len(year) == 4 and year.isdigit():
         return year
-    return "unknown"
-
-
-def _collect_classification_rows_by_year(
-    payload: dict[str, Any],
-    cancel_check: Callable[[], bool] | None = None,
-) -> tuple[dict[str, list[dict[str, Any]]], int, int]:
-    rows_by_year: dict[str, list[dict[str, Any]]] = {}
-    row_count = 0
-    companies = list(payload.get("companies") or [])
-    for company_index, company in enumerate(companies):
-        if cancel_check and cancel_check():
-            raise RuntimeError("Job cancelled")
-        company_key = _company_key(company)
-        company_name = company.get("company_name")
-        company_id = company.get("company_id")
-        market = company.get("market")
-        badges = list(company.get("badges") or [])
-        badges_json = json.dumps(badges, ensure_ascii=False)
-        for disclosure in _company_disclosures(company, company_index):
-            if cancel_check and cancel_check():
-                raise RuntimeError("Job cancelled")
-            disclosed_at = disclosure.get("disclosed_at")
-            row = {
-                "row_no": disclosure.get("row_no"),
-                "company_key": company_key,
-                "company_name": company_name,
-                "company_id": company_id,
-                "market": market,
-                "badges_json": badges_json,
-                "disclosed_at": disclosed_at,
-                "disclosed_date": _date_part(disclosed_at),
-                "title": disclosure.get("title"),
-                "title_attr": disclosure.get("title_attr"),
-                "title_base": disclosure.get("title_base"),
-                "title_display": disclosure.get("title_display"),
-                "title_flags_json": json.dumps(
-                    list(disclosure.get("title_flags") or []), ensure_ascii=False
-                ),
-                "is_correction_report": 1
-                if disclosure.get("is_correction_report")
-                else 0,
-                "has_later_correction": 1
-                if disclosure.get("has_later_correction")
-                else 0,
-                "acpt_no": disclosure.get("acpt_no") or disclosure.get("acptno"),
-                "doc_no": disclosure.get("doc_no"),
-                "submitter": disclosure.get("submitter"),
-                "source_file": disclosure.get("source_file"),
-                "source_page": disclosure.get("source_page"),
-            }
-            rows_by_year.setdefault(_row_year(row), []).append(row)
-            row_count += 1
-    return rows_by_year, len(companies), row_count
+    raise ValueError(f"disclosed_date must begin with a four-digit year: {disclosed_date!r}")
 
 
 def _collect_source_folder_rows_by_year(
@@ -305,7 +110,7 @@ def _collect_source_folder_rows_by_year(
         page_source_rows = 0
         page_written_rows = 0
         page_duplicate_rows = 0
-        records, reread_attempts = _read_source_page_records(
+        records = _read_source_page_records(
             body_path,
             cancel_check=cancel_check,
         )
@@ -345,14 +150,10 @@ def _collect_source_folder_rows_by_year(
                 "source_file": record.get("source_file"),
                 "source_page": record.get("source_page"),
             }
-            company_key = str(
-                row.get("company_key")
-                or row.get("company_id")
-                or row.get("company_name")
-                or ""
-            ).strip()
-            if company_key:
-                company_keys.add(company_key)
+            company_key = str(row.get("company_key") or "").strip()
+            if not company_key:
+                raise ValueError(f"company_key is required: {body_path}")
+            company_keys.add(company_key)
             rows_by_year.setdefault(_row_year(row), []).append(row)
             row_count += 1
             page_written_rows += 1
@@ -364,7 +165,6 @@ def _collect_source_folder_rows_by_year(
                 "source_rows": page_source_rows,
                 "written_rows": page_written_rows,
                 "duplicate_rows": page_duplicate_rows,
-                "reread_attempts": reread_attempts,
             }
         )
     return (
@@ -381,28 +181,13 @@ def _read_source_page_records(
     body_path: Path,
     *,
     cancel_check: Callable[[], bool] | None,
-) -> tuple[list[dict[str, Any]], int]:
-    last_error: Exception | None = None
-    for reread_attempt in range(_MAX_SOURCE_PAGE_REREAD_ATTEMPTS + 1):
-        if cancel_check and cancel_check():
-            raise RuntimeError("Job cancelled")
-        try:
-            records = _parse_source_body_file(body_path)
-            if any(
-                not str(record.get("acpt_no") or "").strip()
-                for record in records
-            ):
-                raise ValueError(
-                    f"acpt_no is required for every disclosure: {body_path}"
-                )
-        except (OSError, UnicodeError, ValueError) as error:
-            last_error = error
-            continue
-        return records, reread_attempt
-    raise ValueError(
-        f"Failed to read source disclosure page after "
-        f"{_MAX_SOURCE_PAGE_REREAD_ATTEMPTS} retries: {body_path}: {last_error}"
-    ) from last_error
+) -> list[dict[str, Any]]:
+    if cancel_check and cancel_check():
+        raise RuntimeError("Job cancelled")
+    records = _parse_source_body_file(body_path)
+    if any(not str(record.get("acpt_no") or "").strip() for record in records):
+        raise ValueError(f"acpt_no is required for every disclosure: {body_path}")
+    return records
 
 
 def _validate_source_page_ranges(
@@ -519,34 +304,31 @@ def _create_indexes(connection: sqlite3.Connection, table_name: str) -> list[str
 def _create_fts_table(connection: sqlite3.Connection, table_name: str) -> bool:
     fts_table = f"{table_name}_fts"
     quoted_table = f'"{table_name}"'
-    try:
-        connection.execute(f'DROP TABLE IF EXISTS "{fts_table}"')
-        connection.execute(
-            f"""
-            CREATE VIRTUAL TABLE "{fts_table}" USING fts5(
-                title,
-                company_name,
-                submitter,
-                content='{table_name}',
-                content_rowid='id'
-            )
-            """
+    connection.execute(f'DROP TABLE IF EXISTS "{fts_table}"')
+    connection.execute(
+        f"""
+        CREATE VIRTUAL TABLE "{fts_table}" USING fts5(
+            title,
+            company_name,
+            submitter,
+            content='{table_name}',
+            content_rowid='id'
         )
-        connection.execute(
-            f"""
-            INSERT INTO "{fts_table}"(rowid, title, company_name, submitter)
-            SELECT id, title, company_name, submitter FROM {quoted_table}
-            """
-        )
-    except sqlite3.OperationalError:
-        return False
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO "{fts_table}"(rowid, title, company_name, submitter)
+        SELECT id, title, company_name, submitter FROM {quoted_table}
+        """
+    )
     return True
 
 
 def _write_metadata(
     connection: sqlite3.Connection,
     *,
-    classification_path: Path,
+    source_path: Path,
     source_type: str,
     table_name: str,
     companies: int,
@@ -567,7 +349,7 @@ def _write_metadata(
         "format": "finiq_disclosure_table_sqlite",
         "shard_format": SQLITE_FORMAT,
         "schema_version": str(TABLE_SCHEMA_VERSION),
-        "source_classification_path": str(classification_path),
+        "source_path": str(source_path),
         "source_type": source_type,
         "table_name": table_name,
         "shard_year": shard_year,
@@ -585,7 +367,7 @@ def _write_sqlite_shard(
     *,
     shard_path: Path,
     rows: list[dict[str, Any]],
-    classification_path: Path,
+    source_path: Path,
     source_type: str,
     table_name: str,
     shard_year: str,
@@ -595,21 +377,7 @@ def _write_sqlite_shard(
     if temporary_path.exists():
         temporary_path.unlink()
 
-    company_keys = {
-        str(
-            row.get("company_key")
-            or row.get("company_id")
-            or row.get("company_name")
-            or ""
-        ).strip()
-        for row in rows
-        if str(
-            row.get("company_key")
-            or row.get("company_id")
-            or row.get("company_name")
-            or ""
-        ).strip()
-    }
+    company_keys = {str(row["company_key"]).strip() for row in rows}
     connection = sqlite3.connect(temporary_path)
     try:
         with connection:
@@ -676,7 +444,7 @@ def _write_sqlite_shard(
                 raise ValueError(msg)
             _write_metadata(
                 connection,
-                classification_path=classification_path,
+                source_path=source_path,
                 source_type=source_type,
                 table_name=table_name,
                 companies=len(company_keys),
@@ -740,7 +508,7 @@ def _write_sqlite_shards(
                 _write_sqlite_shard(
                     shard_path=shard_path,
                     rows=shard_rows,
-                    classification_path=source_path,
+                    source_path=source_path,
                     source_type=source_type,
                     table_name=table_name,
                     shard_year=year,
@@ -768,7 +536,7 @@ def _write_sqlite_shards(
                     _write_sqlite_shard,
                     shard_path=shard_path,
                     rows=shard_rows,
-                    classification_path=source_path,
+                    source_path=source_path,
                     source_type=source_type,
                     table_name=table_name,
                     shard_year=year,
@@ -808,42 +576,34 @@ def build_disclosure_table_payload(
     if progress_callback:
         progress_callback("작업 설정 및 경로를 파악합니다...")
     root_directory = str(body.get("root_directory") or "").strip()
-    classification_path_raw = str(body.get("classification_path") or "").strip()
-    source_type, source_path = _resolve_source(classification_path_raw, root_directory)
+    if str(body.get("classification_path") or "").strip():
+        raise ValueError("classification_path is not supported; use root_directory")
+    source_path = _resolve_source(root_directory)
+    source_type = "source_folder"
 
     output_path_raw = str(body.get("output_path") or "").strip()
-    manifest_path = _manifest_output_path(output_path_raw, source_path)
+    manifest_path = _manifest_output_path(output_path_raw)
     shard_root = _shard_directory(manifest_path)
     table_name = _normalize_table_name(body.get("table_name"))
 
     if progress_callback:
         progress_callback("공시 메타데이터를 로드합니다...")
 
-    if source_type == "classification":
-        payload = load_company_classification_file(source_path)
-        rows_by_year, companies, row_count = _collect_classification_rows_by_year(
-            payload, cancel_check=cancel_check
-        )
-        _validate_classification_disclosure_counts(payload, row_count, source_path)
-        source_row_count = row_count
-        duplicate_row_count = 0
-        pages: list[dict[str, Any]] = []
-    else:
-        _validate_source_page_ranges(
-            source_path,
-            cancel_check=cancel_check,
-        )
-        (
-            rows_by_year,
-            companies,
-            row_count,
-            source_row_count,
-            duplicate_row_count,
-            pages,
-        ) = _collect_source_folder_rows_by_year(
-            source_path,
-            cancel_check=cancel_check,
-        )
+    _validate_source_page_ranges(
+        source_path,
+        cancel_check=cancel_check,
+    )
+    (
+        rows_by_year,
+        companies,
+        row_count,
+        source_row_count,
+        duplicate_row_count,
+        pages,
+    ) = _collect_source_folder_rows_by_year(
+        source_path,
+        cancel_check=cancel_check,
+    )
     if source_row_count != row_count + duplicate_row_count:
         msg = (
             "SQLite export did not account for every source disclosure row: "
@@ -852,7 +612,7 @@ def build_disclosure_table_payload(
         )
         raise ValueError(msg)
     shard_workers = _resolve_shard_workers(
-        body.get("table_workers", body.get("shard_workers")), len(rows_by_year)
+        body.get("table_workers"), len(rows_by_year)
     )
 
     if progress_callback:
@@ -881,9 +641,7 @@ def build_disclosure_table_payload(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_type": source_type,
         "source_path": str(source_path),
-        "source_classification_path": str(source_path)
-        if source_type == "classification"
-        else "",
+        "source_classification_path": "",
         "manifest_path": str(manifest_path),
         "shard_root": str(shard_root),
         "table_name": table_name,
@@ -903,9 +661,7 @@ def build_disclosure_table_payload(
         "manifest_format": MANIFEST_FORMAT,
         "source_type": source_type,
         "source_path": str(source_path),
-        "source_classification_path": str(source_path)
-        if source_type == "classification"
-        else "",
+        "source_classification_path": "",
         "output_path": str(manifest_path),
         "manifest_path": str(manifest_path),
         "shard_root": str(shard_root),

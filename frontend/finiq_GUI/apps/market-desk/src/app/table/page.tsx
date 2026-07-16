@@ -19,7 +19,6 @@ export default function TablePage() {
   
   const {
     output_root: dataRoot,
-    parallel_worker_count: parallelWorkerCount,
     disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
     saveSetting,
@@ -38,8 +37,14 @@ export default function TablePage() {
     try {
       const config = await fetchSettings();
       if (config) {
-        setOutputPath(config.sqlite_output_directory || config.sqlite_manifest_path || "");
-        const workerCount = Number(config.parallel_worker_count || 1);
+        if (typeof config.sqlite_output_directory !== "string") {
+          throw new Error("sqlite_output_directory must be a string");
+        }
+        setOutputPath(config.sqlite_output_directory);
+        const workerCount = Number(config.parallel_worker_count);
+        if (!Number.isInteger(workerCount) || workerCount < 1) {
+          throw new Error("parallel_worker_count must be a positive integer");
+        }
         setMaxTableWorkers(workerCount);
         setTableWorkers(String(workerCount));
       }
@@ -58,13 +63,24 @@ export default function TablePage() {
   const handleWorkspaceDirectoryChange = async (value: string) => {
     if (await saveSetting("output_root", value)) {
       const settings = useSettingsStore.getState();
-      setOutputPath(settings.sqlite_output_directory || settings.sqlite_manifest_path || "");
+      setOutputPath(settings.sqlite_output_directory);
     }
   };
 
   const handleBuild = async () => {
     if (!dataRoot) {
       setStatus("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (useSeparateOutputDirectory && !outputPath.trim()) {
+      setStatus("결과 데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const configuredWorkers = Number(tableWorkers);
+    if (!Number.isInteger(configuredWorkers) || configuredWorkers < 1) {
+      setStatus("table_workers must be a positive integer");
       setIsErrorStatus(true);
       return;
     }
@@ -80,7 +96,7 @@ export default function TablePage() {
             : "",
           output_path: useSeparateOutputDirectory ? outputPath : "",
           table_name: "disclosures",
-          table_workers: Number(tableWorkers || parallelWorkerCount || 1),
+          table_workers: configuredWorkers,
         }),
       });
       

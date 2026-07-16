@@ -30,11 +30,12 @@ def companysummary_onclick(onclick_value: str | None) -> dict[str, str | None] |
 
 
 def _pick_market_and_badges(company_cell: html.HtmlElement) -> tuple[str | None, list[str]]:
-    labels = [
-        _clean_text(str(image_tag.get("alt") or ""))
-        for image_tag in company_cell.xpath(".//img")
-    ]
-    labels = [label for label in labels if label]
+    labels: list[str] = []
+    for image_tag in company_cell.xpath(".//img"):
+        label = _clean_text(str(image_tag.get("alt") or ""))
+        if not label:
+            raise ValueError("KIND company image is missing a non-empty alt label")
+        labels.append(label)
     if not labels:
         return None, []
     return labels[0], labels[1:]
@@ -77,38 +78,36 @@ def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any]:
     disclosure_cell = cells[3]
     submitter_cell = cells[4]
 
-    company_links = company_cell.xpath(".//a[@id='companysum']") or company_cell.xpath(".//a")
-    company_link = company_links[0] if company_links else None
-    disclosure_links = disclosure_cell.xpath(".//a")
-    disclosure_link = disclosure_links[0] if disclosure_links else None
+    company_links = company_cell.xpath(".//a[@id='companysum']")
+    if len(company_links) != 1:
+        raise ValueError("KIND disclosure row must contain exactly one companysum link")
+    disclosure_links = disclosure_cell.xpath(
+        ".//a[contains(@onclick, 'openDisclsViewer')]"
+    )
+    if len(disclosure_links) != 1:
+        raise ValueError("KIND disclosure row must contain exactly one disclosure link")
+    company_link = company_links[0]
+    disclosure_link = disclosure_links[0]
 
-    company_name = ""
-    company_id = None
-    if company_link is not None:
-        company_name = _clean_text(
-            str(company_link.get("title") or _element_text(company_link))
-        )
-        company_info = companysummary_onclick(company_link.get("onclick"))
-        if company_info is not None:
-            company_id = company_info.get("company_id")
+    company_name = _clean_text(str(company_link.get("title") or ""))
     if not company_name:
-        company_name = _element_text(company_cell)
+        raise ValueError("KIND company link is missing a non-empty title")
+    company_info = companysummary_onclick(company_link.get("onclick"))
+    company_id = company_info.get("company_id") if company_info is not None else None
+    if not company_id:
+        raise ValueError("KIND company link is missing company_id")
 
     market, badges = _pick_market_and_badges(company_cell)
-    disclosure_info = (
-        disclosure_onclick(disclosure_link.get("onclick")) if disclosure_link is not None else None
-    ) or {"acpt_no": None, "doc_no": None}
+    disclosure_info = disclosure_onclick(disclosure_link.get("onclick"))
+    if disclosure_info is None or not disclosure_info.get("acpt_no"):
+        raise ValueError("KIND disclosure link is missing acpt_no")
 
-    title_attr = ""
-    title_display = ""
-    if disclosure_link is not None:
-        title_attr = _clean_text(str(disclosure_link.get("title") or ""))
-        title_display = _display_text(disclosure_link)
-    title = title_display or title_attr
-    if not title:
-        title = _display_text(disclosure_cell)
-        title_display = title
-    title_flags = _title_flags(title_display or title)
+    title_attr = _clean_text(str(disclosure_link.get("title") or ""))
+    title_display = _display_text(disclosure_link)
+    if not title_display:
+        raise ValueError("KIND disclosure link has no displayed title")
+    title = title_display
+    title_flags = _title_flags(title_display)
 
     return {
         "row_no": _element_text(cells[0]),
@@ -120,7 +119,7 @@ def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any]:
         "title": title,
         "title_attr": title_attr,
         "title_base": title_attr,
-        "title_display": title_display or title,
+        "title_display": title_display,
         "title_flags": title_flags,
         "is_correction_report": "정정" in title_flags,
         "has_later_correction": _has_later_correction(disclosure_cell),

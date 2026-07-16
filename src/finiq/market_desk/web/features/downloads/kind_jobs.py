@@ -74,28 +74,9 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
             _update_job(job_id, status="completed", result=result)
             _append_job_progress(job_id, f"JOB completed id={job_id}")
         except DownloadCancelled:
-            try:
-                current = inspect_download_output_directory_payload(
-                    {**payload, "dry_run": True}
-                )
-                _update_job(job_id, result=current)
-            except Exception:
-                pass
             _update_job(job_id, status="cancelled")
             _append_job_progress(job_id, f"JOB cancelled id={job_id}")
         except Exception as exc:  # pragma: no cover - runtime path
-            try:
-                current = inspect_download_output_directory_payload(
-                    {**payload, "dry_run": True}
-                )
-                summary = current.get("summary") or {}
-                _append_job_progress(
-                    job_id,
-                    f"CURRENT success={summary.get('success', 0)}/{summary.get('total', 0)} failed={summary.get('failed', 0)}",
-                )
-                _update_job(job_id, result=current)
-            except Exception:
-                pass
             _update_job(job_id, status="failed", error=str(exc))
             _append_job_progress(job_id, f"JOB failed error={exc}")
         finally:
