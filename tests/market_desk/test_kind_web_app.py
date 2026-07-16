@@ -993,19 +993,19 @@ def test_download_inspect_folder_start_route(tmp_path: Path, monkeypatch) -> Non
     assert data["job_id"] == job_id
 
 
-def test_html_section_inspect_route_returns_document_toc_and_problem_files(tmp_path: Path) -> None:
+def test_html_section_inspect_route_rejects_file_without_canonical_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     (input_directory / "20260421000111.html").write_text(
-        "<html><body><p>목차 없는 문서</p></body></html>",
+        "<html><head></head><body><p>목차 없는 문서</p></body></html>",
         encoding="utf-8",
     )
     (input_directory / "20260422000832.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -1015,38 +1015,22 @@ def test_html_section_inspect_route_returns_document_toc_and_problem_files(tmp_p
     client = TestClient(app)
     response = client.post(
         "/api/disclosures/html/sections/inspect",
-        json={"input_directory": str(input_directory), "report_limit": 10},
+        json={"input_directory": str(input_directory)},
     )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["summary"] == {
-        "found_files": 2,
-        "documents_with_sections": 1,
-        "files_without_sections": 1,
-        "failed_files": 0,
-        "reported_problem_files": 1,
-    }
-    assert data["documents"][0]["source_name"] == "20260422000832.html"
-    assert [section["toc_id"] for section in data["documents"][0]["sections"]] == ["toc_1", "toc_2"]
-    assert data["problem_files"] == [
-        {
-            "kind": "no_sections",
-            "source_file": str(input_directory / "20260421000111.html"),
-            "error": "",
-        }
-    ]
+    assert response.status_code == 400
+    assert response.json()["detail"] == "canonical SECTION heading is required"
 
 
 def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     for index in range(21):
-        section_markup = "<h2 id='toc_1'><p>목차</p></h2>"
+        section_markup = "<h2 class='SECTION-1' id='toc_1'><p>목차</p></h2>"
         if index == 0:
-            section_markup += "<h2 id='toc_2'><p>본문</p></h2>"
+            section_markup += "<h2 class='SECTION-2' id='toc_2'><p>본문</p></h2>"
         (input_directory / f"202604{index + 1:02d}000001.html").write_text(
-            f"<html><body>{section_markup}</body></html>",
+            f"<html><head></head><body>{section_markup}</body></html>",
             encoding="utf-8",
         )
 
@@ -1076,15 +1060,15 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
     for source_name in ["20260401000001.html", "20260402000001.html"]:
         (input_directory / source_name).write_text(
             """
-            <html><body>
-              <h2 id="toc_1"><p>1</p></h2>
-              <h2 id="toc_2"><p>2</p></h2>
+            <html><head></head><body>
+              <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
+              <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
             </body></html>
             """,
             encoding="utf-8",
         )
     (input_directory / "20260403000001.html").write_text(
-        "<html><body><h2 id='toc_1'><p>1</p></h2></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2></body></html>",
         encoding="utf-8",
     )
 
@@ -1195,10 +1179,10 @@ def test_html_section_source_split_route_returns_selected_disclosure_sections(tm
     source_file = input_directory / "20260422000832.html"
     source_file.write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -1231,10 +1215,10 @@ def test_html_section_save_start_route_saves_all_explicitly_selected_toc_section
     source_directory.mkdir(parents=True)
     (source_directory / "20260422000832.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -1295,10 +1279,10 @@ def test_html_section_save_start_route_applies_pattern_toc_selection(tmp_path: P
     source_directory.mkdir(parents=True)
     (source_directory / "20260422000832.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -1352,10 +1336,10 @@ def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> 
     input_directory.mkdir()
     (input_directory / "20260422000832.html").write_text(
         """
-        <html><body>
-          <h2 id="toc_1"><p>주요사항보고서</p></h2>
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,

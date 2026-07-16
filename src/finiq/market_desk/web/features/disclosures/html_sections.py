@@ -16,8 +16,8 @@ from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.web.html_parsers.common import decode_html_markup
 
 ProgressCallback = Callable[[str], None]
-_TOC_ID_RE = re.compile(r"^toc_(\d+)$")
-DEFAULT_REPORT_LIMIT = 50
+_SECTION_CLASS_RE = re.compile(r"^SECTION-\d+$")
+_HEADING_TAGS = {f"h{level}" for level in range(1, 7)}
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 T = TypeVar("T")
 
@@ -45,40 +45,27 @@ def _element_html(element: etree._Element) -> str:
     return html.tostring(element, encoding="unicode", method="html")
 
 
-def _element_start_tag(element: etree._Element) -> str:
-    if not isinstance(element.tag, str):
-        return ""
-    attrs = "".join(
-        f' {key}="{escape(str(value), quote=True)}"'
-        for key, value in element.attrib.items()
-    )
-    return f"<{element.tag}{attrs}>"
-
-
-def _element_end_tag(element: etree._Element) -> str:
-    if not isinstance(element.tag, str):
-        return ""
-    return f"</{element.tag}>"
-
-
-def _toc_index(toc_id: str, fallback: int) -> int:
-    match = _TOC_ID_RE.match(toc_id)
-    if match:
-        return int(match.group(1))
-    return fallback
+def _parse_internal_html_document(html_markup: str | bytes) -> html.HtmlElement:
+    decoded_markup = decode_html_markup(html_markup)
+    if re.search(r"<head(?:\s|>)", decoded_markup, flags=re.IGNORECASE) is None:
+        raise ValueError("HTML head is required")
+    if re.search(r"<body(?:\s|>)", decoded_markup, flags=re.IGNORECASE) is None:
+        raise ValueError("HTML body is required")
+    parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
+    return html.fromstring(decoded_markup, parser=parser)
 
 
 def _body_direct_children(document: html.HtmlElement) -> list[etree._Element]:
     body_nodes = document.xpath("//body")
-    if body_nodes:
-        return list(body_nodes[0])
-    return list(document)
+    if not body_nodes:
+        raise ValueError("HTML body is required")
+    return list(body_nodes[0])
 
 
 def _body_attrs(document: html.HtmlElement) -> str:
     body_nodes = document.xpath("//body")
     if not body_nodes:
-        return ""
+        raise ValueError("HTML body is required")
     attrs = []
     for key, value in body_nodes[0].attrib.items():
         if key.lower() == "style":
@@ -90,7 +77,7 @@ def _body_attrs(document: html.HtmlElement) -> str:
 def _head_markup(document: html.HtmlElement) -> str:
     head_nodes = document.xpath("//head")
     if not head_nodes:
-        return '<meta charset="UTF-8">'
+        raise ValueError("HTML head is required")
     return "".join(_element_html(child) for child in head_nodes[0])
 
 
@@ -98,13 +85,13 @@ def _section_title(
     heading: etree._Element, section_children: list[etree._Element]
 ) -> str:
     title = _clean_text(heading.text_content())
-    if title:
-        return title
-    for child in section_children[1:4]:
-        title = _clean_text(child.text_content())
-        if title:
-            return title
-    return ""
+    if not title and len(section_children) > 1:
+        first_content = section_children[1]
+        if isinstance(first_content.tag, str) and first_content.tag.lower() == "p":
+            title = _clean_text(first_content.text_content())
+    if not title:
+        raise ValueError("SECTION heading title is required")
+    return title
 
 
 def _wrap_section_html(document: html.HtmlElement, section_markup: str) -> str:
@@ -121,123 +108,27 @@ def _wrap_section_html(document: html.HtmlElement, section_markup: str) -> str:
     )
 
 
-def _is_toc_heading(element: etree._Element) -> bool:
+def _is_section_heading(element: etree._Element) -> bool:
     if not isinstance(element.tag, str):
         return False
-    if element.tag.lower() != "h2":
+    if element.tag.lower() not in _HEADING_TAGS:
         return False
-    return bool(_TOC_ID_RE.match(str(element.get("id") or "").strip()))
-
-
-def _is_legacy_section_heading(element: etree._Element) -> bool:
-    if not isinstance(element.tag, str):
-        return False
-    if element.tag.lower() != "p":
-        return False
-    class_names = set(str(element.get("class") or "").split())
-    if "SECTION-1" not in class_names:
-        return False
-    return bool(_clean_text(element.text_content()))
-
-
-def _has_class(element: etree._Element, class_name: str) -> bool:
-    return class_name in set(str(element.get("class") or "").split())
-
-
-def _xforms_title_sections(
-    document: html.HtmlElement,
-) -> list[tuple[str, list[etree._Element]]]:
-    title_nodes = document.xpath(
-        '//*[contains(concat(" ", normalize-space(@class), " "), " xforms_title ")]'
+    return any(
+        _SECTION_CLASS_RE.match(class_name)
+        for class_name in str(element.get("class") or "").split()
     )
-    sections: list[tuple[str, list[etree._Element]]] = []
-    seen_parents: set[etree._Element] = set()
-    for title_node in title_nodes:
-        title = _clean_text(title_node.text_content())
-        if not title:
-            continue
-        parent = title_node.getparent()
-        if parent is None:
-            sections.append((title, [title_node]))
-            continue
-        siblings = list(parent)
-        start = siblings.index(title_node)
-        section_start = start
-        if parent not in seen_parents:
-            section_start = 0
-            seen_parents.add(parent)
-        end = len(siblings)
-        for position in range(start + 1, len(siblings)):
-            if _has_class(siblings[position], "xforms_title"):
-                end = position
-                break
-        sections.append((title, siblings[section_start:end]))
-    return sections
-
-
-def _xforms_section_markup(section_children: list[etree._Element]) -> str:
-    section_markup = "".join(_element_html(child) for child in section_children)
-    if not section_children:
-        return section_markup
-
-    ancestors: list[etree._Element] = []
-    for ancestor in section_children[0].iterancestors():
-        ancestors.append(ancestor)
-        if _has_class(ancestor, "xforms"):
-            wrappers = list(reversed(ancestors))
-            return (
-                "".join(_element_start_tag(wrapper) for wrapper in wrappers)
-                + section_markup
-                + "".join(_element_end_tag(wrapper) for wrapper in reversed(wrappers))
-            )
-    return section_markup
-
-
-def _split_xforms_sections(document: html.HtmlElement) -> list[HtmlSection]:
-    sections: list[HtmlSection] = []
-    for order, (title, section_children) in enumerate(
-        _xforms_title_sections(document), start=1
-    ):
-        section_markup = _xforms_section_markup(section_children)
-        toc_id = f"toc_{order}"
-        sections.append(
-            HtmlSection(
-                toc_id=toc_id,
-                index=order,
-                title=title,
-                html=_wrap_section_html(document, section_markup),
-            )
-        )
-    return sections
-
-
-def _inspect_xforms_sections(document: html.HtmlElement) -> list[HtmlSectionSummary]:
-    return [
-        HtmlSectionSummary(toc_id=f"toc_{order}", index=order, title=title)
-        for order, (title, _section_children) in enumerate(
-            _xforms_title_sections(document), start=1
-        )
-    ]
 
 
 def split_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
-    """Split a KIND internal HTML document by top-level TOC headings."""
-    parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
-    document = html.fromstring(decode_html_markup(html_markup), parser=parser)
+    """Split a KIND internal HTML document by top-level SECTION headings."""
+    document = _parse_internal_html_document(html_markup)
     children = _body_direct_children(document)
     heading_positions: list[tuple[int, etree._Element]] = []
     for position, child in enumerate(children):
-        if _is_toc_heading(child):
+        if _is_section_heading(child):
             heading_positions.append((position, child))
     if not heading_positions:
-        heading_positions = [
-            (position, child)
-            for position, child in enumerate(children)
-            if _is_legacy_section_heading(child)
-        ]
-    if not heading_positions:
-        return _split_xforms_sections(document)
-
+        raise ValueError("canonical SECTION heading is required")
     sections: list[HtmlSection] = []
     for order, (start, heading) in enumerate(heading_positions, start=1):
         end = (
@@ -245,13 +136,13 @@ def split_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
             if order < len(heading_positions)
             else len(children)
         )
-        toc_id = str(heading.get("id") or "").strip() or f"toc_{order}"
+        toc_id = f"toc_{order}"
         section_children = children[start:end]
         section_markup = "".join(_element_html(child) for child in section_children)
         sections.append(
             HtmlSection(
                 toc_id=toc_id,
-                index=_toc_index(toc_id, order),
+                index=order,
                 title=_section_title(heading, section_children),
                 html=_wrap_section_html(document, section_markup),
             )
@@ -260,23 +151,15 @@ def split_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
 
 
 def inspect_internal_html_sections(html_markup: str | bytes) -> list[HtmlSectionSummary]:
-    """Read only top-level TOC metadata from a KIND internal HTML document."""
-    parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
-    document = html.fromstring(decode_html_markup(html_markup), parser=parser)
+    """Read only top-level SECTION metadata from a KIND internal HTML document."""
+    document = _parse_internal_html_document(html_markup)
     children = _body_direct_children(document)
     heading_positions: list[tuple[int, etree._Element]] = []
     for position, child in enumerate(children):
-        if _is_toc_heading(child):
+        if _is_section_heading(child):
             heading_positions.append((position, child))
     if not heading_positions:
-        heading_positions = [
-            (position, child)
-            for position, child in enumerate(children)
-            if _is_legacy_section_heading(child)
-        ]
-    if not heading_positions:
-        return _inspect_xforms_sections(document)
-
+        raise ValueError("canonical SECTION heading is required")
     sections: list[HtmlSectionSummary] = []
     for order, (start, heading) in enumerate(heading_positions, start=1):
         end = (
@@ -284,25 +167,15 @@ def inspect_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection
             if order < len(heading_positions)
             else len(children)
         )
-        toc_id = str(heading.get("id") or "").strip() or f"toc_{order}"
+        toc_id = f"toc_{order}"
         sections.append(
             HtmlSectionSummary(
                 toc_id=toc_id,
-                index=_toc_index(toc_id, order),
+                index=order,
                 title=_section_title(heading, children[start:end]),
             )
         )
     return sections
-
-
-def _parse_report_limit(value: Any) -> int:
-    if value in (None, ""):
-        return DEFAULT_REPORT_LIMIT
-    parsed = int(value)
-    if parsed < 0:
-        msg = "report_limit must be >= 0"
-        raise ValueError(msg)
-    return parsed
 
 
 def _parse_page(value: Any) -> int:
@@ -588,19 +461,10 @@ def summarize_disclosure_html_section_kinds_payload(
     if progress_callback is not None:
         progress_callback(f"목차 조합 확인 대상 HTML {len(html_files)}건을 찾았습니다.")
     documents: list[dict[str, Any]] = []
-    files_without_sections = 0
-    failed_files = 0
     for index, source_file in enumerate(html_files, start=1):
         if cancel_check is not None and cancel_check():
             return {"cancelled": True}
-        try:
-            document = _source_document_with_sections(input_directory, source_file)
-        except Exception:
-            failed_files += 1
-            continue
-        if int(document["section_count"]) <= 0:
-            files_without_sections += 1
-            continue
+        document = _source_document_with_sections(input_directory, source_file)
         documents.append(document)
         if progress_callback is not None and (
             index == 1 or index == len(html_files) or index % 100 == 0
@@ -614,8 +478,8 @@ def summarize_disclosure_html_section_kinds_payload(
         "summary": {
             "found_files": len(html_files),
             "documents_with_sections": len(documents),
-            "files_without_sections": files_without_sections,
-            "failed_files": failed_files,
+            "files_without_sections": 0,
+            "failed_files": 0,
             "unique_kinds": len(items),
         },
         "items": items,
@@ -663,35 +527,13 @@ def inspect_disclosure_html_sections_payload(
 
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
-    files_without_sections = 0
-    failed_files = 0
-    report_limit = _parse_report_limit(body.get("report_limit"))
 
     def emit(message: str) -> None:
         if progress_callback is not None:
             progress_callback(message)
 
     def inspect_one(source_file: Path) -> dict[str, Any]:
-        try:
-            sections = inspect_internal_html_sections(source_file.read_bytes())
-        except Exception as exc:
-            return {
-                "status": "read_failed",
-                "problem": {
-                    "kind": "read_failed",
-                    "source_file": str(source_file),
-                    "error": str(exc),
-                },
-            }
-        if not sections:
-            return {
-                "status": "no_sections",
-                "problem": {
-                    "kind": "no_sections",
-                    "source_file": str(source_file),
-                    "error": "",
-                },
-            }
+        sections = inspect_internal_html_sections(source_file.read_bytes())
         return {
             "status": "ok",
             "document": {
@@ -717,20 +559,10 @@ def inspect_disclosure_html_sections_payload(
     )
     results = _map_html_files(html_files, workers, inspect_one, cancel_check)
     documents: list[dict[str, Any]] = []
-    problem_files: list[dict[str, str]] = []
     for index, result in enumerate(results, start=1):
         if _cancel_requested(cancel_check):
             return {"cancelled": True}
-        if result["status"] == "ok":
-            documents.append(result["document"])
-        elif result["status"] == "read_failed":
-            failed_files += 1
-            if len(problem_files) < report_limit:
-                problem_files.append(result["problem"])
-        else:
-            files_without_sections += 1
-            if len(problem_files) < report_limit:
-                problem_files.append(result["problem"])
+        documents.append(result["document"])
         if index == 1 or index == len(html_files) or index % 100 == 0:
             emit(f"목차 확인 중간 확인: {index}/{len(html_files)}건 처리.")
 
@@ -741,12 +573,12 @@ def inspect_disclosure_html_sections_payload(
         "summary": {
             "found_files": total_files,
             "documents_with_sections": len(documents),
-            "files_without_sections": files_without_sections,
-            "failed_files": failed_files,
-            "reported_problem_files": len(problem_files),
+            "files_without_sections": 0,
+            "failed_files": 0,
+            "reported_problem_files": 0,
         },
         "documents": documents,
-        "problem_files": problem_files,
+        "problem_files": [],
     }
 
 
@@ -785,20 +617,7 @@ def _selected_section_output(
     source_file: Path,
     section_save_rules: dict[str, set[str]],
 ) -> dict[str, Any]:
-    try:
-        sections = split_internal_html_sections(source_file.read_bytes())
-    except Exception as exc:
-        return {
-            "status": "read_failed",
-            "source_file": str(source_file),
-            "error": str(exc),
-        }
-    if not sections:
-        return {
-            "status": "no_sections",
-            "source_file": str(source_file),
-            "error": "no sections found",
-        }
+    sections = split_internal_html_sections(source_file.read_bytes())
     signature = _section_signature(_section_dicts_from_split_sections(sections))
     if signature not in section_save_rules:
         return {
@@ -962,24 +781,6 @@ def save_disclosure_html_sections_payload(
 
     def save_one(source_file: Path) -> dict[str, Any]:
         selected = _selected_section_output(source_file, section_save_rules)
-        if selected["status"] == "read_failed":
-            return {
-                "status": "read_failed",
-                "skipped": {
-                    "source_file": str(source_file),
-                    "error": str(selected["error"]),
-                },
-                "saved": [],
-            }
-        if selected["status"] == "no_sections":
-            return {
-                "status": "no_sections",
-                "skipped": {
-                    "source_file": str(source_file),
-                    "error": "no sections found",
-                },
-                "saved": [],
-            }
         if selected["status"] == "missing_selection":
             return {
                 "status": "missing_selection",
@@ -1021,11 +822,7 @@ def save_disclosure_html_sections_payload(
         else:
             skipped_files.append(result["skipped"])
             source_name = Path(result["skipped"]["source_file"]).name
-            if result["status"] == "read_failed":
-                emit(f"읽기 실패 {index}/{len(html_files)}: {source_name}")
-            elif result["status"] == "no_sections":
-                emit(f"목차 없음 {index}/{len(html_files)}: {source_name}")
-            elif result["status"] == "missing_selection":
+            if result["status"] == "missing_selection":
                 emit(f"목차 선택 없음 {index}/{len(html_files)}: {source_name}")
             else:
                 emit(f"선택 목차 없음 {index}/{len(html_files)}: {source_name}")
