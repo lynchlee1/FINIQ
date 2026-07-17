@@ -6761,9 +6761,12 @@ def test_rights_section_marker_accepts_arabic_and_roman_numbers(marker: str) -> 
     assert _is_rights_section_marker_row([marker]) is True
 
 
-@pytest.mark.parametrize("marker", ["유상증자", "1-1-1. 유상증자"])
-def test_rights_section_marker_requires_supported_number_prefix(marker: str) -> None:
-    assert _is_rights_section_marker_row([marker]) is False
+def test_rights_section_marker_accepts_plain_label() -> None:
+    assert _is_rights_section_marker_row(["유상증자"]) is True
+
+
+def test_rights_section_marker_rejects_unsupported_number_prefix() -> None:
+    assert _is_rights_section_marker_row(["1-1-1. 유상증자"]) is False
 
 
 def test_parse_int_distinguishes_empty_source_from_explicit_dash_zero() -> None:
@@ -7874,8 +7877,39 @@ def test_parse_bond_issuance_does_not_replace_failed_target_from_later_same_labe
         title="전환사채발행결정",
     )
 
-    assert parsed["기업명(행사대상)"] is None
-    assert parsed["field_parse_status"]["기업명(행사대상)"] == "source_not_found"
+    assert parsed["기업명(행사대상)"] == "미정"
+    assert parsed["field_parse_status"]["기업명(행사대상)"] == "parsed"
+
+
+def test_parse_bond_issuance_does_not_replace_empty_first_fixed_row(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20260712000003.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000,000,000</td></tr>
+        <tr><td>5. 사채만기일</td><td></td></tr>
+        <tr><td>5. 사채만기</td><td>2030년 01월 01일</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환가액 (원/주)</td><td>미정</td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환가액 (원/주)</td><td>2,000</td></tr>
+        <tr><td>9. 전환에 관한 사항</td><td>전환청구기간</td><td>시작일</td><td></td></tr>
+        <tr><td>9. 교환에 관한 사항</td><td>교환청구기간</td><td>시작일</td><td>2028년 01월 01일</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="전환사채발행결정",
+    )
+
+    assert parsed["만기일"] is None
+    assert parsed["행사가액"] is None
+    assert parsed["행사시작일"] is None
 
 
 @pytest.mark.parametrize(

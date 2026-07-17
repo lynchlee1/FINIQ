@@ -227,16 +227,15 @@ test("disclosure filter workspace picker selects a folder", async () => {
   assert.doesNotMatch(workspacePicker, /mode="save"/);
 });
 
-test("disclosure filter requires a parser mode for mode-folder output", async () => {
+test("disclosure filter removes the parser mode from the data path card", async () => {
   const source = await readFile(filterPagePath, "utf8");
+  const dataPathCard = source.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
 
   assert.match(source, /const \[mode, setMode\] = useState\(""\)/);
   assert.match(source, /mode,\s*\.\.\.\(useSeparateOutputDirectory/);
-  assert.match(source, /if \(!mode\) \{[\s\S]*?파싱 모드를 선택하세요/);
-  assert.match(source, /\{ key: "bond_issuance", label: "사채발행파싱" \}/);
-  assert.match(source, /\{ key: "rights_issuance", label: "유무상증자파싱" \}/);
-  assert.match(source, /\{ key: "shareholder_meeting", label: "주주총회파싱" \}/);
-  assert.match(source, /saveSetting\("html_parse_mode", event\.target\.value\)/);
+  assert.match(source, /if \(!mode\) \{[\s\S]*?조건검색 프리셋을 선택하세요/);
+  assert.doesNotMatch(dataPathCard, /파싱 모드/);
+  assert.doesNotMatch(dataPathCard, /<select/);
 });
 
 test("disclosure filter initializes counts to 1000 and submits them without fallback", async () => {
@@ -248,20 +247,23 @@ test("disclosure filter initializes counts to 1000 and submits them without fall
   assert.doesNotMatch(source, /Number\(progressInterval \|\| 1000\)/);
 });
 
-test("disclosure filter loads saved JSON filters and auto-applies selected presets", async () => {
+test("disclosure filter auto-loads workspace JSON presets without a load button", async () => {
   const source = await readFile(filterPagePath, "utf8");
   const conditionCardSource = await readFile(disclosureConditionCardPath, "utf8");
 
-  assert.match(source, /pickPath\(\{[\s\S]*?title: "필터 결과 JSON 선택"/);
-  assert.match(source, /apiPost<DisclosureConditionPresetPayload>\("\/api\/disclosures\/filter\/preset"/);
-  assert.match(source, /source_json_path: sourceJsonPath/);
-  assert.match(source, /onLoadPresetFromJson=\{loadFilterPresetFromJson\}/);
-  assert.match(conditionCardSource, /<Button variant="outline" onClick=\{onLoadPresetFromJson\}>[\s\S]*?<Upload className="mr-2 h-4 w-4" \/>불러오기<\/Button>/);
+  assert.match(source, /listDisclosureConditionPresets\(rootDirectory\)/);
+  assert.doesNotMatch(source, /pickPath/);
+  assert.doesNotMatch(source, /\/api\/disclosures\/filter\/preset/);
+  assert.doesNotMatch(source, /onLoadPresetFromJson/);
+  assert.match(conditionCardSource, /onLoadPresetFromJson\?: \(\) => void/);
+  assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" onClick=\{onLoadPresetFromJson\}>/);
+  assert.match(conditionCardSource, /<option value="">프리셋 선택<\/option>/);
+  assert.match(conditionCardSource, /placeholder="프리셋 이름"/);
+  assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
   assert.match(conditionCardSource, /onClick=\{onRenamePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /\/>수정<\/Button>/);
+  assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
-  assert.doesNotMatch(source, /<Label className="dark:text-slate-300">필터 결과 JSON<\/Label>/);
-  assert.doesNotMatch(source, /onClick=\{loadPreset\} disabled=\{!selectedPreset\}>불러오기/);
 });
 
 test("disclosure condition presets use only the workspace JSON store", async () => {

@@ -2,7 +2,7 @@ import { apiPost } from "@/api/client";
 import type { DisclosureConditionPreset } from "@/components/disclosures/DisclosureConditionFilterCard";
 
 type PresetStoreResponse = {
-  format: "finiq_disclosure_filter_presets_v1";
+  format: "finiq_disclosure_filter_preset_directory_v1";
   path: string;
   presets: DisclosureConditionPreset[];
 };

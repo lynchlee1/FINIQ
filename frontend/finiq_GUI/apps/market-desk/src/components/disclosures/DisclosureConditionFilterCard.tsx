@@ -70,7 +70,7 @@ type DisclosureConditionFilterCardProps = {
   onPresetNameChange: (value: string) => void;
   onSelectedPresetChange: (value: string) => void;
   onLoadPreset: (name: string) => void;
-  onLoadPresetFromJson: () => void;
+  onLoadPresetFromJson?: () => void;
   onSavePreset: () => void;
   onRenamePreset: () => void;
   onDeletePreset: () => void;
@@ -191,7 +191,12 @@ export function DisclosureConditionFilterCard({
       <CardContent className="space-y-5">
         <div className="grid gap-2">
           <Label className="dark:text-slate-300">조건검색 프리셋</Label>
-          <div className="grid gap-2 md:grid-cols-[minmax(150px,1fr)_minmax(150px,.9fr)_auto_auto_auto_auto]">
+          <div className={cn(
+            "grid gap-2",
+            onLoadPresetFromJson
+              ? "md:grid-cols-[minmax(150px,1fr)_minmax(150px,.9fr)_auto_auto_auto_auto]"
+              : "md:grid-cols-[minmax(150px,1fr)_minmax(150px,.9fr)_auto_auto_auto]",
+          )}>
             <select
               value={selectedPreset}
               onChange={(event) => {
@@ -214,7 +219,7 @@ export function DisclosureConditionFilterCard({
                 onSavePreset();
               }
             }} placeholder="프리셋 이름" className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-            <Button variant="outline" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>
+            {onLoadPresetFromJson && <Button variant="outline" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>}
             <Button onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
             <Button variant="outline" onClick={onRenamePreset} disabled={!selectedPreset}><Pencil className="mr-2 h-4 w-4" />수정</Button>
             <Button variant="outline" onClick={onDeletePreset} disabled={!selectedPreset}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>

@@ -100,7 +100,10 @@ class _BondRows:
             starts_with=starts_with,
             additional_label_cells=additional_label_cells,
         )
-        return row[-1] if len(row) > label_cell else None
+        required_label_cell = max(
+            (label_cell, *(cell_number for cell_number, _ in additional_label_cells))
+        )
+        return row[-1] if len(row) > required_label_cell else None
 
 
 def _label_cell_matches(

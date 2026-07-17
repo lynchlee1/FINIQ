@@ -441,14 +441,15 @@ class RightsIssuanceExtractor:
         section_labels: tuple[str, ...],
         source_labels: tuple[str, ...],
     ) -> int | None:
-        row = self._stock_value_row(
+        row, label_cell = self._stock_value_row(
             _RightsRows(rows),
             section_labels,
             source_labels,
             unit="주",
             stock_layouts=((2, ()),),
         )
-        return parse_int(row[-1], dash_as_zero=True) if row else None
+        raw_value = row[-1] if len(row) > label_cell else None
+        return parse_int(raw_value, dash_as_zero=True)
 
     def _section_stock_text_values(
         self, rows: list[list[str]], section_labels: tuple[str, ...]
@@ -473,7 +474,7 @@ class RightsIssuanceExtractor:
         scalar_layout: bool,
     ) -> str | None:
         rights_rows = _RightsRows(rows)
-        row = self._stock_value_row(
+        row, label_cell = self._stock_value_row(
             rights_rows,
             section_labels,
             source_labels,
@@ -483,7 +484,8 @@ class RightsIssuanceExtractor:
         if not row and scalar_layout:
             scalar_row = rights_rows.first_row_at(1, section_labels)
             row = scalar_row if len(scalar_row) == 2 else []
-        value = row[-1].strip() if row else ""
+            label_cell = 1
+        value = row[-1].strip() if len(row) > label_cell else ""
         return value if value and value != "-" else None
 
     def _stock_values(
@@ -546,14 +548,15 @@ class RightsIssuanceExtractor:
         stock_layouts: StockLayouts,
     ) -> tuple[int | None, str]:
         """고정 라벨 칸으로 찾은 첫 행의 마지막 값을 숫자와 상태로 변환한다."""
-        row = self._stock_value_row(
+        row, label_cell = self._stock_value_row(
             rows,
             section_labels,
             source_labels,
             unit=unit,
             stock_layouts=stock_layouts,
         )
-        parsed = parse_int(row[-1], dash_as_zero=True) if row else None
+        raw_value = row[-1] if len(row) > label_cell else None
+        parsed = parse_int(raw_value, dash_as_zero=True)
         if parsed is None:
             return None, "source_not_found"
         if parsed == 0:
@@ -568,7 +571,7 @@ class RightsIssuanceExtractor:
         *,
         unit: str,
         stock_layouts: StockLayouts,
-    ) -> list[str]:
+    ) -> tuple[list[str], int]:
         stock_labels = tuple(f"{label} ({unit})" for label in source_labels)
         for stock_cell, additional_label_cells in stock_layouts:
             row = rows.first_row_at(
@@ -580,8 +583,11 @@ class RightsIssuanceExtractor:
                 ),
             )
             if row:
-                return row
-        return []
+                required_label_cell = max(
+                    (stock_cell, *(cell for cell, _ in additional_label_cells))
+                )
+                return row, required_label_cell
+        return [], 0
 
     def _stock_value_total(
         self, stock_counts: list[list[Any]], issue_prices: list[list[Any]] | str
