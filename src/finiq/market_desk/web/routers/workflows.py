@@ -18,7 +18,11 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.filter_presets import (
+    begin_filter_workflow_payload,
+    complete_filter_workflow_payload,
+    fail_filter_workflow_payload,
     manage_filter_presets_payload,
+    mark_filter_workflow_query_completed,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
     cancel_disclosure_html_download,
@@ -110,6 +114,44 @@ def _attach_external_html_download_transfer(
     return payload
 
 
+def _finish_filter_workflow(
+    payload: dict[str, Any], *, body: dict[str, Any], workflow_run: dict[str, Any]
+) -> dict[str, Any]:
+    mark_filter_workflow_query_completed(
+        data_root=body.get("data_root"),
+        name=workflow_run["name"],
+        run_id=workflow_run["run_id"],
+        summary=payload.get("summary"),
+    )
+    _attach_external_html_download_transfer(
+        payload,
+        output_directory=str(body.get("external_html_transfer_path") or "").strip(),
+        mode=body.get("mode"),
+    )
+    transfer = payload.get("external_html_download_transfer")
+    if not isinstance(transfer, dict):
+        raise ValueError("filter workflow did not record a result file")
+    payload["filter_workflow"] = complete_filter_workflow_payload(
+        data_root=body.get("data_root"),
+        name=workflow_run["name"],
+        run_id=workflow_run["run_id"],
+        result_path=transfer.get("path"),
+        summary=payload.get("summary"),
+    )
+    return payload
+
+
+def _fail_filter_workflow(
+    *, body: dict[str, Any], workflow_run: dict[str, Any], error: Exception
+) -> None:
+    fail_filter_workflow_payload(
+        data_root=body.get("data_root"),
+        name=workflow_run["name"],
+        run_id=workflow_run["run_id"],
+        error=error,
+    )
+
+
 def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
     source_path = Path(source_json_path).expanduser().resolve()
     if source_path.name != "filtered.json":
@@ -170,6 +212,7 @@ def create_workflows_router(
             body["external_html_transfer_path"] = _filter_output_directory(
                 body.get("external_html_transfer_path")
             )
+            workflow_run = begin_filter_workflow_payload(body)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         accept = request.headers.get("Accept", "")
@@ -188,15 +231,18 @@ def create_workflows_router(
                             ),
                             cancel_check=cancel_event.is_set,
                         )
-                        _attach_external_html_download_transfer(
+                        _finish_filter_workflow(
                             payload,
-                            output_directory=str(
-                                body.get("external_html_transfer_path") or ""
-                            ).strip(),
-                            mode=body.get("mode"),
+                            body=body,
+                            workflow_run=workflow_run,
                         )
                         events.put({"type": "result", "payload": payload})
                     except Exception as e:
+                        _fail_filter_workflow(
+                            body=body,
+                            workflow_run=workflow_run,
+                            error=e,
+                        )
                         events.put({"type": "error", "error": str(e)})
 
                 thread = threading.Thread(target=run_filter, daemon=True)
@@ -214,15 +260,17 @@ def create_workflows_router(
             return StreamingResponse(generate(), media_type="application/x-ndjson")
         try:
             payload = filter_disclosures_payload(body)
-            _attach_external_html_download_transfer(
+            return _finish_filter_workflow(
                 payload,
-                output_directory=str(
-                    body.get("external_html_transfer_path") or ""
-                ).strip(),
-                mode=body.get("mode"),
+                body=body,
+                workflow_run=workflow_run,
             )
-            return payload
         except Exception as exc:
+            _fail_filter_workflow(
+                body=body,
+                workflow_run=workflow_run,
+                error=exc,
+            )
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/filter/preset")

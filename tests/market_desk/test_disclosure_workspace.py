@@ -19,6 +19,9 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
 from finiq.market_desk.web.features.disclosures.table_export import (
     _manifest_output_path,
 )
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    manage_filter_presets_payload,
+)
 
 
 def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
@@ -331,10 +334,26 @@ def test_existing_filter_route_uses_workspace_stage_paths(
         }
 
     monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter)
+    manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "name": "bond",
+                "mode": "bond_issuance",
+                "condition_blocks": [],
+            },
+        }
+    )
 
     response = TestClient(app).post(
         "/api/disclosures/filter",
-        json={"data_root": str(data_root), "mode": "bond_issuance"},
+        json={
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "workflow_name": "bond",
+            "filter_blocks": [],
+        },
     )
 
     assert response.status_code == 200

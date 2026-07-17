@@ -79,7 +79,7 @@ export function useJobStreaming() {
             if (onProgress) onProgress(progress);
           } else if (event.type === "result") {
             onResult(event.payload);
-            return;
+            return "completed" as const;
           } else if (event.type === "error") {
             throw new Error(event.error || "실행 중 오류가 발생했습니다.");
           }
@@ -90,7 +90,7 @@ export function useJobStreaming() {
         const event = JSON.parse(buffer);
         if (event.type === "result") {
           onResult(event.payload);
-          return;
+          return "completed" as const;
         }
         if (event.type === "error") throw new Error(event.error || "실행 중 오류가 발생했습니다.");
       }
@@ -98,9 +98,11 @@ export function useJobStreaming() {
     } catch (err: any) {
       if (err.name === "AbortError") {
         appendStatus("작업을 중단했습니다.", true);
+        return "aborted" as const;
       } else {
         setStatus(err.message);
         setIsErrorStatus(true);
+        return "failed" as const;
       }
     } finally {
       abortRef.current = null;

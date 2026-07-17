@@ -52,6 +52,12 @@ export type DisclosureConditionPreset = {
   name: string;
   mode: string;
   condition_blocks: DisclosureConditionBlock[];
+  status: "ready" | "running" | "completed" | "failed";
+  steps: {
+    condition_input: { status: "completed" };
+    database_query: { status: "pending" | "running" | "completed" | "failed" };
+    record: { status: "pending" | "running" | "completed" | "failed" };
+  };
 };
 
 export type DisclosureConditionPresetPayload = {
@@ -150,6 +156,15 @@ function operatorLabel(operator: DisclosureFilterOperatorKey) {
   return DISCLOSURE_FILTER_OPERATOR_OPTIONS.find(([key]) => key === operator)?.[1] || operator;
 }
 
+function workflowStatusLabel(status: DisclosureConditionPreset["status"]) {
+  return {
+    ready: "입력 완료",
+    running: "실행 중",
+    completed: "완료",
+    failed: "실패",
+  }[status];
+}
+
 export function DisclosureConditionFilterCard({
   conditions,
   onConditionsChange,
@@ -210,7 +225,9 @@ export function DisclosureConditionFilterCard({
             >
               <option value="">프리셋 선택</option>
               {presets.map((preset) => (
-                <option key={preset.name} value={preset.name}>{preset.name}</option>
+                <option key={preset.name} value={preset.name}>
+                  {preset.name} · {workflowStatusLabel(preset.status)}
+                </option>
               ))}
             </select>
             <Input value={presetName} onChange={(event) => onPresetNameChange(event.target.value)} onKeyDown={(event) => {

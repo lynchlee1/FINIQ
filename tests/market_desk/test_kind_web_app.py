@@ -15,6 +15,26 @@ from finiq.market_desk.web.features.downloads.kind_common import (
 )
 
 
+def _save_filter_workflow(
+    data_root: Path,
+    *,
+    name: str = "bond",
+    mode: str = "bond_issuance",
+    condition_blocks: list[dict[str, object]] | None = None,
+) -> None:
+    filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "name": name,
+                "mode": mode,
+                "condition_blocks": condition_blocks or [],
+            },
+        }
+    )
+
+
 def _external_workspace_body(
     tmp_path: Path, source_json: dict, **body: object
 ) -> dict[str, object]:
@@ -328,7 +348,7 @@ def test_api_settings_rejects_non_positive_job_retention_minutes() -> None:
 
 
 def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypatch) -> None:
-    def fake_filter_disclosures_payload(body, progress_callback=None):
+    def fake_filter_disclosures_payload(body, progress_callback=None, **_kwargs):
         if progress_callback:
             progress_callback({
                 "source_type": "sqlite_manifest",
@@ -347,13 +367,18 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter_disclosures_payload)
 
     client = TestClient(app)
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
     transfer_dir = tmp_path / "filtered"
     with client.stream(
         "POST",
         "/api/disclosures/filter",
         headers={"Accept": "application/x-ndjson"},
         json={
+            "data_root": str(data_root),
             "mode": "bond_issuance",
+            "workflow_name": "bond",
+            "filter_blocks": [],
             "external_html_transfer_path": str(transfer_dir),
         },
     ) as response:
@@ -370,6 +395,67 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
         transfer_dir / "bond_issuance" / "filtered.json"
     ).resolve()
     assert result["mode"] == "bond_issuance"
+    assert result["filter_workflow"]["status"] == "completed"
+    workflow = json.loads(
+        (data_root / "03-filter" / "bond.json").read_text(encoding="utf-8")
+    )
+    assert workflow["steps"]["database_query"]["status"] == "completed"
+    assert workflow["steps"]["record"]["status"] == "completed"
+    assert workflow["steps"]["record"]["path"] == str(transfer_path)
+
+
+def test_filter_disclosures_records_query_failure_in_workflow(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+
+    def fail_filter(*_args, **_kwargs):
+        raise ValueError("query failed")
+
+    monkeypatch.setattr(web_app, "filter_disclosures_payload", fail_filter)
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter",
+        json={
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "workflow_name": "bond",
+            "filter_blocks": [],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "query failed"
+    workflow = json.loads(
+        (data_root / "03-filter" / "bond.json").read_text(encoding="utf-8")
+    )
+    assert workflow["status"] == "failed"
+    assert workflow["steps"]["database_query"]["status"] == "failed"
+    assert workflow["steps"]["database_query"]["error"] == "query failed"
+    assert workflow["steps"]["record"] == {"status": "pending"}
+
+
+def test_filter_disclosures_requires_saved_workflow_conditions(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter",
+        json={
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "workflow_name": "bond",
+            "filter_blocks": [{"field": "title", "operator": "contains", "value": "사채"}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Save the filter conditions" in response.json()["detail"]
+    workflow = json.loads(
+        (data_root / "03-filter" / "bond.json").read_text(encoding="utf-8")
+    )
+    assert workflow["status"] == "ready"
 
 
 def test_filter_disclosures_requires_mode_folder(tmp_path: Path, monkeypatch) -> None:
@@ -416,7 +502,7 @@ def test_filter_disclosures_rejects_json_output_path_before_filtering(
     assert called is False
 
 
-def test_disclosure_filter_presets_list_workspace_filter_json_files(tmp_path: Path) -> None:
+def test_disclosure_filter_workflows_ignore_obsolete_filter_result_json(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
     source_path = data_root / "03-filter" / "bond_issuance_custom_filter.json"
     source_path.parent.mkdir(parents=True)
@@ -453,13 +539,9 @@ def test_disclosure_filter_presets_list_workspace_filter_json_files(tmp_path: Pa
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["format"] == "finiq_disclosure_filter_preset_directory_v1"
+    assert payload["format"] == "finiq_disclosure_filter_workflow_directory"
     assert payload["path"] == str(source_path.parent.resolve())
-    assert payload["presets"] == [{
-        "name": "bond_issuance_custom_filter",
-        "mode": "bond_issuance",
-        "condition_blocks": filter_blocks,
-    }]
+    assert payload["presets"] == []
 
 
 def test_disclosure_filter_presets_are_saved_as_named_workspace_json(tmp_path: Path) -> None:
@@ -481,12 +563,19 @@ def test_disclosure_filter_presets_are_saved_as_named_workspace_json(tmp_path: P
     assert response.status_code == 200
     presets_path = data_root / "03-filter" / "전환사채.json"
     assert response.json()["path"] == str(presets_path.parent.resolve())
-    assert response.json()["presets"] == [preset]
-    assert json.loads(presets_path.read_text(encoding="utf-8")) == {
-        "format": "finiq_disclosure_filter_preset_v1",
-        "mode": "bond_issuance",
-        "filters": {"filter_blocks": preset["condition_blocks"]},
-    }
+    saved = response.json()["presets"][0]
+    assert saved["name"] == preset["name"]
+    assert saved["mode"] == preset["mode"]
+    assert saved["condition_blocks"] == preset["condition_blocks"]
+    assert saved["status"] == "ready"
+    document = json.loads(presets_path.read_text(encoding="utf-8"))
+    assert document["format"] == "finiq_disclosure_filter_workflow"
+    assert document["mode"] == "bond_issuance"
+    assert document["status"] == "ready"
+    assert document["steps"]["condition_input"]["status"] == "completed"
+    assert document["steps"]["condition_input"]["filter_blocks"] == preset["condition_blocks"]
+    assert document["steps"]["database_query"] == {"status": "pending"}
+    assert document["steps"]["record"] == {"status": "pending"}
 
 
 def test_disclosure_filter_presets_serialize_concurrent_saves(
@@ -494,7 +583,7 @@ def test_disclosure_filter_presets_serialize_concurrent_saves(
     monkeypatch,
 ) -> None:
     data_root = tmp_path / "workspace"
-    original_read = filter_presets._read_presets
+    original_read = filter_presets._read_workflows
     active_reads = 0
     maximum_active_reads = 0
     counter_lock = threading.Lock()
@@ -512,7 +601,7 @@ def test_disclosure_filter_presets_serialize_concurrent_saves(
             with counter_lock:
                 active_reads -= 1
 
-    monkeypatch.setattr(filter_presets, "_read_presets", slow_read)
+    monkeypatch.setattr(filter_presets, "_read_workflows", slow_read)
 
     def save(name: str) -> None:
         start.wait()

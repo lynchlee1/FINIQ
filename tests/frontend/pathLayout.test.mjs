@@ -10,6 +10,7 @@ const htmlParsePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/html-pars
 const disclosureAutomationPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/disclosure-automation/page.tsx";
 const disclosureConditionPresetsPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureConditionPresets.ts";
 const disclosureConditionCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureConditionFilterCard.tsx";
+const jobStreamingHookPath = "frontend/finiq_GUI/apps/market-desk/src/hooks/useJobStreaming.ts";
 const utilityPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/utility/page.tsx";
 const assetsExcelViewPath = "frontend/finiq_GUI/apps/market-desk/src/features/assets-excel/AssetExcelUtilityView.tsx";
 const graphWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/OntologyGraphWorkspace.tsx";
@@ -232,8 +233,9 @@ test("disclosure filter removes the parser mode from the data path card", async 
   const dataPathCard = source.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
 
   assert.match(source, /const \[mode, setMode\] = useState\(""\)/);
-  assert.match(source, /mode,\s*\.\.\.\(useSeparateOutputDirectory/);
+  assert.match(source, /mode,\s*workflow_name: workflowName,\s*\.\.\.\(useSeparateOutputDirectory/);
   assert.match(source, /if \(!mode\) \{[\s\S]*?조건검색 프리셋을 선택하세요/);
+  assert.match(source, /if \(!selectedPreset\) \{[\s\S]*?조건검색 프리셋을 선택하세요/);
   assert.doesNotMatch(dataPathCard, /파싱 모드/);
   assert.doesNotMatch(dataPathCard, /<select/);
 });
@@ -258,12 +260,35 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /onLoadPresetFromJson\?: \(\) => void/);
   assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" onClick=\{onLoadPresetFromJson\}>/);
   assert.match(conditionCardSource, /<option value="">프리셋 선택<\/option>/);
+  assert.match(conditionCardSource, /preset\.name} · \{workflowStatusLabel\(preset\.status\)}/);
+  assert.match(conditionCardSource, /ready: "입력 완료"/);
+  assert.match(conditionCardSource, /running: "실행 중"/);
   assert.match(conditionCardSource, /placeholder="프리셋 이름"/);
   assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
   assert.match(conditionCardSource, /onClick=\{onRenamePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /\/>수정<\/Button>/);
   assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
+});
+
+test("disclosure filter keeps workflow status scoped to the active workspace", async () => {
+  const source = await readFile(filterPagePath, "utf8");
+  const streamingSource = await readFile(jobStreamingHookPath, "utf8");
+
+  assert.match(source, /const presetListRequestIdRef = useRef\(0\)/);
+  assert.match(source, /currentDataRootRef\.current = rootDirectory/);
+  assert.match(source, /setSelectedPreset\(""\)/);
+  assert.match(source, /if \(requestId !== presetListRequestIdRef\.current\) return/);
+  assert.match(source, /const isCurrentPresetWorkspace = \(dataRoot: string, requestId: number\)/);
+  assert.ok(
+    (source.match(/if \(!isCurrentPresetWorkspace\(dataRoot, requestId\)\) return;/g) || []).length >= 8,
+    "모든 비동기 프리셋 응답은 현재 작업공간에만 적용해야 합니다.",
+  );
+  assert.match(source, /const selectedWorkflow = presets\.find\(\(preset\) => preset\.name === selectedPreset\)/);
+  assert.match(source, /status: "running"/);
+  assert.match(source, /streamOutcome === "aborted"/);
+  assert.match(source, /workflow\?\.status !== "running"/);
+  assert.match(streamingSource, /return "aborted"/);
 });
 
 test("disclosure condition presets use only the workspace JSON store", async () => {
