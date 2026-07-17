@@ -14,11 +14,13 @@ export function RelationshipEdgeForm({ graph, onRefreshGraph }: RelationshipEdge
   const [targetId, setTargetId] = useState('')
   const [relationName, setRelationName] = useState('')
   const [category, setCategory] = useState<'equity' | 'personnel' | 'address' | 'transaction' | 'other'>('transaction')
-  const [weight, setWeight] = useState('0')
+  const [weight, setWeight] = useState('1')
   const [directed, setDirected] = useState(true)
   const [edgeSuccessMsg, setEdgeSuccessMsg] = useState('')
 
   const nodeOptions = useMemo(() => graph.nodes.map((n: GraphNode) => ({ id: n.id, label: n.label })), [graph.nodes])
+  const numericWeight = Number(weight)
+  const hasValidWeight = weight.trim() !== '' && Number.isFinite(numericWeight) && numericWeight > 0 && numericWeight <= 100
 
   const handleAddEdge = async () => {
     setEdgeSuccessMsg('')
@@ -34,7 +36,7 @@ export function RelationshipEdgeForm({ graph, onRefreshGraph }: RelationshipEdge
         target: targetId,
         relation: relationName.trim(),
         category,
-        weight: Number(weight) || 0,
+        weight: numericWeight,
         directed,
         properties: {},
       }
@@ -44,7 +46,7 @@ export function RelationshipEdgeForm({ graph, onRefreshGraph }: RelationshipEdge
       onRefreshGraph()
 
       setRelationName('')
-      setWeight('0')
+      setWeight('1')
     } catch (e: any) {
       alert(`Failed to create relationship: ${e.message}`)
     }
@@ -116,7 +118,7 @@ export function RelationshipEdgeForm({ graph, onRefreshGraph }: RelationshipEdge
         <div className="grid grid-cols-2 gap-3 items-end">
           <div className="grid gap-1.5">
             <Label className="text-xs">Transaction Stake / Cost weight (%)</Label>
-            <Input type="number" min="0" max="100" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 15" className="h-8 text-xs font-mono" />
+            <Input type="number" min="0.01" max="100" step="any" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 15" className="h-8 text-xs font-mono" />
           </div>
           <div className="flex items-center gap-2 py-2 select-none">
             <input
@@ -137,7 +139,7 @@ export function RelationshipEdgeForm({ graph, onRefreshGraph }: RelationshipEdge
         )}
 
         <div className="flex justify-end pt-4">
-          <Button size="sm" onClick={handleAddEdge} className="text-xs font-bold flex items-center gap-1">
+          <Button size="sm" onClick={handleAddEdge} disabled={!hasValidWeight} className="text-xs font-bold flex items-center gap-1">
             <PlusCircle className="w-3.5 h-3.5" /> Create Link
           </Button>
         </div>

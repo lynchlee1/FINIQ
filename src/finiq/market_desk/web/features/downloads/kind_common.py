@@ -25,6 +25,7 @@ from finiq.data_scraper.core.constants import (
     SECURITIES_TYPES,
 )
 from finiq.data_scraper.parse import pagination_info
+from finiq.data_scraper.storage.result_files import sorted_result_page_paths
 from finiq.data_scraper.workflow import (
     KIND_WORKFLOW_INPUT_FORMAT,
     KindWorkflow,
@@ -122,26 +123,32 @@ def _normalize_disclosure_type_groups(
     if not isinstance(raw_groups, dict):
         raise ValueError("disclosure_type_groups must be an object")
 
+    known_suffixes = {suffix for suffix, _name, _items in DISCLOSURE_GROUPS}
+    unknown_suffixes = sorted(str(suffix) for suffix in raw_groups if suffix not in known_suffixes)
+    if unknown_suffixes:
+        raise ValueError(
+            "unsupported disclosure_type_groups suffixes: "
+            + ", ".join(unknown_suffixes)
+        )
+
     normalized: dict[str, list[str]] = {}
     for suffix, _, items in DISCLOSURE_GROUPS:
         selected = raw_groups.get(suffix)
-        if not selected:
+        if selected is None or selected == []:
             continue
         if not isinstance(selected, list):
             raise ValueError(f"disclosure_type_groups.{suffix} must be an array")
         allowed = {code for code, _name in items}
-        codes = [str(code) for code in selected if str(code) in allowed]
+        codes = [str(code) for code in selected]
+        unsupported_codes = sorted({code for code in codes if code not in allowed})
+        if unsupported_codes:
+            raise ValueError(
+                f"unsupported disclosure_type_groups.{suffix} codes: "
+                + ", ".join(unsupported_codes)
+            )
         if codes:
             normalized[suffix] = codes
     return normalized or None
-
-
-def _is_trusted_download_input_snapshot(snapshot: dict[str, Any] | None) -> bool:
-    try:
-        validate_kind_workflow_input_snapshot(snapshot)
-    except ValueError:
-        return False
-    return True
 
 
 def _build_search_filters(payload: dict[str, Any]) -> dict[str, str] | None:
@@ -156,11 +163,15 @@ def _build_search_filters(payload: dict[str, Any]) -> dict[str, str] | None:
         search_filters["submitOblgNm"] = submitter_name
 
     market_label = str(payload.get("market_label") or "").strip()
+    if market_label and market_label not in MARKET_TYPES:
+        raise ValueError(f"unsupported market_label: {market_label}")
     market_value = MARKET_TYPES.get(market_label, "")
     if market_value:
         search_filters["marketType"] = market_value
 
     securities_label = str(payload.get("securities_label") or "").strip()
+    if securities_label and securities_label not in SECURITIES_TYPES:
+        raise ValueError(f"unsupported securities_label: {securities_label}")
     securities_value = SECURITIES_TYPES.get(securities_label, "")
     if securities_value:
         search_filters["securities"] = securities_value
@@ -204,17 +215,15 @@ def _as_bool(payload: dict[str, Any], key: str) -> bool | None:
 
 
 def _detect_pagination(folder: Path) -> dict[str, Any] | None:
-    def page_number(path: Path) -> int:
-        match = re.search(r"_post_page_(\d+)\.body$", path.name)
-        return int(match.group(1)) if match else -1
-
-    body_files = sorted(folder.glob("*_post_page_*.body"), key=page_number)
+    body_files = sorted_result_page_paths(folder)
     if not body_files:
         return None
     latest_file = body_files[-1]
     info = pagination_info(latest_file.read_bytes())
     if info is None:
-        return None
+        raise ValueError(
+            f"KIND pagination not found in result page: {latest_file.name}"
+        )
     info["downloaded_pages"] = len(body_files)
     info["latest_file"] = latest_file.name
     return info
@@ -379,36 +388,35 @@ def _folder_date_range_from_name(folder: Path) -> tuple[date, date] | None:
         return None
 
 
-def _snapshot_filters_payload(snapshot: dict[str, Any]) -> dict[str, Any] | None:
-    if not _is_trusted_download_input_snapshot(snapshot):
-        return None
+def _snapshot_filters_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
     try:
+        validate_kind_workflow_input_snapshot(snapshot)
         search_filters_dict = dict(snapshot.get("search_filters") or [])
 
         market_val = search_filters_dict.get("marketType", "")
-        market_label = "전체"
-        for label, val in MARKET_TYPES.items():
-            if val == market_val:
-                market_label = label
-                break
+        market_labels = [label for label, value in MARKET_TYPES.items() if value == market_val]
+        if len(market_labels) != 1:
+            raise ValueError(f"unsupported saved marketType: {market_val!r}")
 
         securities_val = search_filters_dict.get("securities", "")
-        securities_label = "전체"
-        for label, val in SECURITIES_TYPES.items():
-            if val == securities_val:
-                securities_label = label
-                break
+        securities_labels = [
+            label for label, value in SECURITIES_TYPES.items() if value == securities_val
+        ]
+        if len(securities_labels) != 1:
+            raise ValueError(f"unsupported saved securities: {securities_val!r}")
 
         return {
             "company_name": search_filters_dict.get("searchCorpName", ""),
             "submitter_name": search_filters_dict.get("submitOblgNm", ""),
-            "market_label": market_label,
-            "securities_label": securities_label,
+            "market_label": market_labels[0],
+            "securities_label": securities_labels[0],
             "disclosure_type_groups": snapshot.get("disclosure_type_groups") or {},
             "last_report_only": bool(snapshot.get("last_report_only")),
         }
-    except Exception:
-        return None
+    except (TypeError, ValueError) as exc:
+        raise DownloadInputMetadataError(
+            f"saved search filters cannot be normalized: {exc}"
+        ) from exc
 
 
 def _current_filters_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -423,10 +431,8 @@ def _current_filters_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _filters_payloads_match(
-    current: dict[str, Any], saved: dict[str, Any] | None
+    current: dict[str, Any], saved: dict[str, Any]
 ) -> bool:
-    if saved is None:
-        return True
     return (
         str(current.get("company_name") or "").strip()
         == str(saved.get("company_name") or "").strip()

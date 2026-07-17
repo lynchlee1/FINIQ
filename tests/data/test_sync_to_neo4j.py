@@ -87,3 +87,10 @@ def test_sync_to_neo4j_script(tmp_path: Path):
             if "CREATE CONSTRAINT" in call[0][0]
         ]
         assert len(constraint_calls) == 1
+        node_import_queries = [
+            call[0][0]
+            for call in mock_session.run.call_args_list
+            if "MERGE (n:Entity {id: row.id})" in call[0][0]
+        ]
+        assert node_import_queries
+        assert all("COALESCE(row.riskLevel" not in query for query in node_import_queries)

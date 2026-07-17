@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from finiq.config import AppConfig
 from finiq.market_desk.analytics import ontology_graph
+from finiq.market_desk.analytics import triple_barrier
 from finiq.market_desk.analytics.ontology_graph import (
     OntologyRequestCancelled,
     build_ontology_company_panel,
@@ -267,6 +268,49 @@ def test_search_ontology_companies_returns_quanti_mapping_matches_without_kind_r
     }
     assert by_code["companies"] == [expected]
     assert by_name["companies"] == [expected]
+
+
+def test_search_ontology_companies_applies_market_filter_to_mapping_only_rows(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+
+    payload = search_ontology_companies(
+        manifest_path=manifest_path,
+        quanti_dir=quanti_dir,
+        keyword="매핑전용",
+        market="코스피",
+    )
+
+    assert payload["companies"] == []
+    assert payload["total"] == 0
+
+
+def test_ontology_queries_reject_missing_manifest_shards(tmp_path: Path) -> None:
+    manifest_path = _write_disclosure_shard(tmp_path)
+    quanti_dir = _write_quanti_parquet(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    (manifest_path.parent / manifest["shards"][0]["relative_path"]).unlink()
+
+    with pytest.raises(FileNotFoundError, match="KIND SQLite shard not found"):
+        search_ontology_companies(
+            manifest_path=manifest_path,
+            quanti_dir=quanti_dir,
+        )
+    with pytest.raises(FileNotFoundError, match="KIND SQLite shard not found"):
+        build_ontology_company_panel(
+            manifest_path=manifest_path,
+            quanti_dir=quanti_dir,
+            company_id="A005930",
+        )
+    with pytest.raises(FileNotFoundError, match="KIND SQLite shard not found"):
+        triple_barrier._load_disclosures_for_triple_barrier(
+            manifest_path=manifest_path,
+            manifest=manifest,
+            company_id="A005930",
+            market="전체",
+            disclosure_group="전체",
+            disclosure_ids=[],
+        )
 
 
 def test_build_ontology_company_panel_uses_quanti_mapping_name_without_kind_rows(tmp_path: Path) -> None:

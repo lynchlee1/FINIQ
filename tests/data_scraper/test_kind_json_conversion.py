@@ -153,7 +153,7 @@ def test_html_to_json_cells_mode() -> None:
     assert "table_index" not in data["cells"][0]
 
 
-def test_html_to_json_simpletable_mode_rectangular() -> None:
+def test_html_to_json_simpletable_mode_preserves_row_widths() -> None:
     html = """
     <table>
       <tbody>
@@ -170,8 +170,16 @@ def test_html_to_json_simpletable_mode_rectangular() -> None:
     data = html_to_json(html, mode="simpletable")
     assert "simpletable" in data
     grid = data["simpletable"]
-    assert grid == [["A", "B"], ["짧음", ""]]
-    assert all(len(row) == len(grid[0]) for row in grid)
+    assert grid == [["A", "B"], ["짧음"]]
+
+
+def test_html_to_json_does_not_treat_sectionless_rows_as_tbody() -> None:
+    data = html_to_json(
+        "<table><tr><td>sectionless</td></tr></table>",
+        mode="simpletable",
+    )
+
+    assert data["simpletable"] == []
 
 
 def test_html_to_json_rows_mode() -> None:
@@ -279,20 +287,91 @@ def test_viewer_html_extracts_selected_main_docno() -> None:
     assert parsed["selected_main_doc_no"] == "20250120002372"
     assert parsed["main_docs"] == [
         {
+            "select_id": "mainDoc",
+            "select_name": "mainDoc",
+            "option_index": 0,
+            "doc_no": "",
+            "label": "본문선택",
+            "value": "",
+            "latest_flag": None,
+            "selected": False,
+            "is_latest": None,
+        },
+        {
+            "select_id": "mainDoc",
+            "select_name": "mainDoc",
+            "option_index": 1,
             "doc_no": "20250120002372",
             "label": "현금ㆍ현물 배당 결정 (2025.01.23)",
+            "value": "20250120002372|Y",
+            "latest_flag": "Y",
             "selected": True,
             "is_latest": True,
         }
     ]
     assert parsed["attached_docs"] == [
         {
+            "select_id": "attachedDoc",
+            "select_name": "attachedDoc",
+            "option_index": 0,
+            "doc_no": "",
+            "label": "첨부문서선택",
+            "value": "",
+            "latest_flag": None,
+            "selected": False,
+            "is_latest": None,
+        },
+        {
+            "select_id": "attachedDoc",
+            "select_name": "attachedDoc",
+            "option_index": 1,
             "doc_no": "20250120002373",
             "label": "배당 관련 참고자료 (2025.01.23)",
+            "value": "20250120002373",
+            "latest_flag": None,
             "selected": False,
             "is_latest": None,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("html", "message"),
+    [
+        (
+            "<select id='mainDoc'><option value='1|Y' selected>본문</option></select>"
+            "<select id='attachedDoc'><option value='2'>첨부</option></select>",
+            "acptNo is required",
+        ),
+        (
+            "<input name='acptNo' value='20250101000001'>"
+            "<select id='attachedDoc'><option value='2'>첨부</option></select>",
+            "mainDoc select is required",
+        ),
+        (
+            "<input name='acptNo' value='20250101000001'>"
+            "<select id='mainDoc'><option value='1|Y' selected>본문</option></select>",
+            "attachedDoc select is required",
+        ),
+        (
+            "<input name='acptNo' value='20250101000001'>"
+            "<select id='mainDoc'><option value='1|Y' selected>본문</option></select>"
+            "<select id='attachedDoc'></select>",
+            "attachedDoc options are required",
+        ),
+        (
+            "<input name='acptNo' value='20250101000001'>"
+            "<select id='mainDoc'><option value='1|Y' selected>본문</option></select>"
+            "<select id='attachedDoc'><option value=''>첨부문서선택</option></select>",
+            "attachedDoc option docNo is required",
+        ),
+    ],
+)
+def test_viewer_html_requires_complete_compression_metadata(
+    html: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        viewer_html(html, require_complete_metadata=True)
 
 
 def test_dart_main_doc_no_returns_selected_docno() -> None:

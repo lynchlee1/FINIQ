@@ -65,7 +65,7 @@ function summarize(rows: BacktestResultRow[]): BacktestResult["summary"] {
 }
 
 export function runTripleBarrierMethod(input: BacktestInput): BacktestResult {
-  const rows = input.markers.slice(0, 120).map((marker) => {
+  const rows = input.markers.map((marker) => {
     const entryIndex = input.candles.findIndex((candle) => candle.time >= marker.time);
     if (entryIndex < 0) {
       return {

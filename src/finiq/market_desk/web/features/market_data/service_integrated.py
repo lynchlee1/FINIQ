@@ -65,8 +65,8 @@ def run_integrated_merge_payload(
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     input_dirs = payload.get("input_directories")
-    if not input_dirs:
-        input_dirs = [payload.get("input_directory", "")]
+    if not isinstance(input_dirs, list) or not input_dirs:
+        raise ValueError("input_directories must be a non-empty array")
     return merge_quanti_by_item_datasets(
         input_dirs,
         payload.get("output_directory", ""),

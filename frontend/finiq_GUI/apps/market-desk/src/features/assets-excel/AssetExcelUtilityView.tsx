@@ -1449,8 +1449,8 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                             <td className="px-3 py-2 font-medium">{item.accountName}</td>
                             <td className="px-3 py-2 tabular-nums">{item.date || "-"}</td>
                             <td className="px-3 py-2">{item.code || "-"}</td>
-                            <td className="px-3 py-2">{item.existing_value || item.message || "-"}</td>
-                            <td className="px-3 py-2">{item.incoming_value || "-"}</td>
+                            <td className="px-3 py-2">{item.existing_value === 0 ? 0 : item.existing_value || item.message || "-"}</td>
+                            <td className="px-3 py-2">{item.incoming_value === 0 ? 0 : item.incoming_value || "-"}</td>
                             <td className="px-3 py-2 break-all">{item.incoming_file ? `${item.incoming_file} / ${item.incoming_sheet || ""}` : "-"}</td>
                           </tr>
                         ))}

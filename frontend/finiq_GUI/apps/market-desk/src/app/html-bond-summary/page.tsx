@@ -21,6 +21,10 @@ const optionalNonnegativeInteger = (value: any) => {
   return Number.isInteger(number) && number >= 0 ? number : null;
 };
 
+const displayValue = (value: any) => (
+  value === null || value === undefined || value === "" ? "-" : String(value)
+);
+
 export default function HtmlBondSummaryPage() {
   const [loading, setLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
@@ -280,11 +284,11 @@ export default function HtmlBondSummaryPage() {
                             )}
                             onClick={() => setSelectedBondKey(key)}
                           >
-                            <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-200">{record.title || "-"}</td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{getField(record, "회차") || "-"}</td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{getField(record, "종류") || "-"}</td>
+                            <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-200">{displayValue(record.title)}</td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{displayValue(getField(record, "회차"))}</td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{displayValue(getField(record, "종류"))}</td>
                             <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-400 tabular-nums">{formatHundredMillion(getField(record, "발행금액"))}</td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{record.acpt_no || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{displayValue(record.acpt_no)}</td>
                             <td className="px-4 py-3 text-center">
                               {url ? (
                                 <a 
@@ -336,7 +340,7 @@ export default function HtmlBondSummaryPage() {
                         {parsedFieldRows(selectedRecord).map(([label, value]) => (
                           <div key={label} className="flex flex-col gap-0.5 min-w-0">
                             <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">{label}</span>
-                            <span className="text-sm text-slate-700 dark:text-slate-300 font-semibold break-words">{String(value || "-")}</span>
+                            <span className="text-sm text-slate-700 dark:text-slate-300 font-semibold break-words">{displayValue(value)}</span>
                           </div>
                         ))}
                       </div>
@@ -374,7 +378,7 @@ export default function HtmlBondSummaryPage() {
                                         <tr key={rowIndex}>
                                           {row.map((cell: any, cellIndex: number) => (
                                             <td key={cellIndex} className="max-w-[220px] px-2 py-1.5 align-top text-slate-700 dark:text-slate-300 break-words">
-                                              {String(cell || "-")}
+                                              {displayValue(cell)}
                                             </td>
                                           ))}
                                         </tr>
@@ -439,7 +443,7 @@ export default function HtmlBondSummaryPage() {
                           const amount = Array.isArray(target) ? target[target.length - 1] : "";
                           return (
                             <div key={idx} className="flex justify-between items-center p-2 rounded-lg bg-white dark:bg-[#161b22] border border-slate-200 dark:border-[#30363d]">
-                              <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">{String(name || "-")}</span>
+                              <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">{displayValue(name)}</span>
                               <strong className="text-xs text-slate-900 dark:text-slate-100 tabular-nums">{formatNumber(amount)}</strong>
                             </div>
                           );

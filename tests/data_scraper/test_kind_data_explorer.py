@@ -62,6 +62,8 @@ def _workflow_input(start_date: str, end_date: str) -> dict[str, object]:
         "disclosure_type_groups": {},
         "last_report_only": False,
         "include_previous_disclosures": None,
+        "wait_seconds_between_requests": 0,
+        "timeout": 20,
     }
 
 
@@ -221,3 +223,19 @@ def test_detect_pagination_uses_numeric_page_order_for_four_digit_pages(tmp_path
         "downloaded_pages": 2,
         "latest_file": "1000_post_page_01000.body",
     }
+
+
+def test_build_result_folder_records_rejects_missing_pagination(tmp_path: Path) -> None:
+    folder = tmp_path / "20240101_20240131"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_text(
+        "<html><body>broken result page</body></html>",
+        encoding="utf-8",
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(_workflow_input("2024-01-01", "2024-01-31")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="pagination not found"):
+        build_result_folder_records(tmp_path)

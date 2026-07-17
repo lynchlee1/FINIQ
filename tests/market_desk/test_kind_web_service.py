@@ -335,11 +335,22 @@ def _external_workspace_body(
     data_root = tmp_path / "workspace"
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_source_json = dict(source_json)
+    if isinstance(source_json.get("disclosures"), list):
+        normalized_source_json["disclosures"] = [
+            {
+                **disclosure,
+                "disclosed_at": disclosure.get("disclosed_at")
+                or f"{str(disclosure.get('acpt_no') or '')[:4]}-01-01",
+            }
+            for disclosure in source_json["disclosures"]
+            if isinstance(disclosure, dict)
+        ]
     filtered_path.write_text(
         json.dumps(
             {
                 "format": "kind_disclosure_filter_v1",
-                **source_json,
+                **normalized_source_json,
             },
             ensure_ascii=False,
         ),
@@ -1822,7 +1833,14 @@ def test_write_disclosure_html_manifest_payload_uses_selected_mode_filter_folder
         filtered_path = data_root / "03-filter" / mode / "filtered.json"
         filtered_path.parent.mkdir(parents=True)
         filtered_path.write_text(
-            json.dumps({"disclosures": [{"acpt_no": acpt_no}]}),
+            json.dumps(
+                {
+                    "format": "kind_disclosure_filter_v1",
+                    "disclosures": [
+                        {"acpt_no": acpt_no, "disclosed_at": "2025-01-01"}
+                    ],
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -1844,10 +1862,12 @@ def test_write_disclosure_html_manifest_payload_uses_selected_mode_filter_folder
     ]
 
 
-def test_write_disclosure_html_manifest_payload_rejects_missing_metadata(tmp_path: Path) -> None:
+def test_write_disclosure_html_manifest_payload_rejects_noncanonical_receipt_list(
+    tmp_path: Path,
+) -> None:
     output_directory = tmp_path / "converted"
 
-    with pytest.raises(ValueError, match="Missing disclosure metadata"):
+    with pytest.raises(ValueError, match="disclosures array"):
         write_disclosure_html_manifest_payload(
             _external_workspace_body(
                 tmp_path,
@@ -1974,9 +1994,8 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
                 "records": [
                         {
                             "acpt_no": "20250101000001",
-                            "year": "2025",
                             "selected_main_doc_no": "20250101000999",
-                            "metadata": {},
+                            "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
             }
@@ -2077,11 +2096,9 @@ def test_download_disclosure_internal_html_payload_requires_selected_main_doc_no
         )
 
 
-@pytest.mark.parametrize("invalid_year", ["../2025", "/tmp/2025"])
-def test_download_disclosure_internal_html_payload_rejects_unsafe_compressed_year(
+def test_download_disclosure_internal_html_payload_does_not_use_legacy_compressed_year(
     tmp_path: Path,
     monkeypatch,
-    invalid_year: str,
 ) -> None:
     def fail_download(**kwargs):
         raise AssertionError("invalid compressed year must fail before download")
@@ -2096,18 +2113,18 @@ def test_download_disclosure_internal_html_payload_rejects_unsafe_compressed_yea
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000999",
-                        "year": invalid_year,
-                    }
+                        {
+                            "acpt_no": "20250101000001",
+                            "selected_main_doc_no": "20250101000999",
+                            "year": "2025",
+                        }
                 ]
             }
         ),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="invalid year in compressed external HTML JSON"):
+    with pytest.raises(ValueError, match="disclosed_at is required"):
         download_disclosure_internal_html_payload(
             {
                 "output_directory": str(tmp_path / "content_html"),
@@ -2150,6 +2167,7 @@ def test_download_disclosure_internal_html_payload_rejects_result_membership_mis
                     {
                         "acpt_no": "20250101000001",
                         "selected_main_doc_no": "20250101000999",
+                        "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ]
             }
@@ -2592,7 +2610,10 @@ def test_clean_disclosure_external_html_output_directory_deletes_unexpected_cont
 
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download._collect_internal_cleanup_targets_from_external_directory",
-        lambda source, **kwargs: ([{"acpt_no": "20250101000001", "doc_no": "1"}], None),
+        lambda source, **kwargs: (
+            [{"acpt_no": "20250101000001", "doc_no": "1", "year": "2025"}],
+            None,
+        ),
     )
 
     payload = clean_disclosure_html_output_directory_payload(
@@ -2802,14 +2823,13 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
     (dir_corrupt / "kind_workflow.input.json").write_text(json.dumps(_trusted_download_input_snapshot(page_size=100)), encoding="utf-8")
     write_page(dir_corrupt, 1, 100, 100, html_content=b"<html><body>no paging group</body></html>")
 
-    res = inspect_download_output_directory_payload({
-        "mode": "single",
-        "output_directory": str(dir_corrupt),
-        "page_size": 100,
-        "dry_run": True,
-    })
-    assert res["deletion_candidate_count"] == 2
-    assert "무결성 검사 실패" in res["deletion_candidates"][0]["reason"]
+    with pytest.raises(ValueError, match="pagination not found"):
+        inspect_download_output_directory_payload({
+            "mode": "single",
+            "output_directory": str(dir_corrupt),
+            "page_size": 100,
+            "dry_run": True,
+        })
 
     # 2. Duplicate page
     dir_dup = tmp_path / "duplicate"
@@ -3117,11 +3137,10 @@ def test_download_disclosure_internal_html_payload_prefers_compressed_external_j
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "year": "2025",
-                        "selected_main_doc_no": "20250101000999",
-                        "metadata": {},
+                        {
+                            "acpt_no": "20250101000001",
+                            "selected_main_doc_no": "20250101000999",
+                            "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
             }
@@ -3168,10 +3187,11 @@ def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000000",
-                        "docs": [
+                        {
+                            "acpt_no": "20250101000001",
+                            "selected_main_doc_no": "20250101000000",
+                            "metadata": {"disclosed_at": "2025-01-01"},
+                            "docs": [
                             {
                                 "select_id": "mainDoc",
                                 "select_name": "mainDoc",
@@ -3984,15 +4004,14 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
           <script src="../js/viewer.js?version=20250307"></script>
           <form name="docdownloadform" id="docdownloadform">
             <input type="hidden" name="docLocPath" id="docLocPath" value="/external/path" />
-          </form>
-          <input type="hidden" name="tempTitle" value="뷰어 제목" />
+              </form>
+              <input type="hidden" name="acptNo" value="20250101000001" />
+              <input type="hidden" name="tempTitle" value="뷰어 제목" />
           <h1 class="ttl">테스트 (123456)</h1>
           <select id="mainDoc">
-            <option value="">본문선택</option>
             <option value="20250101000999|Y" selected="selected">본문</option>
           </select>
           <select id="attachedDoc">
-            <option value="">첨부문서선택</option>
             <option value="20250101000888">첨부</option>
           </select>
           <select id="orgDisclsId" name="orgDiscls">
@@ -4059,7 +4078,7 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         {
             "select_id": "mainDoc",
             "select_name": "",
-            "option_index": 1,
+            "option_index": 0,
             "doc_no": "20250101000999",
             "text": "본문",
             "value": "20250101000999|Y",
@@ -4069,7 +4088,7 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         {
             "select_id": "attachedDoc",
             "select_name": "",
-            "option_index": 1,
+            "option_index": 0,
             "doc_no": "20250101000888",
             "text": "첨부",
             "value": "20250101000888",
@@ -4108,6 +4127,7 @@ def test_compress_disclosure_external_html_payload_rejects_mismatched_embedded_a
               <select id="mainDoc">
                 <option value="20250101000999|Y" selected="selected">본문</option>
               </select>
+              <select id="attachedDoc"><option value="20250101000888">첨부</option></select>
             </body></html>
             """,
             encoding="utf-8",
@@ -4203,6 +4223,7 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
               <select id="mainDoc">
                 <option value="{acpt_no}999|Y" selected="selected">본문</option>
               </select>
+              <select id="attachedDoc"><option value="{acpt_no}888">첨부</option></select>
             </body></html>
             """,
             encoding="utf-8",
@@ -4255,7 +4276,7 @@ def test_check_disclosure_external_html_output_directory_uses_compressed_json_ye
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "year": "2025",
+                        "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
             }
@@ -4287,8 +4308,8 @@ def test_check_disclosure_external_html_output_directory_finds_yearly_output(
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "year": "2025",
                         "selected_main_doc_no": "20250101000999",
+                        "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
             }
@@ -4382,7 +4403,11 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         """
         <html>
           <head><title>Sample Disclosure</title></head>
-          <body><p class="SECTION-1">Sample Disclosure</p><table><tr><th>Field</th><td>Value</td></tr></table></body>
+          <body><p class="SECTION-1">Sample Disclosure</p><table><tbody>
+            <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
+            <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
+            <tr><th>3. 자금조달의 목적</th><td>운영자금</td><td>1,000,000,000</td></tr>
+          </tbody></table></body>
         </html>
         """,
         encoding="utf-8",
@@ -4441,7 +4466,11 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
         """
         <html>
           <head><title>Sample Disclosure</title></head>
-          <body><p class="SECTION-1">Sample Disclosure</p>유가증권시장 <table><tr><th>Field</th><td>Value</td></tr></table></body>
+          <body><p class="SECTION-1">Sample Disclosure</p>유가증권시장 <table><tbody>
+            <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
+            <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
+            <tr><th>3. 자금조달의 목적</th><td>운영자금</td><td>1,000,000,000</td></tr>
+          </tbody></table></body>
         </html>
         """,
         encoding="utf-8",
@@ -4615,7 +4644,11 @@ def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path:
         """
         <html>
           <head><title>Sample Disclosure</title></head>
-          <body><p class="SECTION-1">Sample Disclosure</p>유가증권시장 <table><tr><th>Field</th><td>Value</td></tr></table></body>
+          <body><p class="SECTION-1">Sample Disclosure</p>유가증권시장 <table><tbody>
+            <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
+            <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
+            <tr><th>3. 자금조달의 목적</th><td>운영자금</td><td>1,000,000,000</td></tr>
+          </tbody></table></body>
         </html>
         """,
         encoding="utf-8",
@@ -5329,10 +5362,11 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
           <head><title>전환사채권발행결정</title></head>
           <body>
             <p class="SECTION-1">전환사채권발행결정</p>
-            <table>
-              <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
-              <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
-            </table>
+                <table><tbody>
+                  <tr><th>1. 사채의 종류</th><td>전환사채</td></tr>
+                  <tr><th>2. 사채의 권면총액</th><td>1,000,000,000</td></tr>
+                  <tr><th>3. 자금조달의 목적</th><td>운영자금</td><td>1,000,000,000</td></tr>
+                </tbody></table>
           </body>
         </html>
         """,
@@ -6838,6 +6872,16 @@ def test_extract_acpt_no_uses_full_filename_stem(filename: str) -> None:
 def test_resolve_disclosure_html_file_uses_year_directory(tmp_path: Path) -> None:
     stem = "20250102000002"
     source_directory = tmp_path / "2025"
+    source_directory.mkdir()
+    source_path = source_directory / f"{stem}.html"
+    source_path.write_text("<html></html>", encoding="utf-8")
+
+    assert resolve_disclosure_html_file(tmp_path, stem) == source_path.resolve()
+
+
+def test_resolve_disclosure_html_file_searches_actual_year_folder(tmp_path: Path) -> None:
+    stem = "20250102000002"
+    source_directory = tmp_path / "2024"
     source_directory.mkdir()
     source_path = source_directory / f"{stem}.html"
     source_path.write_text("<html></html>", encoding="utf-8")

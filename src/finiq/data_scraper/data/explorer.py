@@ -53,7 +53,7 @@ def detect_pagination(folder: str | Path) -> dict[str, Any] | None:
     latest = body_files[-1]
     info = pagination_info(latest.read_bytes())
     if info is None:
-        return None
+        raise ValueError(f"KIND pagination not found in result page: {latest.name}")
     info["downloaded_pages"] = len(body_files)
     info["latest_file"] = latest.name
     return info
@@ -101,7 +101,9 @@ def _build_result_folder_record(task: tuple[str, str]) -> dict[str, Any]:
     root = Path(root_str)
     body_files = sorted_result_page_paths(folder)
     saved_input = load_workflow_input(folder)
-    pagination = detect_pagination(folder) or {}
+    pagination = detect_pagination(folder)
+    if pagination is None:
+        raise ValueError(f"KIND result pages not found: {folder}")
     relative_folder = folder.relative_to(root) if folder != root else Path(".")
     return {
         "folder_path": str(folder),

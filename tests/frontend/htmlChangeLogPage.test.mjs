@@ -28,7 +28,9 @@ test("08 correction history keeps matrix values aligned to record positions", as
   assert.match(source, /recordPositionByIndex\.get\(change\.before\?\.index\)/);
   assert.match(source, /matrix\[delta\.field\]\[beforePosition\] = delta\.before/);
   assert.match(source, /matrix\[delta\.field\]\[afterPosition\] = delta\.after/);
-  assert.match(source, /values\[index\] === unset && values\[index - 1\] !== unset/);
+  assert.match(source, /map\(\(value\) => value === unset \? null : value\)/);
+  assert.doesNotMatch(source, /values\[index - 1\]/);
+  assert.doesNotMatch(source, /values\[index \+ 1\]/);
 });
 
 test("08 correction history applies displayed defaults and nested numeric thresholds", async () => {

@@ -223,9 +223,10 @@ def load_company_index_payload(
         }
     )
     summary = dict(payload.get("summary") or {})
+    summary_company_count = summary.get("companies")
     return {
         "summary": {
-            "companies": int(summary.get("companies") or len(companies)),
+            "companies": int(len(companies) if summary_company_count is None else summary_company_count),
             "disclosures": int(summary.get("disclosures") or 0),
             "filtered_companies": len(filtered),
         },

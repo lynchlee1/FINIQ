@@ -48,6 +48,8 @@ def _current_workflow_input(**overrides: object) -> dict[str, object]:
         "disclosure_type_groups": {},
         "last_report_only": None,
         "include_previous_disclosures": None,
+        "wait_seconds_between_requests": 0,
+        "timeout": 20,
     }
     payload.update(overrides)
     return payload
@@ -455,21 +457,44 @@ def test_build_search_form_allows_raw_filter_overrides() -> None:
         disclosure_type_groups={1: "0119"},
         last_report_only=True,
         search_filters={
-            "disclosureType01": "0999|",
-            "pDisclosureType01": "0999|",
-            "disclosureTypeArr01": ["0999", "1999"],
             "lastReport": "",
             "marketType": "KOSDAQ",
         },
     )
 
-    assert get_form_value(request_data, "disclosureType01") == "0999|1999|"
-    assert get_form_value(request_data, "pDisclosureType01") == "0999|1999|"
-    assert get_form_values(request_data, "disclosureTypeArr01") == ["0999", "1999"]
+    assert get_form_value(request_data, "disclosureType01") == "0119|"
+    assert get_form_value(request_data, "pDisclosureType01") == "0119|"
+    assert get_form_values(request_data, "disclosureTypeArr01") == ["0119"]
     assert get_form_value(request_data, "lastReport") == ""
     assert get_form_value(request_data, "marketType") == "KOSDAQ"
     assert get_form_value(request_data, "pageIndex") == "3"
     assert get_form_value(request_data, "currentPageSize") == "30"
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["disclosureTypeArr01", "disclosureType01", "pDisclosureType01"],
+)
+def test_build_search_form_rejects_raw_disclosure_type_fields(
+    field_name: str,
+) -> None:
+    with pytest.raises(ValueError, match="use disclosure_type_groups"):
+        build_search_form(
+            page_number=1,
+            page_size=100,
+            start_date="2021-01-01",
+            end_date="2021-01-31",
+            search_filters={field_name: "0119"},
+        )
+
+
+def test_kind_workflow_input_rejects_raw_disclosure_type_fields() -> None:
+    with pytest.raises(ValueError, match="use disclosure_type_groups"):
+        validate_kind_workflow_input_snapshot(
+            _current_workflow_input(
+                search_filters={"disclosureTypeArr01": "0119"}
+            )
+        )
 
 
 def test_download_pages_accepts_structured_payload_options(tmp_path: Path) -> None:
@@ -578,13 +603,11 @@ def test_download_disclosure_external_htmls_rate_limits(
     assert all(s == 0.1 for s in sleep_calls)
 
 
-def test_download_disclosure_external_htmls_skips_existing_valid_html(
+def test_download_disclosure_external_htmls_skips_short_existing_html(
     tmp_path: Path,
 ) -> None:
     existing_path = tmp_path / "20260108000150.html"
-    existing_path.write_text(
-        "<html><body>" + ("cached " * 30) + "</body></html>", encoding="utf-8"
-    )
+    existing_path.write_text("<html></html>", encoding="utf-8")
     session = ViewerFakeSession()
     progress_messages: list[str] = []
 
@@ -598,6 +621,7 @@ def test_download_disclosure_external_htmls_skips_existing_valid_html(
     )
 
     assert saved_paths == [existing_path]
+    assert existing_path.stat().st_size < 100
     assert session.get_calls == []
     assert progress_messages == [f"Skipping existing KIND external HTML: {existing_path}"]
 
@@ -901,6 +925,8 @@ def test_kind_workflow_stops_when_existing_folder_has_different_locked_page_size
                 "disclosure_type_groups": {},
                 "last_report_only": None,
                 "include_previous_disclosures": None,
+                "wait_seconds_between_requests": 0,
+                "timeout": 20,
             }
         ),
         encoding="utf-8",

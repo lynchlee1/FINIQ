@@ -687,7 +687,7 @@ def _load_disclosures_for_triple_barrier(
     for shard in list(manifest.get("shards") or []):
         shard_path = _resolve_shard_path(manifest_path, shard)
         if not shard_path.exists():
-            continue
+            raise FileNotFoundError(f"KIND SQLite shard not found: {shard_path}")
         company_id_candidates = kind_company_id_candidates(company_id)
         if not company_id_candidates:
             return rows
