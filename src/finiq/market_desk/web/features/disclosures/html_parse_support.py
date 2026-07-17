@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from finiq.market_desk.web.features.disclosures.html_common import (
     resolve_disclosure_html_file,
 )
@@ -216,6 +218,58 @@ def _parse_numeric_value(val: Any) -> float:
     return float(match.group(0)) if match else float("nan")
 
 
+def _numeric_signature(value: Any) -> tuple[Any, list[float]]:
+    """Return a stable nonnumeric shape and ordered numeric leaves."""
+    import math
+
+    if isinstance(value, bool):
+        return ("literal", value), []
+    if isinstance(value, (int, float, str)):
+        parsed = _parse_numeric_value(value)
+        if not math.isnan(parsed):
+            return ("number",), [parsed]
+        return ("literal", value), []
+    if isinstance(value, list):
+        shapes: list[Any] = []
+        numbers: list[float] = []
+        for item in value:
+            shape, item_numbers = _numeric_signature(item)
+            shapes.append(shape)
+            numbers.extend(item_numbers)
+        return ("list", tuple(shapes)), numbers
+    if isinstance(value, dict):
+        shapes = []
+        numbers = []
+        for key in sorted(value):
+            shape, item_numbers = _numeric_signature(value[key])
+            shapes.append((key, shape))
+            numbers.extend(item_numbers)
+        return ("dict", tuple(shapes)), numbers
+    return ("literal", _json_stable(value)), []
+
+
+def _numeric_change_within_threshold(
+    before: Any, after: Any, threshold: float
+) -> bool:
+    before_shape, before_values = _numeric_signature(before)
+    after_shape, after_values = _numeric_signature(after)
+    if (
+        before_shape != after_shape
+        or not before_values
+        or len(before_values) != len(after_values)
+    ):
+        return False
+    for before_value, after_value in zip(before_values, after_values):
+        if after_value == 0:
+            if before_value != after_value:
+                return False
+            continue
+        difference = abs((after_value - before_value) / after_value) * 100
+        if difference > threshold:
+            return False
+    return True
+
+
 def _is_major_change(
     field: str,
     before: Any,
@@ -241,15 +295,10 @@ def _is_major_change(
                 return False
 
     num_threshold = numeric_thresholds.get(field)
-    if num_threshold is not None:
-        n1 = _parse_numeric_value(before)
-        n2 = _parse_numeric_value(after)
-        import math
-
-        if not math.isnan(n1) and not math.isnan(n2) and n2 != 0:
-            diff_percent = abs((n2 - n1) / n2) * 100
-            if diff_percent <= num_threshold:
-                return False
+    if num_threshold is not None and _numeric_change_within_threshold(
+        before, after, num_threshold
+    ):
+        return False
 
     return True
 

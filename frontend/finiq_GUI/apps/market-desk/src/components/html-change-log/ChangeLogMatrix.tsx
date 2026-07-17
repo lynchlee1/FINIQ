@@ -1,6 +1,6 @@
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { cn } from "@finiq/ui/utils";
-import { getMatrixData, stableJson, parseKoreanDate, parseNumericValue, formatValueWithField } from "@/utils/matrixUtils";
+import { getMatrixData, stableJson, parseKoreanDate, numericChangeWithinThreshold, formatValueWithField } from "@/utils/matrixUtils";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { DATE_FIELDS_CONFIG, NUMERIC_FIELDS_CONFIG } from "./ChangeLogSettings";
 
@@ -11,8 +11,14 @@ interface ChangeLogMatrixProps {
 export function ChangeLogMatrix({ selectedFamily }: ChangeLogMatrixProps) {
   const { change_log_date_thresholds, change_log_numeric_thresholds } = useSettingsStore();
 
-  const dateThresholds = change_log_date_thresholds || Object.fromEntries(DATE_FIELDS_CONFIG.map(c => [c.field, c.default]));
-  const numericThresholds = change_log_numeric_thresholds || Object.fromEntries(NUMERIC_FIELDS_CONFIG.map(c => [c.field, c.default]));
+  const dateThresholds = {
+    ...Object.fromEntries(DATE_FIELDS_CONFIG.map(c => [c.field, c.default])),
+    ...(change_log_date_thresholds || {}),
+  };
+  const numericThresholds = {
+    ...Object.fromEntries(NUMERIC_FIELDS_CONFIG.map(c => [c.field, c.default])),
+    ...(change_log_numeric_thresholds || {}),
+  };
 
   return (
     <div className="lg:col-span-6 border rounded-xl bg-slate-50/50 dark:bg-[#0d1117] dark:border-[#30363d] overflow-hidden flex flex-col min-h-[600px]">
@@ -88,13 +94,8 @@ export function ChangeLogMatrix({ selectedFamily }: ChangeLogMatrixProps) {
                                   const d1 = parseKoreanDate(val);
                                   const d2 = parseKoreanDate(prevVal);
                                   if (!isNaN(d1) && !isNaN(d2) && Math.abs(d1 - d2) <= dateThreshold * 24 * 3600 * 1000) changeType = 'minor';
-                                } else if (numThreshold !== undefined) {
-                                  const n1 = parseNumericValue(val);
-                                  const n2 = parseNumericValue(prevVal);
-                                  if (!isNaN(n1) && !isNaN(n2) && n1 !== 0) {
-                                    const diffPercent = Math.abs((n1 - n2) / n1) * 100;
-                                    if (diffPercent <= numThreshold) changeType = 'minor';
-                                  }
+                                } else if (numThreshold !== undefined && numericChangeWithinThreshold(prevVal, val, numThreshold)) {
+                                  changeType = 'minor';
                                 }
                               }
 

@@ -5458,7 +5458,7 @@ def test_compact_source_tables_limits_table_components_and_total_rows() -> None:
 def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path, monkeypatch) -> None:
     from finiq.market_desk.web.app import config as app_config
 
-    monkeypatch.setattr(app_config, "change_log_date_thresholds", {})
+    monkeypatch.setattr(app_config, "change_log_date_thresholds", {"납입일": 0})
     monkeypatch.setattr(app_config, "change_log_numeric_thresholds", {})
 
     parse_path = tmp_path / "parsed-rights_issuance.json"
@@ -5516,6 +5516,59 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
     assert payload["families"][0]["severity"] == "major"
     assert payload["families"][0]["changed_fields"] == 2
     assert [change["field"] for change in payload["families"][0]["changes"][0]["changes"]] == ["발행목적", "납입일"]
+
+
+def test_build_parse_change_log_payload_applies_default_threshold_to_nested_numeric_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from finiq.market_desk.web.app import config as app_config
+
+    monkeypatch.setattr(app_config, "change_log_date_thresholds", {})
+    monkeypatch.setattr(app_config, "change_log_numeric_thresholds", {})
+    parse_path = tmp_path / "parsed-rights_issuance.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "rights_issuance",
+                "records": [
+                    {
+                        "title": "유상증자결정",
+                        "acpt_no": "20260701000001",
+                        "family_id": "20260702000001",
+                        "current_sequence": 0,
+                        "family_member_count": 2,
+                        "상장구분": "유가증권시장",
+                        "신주의 종류와 수": [["보통주식", 100]],
+                    },
+                    {
+                        "title": "[정정]유상증자결정",
+                        "acpt_no": "20260702000001",
+                        "family_id": "20260702000001",
+                        "current_sequence": 1,
+                        "family_member_count": 2,
+                        "상장구분": "코스닥시장",
+                        "신주의 종류와 수": [["보통주식", 101]],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_change_log_payload(
+        {
+            "output_path": str(tmp_path),
+            "mode": "rights_issuance",
+            "summary_only": True,
+        }
+    )
+
+    assert payload["families"][0]["changed_fields"] == 0
+    assert payload["families"][0]["severity"] == "minor"
+    assert payload["summary"]["major_changes"] == 0
+    assert payload["summary"]["minor_changes"] == 1
 
 
 def test_build_parse_change_log_payload_accepts_result_folder(tmp_path: Path) -> None:

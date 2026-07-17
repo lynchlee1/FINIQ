@@ -40,6 +40,46 @@ export const parseNumericValue = (val: any) => {
   return clean ? parseFloat(clean[0]) : NaN;
 };
 
+const numericSignature = (value: any): { shape: string; values: number[] } => {
+  if (typeof value === "number" || typeof value === "string") {
+    const parsed = parseNumericValue(value);
+    if (!Number.isNaN(parsed)) return { shape: "number", values: [parsed] };
+    return { shape: `literal:${stableJson(value)}`, values: [] };
+  }
+  if (Array.isArray(value)) {
+    const children = value.map(numericSignature);
+    return {
+      shape: `list:[${children.map((child) => child.shape).join("|")}]`,
+      values: children.flatMap((child) => child.values),
+    };
+  }
+  if (value && typeof value === "object") {
+    const children = Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, numericSignature(item)] as const);
+    return {
+      shape: `object:{${children.map(([key, child]) => `${key}:${child.shape}`).join("|")}}`,
+      values: children.flatMap(([, child]) => child.values),
+    };
+  }
+  return { shape: `literal:${stableJson(value)}`, values: [] };
+};
+
+export const numericChangeWithinThreshold = (before: any, after: any, threshold: number) => {
+  const beforeSignature = numericSignature(before);
+  const afterSignature = numericSignature(after);
+  if (
+    beforeSignature.shape !== afterSignature.shape ||
+    beforeSignature.values.length === 0 ||
+    beforeSignature.values.length !== afterSignature.values.length
+  ) return false;
+  return beforeSignature.values.every((beforeValue, index) => {
+    const afterValue = afterSignature.values[index];
+    if (afterValue === 0) return beforeValue === afterValue;
+    return Math.abs((afterValue - beforeValue) / afterValue) * 100 <= threshold;
+  });
+};
+
 export const getChangedFields = (family: any) => {
   return Array.isArray(family?.changed_field_names) ? family.changed_field_names : [];
 };
@@ -51,24 +91,34 @@ export const getMatrixData = (family: any) => {
   const fields = getChangedFields(family);
   if (!fields.length) return null;
   
+  const unset = Symbol("unset matrix value");
   const matrix: Record<string, any[]> = {};
-  for (const f of fields) matrix[f] = new Array(records.length).fill(null);
+  for (const field of fields) matrix[field] = new Array(records.length).fill(unset);
 
-  if (changes.length > 0) {
-    const firstChange = changes[0];
-    for (const f of fields) {
-      const delta = firstChange.changes.find((c: any) => c.field === f);
-      if (delta) matrix[f][0] = delta.before;
+  const recordPositionByIndex = new Map<unknown, number>();
+  records.forEach((record: any, position: number) => {
+    recordPositionByIndex.set(record.index, position);
+  });
+  for (const change of changes) {
+    const beforePosition = recordPositionByIndex.get(change.before?.index);
+    const afterPosition = recordPositionByIndex.get(change.after?.index);
+    if (beforePosition === undefined || afterPosition === undefined) continue;
+    for (const delta of change.changes || []) {
+      if (!matrix[delta.field]) continue;
+      matrix[delta.field][beforePosition] = delta.before;
+      matrix[delta.field][afterPosition] = delta.after;
     }
   }
 
-  for (let i = 0; i < changes.length; i++) {
-    const change = changes[i];
-    const vIdx = i + 1;
-    for (const f of fields) {
-      const delta = change.changes.find((c: any) => c.field === f);
-      if (delta) matrix[f][vIdx] = delta.after;
+  for (const field of fields) {
+    const values = matrix[field];
+    for (let index = 1; index < values.length; index += 1) {
+      if (values[index] === unset && values[index - 1] !== unset) values[index] = values[index - 1];
     }
+    for (let index = values.length - 2; index >= 0; index -= 1) {
+      if (values[index] === unset && values[index + 1] !== unset) values[index] = values[index + 1];
+    }
+    matrix[field] = values.map((value) => value === unset ? null : value);
   }
   return { fields, records, matrix };
 };
