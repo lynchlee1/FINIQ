@@ -121,15 +121,6 @@ def _validated_compressed_records(
 
 
 def _compressed_record_year(record: dict[str, Any], acpt_no: str) -> str:
-    year = str(record.get("year") or "").strip()
-    if year:
-        if len(year) != 4 or not year.isdigit():
-            msg = (
-                "invalid year in compressed external HTML JSON: "
-                f"acpt_no={acpt_no} year={year!r}"
-            )
-            raise ValueError(msg)
-        return year
     return _year_from_disclosure(
         acpt_no,
         record.get("metadata") if isinstance(record.get("metadata"), dict) else None,
@@ -444,8 +435,7 @@ def download_disclosure_internal_html_payload(
     targets = _apply_limit_to_targets(targets, body.get("limit"))
     acpt_numbers = [target["acpt_no"] for target in targets]
     target_years = {
-        target["acpt_no"]: target.get("year")
-        or _year_from_disclosure(target["acpt_no"])
+        target["acpt_no"]: target["year"]
         for target in targets
     }
     source_json = manifest_payload

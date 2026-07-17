@@ -277,7 +277,7 @@ def search_ontology_companies(
 
     for _, shard_path in _iter_shards(resolved_manifest, manifest):
         if not shard_path.exists():
-            continue
+            raise FileNotFoundError(f"KIND SQLite shard not found: {shard_path}")
         connection = _connect(shard_path)
         try:
             clauses = ["company_id IS NOT NULL", "company_id != ''"]
@@ -345,6 +345,8 @@ def search_ontology_companies(
     normalized_keyword_code = _display_stock_code(normalized_keyword)
     for code, name in quanti_names.items():
         if code in existing_stock_codes:
+            continue
+        if normalized_market and normalized_market != "전체":
             continue
         if normalized_keyword:
             name_matches = keyword_casefold in name.casefold()
@@ -417,7 +419,7 @@ def _load_disclosures_for_company_id(
     for _, shard_path in _iter_shards(manifest_path, manifest, start_date=start_date, end_date=end_date):
         _raise_if_cancelled(cancellation_check)
         if not shard_path.exists():
-            continue
+            raise FileNotFoundError(f"KIND SQLite shard not found: {shard_path}")
         connection = _connect(shard_path)
         try:
             clauses = [

@@ -53,17 +53,11 @@ def _serialize_rows(parent_tag: Tag) -> list[dict[str, Any]]:
 
 
 def _collect_table_sections(table_tag: Tag) -> dict[str, list[dict[str, Any]]]:
-    """테이블의 section별 행을 모아 표준 structure로 정리한다.
-
-    `thead`, `tbody`, `tfoot`를 각각 수집하고,
-    section 없이 바로 달린 `tr`은 `tbody`로 간주한다.
-    """
+    """테이블의 명시적인 section별 행을 모아 표준 structure로 정리한다."""
     sections = {section_name: [] for section_name in _TABLE_SECTION_NAMES}
     for section_name in _TABLE_SECTION_NAMES:
         for section_tag in table_tag.find_all(section_name, recursive=False):
             sections[section_name].extend(_serialize_rows(section_tag))
-
-    sections["tbody"].extend(_serialize_rows(table_tag))
     return sections
 
 
@@ -150,26 +144,15 @@ def _build_flat_row_list(table_data: list[dict[str, Any]]) -> list[list[dict[str
     return flat_rows
 
 
-def _assure_rectangular_string_grid(rows: list[list[str]]) -> list[list[str]]:
-    """각 행의 열 개수를 맞춰 `len(row) == width`인 직사각형 격자로 만든다.
-
-    빈 행 목록이면 그대로 반환한다. 열이 부족한 행은 오른쪽에 빈 문자열을 채운다.
-    """
-    if not rows:
-        return []
-    width = max(len(row) for row in rows)
-    return [row + [""] * (width - len(row)) for row in rows]
-
-
 def _build_simple_table(table_data: list[dict[str, Any]]) -> list[list[str]]:
-    """`tbody` 행만 모아 셀 텍스트만 담은 `list[list[str]]`로 만든 뒤 직사각형으로 맞춘다."""
+    """`tbody` 행만 모아 원래 열 수의 셀 텍스트 목록으로 만든다."""
     text_rows: list[list[str]] = []
     for body_rows in _iter_table_body_rows(table_data):
         for row_data in body_rows:
             text_rows.append(
                 [str(cell_data.get("text", "")) for cell_data in row_data.get("cells", [])]
             )
-    return _assure_rectangular_string_grid(text_rows)
+    return text_rows
 
 
 def _build_json_output(table_data: list[dict[str, Any]], mode: ParseMode) -> dict[str, Any]:
@@ -195,7 +178,7 @@ def html_to_json(
 
     입력 HTML을 복구 파싱한 뒤,
     필요에 따라 테이블 전체 structure, flat 셀/행 structure,
-    또는 직사각형 `list[list[str]]` (`simpletable`)로 내보낸다.
+    또는 원래 행별 열 수를 유지한 `list[list[str]]` (`simpletable`)로 내보낸다.
     """
     soup = parse_html_with_recovery(html_markup)
     table_data = _extract_table_data_from_soup(soup)

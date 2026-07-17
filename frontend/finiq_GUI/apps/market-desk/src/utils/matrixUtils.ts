@@ -26,18 +26,30 @@ export const formatValueWithField = (value: any, fieldName: string) => {
 
 export const parseKoreanDate = (dateStr: any) => {
   if (!dateStr || typeof dateStr !== "string") return NaN;
-  const match = dateStr.match(/(\d{4})\s*[년.-]\s*(\d{1,2})\s*[월.-]\s*(\d{1,2})/);
-  if (match) return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3])).getTime();
-  const clean = dateStr.replace(/[^\d]/g, "");
-  if (clean.length === 8) return new Date(parseInt(clean.substring(0, 4)), parseInt(clean.substring(4, 6)) - 1, parseInt(clean.substring(6, 8))).getTime();
-  return NaN;
+  const text = dateStr.trim();
+  const separatedMatch = text.match(/^(\d{4})([.-])(\d{1,2})\2(\d{1,2})$/);
+  const match = separatedMatch
+    || text.match(/^(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일?$/)
+    || text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!match) return NaN;
+  const year = Number(match[1]);
+  const month = Number(separatedMatch ? match[3] : match[2]);
+  const day = Number(separatedMatch ? match[4] : match[3]);
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year
+    || parsed.getMonth() !== month - 1
+    || parsed.getDate() !== day
+  ) return NaN;
+  return parsed.getTime();
 };
 
 export const parseNumericValue = (val: any) => {
-  if (typeof val === "number") return val;
+  if (typeof val === "number") return Number.isFinite(val) ? val : NaN;
   if (typeof val !== "string") return NaN;
-  const clean = val.replace(/,/g, "").match(/-?\d+\.?\d*/);
-  return clean ? parseFloat(clean[0]) : NaN;
+  const text = val.trim();
+  if (!/^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/.test(text)) return NaN;
+  return Number(text.replace(/,/g, ""));
 };
 
 const numericSignature = (value: any): { shape: string; values: number[] } => {
@@ -110,15 +122,6 @@ export const getMatrixData = (family: any) => {
     }
   }
 
-  for (const field of fields) {
-    const values = matrix[field];
-    for (let index = 1; index < values.length; index += 1) {
-      if (values[index] === unset && values[index - 1] !== unset) values[index] = values[index - 1];
-    }
-    for (let index = values.length - 2; index >= 0; index -= 1) {
-      if (values[index] === unset && values[index + 1] !== unset) values[index] = values[index + 1];
-    }
-    matrix[field] = values.map((value) => value === unset ? null : value);
-  }
+  for (const field of fields) matrix[field] = matrix[field].map((value) => value === unset ? null : value);
   return { fields, records, matrix };
 };

@@ -34,8 +34,7 @@ def clean_disclosure_html_output_directory_payload(
         targets = _apply_limit_to_targets(targets, body.get("limit"))
         acpt_numbers = [target["acpt_no"] for target in targets]
         target_years = {
-            target["acpt_no"]: target.get("year")
-            or _year_from_disclosure(target["acpt_no"])
+            target["acpt_no"]: target["year"]
             for target in targets
         }
         source_type = "content"
@@ -50,8 +49,7 @@ def clean_disclosure_html_output_directory_payload(
         targets = _apply_limit_to_targets(targets, body.get("limit"))
         acpt_numbers = [target["acpt_no"] for target in targets]
         target_years = {
-            target["acpt_no"]: target.get("year")
-            or _year_from_disclosure(target["acpt_no"])
+            target["acpt_no"]: target["year"]
             for target in targets
         }
         source_type = "content"

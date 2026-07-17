@@ -8,8 +8,10 @@ test("change matrix uses only backend-declared values", async () => {
   const source = await readFile(`${root}/utils/matrixUtils.ts`, "utf8");
 
   assert.match(source, /Array\.isArray\(family\?\.changed_field_names\)/);
-  assert.doesNotMatch(source, /matrix\[f\]\[vIdx - 1\]/);
-  assert.doesNotMatch(source, /firstIdx/);
+  assert.doesNotMatch(source, /values\[index - 1\]/);
+  assert.doesNotMatch(source, /values\[index \+ 1\]/);
+  assert.doesNotMatch(source, /replace\(\/\[\^\\d\]\//);
+  assert.doesNotMatch(source, /match\(\/-\?\\d\+\\\.\?\\d\*\//);
 });
 
 test("chart and backtest invalid values are not converted to zero", async () => {
@@ -23,6 +25,32 @@ test("chart and backtest invalid values are not converted to zero", async () => 
   assert.doesNotMatch(chartSource, /toNumber\(item\.value, 0\)/);
   assert.match(backtestSource, /returnPct: null/);
   assert.doesNotMatch(backtestSource, /returnPct: 0/);
+  assert.doesNotMatch(backtestSource, /markers\.slice\(0, 120\)/);
+});
+
+test("displayed zero values are not replaced with empty placeholders", async () => {
+  const [bondSource, graphSource, assetSource] = await Promise.all([
+    readFile(`${root}/app/html-bond-summary/page.tsx`, "utf8"),
+    readFile(`${root}/app/graph/OntologyNodeGraph.tsx`, "utf8"),
+    readFile(`${root}/features/assets-excel/AssetExcelUtilityView.tsx`, "utf8"),
+  ]);
+
+  assert.match(bondSource, /const displayValue =/);
+  assert.doesNotMatch(bondSource, /String\((?:value|cell|name) \|\| "-"\)/);
+  assert.doesNotMatch(graphSource, /String\(value \|\| "-"\)/);
+  assert.match(assetSource, /item\.existing_value === 0 \? 0/);
+  assert.match(assetSource, /item\.incoming_value === 0 \? 0/);
+});
+
+test("relationship weight is validated instead of converted to zero", async () => {
+  const source = await readFile(
+    "frontend/finiq_GUI/packages/graph-viewer/src/components/RelationshipEdgeForm.tsx",
+    "utf8",
+  );
+
+  assert.match(source, /numericWeight > 0 && numericWeight <= 100/);
+  assert.match(source, /disabled=\{!hasValidWeight\}/);
+  assert.doesNotMatch(source, /Number\(weight\) \|\| 0/);
 });
 
 test("search and summary selections do not jump to the first result", async () => {

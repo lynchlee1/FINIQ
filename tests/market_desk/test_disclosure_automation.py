@@ -643,9 +643,15 @@ def test_html_inspections_require_complete_current_membership(
     filtered_path.write_text(
         json.dumps(
             {
-                "disclosures": [
-                    {"acpt_no": "20260101000001"},
-                    {"acpt_no": "20260101000002"},
+                    "disclosures": [
+                        {
+                            "acpt_no": "20260101000001",
+                            "disclosed_at": "2026-01-01 09:00",
+                        },
+                        {
+                            "acpt_no": "20260101000002",
+                            "disclosed_at": "2026-01-01 09:00",
+                        },
                 ],
                 "external_html_download_acpt_numbers": [
                     "20260101000001",
@@ -1095,10 +1101,11 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
     def fake_compress(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
         directory = Path(str(body["input_directory"]))
         records = [
-            {
-                "acpt_no": path.stem,
-                "selected_main_doc_no": f"{path.stem}99",
-                "docs": [
+                {
+                    "acpt_no": path.stem,
+                    "selected_main_doc_no": f"{path.stem}99",
+                    "metadata": {"disclosed_at": "2026-07-12 09:00"},
+                    "docs": [
                     {
                         "select_id": "mainDoc",
                         "doc_no": f"{path.stem}99",

@@ -207,6 +207,15 @@ def test_read_asset_excel_quanti_preview_uses_date_code_matrix(tmp_path):
     assert "     Refresh     " not in payload["columns"]
 
 
+def test_read_asset_excel_quanti_preview_rejects_invalid_dates(tmp_path):
+    excel_path = tmp_path / "invalid-date.xlsx"
+    with pd.ExcelWriter(excel_path) as writer:
+        _write_quanti_sheet(writer, "종가", [["not-a-date", 100, 200]])
+
+    with pytest.raises(ValueError, match="Invalid date values in sheet 종가: not-a-date"):
+        read_asset_excel(excel_path.name, sheet_name="종가", root_directory=tmp_path)
+
+
 @pytest.mark.parametrize("account_mappings", [None, []])
 def test_asset_excel_conversion_requires_account_mappings(tmp_path, account_mappings):
     source_dir = tmp_path / "assets"

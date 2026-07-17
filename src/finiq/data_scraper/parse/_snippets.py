@@ -56,13 +56,17 @@ def disclosure_onclick(onclick_value: str | None) -> dict[str, str | None] | Non
     }
 
 
-def _parse_viewer_doc_option(option_tag: Tag) -> dict[str, Any] | None:
+def _parse_viewer_doc_option(
+    option_tag: Tag,
+    *,
+    select_id: str,
+    select_name: str,
+    option_index: int,
+) -> dict[str, Any]:
     """뷰어 select option 1개를 문서 메타데이터로 정리한다."""
     raw_value = str(option_tag.get("value") or "").strip()
-    if not raw_value:
-        return None
-
     doc_no = raw_value
+    latest_flag = ""
     is_latest = None
     if "|" in raw_value:
         doc_no, latest_flag = raw_value.split("|", 1)
@@ -71,12 +75,14 @@ def _parse_viewer_doc_option(option_tag: Tag) -> dict[str, Any] | None:
             is_latest = latest_flag == "Y"
 
     doc_no = doc_no.strip()
-    if not doc_no:
-        return None
-
     return {
+        "select_id": select_id,
+        "select_name": select_name,
+        "option_index": option_index,
         "doc_no": doc_no,
         "label": _clean_text(option_tag.get_text(separator=" ", strip=True)),
+        "value": raw_value,
+        "latest_flag": latest_flag or None,
         "selected": option_tag.has_attr("selected"),
         "is_latest": is_latest,
     }
@@ -89,14 +95,23 @@ def _parse_viewer_doc_select(soup: BeautifulSoup, select_id: str) -> list[dict[s
         return []
 
     documents: list[dict[str, Any]] = []
-    for option_tag in select_tag.find_all("option"):
-        document = _parse_viewer_doc_option(option_tag)
-        if document is not None:
-            documents.append(document)
+    select_name = str(select_tag.get("name") or "").strip()
+    for option_index, option_tag in enumerate(select_tag.find_all("option")):
+        document = _parse_viewer_doc_option(
+            option_tag,
+            select_id=select_id,
+            select_name=select_name,
+            option_index=option_index,
+        )
+        documents.append(document)
     return documents
 
 
-def viewer_html(html_markup: str | bytes) -> dict[str, Any]:
+def viewer_html(
+    html_markup: str | bytes,
+    *,
+    require_complete_metadata: bool = False,
+) -> dict[str, Any]:
     """KIND 공시 뷰어 HTML에서 acptNo와 본문/첨부 docNo 목록을 추출한다."""
     soup = parse_html_with_recovery(html_markup)
 
@@ -107,13 +122,42 @@ def viewer_html(html_markup: str | bytes) -> dict[str, Any]:
     main_docs = _parse_viewer_doc_select(soup, "mainDoc")
     attached_docs = _parse_viewer_doc_select(soup, "attachedDoc")
 
+    acpt_no = (
+        str(acpt_no_input.get("value") or "").strip()
+        if isinstance(acpt_no_input, Tag)
+        else ""
+    )
+    if require_complete_metadata:
+        if not acpt_no:
+            raise ValueError("KIND viewer acptNo is required")
+        for select_id, documents in (
+            ("mainDoc", main_docs),
+            ("attachedDoc", attached_docs),
+        ):
+            if not isinstance(soup.find("select", id=select_id), Tag):
+                raise ValueError(f"KIND viewer {select_id} select is required")
+            if not documents:
+                raise ValueError(f"KIND viewer {select_id} options are required")
+            invalid_option_indexes = [
+                str(document["option_index"])
+                for document in documents
+                if not str(document.get("doc_no") or "").strip()
+            ]
+            if invalid_option_indexes:
+                raise ValueError(
+                    f"KIND viewer {select_id} option docNo is required: "
+                    + ", ".join(invalid_option_indexes)
+                )
+
     selected_main_doc_no = next(
         (document["doc_no"] for document in main_docs if document.get("selected")),
         None,
     )
+    if require_complete_metadata and not selected_main_doc_no:
+        raise ValueError("KIND viewer selected mainDoc is required")
 
     return {
-        "acpt_no": str(acpt_no_input.get("value") or "").strip() if isinstance(acpt_no_input, Tag) else None,
+        "acpt_no": acpt_no or None,
         "header": _clean_text(header_tag.get_text(separator=" ", strip=True))
         if isinstance(header_tag, Tag)
         else "",
@@ -143,4 +187,3 @@ def search_paths(html_markup: str | bytes) -> dict[str, str] | None:
         "form_upclss_cd": match.group("form_upclss_cd"),
         "snd_loc_tp_cd": match.group("snd_loc_tp_cd"),
     }
-

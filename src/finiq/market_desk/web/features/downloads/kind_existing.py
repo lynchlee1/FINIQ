@@ -353,37 +353,8 @@ def check_existing_downloads(
     saved_filters = None
     for folder, _, _ in candidates:
         input_snapshot = _require_current_download_input_snapshot(folder)
-        try:
-            search_filters_dict = dict(input_snapshot.get("search_filters") or [])
-
-            market_val = search_filters_dict.get("marketType", "")
-            market_label = "전체"
-            for label, val in MARKET_TYPES.items():
-                if val == market_val:
-                    market_label = label
-                    break
-
-            securities_val = search_filters_dict.get("securities", "")
-            securities_label = "전체"
-            for label, val in SECURITIES_TYPES.items():
-                if val == securities_val:
-                    securities_label = label
-                    break
-
-            saved_filters = {
-                "company_name": search_filters_dict.get("searchCorpName", ""),
-                "submitter_name": search_filters_dict.get("submitOblgNm", ""),
-                "market_label": market_label,
-                "securities_label": securities_label,
-                "disclosure_type_groups": input_snapshot.get(
-                    "disclosure_type_groups"
-                )
-                or {},
-                "last_report_only": bool(input_snapshot.get("last_report_only")),
-            }
-            break
-        except Exception:
-            pass
+        saved_filters = _snapshot_filters_payload(input_snapshot)
+        break
 
     return {
         "has_existing": True,
@@ -402,44 +373,33 @@ def detect_existing_downloads(
     """Detect existing download folders and metadata state without parsing downloaded pages."""
     if not output_directory_raw:
         return {"has_existing": False}
-    try:
-        output_directory = Path(output_directory_raw).expanduser().resolve()
-    except Exception:
-        return {"has_existing": False}
+    output_directory = Path(output_directory_raw).expanduser().resolve()
 
     if not output_directory.is_dir():
         return {"has_existing": False}
 
     candidates: list[tuple[Path, str, tuple[date, date] | None]] = []
-    try:
-        for child in output_directory.iterdir():
-            if not child.is_dir():
-                continue
-            folder_range = _folder_date_range_from_name(child)
-            if folder_range is not None and list(
-                child.glob("*_post_page_*.body")
-            ):
-                candidates.append((child, child.name, folder_range))
-    except Exception:
-        pass
+    for child in output_directory.iterdir():
+        if not child.is_dir():
+            continue
+        folder_range = _folder_date_range_from_name(child)
+        if folder_range is not None and list(
+            child.glob("*_post_page_*.body")
+        ):
+            candidates.append((child, child.name, folder_range))
 
     if not candidates:
-        try:
-            if list(output_directory.glob("*_post_page_*.body")):
-                input_snapshot = _require_current_download_input_snapshot(
-                    output_directory
-                )
-                folder_range = (
-                    date.fromisoformat(str(input_snapshot["start_date"])),
-                    date.fromisoformat(str(input_snapshot["end_date"])),
-                )
-                candidates.append(
-                    (output_directory, output_directory.name, folder_range)
-                )
-        except DownloadInputMetadataError:
-            raise
-        except Exception:
-            pass
+        if list(output_directory.glob("*_post_page_*.body")):
+            input_snapshot = _require_current_download_input_snapshot(
+                output_directory
+            )
+            folder_range = (
+                date.fromisoformat(str(input_snapshot["start_date"])),
+                date.fromisoformat(str(input_snapshot["end_date"])),
+            )
+            candidates.append(
+                (output_directory, output_directory.name, folder_range)
+            )
 
     if not candidates:
         return {"has_existing": False}
@@ -465,7 +425,7 @@ def detect_existing_downloads(
             if current_filters
             else True
         )
-        if saved_filters is None and range_saved_filters is not None:
+        if saved_filters is None:
             saved_filters = range_saved_filters
 
         metadata_status = "ok" if filters_match else "mismatch"

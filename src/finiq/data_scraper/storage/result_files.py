@@ -12,7 +12,7 @@ def result_page_number(path: str | Path) -> int:
     """Extract the numeric page number from a saved KIND result page path."""
     match = _RESULT_PAGE_NUMBER_RE.search(Path(path).name)
     if match is None:
-        return -1
+        raise ValueError(f"Invalid KIND result page filename: {Path(path).name}")
     return int(match.group("page"))
 
 

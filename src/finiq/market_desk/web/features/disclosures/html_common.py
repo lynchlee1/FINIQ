@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from datetime import date
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
@@ -172,11 +173,15 @@ def _year_from_disclosure(
     acpt_no: str, disclosure: dict[str, Any] | None = None
 ) -> str:
     disclosed_at = str((disclosure or {}).get("disclosed_at") or "").strip()
-    if len(disclosed_at) >= 4 and disclosed_at[:4].isdigit():
-        return disclosed_at[:4]
-    if len(acpt_no) >= 4 and acpt_no[:4].isdigit():
-        return acpt_no[:4]
-    raise ValueError(f"disclosure year not found: {acpt_no}")
+    if not disclosed_at:
+        raise ValueError(f"disclosed_at is required for disclosure year: {acpt_no}")
+    try:
+        disclosed_date = date.fromisoformat(disclosed_at.split(" ", 1)[0])
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid disclosed_at for disclosure year: {acpt_no} {disclosed_at!r}"
+        ) from exc
+    return f"{disclosed_date.year:04d}"
 
 
 def resolve_disclosure_html_file(
@@ -197,14 +202,14 @@ def resolve_disclosure_html_file(
     resolved_root = input_directory.resolve()
     if not resolved_root.is_dir():
         return None
-    candidate = (
-        resolved_root / _year_from_disclosure(normalized_acpt_no) / filename
-    ).resolve()
-    try:
-        candidate.relative_to(resolved_root)
-    except ValueError:
-        return None
-    return candidate if candidate.is_file() else None
+    candidates = sorted(
+        path.resolve()
+        for path in resolved_root.glob(f"[0-9][0-9][0-9][0-9]/{filename}")
+        if path.is_file() and len(path.parent.name) == 4 and path.parent.name.isdigit()
+    )
+    if len(candidates) > 1:
+        raise ValueError(f"duplicate disclosure HTML files for acpt_no: {normalized_acpt_no}")
+    return candidates[0] if candidates else None
 
 
 def _target_years_from_json(
@@ -221,10 +226,12 @@ def _target_html_path(
     output_directory: Path,
     acpt_no: str,
     *,
-    target_years: dict[str, str] | None = None,
+    target_years: dict[str, str],
 ) -> Path:
     filename = VIEWER_HTML_FILENAME_TEMPLATE.format(acpt_no=acpt_no)
-    year = (target_years or {}).get(acpt_no) or _year_from_disclosure(acpt_no)
+    year = str(target_years.get(acpt_no) or "").strip()
+    if len(year) != 4 or not year.isdigit():
+        raise ValueError(f"target year is required for disclosure HTML: {acpt_no}")
     return output_directory / year / filename
 
 
@@ -305,7 +312,7 @@ def _validate_html_output_directory_files(
     output_directory: Path,
     acpt_numbers: list[str],
     *,
-    target_years: dict[str, str] | None = None,
+    target_years: dict[str, str],
     allow_unexpected: bool = False,
 ) -> dict[str, Any]:
     if not output_directory.exists():
@@ -362,7 +369,7 @@ def _validate_html_output_directory_files(
     allowed_paths.update(
         output_directory / filename for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
     )
-    for year in set((target_years or {}).values()):
+    for year in set(target_years.values()):
         allowed_paths.update(
             output_directory / year / filename
             for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
@@ -424,7 +431,7 @@ def _delete_unexpected_html_output_directory_files(
     output_directory: Path,
     acpt_numbers: list[str],
     *,
-    target_years: dict[str, str] | None = None,
+    target_years: dict[str, str],
     dry_run: bool = False,
 ) -> dict[str, Any]:
     if not output_directory.exists():
@@ -455,7 +462,7 @@ def _delete_unexpected_html_output_directory_files(
     allowed_paths.update(
         output_directory / filename for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
     )
-    for year in set((target_years or {}).values()):
+    for year in set(target_years.values()):
         allowed_paths.update(
             output_directory / year / filename
             for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES

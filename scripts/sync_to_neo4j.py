@@ -101,8 +101,8 @@ def main():
                 n.type = row.type,
                 n.group = row.group,
                 n.tags = row.tags,
-                n.riskLevel = COALESCE(row.riskLevel, 'low'),
-                n.riskDescription = COALESCE(row.riskDescription, '')
+                n.riskLevel = row.riskLevel,
+                n.riskDescription = row.riskDescription
             WITH n, row
             // Set dynamic properties
             UNWIND keys(row.properties) AS prop_key
@@ -118,8 +118,8 @@ def main():
                 n.type = row.type,
                 n.group = row.group,
                 n.tags = row.tags,
-                n.riskLevel = COALESCE(row.riskLevel, 'low'),
-                n.riskDescription = COALESCE(row.riskDescription, '')
+                n.riskLevel = row.riskLevel,
+                n.riskDescription = row.riskDescription
             // Set nested properties keys as flat values
             SET n += row.properties
             """

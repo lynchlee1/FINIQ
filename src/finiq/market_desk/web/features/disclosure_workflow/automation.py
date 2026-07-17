@@ -30,6 +30,9 @@ from finiq.market_desk.web.features.disclosures.internal_html_download import (
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
 )
+from finiq.market_desk.web.features.disclosures.html_common import (
+    _year_from_disclosure,
+)
 from finiq.market_desk.web.features.disclosures.external_compact import (
     _verify_compressed_external_html_files,
 )
@@ -1485,9 +1488,7 @@ def _active_disclosure_targets(filtered_path: Path) -> list[tuple[str, str]]:
         if not acpt_no or acpt_no in seen:
             continue
         disclosed_at = str(record.get("disclosed_at") or "")
-        year = disclosed_at[:4] if len(disclosed_at) >= 4 and disclosed_at[:4].isdigit() else acpt_no[:4]
-        if len(year) != 4 or not year.isdigit():
-            raise ValueError(f"공시 연도를 확인할 수 없습니다: {acpt_no}")
+        year = _year_from_disclosure(acpt_no, {"disclosed_at": disclosed_at})
         targets.append((acpt_no, year))
         seen.add(acpt_no)
     return targets

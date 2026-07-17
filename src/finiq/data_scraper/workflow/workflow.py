@@ -40,6 +40,7 @@ from finiq.data_scraper.core.payload import (
     KindDisclosureGroup,
     KindSearchFormData,
     _iter_search_filter_items,
+    _split_disclosure_group_field_name,
     build_search_form,
 )
 from finiq.data_scraper.storage.result_files import (
@@ -130,6 +131,19 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
     if not search_filters_are_valid:
         raise ValueError(
             "kind_workflow.input.json search_filters must be an object of strings or a string key-value list"
+        )
+    unsupported_disclosure_fields = sorted(
+        {
+            key
+            for key, _value in _iter_search_filter_items(search_filters)
+            if _split_disclosure_group_field_name(key) is not None
+        }
+    )
+    if unsupported_disclosure_fields:
+        raise ValueError(
+            "kind_workflow.input.json search_filters must not contain disclosure type fields; "
+            "use disclosure_type_groups: "
+            + ", ".join(unsupported_disclosure_fields)
         )
     disclosure_groups = snapshot["disclosure_type_groups"]
     disclosure_groups_are_valid = disclosure_groups is None or (

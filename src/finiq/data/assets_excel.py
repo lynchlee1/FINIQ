@@ -708,6 +708,18 @@ def _preview_metadata(raw_frame: pd.DataFrame, source_label: str) -> dict[str, s
     return metadata
 
 
+def _parse_quanti_dates(raw_dates: pd.Series, sheet_name: str) -> pd.Series:
+    parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
+    populated_date_mask = raw_dates.notna() & raw_dates.astype(str).str.strip().ne("")
+    invalid_date_mask = populated_date_mask & parsed_dates.isna()
+    if invalid_date_mask.any():
+        invalid_values = [str(value) for value in raw_dates.loc[invalid_date_mask].head(5)]
+        raise _QuantiDataValidationError(
+            f"Invalid date values in sheet {sheet_name}: {', '.join(invalid_values)}"
+        )
+    return parsed_dates.dt.date
+
+
 def _read_quanti_preview_sheet(
     xlsx_path: Path,
     sheet_name: str,
@@ -752,7 +764,7 @@ def _read_quanti_preview_sheet(
     )
     data_columns = [0, *[position + 1 for position in valid_positions]]
     data = raw_frame.iloc[date_header_row + 1 :, data_columns].copy()
-    dates = pd.to_datetime(data.iloc[:, 0], errors="coerce").dt.date
+    dates = _parse_quanti_dates(data.iloc[:, 0], sheet_name)
     preview_codes = [codes[position] for position in valid_positions]
     values = data.iloc[:, 1:].copy()
     values.columns = preview_codes
@@ -819,15 +831,7 @@ def _read_quanti_wide_sheet_with_mapping(
     data_columns = [0, *[position + 1 for position in valid_positions]]
     data = raw_frame.iloc[date_header_row + 1 :, data_columns].copy()
     raw_dates = data.iloc[:, 0]
-    parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
-    populated_date_mask = raw_dates.notna() & raw_dates.astype(str).str.strip().ne("")
-    invalid_date_mask = populated_date_mask & parsed_dates.isna()
-    if invalid_date_mask.any():
-        invalid_values = [str(value) for value in raw_dates.loc[invalid_date_mask].head(5)]
-        raise _QuantiDataValidationError(
-            f"Invalid date values in sheet {sheet_name}: {', '.join(invalid_values)}"
-        )
-    dates = parsed_dates.dt.date
+    dates = _parse_quanti_dates(raw_dates, sheet_name)
     duplicate_codes = sorted(
         code for code in set(codes) if code and codes.count(code) > 1
     )

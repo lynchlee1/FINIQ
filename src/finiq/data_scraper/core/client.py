@@ -51,14 +51,11 @@ def _save_response_content(output_path: Path, response: requests.Response) -> No
 
 
 def _is_valid_html(path: Path) -> bool:
-    """Check if the saved file is a valid HTML (basic check)."""
+    """저장 파일에 HTML 또는 KIND 뷰어 식별자가 있는지 확인한다."""
     if not path.exists():
-        return False
-    if path.stat().st_size < 100:  # Too small to be a valid KIND external HTML
         return False
     try:
         content = path.read_text(encoding="utf-8", errors="ignore")
-        # Basic check for HTML or KIND specific content
         return "<html" in content.lower() or "openDisclsViewer" in content
     except Exception:
         return False
@@ -648,7 +645,7 @@ def download_disclosure_external_htmls(
             return None
 
         output_path = output_directory / _build_viewer_html_filename(acpt_no)
-        
+
         if skip_existing and _is_valid_html(output_path):
             _report_progress(progress_callback, f"Skipping existing KIND external HTML: {output_path}")
             with lock:

@@ -147,14 +147,6 @@ def _normalize_disclosure_type_group_value(group_value: DisclosureTypeGroupValue
     return [code.strip() for code in raw_codes if str(code).strip()]
 
 
-def _normalize_disclosure_codes(values: Sequence[str]) -> list[str]:
-    """여러 형식으로 들어온 공시 code를 하나의 code list로 합친다."""
-    normalized_codes: list[str] = []
-    for value in values:
-        normalized_codes.extend(_normalize_disclosure_type_group_value(value))
-    return normalized_codes
-
-
 def _split_disclosure_group_field_name(field_name: str) -> tuple[str, str] | None:
     """공시유형 관련 field name을 prefix와 suffix로 분리한다."""
     for prefix in _DISCLOSURE_GROUP_FIELD_PREFIXES:
@@ -205,45 +197,6 @@ class KindDisclosureGroup:
     def repeated_field(self) -> str:
         """반복 전송용 공시유형 array field name을 만든다."""
         return f"disclosureTypeArr{self.suffix}"
-
-
-def _pop_disclosure_group_overrides(
-    grouped_raw_filters: dict[str, list[str]],
-) -> list[KindDisclosureGroup]:
-    """raw override에서 공시유형 3종 세트를 추출해 group object로 바꾼다.
-
-    `disclosureTypeXX`, `pDisclosureTypeXX`, `disclosureTypeArrXX`는
-    서로 독립적으로 남겨두지 않고 같은 suffix 기준으로 다시 묶는다.
-    """
-    grouped_fields_by_suffix: dict[str, dict[str, list[str]]] = {}
-    disclosure_group_keys: list[str] = []
-
-    for key, values in grouped_raw_filters.items():
-        group_field = _split_disclosure_group_field_name(key)
-        if group_field is None:
-            continue
-        prefix, suffix = group_field
-        grouped_fields_by_suffix.setdefault(suffix, {})[prefix] = values
-        disclosure_group_keys.append(key)
-
-    for key in disclosure_group_keys:
-        grouped_raw_filters.pop(key, None)
-
-    disclosure_groups: list[KindDisclosureGroup] = []
-    for suffix, grouped_fields in grouped_fields_by_suffix.items():
-        raw_codes = (
-            grouped_fields.get("disclosureTypeArr")
-            or grouped_fields.get("disclosureType")
-            or grouped_fields.get("pDisclosureType")
-            or []
-        )
-        disclosure_groups.append(
-            KindDisclosureGroup(
-                suffix=suffix,
-                codes=_normalize_disclosure_codes(raw_codes),
-            )
-        )
-    return disclosure_groups
 
 
 @dataclass(slots=True)
@@ -300,14 +253,23 @@ class KindSearchPayload:
     ) -> None:
         """raw override를 마지막에 적용해 payload를 덮어쓴다.
 
-        일반 field는 단일 값과 반복 값을 구분해서 교체하고,
-        공시유형 관련 field는 부분 수정이 들어와도 다시 3종 set로 맞춘다.
+        일반 field는 단일 값과 반복 값을 구분해서 교체한다.
+        공시유형은 structured `disclosure_type_groups`로만 받는다.
         """
         grouped_raw_filters = _group_form_items(_iter_search_filter_items(search_filters))
         if not grouped_raw_filters:
             return
-
-        disclosure_group_overrides = _pop_disclosure_group_overrides(grouped_raw_filters)
+        unsupported_disclosure_fields = sorted(
+            key
+            for key in grouped_raw_filters
+            if _split_disclosure_group_field_name(key) is not None
+        )
+        if unsupported_disclosure_fields:
+            raise ValueError(
+                "disclosure type fields are not supported in search_filters; "
+                "use disclosure_type_groups: "
+                + ", ".join(unsupported_disclosure_fields)
+            )
 
         grouped_repeated_fields = _group_form_items(self.repeated_fields)
         repeated_field_order = _ordered_form_keys(self.repeated_fields)
@@ -327,9 +289,6 @@ class KindSearchPayload:
             for key in repeated_field_order
             for value in grouped_repeated_fields.get(key, [])
         ]
-
-        for disclosure_group in disclosure_group_overrides:
-            self.apply_disclosure_group(disclosure_group)
 
     def to_form_data(self) -> KindSearchFormData:
         """최종 payload를 request 전송용 form data로 serialize한다."""

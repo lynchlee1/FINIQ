@@ -464,7 +464,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
                     {Object.entries(selectedNode.properties).map(([key, value]) => (
                       <div key={key}>
                         <dt className="text-xs text-slate-500">{key}</dt>
-                        <dd className="ontology-mono-wrap mt-0.5 font-semibold text-slate-200">{String(value || "-")}</dd>
+                        <dd className="ontology-mono-wrap mt-0.5 font-semibold text-slate-200">{String(value === null || value === undefined || value === "" ? "-" : value)}</dd>
                       </div>
                     ))}
                   </dl>

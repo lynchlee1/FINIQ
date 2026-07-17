@@ -41,8 +41,19 @@ def _external_workspace_body(
     data_root = tmp_path / "workspace"
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_source_json = dict(source_json)
+    if isinstance(source_json.get("disclosures"), list):
+        normalized_source_json["disclosures"] = [
+            {
+                **disclosure,
+                "disclosed_at": disclosure.get("disclosed_at")
+                or f"{str(disclosure.get('acpt_no') or '')[:4]}-01-01",
+            }
+            for disclosure in source_json["disclosures"]
+            if isinstance(disclosure, dict)
+        ]
     filtered_path.write_text(
-        json.dumps({"format": "kind_disclosure_filter_v1", **source_json}),
+        json.dumps({"format": "kind_disclosure_filter_v1", **normalized_source_json}),
         encoding="utf-8",
     )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
@@ -544,6 +555,23 @@ def test_disclosure_filter_workflows_ignore_obsolete_filter_result_json(tmp_path
     assert payload["presets"] == []
 
 
+def test_disclosure_filter_workflows_read_format_after_one_mib(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root, name="large")
+    workflow_path = data_root / "03-filter" / "large.json"
+    document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow_path.write_text(
+        json.dumps({"padding": "x" * (1024 * 1024 + 1), **document}),
+        encoding="utf-8",
+    )
+
+    payload = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "list"}
+    )
+
+    assert [preset["name"] for preset in payload["presets"]] == ["large"]
+
+
 def test_disclosure_filter_presets_are_saved_as_named_workspace_json(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
     preset = {
@@ -930,10 +958,10 @@ def test_internal_html_download_check_existing_route_uses_compressed_json_year(
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "year": "2025",
-                        "selected_main_doc_no": "20250101000999",
+                        {
+                            "acpt_no": "20250101000001",
+                            "selected_main_doc_no": "20250101000999",
+                            "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
             }
@@ -974,10 +1002,10 @@ def test_internal_html_check_existing_route_uses_workspace_defaults(
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "year": "2025",
-                        "selected_main_doc_no": "20250101000999",
+                        {
+                            "acpt_no": "20250101000001",
+                            "selected_main_doc_no": "20250101000999",
+                            "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
             }
@@ -1017,10 +1045,10 @@ def test_internal_html_download_check_existing_route_finds_yearly_output(
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "year": "2025",
-                        "selected_main_doc_no": "20250101000999",
+                        {
+                            "acpt_no": "20250101000001",
+                            "selected_main_doc_no": "20250101000999",
+                            "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
             }

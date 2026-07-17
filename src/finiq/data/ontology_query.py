@@ -66,6 +66,14 @@ class OntologyGraphQueryService:
         nodes_list = data.get("nodes", [])
         edges_list = data.get("edges", [])
         nodes_index = {node["id"]: node for node in nodes_list}
+        dangling_edges = [
+            edge
+            for edge in edges_list
+            if edge["source"] not in nodes_index or edge["target"] not in nodes_index
+        ]
+        if dangling_edges:
+            edge_ids = ", ".join(str(edge.get("id") or "<missing id>") for edge in dangling_edges[:10])
+            raise ValueError(f"Ontology graph edges reference missing nodes: {edge_ids}")
         adjacency = {node_id: [] for node_id in nodes_index}
 
         for edge in edges_list:

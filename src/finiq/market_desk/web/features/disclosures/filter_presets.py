@@ -19,8 +19,6 @@ FILTER_WORKFLOW_FORMAT = "finiq_disclosure_filter_workflow"
 FILTER_WORKFLOW_DIRECTORY_FORMAT = "finiq_disclosure_filter_workflow_directory"
 FILTER_WORKFLOW_STATUSES = {"ready", "running", "completed", "failed"}
 FILTER_STEP_STATUSES = {"pending", "running", "completed", "failed"}
-_FILTER_HEADER_LIMIT = 1024 * 1024
-_FILTER_HEADER_CHUNK_SIZE = 64 * 1024
 _WORKFLOWS_LOCK = threading.RLock()
 
 
@@ -59,67 +57,13 @@ def _utc_now() -> str:
 
 
 def _read_format_header(path: Path) -> object:
-    decoder = json.JSONDecoder()
-    buffer = ""
-    position = 0
-
     try:
-        with path.open("r", encoding="utf-8") as source:
-            def decode_value() -> tuple[Any, int]:
-                nonlocal buffer
-                while True:
-                    try:
-                        return decoder.raw_decode(buffer, position)
-                    except json.JSONDecodeError as exc:
-                        chunk = source.read(_FILTER_HEADER_CHUNK_SIZE)
-                        if not chunk or len(buffer) + len(chunk) > _FILTER_HEADER_LIMIT:
-                            raise ValueError(
-                                f"Invalid disclosure filter workflow JSON: {path}"
-                            ) from exc
-                        buffer += chunk
-
-            buffer = source.read(_FILTER_HEADER_CHUNK_SIZE)
-            if not buffer:
-                raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
-            while position < len(buffer) and buffer[position].isspace():
-                position += 1
-            if position >= len(buffer) or buffer[position] != "{":
-                raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
-            position += 1
-
-            while True:
-                while position < len(buffer) and buffer[position].isspace():
-                    position += 1
-                if position < len(buffer) and buffer[position] == "}":
-                    return None
-                key, position = decode_value()
-                if not isinstance(key, str):
-                    raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
-                while position < len(buffer) and buffer[position].isspace():
-                    position += 1
-                if position >= len(buffer) or buffer[position] != ":":
-                    raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
-                position += 1
-                while position < len(buffer) and buffer[position].isspace():
-                    position += 1
-                value, position = decode_value()
-                if key == "format":
-                    return value
-                while position < len(buffer) and buffer[position].isspace():
-                    position += 1
-                if position >= len(buffer):
-                    chunk = source.read(_FILTER_HEADER_CHUNK_SIZE)
-                    if not chunk or len(buffer) + len(chunk) > _FILTER_HEADER_LIMIT:
-                        raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
-                    buffer += chunk
-                if buffer[position] == ",":
-                    position += 1
-                elif buffer[position] == "}":
-                    return None
-                else:
-                    raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
-    except (OSError, UnicodeDecodeError) as exc:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Invalid disclosure filter workflow JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
+    return payload.get("format")
 
 
 def _required_step(steps: object, name: str) -> dict[str, Any]:

@@ -24,9 +24,8 @@ def test_detect_pagination_rejects_latest_page_when_it_is_corrupt(
         else None,
     )
 
-    result = _detect_pagination(tmp_path)
-
-    assert result is None
+    with pytest.raises(ValueError, match="pagination not found"):
+        _detect_pagination(tmp_path)
 
 
 def test_detect_pagination_sorts_four_digit_pages_numerically(
