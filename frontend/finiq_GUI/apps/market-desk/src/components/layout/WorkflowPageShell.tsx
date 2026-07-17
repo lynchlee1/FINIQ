@@ -9,6 +9,8 @@ type WorkflowPageShellProps = {
 };
 
 export function WorkflowPageShell({ workflowId, tabs, children }: WorkflowPageShellProps) {
+  if (workflowId === "disclosure-build") return <>{children}</>;
+
   const resolvedTabs = tabs ?? (workflowId ? getWorkflowTabs(workflowId) : []);
   const sidebar = workflowId ? getSidebarDefinition(workflowId) : { title: "작업 메뉴", groups: [{ label: "Workflow", steps: resolvedTabs }] };
 

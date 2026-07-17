@@ -5,9 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
-import { WorkflowSidebar } from "@finiq/web-app/workflow";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-import { getSidebarDefinition, type WorkflowId } from "@/config/navigation";
 
 export const htmlControlClassName = "text-body h-10 border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)] placeholder:text-[var(--tv-subtle)]";
 export const htmlSelectTriggerClassName = htmlControlClassName;
@@ -17,7 +15,6 @@ export const htmlInsetPanelClassName = "rounded-lg border border-[color:var(--tv
 export const htmlTableFrameClassName = "max-h-80 overflow-auto rounded-md border border-[color:var(--tv-border)]";
 
 type HtmlWorkflowPageProps = {
-  workflowId?: WorkflowId;
   eyebrow?: string;
   title: string;
   description: string;
@@ -122,7 +119,6 @@ type HtmlWorkflowFormProps = {
 };
 
 export function HtmlWorkflowPage({
-  workflowId = "html-processing",
   eyebrow: _eyebrow = "HTML Workflow",
   title: _title,
   description: _description,
@@ -130,21 +126,16 @@ export function HtmlWorkflowPage({
   actions,
   children,
 }: HtmlWorkflowPageProps) {
-  const sidebar = getSidebarDefinition(workflowId);
-
   return (
-    <main className="grid w-full gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
-      <WorkflowSidebar title={sidebar.title} groups={sidebar.groups} />
-      <div className="min-w-0 flex flex-col gap-6">
-        {(actions || notice) ? (
-          <section className={htmlPageNoticeClassName}>
-            {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-            {notice ? <div className={actions ? "mt-4" : ""}>{notice}</div> : null}
-          </section>
-        ) : null}
-        {children}
-      </div>
-    </main>
+    <>
+      {(actions || notice) ? (
+        <section className={htmlPageNoticeClassName}>
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+          {notice ? <div className={actions ? "mt-4" : ""}>{notice}</div> : null}
+        </section>
+      ) : null}
+      {children}
+    </>
   );
 }
 

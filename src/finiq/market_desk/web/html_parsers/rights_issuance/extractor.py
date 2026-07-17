@@ -12,17 +12,23 @@ from ..common import (
     parse_ints,
     row_contains,
 )
-from .utils import STOCK_LABELS, _RightsParseContext
+from .utils import (
+    STOCK_LABELS,
+    _RightsParseContext,
+    _RightsRows,
+    _is_rights_section_marker_row,
+    _label_cell_matches,
+)
 
 RIGHTS_FIELD_EXTRACTION_RULES = {
-    "신주의 종류와 수": "메인 표 > '신주의 종류와 수' 행 > 주식 종류별 마지막 숫자",
-    "증자 전 발행주식총수": "메인 표 > '증자전 발행주식총수' 행 > 주식 종류별 마지막 숫자",
-    "발행목적": "메인 표 > '자금조달의 목적' 행 > 목적별 마지막 숫자",
-    "발행가액": "메인 표 > '신주 발행가액' 행 > 주식 종류별 마지막 숫자",
-    "증자방식": "메인 표 > '증자방식' 행 > 마지막 값",
-    "납입일": "메인 표 > '납입일' 라벨 행 > 마지막 값",
-    "신주권교부예정일": "메인 표 > '신주권교부예정일' 라벨 행 > 마지막 값",
-    "상장예정일": "메인 표 > '신주의 상장 예정일'|'신주의 상장예정일' 라벨 행 > 마지막 값",
+    "신주의 종류와 수": "메인 표 > N=1 '신주의 종류와 수' + N=2 주식 종류 행 > 마지막 값",
+    "증자 전 발행주식총수": "메인 표 > N=1 '증자전 발행주식총수' + N=2 주식 종류 행 > 마지막 값",
+    "발행목적": "메인 표 > N=1 '자금조달의 목적' 행 > N=2 목적명 + 마지막 값",
+    "발행가액": "메인 표 > N=1 '신주 발행가액' + 고정 주식 종류 칸 행 > 마지막 값",
+    "증자방식": "메인 표 > N=1 '증자방식' 행 > 마지막 값",
+    "납입일": "메인 표 > N=1 '납입일' 행 > 마지막 값",
+    "신주권교부예정일": "메인 표 > N=1 '신주권교부예정일' 행 > 마지막 값",
+    "상장예정일": "메인 표 > N=1 '신주의 상장 예정일' 행 > 마지막 값",
     "발행대상자": "'제3자배정 대상자' 표 > 대상자명 + 배정주식수",
 }
 ISSUE_TARGET_TOTAL_LABEL_TOKENS = {"계", "합계", "소계", "총계"}
@@ -37,6 +43,8 @@ ISSUANCE_TYPE_LABELS = {
     "mixed": "유무상증자",
     "unknown": "unknown",
 }
+StockLayout = tuple[int, tuple[tuple[int, tuple[str, ...]], ...]]
+StockLayouts = tuple[StockLayout, ...]
 
 
 class RightsIssuanceExtractor:
@@ -54,13 +62,18 @@ class RightsIssuanceExtractor:
 
     def get_stock_types_and_counts(self) -> list[list[Any]]:
         """신주의 종류별 발행 수량을 보통주/기타주식 순서로 추출한다."""
-        return self._stock_values("신주의 종류와 수")
+        return self._stock_values(
+            ("신주의 종류와 수",),
+            field_name="신주의 종류와 수",
+            unit="주",
+        )
 
     def get_pre_issuance_stock_counts(self) -> list[list[Any]]:
         """증자 전 발행주식총수를 주식 종류별로 추출한다."""
         return self._stock_values(
-            "증자전 발행주식총수",
-            warning_field_name="증자 전 발행주식총수",
+            ("증자전 발행주식총수 (주)", "증자전 발행주식총수"),
+            field_name="증자 전 발행주식총수",
+            unit="주",
         )
 
     def get_funding_purposes(self) -> list[list[Any]] | str | None:
@@ -70,12 +83,13 @@ class RightsIssuanceExtractor:
             return "-"
         purposes: list[list[Any]] = []
         found_purpose_amount = False
-        for row in self.rows.values:
-            purpose_index = self._funding_purpose_index(row)
-            if purpose_index is None or purpose_index + 1 >= len(row):
+        for row in self._top_level_rows().matching_rows(
+            1, ("자금조달의 목적",)
+        ):
+            if len(row) < 3:
                 continue
-            label = self._clean_funding_purpose_label(row[purpose_index + 1])
-            value = self._funding_purpose_amount(row, purpose_index)
+            label = self._clean_funding_purpose_label(row[1])
+            value = self._funding_purpose_amount(row)
             if value is not None:
                 found_purpose_amount = True
             if label and value:
@@ -168,9 +182,13 @@ class RightsIssuanceExtractor:
             self._set_field_status("발행가액", "not_applicable")
             return "-"
         return self._stock_values(
-            "신주 발행가액",
-            warning_field_name="발행가액",
-            prefer_positive_after_zero=False,
+            ("신주 발행가액",),
+            field_name="발행가액",
+            unit="원",
+            stock_layouts=(
+                (2, ()),
+                (3, ((2, ("확정발행가",)),)),
+            ),
         )
 
     def get_issue_method(self) -> str | None:
@@ -178,7 +196,7 @@ class RightsIssuanceExtractor:
         if self.context.issuance_type == "bonus":
             self._set_field_status("증자방식", "not_applicable")
             return "-"
-        value = self.rows.last_value("증자방식")
+        value = self._top_level_rows().last_value_at(1, ("증자방식",))
         self._warn_if_missing("증자방식", value)
         if value is not None:
             self._set_field_status("증자방식", "parsed")
@@ -189,7 +207,7 @@ class RightsIssuanceExtractor:
         if self.context.issuance_type == "bonus":
             self._set_field_status("납입일", "not_applicable")
             return "-"
-        value = self.rows.last_value("납입일")
+        value = self._top_level_rows().last_value_at(1, ("납입일",))
         self._warn_if_missing("납입일", value)
         self._set_field_status(
             "납입일", "parsed" if value is not None else "source_not_found"
@@ -198,7 +216,7 @@ class RightsIssuanceExtractor:
 
     def get_delivery_date(self) -> str | None:
         """신주권교부예정일을 추출한다."""
-        value = self.rows.last_value("신주권교부예정일")
+        value = self._top_level_rows().last_value_at(1, ("신주권교부예정일",))
         self._warn_if_missing("신주권교부예정일", value)
         self._set_field_status(
             "신주권교부예정일", "parsed" if value is not None else "source_not_found"
@@ -207,7 +225,7 @@ class RightsIssuanceExtractor:
 
     def get_listing_date(self) -> str | None:
         """신주의 상장 예정일을 추출한다."""
-        value = self.rows.last_value("신주의 상장 예정일")
+        value = self._top_level_rows().last_value_at(1, ("신주의 상장 예정일",))
         self._warn_if_missing("상장예정일", value)
         self._set_field_status(
             "상장예정일", "parsed" if value is not None else "source_not_found"
@@ -295,9 +313,12 @@ class RightsIssuanceExtractor:
                 "발행목적": funding_purposes,
                 "발행가액": issue_prices,
                 "증자방식": issue_method,
-                "신주배정기준일": self._section_last_value(paid_rows, "신주배정기준일"),
+                "신주배정기준일": self._section_last_value(
+                    paid_rows, ("신주배정기준일",)
+                ),
                 "1주당 신주배정주식수": self._section_stock_text_values(
-                    paid_rows, "1주당 신주배정"
+                    paid_rows,
+                    ("1주당 신주배정주식수 (주)", "1주당 신주배정주식수"),
                 ),
                 "납입일": payment_date,
                 "신주권교부예정일": delivery_date,
@@ -308,22 +329,24 @@ class RightsIssuanceExtractor:
             bonus_rows = self._rows_for_issuance_section("bonus")
             bonus_detail = {
                 "신주의 종류와 수": self._section_stock_int_values(
-                    bonus_rows, "신주의 종류와 수"
+                    bonus_rows, ("신주의 종류와 수",)
                 ),
                 "증자 전 발행주식총수": self._section_stock_int_values(
-                    bonus_rows, "증자전 발행주식총수"
+                    bonus_rows,
+                    ("증자전 발행주식총수 (주)", "증자전 발행주식총수"),
                 ),
                 "신주배정기준일": self._section_last_value(
-                    bonus_rows, "신주배정기준일"
+                    bonus_rows, ("신주배정기준일",)
                 ),
                 "1주당 신주배정주식수": self._section_stock_text_values(
-                    bonus_rows, "1주당 신주배정"
+                    bonus_rows,
+                    ("1주당 신주배정주식수 (주)", "1주당 신주배정주식수"),
                 ),
                 "신주권교부예정일": self._section_last_value(
-                    bonus_rows, "신주권교부예정일"
+                    bonus_rows, ("신주권교부예정일",)
                 ),
                 "상장예정일": self._section_last_value(
-                    bonus_rows, "신주의 상장 예정일"
+                    bonus_rows, ("신주의 상장 예정일",)
                 ),
             }
         return issuance_label, paid_detail, bonus_detail
@@ -384,57 +407,58 @@ class RightsIssuanceExtractor:
             return rows
         return []
 
+    def _top_level_rows(self) -> _RightsRows:
+        section = "bonus" if self.context.issuance_type == "bonus" else "paid"
+        return _RightsRows(self._rows_for_issuance_section(section))
+
     def _bonus_section_index(self, rows: list[list[str]]) -> int | None:
         for index, row in enumerate(rows):
-            if row_contains(row, "무상증자") and not row_contains(row, "유무상증자"):
+            if _is_rights_section_marker_row(row) and _label_cell_matches(
+                row, 1, ("무상증자",)
+            ):
                 return index
         return None
 
-    def _section_last_value(self, rows: list[list[str]], *needles: str) -> str | None:
-        for row in rows:
-            if row_contains(row, *needles):
-                return row[-1]
-        return None
+    def _section_last_value(
+        self, rows: list[list[str]], labels: tuple[str, ...]
+    ) -> str | None:
+        return _RightsRows(rows).last_value_at(1, labels)
 
     def _section_stock_int_values(
-        self, rows: list[list[str]], section_label: str
+        self, rows: list[list[str]], section_labels: tuple[str, ...]
     ) -> list[list[Any]]:
         values: list[list[Any]] = []
         for output_label, source_labels in STOCK_LABELS.items():
-            parsed = self._section_stock_int_value(rows, section_label, source_labels)
+            parsed = self._section_stock_int_value(
+                rows, section_labels, source_labels
+            )
             values.append([output_label, parsed])
         return values
 
     def _section_stock_int_value(
         self,
         rows: list[list[str]],
-        section_label: str,
+        section_labels: tuple[str, ...],
         source_labels: tuple[str, ...],
     ) -> int | None:
-        dash_seen = False
-        for row in rows:
-            if not row_contains(row, section_label):
-                continue
-            for index, cell in enumerate(row):
-                if not any(label in cell.replace(" ", "") for label in source_labels):
-                    continue
-                if index + 1 >= len(row):
-                    continue
-                parsed = parse_int(row[index + 1], dash_as_zero=True)
-                if parsed is None:
-                    continue
-                if parsed == 0:
-                    dash_seen = True
-                    continue
-                return parsed
-        return 0 if dash_seen else None
+        row = self._stock_value_row(
+            _RightsRows(rows),
+            section_labels,
+            source_labels,
+            unit="주",
+            stock_layouts=((2, ()),),
+        )
+        return parse_int(row[-1], dash_as_zero=True) if row else None
 
     def _section_stock_text_values(
-        self, rows: list[list[str]], section_label: str
+        self, rows: list[list[str]], section_labels: tuple[str, ...]
     ) -> list[list[Any]]:
         by_label = {
             output_label: self._section_stock_text_value(
-                rows, section_label, source_labels
+                rows,
+                section_labels,
+                source_labels,
+                scalar_layout=output_label == "보통주식",
             )
             for output_label, source_labels in STOCK_LABELS.items()
         }
@@ -443,41 +467,47 @@ class RightsIssuanceExtractor:
     def _section_stock_text_value(
         self,
         rows: list[list[str]],
-        section_label: str,
+        section_labels: tuple[str, ...],
         source_labels: tuple[str, ...],
+        *,
+        scalar_layout: bool,
     ) -> str | None:
-        for row in rows:
-            if not row_contains(row, section_label):
-                continue
-            for index, cell in enumerate(row):
-                if not any(label in cell.replace(" ", "") for label in source_labels):
-                    continue
-                if index + 1 >= len(row):
-                    continue
-                value = row[index + 1].strip()
-                if value and value != "-":
-                    return value
-        return None
+        rights_rows = _RightsRows(rows)
+        row = self._stock_value_row(
+            rights_rows,
+            section_labels,
+            source_labels,
+            unit="주",
+            stock_layouts=((2, ()),),
+        )
+        if not row and scalar_layout:
+            scalar_row = rights_rows.first_row_at(1, section_labels)
+            row = scalar_row if len(scalar_row) == 2 else []
+        value = row[-1].strip() if row else ""
+        return value if value and value != "-" else None
 
     def _stock_values(
         self,
-        section_label: str,
+        section_labels: tuple[str, ...],
         *,
-        warning_field_name: str | None = None,
-        prefer_positive_after_zero: bool = True,
+        field_name: str,
+        unit: str,
+        stock_layouts: StockLayouts = ((2, ()),),
     ) -> list[list[Any]]:
         """보통주와 기타주식 값을 일관된 순서로 배열하여 반환한다."""
         values: list[list[Any]] = []
         item_statuses: dict[str, str] = {}
+        rows = self._top_level_rows()
         for output_label, source_labels in STOCK_LABELS.items():
             parsed, item_status = self._stock_value_with_status(
-                section_label,
+                rows,
+                section_labels,
                 source_labels,
-                prefer_positive_after_zero=prefer_positive_after_zero,
+                unit=unit,
+                stock_layouts=stock_layouts,
             )
             item_statuses[output_label] = item_status
             values.append([output_label, parsed])
-        field_name = warning_field_name or section_label
         if field_name in STOCK_STATUS_DETAIL_FIELDS:
             self.field_parse_status_detail[field_name] = item_statuses
         if any(isinstance(value, int) and value > 0 for _, value in values):
@@ -496,12 +526,6 @@ class RightsIssuanceExtractor:
                 )
         return values
 
-    def _funding_purpose_index(self, row: list[str]) -> int | None:
-        for index, cell in enumerate(row):
-            if row_contains([cell], "자금조달의 목적"):
-                return index
-        return None
-
     def _clean_funding_purpose_label(self, value: str) -> str | None:
         label = clean_text(value)
         label = re.sub(r"\(\s*원\s*\)", "", label)
@@ -509,44 +533,55 @@ class RightsIssuanceExtractor:
         label = clean_text(label.strip(" -_/·,"))
         return label or None
 
-    def _funding_purpose_amount(
-        self, row: list[str], purpose_index: int
-    ) -> int | None:
-        for cell in reversed(row[purpose_index + 2 :]):
-            parsed = parse_int(cell, dash_as_zero=True)
-            if parsed is not None:
-                return parsed
-        return None
+    def _funding_purpose_amount(self, row: list[str]) -> int | None:
+        return parse_int(row[-1], dash_as_zero=True) if len(row) >= 3 else None
 
     def _stock_value_with_status(
         self,
-        section_label: str,
+        rows: _RightsRows,
+        section_labels: tuple[str, ...],
         source_labels: tuple[str, ...],
         *,
-        prefer_positive_after_zero: bool,
+        unit: str,
+        stock_layouts: StockLayouts,
     ) -> tuple[int | None, str]:
-        """지정 구간에서 주식 종류 라벨 바로 다음 값을 숫자와 상태로 변환한다."""
-        dash_seen = False
-        for row in self.rows.values:
-            if not row_contains(row, section_label):
-                continue
-            for index, cell in enumerate(row):
-                if not any(label in cell.replace(" ", "") for label in source_labels):
-                    continue
-                if index + 1 >= len(row):
-                    continue
-                parsed = parse_int(row[index + 1], dash_as_zero=True)
-                if parsed is None:
-                    continue
-                if parsed == 0:
-                    if not prefer_positive_after_zero:
-                        return 0, "explicit_zero"
-                    dash_seen = True
-                    continue
-                return parsed, "parsed"
-        if dash_seen:
+        """고정 라벨 칸으로 찾은 첫 행의 마지막 값을 숫자와 상태로 변환한다."""
+        row = self._stock_value_row(
+            rows,
+            section_labels,
+            source_labels,
+            unit=unit,
+            stock_layouts=stock_layouts,
+        )
+        parsed = parse_int(row[-1], dash_as_zero=True) if row else None
+        if parsed is None:
+            return None, "source_not_found"
+        if parsed == 0:
             return 0, "explicit_zero"
-        return None, "source_not_found"
+        return parsed, "parsed"
+
+    def _stock_value_row(
+        self,
+        rows: _RightsRows,
+        section_labels: tuple[str, ...],
+        source_labels: tuple[str, ...],
+        *,
+        unit: str,
+        stock_layouts: StockLayouts,
+    ) -> list[str]:
+        stock_labels = tuple(f"{label} ({unit})" for label in source_labels)
+        for stock_cell, additional_label_cells in stock_layouts:
+            row = rows.first_row_at(
+                1,
+                section_labels,
+                additional_label_cells=(
+                    *additional_label_cells,
+                    (stock_cell, stock_labels),
+                ),
+            )
+            if row:
+                return row
+        return []
 
     def _stock_value_total(
         self, stock_counts: list[list[Any]], issue_prices: list[list[Any]] | str

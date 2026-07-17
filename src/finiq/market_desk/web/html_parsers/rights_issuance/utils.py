@@ -8,10 +8,9 @@ from typing import Any
 
 from ..common import (
     build_base_record,
-    last_value,
+    clean_text,
     normalize_label,
     row_contains,
-    row_containing,
 )
 
 MODE = "rights_issuance"
@@ -54,12 +53,66 @@ class _RightsRows:
 
     values: list[list[str]]
 
-    def containing(self, *needles: str) -> list[str]:
-        return row_containing(self.values, *needles)
+    def matching_rows(
+        self,
+        label_cell: int,
+        labels: tuple[str, ...],
+        *,
+        additional_label_cells: tuple[tuple[int, tuple[str, ...]], ...] = (),
+    ) -> list[list[str]]:
+        """고정 위치의 정규화된 라벨이 일치하는 행만 반환한다."""
+        return [
+            row
+            for row in self.values
+            if _label_cell_matches(row, label_cell, labels)
+            and all(
+                _label_cell_matches(row, cell_number, cell_labels)
+                for cell_number, cell_labels in additional_label_cells
+            )
+        ]
 
-    def last_value(self, *needles: str) -> str | None:
-        row = self.containing(*needles)
-        return last_value(row) if len(row) > 1 else None
+    def first_row_at(
+        self,
+        label_cell: int,
+        labels: tuple[str, ...],
+        *,
+        additional_label_cells: tuple[tuple[int, tuple[str, ...]], ...] = (),
+    ) -> list[str]:
+        """고정 위치의 라벨이 일치하는 첫 행을 반환한다."""
+        rows = self.matching_rows(
+            label_cell,
+            labels,
+            additional_label_cells=additional_label_cells,
+        )
+        return rows[0] if rows else []
+
+    def last_value_at(
+        self,
+        label_cell: int,
+        labels: tuple[str, ...],
+        *,
+        additional_label_cells: tuple[tuple[int, tuple[str, ...]], ...] = (),
+    ) -> str | None:
+        """고정 위치의 라벨이 일치하는 첫 행의 맨 오른쪽 값을 반환한다."""
+        row = self.first_row_at(
+            label_cell,
+            labels,
+            additional_label_cells=additional_label_cells,
+        )
+        return row[-1] if len(row) > label_cell else None
+
+
+def _label_cell_matches(
+    row: list[str],
+    cell_number: int,
+    labels: tuple[str, ...],
+) -> bool:
+    index = cell_number - 1
+    if index < 0 or index >= len(row):
+        return False
+    value = normalize_label(clean_text(row[index]))
+    normalized_labels = tuple(normalize_label(label) for label in labels)
+    return value in normalized_labels
 
 
 def _build_rights_parse_context(
@@ -103,7 +156,7 @@ def _is_rights_extraction_table(rows: list[list[str]]) -> bool:
         return True
     return any(
         len(row) >= 2
-        and any(row_contains([row[0]], label) for label in _RIGHTS_PRIMARY_FIELD_LABELS)
+        and _label_cell_matches(row, 1, _RIGHTS_PRIMARY_FIELD_LABELS)
         for row in rows
     )
 
