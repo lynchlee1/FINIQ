@@ -6,6 +6,10 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import ts from "../../frontend/node_modules/typescript/lib/typescript.js";
 
+const appFramePath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/AppFrame.tsx";
+const workflowPageShellPath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/WorkflowPageShell.tsx";
+const htmlWorkflowTemplatePath = "frontend/finiq_GUI/apps/market-desk/src/components/html-workflow/HtmlWorkflowTemplate.tsx";
+
 async function loadNavigation() {
   const sourcePath = path.resolve("frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts");
   const source = await readFile(sourcePath, "utf8");
@@ -102,4 +106,18 @@ test("price data pages use short page titles without repeating the top-level men
 
   assert.equal(getPageTitle("/utility/assets-excel"), "Excel 미리보기");
   assert.equal(getPageTitle("/utility/assets-excel/merge"), "Parquet 병합하기");
+});
+
+test("disclosure navigation stays mounted while route content changes", async () => {
+  const [appFrameSource, workflowShellSource, htmlTemplateSource] = await Promise.all([
+    readFile(appFramePath, "utf8"),
+    readFile(workflowPageShellPath, "utf8"),
+    readFile(htmlWorkflowTemplatePath, "utf8"),
+  ]);
+
+  assert.match(appFrameSource, /activeItem\?\.workflowId === "disclosure-build"/);
+  assert.match(appFrameSource, /<WorkflowSidebar title=\{sidebar\.title\} groups=\{sidebar\.groups\} \/>/);
+  assert.match(appFrameSource, /data-testid="persistent-disclosure-layout"/);
+  assert.match(workflowShellSource, /workflowId === "disclosure-build"[\s\S]*?return <>{children}<\/>/);
+  assert.doesNotMatch(htmlTemplateSource, /<WorkflowSidebar/);
 });
