@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Play, Loader2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
@@ -85,6 +85,9 @@ export default function FilterPage() {
   const [progressInterval, setProgressInterval] = useState("1000");
   const [result, setResult] = useState<FilterResult | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
+  const presetListRequestIdRef = useRef(0);
+  const currentDataRootRef = useRef(rootDirectory);
+  currentDataRootRef.current = rootDirectory;
 
   useEffect(() => {
     fetchSettings().then((config) => {
@@ -105,13 +108,18 @@ export default function FilterPage() {
   }, [fetchSettings, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
+    const requestId = ++presetListRequestIdRef.current;
+    setPresets([]);
+    setSelectedPreset("");
+    setPresetName("");
     if (!rootDirectory?.trim()) {
-      setPresets([]);
       return;
     }
     listDisclosureConditionPresets(rootDirectory).then((response) => {
+      if (requestId !== presetListRequestIdRef.current) return;
       setPresets(response.presets);
     }).catch((error) => {
+      if (requestId !== presetListRequestIdRef.current) return;
       setPresets([]);
       setStatus(error instanceof Error ? error.message : String(error));
       setIsErrorStatus(true);
@@ -135,7 +143,7 @@ export default function FilterPage() {
     return rows.slice(safeIndex * PAGE_SIZE, (safeIndex + 1) * PAGE_SIZE);
   }, [pageCount, pageIndex, result]);
 
-  const buildPayload = () => {
+  const buildPayload = (workflowName: string) => {
     const configuredLimit = Number(limit);
     const configuredWorkers = Number(filterWorkers);
     const configuredProgressInterval = Number(progressInterval);
@@ -151,6 +159,7 @@ export default function FilterPage() {
     return {
       data_root: rootDirectory,
       mode,
+      workflow_name: workflowName,
       ...(useSeparateOutputDirectory ? {
         external_html_transfer_path: htmlTransferPath,
       } : {}),
@@ -165,6 +174,30 @@ export default function FilterPage() {
     };
   };
 
+  const isCurrentPresetWorkspace = (dataRoot: string, requestId: number) => (
+    currentDataRootRef.current === dataRoot
+    && presetListRequestIdRef.current === requestId
+  );
+
+  const refreshPresetsAfterRun = async (
+    dataRoot: string,
+    workflowName: string,
+    requestId: number,
+    waitForTerminalStatus: boolean,
+  ) => {
+    let retryDelay = 100;
+    for (;;) {
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      const response = await listDisclosureConditionPresets(dataRoot);
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      setPresets(response.presets);
+      const workflow = response.presets.find((preset) => preset.name === workflowName);
+      if (!waitForTerminalStatus || workflow?.status !== "running") return;
+      await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      retryDelay = Math.min(retryDelay * 2, 1000);
+    }
+  };
+
   const handleFilter = async () => {
     if (!rootDirectory?.trim()) {
       setStatus("입력 데이터 경로를 선택하세요.");
@@ -176,6 +209,17 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
+    if (!selectedPreset) {
+      setStatus("조건검색 프리셋을 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const selectedWorkflow = presets.find((preset) => preset.name === selectedPreset);
+    if (!selectedWorkflow) {
+      setStatus("선택한 프리셋을 찾을 수 없습니다.");
+      setIsErrorStatus(true);
+      return;
+    }
     if (useSeparateOutputDirectory && !htmlTransferPath.trim()) {
       setStatus("필터 결과 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
@@ -184,9 +228,30 @@ export default function FilterPage() {
 
     setResult(null);
     setPageIndex(0);
+    const dataRoot = rootDirectory;
+    const requestId = presetListRequestIdRef.current;
+    let streamOutcome: "completed" | "aborted" | "failed" | null = null;
 
     try {
-      await streamJob("/api/disclosures/filter", buildPayload(), (payload: FilterResult) => {
+      const filterPayload = buildPayload(selectedPreset);
+      const saved = await saveDisclosureConditionPreset(dataRoot, {
+        name: selectedPreset,
+        mode,
+        condition_blocks: normalizeDisclosureConditionBlocks(conditions),
+      });
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      setPresets(saved.presets);
+      setPresets((items) => items.map((preset) => preset.name === selectedPreset ? {
+        ...preset,
+        status: "running",
+        steps: {
+          ...preset.steps,
+          database_query: { status: "running" },
+          record: { status: "pending" },
+        },
+      } : preset));
+      streamOutcome = await streamJob("/api/disclosures/filter", filterPayload, (payload: FilterResult) => {
+        if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
         setResult(payload);
         const transferPath = String(payload.external_html_download_transfer?.path || "").trim();
         const saved = transferPath ? `접수번호 ${formatInteger(payload.external_html_download_transfer?.acpt_numbers)}개를 저장했습니다: ${transferPath}` : "저장 파일을 만들지 못했습니다.";
@@ -195,6 +260,19 @@ export default function FilterPage() {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
       setIsErrorStatus(true);
+    } finally {
+      try {
+        await refreshPresetsAfterRun(
+          dataRoot,
+          selectedPreset,
+          requestId,
+          streamOutcome === "aborted",
+        );
+      } catch (error) {
+        if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+        setStatus(error instanceof Error ? error.message : String(error));
+        setIsErrorStatus(true);
+      }
     }
   };
 
@@ -211,12 +289,15 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
+    const dataRoot = rootDirectory;
+    const requestId = presetListRequestIdRef.current;
     try {
-      const response = await saveDisclosureConditionPreset(rootDirectory, {
+      const response = await saveDisclosureConditionPreset(dataRoot, {
         name,
         mode: presetMode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
       setMode(presetMode);
       setSelectedPreset(name);
@@ -263,8 +344,11 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
+    const dataRoot = rootDirectory;
+    const requestId = presetListRequestIdRef.current;
     try {
-      const response = await renameDisclosureConditionPreset(rootDirectory, selectedPreset, name);
+      const response = await renameDisclosureConditionPreset(dataRoot, selectedPreset, name);
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
       setSelectedPreset(name);
       setPresetName(name);
@@ -283,8 +367,11 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
+    const dataRoot = rootDirectory;
+    const requestId = presetListRequestIdRef.current;
     try {
-      const response = await deleteDisclosureConditionPreset(rootDirectory, selectedPreset);
+      const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
       setPresetName((value) => value === selectedPreset ? "" : value);
       setSelectedPreset("");

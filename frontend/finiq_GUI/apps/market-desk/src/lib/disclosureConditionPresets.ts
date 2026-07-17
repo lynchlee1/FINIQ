@@ -2,7 +2,7 @@ import { apiPost } from "@/api/client";
 import type { DisclosureConditionPreset } from "@/components/disclosures/DisclosureConditionFilterCard";
 
 type PresetStoreResponse = {
-  format: "finiq_disclosure_filter_preset_directory_v1";
+  format: "finiq_disclosure_filter_workflow_directory";
   path: string;
   presets: DisclosureConditionPreset[];
 };
@@ -14,7 +14,7 @@ export const listDisclosureConditionPresets = (dataRoot: string) =>
 
 export const saveDisclosureConditionPreset = (
   dataRoot: string,
-  preset: DisclosureConditionPreset,
+  preset: Pick<DisclosureConditionPreset, "name" | "mode" | "condition_blocks">,
 ) => apiPost<PresetStoreResponse>(endpoint, { data_root: dataRoot, action: "save", preset });
 
 export const renameDisclosureConditionPreset = (
