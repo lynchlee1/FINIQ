@@ -99,7 +99,10 @@ class _RightsRows:
             labels,
             additional_label_cells=additional_label_cells,
         )
-        return row[-1] if len(row) > label_cell else None
+        required_label_cell = max(
+            (label_cell, *(cell_number for cell_number, _ in additional_label_cells))
+        )
+        return row[-1] if len(row) > required_label_cell else None
 
 
 def _label_cell_matches(
@@ -166,4 +169,4 @@ def _is_rights_section_marker_row(row: list[str]) -> bool:
         return False
     text = row[0].replace(" ", "")
     normalized = normalize_label(text)
-    return normalized != text and normalized in {"유상증자", "무상증자"}
+    return normalized in {"유상증자", "무상증자"}

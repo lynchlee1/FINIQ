@@ -416,14 +416,21 @@ def test_filter_disclosures_rejects_json_output_path_before_filtering(
     assert called is False
 
 
-def test_load_disclosure_filter_preset_reads_result_json_filters(tmp_path: Path) -> None:
-    source_path = tmp_path / "bond_issuance" / "filtered.json"
-    source_path.parent.mkdir()
+def test_disclosure_filter_presets_list_workspace_filter_json_files(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    source_path = data_root / "03-filter" / "bond_issuance_custom_filter.json"
+    source_path.parent.mkdir(parents=True)
     filter_blocks = [
         {
+            "connector": "",
+            "open_count": 0,
+            "not": False,
+            "ignore_spaces": True,
+            "clean_search": True,
             "field": "title",
             "operator": "contains",
             "value": "전환사채",
+            "close_count": 0,
         }
     ]
     source_path.write_text(
@@ -439,21 +446,23 @@ def test_load_disclosure_filter_preset_reads_result_json_filters(tmp_path: Path)
     )
 
     client = TestClient(app)
-    response = client.post(
-        "/api/disclosures/filter/preset",
-        json={"source_json_path": str(source_path)},
-    )
+    response = client.post("/api/disclosures/filter/presets", json={
+        "data_root": str(data_root),
+        "action": "list",
+    })
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["format"] == "kind_disclosure_filter_preset_v1"
-    assert payload["name"] == "bond_issuance"
-    assert payload["mode"] == "bond_issuance"
-    assert payload["source_json_path"] == str(source_path.resolve())
-    assert payload["condition_blocks"] == filter_blocks
+    assert payload["format"] == "finiq_disclosure_filter_preset_directory_v1"
+    assert payload["path"] == str(source_path.parent.resolve())
+    assert payload["presets"] == [{
+        "name": "bond_issuance_custom_filter",
+        "mode": "bond_issuance",
+        "condition_blocks": filter_blocks,
+    }]
 
 
-def test_disclosure_filter_presets_are_saved_in_workspace_json(tmp_path: Path) -> None:
+def test_disclosure_filter_presets_are_saved_as_named_workspace_json(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
     preset = {
         "name": "전환사채",
@@ -470,12 +479,13 @@ def test_disclosure_filter_presets_are_saved_in_workspace_json(tmp_path: Path) -
     )
 
     assert response.status_code == 200
-    presets_path = data_root / "03-filter" / "presets.json"
-    assert response.json()["path"] == str(presets_path.resolve())
+    presets_path = data_root / "03-filter" / "전환사채.json"
+    assert response.json()["path"] == str(presets_path.parent.resolve())
     assert response.json()["presets"] == [preset]
     assert json.loads(presets_path.read_text(encoding="utf-8")) == {
-        "format": "finiq_disclosure_filter_presets_v1",
-        "presets": [preset],
+        "format": "finiq_disclosure_filter_preset_v1",
+        "mode": "bond_issuance",
+        "filters": {"filter_blocks": preset["condition_blocks"]},
     }
 
 
@@ -531,7 +541,7 @@ def test_disclosure_filter_presets_serialize_concurrent_saves(
     assert [preset["name"] for preset in saved["presets"]] == ["A", "B"]
 
 
-def test_disclosure_filter_presets_list_missing_workspace_file_as_empty(
+def test_disclosure_filter_presets_list_missing_workspace_directory_as_empty(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "workspace"
@@ -543,7 +553,7 @@ def test_disclosure_filter_presets_list_missing_workspace_file_as_empty(
 
     assert response.status_code == 200
     assert response.json()["presets"] == []
-    assert not (data_root / "03-filter" / "presets.json").exists()
+    assert not (data_root / "03-filter").exists()
 
 
 def test_disclosure_filter_presets_rename_and_delete_workspace_entry(
@@ -576,6 +586,8 @@ def test_disclosure_filter_presets_rename_and_delete_workspace_entry(
     )
     assert rename_response.status_code == 200
     assert rename_response.json()["presets"][0]["name"] == "새 이름"
+    assert not (data_root / "03-filter" / "기존 이름.json").exists()
+    assert (data_root / "03-filter" / "새 이름.json").is_file()
 
     delete_response = client.post(
         "/api/disclosures/filter/presets",
@@ -583,11 +595,12 @@ def test_disclosure_filter_presets_rename_and_delete_workspace_entry(
     )
     assert delete_response.status_code == 200
     assert delete_response.json()["presets"] == []
+    assert not (data_root / "03-filter" / "새 이름.json").exists()
 
 
 def test_disclosure_filter_presets_reject_invalid_workspace_json(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
-    presets_path = data_root / "03-filter" / "presets.json"
+    presets_path = data_root / "03-filter" / "broken.json"
     presets_path.parent.mkdir(parents=True)
     presets_path.write_text("[]", encoding="utf-8")
 
@@ -597,7 +610,7 @@ def test_disclosure_filter_presets_reject_invalid_workspace_json(tmp_path: Path)
     )
 
     assert response.status_code == 400
-    assert "presets.json" in response.json()["detail"]
+    assert "broken.json" in response.json()["detail"]
 
 
 def test_html_download_inspect_folder_route_deletes_unexpected_file(tmp_path: Path) -> None:

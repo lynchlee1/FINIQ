@@ -10,15 +10,12 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobStreaming } from "@/hooks/useJobStreaming";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
-import { apiPost } from "@/api/client";
-import { pickPath } from "@/lib/fileDialog";
 import {
   DisclosureConditionFilterCard,
   makeEmptyDisclosureCondition,
   normalizeDisclosureConditionBlocks,
   type DisclosureConditionBlock,
   type DisclosureConditionPreset,
-  type DisclosureConditionPresetPayload,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 import {
@@ -29,12 +26,12 @@ import {
 } from "@/lib/disclosureConditionPresets";
 
 const PAGE_SIZE = 20;
-const FILTER_MODES = [
-  { key: "bond_issuance", label: "사채발행파싱" },
-  { key: "rights_issuance", label: "유무상증자파싱" },
-  { key: "shareholder_meeting", label: "주주총회파싱" },
-  { key: "asset_transaction", label: "유무형자산거래파싱" },
-  { key: "security_transaction", label: "발행증권거래파싱" },
+const FILTER_MODE_KEYS = [
+  "bond_issuance",
+  "rights_issuance",
+  "shareholder_meeting",
+  "asset_transaction",
+  "security_transaction",
 ] as const;
 
 type FilterResult = {
@@ -55,6 +52,15 @@ function getKindDisclosureUrl(acptNo: string) {
   return `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=${encodeURIComponent(acptNo)}&docno=&viewerhost=&viewerport=`;
 }
 
+function normalizePresetName(value: string) {
+  return value.trim().replace(/\.json$/i, "").trim();
+}
+
+function modeFromPresetName(value: string) {
+  const name = normalizePresetName(value);
+  return FILTER_MODE_KEYS.find((key) => name === key || name.startsWith(`${key}_`)) || "";
+}
+
 export default function FilterPage() {
   const {
     output_root: rootDirectory,
@@ -73,7 +79,6 @@ export default function FilterPage() {
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
-  const [filterPresetPath, setFilterPresetPath] = useState("");
   const [limitUnlimited, setLimitUnlimited] = useState(true);
   const [limit, setLimit] = useState("1000");
   const [filterWorkers, setFilterWorkers] = useState("1");
@@ -89,7 +94,7 @@ export default function FilterPage() {
       }
       setFilterWorkers(String(workerCount));
       const configuredMode = String(config?.html_parse_mode || "");
-      setMode(FILTER_MODES.some((item) => item.key === configuredMode) ? configuredMode : "");
+      setMode(FILTER_MODE_KEYS.some((item) => item === configuredMode) ? configuredMode : "");
       setStatus("공시 소스 폴더를 불러왔습니다.");
     }).catch((error) => {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -113,12 +118,12 @@ export default function FilterPage() {
     });
   }, [rootDirectory, setIsErrorStatus, setStatus]);
 
-  const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
+  const applyPreset = useCallback((preset: DisclosureConditionPreset, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
-    if (preset.mode && FILTER_MODES.some((item) => item.key === preset.mode)) {
+    if (FILTER_MODE_KEYS.some((item) => item === preset.mode)) {
       setMode(preset.mode);
     }
-    if (preset.name) setPresetName(preset.name);
+    setPresetName(preset.name);
     setStatus(statusMessage);
     setIsErrorStatus(false);
   }, [setIsErrorStatus, setStatus]);
@@ -167,7 +172,7 @@ export default function FilterPage() {
       return;
     }
     if (!mode) {
-      setStatus("파싱 모드를 선택하세요.");
+      setStatus("조건검색 프리셋을 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -194,25 +199,28 @@ export default function FilterPage() {
   };
 
   const savePreset = async () => {
-    const name = presetName.trim();
+    const name = normalizePresetName(presetName);
     if (!name) {
       setStatus("저장할 프리셋 이름을 입력하세요.");
       setIsErrorStatus(true);
       return;
     }
-    if (!rootDirectory?.trim() || !mode) {
-      setStatus(!rootDirectory?.trim() ? "작업공간 디렉토리를 선택하세요." : "파싱 모드를 선택하세요.");
+    const presetMode = modeFromPresetName(name) || mode;
+    if (!rootDirectory?.trim() || !presetMode) {
+      setStatus(!rootDirectory?.trim() ? "작업공간 디렉토리를 선택하세요." : "파싱 모드가 포함된 프리셋을 먼저 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
     try {
       const response = await saveDisclosureConditionPreset(rootDirectory, {
         name,
-        mode,
+        mode: presetMode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       setPresets(response.presets);
+      setMode(presetMode);
       setSelectedPreset(name);
+      setPresetName(name);
       setStatus(`조건검색 프리셋을 저장했습니다: ${name}`);
       setIsErrorStatus(false);
     } catch (error) {
@@ -233,7 +241,7 @@ export default function FilterPage() {
 
   const renamePreset = async () => {
     if (!selectedPreset) return;
-    const name = presetName.trim();
+    const name = normalizePresetName(presetName);
     if (!name) {
       setStatus("수정할 프리셋 이름을 입력하세요.");
       setIsErrorStatus(true);
@@ -264,26 +272,6 @@ export default function FilterPage() {
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
-      setIsErrorStatus(true);
-    }
-  };
-
-  const loadFilterPresetFromJson = async () => {
-    try {
-      const sourceJsonPath = await pickPath({
-        mode: "file",
-        title: "필터 결과 JSON 선택",
-        defaultPath: filterPresetPath,
-      });
-      if (!sourceJsonPath) return;
-      setFilterPresetPath(sourceJsonPath);
-      const preset = await apiPost<DisclosureConditionPresetPayload>("/api/disclosures/filter/preset", {
-        source_json_path: sourceJsonPath,
-      });
-      setSelectedPreset("");
-      applyPreset(preset, `필터 결과 JSON에서 조건을 불러왔습니다: ${preset.source_json_path || sourceJsonPath}`);
-    } catch (err: any) {
-      setStatus(err.message || "필터 결과 JSON을 불러오지 못했습니다.");
       setIsErrorStatus(true);
     }
   };
@@ -330,20 +318,6 @@ export default function FilterPage() {
               onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
             />
           </div>
-          <Label className="grid gap-2 dark:text-slate-300">
-            파싱 모드
-            <select
-              value={mode}
-              onChange={(event) => {
-                setMode(event.target.value);
-                void saveSetting("html_parse_mode", event.target.value);
-              }}
-              className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
-            >
-              <option value="">선택하세요</option>
-              {FILTER_MODES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-            </select>
-          </Label>
           {useSeparateOutputDirectory && <div className="grid gap-2">
             <Label className="dark:text-slate-300">결과 데이터 경로</Label>
             <PathPickerInput 
@@ -365,7 +339,6 @@ export default function FilterPage() {
             onPresetNameChange={setPresetName}
             onSelectedPresetChange={setSelectedPreset}
             onLoadPreset={loadPreset}
-            onLoadPresetFromJson={loadFilterPresetFromJson}
             onSavePreset={savePreset}
             onRenamePreset={renamePreset}
             onDeletePreset={deletePreset}
