@@ -9,6 +9,7 @@ const companyGraphViewerPath = "frontend/finiq_GUI/apps/market-desk/src/app/comp
 const pathPickerPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/PathPickerInput.tsx";
 const graphViewerStylesPath = "frontend/finiq_GUI/apps/graph-viewer/src/globals.css";
 const marketDeskStylesPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
+const graphViewerControllerPath = "frontend/finiq_GUI/packages/graph-viewer/src/core/useGraphViewer.ts";
 
 test("standalone graph selection actions are connected to graph state", async () => {
   const source = await readFile(graphViewerExamplePath, "utf8");
@@ -31,6 +32,13 @@ test("selection-only graph actions are disabled until a selection exists", async
   assert.match(source, /onClick=\{onJumpSelected\} disabled=\{!selectedNode\}/);
   assert.match(source, /onClick=\{onApplyNeighborhood\} disabled=\{!selectedNode\}/);
   assert.match(source, /onClick=\{onHideSelected\} disabled=\{selectedNodeIds\.size \+ selectedEdgeIds\.size === 0\}/);
+});
+
+test("hiding graph items removes them from selection state", async () => {
+  const source = await readFile(graphViewerControllerPath, "utf8");
+
+  assert.match(source, /setSelectedNodeIds\(\(prev\) => \{[\s\S]*?next\.delete\(id\)/);
+  assert.match(source, /setSelectedEdgeIds\(\(prev\) => \{[\s\S]*?next\.delete\(id\)/);
 });
 
 test("selected-node icon actions stay inside the right panel and have names", async () => {

@@ -184,6 +184,22 @@ CHANGE_LOG_COMPARISON_FIELDS = {
         "발행대상자",
     ),
 }
+DEFAULT_CHANGE_LOG_DATE_THRESHOLDS = {
+    "만기일": 3,
+    "행사시작일": 3,
+    "행사종료일": 3,
+    "납입일": 3,
+    "신주권교부예정일": 3,
+    "상장예정일": 3,
+    "기준일": 3,
+    "권리배정기준일": 3,
+}
+DEFAULT_CHANGE_LOG_NUMERIC_THRESHOLDS = {
+    "발행금액": 1,
+    "발행가액": 1,
+    "행사가액": 1,
+    "신주의 종류와 수": 1,
+}
 MAJOR_CHANGE_FIELDS = {
     "bond_issuance": {
         "corp_name",

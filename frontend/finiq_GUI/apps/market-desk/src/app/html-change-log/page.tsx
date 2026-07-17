@@ -72,8 +72,8 @@ export default function HtmlChangeLogPage() {
         }),
       });
       
-      if (!response.ok) throw new Error("Failed to load change log");
       const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "변동 기록을 불러오지 못했습니다.");
       setChangeLog(data);
       setStatus(`${formatInteger(data.families.length)}건의 목록을 불러왔습니다.`);
       
@@ -102,8 +102,8 @@ export default function HtmlChangeLogPage() {
           family_id: familyId,
         }),
       });
-      if (!response.ok) throw new Error("Failed to load family detail");
       const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "상세 변동 기록을 불러오지 못했습니다.");
       const detailedFamily = data.families.find((f: any) => f.family_id === familyId);
       if (detailedFamily) {
         setFamilyDetails(prev => ({ ...prev, [familyId]: detailedFamily }));

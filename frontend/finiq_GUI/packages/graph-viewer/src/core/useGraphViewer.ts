@@ -422,6 +422,11 @@ export function useGraphViewer(options: UseGraphViewerOptions = {}): GraphViewer
       if (kind === 'node') {
         if (action === 'hide') {
           setHiddenNodeIds((prev) => new Set(prev).add(id))
+          setSelectedNodeIds((prev) => {
+            const next = new Set(prev)
+            next.delete(id)
+            return next
+          })
         } else if (action === 'delete') {
           setGraph((current) => ({
             nodes: current.nodes.filter((n) => n.id !== id),
@@ -442,6 +447,11 @@ export function useGraphViewer(options: UseGraphViewerOptions = {}): GraphViewer
         }
       } else if (action === 'hide') {
         setHiddenEdgeIds((prev) => new Set(prev).add(id))
+        setSelectedEdgeIds((prev) => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
       } else if (action === 'delete') {
         setGraph((current) => ({
           nodes: current.nodes,

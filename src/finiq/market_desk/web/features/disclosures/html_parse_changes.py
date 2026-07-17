@@ -36,8 +36,14 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     # Load thresholds from global config
     from finiq.market_desk.web.app import config as app_config
 
-    date_thresholds = app_config.change_log_date_thresholds or {}
-    numeric_thresholds = app_config.change_log_numeric_thresholds or {}
+    date_thresholds = {
+        **DEFAULT_CHANGE_LOG_DATE_THRESHOLDS,
+        **(app_config.change_log_date_thresholds or {}),
+    }
+    numeric_thresholds = {
+        **DEFAULT_CHANGE_LOG_NUMERIC_THRESHOLDS,
+        **(app_config.change_log_numeric_thresholds or {}),
+    }
 
     # Get records
     all_records = list(payload.get("records") or [])
@@ -87,7 +93,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             for c in change["changes"]:
                 f = str(c["field"]).strip()
                 # Check if it's a major change based on dynamic thresholds
-                if _is_major_change(
+                if c.get("impact") == "major" and _is_major_change(
                     f,
                     c["before"],
                     c["after"],
@@ -97,6 +103,13 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
                     changed_field_names.add(f)
 
         total_changed_fields = len(changed_field_names)
+        family_severity = (
+            "major"
+            if total_changed_fields
+            else "minor"
+            if family_changes
+            else "none"
+        )
 
         if changes_only and total_changed_fields == 0:
             continue
@@ -109,6 +122,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
                     "title": sorted_records[-1][1].get("title") or "",
                     "changed_fields": total_changed_fields,
                     "changed_field_names": sorted(list(changed_field_names)),
+                    "severity": family_severity,
                     "has_details": False,
                 }
             )
@@ -116,11 +130,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             families.append(
                 {
                     "family_id": family_id,
-                    "severity": "major"
-                    if any(c["severity"] == "major" for c in family_changes)
-                    else "minor"
-                    if family_changes
-                    else "none",
+                    "severity": family_severity,
                     "record_count": len(sorted_records),
                     "change_count": len(family_changes),
                     "changed_fields": total_changed_fields,

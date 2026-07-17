@@ -25,8 +25,14 @@ export function ChangeLogSettings() {
   const { change_log_date_thresholds, change_log_numeric_thresholds, saveSetting } = useSettingsStore();
   const [showDetails, setShowDetails] = useState(false);
 
-  const dateThresholds = change_log_date_thresholds || {};
-  const numericThresholds = change_log_numeric_thresholds || {};
+  const dateThresholds = {
+    ...Object.fromEntries(DATE_FIELDS_CONFIG.map((config) => [config.field, config.default])),
+    ...(change_log_date_thresholds || {}),
+  };
+  const numericThresholds = {
+    ...Object.fromEntries(NUMERIC_FIELDS_CONFIG.map((config) => [config.field, config.default])),
+    ...(change_log_numeric_thresholds || {}),
+  };
 
   const handleDateChange = (field: string, val: number) => {
     saveSetting("change_log_date_thresholds", { ...dateThresholds, [field]: val });
