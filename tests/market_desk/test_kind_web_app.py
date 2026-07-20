@@ -5,6 +5,7 @@ import threading
 import time
 from pathlib import Path
 from fastapi.testclient import TestClient
+import pytest
 import finiq.market_desk.web.app as web_app
 import finiq.market_desk.web.features.disclosures.filter_presets as filter_presets
 from finiq.market_desk.web.app import _normalize_file_dialog_mode, app, config
@@ -33,6 +34,51 @@ def _save_filter_workflow(
             },
         }
     )
+
+
+def _filter_result(
+    *,
+    source_disclosures: int,
+    source_offset: int,
+    disclosures: list[dict[str, object]],
+    inspected_disclosures: int | None = None,
+    complete: bool = True,
+    condition_blocks: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    inspected = (
+        source_disclosures - source_offset
+        if inspected_disclosures is None
+        else inspected_disclosures
+    )
+    return {
+        "format": "kind_disclosure_filter_v1",
+        "source_type": "sqlite_manifest",
+        "source_sqlite_manifest_path": "/tmp/sqlite_manifest.json",
+        "filters": {"filter_blocks": condition_blocks or []},
+        "summary": {
+            "source_disclosures": source_disclosures,
+            "source_body_files": 0,
+            "source_offset": source_offset,
+            "target_disclosures": source_disclosures - source_offset,
+            "inspected_disclosures": inspected,
+            "matched_disclosures": len(disclosures),
+            "returned_disclosures": len(disclosures),
+            "duplicate_disclosures": 0,
+            "unique_acpt_numbers": len(disclosures),
+        },
+        "integrity": {
+            "complete": complete,
+            "passed": complete,
+            "search_target_disclosures": source_disclosures - source_offset,
+            "search_result_disclosures": len(disclosures),
+            "inspected_disclosures": inspected,
+        },
+        "unique_titles": [str(row.get("title") or "") for row in disclosures],
+        "external_html_download_acpt_numbers": [
+            str(row["acpt_no"]) for row in disclosures
+        ],
+        "disclosures": disclosures,
+    }
 
 
 def _external_workspace_body(
@@ -368,12 +414,14 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
                 "total": 2,
                 "records": 1,
             })
-        return {
-            "format": "kind_disclosure_filter_v1",
-            "summary": {"matched_disclosures": 2, "returned_disclosures": 2},
-            "external_html_download_acpt_numbers": ["1", "2"],
-            "disclosures": [],
-        }
+        return _filter_result(
+            source_disclosures=2,
+            source_offset=int(body["source_offset"]),
+            disclosures=[
+                {"acpt_no": "1", "title": "A", "disclosed_at": "2025-01-01"},
+                {"acpt_no": "2", "title": "B", "disclosed_at": "2025-01-02"},
+            ],
+        )
 
     monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter_disclosures_payload)
 
@@ -412,7 +460,242 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     )
     assert workflow["steps"]["database_query"]["status"] == "completed"
     assert workflow["steps"]["record"]["status"] == "completed"
-    assert workflow["steps"]["record"]["path"] == str(transfer_path)
+    assert workflow["steps"]["record"]["path"] == str(
+        (data_root / "03-filter" / "bond.json").resolve()
+    )
+    assert workflow["result"]["summary"]["source_disclosures"] == 2
+    assert workflow["result"]["integrity"] == {
+        "complete": True,
+        "passed": True,
+        "search_target_disclosures": 2,
+        "search_result_disclosures": 2,
+        "inspected_disclosures": 2,
+    }
+
+
+def test_filter_workflow_preserves_result_and_processes_only_new_rows(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    workflow_path = data_root / "03-filter" / "bond.json"
+
+    first_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    original_document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert original_document["status"] == "ready"
+    assert first_run["source_offset"] == 0
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=data_root,
+        name="bond",
+        run_id=first_run["run_id"],
+        summary={},
+    )
+    first = _filter_result(
+        source_disclosures=2,
+        source_offset=0,
+        disclosures=[
+            {"acpt_no": "1", "title": "A", "disclosed_at": "2025-01-01"}
+        ],
+    )
+    filter_presets.complete_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=first_run["run_id"],
+        result=first,
+    )
+
+    completed_before_save = workflow_path.read_text(encoding="utf-8")
+    _save_filter_workflow(data_root)
+    assert workflow_path.read_text(encoding="utf-8") == completed_before_save
+
+    second_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    assert second_run["source_offset"] == 2
+    assert second_run["source_expected_minimum"] == 2
+    assert workflow_path.read_text(encoding="utf-8") == completed_before_save
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=data_root,
+        name="bond",
+        run_id=second_run["run_id"],
+        summary={},
+    )
+    second = _filter_result(
+        source_disclosures=3,
+        source_offset=2,
+        disclosures=[
+            {"acpt_no": "3", "title": "C", "disclosed_at": "2025-02-01"}
+        ],
+    )
+    completed = filter_presets.complete_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=second_run["run_id"],
+        result=second,
+    )
+
+    assert completed["result"]["summary"]["source_disclosures"] == 3
+    assert completed["result"]["summary"]["inspected_disclosures"] == 3
+    assert completed["result"]["integrity"]["search_target_disclosures"] == 3
+    assert completed["result"]["integrity"]["search_result_disclosures"] == 2
+    assert [row["acpt_no"] for row in completed["result"]["disclosures"]] == [
+        "3",
+        "1",
+    ]
+
+
+def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    first_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    partial = _filter_result(
+        source_disclosures=4,
+        source_offset=0,
+        inspected_disclosures=2,
+        complete=False,
+        disclosures=[
+            {"acpt_no": "1", "title": "A", "disclosed_at": "2025-01-01"}
+        ],
+    )
+    interrupted = filter_presets.interrupt_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=first_run["run_id"],
+        partial_result=partial,
+    )
+    assert interrupted is not None
+    assert interrupted["status"] == "interrupted"
+
+    resumed_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    assert resumed_run["source_offset"] == 2
+    assert resumed_run["source_expected_minimum"] == 4
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=data_root,
+        name="bond",
+        run_id=resumed_run["run_id"],
+        summary={},
+    )
+    remainder = _filter_result(
+        source_disclosures=4,
+        source_offset=2,
+        disclosures=[
+            {"acpt_no": "3", "title": "C", "disclosed_at": "2025-01-03"}
+        ],
+    )
+    completed = filter_presets.complete_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=resumed_run["run_id"],
+        result=remainder,
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["result"]["summary"]["inspected_disclosures"] == 4
+    assert completed["result"]["integrity"]["search_result_disclosures"] == 2
+    assert [row["acpt_no"] for row in completed["result"]["disclosures"]] == [
+        "3",
+        "1",
+    ]
+
+
+def test_filter_workflow_preserves_canonical_when_cancelled_before_first_row(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    workflow_path = data_root / "03-filter" / "bond.json"
+    original = workflow_path.read_text(encoding="utf-8")
+    run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    partial = _filter_result(
+        source_disclosures=4,
+        source_offset=0,
+        inspected_disclosures=0,
+        complete=False,
+        disclosures=[],
+    )
+
+    interrupted = filter_presets.interrupt_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=run["run_id"],
+        partial_result=partial,
+    )
+
+    assert interrupted is None
+    assert workflow_path.read_text(encoding="utf-8") == original
+    assert list(workflow_path.parent.glob(".bond.filter-run-*.json")) == []
+
+
+def test_filter_workflow_count_validation_rejects_fractional_numbers() -> None:
+    with pytest.raises(ValueError, match="must be an integer"):
+        filter_presets._required_count(1.5, "count")
+
+
+@pytest.mark.parametrize(
+    ("complete_value", "passed_value"),
+    [
+        (None, False),
+        ("false", False),
+        (False, None),
+        (False, "false"),
+        (True, False),
+    ],
+)
+def test_filter_workflow_rejects_invalid_interrupted_integrity_flags(
+    complete_value: object,
+    passed_value: object,
+) -> None:
+    partial = _filter_result(
+        source_disclosures=1,
+        source_offset=0,
+        inspected_disclosures=0,
+        complete=False,
+        disclosures=[],
+    )
+    partial["integrity"]["complete"] = complete_value
+    partial["integrity"]["passed"] = passed_value
+
+    with pytest.raises(ValueError, match="integrity flags must be false"):
+        filter_presets._validate_filter_result(
+            partial,
+            condition_blocks=[],
+            require_complete=False,
+        )
 
 
 def test_filter_disclosures_records_query_failure_in_workflow(

@@ -118,6 +118,7 @@ type StoredProfile = {
   securitiesLabel?: string;
   disclosureTypeGroups?: Record<string, string[]>;
   conditions?: DisclosureConditionBlock[];
+  filterPresetName?: string;
   sectionRules?: Record<string, string[]>;
   rangeStart?: number;
   rangeEnd?: number;
@@ -319,6 +320,8 @@ export default function DisclosureAutomationPage() {
           ? [makeEmptyDisclosureCondition()]
           : normalizeDisclosureConditionBlocks(stored.conditions),
       );
+      setSelectedPreset(stored?.filterPresetName || "");
+      setPresetName(stored?.filterPresetName || "");
       setSectionRules(stored?.sectionRules || {});
       setRangeStart(stored?.rangeStart ?? 1);
       setRangeEnd(stored?.rangeEnd ?? 7);
@@ -392,7 +395,7 @@ export default function DisclosureAutomationPage() {
     [],
   );
   const searchSettingsSelected = executionMask.includes(1);
-  const filterSettingsSelected = executionMask.includes(3);
+  const filterSettingsSelected = executionMask.some((stage) => stage >= 3);
   const sectionSettingsSelected = executionMask.includes(6);
 
   const validatedExecution = () => {
@@ -421,6 +424,9 @@ export default function DisclosureAutomationPage() {
     confirmedDownload = "",
   ) => {
     const execution = validatedExecution();
+    if (executionMask.some((stage) => stage >= 3) && !selectedPreset) {
+      throw new Error("조건검색 프리셋을 선택하세요.");
+    }
     return {
       name,
       data_root: dataRoot,
@@ -438,7 +444,10 @@ export default function DisclosureAutomationPage() {
           disclosure_type_groups: disclosureTypeGroups,
           last_report_only: false,
         },
-        s3_selection: { filter_blocks: validatedConditions() },
+        s3_selection: {
+          workflow_name: selectedPreset,
+          filter_blocks: validatedConditions(),
+        },
         s6_sections: { unmatched_policy: "needs_review", section_save_rules: sectionRulesOverride },
       },
       execution: {
@@ -466,6 +475,7 @@ export default function DisclosureAutomationPage() {
       securitiesLabel,
       disclosureTypeGroups,
       conditions: validatedConditions(),
+      filterPresetName: selectedPreset,
       sectionRules: sectionRulesOverride,
       rangeStart,
       rangeEnd,

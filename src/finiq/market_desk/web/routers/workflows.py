@@ -21,6 +21,7 @@ from finiq.market_desk.web.features.disclosures.filter_presets import (
     begin_filter_workflow_payload,
     complete_filter_workflow_payload,
     fail_filter_workflow_payload,
+    interrupt_filter_workflow_payload,
     manage_filter_presets_payload,
     mark_filter_workflow_query_completed,
 )
@@ -64,6 +65,7 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     prepare_disclosure_workspace_payload,
     validate_workspace_mode,
 )
+from finiq.market_desk.web.features.market_data.service_records import FilterCancelled
 
 FilterDisclosuresPayload = Callable[..., dict[str, Any]]
 RunJobWorker = Callable[[str, str, dict[str, Any]], None]
@@ -123,27 +125,36 @@ def _finish_filter_workflow(
         run_id=workflow_run["run_id"],
         summary=payload.get("summary"),
     )
-    _attach_external_html_download_transfer(
-        payload,
-        output_directory=str(body.get("external_html_transfer_path") or "").strip(),
-        mode=body.get("mode"),
-    )
-    transfer = payload.get("external_html_download_transfer")
-    if not isinstance(transfer, dict):
-        raise ValueError("filter workflow did not record a result file")
-    payload["filter_workflow"] = complete_filter_workflow_payload(
+    completed_workflow = complete_filter_workflow_payload(
         data_root=body.get("data_root"),
         name=workflow_run["name"],
         run_id=workflow_run["run_id"],
-        result_path=transfer.get("path"),
-        summary=payload.get("summary"),
+        result=payload,
     )
-    return payload
+    merged_result = completed_workflow.pop("result")
+    _attach_external_html_download_transfer(
+        merged_result,
+        output_directory=str(body.get("external_html_transfer_path") or "").strip(),
+        mode=body.get("mode"),
+    )
+    transfer = merged_result.get("external_html_download_transfer")
+    if not isinstance(transfer, dict):
+        raise ValueError("filter workflow did not record a result file")
+    merged_result["filter_workflow"] = completed_workflow
+    return merged_result
 
 
 def _fail_filter_workflow(
     *, body: dict[str, Any], workflow_run: dict[str, Any], error: Exception
 ) -> None:
+    if isinstance(error, FilterCancelled):
+        interrupt_filter_workflow_payload(
+            data_root=body.get("data_root"),
+            name=workflow_run["name"],
+            run_id=workflow_run["run_id"],
+            partial_result=error.partial_payload,
+        )
+        return
     fail_filter_workflow_payload(
         data_root=body.get("data_root"),
         name=workflow_run["name"],
@@ -213,6 +224,10 @@ def create_workflows_router(
                 body.get("external_html_transfer_path")
             )
             workflow_run = begin_filter_workflow_payload(body)
+            body["source_offset"] = workflow_run["source_offset"]
+            body["source_expected_minimum"] = workflow_run[
+                "source_expected_minimum"
+            ]
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         accept = request.headers.get("Accept", "")
@@ -231,7 +246,7 @@ def create_workflows_router(
                             ),
                             cancel_check=cancel_event.is_set,
                         )
-                        _finish_filter_workflow(
+                        payload = _finish_filter_workflow(
                             payload,
                             body=body,
                             workflow_run=workflow_run,

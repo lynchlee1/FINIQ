@@ -329,6 +329,30 @@ def test_existing_filter_route_uses_workspace_stage_paths(
         captured.update(payload)
         return {
             "format": "kind_disclosure_filter_v1",
+            "source_type": "sqlite_manifest",
+            "source_sqlite_manifest_path": str(
+                data_root / "02-table" / "sqlite_manifest.json"
+            ),
+            "filters": {"filter_blocks": []},
+            "summary": {
+                "source_disclosures": 0,
+                "source_body_files": 0,
+                "source_offset": 0,
+                "target_disclosures": 0,
+                "inspected_disclosures": 0,
+                "matched_disclosures": 0,
+                "returned_disclosures": 0,
+                "duplicate_disclosures": 0,
+                "unique_acpt_numbers": 0,
+            },
+            "integrity": {
+                "complete": True,
+                "passed": True,
+                "search_target_disclosures": 0,
+                "search_result_disclosures": 0,
+                "inspected_disclosures": 0,
+            },
+            "unique_titles": [],
             "disclosures": [],
             "external_html_download_acpt_numbers": [],
         }
