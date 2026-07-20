@@ -42,6 +42,12 @@
 - 원본 화면 전체는 압축 JSON에 복사하지 않고 연도별 HTML 파일로 보존한다.
 <br>
 
+**[Result Validation] HTML manifest metadata 연결 기능**
+
+- **목적:** 저장한 외부 HTML이 요청한 원본 공시와 연결됐음을 manifest에 기록한다.
+- 외부 HTML 저장이 끝난 뒤 같은 `acpt_no`의 원본 공시 metadata를 연결해 `kind_disclosure_html_manifest.json`을 만든다.
+<br>
+
 **[Result Validation] 압축 결과 무결성 확인 기능**
 
 - **목적:** 요청한 HTML과 worker 결과 및 저장한 압축 JSON의 접수번호 집합이 일치하는지 확인한다.
@@ -58,20 +64,24 @@
 
 #### **Shutdown**
 
-**[Input Handling] 입력 데이터 오류시 실패 처리하기**
-- **목적:** 다운로드 대상과 저장 결과가 일치하지 않는 상태에서 다음 단계로 진행하지 않는다.
+**[Input Handling] 필터 입력 오류시 실패 처리하기**
+- **목적:** 다운로드 대상과 저장 연도를 입력에서 확정하지 못하면 실행하지 않는다.
 - 선택한 `<data_root>/03-filter/<mode>/filtered.json`을 읽을 수 없거나 접수번호가 없으면 실패 처리한다.
 - 입력은 `format=kind_disclosure_filter_v1` 객체의 최상위 `disclosures` 목록만 허용한다.
 - 각 항목은 숫자로 된 `acpt_no`를 가져야 하며 호환 field, 중첩 탐색과 중복 접수번호는 허용하지 않는다.
 - 각 항목의 `disclosed_at`이 없거나 유효한 ISO 날짜로 시작하지 않으면 접수번호에서 연도를 추론하지 않고 실패 처리한다.
-- 외부 HTML과 같은 `acpt_no`의 manifest metadata를 찾지 못하면 실패 처리한다.
+<br>
+
+**[Core Processing] 압축 record 구성 실패시 종료하기**
+
+- **목적:** 외부 HTML에서 압축 결과에 넣을 문서 식별값을 확정하지 못하면 불완전한 record를 만들지 않는다.
 - 외부 HTML 안의 `acptNo`, `mainDoc`, `attachedDoc`과 각 select의 option 목록이 없으면 실패 처리한다.
 - 외부 HTML 안의 `acptNo`가 파일명과 다르면 실패 처리한다. 빈 `acptNo`를 파일명으로 대신하지 않는다.
 - 문서 option의 값이나 문서 번호가 비어 있으면 해당 option을 조용히 제외하거나 불완전한 record를 저장하지 않고 실패 처리한다.
 - 외부 HTML에서 선택된 본문 문서 번호를 찾지 못하면 05단계에서 사용할 수 없는 압축 record를 만들지 않고 실패 처리한다.
 <br>
 
-**[Core Processing] HTML manifest 연결 실패시 종료하기**
+**[Result Validation] HTML manifest 연결 실패시 종료하기**
 
 - **목적:** 저장한 HTML에 연결할 원본 공시 metadata를 확정하지 못하면 manifest를 만들지 않는다.
 - HTML manifest를 만들 때 저장된 접수번호의 metadata가 없으면 실패 처리한다.

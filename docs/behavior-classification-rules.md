@@ -7,10 +7,10 @@
 Every operation must be able to answer the following three questions:
 1. Does it affect the resulting data, or is it the way the UI · API execute?
 2. Does it operate under the right conditions, or does it operate after an unexpected failure?
-3. What does it directly control: input, result generation, or result validation?
+3. Which state transition does it directly control: accepting input, producing a candidate result, or validating and certifying a completed result?
 
 ### 2. Rules
-- Keep each rule focused on one one functionality.
+- Keep each rule focused on one functionality.
 - Each operation is classified according to the following order: **Layer → Behavior → Responsibility**.
 
 #### 2.1 Layer: Core · Serving
@@ -24,13 +24,13 @@ Every operation must be able to answer the following three questions:
 - Within both the Core and Serving categories, behavior should be classified as Feature, Fallback, or Shutdown.
 
 #### 2.2 Behavior: Feature · Fallback · Shutdown
-- **Behaviour** distinguishes between normal conditions and how failures are handled.
+- **Behavior** distinguishes between normal conditions and how failures are handled.
   - First, determine whether it is a feature.
   - Only when it is not a feature, distinguish between fallback and shutdown.
 - **Feature** is a set of rules for processing normal input and data.
   - It includes selecting or rejecting values.
   - It includes normal operations creating empty results.
-- **Fallback** is a set of rules for using different values, methods, or reduces the scope of processing in order to continue in the event of an unexpected failure.
+- **Fallback** uses a different value or method, or reduces the processing scope, to continue after an unexpected failure.
 - **Shutdown** is a set of rules for when an unexpected failure occurs and it is not possible to produce a safe result, resulting in the current execution ending.
 
 ```text
@@ -46,17 +46,26 @@ Does it work with normal input and data?
   - It is only classified as a Fallback if an unexpected failure occurs and the current execution continues, or as a Shutdown if it is terminated.
 
 #### 2.3 Responsibility: Input Handling · Core Processing · Result Validation
-- **Responsibility** distinguishes which part of an operation a rule directly controls.
-- **Input Handling** reads input and converts it into values that can be used for execution.
-  - It includes checking the format and required values before execution begins.
-- **Core Processing** uses the accepted input to produce the intended result.
-  - It includes calculations, transformations, and checks required while producing the result.
-- **Result Validation** checks the completed result and decides whether it can be saved or returned.
-  - It includes checking the result's structure, completeness, and consistency.
-- Do not classify every check as Result Validation.
-  - A check on input is Input Handling.
-  - A check on data used to produce the result is Core Processing.
-  - A check on the completed result is Result Validation.
+- **Responsibility** identifies the state transition directly controlled by a rule within the current operation.
+  - Before assigning a responsibility, define the current operation's external input, intended business result, and publication boundary. A file that was a result of an earlier operation can be an input to the current operation.
+- **Input Handling** turns an external request, source file, stored state, or prior result into accepted input for the current operation.
+  - It includes reading, locating, parsing, normalising, and checking the availability, type, format, schema, and required values of input before business-result production begins.
+  - It does not include extracting domain values or selecting values that will become fields of the intended result.
+- **Core Processing** turns accepted input into the intended candidate result.
+  - It includes domain extraction, selection, exclusion, calculation, transformation, aggregation, linking, ordering, result-structure construction, and persistence of business-result values.
+  - A check performed while the candidate result is incomplete is Core Processing when it determines or changes what the result contains.
+- **Result Validation** examines a completed candidate result and determines whether it may be published, saved as valid, returned, or reused.
+  - It includes checking the completed result's structure, completeness, counts, and internal or source consistency.
+  - It includes creating validation evidence such as a manifest, validation metadata, warning record, or completion marker when that evidence certifies the completed result without producing or changing its business values.
+  - If a rule repairs, substitutes, recalculates, filters, or otherwise changes business-result values, it is not Result Validation.
+
+```text
+External data
+└── accept as executable input? ── Input Handling
+    └── produce or change business-result values? ── Core Processing
+        └── candidate result complete
+            └── approve, reject, or certify it without changing business values? ── Result Validation
+```
 
 ### 3. Boundary Rules
 - Core and Serving are distinguished by whether the rule changes the result produced by the Core.
@@ -75,9 +84,20 @@ Does it work with normal input and data?
 - Excluding an item does not determine the classification by itself.
   - Excluding an item according to a normal rule is a Feature.
   - Excluding a failed item and continuing with the remaining items is a Fallback.
+- Responsibility is determined by the role of the data in the current operation, not by the file name or its role in a previous operation.
+  - Validating a prior saved result before reusing it as the current input is Input Handling.
+  - Validating a newly completed candidate immediately before publication is Result Validation.
+- Creating a file does not determine the responsibility by itself.
+  - Creating or changing business-result values is Core Processing.
+  - Creating a manifest, validation metadata, warning record, or completion marker that certifies an unchanged completed result is Result Validation.
+- The words `read`, `check`, `validate`, `save`, `metadata`, and `result` do not determine responsibility. Apply the state-transition test instead.
+- A rule must not span more than one responsibility transition.
+  - Split input acceptance, result production, and completed-result validation into separate rules.
+  - In particular, do not combine validation failure detection, user confirmation, and alternative result production in one rule.
+- For every rule, its description should make the boundary observable: name the accepted input, the business result or candidate being acted on, and whether the candidate is incomplete or complete at that point.
 
 ### 4. Writing Example
-The following example shows every combination of Layer, Behavior, and Responsibility. An actual document should include only the rules that exist and mark an empty category as `None`.
+The following example shows every combination of Layer, Behavior, and Responsibility. An actual document should include only the rules that exist and mark an empty category explicitly (`없음` in the disclosure documents).
 
 ```markdown
 ### Core
@@ -90,8 +110,8 @@ The following example shows every combination of Layer, Behavior, and Responsibi
 **[Core Processing] Record Filtering**
 - Selects records that match the accepted date range.
 
-**[Result Validation] Result Count Validation**
-- Confirms that the reported count matches the number of selected records.
+**[Result Validation] Result Certification Metadata**
+- After all records have been selected, confirms that the reported count matches the records and writes a completion marker without changing them.
 
 #### Fallback
 
@@ -101,8 +121,8 @@ The following example shows every combination of Layer, Behavior, and Responsibi
 **[Core Processing] Failed Record Exclusion**
 - Excludes a record that cannot be processed and continues with the remaining records.
 
-**[Result Validation] Valid Result Preservation**
-- Saves only the records that pass validation when some generated records are invalid.
+**[Result Validation] Alternate Result Certification**
+- Uses an independent consistency check when the primary completed-result check cannot run, without changing the candidate result.
 
 #### Shutdown
 
@@ -125,8 +145,8 @@ The following example shows every combination of Layer, Behavior, and Responsibi
 **[Core Processing] Task Execution**
 - Starts the Core operation requested through the UI or API.
 
-**[Result Validation] Result Availability Check**
-- Checks that the Core result is ready before returning it.
+**[Result Validation] Response Consistency Check**
+- Checks a completed response against the Core result before returning it.
 
 #### Fallback
 
@@ -136,8 +156,8 @@ The following example shows every combination of Layer, Behavior, and Responsibi
 **[Core Processing] Partial Preview Display**
 - Displays the available preview items when some items cannot be loaded.
 
-**[Result Validation] Valid Response Item Display**
-- Returns only the response items that pass validation when some items are invalid.
+**[Result Validation] Alternate Response Certification**
+- Uses an independent check when the primary completed-response check cannot run, without changing response values.
 
 #### Shutdown
 

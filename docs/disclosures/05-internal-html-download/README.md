@@ -41,6 +41,13 @@
 - 사용자가 작업을 취소한 경우에는 취소 뒤의 누락을 허용하되 저장된 항목의 중복·추가는 계속 검사한다.
 <br>
 
+**[Result Validation] 내부 HTML manifest metadata 연결 기능**
+
+- **목적:** 검증을 마친 내부 HTML이 요청한 원본 공시와 연결됐음을 manifest에 기록한다.
+- 다운로드 대상 무결성 검사를 통과한 저장 HTML의 `acpt_no`를 원본 metadata와 연결해 `kind_disclosure_html_manifest.json`을 만든다.
+- manifest는 저장 HTML의 업무 내용을 바꾸지 않고 원본 연결과 완료 결과를 증명한다.
+<br>
+
 #### **Fallback**
 
 - 없음.
@@ -65,6 +72,12 @@
 **[Result Validation] 본문 검증 실패시 다운로드 중단하기**
 - **목적:** 올바른 HTML만 결과로 남긴다.
 - 새로 내려받은 본문이 HTML 판별 검사를 통과하지 못하면 방금 저장한 본문 파일을 삭제하고 실패 처리한다.
+<br>
+
+**[Result Validation] 내부 HTML manifest 연결 실패시 종료하기**
+
+- **목적:** 저장 HTML과 원본 공시를 연결하지 못한 결과를 다음 단계에 전달하지 않는다.
+- 다운로드 대상 검증 뒤 저장된 `acpt_no`의 원본 metadata를 확정하지 못하거나 manifest를 저장하지 못하면 실패 처리한다.
 <br>
 
 ### **3. Serving**

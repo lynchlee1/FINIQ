@@ -1,5 +1,32 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-07-21 — Disclosure responsibility boundary correction
+
+### Purpose
+
+- Make Input Handling, Core Processing, and Result Validation depend on the current operation's data-state transition instead of keywords or a file's historical role.
+- Re-audit every disclosure behavior against the corrected responsibility boundary.
+
+### Implementation summary
+
+- Rewrote the Responsibility rules around explicit accepted-input, candidate-result, and publication state transitions, with complete Core/Serving examples in the writing example section.
+- Defined validation metadata, manifests, warning records, and completion markers as Result Validation when they certify an unchanged completed result.
+- Clarified that a prior result read by a new operation is current input, while domain extraction, result-value substitution, and incomplete-result checks are Core Processing.
+- Split existing-result failure handling, user confirmation, and full-period redownload into separate Core and Serving responsibilities.
+- Separated SQLite generation from manifest certification, external and internal HTML generation from manifest metadata linking, and HTML input conversion from domain-value extraction helpers.
+- Split filtered-input validation from external HTML result-field extraction, and graph-input validation from graph event-date production.
+- Corrected ambiguous responsibility labels for result publication, manifest linking, saved-result lookup, progress-event input, section-title extraction, rights-issuance type extraction, and graph event-date production.
+- Documented reduced graph generation after missing disclosure or company identifiers as a Core Processing Fallback.
+- No files under `resources/` were read or changed.
+
+### Verification result
+
+- Confirmed all 20 disclosure README documents retain the same 11-heading classification structure and explicit `없음` markers for empty categories.
+- Confirmed all 220 behavior entries use exactly one allowed responsibility label: 60 Input Handling, 137 Core Processing, and 23 Result Validation.
+- Confirmed every one of the 200 adjacent behavior-entry pairs has exactly one correctly placed `<br>` separator.
+- Confirmed all relative Markdown links and referenced anchors resolve.
+- `git diff --check` and the `resources/` scope check passed. Runtime tests were not run because the change is documentation-only.
+
 ## 2026-07-20 — Disclosure behavior classification rewrite
 
 ### Purpose

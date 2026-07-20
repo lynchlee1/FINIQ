@@ -11,21 +11,25 @@
 - Core는 같은 입력에서 만들어지는 데이터가 달라지는 규칙이고, Serving은 Core 결과를 바꾸지 않는 요청·실행·표시 규칙이다.
 - 정상 입력에서의 선택·제외·빈 결과·대기는 Feature다. 예상하지 못한 실패 뒤 다른 값·방법·축소 범위로 계속할 때만 Fallback이며, 안전한 결과를 만들 수 없어 현재 실행을 끝낼 때만 Shutdown이다.
 - 검증 규칙과 검증 실패 처리는 각각 Feature와 Fallback 또는 Shutdown으로 분리한다.
+- Responsibility는 현재 작업에서 데이터가 맡는 역할로 정한다. 이전 단계의 결과도 현재 작업에서 읽어 사용할 때는 입력이며, 완성된 결과를 바꾸지 않고 유효성을 증명하는 manifest·metadata·완료 표식은 Result Validation이다.
+- 한 규칙에는 입력 확정, 결과 생성, 완료 결과 검증 중 하나의 책임만 기록한다.
 
 ### **2. Core**
 
 #### **Feature**
 
-**[Core Processing] 단계 결과 게시 기능**
+**[Result Validation] 단계 결과 게시 기능**
 
 - **목적:** 완성된 단계 결과만 현재 결과 위치에 게시한다.
 - 기존 결과를 백업한 뒤 새 단계 폴더를 `.automation-current` 위치로 옮긴다.
+- 업무값을 바꾸지 않고 완료된 후보 결과의 게시 여부를 확정하는 단계이므로 Result Validation이다.
 <br>
 
-**[Core Processing] HTML 원본 metadata 연결 기능**
+**[Result Validation] HTML 원본 metadata 연결 기능**
 
 - **목적:** 저장한 HTML을 같은 `acpt_no`의 원본 공시와 연결해 manifest를 만든다.
 - HTML 저장이 끝난 뒤 원본 JSON에서 같은 `acpt_no`의 공시를 찾아 manifest metadata로 사용한다.
+- manifest는 저장된 HTML의 원본 연결을 증명하고 HTML 자체를 바꾸지 않으므로 Result Validation이다.
 <br>
 
 #### **Fallback**
@@ -34,12 +38,12 @@
 
 #### **Shutdown**
 
-**[Core Processing] 단계 결과 교체 실패시 실행 중단하기**
+**[Result Validation] 단계 결과 교체 실패시 실행 중단하기**
 - **목적:** 새 결과로 교체하지 못하면 기존 결과를 복원하고 자동화를 중단한다.
 - `os.replace`가 실패했을 때 `.automation-current`가 비어 있고 백업이 남아 있으면 백업을 원래 위치로 되돌린 뒤 실패 처리한다.
 <br>
 
-**[Core Processing] HTML 저장 연결 오류시 중단하기**
+**[Result Validation] HTML 저장 연결 오류시 중단하기**
 - **목적:** 저장한 HTML과 원본 공시를 연결할 수 없으면 manifest를 만들지 않는다.
 - HTML 저장이 끝난 뒤 원본 JSON에서 같은 `acpt_no`의 공시를 찾지 못하면 요청 전체를 실패 처리한다.
 <br>
@@ -146,10 +150,11 @@
 - 브라우저 저장 공간을 읽지 못하면 저장된 작업이 없는 것으로 본다. 저장 공간을 바꾸지 못해도 현재 작업 확인은 계속한다.
 <br>
 
-**[Result Validation] 실패 이유 대체 표시 기능**
+**[Core Processing] 실패 이유 대체 표시 기능**
 
 - **목적:** 서버 응답에 실패 이유가 없어도 작업 실패 상태를 표시한다.
 - 서버가 실패 이유를 보내지 않으면 `Job failed`를 표시한다.
+- 화면에 표시할 값을 대체해 결과를 구성하므로 Core Processing이다.
 <br>
 
 **[Core Processing] 설정 저장 실패 후 화면 유지 기능**
