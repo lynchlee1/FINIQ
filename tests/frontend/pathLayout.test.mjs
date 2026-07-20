@@ -262,6 +262,7 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /<option value="">프리셋 선택<\/option>/);
   assert.match(conditionCardSource, /preset\.name} · \{workflowStatusLabel\(preset\.status\)}/);
   assert.match(conditionCardSource, /ready: "입력 완료"/);
+  assert.match(conditionCardSource, /interrupted: "중단됨"/);
   assert.match(conditionCardSource, /running: "실행 중"/);
   assert.match(conditionCardSource, /placeholder="프리셋 이름"/);
   assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
@@ -269,6 +270,13 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /\/>수정<\/Button>/);
   assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
+});
+
+test("disclosure automation exposes filter presets for every dependent stage range", async () => {
+  const source = await readFile(disclosureAutomationPagePath, "utf8");
+
+  assert.match(source, /const filterSettingsSelected = executionMask\.some\(\(stage\) => stage >= 3\)/);
+  assert.match(source, /executionMask\.some\(\(stage\) => stage >= 3\) && !selectedPreset/);
 });
 
 test("disclosure filter keeps workflow status scoped to the active workspace", async () => {

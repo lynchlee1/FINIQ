@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 
 from finiq.config import PROJECT_ROOT
 from finiq.market_desk.web.features.disclosures import internal_html_download
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    manage_filter_presets_payload,
+)
 from finiq.market_desk.web.features.disclosure_workflow import automation
 from finiq.market_desk.web.features.disclosure_workflow.automation import (
     AUTOMATION_CHECKPOINT_FORMAT,
@@ -53,7 +56,10 @@ def _profile(root: Path, **overrides: object) -> dict[str, object]:
                 "securities_label": "전체",
                 "last_report_only": False,
             },
-            "s3_selection": {"filter_blocks": []},
+            "s3_selection": {
+                "workflow_name": "bond",
+                "filter_blocks": [],
+            },
             "s6_sections": {
                 "unmatched_policy": "needs_review",
                 "section_save_rules": {},
@@ -593,7 +599,7 @@ def test_detail_table_manifest_selects_current_automation_source(tmp_path: Path)
     assert automation._table_manifest(profile) == detail_manifest
 
 
-def test_filter_inspection_recomputes_current_filter_result(
+def test_filter_inspection_checks_canonical_and_transfer_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
@@ -611,27 +617,152 @@ def test_filter_inspection_recomputes_current_filter_result(
     output_path.write_text(json.dumps(expected))
     monkeypatch.setattr(
         automation,
-        "filter_disclosures_payload",
-        lambda *_args, **_kwargs: expected,
+        "load_filter_workflow_result_payload",
+        lambda **_kwargs: expected,
+    )
+    monkeypatch.setattr(automation, "_table_manifest", lambda _profile: tmp_path / "manifest.json")
+    monkeypatch.setattr(
+        automation,
+        "_load_sqlite_manifest",
+        lambda _path: {"summary": {"disclosures": 0}},
     )
 
     confirmed = automation._inspect_detail_filter(profile)
 
     assert confirmed["confirmed"] is True
 
-    monkeypatch.setattr(
-        automation,
-        "filter_disclosures_payload",
-        lambda *_args, **_kwargs: {
-            **expected,
-            "disclosures": [{"acpt_no": "2"}],
-        },
+    output_path.write_text(
+        json.dumps({**expected, "disclosures": [{"acpt_no": "2"}]})
     )
 
     mismatch = automation._inspect_detail_filter(profile)
 
     assert mismatch["confirmed"] is False
     assert "다릅니다" in mismatch["reason"]
+
+
+def test_stage_three_uses_saved_workflow_and_filters_only_new_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    manage_filter_presets_payload(
+        {
+            "data_root": str(tmp_path),
+            "action": "save",
+            "preset": {
+                "name": "bond",
+                "mode": "bond_issuance",
+                "condition_blocks": [],
+            },
+        }
+    )
+    offsets: list[int] = []
+
+    def fake_filter(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        offset = int(body["source_offset"])
+        offsets.append(offset)
+        source_count = 2 if offset == 0 else 3
+        disclosures = [
+            {
+                "acpt_no": "1" if offset == 0 else "3",
+                "title": "A" if offset == 0 else "C",
+                "disclosed_at": "2025-01-01" if offset == 0 else "2025-02-01",
+            }
+        ]
+        target_count = source_count - offset
+        return {
+            "format": "kind_disclosure_filter_v1",
+            "source_type": "sqlite_manifest",
+            "source_sqlite_manifest_path": str(tmp_path / "02-table" / "sqlite_manifest.json"),
+            "filters": {"filter_blocks": []},
+            "summary": {
+                "source_disclosures": source_count,
+                "source_body_files": 0,
+                "source_offset": offset,
+                "target_disclosures": target_count,
+                "inspected_disclosures": target_count,
+                "matched_disclosures": 1,
+                "returned_disclosures": 1,
+                "duplicate_disclosures": 0,
+                "unique_acpt_numbers": 1,
+            },
+            "integrity": {
+                "complete": True,
+                "passed": True,
+                "search_target_disclosures": target_count,
+                "search_result_disclosures": 1,
+                "inspected_disclosures": target_count,
+            },
+            "unique_titles": [disclosures[0]["title"]],
+            "disclosures": disclosures,
+            "external_html_download_acpt_numbers": [disclosures[0]["acpt_no"]],
+        }
+
+    monkeypatch.setattr(automation, "filter_disclosures_payload", fake_filter)
+
+    first = _run_stage(
+        3,
+        profile,
+        trigger="sync",
+        progress_callback=lambda _message: None,
+        cancel_check=lambda: False,
+    )
+    second = _run_stage(
+        3,
+        profile,
+        trigger="sync",
+        progress_callback=lambda _message: None,
+        cancel_check=lambda: False,
+    )
+
+    assert offsets == [0, 2]
+    assert first["summary"]["source_disclosures"] == 2
+    assert second["summary"]["source_disclosures"] == 3
+    assert [row["acpt_no"] for row in second["disclosures"]] == ["3", "1"]
+    canonical = json.loads(
+        (tmp_path / "03-filter" / "bond.json").read_text(encoding="utf-8")
+    )
+    transfer = json.loads(
+        (
+            tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert canonical["result"] == transfer
+
+
+def test_stage_three_rejects_runtime_conditions_that_differ_from_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_profile = _profile(tmp_path)
+    raw_profile["decisions"]["s3_selection"]["filter_blocks"] = [  # type: ignore[index]
+        {"field": "title", "operator": "contains", "value": "사채"}
+    ]
+    profile = normalize_automation_profile(raw_profile)
+    manage_filter_presets_payload(
+        {
+            "data_root": str(tmp_path),
+            "action": "save",
+            "preset": {
+                "name": "bond",
+                "mode": "bond_issuance",
+                "condition_blocks": [],
+            },
+        }
+    )
+    monkeypatch.setattr(
+        automation,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: pytest.fail("filter must not start"),
+    )
+
+    with pytest.raises(ValueError, match="Save the filter conditions"):
+        _run_stage(
+            3,
+            profile,
+            trigger="sync",
+            progress_callback=lambda _message: None,
+            cancel_check=lambda: False,
+        )
 
 
 def test_html_inspections_require_complete_current_membership(

@@ -168,14 +168,23 @@ def _sqlite_select_column(columns: set[str], column_name: str) -> str:
 def _iter_sqlite_manifest_disclosure_records(
     manifest_path: Path,
     manifest: dict[str, Any],
+    *,
+    offset: int = 0,
 ) -> Any:
+    if offset < 0:
+        raise ValueError("SQLite disclosure offset must be >= 0")
     table_name = (
         str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
     )
     quoted_table = _quoted_sqlite_identifier(table_name)
+    remaining_offset = offset
     for shard in sorted(
         list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")
     ):
+        shard_disclosures = int(shard.get("disclosures") or 0)
+        if remaining_offset >= shard_disclosures:
+            remaining_offset -= shard_disclosures
+            continue
         shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
         if not shard_path.is_file():
             msg = f"SQLite shard not found: {shard_path}"
@@ -213,8 +222,12 @@ def _iter_sqlite_manifest_disclosure_records(
                 SELECT
                     {selected_columns}
                 FROM {quoted_table}
-                """
+                ORDER BY id
+                LIMIT -1 OFFSET ?
+                """,
+                (remaining_offset,),
             )
+            remaining_offset = 0
             for row in cursor:
                 record = dict(row)
                 record["title_flags"] = list(

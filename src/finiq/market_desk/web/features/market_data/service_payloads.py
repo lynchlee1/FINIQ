@@ -2,10 +2,88 @@
 
 from __future__ import annotations
 
+import math
+
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     resolve_disclosure_workspace,
 )
 from finiq.market_desk.web.features.market_data.service_sources import *
+
+
+def _required_nonnegative_integer(value: object, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer")
+    if isinstance(value, float) and (
+        not math.isfinite(value) or not value.is_integer()
+    ):
+        raise ValueError(f"{field} must be an integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be an integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{field} must be >= 0")
+    return parsed
+
+
+def _filter_result_payload(
+    *,
+    source_kind: str,
+    sqlite_manifest_path: Path,
+    filters: dict[str, Any],
+    source_offset: int,
+    source_disclosures: int,
+    target_disclosures: int,
+    inspected_disclosures: int,
+    matched_disclosures: int,
+    duplicate_disclosures: int,
+    filtered: list[dict[str, Any]],
+    external_html_download_acpt_heap: list[
+        tuple[tuple[str, str, str], int, str]
+    ],
+    include_external_html_download_acpt_numbers: bool,
+    complete: bool,
+) -> dict[str, Any]:
+    filtered.sort(key=_record_sort_key, reverse=True)
+    public_disclosures = [_public_disclosure_record(record) for record in filtered]
+    payload = {
+        "format": "kind_disclosure_filter_v1",
+        "source_type": source_kind,
+        "source_sqlite_manifest_path": str(sqlite_manifest_path),
+        "filters": filters,
+        "summary": {
+            "source_disclosures": source_disclosures,
+            "source_body_files": 0,
+            "source_offset": source_offset,
+            "target_disclosures": target_disclosures,
+            "inspected_disclosures": inspected_disclosures,
+            "matched_disclosures": matched_disclosures,
+            "returned_disclosures": len(public_disclosures),
+            "duplicate_disclosures": duplicate_disclosures,
+            "unique_acpt_numbers": len(
+                {
+                    str(record.get("acpt_no") or "")
+                    for record in public_disclosures
+                    if record.get("acpt_no")
+                }
+            ),
+        },
+        "integrity": {
+            "complete": complete,
+            "passed": complete and inspected_disclosures == target_disclosures,
+            "search_target_disclosures": target_disclosures,
+            "search_result_disclosures": len(public_disclosures),
+            "inspected_disclosures": inspected_disclosures,
+        },
+        "unique_titles": _unique_disclosure_titles(public_disclosures),
+        "disclosures": public_disclosures,
+    }
+    if include_external_html_download_acpt_numbers:
+        payload["external_html_download_acpt_numbers"] = [
+            item[2] for item in sorted(external_html_download_acpt_heap, reverse=True)
+        ]
+    return payload
+
 
 def filter_disclosures_payload(
     body: dict[str, Any],
@@ -51,13 +129,54 @@ def filter_disclosures_payload(
     )
     progress_interval = _progress_interval(body.get("progress_interval"))
     filter_workers = _resolve_filter_workers(body.get("filter_workers"), None)
+    source_offset = _required_nonnegative_integer(
+        body.get("source_offset", 0), "source_offset"
+    )
+    source_expected_minimum = _required_nonnegative_integer(
+        body.get("source_expected_minimum", source_offset),
+        "source_expected_minimum",
+    )
+    if source_expected_minimum < source_offset:
+        raise ValueError("source_expected_minimum must be >= source_offset")
 
     sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
-    _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
-    records = _iter_sqlite_manifest_disclosure_records(
-        sqlite_manifest_path, sqlite_manifest
-    )
+    try:
+        _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
+    except ValueError as exc:
+        raise ValueError(
+            f"{exc} 02단계 데이터베이스를 초기화하고 "
+            "01단계부터 다시 실행하세요."
+        ) from exc
     total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
+    if total_records < source_expected_minimum:
+        raise ValueError(
+            "03단계 원본 건수가 이전에 확인한 건수보다 적습니다. "
+            "02단계 데이터베이스를 초기화하고 01단계부터 다시 실행하세요. "
+            f"이전 확인={source_expected_minimum}, 현재 원본={total_records}"
+        )
+    target_records = total_records - source_offset
+    records = _iter_sqlite_manifest_disclosure_records(
+        sqlite_manifest_path,
+        sqlite_manifest,
+        offset=source_offset,
+    )
+    filters = {
+        "filter_blocks": filter_blocks,
+        "title_expression": title_expression,
+        "title_keywords": title_keywords,
+        "exclude_title_keywords": exclude_title_keywords,
+        "title_match_mode": title_match_mode,
+        "company_keyword": body.get("company_keyword") or "",
+        "submitter_keyword": body.get("submitter_keyword") or "",
+        "market": market,
+        "start_date": start_date,
+        "end_date": end_date,
+        "acpt_numbers": sorted(acpt_numbers),
+        "limit": limit,
+        "limit_unlimited": limit_unlimited,
+        "return_limit": None,
+        "filter_workers": filter_workers,
+    }
     filtered: list[dict[str, Any]] = []
     external_html_download_acpt_heap: list[tuple[tuple[str, str, str], int, str]] = []
     seen_disclosure_keys: set[tuple[str, str, str, str]] = set()
@@ -66,7 +185,26 @@ def filter_disclosures_payload(
     inspected_count = 0
     for index, record in enumerate(records, start=1):
         if cancel_check is not None and cancel_check():
-            raise FilterCancelled("filter cancelled")
+            raise FilterCancelled(
+                "filter cancelled",
+                partial_payload=_filter_result_payload(
+                    source_kind=source_kind,
+                    sqlite_manifest_path=sqlite_manifest_path,
+                    filters=filters,
+                    source_offset=source_offset,
+                    source_disclosures=total_records,
+                    target_disclosures=target_records,
+                    inspected_disclosures=inspected_count,
+                    matched_disclosures=matched_count,
+                    duplicate_disclosures=duplicate_count,
+                    filtered=filtered,
+                    external_html_download_acpt_heap=external_html_download_acpt_heap,
+                    include_external_html_download_acpt_numbers=(
+                        include_external_html_download_acpt_numbers
+                    ),
+                    complete=False,
+                ),
+            )
         inspected_count = index
         disclosed_date = str(record.get("__filter_disclosed_date") or "")
         acpt_no = str(record.get("__filter_acpt_no") or "")
@@ -113,7 +251,7 @@ def filter_disclosures_payload(
                     source_type=source_kind,
                     unit_label="공시",
                     completed=index,
-                    total=total_records,
+                    total=target_records,
                     records=matched_count,
                     progress_interval=progress_interval,
                 )
@@ -130,63 +268,37 @@ def filter_disclosures_payload(
             source_type=source_kind,
             unit_label="공시",
             completed=index,
-            total=total_records,
+            total=target_records,
             records=matched_count,
             progress_interval=progress_interval,
         )
 
-    if inspected_count != total_records:
+    if inspected_count != target_records:
         msg = (
             "SQLite filter did not inspect every manifest disclosure: "
-            f"manifest={sqlite_manifest_path}, inspected={inspected_count}, expected={total_records}"
+            f"manifest={sqlite_manifest_path}, offset={source_offset}, "
+            f"inspected={inspected_count}, expected={target_records}. "
+            "02단계 데이터베이스를 초기화하고 01단계부터 다시 실행하세요."
         )
         raise ValueError(msg)
 
-    filtered.sort(key=_record_sort_key, reverse=True)
-    public_limited = [_public_disclosure_record(record) for record in filtered]
-    payload = {
-        "format": "kind_disclosure_filter_v1",
-        "source_type": source_kind,
-        "source_sqlite_manifest_path": str(sqlite_manifest_path),
-        "filters": {
-            "filter_blocks": filter_blocks,
-            "title_expression": title_expression,
-            "title_keywords": title_keywords,
-            "exclude_title_keywords": exclude_title_keywords,
-            "title_match_mode": title_match_mode,
-            "company_keyword": body.get("company_keyword") or "",
-            "submitter_keyword": body.get("submitter_keyword") or "",
-            "market": market,
-            "start_date": start_date,
-            "end_date": end_date,
-            "acpt_numbers": sorted(acpt_numbers),
-            "limit": limit,
-            "limit_unlimited": limit_unlimited,
-            "return_limit": None,
-            "filter_workers": filter_workers,
-        },
-        "summary": {
-            "source_disclosures": total_records,
-            "source_body_files": 0,
-            "matched_disclosures": matched_count,
-            "returned_disclosures": len(public_limited),
-            "duplicate_disclosures": duplicate_count,
-            "unique_acpt_numbers": len(
-                {
-                    str(record.get("acpt_no") or "")
-                    for record in public_limited
-                    if record.get("acpt_no")
-                }
-            ),
-        },
-        "unique_titles": _unique_disclosure_titles(public_limited),
-        "disclosures": public_limited,
-    }
-    if include_external_html_download_acpt_numbers:
-        payload["external_html_download_acpt_numbers"] = [
-            item[2] for item in sorted(external_html_download_acpt_heap, reverse=True)
-        ]
-    return payload
+    return _filter_result_payload(
+        source_kind=source_kind,
+        sqlite_manifest_path=sqlite_manifest_path,
+        filters=filters,
+        source_offset=source_offset,
+        source_disclosures=total_records,
+        target_disclosures=target_records,
+        inspected_disclosures=inspected_count,
+        matched_disclosures=matched_count,
+        duplicate_disclosures=duplicate_count,
+        filtered=filtered,
+        external_html_download_acpt_heap=external_html_download_acpt_heap,
+        include_external_html_download_acpt_numbers=(
+            include_external_html_download_acpt_numbers
+        ),
+        complete=True,
+    )
 
 
 def load_company_index_payload(

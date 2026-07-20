@@ -30,6 +30,7 @@ from finiq.market_desk.web.features.market_data.service_payloads import (
     load_company_index_payload,
 )
 from finiq.market_desk.web.features.market_data.service_records import (
+    FilterCancelled,
     _progress_interval,
 )
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
@@ -688,6 +689,110 @@ def test_filter_disclosures_payload_filters_by_title_and_date(tmp_path: Path) ->
     assert payload["disclosures"][0]["acpt_no"] == "1"
     assert payload["disclosures"][0]["company_name"] == "테스트전자"
     assert payload["unique_titles"] == ["[정정]전환사채발행결정"]
+
+
+def test_filter_disclosures_payload_filters_only_rows_after_source_offset(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+
+    payload = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "source_offset": 2,
+            "source_expected_minimum": 2,
+        }
+    )
+
+    assert payload["summary"]["source_disclosures"] == 3
+    assert payload["summary"]["source_offset"] == 2
+    assert payload["summary"]["target_disclosures"] == 1
+    assert payload["summary"]["inspected_disclosures"] == 1
+    assert [row["acpt_no"] for row in payload["disclosures"]] == ["3"]
+    assert payload["integrity"] == {
+        "complete": True,
+        "passed": True,
+        "search_target_disclosures": 1,
+        "search_result_disclosures": 1,
+        "inspected_disclosures": 1,
+    }
+
+
+@pytest.mark.parametrize("field", ["source_offset", "source_expected_minimum"])
+def test_filter_disclosures_payload_rejects_fractional_incremental_counts(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match=rf"{field} must be an integer"):
+        filter_disclosures_payload(
+            {
+                "data_root": str(tmp_path),
+                field: 1.5,
+            }
+        )
+
+
+def test_filter_disclosures_payload_offset_skips_complete_year_shards(
+    tmp_path: Path,
+) -> None:
+    source = _classification_fixture_payload()
+    disclosures = source["companies"][0]["disclosures"]
+    disclosures[0]["disclosed_at"] = "2024-01-02 09:00:00"
+    disclosures[1]["disclosed_at"] = "2025-01-10 09:00:00"
+    disclosures[2]["disclosed_at"] = "2026-01-15 09:00:00"
+    _write_filter_manifest_fixture(tmp_path, source)
+
+    payload = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "source_offset": 2,
+            "source_expected_minimum": 2,
+        }
+    )
+
+    assert payload["summary"]["target_disclosures"] == 1
+    assert [row["acpt_no"] for row in payload["disclosures"]] == ["3"]
+
+
+def test_filter_disclosures_payload_rejects_source_count_regression(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="01단계부터 다시 실행"):
+        filter_disclosures_payload(
+            {
+                "data_root": str(tmp_path),
+                "source_offset": 2,
+                "source_expected_minimum": 4,
+            }
+        )
+
+
+def test_filter_disclosures_payload_returns_integrity_checked_partial_on_cancel(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+    checks = 0
+
+    def cancel_check() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks > 2
+
+    with pytest.raises(FilterCancelled) as raised:
+        filter_disclosures_payload(
+            {"data_root": str(tmp_path)}, cancel_check=cancel_check
+        )
+
+    partial = raised.value.partial_payload
+    assert partial is not None
+    assert partial["summary"]["source_disclosures"] == 3
+    assert partial["summary"]["inspected_disclosures"] == 1
+    assert partial["integrity"]["complete"] is False
+    assert partial["integrity"]["passed"] is False
 
 
 def test_filter_disclosures_payload_rejects_root_directory(tmp_path: Path) -> None:

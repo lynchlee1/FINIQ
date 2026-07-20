@@ -54,6 +54,15 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
 from finiq.market_desk.web.features.disclosures.table_export import (
     build_disclosure_table_payload,
 )
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    begin_filter_workflow_payload,
+    complete_filter_workflow_payload,
+    fail_filter_workflow_payload,
+    filter_workflow_path,
+    interrupt_filter_workflow_payload,
+    load_filter_workflow_result_payload,
+    mark_filter_workflow_query_completed,
+)
 from finiq.market_desk.web.features.downloads.kind_runner import _run_single
 from finiq.market_desk.web.features.downloads.kind_common import (
     _download_input_snapshot_from_payload,
@@ -69,6 +78,7 @@ from finiq.market_desk.web.features.downloads.kind_existing import (
 from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
 )
+from finiq.market_desk.web.features.market_data.service_records import FilterCancelled
 from finiq.market_desk.web.features.market_data.service_sources import (
     _load_sqlite_manifest,
     _validate_sqlite_manifest_counts,
@@ -238,6 +248,11 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
         "shareholder_meeting",
     }:
         raise ValueError("unsupported parser_mode")
+    workflow_name = str(raw_selection.get("workflow_name") or "").strip()
+    if any(stage >= 3 for stage in execution_mask) and not workflow_name:
+        raise ValueError("조건검색 프리셋을 선택하세요.")
+    if workflow_name:
+        workflow_name = filter_workflow_path(data_root, workflow_name).stem
 
     return {
         "format": AUTOMATION_PROFILE_FORMAT,
@@ -260,7 +275,10 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
                 "disclosure_type_groups": normalized_groups,
                 "last_report_only": False,
             },
-            "s3_selection": {"filter_blocks": filter_blocks},
+            "s3_selection": {
+                "workflow_name": workflow_name,
+                "filter_blocks": filter_blocks,
+            },
             "s6_sections": {
                 "unmatched_policy": "needs_review",
                 "section_save_rules": normalized_section_rules,
@@ -326,10 +344,15 @@ def _stage_config_hash(profile: dict[str, Any], stage: int) -> str:
 def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
     root = Path(profile["data_root"])
     mode = profile["execution"]["parser_mode"]
+    if stage == 3:
+        workflow_name = profile["decisions"]["s3_selection"]["workflow_name"]
+        return [
+            filter_workflow_path(root, workflow_name),
+            root / "03-filter" / mode / "filtered.json",
+        ]
     paths = {
         1: [root / "01-list" / ".automation-windows"],
         2: [root / "02-table"],
-        3: [root / "03-filter" / mode / "filtered.json"],
         4: [
             _external_mode_directory(profile) / "compressed-external-html.json",
             _external_mode_directory(profile) / ".automation-current",
@@ -699,19 +722,32 @@ def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
     actual = _read_json_object(output_path)
     if actual is None:
         return _inspection_failure(3, reason="필터 결과 JSON이 없거나 손상되었습니다.")
-    expected = filter_disclosures_payload(
-        {
-            "data_root": str(root),
-            "mode": profile["execution"]["parser_mode"],
-            "filter_blocks": profile["decisions"]["s3_selection"]["filter_blocks"],
-            "include_external_html_download_acpt_numbers": True,
-            "filter_workers": profile["execution"]["local_workers"],
-        }
-    )
+    selection = profile["decisions"]["s3_selection"]
+    try:
+        expected = load_filter_workflow_result_payload(
+            data_root=root,
+            name=selection["workflow_name"],
+            mode=profile["execution"]["parser_mode"],
+            condition_blocks=selection["filter_blocks"],
+        )
+    except ValueError as error:
+        return _inspection_failure(3, reason=str(error))
+    manifest = _load_sqlite_manifest(_table_manifest(profile))
+    current_source_count = int((manifest.get("summary") or {}).get("disclosures") or 0)
+    saved_source_count = int((expected.get("summary") or {}).get("source_disclosures") or 0)
+    if current_source_count != saved_source_count:
+        return _inspection_failure(
+            3,
+            reason="현재 SQLite 원본 건수와 조건검색 정본의 검사 완료 건수가 다릅니다.",
+            details={
+                "current_source_records": current_source_count,
+                "saved_source_records": saved_source_count,
+            },
+        )
     if _filter_signature(actual) != _filter_signature(expected):
         return _inspection_failure(
             3,
-            reason="현재 필터 설정으로 다시 계산한 결과와 저장된 결과가 다릅니다.",
+            reason="조건검색 정본과 04단계 전달 파일의 결과가 다릅니다.",
             details={
                 "expected_records": len(expected.get("disclosures") or []),
                 "actual_records": len(actual.get("disclosures") or []),
@@ -719,7 +755,7 @@ def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
         )
     return _inspection_success(
         3,
-        reason="필터 설정, 입력 SQLite와 전체 필터 결과가 일치합니다.",
+        reason="조건검색 정본, 입력 SQLite 건수와 04단계 전달 파일이 일치합니다.",
         details={"records": len(actual.get("disclosures") or [])},
     )
 
@@ -1719,21 +1755,58 @@ def _run_stage(
         )
     if stage == 3:
         mode = execution["parser_mode"]
-        result = filter_disclosures_payload(
-            {
-                "data_root": str(root),
-                "mode": mode,
-                "filter_blocks": profile["decisions"]["s3_selection"]["filter_blocks"],
-                "include_external_html_download_acpt_numbers": True,
-                "filter_workers": execution["local_workers"],
-                "progress_interval": 100,
-            },
-            progress_callback=progress_callback,
-            cancel_check=cancel_check,
-        )
-        result["mode"] = mode
-        atomic_write_json(root / "03-filter" / mode / "filtered.json", result)
-        return result
+        selection = profile["decisions"]["s3_selection"]
+        filter_body = {
+            "data_root": str(root),
+            "mode": mode,
+            "workflow_name": selection["workflow_name"],
+            "filter_blocks": selection["filter_blocks"],
+            "include_external_html_download_acpt_numbers": True,
+            "filter_workers": execution["local_workers"],
+            "progress_interval": 100,
+        }
+        workflow_run = begin_filter_workflow_payload(filter_body)
+        filter_body["source_offset"] = workflow_run["source_offset"]
+        filter_body["source_expected_minimum"] = workflow_run[
+            "source_expected_minimum"
+        ]
+        try:
+            incremental_result = filter_disclosures_payload(
+                filter_body,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+            )
+            mark_filter_workflow_query_completed(
+                data_root=root,
+                name=selection["workflow_name"],
+                run_id=workflow_run["run_id"],
+                summary=incremental_result.get("summary"),
+            )
+            completed = complete_filter_workflow_payload(
+                data_root=root,
+                name=selection["workflow_name"],
+                run_id=workflow_run["run_id"],
+                result=incremental_result,
+            )
+            result = completed["result"]
+            atomic_write_json(root / "03-filter" / mode / "filtered.json", result)
+            return result
+        except FilterCancelled as error:
+            interrupt_filter_workflow_payload(
+                data_root=root,
+                name=selection["workflow_name"],
+                run_id=workflow_run["run_id"],
+                partial_result=error.partial_payload,
+            )
+            raise
+        except Exception as error:
+            fail_filter_workflow_payload(
+                data_root=root,
+                name=selection["workflow_name"],
+                run_id=workflow_run["run_id"],
+                error=error,
+            )
+            raise
     if stage == 4:
         mode = execution["parser_mode"]
         targets = _active_workspace_disclosure_targets(root, mode)

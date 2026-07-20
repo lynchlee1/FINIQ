@@ -52,11 +52,11 @@ export type DisclosureConditionPreset = {
   name: string;
   mode: string;
   condition_blocks: DisclosureConditionBlock[];
-  status: "ready" | "running" | "completed" | "failed";
+  status: "ready" | "running" | "interrupted" | "completed" | "failed";
   steps: {
     condition_input: { status: "completed" };
-    database_query: { status: "pending" | "running" | "completed" | "failed" };
-    record: { status: "pending" | "running" | "completed" | "failed" };
+    database_query: { status: "pending" | "running" | "interrupted" | "completed" | "failed" };
+    record: { status: "pending" | "running" | "interrupted" | "completed" | "failed" };
   };
 };
 
@@ -160,6 +160,7 @@ function workflowStatusLabel(status: DisclosureConditionPreset["status"]) {
   return {
     ready: "입력 완료",
     running: "실행 중",
+    interrupted: "중단됨",
     completed: "완료",
     failed: "실패",
   }[status];

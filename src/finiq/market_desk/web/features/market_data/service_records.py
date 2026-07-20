@@ -8,6 +8,15 @@ from finiq.market_desk.web.features.market_data.service_common import *
 class FilterCancelled(Exception):
     """Raised when a streaming filter request is abandoned by the client."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_payload: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.partial_payload = partial_payload
+
 
 def _resolve_filter_workers(value: object, item_count: int | None) -> int:
     return resolve_worker_count(
