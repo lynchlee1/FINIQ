@@ -11,9 +11,10 @@
 
 #### **Feature**
 
-**[Input Handling] 증자유형 결정 기능**
+**[Core Processing] 증자유형 결정 기능**
 - **목적:** 외부 제목에서 적용할 유형별 규칙을 정한다.
 - 제목의 공백을 정리한 뒤 `유무상증자` → `무상증자` → `유상증자` 순서로 확인한다.
+- 확정한 유형은 결과의 `증자유형` 값이 되고 유형별 결과 생성 규칙을 결정하므로 Core Processing이다.
 <br>
 
 **[Core Processing] 증자 표 선택 기능**
@@ -94,9 +95,10 @@
 
 #### **Shutdown**
 
-**[Input Handling] 증자유형 오류시 중단하기**
+**[Core Processing] 증자유형 오류시 중단하기**
 - **목적:** 제목을 근거로 적용할 규칙을 확정한다.
 - 외부 제목이 없거나 유상·무상·유무상증자 중 하나를 확정하지 못하면 실패 처리한다.
+- 결과의 `증자유형`을 만들지 못한 실패이므로 Core Processing이다.
 
 유무상증자의 section 중단 규칙은 [유무상증자 문서](./mixed/README.md#shutdown), 그 밖의 중단 규칙은 [공시원문 변환의 Core Shutdown](../../README.md#shutdown)을 따른다.
 

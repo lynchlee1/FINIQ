@@ -28,7 +28,6 @@
 **[Core Processing] 연도별 SQLite 생성 기능**
 - **목적:** 연도별 SQLite 조각을 생성한다.
 - 각 공시일의 연도를 기준으로 SQLite 조각인 `<YYYY>.sqlite`를 생성한다.
-- `sqlite_manifest.json`에는 원본 경로, 테이블 이름, 전체 원본·중복·저장 행 수와 연도별 SQLite 경로·저장 행 수를 기록한다.
 <br>
 
 **[Core Processing] 공시 행 중복 정리 기능**
@@ -36,7 +35,6 @@
 - 모든 원본 `tbody > tr`을 순서대로 확인한다.
 - `acpt_no`가 같은 행은 같은 공시로 보고 먼저 읽은 행만 SQLite에 저장한다.
 - 나중에 읽은 같은 `acpt_no` 행은 버리지 않고 중복 행 수에 포함한다.
-- 페이지별 원본 파일, 페이지 번호와 원본·중복·저장 행 수를 `sqlite_manifest.json`에 기록한다.
 <br>
 
 **[Core Processing] 회사 표시 정보 추출 기능**
@@ -44,6 +42,13 @@
 - **목적:** 회사 칸의 이미지 유무에 따라 시장과 badge를 명시적으로 만든다.
 - 회사 칸에 이미지가 있으면 첫 번째 이미지의 `alt`를 시장으로, 나머지 이미지의 `alt`를 badge로 저장한다.
 - 회사 칸에 이미지가 없으면 시장은 `null`, badge는 빈 목록으로 저장한다.
+<br>
+
+**[Result Validation] SQLite manifest 생성 기능**
+
+- **목적:** 완성된 SQLite 조각의 출처와 검증 근거를 기록한다.
+- SQLite 조각 생성이 끝나면 `sqlite_manifest.json`에 원본 경로, 테이블 이름, 전체 원본·중복·저장 행 수와 연도별 SQLite 경로·저장 행 수를 기록한다.
+- 페이지별 원본 파일, 페이지 번호와 원본·중복·저장 행 수도 기록한다.
 <br>
 
 **[Result Validation] SQLite 무결성 검사 기능**
@@ -83,7 +88,7 @@
 **[Input Handling] 페이지 읽기 실패시 변환 중단하기**
 
 - **목적:** 손상된 입력을 재읽기나 복구 record로 숨기지 않는다.
-- 원본 `.body`를 한 번 읽어 결과표나 필수 식별값을 얻지 못하면 즉시 실패 처리한다.
+- 원본 `.body`를 한 번 읽어 결과표를 확정하지 못하면 즉시 실패 처리한다. 공시 행의 필수 식별값 오류는 Core Processing 규칙에서 처리한다.
 - 페이지별 pagination 값이 서로 다르거나 원본 페이지가 연속적이지 않으면 다수결이나 복구 overlay를 사용하지 않고 실패 처리한다.
 - workflow metadata의 page size·요청 간 대기 시간·timeout은 모두 명시되어야 한다.
 <br>

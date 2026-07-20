@@ -40,11 +40,12 @@
 - 원문에 `head` 또는 `body`가 없거나 `body` 바로 아래에 `SECTION-N` class를 가진 heading이 없으면 실패 처리한다.
 <br>
 
-**[Input Handling] 목차 제목 확정 실패시 저장 중단하기**
+**[Core Processing] 목차 제목 확정 실패시 저장 중단하기**
 
 - **목적:** 선택한 목차의 제목을 정해진 위치에서 찾지 못하면 section 결과를 만들지 않는다.
 - 선택한 heading 및 parser가 바로 뒤로 정규화한 `p`에 제목이 없으면 실패 처리한다.
 - `id="toc_N"`, heading이 아닌 `p.SECTION-N`, `.xforms_title`, heading 뒤 두 번째 이후 요소의 text와 합성한 HTML 구조는 목차나 제목을 대신하지 않는다.
+- 목차 제목은 section 결과에 들어갈 업무값이므로 제목 확정 실패는 Core Processing이다.
 <br>
 
 ### **3. Serving**

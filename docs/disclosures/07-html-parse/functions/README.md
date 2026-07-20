@@ -33,10 +33,15 @@
 - 직접 parser 결과의 `raw_tables`는 최종 JSON을 저장하기 전에 제거한다.
 <br>
 
-**[Input Handling] HTML·표 보조 함수 기능**
+**[Input Handling] HTML·표 입력 변환 보조 함수 기능**
 - **목적:** 모든 mode가 같은 문자와 표 구조를 사용하게 한다.
 - byte 입력은 UTF-8로 읽고 복구 가능한 HTML DOM으로 만든다.
 - 표의 `rowspan`과 `colspan`을 펼쳐 원래 위치와 실제 검색 위치를 함께 보존한다.
+<br>
+
+**[Core Processing] 값 추출 공통 보조 함수 기능**
+
+- **목적:** 입력 표에서 결과 field를 찾고 변환할 때 같은 규칙을 사용한다.
 - 행 이름 검색, 공백 정리와 숫자 변환은 공통 규칙을 사용한다.
 <br>
 
