@@ -14,13 +14,13 @@ Every operation must be able to answer the following three questions:
 - Each operation is classified according to the following order: **Layer → Behavior → Responsibility**.
 
 #### 2.1 Layer: Core · Serving
-- **Layer** separates the rules that produce results and the rules that display them to the user.
-- **Core** takes input and produces results. 
-  - This category includes rules that determine which values should be selected or excluded.
-  - If the results produced from the same input differ, it is classified as 'Core'. 
-- **Serving** determines how the UI and API execute the Core and display its progress and results.
-  - It does not affect the results produced by the Core.
-  - If the results are the same, but the method of requesting or displaying them is different, then it's Serving.
+- **Layer** separates ownership of the business-result lifecycle from ownership of user and API interaction.
+- **Core** accepts domain input and owns the production, validation, certification, and publication of the business result.
+  - This category includes rules that determine which business values should be selected or excluded and whether a completed candidate is valid enough to publish.
+  - A rule is Core if removing it can change the business result or whether that result is accepted as valid, saved, or published.
+- **Serving** determines how the UI and API request and coordinate Core execution and present its progress and results.
+  - It may validate a request or response, but it does not produce, change, or certify the document's business result.
+  - A rule is Serving if the Core business result and its validity remain the same while only the request, execution control, or presentation changes.
 - Within both the Core and Serving categories, behavior should be classified as Feature, Fallback, or Shutdown.
 
 #### 2.2 Behavior: Feature · Fallback · Shutdown
@@ -46,31 +46,33 @@ Does it work with normal input and data?
   - It is only classified as a Fallback if an unexpected failure occurs and the current execution continues, or as a Shutdown if it is terminated.
 
 #### 2.3 Responsibility: Input Handling · Core Processing · Result Validation
-- **Responsibility** identifies the state transition directly controlled by a rule within the current operation.
-  - Before assigning a responsibility, define the current operation's external input, intended business result, and publication boundary. A file that was a result of an earlier operation can be an input to the current operation.
-- **Input Handling** turns an external request, source file, stored state, or prior result into accepted input for the current operation.
+- **Responsibility** identifies how a rule relates to the business result declared by the document.
+  - Define the document's external input, business result, and publication boundary before assigning a responsibility. A helper return value, UI state, progress log, preview, or display representation is not a separate business result.
+- **Input Handling** accepts, rejects, resets, or prepares data and execution state without producing or changing the declared business result.
   - It includes reading, locating, parsing, normalising, and checking the availability, type, format, schema, and required values of input before business-result production begins.
-  - It does not include extracting domain values or selecting values that will become fields of the intended result.
-- **Core Processing** turns accepted input into the intended candidate result.
-  - It includes domain extraction, selection, exclusion, calculation, transformation, aggregation, linking, ordering, result-structure construction, and persistence of business-result values.
-  - A check performed while the candidate result is incomplete is Core Processing when it determines or changes what the result contains.
+  - It includes choosing the starting range after rejecting a prior result and requesting, routing, cancelling, formatting, truncating, or displaying Core execution and results in Serving.
+  - A file that was a result of an earlier operation and a result returned by Core are inputs when another operation or Serving reads them.
+- **Core Processing** turns accepted input into the declared business result or changes that result's business values, membership, relationships, or ordering.
+  - It includes domain extraction, selection, exclusion, calculation, transformation, aggregation, linking, result-structure construction, and persistence of business-result values.
+  - Core Processing is valid only in the Core layer. A Serving rule does not become Core Processing merely because it starts Core or produces a UI response.
+  - A check performed while the candidate result is incomplete is Core Processing only when it determines or changes what the business result contains.
 - **Result Validation** examines a completed candidate result and determines whether it may be published, saved as valid, returned, or reused.
   - It includes checking the completed result's structure, completeness, counts, and internal or source consistency.
   - It includes creating validation evidence such as a manifest, validation metadata, warning record, or completion marker when that evidence certifies the completed result without producing or changing its business values.
   - If a rule repairs, substitutes, recalculates, filters, or otherwise changes business-result values, it is not Result Validation.
 
 ```text
-External data
-└── accept as executable input? ── Input Handling
-    └── produce or change business-result values? ── Core Processing
-        └── candidate result complete
-            └── approve, reject, or certify it without changing business values? ── Result Validation
+Does the rule approve, reject, or certify a completed candidate without changing it?
+├── Yes: Result Validation
+└── No
+    ├── Produce or change the declared business result: Core Processing
+    └── Accept, reset, route, control, format, truncate, or display without changing it: Input Handling
 ```
 
 ### 3. Boundary Rules
-- Core and Serving are distinguished by whether the rule changes the result produced by the Core.
-  - A rule that changes the result produced by the Core is Core.
-  - A rule that only changes how the result is requested or displayed is Serving.
+- Core and Serving are distinguished by which lifecycle the rule owns.
+  - Producing the business result or deciding whether it is valid and publishable is Core.
+  - Requesting or coordinating that work and validating or displaying the interaction response is Serving.
 - Feature and Fallback are distinguished by whether the alternative is part of normal processing.
   - Selecting a value according to a predefined order is a Feature.
   - Using another value because the intended value failed is a Fallback.
@@ -84,9 +86,16 @@ External data
 - Excluding an item does not determine the classification by itself.
   - Excluding an item according to a normal rule is a Feature.
   - Excluding a failed item and continuing with the remaining items is a Fallback.
-- Responsibility is determined by the role of the data in the current operation, not by the file name or its role in a previous operation.
+- Responsibility is determined by the role of the data relative to the business result declared by the current document, not by the file name or its role in a previous operation.
   - Validating a prior saved result before reusing it as the current input is Input Handling.
   - Validating a newly completed candidate immediately before publication is Result Validation.
+- The business result is declared at the document boundary, not inferred from a helper function or UI component.
+  - Formatting, truncating, or displaying a Core result is Serving Input Handling, even when it creates local UI state.
+  - Starting, retrying, cancelling, or monitoring Core from Serving is Input Handling. Any resulting business-value change belongs to a separate Core rule.
+  - Core Processing must not be used in the Serving layer.
+- A recovery trigger and the business processing it invokes are separate rules.
+  - Rejecting an invalid prior result and choosing a full reprocessing range is Input Handling.
+  - The normal operation that produces the replacement business result remains Core Processing.
 - Creating a file does not determine the responsibility by itself.
   - Creating or changing business-result values is Core Processing.
   - Creating a manifest, validation metadata, warning record, or completion marker that certifies an unchanged completed result is Result Validation.
@@ -97,7 +106,7 @@ External data
 - For every rule, its description should make the boundary observable: name the accepted input, the business result or candidate being acted on, and whether the candidate is incomplete or complete at that point.
 
 ### 4. Writing Example
-The following example shows every combination of Layer, Behavior, and Responsibility. An actual document should include only the rules that exist and mark an empty category explicitly (`없음` in the disclosure documents).
+The following example shows valid combinations of Layer, Behavior, and Responsibility. Serving has no Core Processing example because Serving does not change the business result. An actual document should include only the rules that exist and mark an empty category explicitly (`없음` in the disclosure documents).
 
 ```markdown
 ### Core
@@ -142,8 +151,8 @@ The following example shows every combination of Layer, Behavior, and Responsibi
 **[Input Handling] Request Parameter Conversion**
 - Converts request parameters into the input format accepted by the Core.
 
-**[Core Processing] Task Execution**
-- Starts the Core operation requested through the UI or API.
+**[Input Handling] Result Presentation**
+- Formats and truncates a completed Core result for display without changing the Core result.
 
 **[Result Validation] Response Consistency Check**
 - Checks a completed response against the Core result before returning it.
@@ -153,7 +162,7 @@ The following example shows every combination of Layer, Behavior, and Responsibi
 **[Input Handling] Alternate Request Reading**
 - Reads the same request values from query parameters when the request body cannot be read.
 
-**[Core Processing] Partial Preview Display**
+**[Input Handling] Partial Preview Display**
 - Displays the available preview items when some items cannot be loaded.
 
 **[Result Validation] Alternate Response Certification**
@@ -164,7 +173,7 @@ The following example shows every combination of Layer, Behavior, and Responsibi
 **[Input Handling] Invalid Request Rejection**
 - Rejects a request when required parameters are missing.
 
-**[Core Processing] Execution Request Failure**
+**[Input Handling] Execution Request Failure**
 - Ends the request when the Core operation cannot be started.
 
 **[Result Validation] Invalid Response Rejection**

@@ -4,15 +4,20 @@
 
 ### Purpose
 
-- Make Input Handling, Core Processing, and Result Validation depend on the current operation's data-state transition instead of keywords or a file's historical role.
+- Make Input Handling, Core Processing, and Result Validation depend on the business result declared by each document instead of a helper return value, UI state, keyword, or file's historical role.
 - Re-audit every disclosure behavior against the corrected responsibility boundary.
 
 ### Implementation summary
 
-- Rewrote the Responsibility rules around explicit accepted-input, candidate-result, and publication state transitions, with complete Core/Serving examples in the writing example section.
+- Rewrote the Responsibility rules around each document's declared business result and made Core Processing valid only for Core rules that produce or change its business values, membership, relationships, or ordering.
+- Defined Core as the owner of business-result production and certification, and Serving as the owner of request, execution-control, and presentation lifecycles so Core Result Validation is not mistaken for Serving.
+- Defined Core results as Serving inputs and reclassified every Serving display, truncation, progress, orchestration, cancellation, and recovery-routing rule from Core Processing to Input Handling.
 - Defined validation metadata, manifests, warning records, and completion markers as Result Validation when they certify an unchanged completed result.
 - Clarified that a prior result read by a new operation is current input, while domain extraction, result-value substitution, and incomplete-result checks are Core Processing.
-- Split existing-result failure handling, user confirmation, and full-period redownload into separate Core and Serving responsibilities.
+- Separated invalidating an existing result and choosing a full-period input range from the normal Core download that creates replacement pages.
+- Split the combined download display-count rule into missing-page display and progress-history display boundaries, and classified both as Serving Input Handling.
+- Reclassified incremental search range selection as Input Handling and external HTML byte-count/SHA-256 metadata as Result Validation.
+- Reordered every affected Layer/Behavior section into Input Handling, Core Processing, and Result Validation order after reclassification.
 - Separated SQLite generation from manifest certification, external and internal HTML generation from manifest metadata linking, and HTML input conversion from domain-value extraction helpers.
 - Split filtered-input validation from external HTML result-field extraction, and graph-input validation from graph event-date production.
 - Corrected ambiguous responsibility labels for result publication, manifest linking, saved-result lookup, progress-event input, section-title extraction, rights-issuance type extraction, and graph event-date production.
@@ -22,8 +27,10 @@
 ### Verification result
 
 - Confirmed all 20 disclosure README documents retain the same 11-heading classification structure and explicit `없음` markers for empty categories.
-- Confirmed all 220 behavior entries use exactly one allowed responsibility label: 60 Input Handling, 137 Core Processing, and 23 Result Validation.
-- Confirmed every one of the 200 adjacent behavior-entry pairs has exactly one correctly placed `<br>` separator.
+- Confirmed all 221 behavior entries use exactly one allowed responsibility label: 97 Input Handling, 100 Core Processing, and 24 Result Validation.
+- Confirmed no Serving behavior is classified as Core Processing.
+- Confirmed every Layer/Behavior section follows Input Handling → Core Processing → Result Validation order.
+- Confirmed every one of the 201 adjacent behavior-entry pairs has exactly one correctly placed `<br>` separator.
 - Confirmed all relative Markdown links and referenced anchors resolve.
 - `git diff --check` and the `resources/` scope check passed. Runtime tests were not run because the change is documentation-only.
 

@@ -19,6 +19,19 @@
 - 입력은 `input_directory/<year>/<acpt_no>.html`만 사용하며 `<year>`는 4자리 숫자 폴더다.
 <br>
 
+**[Input Handling] HTML·표 입력 변환 보조 함수 기능**
+- **목적:** 모든 mode가 같은 문자와 표 구조를 사용하게 한다.
+- byte 입력은 UTF-8로 읽고 복구 가능한 HTML DOM으로 만든다.
+- 표의 `rowspan`과 `colspan`을 펼쳐 원래 위치와 실제 검색 위치를 함께 보존한다.
+<br>
+
+**[Input Handling] metadata 입력 보조 함수 기능**
+
+- **목적:** 외부 정보와 correction family를 만들 입력의 출처를 고정한다.
+- metadata는 지정된 `filtered.json`과 `compressed-external-html.json`에서만 읽는다.
+- 파일명의 stem을 연결 key로 사용해 metadata index를 만든다.
+<br>
+
 **[Core Processing] 변환 실행 메인 함수 기능**
 
 - **목적:** 확정한 HTML 전체를 같은 조건으로 변환해 하나의 결과로 저장한다.
@@ -33,23 +46,10 @@
 - 직접 parser 결과의 `raw_tables`는 최종 JSON을 저장하기 전에 제거한다.
 <br>
 
-**[Input Handling] HTML·표 입력 변환 보조 함수 기능**
-- **목적:** 모든 mode가 같은 문자와 표 구조를 사용하게 한다.
-- byte 입력은 UTF-8로 읽고 복구 가능한 HTML DOM으로 만든다.
-- 표의 `rowspan`과 `colspan`을 펼쳐 원래 위치와 실제 검색 위치를 함께 보존한다.
-<br>
-
 **[Core Processing] 값 추출 공통 보조 함수 기능**
 
 - **목적:** 입력 표에서 결과 field를 찾고 변환할 때 같은 규칙을 사용한다.
 - 행 이름 검색, 공백 정리와 숫자 변환은 공통 규칙을 사용한다.
-<br>
-
-**[Input Handling] metadata 입력 보조 함수 기능**
-
-- **목적:** 외부 정보와 correction family를 만들 입력의 출처를 고정한다.
-- metadata는 지정된 `filtered.json`과 `compressed-external-html.json`에서만 읽는다.
-- 파일명의 stem을 연결 key로 사용해 metadata index를 만든다.
 <br>
 
 **[Core Processing] metadata·family 연결 보조 함수 기능**
@@ -95,12 +95,12 @@
 
 #### **Feature**
 
-**[Core Processing] 변환 취소 메인 함수 기능**
+**[Input Handling] 변환 취소 메인 함수 기능**
 - **목적:** 실행 중인 변환을 취소한다.
 - `cancel_disclosure_html_parse()`가 취소 요청을 전달한다.
 <br>
 
-**[Core Processing] 조회 메인 함수 기능**
+**[Input Handling] 조회 메인 함수 기능**
 - **목적:** 저장 전후 결과를 화면이나 파일로 확인한다.
 - `build_parse_preview_payload()`는 변환 결과와 원문 표 미리보기를 만든다.
 - `build_parse_filter_candidates_payload()`는 값별 개수와 접수번호 예시를 만든다.
