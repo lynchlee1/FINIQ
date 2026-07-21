@@ -23,15 +23,15 @@
 
 #### **Feature**
 
-**[Core Processing] 내부 HTML 저장 기능**
-- **목적:** 선택한 공시의 KIND 본문 HTML을 원본 식별값과 함께 보존한다.
-- 본문은 선택한 mode, 공시 연도와 접수번호를 사용해 `<mode>/<year>/<acpt_no>.html`로 저장한다.
-<br>
-
 **[Input Handling] 본문 문서 번호 기준 기능**
 - **목적:** 04단계가 확정한 본문 문서 번호를 그대로 다운로드 대상에 사용한다.
 - 압축 JSON을 입력할 때는 `records[].selected_main_doc_no`만 본문 문서 번호의 SoT로 사용한다.
 - 연도별 외부 HTML을 직접 입력할 때도 `mainDoc`에서 명시적으로 선택된 문서 번호만 사용한다.
+<br>
+
+**[Core Processing] 내부 HTML 저장 기능**
+- **목적:** 선택한 공시의 KIND 본문 HTML을 원본 식별값과 함께 보존한다.
+- 본문은 선택한 mode, 공시 연도와 접수번호를 사용해 `<mode>/<year>/<acpt_no>.html`로 저장한다.
 <br>
 
 **[Result Validation] 다운로드 대상 무결성 검사 기능**
@@ -89,7 +89,8 @@
 - 기존 HTML이 [공통 문서](../README.md)의 `기존 HTML 재사용 기능` 판별 기준을 통과하면 다시 다운로드하지 않는다.
 <br>
 
-**[Core Processing] 내부 HTML 표시 수**
+**[Input Handling] 내부 HTML 표시 범위 제한 기능**
+- **목적:** 다운로드·검증 결과를 바꾸지 않고 화면에 전달할 범위만 제한한다.
 - 진행 내역은 최근 100줄만 보여 준다.
 - 중복·누락·추가 접수번호는 종류별로 10개만 보여 준다.
 
