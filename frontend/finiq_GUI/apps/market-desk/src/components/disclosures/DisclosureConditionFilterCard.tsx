@@ -156,16 +156,6 @@ function operatorLabel(operator: DisclosureFilterOperatorKey) {
   return DISCLOSURE_FILTER_OPERATOR_OPTIONS.find(([key]) => key === operator)?.[1] || operator;
 }
 
-function workflowStatusLabel(status: DisclosureConditionPreset["status"]) {
-  return {
-    ready: "입력 완료",
-    running: "실행 중",
-    interrupted: "중단됨",
-    completed: "완료",
-    failed: "실패",
-  }[status];
-}
-
 export function DisclosureConditionFilterCard({
   conditions,
   onConditionsChange,
@@ -227,7 +217,7 @@ export function DisclosureConditionFilterCard({
               <option value="">프리셋 선택</option>
               {presets.map((preset) => (
                 <option key={preset.name} value={preset.name}>
-                  {preset.name} · {workflowStatusLabel(preset.status)}
+                  {preset.name}
                 </option>
               ))}
             </select>

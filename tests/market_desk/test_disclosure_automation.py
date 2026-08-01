@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date
 from pathlib import Path
@@ -18,6 +19,7 @@ from finiq.market_desk.web.features.disclosure_workflow.automation import (
     AUTOMATION_EXTERNAL_FORMAT,
     AUTOMATION_INTERNAL_FORMAT,
     AUTOMATION_SECTIONS_FORMAT,
+    _active_html_outputs_valid,
     _checkpoint_path,
     _load_valid_checkpoint,
     _run_stage,
@@ -1127,6 +1129,9 @@ def test_stage_one_check_does_not_skip_selected_downstream_stages(
     result = run_disclosure_automation_payload(_profile(tmp_path))
 
     assert result["workflow_status"] == "completed"
+    assert result["output_path"] == str(
+        tmp_path / "07-converted" / "bond_issuance" / "parsed-bond_issuance.json"
+    )
     assert executed == list(range(1, 8))
 
 
@@ -1350,6 +1355,59 @@ def test_stage_five_rebuilds_internal_html_without_reusing_current(
 
     assert existing_before_download == []
     assert old_path.read_text("utf-8") == "<html><body>new</body></html>"
+
+
+def test_stage_five_checkpoint_rejects_internal_html_hash_contamination(
+    tmp_path: Path,
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    filtered_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True)
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260712000001",
+                        "disclosed_at": "2026-07-12 09:00",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    current = (
+        tmp_path
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
+    target = current / "2026" / "20260712000001.html"
+    target.parent.mkdir(parents=True)
+    target.write_text("<html><body>original</body></html>", encoding="utf-8")
+    content = target.read_bytes()
+    (current / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "source_json_path": "compressed-external-html.json",
+                "disclosures": [
+                    {
+                        "acpt_no": target.stem,
+                        "source_size_bytes": len(content),
+                        "source_sha256": hashlib.sha256(content).hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _active_html_outputs_valid(profile, 5) is True
+
+    target.write_text("<html><body>changed</body></html>", encoding="utf-8")
+
+    assert _active_html_outputs_valid(profile, 5) is False
 
 
 def test_stage_four_rejects_compressed_record_without_main_document(

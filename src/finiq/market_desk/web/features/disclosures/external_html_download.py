@@ -66,6 +66,7 @@ def download_disclosure_external_html_payload(
     emit(f"이어하기 방식: 저장된 HTML 파일 건너뛰기")
     emit(f"진행 확인 간격: {progress_interval}건")
     existing_paths_by_acpt_no: dict[str, Path] = {}
+    source_integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
     download_acpt_numbers = acpt_numbers
     if bool(body.get("skip_existing", True)):
         output_summary = _validate_html_output_directory_files(
@@ -73,8 +74,38 @@ def download_disclosure_external_html_payload(
             acpt_numbers,
             target_years=target_years,
         )
-        existing_acpt_numbers = output_summary["existing_target_acpt_numbers"]
-        download_acpt_numbers = output_summary["missing_target_acpt_numbers"]
+        integrity_summary = _inspect_html_integrity(
+            resolved_output_directory,
+            acpt_numbers,
+            target_years=target_years,
+            source_json_path=resolved_source_json_path,
+            structurally_valid_acpt_numbers=output_summary[
+                "existing_target_acpt_numbers"
+            ],
+        )
+        unverified_acpt_numbers = integrity_summary[
+            "hash_unverified_target_acpt_numbers"
+        ]
+        if unverified_acpt_numbers:
+            sample = ", ".join(unverified_acpt_numbers[:10])
+            raise ValueError(
+                f"기준 해시가 없는 기존 외부 HTML이 {len(unverified_acpt_numbers)}건 있습니다. "
+                "현재 파일을 신뢰해 기준 해시를 생성하거나 기존 파일 건너뛰기를 해제하세요. "
+                f"접수번호 예시: {sample}"
+            )
+        existing_acpt_numbers = integrity_summary[
+            "hash_verified_target_acpt_numbers"
+        ]
+        download_targets = set(output_summary["missing_target_acpt_numbers"])
+        download_targets.update(
+            integrity_summary["hash_mismatch_target_acpt_numbers"]
+        )
+        download_acpt_numbers = [
+            acpt_no for acpt_no in acpt_numbers if acpt_no in download_targets
+        ]
+        source_integrity_by_acpt_no.update(
+            integrity_summary["_verified_integrity_by_acpt_no"]
+        )
         existing_paths_by_acpt_no = {
             acpt_no: _target_html_path(
                 resolved_output_directory,
@@ -90,10 +121,10 @@ def download_disclosure_external_html_payload(
         )
         if output_summary["existing_target_html_count"] == 0:
             emit("기존 HTML 겹침 없음: 전체 대상이 새로 저장됩니다.")
-        elif output_summary["missing_target_html_count"] == 0:
+        elif not download_acpt_numbers:
             emit("기존 HTML 겹침: 전체 대상이 이미 저장되어 있습니다.")
         else:
-            emit(f"새로 저장할 대상: {output_summary['missing_target_html_count']}건.")
+            emit(f"새로 저장할 대상: {len(download_acpt_numbers)}건.")
         for acpt_no, path in existing_paths_by_acpt_no.items():
             handle_progress(f"Skipping existing KIND external HTML: {path}")
     try:
@@ -137,6 +168,10 @@ def download_disclosure_external_html_payload(
             for acpt_no in acpt_numbers
             if acpt_no in saved_paths_by_acpt_no
         ]
+        downloaded_integrity, _ = _hash_html_files(
+            {path.stem: path for path in downloaded_paths}
+        )
+        source_integrity_by_acpt_no.update(downloaded_integrity)
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
     finally:
         _clear_cancel_token(cancel_token)
@@ -149,6 +184,7 @@ def download_disclosure_external_html_payload(
         source_json_path=resolved_source_json_path,
         acpt_numbers=saved_acpt_numbers,
         source_json=source_json,
+        source_integrity=source_integrity_by_acpt_no,
     )
     emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
     emit(

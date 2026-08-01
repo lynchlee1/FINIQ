@@ -68,6 +68,5 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   5. Conditional statements, correction logic or temporary processing are used to get around specific disclosure formats or exceptional HTML structures.
 
 ## 6. Other Rules
-- Do not read, write, generate, convert, or execute workflows against files under `resources/` without explicit user permission in the current turn. Tests, builds, linters, package commands, and other verification commands are allowed when they do not target or mutate `resources/`.
 - Always use `PLANS.md` to record the purpose, implementation summary, and verification result for completed code changes.
 - Before adding or changing UI labels, button names, page titles, status text, or feature names, consult the UI terminology section in `DESIGN.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to that section in the same change and keep UI/tests aligned with it.

@@ -31,6 +31,8 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
+    _hash_html_files,
+    _load_html_manifest_integrity,
     _year_from_disclosure,
 )
 from finiq.market_desk.web.features.disclosures.external_compact import (
@@ -1557,6 +1559,20 @@ def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
             not _is_valid_html(path) for path in actual_files
         ):
             return False
+        if stage == 5:
+            _manifest_source_path, expected_integrity = (
+                _load_html_manifest_integrity(current)
+            )
+            expected_acpt_numbers = {
+                acpt_no for acpt_no, _year in expected_targets
+            }
+            if set(expected_integrity) != expected_acpt_numbers:
+                return False
+            actual_integrity, cancelled = _hash_html_files(
+                {path.stem: path for path in actual_files}
+            )
+            if cancelled or actual_integrity != expected_integrity:
+                return False
         if stage == 4:
             compressed_payload = json.loads(
                 (_external_mode_directory(profile) / "compressed-external-html.json").read_text(

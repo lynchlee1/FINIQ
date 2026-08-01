@@ -15,6 +15,10 @@ from finiq.data.assets_excel import (
 from finiq.market_desk.web.features.disclosures.internal_html_download import download_disclosure_internal_html_payload
 from finiq.market_desk.web.features.disclosures.external_html_download import download_disclosure_external_html_payload
 from finiq.market_desk.web.features.disclosures.external_html_compress import compress_disclosure_external_html_payload
+from finiq.market_desk.web.features.disclosures.html_cleanup import (
+    create_external_html_integrity_baseline_payload,
+    create_internal_html_integrity_baseline_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_common import parse_disclosure_html_payload
 from finiq.market_desk.web.features.disclosures.html_sections import (
     inspect_disclosure_html_sections_payload,
@@ -48,7 +52,10 @@ from finiq.market_desk.web.features.market_data.service_integrated import (
     run_integrated_market_history_payload,
     run_integrated_merge_payload,
 )
-from finiq.market_desk.web.features.market_data.service_payloads import filter_disclosures_payload
+from finiq.market_desk.web.features.market_data.service_payloads import (
+    filter_disclosures_payload,
+    search_disclosure_titles_payload,
+)
 from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
 from finiq.market_desk.web.features.downloads.kind_coordination import (
     KIND_NETWORK_JOB_LOCK,
@@ -141,9 +148,12 @@ def _run_asset_parquet_duplicate_cleanup_job(
 
 
 JOB_HANDLERS: dict[str, JobHandler] = {
+    "title_search": search_disclosure_titles_payload,
     "external_html_download": download_disclosure_external_html_payload,
     "external_html_compress": compress_disclosure_external_html_payload,
+    "external_html_integrity_baseline": create_external_html_integrity_baseline_payload,
     "internal_html_download": download_disclosure_internal_html_payload,
+    "internal_html_integrity_baseline": create_internal_html_integrity_baseline_payload,
     "parse": parse_disclosure_html_payload,
     "section_inspect": inspect_disclosure_html_sections_payload,
     "section_kinds": summarize_disclosure_html_section_kinds_payload,
@@ -164,7 +174,18 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
     try:
         if not job_manager.start_job(job_id):
             return
-        progress_callback = lambda m: job_manager.add_log(job_id, m)
+        def progress_callback(message: object) -> None:
+            if kind == "title_search" and isinstance(message, dict):
+                job_manager.add_log(
+                    job_id,
+                    "제목 검색 "
+                    f"{int(message.get('completed') or 0)}/"
+                    f"{int(message.get('total') or 0)} · "
+                    f"일치 {int(message.get('records') or 0)}건",
+                )
+                return
+            job_manager.add_log(job_id, str(message))
+
         handler = JOB_HANDLERS.get(kind)
         if handler is None:
             raise ValueError(f"Unhandled job kind: {kind}")
@@ -185,7 +206,10 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
             with KIND_NETWORK_JOB_LOCK:
                 result = handler(apply_workspace_defaults(kind, payload), **kwargs)
         else:
-            result = handler(apply_workspace_defaults(kind, payload), **kwargs)
+            handler_payload = (
+                payload if kind == "title_search" else apply_workspace_defaults(kind, payload)
+            )
+            result = handler(handler_payload, **kwargs)
 
         if job_manager.is_cancelled(job_id) or (
             isinstance(result, dict) and result.get("cancelled") is True
@@ -210,6 +234,12 @@ def _filter_disclosures_payload(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return filter_disclosures_payload(*args, **kwargs)
 
 
+def _search_disclosure_titles_payload(
+    *args: Any, **kwargs: Any
+) -> dict[str, Any]:
+    return search_disclosure_titles_payload(*args, **kwargs)
+
+
 app.include_router(
     create_config_router(
         config, choose_finder_path=lambda **kwargs: _choose_finder_path(**kwargs)
@@ -227,6 +257,7 @@ app.include_router(create_download_router(config))
 app.include_router(
     create_workflows_router(
         filter_disclosures_payload=_filter_disclosures_payload,
+        search_disclosure_titles_payload=_search_disclosure_titles_payload,
         run_job_worker=_run_job_worker,
     )
 )

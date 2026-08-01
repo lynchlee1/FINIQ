@@ -238,6 +238,215 @@ def _iter_sqlite_manifest_disclosure_records(
             connection.close()
 
 
+def _sqlite_title_filter_expression(
+    filter_blocks: list[dict[str, Any]],
+) -> tuple[str, list[str]]:
+    if not filter_blocks:
+        return "1 = 1", []
+
+    sql_parts: list[str] = []
+    parameters: list[str] = []
+    parenthesis_depth = 0
+    for index, block in enumerate(filter_blocks):
+        if index > 0:
+            sql_parts.append(str(block["connector"]))
+        open_count = int(block["open_count"])
+        close_count = int(block["close_count"])
+        if open_count:
+            sql_parts.append("(" * open_count)
+            parenthesis_depth += open_count
+
+        field = str(block["field"])
+        quoted_field = _quoted_sqlite_identifier(field)
+        actual = f"TRIM(COALESCE(CAST({quoted_field} AS TEXT), ''))"
+        expected = str(block["value"]).strip()
+        if block["clean_search"]:
+            actual = f"finiq_clean_search({actual})"
+            expected = _clean_search_text(expected)
+        if block["ignore_spaces"]:
+            actual = f"finiq_remove_spaces({actual})"
+            expected = _remove_whitespace(expected)
+
+        folded_actual = f"finiq_casefold({actual})"
+        folded_expected = expected.casefold()
+        operator = str(block["operator"])
+        if operator == "contains":
+            predicate = f"INSTR({folded_actual}, ?) > 0"
+            parameters.append(folded_expected)
+        elif operator == "not_contains":
+            predicate = f"INSTR({folded_actual}, ?) = 0"
+            parameters.append(folded_expected)
+        elif operator == "exact_match":
+            predicate = f"{actual} = ?"
+            parameters.append(expected)
+        elif operator == "equals":
+            predicate = f"{folded_actual} = ?"
+            parameters.append(folded_expected)
+        elif operator == "not_equals":
+            predicate = f"{folded_actual} != ?"
+            parameters.append(folded_expected)
+        elif operator == "starts_with":
+            predicate = f"SUBSTR({folded_actual}, 1, LENGTH(?)) = ?"
+            parameters.extend([folded_expected, folded_expected])
+        elif operator == "ends_with":
+            predicate = f"SUBSTR({folded_actual}, -LENGTH(?)) = ?"
+            parameters.extend([folded_expected, folded_expected])
+        elif operator == "in":
+            values = [item.casefold() for item in _split_operator_values(expected)]
+            if values:
+                predicate = f"{folded_actual} IN ({', '.join('?' for _ in values)})"
+                parameters.extend(values)
+            else:
+                predicate = "0 = 1"
+        elif operator in {
+            "before",
+            "after",
+            "on_or_before",
+            "on_or_after",
+        }:
+            comparison = {
+                "before": "<",
+                "after": ">",
+                "on_or_before": "<=",
+                "on_or_after": ">=",
+            }[operator]
+            predicate = f"({actual} != '' AND {actual} {comparison} ?)"
+            parameters.append(expected)
+        elif operator == "between":
+            values = _split_operator_values(expected)
+            if len(values) < 2:
+                raise ValueError("between operator requires two values")
+            predicate = f"({actual} != '' AND {actual} BETWEEN ? AND ?)"
+            parameters.extend(values[:2])
+        elif operator == "exists":
+            predicate = f"{actual} != ''"
+        elif operator == "empty":
+            predicate = f"{actual} = ''"
+        else:
+            raise ValueError(f"Unsupported filter operator: {operator}")
+
+        if block["not"]:
+            predicate = f"NOT ({predicate})"
+        sql_parts.append(predicate)
+        if close_count:
+            parenthesis_depth -= close_count
+            if parenthesis_depth < 0:
+                raise ValueError("Unmatched closing parenthesis in filter blocks")
+            sql_parts.append(")" * close_count)
+
+    if parenthesis_depth:
+        raise ValueError("Unmatched opening parenthesis in filter blocks")
+    return " ".join(sql_parts), parameters
+
+
+def _query_sqlite_shard_titles(
+    shard_path: Path,
+    table_name: str,
+    where_sql: str,
+    parameters: list[str],
+    cancel_check: CancelCheck | None,
+) -> tuple[int, list[tuple[str, int]]]:
+    if cancel_check is not None and cancel_check():
+        raise FilterCancelled("title search cancelled")
+    connection = sqlite3.connect(shard_path)
+    try:
+        columns = _sqlite_table_columns(connection, table_name)
+        for column_name in _FILTER_FIELDS | {"id"}:
+            _sqlite_select_column(columns, column_name)
+        connection.create_function(
+            "finiq_casefold", 1, lambda value: str(value or "").casefold()
+        )
+        connection.create_function(
+            "finiq_clean_search", 1, lambda value: _clean_search_text(str(value or ""))
+        )
+        connection.create_function(
+            "finiq_remove_spaces", 1, lambda value: _remove_whitespace(str(value or ""))
+        )
+        if cancel_check is not None:
+            connection.set_progress_handler(lambda: int(cancel_check()), 1000)
+        quoted_table = _quoted_sqlite_identifier(table_name)
+        rows = connection.execute(
+            f"""
+            SELECT title, COUNT(DISTINCT acpt_no) AS disclosure_count, MIN(id)
+            FROM {quoted_table}
+            WHERE {where_sql}
+            GROUP BY title
+            ORDER BY MIN(id)
+            """,
+            parameters,
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if cancel_check is not None and cancel_check():
+            raise FilterCancelled("title search cancelled") from exc
+        raise
+    finally:
+        connection.close()
+
+    matched_disclosures = sum(int(row[1]) for row in rows)
+    titles = [
+        (str(row[0]).strip(), int(row[1]))
+        for row in rows
+        if str(row[0] or "").strip()
+    ]
+    return matched_disclosures, titles
+
+
+def _search_sqlite_manifest_titles(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    filter_blocks: list[dict[str, Any]],
+    filter_workers: int,
+    progress_callback: ProgressCallback | None,
+    cancel_check: CancelCheck | None,
+) -> tuple[int, dict[str, int]]:
+    table_name = (
+        str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
+    )
+    where_sql, parameters = _sqlite_title_filter_expression(filter_blocks)
+    shards = sorted(
+        list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")
+    )
+    worker_count = _resolve_filter_workers(filter_workers, len(shards))
+
+    def query_shard(shard: dict[str, Any]) -> tuple[int, list[tuple[str, int]]]:
+        shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
+        if not shard_path.is_file():
+            raise ValueError(f"SQLite shard not found: {shard_path}")
+        return _query_sqlite_shard_titles(
+            shard_path,
+            table_name,
+            where_sql,
+            parameters,
+            cancel_check,
+        )
+
+    matched_disclosures = 0
+    inspected_disclosures = 0
+    title_counts: dict[str, int] = {}
+    with ThreadPoolExecutor(
+        max_workers=worker_count, thread_name_prefix="disclosure-title-search"
+    ) as executor:
+        results = executor.map(query_shard, shards)
+        for shard, (shard_matched, shard_titles) in zip(shards, results):
+            if cancel_check is not None and cancel_check():
+                raise FilterCancelled("title search cancelled")
+            matched_disclosures += shard_matched
+            inspected_disclosures += int(shard.get("disclosures") or 0)
+            for title, count in shard_titles:
+                title_counts[title] = title_counts.get(title, 0) + count
+            _emit_progress(
+                progress_callback,
+                source_type="sqlite_manifest",
+                unit_label="공시",
+                completed=inspected_disclosures,
+                total=_sqlite_manifest_total_disclosures(manifest),
+                records=matched_disclosures,
+                force=True,
+            )
+    return matched_disclosures, title_counts
+
+
 def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
     try:
         parsed_rows = disclosure_file_rows(file_path)

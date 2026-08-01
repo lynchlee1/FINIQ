@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import date
@@ -22,6 +23,7 @@ from finiq.data_scraper.core.client import (
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.parse._snippets import dart_main_doc_no, search_paths
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    atomic_write_json,
     resolve_disclosure_workspace,
     validate_workspace_mode,
 )
@@ -42,6 +44,66 @@ HTML_DELETE_CONFIRMATION_TEXT = "확인했습니다."
 _CANCELLED_DOWNLOADS: set[str] = set()
 _CANCEL_LOCK = Lock()
 ProgressCallback = Callable[[str], None]
+
+
+def _html_file_integrity(path: Path) -> dict[str, Any]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return {
+        "source_sha256": digest.hexdigest(),
+        "source_size_bytes": size,
+    }
+
+
+def _hash_html_files(
+    paths_by_acpt_no: dict[str, Path],
+    *,
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    acpt_numbers = list(paths_by_acpt_no)
+    if not acpt_numbers:
+        return {}, False
+
+    worker_count = _html_output_check_workers(len(acpt_numbers))
+    indexed_results: list[tuple[str, dict[str, Any]] | None] = [None] * len(
+        acpt_numbers
+    )
+
+    def hash_target(item: tuple[int, str]) -> tuple[int, str, dict[str, Any]]:
+        index, acpt_no = item
+        return index, acpt_no, _html_file_integrity(paths_by_acpt_no[acpt_no])
+
+    with ThreadPoolExecutor(
+        max_workers=worker_count, thread_name_prefix="html-integrity"
+    ) as executor:
+        completed = bounded_as_completed(
+            executor,
+            enumerate(acpt_numbers),
+            lambda item: executor.submit(hash_target, item),
+            max_pending=worker_count * 2,
+        )
+        for completed_count, (future, _item) in enumerate(completed, start=1):
+            if cancel_check is not None and cancel_check():
+                executor.shutdown(wait=False, cancel_futures=True)
+                return {}, True
+            index, acpt_no, integrity = future.result()
+            indexed_results[index] = (acpt_no, integrity)
+            if progress_callback is not None and completed_count % 100 == 0:
+                progress_callback(
+                    f"HTML 해시 생성 중간 확인: {completed_count}/{len(acpt_numbers)}건 처리."
+                )
+
+    return {
+        acpt_no: integrity
+        for result in indexed_results
+        if result is not None
+        for acpt_no, integrity in [result]
+    }, False
 
 
 def _ensure_safe_html_cleanup_directory(output_directory: Path) -> None:
@@ -260,9 +322,8 @@ def _write_html_manifest(
     source_json_path: str,
     acpt_numbers: list[str],
     source_json: Any,
+    source_integrity: dict[str, dict[str, Any]] | None = None,
 ) -> Path:
-    import json
-
     metadata = _collect_disclosure_metadata_from_json(source_json)
     missing_metadata = [acpt_no for acpt_no in acpt_numbers if acpt_no not in metadata]
     if missing_metadata:
@@ -270,22 +331,136 @@ def _write_html_manifest(
             "Missing disclosure metadata for acpt_no values: "
             + ", ".join(missing_metadata[:10])
         )
-    disclosures = [metadata[acpt_no] for acpt_no in acpt_numbers]
+    if source_integrity is not None:
+        missing_integrity = [
+            acpt_no for acpt_no in acpt_numbers if acpt_no not in source_integrity
+        ]
+        if missing_integrity:
+            raise ValueError(
+                "Missing HTML integrity for acpt_no values: "
+                + ", ".join(missing_integrity[:10])
+            )
+    disclosures = [
+        {
+            **metadata[acpt_no],
+            **(source_integrity[acpt_no] if source_integrity is not None else {}),
+        }
+        for acpt_no in acpt_numbers
+    ]
     manifest_path = output_directory / HTML_MANIFEST_FILENAME
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_html_manifest_v1",
-                "source_json_path": source_json_path,
-                "disclosures": disclosures,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    atomic_write_json(
+        manifest_path,
+        {
+            "format": "finiq_disclosure_html_manifest_v1",
+            "source_json_path": source_json_path,
+            "disclosures": disclosures,
+        },
     )
     return manifest_path
+
+
+def _load_html_manifest_integrity(
+    output_directory: Path,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    manifest_path = output_directory / HTML_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        return "", {}
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("format") != "finiq_disclosure_html_manifest_v1":
+        raise ValueError(f"invalid HTML manifest format: {manifest_path}")
+    disclosures = payload.get("disclosures")
+    if not isinstance(disclosures, list):
+        raise ValueError(f"HTML manifest disclosures must be a list: {manifest_path}")
+
+    integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    for index, disclosure in enumerate(disclosures):
+        if not isinstance(disclosure, dict):
+            raise ValueError(f"HTML manifest disclosures[{index}] must be an object")
+        acpt_no = str(disclosure.get("acpt_no") or "").strip()
+        if not acpt_no.isdigit():
+            raise ValueError(
+                f"HTML manifest disclosures[{index}].acpt_no must contain digits"
+            )
+        if acpt_no in seen:
+            raise ValueError(f"duplicate acpt_no in HTML manifest: {acpt_no}")
+        seen.add(acpt_no)
+        sha256 = str(disclosure.get("source_sha256") or "").strip().lower()
+        size = disclosure.get("source_size_bytes")
+        if not sha256 and size in (None, ""):
+            continue
+        if (
+            len(sha256) != 64
+            or any(character not in "0123456789abcdef" for character in sha256)
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size < 0
+        ):
+            raise ValueError(f"invalid HTML integrity metadata for acpt_no: {acpt_no}")
+        integrity_by_acpt_no[acpt_no] = {
+            "source_sha256": sha256,
+            "source_size_bytes": size,
+        }
+    return str(payload.get("source_json_path") or ""), integrity_by_acpt_no
+
+
+def _inspect_html_integrity(
+    output_directory: Path,
+    acpt_numbers: list[str],
+    *,
+    target_years: dict[str, str],
+    source_json_path: str,
+    structurally_valid_acpt_numbers: list[str],
+) -> dict[str, Any]:
+    manifest_source_path, expected_integrity = _load_html_manifest_integrity(
+        output_directory
+    )
+    source_matches = bool(manifest_source_path) and manifest_source_path == source_json_path
+    structurally_valid = set(structurally_valid_acpt_numbers)
+    unverified_acpt_numbers: list[str] = []
+    hash_mismatch_acpt_numbers: list[str] = []
+    candidates: dict[str, Path] = {}
+    for acpt_no in acpt_numbers:
+        if acpt_no not in structurally_valid:
+            continue
+        if not source_matches or acpt_no not in expected_integrity:
+            unverified_acpt_numbers.append(acpt_no)
+            continue
+        target_path = _target_html_path(
+            output_directory,
+            acpt_no,
+            target_years=target_years,
+        )
+        if (
+            target_path.stat().st_size
+            != expected_integrity[acpt_no]["source_size_bytes"]
+        ):
+            hash_mismatch_acpt_numbers.append(acpt_no)
+            continue
+        candidates[acpt_no] = target_path
+
+    actual_integrity, _ = _hash_html_files(candidates)
+    reusable_acpt_numbers: list[str] = []
+    reusable_integrity: dict[str, dict[str, Any]] = {}
+    for acpt_no in acpt_numbers:
+        if acpt_no not in actual_integrity:
+            continue
+        if actual_integrity[acpt_no] == expected_integrity[acpt_no]:
+            reusable_acpt_numbers.append(acpt_no)
+            reusable_integrity[acpt_no] = actual_integrity[acpt_no]
+        else:
+            hash_mismatch_acpt_numbers.append(acpt_no)
+
+    return {
+        "hash_manifest_source_matches": source_matches,
+        "hash_verified_target_html_count": len(reusable_acpt_numbers),
+        "hash_unverified_target_html_count": len(unverified_acpt_numbers),
+        "hash_mismatch_target_html_count": len(hash_mismatch_acpt_numbers),
+        "hash_verified_target_acpt_numbers": reusable_acpt_numbers,
+        "hash_unverified_target_acpt_numbers": unverified_acpt_numbers,
+        "hash_mismatch_target_acpt_numbers": hash_mismatch_acpt_numbers,
+        "_verified_integrity_by_acpt_no": reusable_integrity,
+    }
 
 
 def _parse_progress_interval(value: Any) -> int:

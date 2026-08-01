@@ -473,6 +473,88 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     }
 
 
+def test_search_disclosure_titles_is_read_only(tmp_path: Path, monkeypatch) -> None:
+    received: dict[str, object] = {}
+
+    def fake_search(payload):
+        received.update(payload)
+        return {
+            "format": "finiq_disclosure_title_search_v1",
+            "summary": {
+                "source_disclosures": 2,
+                "matched_disclosures": 1,
+                "matched_titles": 1,
+            },
+            "titles": [{"title": "전환사채발행결정", "disclosures": 1}],
+        }
+
+    monkeypatch.setattr(web_app, "search_disclosure_titles_payload", fake_search)
+    data_root = tmp_path / "workspace"
+    response = TestClient(app).post(
+        "/api/disclosures/titles/search",
+        json={
+            "data_root": str(data_root),
+            "filter_blocks": [{"field": "title"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert received == {
+        "data_root": str(data_root),
+        "filter_blocks": [{"field": "title"}],
+    }
+    assert response.json()["titles"] == [
+        {"title": "전환사채발행결정", "disclosures": 1}
+    ]
+    assert not (data_root / "03-filter").exists()
+
+
+def test_search_disclosure_titles_background_job_keeps_result(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def fake_search(payload, progress_callback=None, cancel_check=None):
+        assert cancel_check is not None
+        if progress_callback:
+            progress_callback({
+                "source_type": "sqlite_manifest",
+                "unit_label": "공시",
+                "completed": 2,
+                "total": 2,
+                "records": 1,
+            })
+        return {
+            "format": "finiq_disclosure_title_search_v1",
+            "summary": {
+                "source_disclosures": 2,
+                "matched_disclosures": 1,
+                "matched_titles": 1,
+            },
+            "titles": [{"title": "전환사채발행결정", "disclosures": 1}],
+        }
+
+    monkeypatch.setitem(web_app.JOB_HANDLERS, "title_search", fake_search)
+    data_root = tmp_path / "workspace"
+    client = TestClient(app)
+    started = client.post(
+        "/api/disclosures/titles/search/start",
+        json={"data_root": str(data_root), "filter_blocks": []},
+    )
+
+    assert started.status_code == 200
+    job_id = started.json()["job_id"]
+    snapshot = client.get(f"/api/disclosures/titles/jobs/{job_id}")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["status"] == "completed"
+    assert any(
+        "제목 검색 2/2 · 일치 1건" in line
+        for line in snapshot.json()["progress_log"]
+    )
+    assert snapshot.json()["result"]["titles"] == [
+        {"title": "전환사채발행결정", "disclosures": 1}
+    ]
+    assert not data_root.exists()
+
+
 def test_filter_workflow_preserves_result_and_processes_only_new_rows(
     tmp_path: Path,
 ) -> None:
@@ -664,6 +746,37 @@ def test_filter_workflow_preserves_canonical_when_cancelled_before_first_row(
 def test_filter_workflow_count_validation_rejects_fractional_numbers() -> None:
     with pytest.raises(ValueError, match="must be an integer"):
         filter_presets._required_count(1.5, "count")
+
+
+def test_filter_workflow_accepts_text_acpt_no() -> None:
+    result = _filter_result(
+        source_disclosures=1,
+        source_offset=0,
+        disclosures=[{"acpt_no": "20250101A00001"}],
+    )
+
+    validated = filter_presets._validate_filter_result(
+        result,
+        condition_blocks=[],
+        require_complete=True,
+    )
+
+    assert validated["disclosures"][0]["acpt_no"] == "20250101A00001"
+
+
+def test_filter_workflow_rejects_missing_acpt_no() -> None:
+    result = _filter_result(
+        source_disclosures=1,
+        source_offset=0,
+        disclosures=[{"acpt_no": ""}],
+    )
+
+    with pytest.raises(ValueError, match=r"disclosures\[0\]\.acpt_no is required"):
+        filter_presets._validate_filter_result(
+            result,
+            condition_blocks=[],
+            require_complete=True,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1095,6 +1208,9 @@ def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path
     assert payload["has_existing"] is True
     assert payload["existing_target_html_count"] == 1
     assert payload["missing_target_html_count"] == 1
+    assert payload["hash_verified_target_html_count"] == 0
+    assert payload["hash_unverified_target_html_count"] == 1
+    assert payload["hash_mismatch_target_html_count"] == 0
 
 
 def test_external_html_check_existing_route_uses_workspace_default_output(
@@ -1127,6 +1243,56 @@ def test_external_html_check_existing_route_uses_workspace_default_output(
     payload = response.json()
     assert payload["existing_target_html_count"] == 1
     assert payload["output_directory"] == str(output_directory.parent.resolve())
+
+
+def test_external_html_trust_existing_route_creates_hash_baseline(
+    tmp_path: Path,
+) -> None:
+    body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+            ]
+        },
+        output_directory="",
+        trust_existing_files=True,
+    )
+    output_directory = (
+        tmp_path
+        / "workspace"
+        / "04-external-html-download"
+        / "bond_issuance"
+    )
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    target.write_text("<html><body>trusted</body></html>", encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/external-html-download/trust-existing/start",
+        json=body,
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    snapshot = None
+    for _ in range(20):
+        snapshot = client.get(f"/api/disclosures/html/jobs/{job_id}").json()
+        if snapshot["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    assert snapshot is not None
+    assert snapshot["status"] == "completed"
+    assert snapshot["result"]["hashed_count"] == 1
+    manifest = json.loads(
+        (output_directory / "kind_disclosure_html_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(manifest["disclosures"][0]["source_sha256"]) == 64
+    assert manifest["disclosures"][0]["source_size_bytes"] == target.stat().st_size
 
 
 def test_internal_html_download_inspect_folder_route_uses_yearly_layout(tmp_path: Path) -> None:
@@ -1356,6 +1522,72 @@ def test_internal_html_download_check_existing_route_finds_yearly_output(
     assert response.status_code == 200
     payload = response.json()
     assert payload["existing_target_html_count"] == 1
+    assert payload["hash_verified_target_html_count"] == 0
+    assert payload["hash_unverified_target_html_count"] == 1
+    assert payload["hash_mismatch_target_html_count"] == 0
+
+
+def test_internal_html_trust_existing_route_creates_hash_baseline(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    compressed_path = (
+        data_root
+        / "04-external-html-download"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+    compressed_path.parent.mkdir(parents=True)
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000999",
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = data_root / "05-internal-html-download" / "bond_issuance"
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    target.write_text("<html><body>trusted</body></html>", encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/disclosures/internal-html-download/trust-existing/start",
+        json={
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "output_directory": "",
+            "trust_existing_files": True,
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    snapshot = None
+    for _ in range(20):
+        snapshot = client.get(f"/api/disclosures/html/jobs/{job_id}").json()
+        if snapshot["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    assert snapshot is not None
+    assert snapshot["status"] == "completed"
+    assert snapshot["result"]["hashed_count"] == 1
+    manifest = json.loads(
+        (output_directory / "kind_disclosure_html_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(manifest["disclosures"][0]["source_sha256"]) == 64
+    assert manifest["disclosures"][0]["source_size_bytes"] == target.stat().st_size
 
 
 def test_html_download_inspect_folder_route_rejects_high_risk_directory(

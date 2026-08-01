@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { AlertTriangle, FileJson, FolderOpen, Info, Play, Square, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, FileJson, FolderOpen, Info, Play, ShieldCheck, Square, Loader2, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -33,6 +33,9 @@ const DOWNLOAD_VARIANTS = {
     cancelEndpoint: "/api/disclosures/external-html-download/cancel",
     inspectEndpoint: "/api/disclosures/external-html-download/inspect-folder",
     checkExistingEndpoint: "/api/disclosures/external-html-download/check-existing",
+    trustExistingEndpoint: "/api/disclosures/external-html-download/trust-existing/start",
+    trustExistingLabel: "현재 외부 HTML 신뢰",
+    htmlKindLabel: "외부",
     stopMessage: "공시원문 외부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
   internal: {
@@ -45,6 +48,9 @@ const DOWNLOAD_VARIANTS = {
     cancelEndpoint: "/api/disclosures/internal-html-download/cancel",
     inspectEndpoint: "/api/disclosures/internal-html-download/inspect-folder",
     checkExistingEndpoint: "/api/disclosures/internal-html-download/check-existing",
+    trustExistingEndpoint: "/api/disclosures/internal-html-download/trust-existing/start",
+    trustExistingLabel: "현재 내부 HTML 신뢰",
+    htmlKindLabel: "내부",
     stopMessage: "공시원문 내부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
 } as const;
@@ -90,7 +96,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     if (data.error) lines.push(`오류: ${data.error}`);
     if (res.requested_count !== undefined) {
       lines.push(`요청 접수번호: ${formatInteger(res.requested_count)}`);
-      lines.push(`저장 파일: ${formatInteger(res.saved_count)}`);
+      if (res.saved_count !== undefined) lines.push(`저장 파일: ${formatInteger(res.saved_count)}`);
+      if (res.hashed_count !== undefined) lines.push(`기준 해시: ${formatInteger(res.hashed_count)}`);
       lines.push(`데이터 경로: ${res.output_directory || ""}`);
     }
     if (res.summary?.compressed_files !== undefined) {
@@ -124,6 +131,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [existingCheckError, setExistingCheckError] = useState("");
   const [checkingExisting, setCheckingExisting] = useState(false);
   const [existingCheckRefreshKey, setExistingCheckRefreshKey] = useState(0);
+  const [trustExistingConfirmed, setTrustExistingConfirmed] = useState(false);
   const checkExistingRequestRef = useRef({ id: 0, key: "" });
   const checkExistingAbortControllerRef = useRef<AbortController | null>(null);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
@@ -144,7 +152,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [skipExisting, setSkipExisting] = useState(true);
   const [progressInterval, setProgressInterval] = useState("10");
 
-  const existingAllSaved = !!existingData && (existingData.requested_count || 0) > 0 && (existingData.missing_target_html_count || 0) === 0;
+  const existingAllSaved = !!existingData
+    && (existingData.requested_count || 0) > 0
+    && (existingData.missing_target_html_count || 0) === 0
+    && (existingData.hash_unverified_target_html_count || 0) === 0
+    && (existingData.hash_mismatch_target_html_count || 0) === 0;
 
   const {
     status,
@@ -156,7 +168,10 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   } = useJobPolling({
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     formatStatus,
-    onSuccess: setResult,
+    onSuccess: (nextResult) => {
+      setResult(nextResult);
+      setExistingCheckRefreshKey((current) => current + 1);
+    },
   });
 
   const isJobActive = !!activeJobId;
@@ -418,6 +433,25 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     }
   };
 
+  const handleTrustExistingFiles = async () => {
+    if (!trustExistingConfirmed) {
+      setStatus(`${variantConfig.trustExistingLabel} 확인이 필요합니다.`);
+      setIsErrorStatus(true);
+      return;
+    }
+    setIsErrorStatus(false);
+    const payload = {
+      data_root: dataRoot,
+      mode: htmlParseMode,
+      output_directory: useSeparateOutputDirectory ? outputDirectory : "",
+      ...sourcePayload(),
+      limit: limit ? Number(limit) : null,
+      trust_existing_files: true,
+    };
+    setTrustExistingConfirmed(false);
+    startJob(variantConfig.trustExistingEndpoint, payload);
+  };
+
   const handleDeleteUnexpectedFiles = async () => {
     if (!deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다.") {
       setStatus('삭제하려면 삭제 허가를 체크하고 "확인했습니다."를 입력하세요.');
@@ -610,12 +644,15 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const existingSummary = existingData ? (() => {
     const requestedCount = existingData.requested_count || 0;
     const existingCount = existingData.existing_target_html_count || 0;
-    const missingCount = existingData.missing_target_html_count || 0;
-    if (requestedCount > 0 && missingCount === 0) {
+    const downloadCount = existingData.download_required_target_html_count
+      ?? existingData.missing_target_html_count
+      ?? 0;
+    const unverifiedCount = existingData.hash_unverified_target_html_count || 0;
+    if (requestedCount > 0 && downloadCount === 0 && unverifiedCount === 0) {
       return `이번 대상 ${formatInteger(requestedCount)}건이 모두 저장되어 있습니다.`;
     }
     if (requestedCount > 0) {
-      return `기존 원문 저장 ${formatInteger(existingCount)}건 감지됨. 이번 대상 ${formatInteger(requestedCount)}건 중 ${formatInteger(missingCount)}건을 새로 저장합니다.`;
+      return `기존 원문 저장 ${formatInteger(existingCount)}건 감지됨. 이번 대상 ${formatInteger(requestedCount)}건 중 ${formatInteger(downloadCount)}건을 다운로드해야 합니다.`;
     }
     return `기존 원문 저장 ${formatInteger(existingCount)}건 감지됨.`;
   })() : "";
@@ -635,6 +672,18 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       return {
         className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
         label: "폴더 검사 필요",
+      };
+    }
+    if ((existingData.hash_mismatch_target_html_count || 0) > 0) {
+      return {
+        className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
+        label: "해시 불일치",
+      };
+    }
+    if ((existingData.hash_unverified_target_html_count || 0) > 0) {
+      return {
+        className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
+        label: "기준 해시 필요",
       };
     }
     if (existingAllSaved) {
@@ -758,6 +807,9 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                       저장됨: <span className="font-semibold">{formatInteger(existingData.existing_target_html_count || 0)}</span>건
                       {" "} / 대상: <span className="font-semibold">{formatInteger(existingData.requested_count || 0)}</span>건
                       {" "} / 신규 저장: <span className="font-semibold">{formatInteger(existingData.missing_target_html_count || 0)}</span>건
+                      {" "} / 해시 확인: <span className="font-semibold">{formatInteger(existingData.hash_verified_target_html_count || 0)}</span>건
+                      {" "} / 기준 없음: <span className="font-semibold">{formatInteger(existingData.hash_unverified_target_html_count || 0)}</span>건
+                      {" "} / 불일치: <span className="font-semibold">{formatInteger(existingData.hash_mismatch_target_html_count || 0)}</span>건
                       {" "} / 대상 외 파일: <span className="font-semibold">{formatInteger(existingData.deletion_candidate_count || 0)}</span>개
                     </p>
                   </div>
@@ -795,6 +847,36 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                   <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
                     <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
                     <strong>알림:</strong> {existingDetail}
+                  </div>
+                )}
+
+                {(existingData.hash_unverified_target_html_count || 0) > 0 && (
+                  <div className="text-caption space-y-3 rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                    <p>
+                      기준 해시가 없는 기존 {variantConfig.htmlKindLabel} HTML {formatInteger(existingData.hash_unverified_target_html_count)}건은 자동으로 재사용하지 않습니다.
+                      외부 자료를 맞다고 가정할 때만 현재 파일의 기준 해시를 생성하세요.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={`trustExisting-${variant}-html`}
+                        checked={trustExistingConfirmed}
+                        onCheckedChange={(value) => setTrustExistingConfirmed(!!value)}
+                        className="border-[color:var(--tv-border)]"
+                      />
+                      <Label htmlFor={`trustExisting-${variant}-html`} className="text-body cursor-pointer">
+                        {variantConfig.trustExistingLabel}
+                      </Label>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTrustExistingFiles}
+                      disabled={isJobActive || !trustExistingConfirmed}
+                    >
+                      <ShieldCheck className="mr-2 h-4 w-4" />
+                      기준 해시 생성
+                    </Button>
                   </div>
                 )}
 
@@ -849,7 +931,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                     {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
                     폴더 검사하기
                   </Button>
-                  <Button className="h-10 w-full" onClick={handleRun} disabled={isJobActive}>
+                  <Button
+                    className="h-10 w-full"
+                    onClick={handleRun}
+                    disabled={isJobActive || (skipExisting && (existingData?.hash_unverified_target_html_count || 0) > 0)}
+                  >
                     <Play className="mr-2 h-4 w-4" />
                     실행
                   </Button>

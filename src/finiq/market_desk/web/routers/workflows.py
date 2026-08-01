@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
+    create_external_html_integrity_baseline_payload,
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.filter_presets import (
@@ -68,6 +69,7 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
 from finiq.market_desk.web.features.market_data.service_records import FilterCancelled
 
 FilterDisclosuresPayload = Callable[..., dict[str, Any]]
+SearchDisclosureTitlesPayload = Callable[..., dict[str, Any]]
 RunJobWorker = Callable[[str, str, dict[str, Any]], None]
 
 
@@ -210,9 +212,41 @@ def _start_background_job(
 def create_workflows_router(
     *,
     filter_disclosures_payload: FilterDisclosuresPayload,
+    search_disclosure_titles_payload: SearchDisclosureTitlesPayload,
     run_job_worker: RunJobWorker,
 ) -> APIRouter:
     router = APIRouter()
+
+    @router.post("/api/disclosures/titles/search")
+    async def search_disclosure_titles(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(search_disclosure_titles_payload, payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/titles/search/start")
+    async def start_disclosure_title_search(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
+        return _start_background_job(
+            kind="title_search",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.get("/api/disclosures/titles/jobs/{job_id}")
+    async def get_disclosure_title_search_job(job_id: str):
+        return _job_snapshot(job_id)
+
+    @router.post("/api/disclosures/titles/search/cancel")
+    async def cancel_disclosure_title_search(payload: dict[str, Any]):
+        job_id = str(payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="Missing job_id")
+        if not job_manager.cancel_job(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"status": "success", "job_id": job_id}
 
     @router.post("/api/disclosures/filter")
     async def filter_disclosures(request: Request):
@@ -449,6 +483,17 @@ def create_workflows_router(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
+    @router.post("/api/disclosures/external-html-download/trust-existing/start")
+    async def start_external_html_integrity_baseline(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
+        return _start_background_job(
+            kind="external_html_integrity_baseline",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
     @router.post("/api/disclosures/external-html-download/compress/start")
     async def start_external_html_compress(
         payload: dict[str, Any], background_tasks: BackgroundTasks
@@ -492,6 +537,17 @@ def create_workflows_router(
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/internal-html-download/trust-existing/start")
+    async def start_internal_html_integrity_baseline(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
+        return _start_background_job(
+            kind="internal_html_integrity_baseline",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
 
     @router.post("/api/disclosures/html/manifest/write")
     async def write_html_manifest(payload: dict[str, Any]):
