@@ -123,7 +123,7 @@ html, body {
   height: auto !important;
   min-height: 100% !important;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
   background-color: var(--background) !important;
   color: var(--foreground) !important;
   font-family: var(--font-sans);

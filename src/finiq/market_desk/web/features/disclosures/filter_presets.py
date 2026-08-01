@@ -166,10 +166,8 @@ def _validate_filter_result(
         if not isinstance(disclosure, dict):
             raise ValueError(f"filter result disclosures[{index}] must be an object")
         acpt_no = str(disclosure.get("acpt_no") or "").strip()
-        if not acpt_no.isdigit():
-            raise ValueError(
-                f"filter result disclosures[{index}].acpt_no must contain digits"
-            )
+        if not acpt_no:
+            raise ValueError(f"filter result disclosures[{index}].acpt_no is required")
         acpt_numbers.append(acpt_no)
     if len(acpt_numbers) != len(set(acpt_numbers)):
         raise _integrity_error(
@@ -463,7 +461,7 @@ def _merge_filter_results(
             inspected_count,
         ) = _filter_result_counts(validated)
         if source_offset != cursor:
-            raise _integrity_error("03단계 처리 구간이 이어지지 않습니다.")
+            raise _integrity_error("04단계 처리 구간이 이어지지 않습니다.")
         cursor += inspected_count
         latest_payload = validated
         duplicate_disclosures += _required_count(
@@ -479,14 +477,14 @@ def _merge_filter_results(
             acpt_no = str(disclosure["acpt_no"])
             if acpt_no in disclosures_by_acpt_no:
                 raise _integrity_error(
-                    "03단계 신규 구간에 이미 처리한 접수번호가 있습니다. "
+                    "04단계 신규 구간에 이미 처리한 접수번호가 있습니다. "
                     f"중복 접수번호={acpt_no}."
                 )
             disclosures_by_acpt_no[acpt_no] = disclosure
 
     if complete and cursor != source_disclosures:
         raise _integrity_error(
-            "03단계 검색 대상 건수와 검사 완료 건수가 다릅니다. "
+            "04단계 검색 대상 건수와 검사 완료 건수가 다릅니다. "
             f"검색 대상={source_disclosures}, 검사 완료={cursor}"
         )
     if latest_payload is None:

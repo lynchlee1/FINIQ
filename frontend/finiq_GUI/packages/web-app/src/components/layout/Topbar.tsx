@@ -65,35 +65,36 @@ export function Topbar({
   };
 
   return (
-    <header className="mb-6 flex w-full max-w-full flex-col gap-4 overflow-hidden rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-4 py-3 shadow-[var(--tv-shadow)] backdrop-blur transition-colors md:flex-row md:items-center md:justify-between md:gap-5 md:px-5">
-      <div className="flex w-full min-w-0 items-center justify-between gap-3 md:w-auto">
-        <div className="min-w-0">
-          <p className="text-sm font-medium uppercase text-[var(--tv-muted)]">{brandLabel}</p>
-          <h1 className="mt-1 truncate text-2xl font-bold text-[var(--tv-text)]">
-            {pageTitle}
-          </h1>
+    <header className="mb-6 flex w-full max-w-full flex-col gap-2 overflow-hidden rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 shadow-[var(--tv-shadow)] transition-colors lg:min-h-16 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex w-full min-w-0 items-center justify-between gap-3 px-2 py-1 lg:w-auto lg:shrink-0">
+        <div className="flex min-w-0 flex-col lg:flex-row lg:items-center lg:gap-3">
+          <p className="truncate text-xs font-semibold uppercase tracking-wide text-[var(--tv-muted)]">{brandLabel}</p>
+          <span aria-hidden="true" className="hidden h-7 w-px bg-[var(--tv-border)] lg:block" />
+          <h1 className="truncate text-2xl font-bold text-[var(--tv-text)]">{pageTitle}</h1>
         </div>
         <Button
           variant="outline"
           size="icon"
           onClick={toggleDarkMode}
-          className="border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] hover:text-[var(--tv-accent)] md:hidden"
+          className="border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] hover:text-[var(--tv-accent)] lg:hidden"
+          title={isDark ? "라이트 모드로 전환" : "다크 모드로 전환"}
         >
           {isDark ? <Sun className="h-4 w-4 text-[var(--tv-warning)]" /> : <Moon className="h-4 w-4" />}
         </Button>
       </div>
 
-      <div className="grid w-full min-w-0 gap-3 md:flex md:w-auto md:flex-nowrap md:items-center md:gap-4">
-        <nav className="grid w-full min-w-0 grid-cols-1 gap-2 md:flex md:w-auto md:flex-nowrap" aria-label="주요 메뉴">
+      <div className="flex w-full min-w-0 items-center gap-2 lg:w-auto lg:justify-end">
+        <nav className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface-muted)] p-1 lg:w-auto" aria-label="주요 메뉴">
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
+              aria-current={activeItem?.href === item.href ? "page" : undefined}
               className={cn(
-                "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg px-3 py-2 text-center text-sm font-medium transition-all md:px-4",
+                "min-h-9 shrink-0 whitespace-nowrap rounded-md px-1.5 py-2 text-center text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--tv-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--tv-surface)] sm:px-4",
                 activeItem?.href === item.href
-                  ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)] shadow-sm"
-                  : "text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
+                  ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
+                  : "text-[var(--tv-muted)] hover:bg-[var(--tv-surface-raised)] hover:text-[var(--tv-text)]"
               )}
             >
               {item.label}
@@ -101,13 +102,11 @@ export function Topbar({
           ))}
         </nav>
 
-        <div className="mx-1 hidden h-6 w-px bg-[var(--tv-border)] md:block" />
-
         <Button
           variant="outline"
           size="icon"
           onClick={toggleDarkMode}
-          className="hidden border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] transition-colors hover:text-[var(--tv-accent)] md:flex"
+          className="hidden border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] transition-colors hover:text-[var(--tv-accent)] lg:flex"
           title={isDark ? "라이트 모드로 전환" : "다크 모드로 전환"}
         >
           {isDark ? <Sun className="h-4 w-4 text-[var(--tv-warning)]" /> : <Moon className="h-4 w-4" />}

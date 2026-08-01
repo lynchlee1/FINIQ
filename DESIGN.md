@@ -96,6 +96,7 @@ All spacing derives from a base of 4px.
 - **Structure**: two or three buttons in a bordered row.
 - **Variants**: active tonal fill, inactive transparent.
 - **Spacing**: `--space-1` button gap, `--space-2` horizontal padding.
+- **Layout**: the containing track should hug its options on desktop and become full-width only when mobile space requires it. Do not wrap a compact mode control in an otherwise empty full-width card.
 - **States**: hover, active, focus visible.
 - **Accessibility**: use `aria-pressed` for active mode.
 - **Motion**: 150ms color transition.
@@ -156,7 +157,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
-| Disclosure stages 1–7 orchestration workflow | 공시 자동화 | Use for the page that plans and runs the existing seven disclosure workflows together. Keep the seven stage labels unchanged. |
+| Disclosure stages 1–7 orchestration workflow | 공시 자동화 | Use for the page that plans and runs the seven disclosure workflows together. Keep the seven stage labels unchanged. |
 | Disclosure automation preflight result | 실행 계획 | Shows which stage entities will run, be reused, or be blocked before execution. |
 | Disclosure automation detail-output inspection result | 확인됨 | Green state only after the current profile, all prerequisite inputs, expected membership, integrity checks, and recomputed outputs agree for either detail-page or continuous-run artifacts. |
 | Disclosure automation detail-output inspection action | 검사 | Per-stage action placed to the right of `설정`; checks only that stage in the selected workspace. |
@@ -210,7 +211,13 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filter mode folder | 파싱 모드 | Internal filter result folder key under `03-filter`. On `공시내역 필터링`, resolve it from the selected preset instead of rendering a separate selector in `데이터 경로`. |
 | Disclosure filter preset selector | 조건검색 프리셋 | Automatically lists condition-search workflow JSON files directly under `<data_root>/03-filter`; selecting one immediately applies its conditions. Do not add a manual load action on `공시내역 필터링`. |
 | Disclosure filter preset JSON name | 프리셋 이름 | File stem used when saving `<data_root>/03-filter/<name>.json`; keep the dropdown and this input available for adding workflows. |
-| Disclosure filter workflow status | 작업 상태 | Show persisted workflow state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패` next to each condition-search preset. |
+| Disclosure filter workflow status | 작업 상태 | Persist workflow state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed preset name shown in the selector. |
+| Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. |
+| Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. |
+| Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
+| Disclosure title search action | 실행 | Starts the restorable background title-search job in `공시내역 제목 검색` mode. Use the same execution label as the filtering mode. |
+| Disclosure title search result | 제목 검색 결과 | Lists distinct database titles and the matching disclosure count for each title. |
+| Disclosure title search worker count | 검색 worker 수 | Worker count for querying the stage 02 SQLite shards in `공시내역 제목 검색` mode. |
 | Disclosure workflow stage index | 00–09 | Show the zero-padded stage number only in the disclosure sidebar. Keep page titles unnumbered. |
 | HTML parse report preview | 리포트 미리보기 | Separate box below `모드별 기능` that shows a few parsed report results as HTML tables for the selected parse mode. |
 | HTML parse warning files page open action | 현재 페이지 열기 | Button in the right-side `알림` panel on `공시원문 변환` that opens the current page of source HTML files with parse warnings. Pages contain 20 files. |
@@ -233,6 +240,10 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Bond issuance result review | 발행내역 한눈에 | Unnumbered read-only helper for reviewing `bond_issuance` parse results. |
 | External HTML save mode/button | 외부 HTML 저장 | Top mode button in 공시원문 외부 저장. |
 | External HTML compression mode/button | 외부 HTML 압축 | Use for the compact JSON creation from saved external HTML. |
+| Existing external HTML trust confirmation | 현재 외부 HTML 신뢰 | Explicit confirmation that externally supplied files may be used as the integrity baseline. |
+| External HTML integrity baseline action | 기준 해시 생성 | Calculates and stores SHA-256 values for explicitly trusted existing external HTML files. |
+| Existing internal HTML trust confirmation | 현재 내부 HTML 신뢰 | Explicit confirmation that externally supplied internal HTML files may be used as the integrity baseline. |
+| Internal HTML integrity baseline action | 기준 해시 생성 | Calculates and stores SHA-256 values for explicitly trusted existing internal HTML files. |
 | Source folder input mode | 폴더 입력 | Toggle label. |
 | Source JSON file input mode | JSON 파일 입력 | Toggle label. |
 | Output split storage | 분할저장 | Keep this spelling. |

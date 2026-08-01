@@ -227,14 +227,20 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("root_directory is not supported; use data_root")
         payload["mode"] = validate_workspace_mode(payload.get("mode"))
         _set_default(payload, "external_html_transfer_path", str(workspace.filtered))
-    elif normalized_kind == "external_html_download":
+    elif normalized_kind in {
+        "external_html_download",
+        "external_html_integrity_baseline",
+    }:
         mode = validate_workspace_mode(payload.get("mode"))
         _set_default(payload, "output_directory", str(workspace.external_mode(mode)))
     elif normalized_kind == "external_html_compress":
         mode = validate_workspace_mode(payload.get("mode"))
         _set_default(payload, "input_directory", str(workspace.external_mode(mode)))
         _set_default(payload, "output_directory", str(workspace.external_mode(mode)))
-    elif normalized_kind == "internal_html_download":
+    elif normalized_kind in {
+        "internal_html_download",
+        "internal_html_integrity_baseline",
+    }:
         mode = validate_workspace_mode(payload.get("mode"))
         if not str(payload.get("source_compressed_json_path") or "").strip():
             _set_default(

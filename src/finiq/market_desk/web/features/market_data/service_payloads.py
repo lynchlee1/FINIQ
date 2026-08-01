@@ -301,6 +301,54 @@ def filter_disclosures_payload(
     )
 
 
+def search_disclosure_titles_payload(
+    body: dict[str, Any],
+    *,
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: CancelCheck | None = None,
+) -> dict[str, Any]:
+    """Search disclosure titles without recording a stage 03 filter run."""
+    data_root = str(body.get("data_root") or "").strip()
+    if not data_root:
+        raise ValueError("data_root is required")
+    sqlite_manifest_path = _resolve_sqlite_manifest_path(
+        resolve_disclosure_workspace(data_root).table / "sqlite_manifest.json"
+    )
+    sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
+    _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
+    filter_blocks = _validate_filter_blocks(body.get("filter_blocks") or [])
+    shards = list(sqlite_manifest.get("shards") or [])
+    filter_workers = _resolve_filter_workers(body.get("filter_workers"), len(shards))
+    matched_disclosures, title_counts = _search_sqlite_manifest_titles(
+        sqlite_manifest_path,
+        sqlite_manifest,
+        filter_blocks=filter_blocks,
+        filter_workers=filter_workers,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
+    source_disclosures = _sqlite_manifest_total_disclosures(sqlite_manifest)
+
+    return {
+        "format": "finiq_disclosure_title_search_v1",
+        "source_type": "sqlite_manifest",
+        "source_sqlite_manifest_path": str(sqlite_manifest_path),
+        "filters": {
+            "filter_blocks": filter_blocks,
+            "filter_workers": filter_workers,
+        },
+        "summary": {
+            "source_disclosures": source_disclosures,
+            "matched_disclosures": matched_disclosures,
+            "matched_titles": len(title_counts),
+        },
+        "titles": [
+            {"title": title, "disclosures": count}
+            for title, count in title_counts.items()
+        ],
+    }
+
+
 def load_company_index_payload(
     classification_path: str | Path,
     *,

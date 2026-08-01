@@ -1,12 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Play, Loader2 } from "lucide-react";
+import { Filter, Play, Loader2, Search } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { apiPost } from "@/api/client";
+import { useJobPolling } from "@/hooks/useJobPolling";
 import { useJobStreaming } from "@/hooks/useJobStreaming";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -25,7 +27,8 @@ import {
   saveDisclosureConditionPreset,
 } from "@/lib/disclosureConditionPresets";
 
-const PAGE_SIZE = 20;
+const FILTER_PAGE_SIZE = 20;
+const TITLE_PAGE_SIZE = 50;
 const FILTER_MODE_KEYS = [
   "bond_issuance",
   "rights_issuance",
@@ -46,6 +49,20 @@ type FilterResult = {
     acpt_numbers?: number;
   };
 };
+
+type TitleSearchResult = {
+  summary: {
+    source_disclosures: number;
+    matched_disclosures: number;
+    matched_titles: number;
+  };
+  titles: Array<{
+    title: string;
+    disclosures: number;
+  }>;
+};
+
+type FilterTaskMode = "title-search" | "filter";
 
 
 function getKindDisclosureUrl(acptNo: string) {
@@ -71,9 +88,8 @@ export default function FilterPage() {
     saveSetting,
   } = useSettingsStore();
 
-  const { status, setStatus, isErrorStatus, setIsErrorStatus, isStreaming, streamJob, abortJob, appendStatus } = useJobStreaming();
-
   const [loading, setLoading] = useState(true);
+  const [taskMode, setTaskMode] = useState<FilterTaskMode>("filter");
   const [mode, setMode] = useState("");
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
   const [presetName, setPresetName] = useState("");
@@ -85,9 +101,61 @@ export default function FilterPage() {
   const [progressInterval, setProgressInterval] = useState("1000");
   const [result, setResult] = useState<FilterResult | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
+  const [titleResult, setTitleResult] = useState<TitleSearchResult | null>(null);
+  const [titlePageIndex, setTitlePageIndex] = useState(0);
+  const {
+    status: filterStatus,
+    setStatus: setFilterStatus,
+    isErrorStatus: isFilterErrorStatus,
+    setIsErrorStatus: setIsFilterErrorStatus,
+    isStreaming,
+    streamJob,
+    abortJob,
+    appendStatus,
+  } = useJobStreaming();
+  const {
+    status: titleStatus,
+    setStatus: setTitleStatus,
+    isErrorStatus: isTitleErrorStatus,
+    setIsErrorStatus: setIsTitleErrorStatus,
+    activeJobId: titleJobId,
+    startPolling: startTitlePolling,
+    cancelJob: cancelTitleSearch,
+  } = useJobPolling({
+    pollingEndpoint: "/api/disclosures/titles/jobs/{jobId}",
+    cancelEndpoint: "/api/disclosures/titles/search/cancel",
+    onSuccess: (response: TitleSearchResult) => {
+      setTitleResult(response);
+      setTitlePageIndex(0);
+    },
+  });
+  const setStatus = useCallback((message: string) => {
+    setFilterStatus(message);
+    setTitleStatus(message);
+  }, [setFilterStatus, setTitleStatus]);
+  const setIsErrorStatus = useCallback((isError: boolean) => {
+    setIsFilterErrorStatus(isError);
+    setIsTitleErrorStatus(isError);
+  }, [setIsFilterErrorStatus, setIsTitleErrorStatus]);
+  const activeStatusMode: FilterTaskMode = titleJobId
+    ? "title-search"
+    : isStreaming
+      ? "filter"
+      : taskMode;
+  const status = activeStatusMode === "title-search" ? titleStatus : filterStatus;
+  const isErrorStatus = activeStatusMode === "title-search"
+    ? isTitleErrorStatus
+    : isFilterErrorStatus;
+  const isJobActive = isStreaming || !!titleJobId;
   const presetListRequestIdRef = useRef(0);
   const currentDataRootRef = useRef(rootDirectory);
   currentDataRootRef.current = rootDirectory;
+
+  useEffect(() => {
+    if (titleJobId) {
+      setTaskMode("title-search");
+    }
+  }, [titleJobId]);
 
   useEffect(() => {
     fetchSettings().then((config) => {
@@ -136,12 +204,19 @@ export default function FilterPage() {
     setIsErrorStatus(false);
   }, [setIsErrorStatus, setStatus]);
 
-  const pageCount = Math.max(1, Math.ceil((result?.disclosures?.length || 0) / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil((result?.disclosures?.length || 0) / FILTER_PAGE_SIZE));
   const pageRows = useMemo(() => {
     const rows = result?.disclosures || [];
     const safeIndex = Math.min(Math.max(pageIndex, 0), pageCount - 1);
-    return rows.slice(safeIndex * PAGE_SIZE, (safeIndex + 1) * PAGE_SIZE);
+    return rows.slice(safeIndex * FILTER_PAGE_SIZE, (safeIndex + 1) * FILTER_PAGE_SIZE);
   }, [pageCount, pageIndex, result]);
+
+  const titlePageCount = Math.max(1, Math.ceil((titleResult?.titles.length || 0) / TITLE_PAGE_SIZE));
+  const titlePageRows = useMemo(() => {
+    const rows = titleResult?.titles || [];
+    const safeIndex = Math.min(Math.max(titlePageIndex, 0), titlePageCount - 1);
+    return rows.slice(safeIndex * TITLE_PAGE_SIZE, (safeIndex + 1) * TITLE_PAGE_SIZE);
+  }, [titlePageCount, titlePageIndex, titleResult]);
 
   const buildPayload = (workflowName: string) => {
     const configuredLimit = Number(limit);
@@ -179,6 +254,42 @@ export default function FilterPage() {
     && presetListRequestIdRef.current === requestId
   );
 
+  const handleTitleSearch = async () => {
+    setTaskMode("title-search");
+    if (!rootDirectory?.trim()) {
+      setTitleStatus("작업공간 디렉토리를 선택하세요.");
+      setIsTitleErrorStatus(true);
+      return;
+    }
+    const configuredWorkers = Number(filterWorkers);
+    if (!Number.isInteger(configuredWorkers) || configuredWorkers < 1) {
+      setTitleStatus("filter_workers must be a positive integer");
+      setIsTitleErrorStatus(true);
+      return;
+    }
+    setTitleResult(null);
+    setTitlePageIndex(0);
+    try {
+      const response = await apiPost<{ job_id: string }>("/api/disclosures/titles/search/start", {
+        data_root: rootDirectory,
+        filter_blocks: normalizeDisclosureConditionBlocks(conditions),
+        filter_workers: configuredWorkers,
+      });
+      startTitlePolling(response.job_id);
+    } catch (error) {
+      setTitleStatus(error instanceof Error ? error.message : String(error));
+      setIsTitleErrorStatus(true);
+    }
+  };
+
+  const handleCancel = () => {
+    if (titleJobId) {
+      void cancelTitleSearch();
+      return;
+    }
+    abortJob();
+  };
+
   const refreshPresetsAfterRun = async (
     dataRoot: string,
     workflowName: string,
@@ -199,6 +310,7 @@ export default function FilterPage() {
   };
 
   const handleFilter = async () => {
+    setTaskMode("filter");
     if (!rootDirectory?.trim()) {
       setStatus("입력 데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
@@ -389,6 +501,37 @@ export default function FilterPage() {
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
+      <div className="flex w-full items-center" data-testid="filter-mode-control">
+        <div
+          className="grid w-full grid-cols-2 gap-1 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface-muted)] p-1 sm:w-auto"
+          role="group"
+          aria-label="공시 작업 모드"
+        >
+          <Button
+            type="button"
+            variant={taskMode === "title-search" ? "default" : "ghost"}
+            size="sm"
+            className="h-10 min-w-0 rounded-md px-2.5 font-semibold sm:min-w-44 sm:px-4"
+            aria-pressed={taskMode === "title-search"}
+            onClick={() => setTaskMode("title-search")}
+          >
+            <Search className="h-4 w-4" />
+            공시내역 제목 검색
+          </Button>
+          <Button
+            type="button"
+            variant={taskMode === "filter" ? "default" : "ghost"}
+            size="sm"
+            className="h-10 min-w-0 rounded-md px-2.5 font-semibold sm:min-w-44 sm:px-4"
+            aria-pressed={taskMode === "filter"}
+            onClick={() => setTaskMode("filter")}
+          >
+            <Filter className="h-4 w-4" />
+            공시내역 필터링
+          </Button>
+        </div>
+      </div>
+
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
@@ -405,7 +548,7 @@ export default function FilterPage() {
               onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
             />
           </div>
-          {useSeparateOutputDirectory && <div className="grid gap-2">
+          {taskMode === "filter" && useSeparateOutputDirectory && <div className="grid gap-2">
             <Label className="dark:text-slate-300">결과 데이터 경로</Label>
             <PathPickerInput 
               mode="folder"
@@ -437,17 +580,69 @@ export default function FilterPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Button onClick={handleFilter} disabled={isStreaming} className="w-full">
-                  {isStreaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                <Button
+                  onClick={taskMode === "title-search" ? handleTitleSearch : handleFilter}
+                  disabled={isJobActive}
+                  className="w-full"
+                >
+                  {isJobActive ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : taskMode === "title-search" ? (
+                    <Search className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Play className="mr-2 h-4 w-4" />
+                  )}
                   실행
                 </Button>
-                <Button variant="outline" onClick={abortJob} disabled={!isStreaming} className="w-full">
+                <Button variant="outline" onClick={handleCancel} disabled={!isJobActive} className="w-full">
                   {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
             </CardContent>
           </Card>
 
+          {taskMode === "title-search" ? (
+            <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
+              <CardHeader>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Result</p>
+                <CardTitle className="dark:text-white">제목 검색 결과</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500 dark:text-slate-400">
+                  <span>공시 {formatInteger(titleResult?.summary.matched_disclosures)}건 · 제목 {formatInteger(titleResult?.summary.matched_titles)}개</span>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setTitlePageIndex((value) => Math.max(0, value - 1))} disabled={!titleResult?.titles.length || titlePageIndex <= 0}>이전</Button>
+                    <span className="min-w-[72px] text-center font-bold">{titleResult?.titles.length ? `${titlePageIndex + 1} / ${titlePageCount}` : "0 / 0"}</span>
+                    <Button variant="outline" size="sm" onClick={() => setTitlePageIndex((value) => Math.min(titlePageCount - 1, value + 1))} disabled={!titleResult?.titles.length || titlePageIndex >= titlePageCount - 1}>다음</Button>
+                  </div>
+                </div>
+                <div className="h-[460px] overflow-auto rounded-lg border border-slate-200 bg-white dark:bg-[#0d1117] dark:border-[#30363d]">
+                  <table className="w-full border-collapse text-sm">
+                    <thead className="sticky top-0 bg-white text-left text-slate-500 dark:bg-[#161b22] dark:text-slate-400">
+                      <tr>
+                        <th className="w-24 border-b border-slate-200 px-3 py-2 dark:border-[#30363d]">번호</th>
+                        <th className="border-b border-slate-200 px-3 py-2 dark:border-[#30363d]">공시 제목</th>
+                        <th className="w-32 border-b border-slate-200 px-3 py-2 text-right dark:border-[#30363d]">공시 건수</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]">
+                      {titlePageRows.length ? titlePageRows.map((row, index) => (
+                        <tr key={row.title} className="hover:bg-slate-50 dark:hover:bg-[#161b22] dark:text-slate-300">
+                          <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{titlePageIndex * TITLE_PAGE_SIZE + index + 1}</td>
+                          <td className="px-3 py-2 font-medium">{row.title}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatInteger(row.disclosures)}</td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td className="px-3 py-10 text-center text-slate-500 dark:text-slate-400" colSpan={3}>제목 검색 결과가 없습니다.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Result</p>
@@ -499,17 +694,18 @@ export default function FilterPage() {
           </div>
         </CardContent>
           </Card>
+          )}
 
         </section>
 
         <ActionDock
-          activityActive={isStreaming}
+          activityActive={isJobActive}
           activityContent={
             <JobStatusLogger 
               status={status} 
               isErrorStatus={isErrorStatus} 
-              isCancellable={isStreaming} 
-              onCancel={abortJob} 
+              isCancellable={isJobActive}
+              onCancel={handleCancel}
             />
           }
           notificationActive={isErrorStatus}
@@ -517,8 +713,8 @@ export default function FilterPage() {
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">
-              <DisclosureSeparateOutputDirectorySetting id="filter-separate-output-directory" />
-              <div className="space-y-3">
+              {taskMode === "filter" && <DisclosureSeparateOutputDirectorySetting id="filter-separate-output-directory" />}
+              {taskMode === "filter" && <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>
                 </div>
@@ -530,19 +726,19 @@ export default function FilterPage() {
                 </label>
                 <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 disabled:opacity-50" />
               </div>
-              </div>
+              </div>}
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
               <Label className="grid gap-2 dark:text-slate-300">
-                파싱 worker 수
+                {taskMode === "title-search" ? "검색 worker 수" : "파싱 worker 수"}
                 <Input type="number" min="1" max={parallelWorkerCount} step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
               </Label>
-              <Label className="grid gap-2 dark:text-slate-300">
+              {taskMode === "filter" && <Label className="grid gap-2 dark:text-slate-300">
                 진행 표시 간격
                 <Input type="number" min="1" max="10000" step="1" value={progressInterval} onChange={(event) => setProgressInterval(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-              </Label>
+              </Label>}
               </div>
             </div>
           }

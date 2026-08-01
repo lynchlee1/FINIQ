@@ -396,7 +396,7 @@ export default function DisclosureAutomationPage() {
   );
   const searchSettingsSelected = executionMask.includes(1);
   const filterSettingsSelected = executionMask.some((stage) => stage >= 3);
-  const sectionSettingsSelected = executionMask.includes(6);
+  const sectionSettingsSelected = executionMask.includes(7);
 
   const validatedExecution = () => {
     const configuredPageSize = Number(pageSize);

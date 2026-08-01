@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 import finiq.market_desk.web.features.disclosures.table_export as table_export_module
+import finiq.market_desk.web.features.market_data.service_payloads as service_payloads_module
 from finiq.config import QUANTI_DIR, STOCK_DATA_DIR
 from finiq.data_scraper.workflow import KIND_WORKFLOW_INPUT_FORMAT
 from finiq.market_desk.analytics.quanti_market_history import (
@@ -28,6 +29,7 @@ from finiq.market_desk.web.features.market_data.service_insight import build_ins
 from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
     load_company_index_payload,
+    search_disclosure_titles_payload,
 )
 from finiq.market_desk.web.features.market_data.service_records import (
     FilterCancelled,
@@ -36,6 +38,7 @@ from finiq.market_desk.web.features.market_data.service_records import (
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
+    create_external_html_integrity_baseline_payload,
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
@@ -689,6 +692,89 @@ def test_filter_disclosures_payload_filters_by_title_and_date(tmp_path: Path) ->
     assert payload["disclosures"][0]["acpt_no"] == "1"
     assert payload["disclosures"][0]["company_name"] == "테스트전자"
     assert payload["unique_titles"] == ["[정정]전환사채발행결정"]
+
+
+def test_search_disclosure_titles_payload_returns_distinct_db_titles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+    progress: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        service_payloads_module,
+        "filter_disclosures_payload",
+        lambda *_args, **_kwargs: pytest.fail(
+            "title search must query SQLite instead of scanning filter results"
+        ),
+    )
+
+    payload = search_disclosure_titles_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_workers": 2,
+            "progress_interval": 1,
+            "filter_blocks": [
+                _filter_block(
+                    field="title",
+                    operator="contains",
+                    value="결의",
+                )
+            ],
+        },
+        progress_callback=progress.append,
+    )
+
+    assert payload["format"] == "finiq_disclosure_title_search_v1"
+    assert payload["summary"] == {
+        "source_disclosures": 3,
+        "matched_disclosures": 1,
+        "matched_titles": 1,
+    }
+    assert payload["titles"] == [
+        {"title": "주주총회소집결의", "disclosures": 1}
+    ]
+    assert payload["filters"]["filter_workers"] == 1
+    assert progress[-1]["completed"] == 3
+    assert "disclosures" not in payload
+
+
+def test_search_disclosure_titles_payload_applies_shared_boolean_conditions_in_sqlite(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+
+    payload = search_disclosure_titles_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [
+                _filter_block(
+                    field="title",
+                    operator="contains",
+                    value="전환사채",
+                    open_count=1,
+                ),
+                _filter_block(
+                    connector="OR",
+                    field="title",
+                    operator="contains",
+                    value="주주총회",
+                    close_count=1,
+                ),
+                _filter_block(
+                    connector="AND",
+                    field="market",
+                    operator="equals",
+                    value="코스피",
+                ),
+            ],
+        }
+    )
+
+    assert payload["summary"]["matched_disclosures"] == 2
+    assert payload["titles"] == [
+        {"title": "[정정]전환사채발행결정", "disclosures": 1},
+        {"title": "주주총회소집결의", "disclosures": 1},
+    ]
 
 
 def test_filter_disclosures_payload_filters_only_rows_after_source_offset(
@@ -1871,7 +1957,13 @@ def test_collect_acpt_numbers_from_json_requires_canonical_records() -> None:
 def test_download_disclosure_external_html_payload_uses_collected_acpt_numbers(tmp_path: Path, monkeypatch) -> None:
     def fake_download(**kwargs):
         assert kwargs["max_retries"] == 5
-        return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
+        paths = []
+        for acpt_no in kwargs["acpt_numbers"]:
+            path = Path(kwargs["output_directory"]) / f"{acpt_no}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_download_html(), encoding="utf-8")
+            paths.append(path)
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls", fake_download)
 
@@ -2061,6 +2153,9 @@ def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Pat
         str(tmp_path / "content_html" / "2025" / "20250101000001.html")
     ]
     assert "HTML 내부 저장 중간 확인: 1/1건 처리." in payload["progress_log"]
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["disclosures"][0]["source_size_bytes"] > 0
+    assert len(manifest["disclosures"][0]["source_sha256"]) == 64
 
 
 def test_download_disclosure_internal_html_payload_rejects_json_only_input(tmp_path: Path) -> None:
@@ -2087,7 +2182,13 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
         output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
         calls.append((output_directory, targets))
-        return [output_directory / f"{target['acpt_no']}.html" for target in targets]
+        paths = [
+            output_directory / f"{target['acpt_no']}.html" for target in targets
+        ]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_download_html(), encoding="utf-8")
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
 
@@ -2457,7 +2558,12 @@ def test_download_disclosure_external_html_payload_logs_existing_html_overlap(
     def fake_download(**kwargs):
         assert kwargs["acpt_numbers"] == ["20250101000002"]
         assert kwargs["skip_existing"] is False
-        return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
+        paths = []
+        for acpt_no in kwargs["acpt_numbers"]:
+            path = Path(kwargs["output_directory"]) / f"{acpt_no}.html"
+            path.write_text(_valid_download_html(), encoding="utf-8")
+            paths.append(path)
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls", fake_download)
     output_directory = tmp_path / "viewer_html"
@@ -2465,16 +2571,25 @@ def test_download_disclosure_external_html_payload_logs_existing_html_overlap(
     (output_directory / "2025" / "20250101000001.html").write_text(
         _valid_download_html(), encoding="utf-8"
     )
+    source = {
+        "disclosures": [
+            {"acpt_no": "20250101000001"},
+            {"acpt_no": "20250101000002"},
+        ]
+    }
+    create_external_html_integrity_baseline_payload(
+        _external_workspace_body(
+            tmp_path,
+            source,
+            output_directory=str(output_directory),
+            trust_existing_files=True,
+        )
+    )
 
     payload = download_disclosure_external_html_payload(
         _external_workspace_body(
             tmp_path,
-            {
-                "disclosures": [
-                    {"acpt_no": "20250101000001"},
-                    {"acpt_no": "20250101000002"},
-                ]
-            },
+            source,
             output_directory=str(output_directory),
             skip_existing=True,
             progress_interval=1,
@@ -2497,7 +2612,13 @@ def test_download_disclosure_external_html_payload_logs_when_no_existing_html_ov
     def fake_download(**kwargs):
         assert kwargs["acpt_numbers"] == ["20250101000001"]
         assert kwargs["skip_existing"] is False
-        return [Path(kwargs["output_directory"]) / f"{acpt_no}.html" for acpt_no in kwargs["acpt_numbers"]]
+        paths = []
+        for acpt_no in kwargs["acpt_numbers"]:
+            path = Path(kwargs["output_directory"]) / f"{acpt_no}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_download_html(), encoding="utf-8")
+            paths.append(path)
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls", fake_download)
     output_directory = tmp_path / "viewer_html"
@@ -2806,7 +2927,12 @@ def test_download_disclosure_external_html_payload_resumes_yearly_files(
         output_directory = Path(kwargs["output_directory"])
         acpt_numbers = list(kwargs["acpt_numbers"])
         calls.append((output_directory, acpt_numbers))
-        return [output_directory / f"{acpt_no}.html" for acpt_no in acpt_numbers]
+        paths = []
+        for acpt_no in acpt_numbers:
+            path = output_directory / f"{acpt_no}.html"
+            path.write_text(_valid_download_html(), encoding="utf-8")
+            paths.append(path)
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls", fake_download)
 
@@ -2815,16 +2941,25 @@ def test_download_disclosure_external_html_payload_resumes_yearly_files(
     (output_directory / "2025" / "20250101000001.html").write_text(
         _valid_download_html(), encoding="utf-8"
     )
+    source = {
+        "disclosures": [
+            {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
+            {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
+        ]
+    }
+    create_external_html_integrity_baseline_payload(
+        _external_workspace_body(
+            tmp_path,
+            source,
+            output_directory=str(output_directory),
+            trust_existing_files=True,
+        )
+    )
 
     payload = download_disclosure_external_html_payload(
         _external_workspace_body(
             tmp_path,
-            {
-                "disclosures": [
-                    {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
-                    {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
-                ]
-            },
+            source,
             output_directory=str(output_directory),
             skip_existing=True,
         )
@@ -3187,7 +3322,13 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
         output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
         calls.append((output_directory, targets))
-        return [output_directory / f"{target['acpt_no']}.html" for target in targets]
+        paths = [
+            output_directory / f"{target['acpt_no']}.html" for target in targets
+        ]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_download_html(), encoding="utf-8")
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
 
@@ -3231,7 +3372,13 @@ def test_download_disclosure_internal_html_payload_prefers_compressed_external_j
         output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
         calls.append((output_directory, targets))
-        return [output_directory / f"{target['acpt_no']}.html" for target in targets]
+        paths = [
+            output_directory / f"{target['acpt_no']}.html" for target in targets
+        ]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_download_html(), encoding="utf-8")
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
 
@@ -3281,7 +3428,13 @@ def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_
         output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
         calls.append((output_directory, targets))
-        return [output_directory / f"{target['acpt_no']}.html" for target in targets]
+        paths = [
+            output_directory / f"{target['acpt_no']}.html" for target in targets
+        ]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_download_html(), encoding="utf-8")
+        return paths
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
 
@@ -4443,7 +4596,10 @@ def test_download_disclosure_external_html_payload_stops_when_cancelled(tmp_path
         for acpt_no in kwargs["acpt_numbers"]:
             if kwargs["cancel_check"]():
                 break
-            saved_paths.append(Path(kwargs["output_directory"]) / f"{acpt_no}.html")
+            path = Path(kwargs["output_directory"]) / f"{acpt_no}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_download_html(), encoding="utf-8")
+            saved_paths.append(path)
             cancel_disclosure_html_download("cancel-test")
         return saved_paths
 

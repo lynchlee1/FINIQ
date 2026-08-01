@@ -5,6 +5,53 @@ from __future__ import annotations
 from finiq.market_desk.web.features.disclosures import internal_html_download
 from finiq.market_desk.web.features.disclosures.html_common import *
 
+
+def _load_internal_html_integrity_source(
+    body: dict[str, Any],
+) -> tuple[Any, str, list[str], dict[str, str]]:
+    source_directory_raw = str(body.get("source_directory") or "").strip()
+    source_compressed_json_path_raw = str(
+        body.get("source_compressed_json_path") or ""
+    ).strip()
+    if source_directory_raw and source_compressed_json_path_raw:
+        raise ValueError(
+            "source_directory and source_compressed_json_path cannot be used together"
+        )
+    if source_compressed_json_path_raw:
+        source_path = (
+            Path(source_compressed_json_path_raw).expanduser().resolve()
+        )
+        source_json = (
+            internal_html_download._load_compressed_external_html_file_payload(
+                source_path
+            )
+        )
+        targets, source_json = (
+            internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(
+                source_json
+            )
+        )
+    elif source_directory_raw:
+        source_path = Path(source_directory_raw).expanduser().resolve()
+        targets, source_json = (
+            internal_html_download._collect_internal_cleanup_targets_from_external_directory(
+                source_path
+            )
+        )
+    else:
+        raise ValueError("source_directory or source_compressed_json_path is required")
+
+    targets = _apply_limit_to_targets(targets, body.get("limit"))
+    acpt_numbers = [target["acpt_no"] for target in targets]
+    target_years = {target["acpt_no"]: target["year"] for target in targets}
+    if source_json is None:
+        source_json = {
+            "format": "finiq_disclosure_html_manifest_v1",
+            "disclosures": [{"acpt_no": acpt_no} for acpt_no in acpt_numbers],
+        }
+    return source_json, str(source_path), acpt_numbers, target_years
+
+
 def clean_disclosure_html_output_directory_payload(
     body: dict[str, Any],
 ) -> dict[str, Any]:
@@ -18,42 +65,11 @@ def clean_disclosure_html_output_directory_payload(
         body.get("source_compressed_json_path") or ""
     ).strip()
 
-    if source_directory_raw and source_compressed_json_path_raw:
-        msg = "source_directory and source_compressed_json_path cannot be used together"
-        raise ValueError(msg)
-    if source_compressed_json_path_raw:
-        source_compressed_json_path = (
-            Path(source_compressed_json_path_raw).expanduser().resolve()
+    if source_directory_raw or source_compressed_json_path_raw:
+        _source_json, source_path, acpt_numbers, target_years = (
+            _load_internal_html_integrity_source(body)
         )
-        compressed_payload = internal_html_download._load_compressed_external_html_file_payload(
-            source_compressed_json_path
-        )
-        targets, _manifest_payload = (
-            internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(compressed_payload)
-        )
-        targets = _apply_limit_to_targets(targets, body.get("limit"))
-        acpt_numbers = [target["acpt_no"] for target in targets]
-        target_years = {
-            target["acpt_no"]: target["year"]
-            for target in targets
-        }
         source_type = "content"
-        source_path = str(source_compressed_json_path)
-    elif source_directory_raw:
-        source_directory = Path(source_directory_raw).expanduser().resolve()
-        targets, _manifest_payload = (
-            internal_html_download._collect_internal_cleanup_targets_from_external_directory(
-                source_directory,
-            )
-        )
-        targets = _apply_limit_to_targets(targets, body.get("limit"))
-        acpt_numbers = [target["acpt_no"] for target in targets]
-        target_years = {
-            target["acpt_no"]: target["year"]
-            for target in targets
-        }
-        source_type = "content"
-        source_path = str(source_directory)
     else:
         source_json, source_path = _load_workspace_filtered_payload(body)
         acpt_numbers = collect_acpt_numbers_from_json(source_json)
@@ -105,12 +121,195 @@ def check_disclosure_html_output_directory_payload(
     payload = dict(body)
     payload["dry_run"] = True
     summary = clean_disclosure_html_output_directory_payload(payload)
+    if summary.get("source_type") == "external":
+        source_json, source_json_path = _load_workspace_filtered_payload(body)
+        acpt_numbers = collect_acpt_numbers_from_json(source_json)
+        acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
+        target_years = _target_years_from_json(source_json, acpt_numbers)
+        integrity_summary = _inspect_html_integrity(
+            Path(summary["output_directory"]),
+            acpt_numbers,
+            target_years=target_years,
+            source_json_path=source_json_path,
+            structurally_valid_acpt_numbers=summary[
+                "existing_target_acpt_numbers"
+            ],
+        )
+        integrity_summary.pop("_verified_integrity_by_acpt_no", None)
+        summary.update(integrity_summary)
+    elif summary.get("source_type") == "content":
+        _source_json, source_path, acpt_numbers, target_years = (
+            _load_internal_html_integrity_source(body)
+        )
+        integrity_summary = _inspect_html_integrity(
+            Path(summary["output_directory"]),
+            acpt_numbers,
+            target_years=target_years,
+            source_json_path=source_path,
+            structurally_valid_acpt_numbers=summary[
+                "existing_target_acpt_numbers"
+            ],
+        )
+        integrity_summary.pop("_verified_integrity_by_acpt_no", None)
+        summary.update(integrity_summary)
+    if summary.get("source_type") in {"external", "content"}:
+        summary["download_required_target_html_count"] = (
+            int(summary.get("missing_target_html_count") or 0)
+            + int(summary.get("hash_mismatch_target_html_count") or 0)
+        )
     existing_count = int(summary.get("existing_target_html_count") or 0)
     total_file_count = int(summary.get("total_file_count") or 0)
     return {
         **summary,
         "format": "kind_disclosure_html_existing_check_v1",
         "has_existing": existing_count > 0 or total_file_count > 0,
+    }
+
+
+def create_external_html_integrity_baseline_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Trust the current external HTML files and record their integrity baseline."""
+    if body.get("trust_existing_files") is not True:
+        raise ValueError("현재 외부 HTML 신뢰 확인이 필요합니다.")
+
+    output_directory = str(body.get("output_directory") or "").strip()
+    if not output_directory:
+        raise ValueError("output_directory is required")
+    resolved_output_directory = Path(output_directory).expanduser().resolve()
+    _ensure_safe_html_cleanup_directory(resolved_output_directory)
+
+    source_json, source_json_path = _load_workspace_filtered_payload(body)
+    acpt_numbers = collect_acpt_numbers_from_json(source_json)
+    if not acpt_numbers:
+        raise ValueError("No acpt_no values found in JSON")
+    acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
+    target_years = _target_years_from_json(source_json, acpt_numbers)
+    output_summary = _validate_html_output_directory_files(
+        resolved_output_directory,
+        acpt_numbers,
+        target_years=target_years,
+    )
+    baseline_acpt_numbers = output_summary["existing_target_acpt_numbers"]
+    if not baseline_acpt_numbers:
+        raise ValueError("기준 해시를 생성할 정상 외부 HTML이 없습니다.")
+
+    if progress_callback is not None:
+        progress_callback(
+            f"현재 외부 HTML {len(baseline_acpt_numbers)}건의 기준 해시를 생성합니다."
+        )
+    paths_by_acpt_no = {
+        acpt_no: _target_html_path(
+            resolved_output_directory,
+            acpt_no,
+            target_years=target_years,
+        )
+        for acpt_no in baseline_acpt_numbers
+    }
+    source_integrity, cancelled = _hash_html_files(
+        paths_by_acpt_no,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
+    if cancelled:
+        return {
+            "format": "finiq_disclosure_external_html_integrity_baseline_v1",
+            "cancelled": True,
+            "output_directory": str(resolved_output_directory),
+            "requested_count": len(acpt_numbers),
+            "hashed_count": 0,
+        }
+
+    manifest_path = _write_html_manifest(
+        output_directory=resolved_output_directory,
+        source_json_path=source_json_path,
+        acpt_numbers=baseline_acpt_numbers,
+        source_json=source_json,
+        source_integrity=source_integrity,
+    )
+    if progress_callback is not None:
+        progress_callback(f"외부 HTML 기준 해시 저장 완료: {manifest_path}")
+    return {
+        "format": "finiq_disclosure_external_html_integrity_baseline_v1",
+        "cancelled": False,
+        "output_directory": str(resolved_output_directory),
+        "requested_count": len(acpt_numbers),
+        "hashed_count": len(source_integrity),
+        "manifest_path": str(manifest_path),
+    }
+
+
+def create_internal_html_integrity_baseline_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Trust the current internal HTML files and record their integrity baseline."""
+    if body.get("trust_existing_files") is not True:
+        raise ValueError("현재 내부 HTML 신뢰 확인이 필요합니다.")
+
+    output_directory = str(body.get("output_directory") or "").strip()
+    if not output_directory:
+        raise ValueError("output_directory is required")
+    resolved_output_directory = Path(output_directory).expanduser().resolve()
+    _ensure_safe_html_cleanup_directory(resolved_output_directory)
+
+    source_json, source_path, acpt_numbers, target_years = (
+        _load_internal_html_integrity_source(body)
+    )
+    output_summary = _validate_html_output_directory_files(
+        resolved_output_directory,
+        acpt_numbers,
+        target_years=target_years,
+    )
+    baseline_acpt_numbers = output_summary["existing_target_acpt_numbers"]
+    if not baseline_acpt_numbers:
+        raise ValueError("기준 해시를 생성할 정상 내부 HTML이 없습니다.")
+
+    if progress_callback is not None:
+        progress_callback(
+            f"현재 내부 HTML {len(baseline_acpt_numbers)}건의 기준 해시를 생성합니다."
+        )
+    paths_by_acpt_no = {
+        acpt_no: _target_html_path(
+            resolved_output_directory,
+            acpt_no,
+            target_years=target_years,
+        )
+        for acpt_no in baseline_acpt_numbers
+    }
+    source_integrity, cancelled = _hash_html_files(
+        paths_by_acpt_no,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
+    if cancelled:
+        return {
+            "format": "finiq_disclosure_internal_html_integrity_baseline_v1",
+            "cancelled": True,
+            "output_directory": str(resolved_output_directory),
+            "requested_count": len(acpt_numbers),
+            "hashed_count": 0,
+        }
+
+    manifest_path = _write_html_manifest(
+        output_directory=resolved_output_directory,
+        source_json_path=source_path,
+        acpt_numbers=baseline_acpt_numbers,
+        source_json=source_json,
+        source_integrity=source_integrity,
+    )
+    if progress_callback is not None:
+        progress_callback(f"내부 HTML 기준 해시 저장 완료: {manifest_path}")
+    return {
+        "format": "finiq_disclosure_internal_html_integrity_baseline_v1",
+        "cancelled": False,
+        "output_directory": str(resolved_output_directory),
+        "requested_count": len(acpt_numbers),
+        "hashed_count": len(source_integrity),
+        "manifest_path": str(manifest_path),
     }
 
 

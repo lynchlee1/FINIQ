@@ -39,7 +39,7 @@ test("top navigation separates disclosure, price data, and utility scopes", asyn
 });
 
 test("sidebar definitions match the narrowed top-level workflows", async () => {
-  const { getSidebarDefinition } = await loadNavigation();
+  const { getPageTitle, getSidebarDefinition } = await loadNavigation();
 
   const disclosureSidebar = getSidebarDefinition("disclosure-build");
   assert.deepEqual(
@@ -69,6 +69,7 @@ test("sidebar definitions match the narrowed top-level workflows", async () => {
       [9, "/disclosure-graph"],
     ],
   );
+  assert.equal(getPageTitle("/filter"), "공시내역 필터링");
   assert.deepEqual(
     disclosureSidebar.groups[3].steps.map((step) => [step.step, step.href, step.label]),
     [[undefined, "/html-bond-summary", "발행내역 한눈에"]],

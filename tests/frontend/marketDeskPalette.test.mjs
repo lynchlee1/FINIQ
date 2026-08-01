@@ -33,3 +33,11 @@ test("shared navigation active states use accent foreground instead of fixed whi
     assert.doesNotMatch(source, /bg-\[var\(--tv-accent\)\] text-white/);
   }
 });
+
+test("top navigation presents compact segmented selection semantics", async () => {
+  const source = await readFile(topbarPath, "utf8");
+
+  assert.match(source, /bg-\[var\(--tv-surface-muted\)\] p-1/);
+  assert.match(source, /aria-current=\{activeItem\?\.href === item\.href \? "page" : undefined\}/);
+  assert.match(source, /focus-visible:ring-2/);
+});

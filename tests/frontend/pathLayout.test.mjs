@@ -17,6 +17,8 @@ const graphWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/On
 const graphNodePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/OntologyNodeGraph.tsx";
 const chartWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/OntologyChartWorkspace.tsx";
 const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/DisclosureAnalysisWorkspace.tsx";
+const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
+const marketDeskGlobalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
 test("html section split path fields stack vertically", async () => {
   const source = await readFile(htmlSectionSplitPath, "utf8");
@@ -260,16 +262,55 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /onLoadPresetFromJson\?: \(\) => void/);
   assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" onClick=\{onLoadPresetFromJson\}>/);
   assert.match(conditionCardSource, /<option value="">프리셋 선택<\/option>/);
-  assert.match(conditionCardSource, /preset\.name} · \{workflowStatusLabel\(preset\.status\)}/);
-  assert.match(conditionCardSource, /ready: "입력 완료"/);
-  assert.match(conditionCardSource, /interrupted: "중단됨"/);
-  assert.match(conditionCardSource, /running: "실행 중"/);
+  assert.match(conditionCardSource, /<option key=\{preset\.name\} value=\{preset\.name\}>\s*\{preset\.name\}\s*<\/option>/);
+  assert.doesNotMatch(conditionCardSource, /workflowStatusLabel/);
   assert.match(conditionCardSource, /placeholder="프리셋 이름"/);
   assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
   assert.match(conditionCardSource, /onClick=\{onRenamePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /\/>수정<\/Button>/);
   assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
+});
+
+test("disclosure filter page combines title search and recorded filtering", async () => {
+  const [source, webAppFrameSource, globalsSource] = await Promise.all([
+    readFile(filterPagePath, "utf8"),
+    readFile(webAppFramePath, "utf8"),
+    readFile(marketDeskGlobalsPath, "utf8"),
+  ]);
+
+  assert.match(source, /<DisclosureConditionFilterCard/);
+  assert.match(source, /listDisclosureConditionPresets\(rootDirectory\)/);
+  assert.match(source, /type FilterTaskMode = "title-search" \| "filter"/);
+  assert.match(source, /setTaskMode\("title-search"\)[\s\S]*?공시내역 제목 검색/);
+  assert.match(source, /setTaskMode\("filter"\)[\s\S]*?공시내역 필터링/);
+  assert.ok(
+    source.indexOf('data-testid="filter-mode-control"')
+      < source.indexOf('className="relative action-dock-host'),
+    "동작 전환은 본문 위의 모드 컨트롤에 있어야 합니다.",
+  );
+  assert.match(source, /role="group"\s+aria-label="공시 작업 모드"/);
+  assert.match(source, /aria-pressed=\{taskMode === "title-search"\}/);
+  assert.match(source, /aria-pressed=\{taskMode === "filter"\}/);
+  assert.match(source, /useJobPolling/);
+  assert.match(source, /pollingEndpoint: "\/api\/disclosures\/titles\/jobs\/\{jobId\}"/);
+  assert.match(source, /"\/api\/disclosures\/titles\/search\/start"/);
+  assert.match(source, /startTitlePolling\(response\.job_id\)/);
+  assert.match(source, /if \(titleJobId\) \{\s*setTaskMode\("title-search"\)/);
+  assert.match(source, /const activeStatusMode: FilterTaskMode = titleJobId[\s\S]*?isStreaming[\s\S]*?taskMode/);
+  assert.match(source, /streamJob\("\/api\/disclosures\/filter"/);
+  assert.doesNotMatch(source, /taskMode === "title-search" \? "검색" : "실행"/);
+  assert.match(source, /\n\s+실행\n/);
+  assert.match(source, /<ActionDock/);
+  assert.match(source, /<JobStatusLogger/);
+  assert.match(webAppFrameSource, /overflow-x-clip/);
+  assert.doesNotMatch(webAppFrameSource, /overflow-x-hidden/);
+  assert.match(globalsSource, /html, body \{[\s\S]*?overflow-x: clip;/);
+  assert.doesNotMatch(globalsSource, /html, body \{[\s\S]*?overflow-x: hidden;/);
+  assert.match(source, /data_root: rootDirectory/);
+  assert.match(source, /filter_blocks: normalizeDisclosureConditionBlocks\(conditions\)/);
+  assert.match(source, /<CardTitle className="dark:text-white">제목 검색 결과<\/CardTitle>/);
+  assert.match(source, /<CardTitle className="dark:text-white">필터 결과<\/CardTitle>/);
 });
 
 test("disclosure automation exposes filter presets for every dependent stage range", async () => {
