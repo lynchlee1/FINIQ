@@ -1,9 +1,3 @@
-# AGENTS.md
-
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
-
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
-
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
@@ -23,6 +17,7 @@ Before implementing:
 - No "flexibility" or "configurability" that wasn't requested.
 - No error handling for impossible scenarios.
 - If you write 200 lines and it could be 50, rewrite it.
+- If the user specified a source of truth, you must never rely on any other sources.
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
@@ -60,26 +55,19 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## Project-Specific Notes
+## 5. Avoid Fallbacks
 
+**Minimize fallback logic to keep the codebase maintainable.**
+
+- Always get the user's permission before creating a new fallback.
+- By fallback, it includes all the logic that is used when the normal parsing or conversion path fails or does not return the expected result, as shown below.
+  1. Logic that uses a different parser, selector, tag, attribute, or data source.
+  2. Logic that looks for the desired HTML element in different places, such as parent, child or adjacent elements, or other DOM paths.
+  3. Logic that substitutes another field, metadata, source text or a default value when a specific field is missing or empty.
+  4. Logic that handles errors, exceptions, empty results, format mismatches and validation failures in separate branches.
+  5. Conditional statements, correction logic or temporary processing are used to get around specific disclosure formats or exceptional HTML structures.
+
+## 6. Other Rules
 - Do not read, write, generate, convert, or execute workflows against files under `resources/` without explicit user permission in the current turn. Tests, builds, linters, package commands, and other verification commands are allowed when they do not target or mutate `resources/`.
 - Always use `PLANS.md` to record the purpose, implementation summary, and verification result for completed code changes.
-- Before adding or changing UI labels, button names, page titles, status text, or feature names, consult `docs/ui-terminology.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to the glossary in the same change and keep UI/tests aligned with it.
-- Do not add four meaningless info boxes just to fill space; summary cards must carry decision-making value or be omitted.
-- Our goal is to minimize fallback logic to keep the codebase maintainable. Remove any fallback mechanism when eliminating it does not change the resulting behavior or output. Retain fallbacks only when they are necessary to preserve correctness, reliability, or meaningful edge-case handling.
-
-## Doc Routing
-
-To minimize token use, do not read all files under `docs/` by default. Open only
-the document that matches the current task:
-
-- UI labels, button names, page titles, status text, or feature names: `docs/ui-terminology.md`.
-- Quantiwise Excel, Wide Format, Parquet conversion, preview, merge, duplicate cleanup, account mapping, or date-range metadata: `docs/quantiwise-parquet-conversion.md`.
-- KIND disclosure identifiers, `acpt_no`, `doc_no`, `rcept_no`, `mainDoc`, `filtered.json`, `compressed-external-html.json`, or correction families: `docs/kind-disclosure-identifiers.md`.
-- Disclosure HTML parser architecture or cross-mode extraction behavior: `docs/disclosure-html-parser-logic.md`.
-- Editing KIND HTML parser rules, labels, warnings, correction-table filtering, or parser verification expectations: `docs/disclosure-html-parser-rules.md`.
-- KIND HTML parser common parsing behavior or shared metadata connection flow: `src/finiq/market_desk/web/html_parsers/docs/common/common-html-parser-logic-rules.md`.
-- KIND HTML parser common table/base record shape, saved record fields, or raw table/row storage policy: `src/finiq/market_desk/web/html_parsers/docs/common/common-html-parser-data-structure.md`.
-- KIND HTML parser common warning/status semantics or execution error handling: `src/finiq/market_desk/web/html_parsers/docs/common/common-html-parser-exception-handling.md`.
-- Bond issuance parser field extraction, metadata, title extraction, listing market, or fallback decisions: `src/finiq/market_desk/web/html_parsers/docs/bond-issuance-parser-logic-rules.md`.
-- Rights issuance parser field extraction or type handling for 유상증자, 무상증자, or 유무상증자: `src/finiq/market_desk/web/html_parsers/docs/rights-issuance-parser-logic-rules.md`.
+- Before adding or changing UI labels, button names, page titles, status text, or feature names, consult the UI terminology section in `DESIGN.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to that section in the same change and keep UI/tests aligned with it.

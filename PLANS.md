@@ -1,107 +1,170 @@
 # Completed Changes Requiring Follow-up
 
-## 2026-07-12 — 공시 자동화 단계별 정밀 검사
+## 2026-07-20 — Disclosure behavior classification rewrite
 
 ### Purpose
 
-- `공시 자동화` 작업표에서 사용자가 요청한 단계와 모든 선행 단계가 현재 설정대로 완전히
-  작업됐는지 검사한다.
-- 상세 페이지 실행과 연속 실행 결과를 같은 실행·검증 함수로 판정하고, 완전할 때만 실행
-  계획을 초록색 `확인됨`으로 표시한다.
+- Rewrite every disclosure behavior document against `docs/behavior-classification-rules.md` and make classification boundaries explicit.
+- Preserve every empty behavior category with its heading and an explicit `없음` entry.
 
 ### Implementation summary
 
-- 현재 자동화 프로필 전체와 단계를 받아 설정, 선행 입력, 대상 membership, 결과 내용을
-  검사하는 `/api/disclosure-workflows/inspect` API를 추가했다.
-- 각 작업 행의 `설정` 오른쪽에 `검사` 버튼을 추가하고, 검사한 단계에 유효한 상세 작업
-  결과가 있으면 `확인됨` 배지를 표시하도록 했다. 페이지 진입 시 자동 검사는 하지 않는다.
-- 검사 중에는 버튼 크기가 변하지 않도록 로딩 아이콘 없이 기존 `검사` 문구를 유지하고
-  버튼만 비활성 상태로 표시한다.
-- 다운로드는 기존 실행 코드를 변경하지 않고 설정 스냅샷, 페이지 무결성 검사와 KIND 현재
-  건수 대조를 연결했다. SQLite는 실제 shard 레코드, 필터는 현재 설정 재계산, 외부·내부
-  HTML은 예상 접수번호 전체와 누락·손상·불필요 파일을 검사한다.
-- 목차 분리 저장과 검사가 같은 선택 결과 생성 함수를 공유하도록 연결해 규칙과 HTML
-  내용을 비교하고, 외부 압축과 최종 파싱도 기존 실행 함수로 임시 재계산해 저장 결과와
-  일치하는지 확인한다.
-- 연속 실행은 현재 설정 hash와 파일 fingerprint가 일치하는 전체 checkpoint chain 및
-  다운로드 현재 건수를 검사한다. 상세 실행은 표준 경로 결과를 같은 기준으로 검사한다.
-- 실패 시 `확인 필요`와 최초 실패 단계의 원인을 표시하며, 결과에 영향을 주는 설정이
-  바뀌면 이전 검사 표시를 초기화한다.
-- 표준 상세 경로를 검사·변환할 때 연속 실행의 숨김 cache를 함께 읽던 오류를 수정했다.
-  입력 root 자체가 자동화 cache이면 같은 수집 함수를 그대로 사용하므로 연속 실행은
-  유지하고, 표준 root 아래의 숨김 하위 경로는 목록·저장·검사·변환에서 제외한다.
-- 상세 SQLite 검사에서 임의의 첫 manifest를 선택하거나 중복 제거 후 목록만 비교하던
-  오류를 수정했다. 현재 `01-list`를 입력으로 기록한 유일한 manifest를 선택하고 원본·shard
-  전체 row 수와 공개 record를 모두 비교한다.
-- 장기간 연속 실행 검사가 봉인된 과거 window까지 KIND에 연속 재요청하던 오류를 수정했다.
-  과거 window는 저장 query·본문 hash와 페이지 완전성을 검사하고 최근 7일 mutable window만
-  KIND 현재 건수와 대조한다.
+- Standardized all 20 disclosure README documents as `Core` and `Serving`, each divided into `Feature`, `Fallback`, and `Shutdown`, and labeled every behavior with `Input Handling`, `Core Processing`, or `Result Validation` responsibility.
+- Added the shared classification boundary to the disclosure parent document and separated normal selection, exclusion, empty-result, default-value, and review-wait behavior from unexpected-failure recovery and termination.
+- Reclassified normal download defaults and correction-history value judgments as Features; classified full-period redownload, per-file parser exclusion, retries, reduced graph relationships, and display recovery as Fallbacks; and kept unsafe or incomplete execution paths as Shutdowns.
+- Split mixed rules where validation, recovery, and termination had previously shared one entry, including existing-result validation, parser `skip_errors`, preview augmentation, required bond-table selection, graph input discovery, and stored-result validation.
+- Re-audited the responsibility and layer boundaries after the initial rewrite: moved pre-execution KIND and pagination reads to Input Handling, separated HTML input parsing from row/result generation, treated parser warning and family checks as Core Processing, limited Result Validation to completed outputs, and moved automation orchestration from Core to Serving.
+- Moved normal exclusions and default-value selection out of failure handling, including legacy preset exclusion, graph display-name priority, and correction-history threshold defaults; split the matching failure paths into their own Fallback or Shutdown rules.
+- Added the complete Serving taxonomy to mode-specific parser documents and wrote `없음` in every empty Core or Serving category.
+- Standardized `<br>` separators between every pair of adjacent behavior entries, including pairs separated by Feature, Fallback, Shutdown, Core, or Serving headings, and placed each separator directly after the preceding behavior content so Markdown renders it consistently.
+- No files under `resources/` were read or changed.
 
-### Verification
+### Verification result
 
-- 공시 자동화 집중 Python 테스트 30건과 전체 Python 테스트 988건, 전체 frontend 테스트
-  94건이 통과했다.
-- MarketDesk production build와 TypeScript 검사가 22개 route 생성까지 통과했다.
-- 전체 Python compile 검사와 `git diff --check`가 통과했다.
-- 실제 `resources/` 파일은 읽거나 변경하지 않았다.
+- Confirmed all 20 disclosure README documents contain the same 11-heading classification sequence and no legacy `Features`, `Fallbacks`, or `Shutdowns` headings.
+- Confirmed every behavior entry has one allowed responsibility label and every otherwise-empty category contains `없음`.
+- Rechecked all 211 behavior entries against the three classification questions and cross-checked equivalent input, intermediate-result, completed-result, display, retry, and termination rules across documents.
+- Confirmed all 191 adjacent behavior-entry pairs have exactly one `<br>` separator in the canonical `content → <br> → blank line → next heading` layout.
+- Confirmed all relative Markdown links and referenced anchors in the 20 disclosure README documents resolve.
+- `git diff --check` and the `resources/` scope check passed. Runtime tests were not run because the change is documentation-only.
 
-## 2026-07-12 — 현재 구현 정밀 검토에서 발견한 오류 수정
+## 2026-07-20 — Coding-style instruction relocation
 
 ### Purpose
 
-- `467d1adb..219d2c38` 변경을 HTML parser 문서 계약과 대조해 테스트만으로 드러나지 않은
-  오류를 찾고 수정한다.
-- 오류가 없었던 기존 검토 항목은 제거하고 실제 오류와 검증 결과만 기록한다.
+- Make repository coding-style instructions directly available to coding agents.
 
 ### Implementation summary
 
-- 필터 페이지의 `작업공간 디렉토리` 선택기가 파일 저장 대화상자를 열던 오류를 폴더 선택
-  모드로 수정했다.
-- 병렬 다운로드가 중간 페이지 누락이나 손상을 남긴 경우 파일 개수 다음 페이지가 아니라
-  첫 번째 누락·손상 페이지부터 다시 내려받도록 재개 기준을 수정했다. 이미 저장된 뒤쪽
-  페이지는 다시 검증·저장되어 비연속 결과가 남지 않는다.
-- 가장 마지막 페이지가 손상되면 pagination을 얻지 못해 재개 전에 실패하던 오류를
-  수정했다. 저장 페이지를 뒤에서부터 검사해 첫 정상 pagination을 사용한 뒤 손상 페이지부터
-  다시 내려받는다.
-- 채권 발행 행사대상 추출이 같은 label의 첫 행에서 값을 정하지 못한 뒤 나중 행을 대체
-  원천으로 사용하던 오류를 수정했다. 문서 규칙대로 같은 label에서는 첫 행만 사용한다.
-- 각 오류를 고정하는 frontend 및 Python 회귀 테스트를 추가했다.
+- Moved the complete Coding style section from `docs/README.md` into `AGENTS.md` and merged it with the existing fallback guidance.
+- Left the Writing style guidance and examples in `docs/README.md` unchanged.
 
-### Verification
+### Verification result
 
-- 채권 발행 파서와 숨김 cache 집중 Python 테스트 39건이 통과했다.
-- 전체 Python 테스트 988건과 전체 frontend 테스트 94건이 통과했다.
-- MarketDesk TypeScript 검사, 전체 Python compile 검사와 `git diff --check`가 통과했다.
-- 실제 `resources/` 파일은 읽거나 변경하지 않았다.
+- Confirmed the moved rules occur in `AGENTS.md` and no longer occur in `docs/README.md`.
+- `git diff --check` passed for the three edited Markdown files.
 
-## 2026-07-12 — 외부·내부 HTML 광역 분당 100회 제한
+## 2026-07-18 — Incremental filter review fixes
 
 ### Purpose
 
-- 외부 HTML과 내부 HTML 다운로드의 병렬 워커, 연도 분할 및 연속 작업을 합산해 KIND
-  네트워크 요청이 프로세스 전체에서 분당 100회를 넘지 않도록 한다.
-- 메인 검색결과 테이블 다운로드는 이 제한에서 제외한다.
+- Correct the implementation errors confirmed by the incremental-filter review.
 
 ### Implementation summary
 
-- 60초 슬라이딩 윈도우 방식의 공용 HTML 요청 제한기를 하나 추가하고 최대 요청 수를
-  100회로 고정했다.
-- 외부 HTML 뷰어 요청과 내부 HTML의 문서 경로 조회·본문 조회가 실제 요청 직전에 같은
-  제한기에서 슬롯을 받도록 연결했다. 연도별 함수 호출이 바뀌거나 두 작업이 연속 실행돼도
-  제한 상태는 초기화되지 않는다.
-- 기존 작업별 최대 요청 수와 요청 간격은 유지해 100회보다 낮은 사용자 설정도 계속
-  적용한다.
-- 로컬 제한 slot이나 요청 간격을 먼저 예약한 뒤 광역 제한에서 오래 대기하면 실제 요청
-  시점에 낮은 사용자 제한이 무너지던 오류를 수정했다. 로컬 sliding window, 광역 window,
-  최소 요청 간격을 같은 monotonic 시각에 원자적으로 예약한다.
-- 공시 검색 메인 페이지와 결과 테이블 GET/POST 경로에는 공용 HTML 제한기를 연결하지
-  않았고 이를 회귀 테스트로 고정했다.
+- Exposed the condition-search card for automation ranges beginning at stages 04–07, where profile validation requires a saved preset.
+- Preserved the pre-run canonical workflow when cancellation occurs before any source row is inspected.
+- Rejected fractional incremental counts and required exact boolean `complete=false` and `passed=false` flags on interrupted results.
+- Restored the missing workspace path contract, corrected the stale parser-documentation route, and removed trailing whitespace that invalidated the recorded diff check.
 
-### Verification
+### Verification result
 
-- 슬라이딩 윈도우 제한, 외부·내부 HTML 제한기 공유, 검색결과 다운로드 제외를 검증하는
-  집중 Python 테스트 5건이 통과했다.
-- 전체 Python 테스트 988건과 전체 frontend 테스트 94건이 통과했다.
-- MarketDesk TypeScript 검사, 전체 Python compile 검사와 `git diff --check`가 통과했다.
-- MarketDesk production build가 22개 static/dynamic route 생성까지 통과했다.
-- 실제 `resources/` 파일은 읽거나 변경하지 않았다.
+- `118 passed`: disclosure Web app, workspace, and automation suites.
+- `35 passed`: focused disclosure filter service tests.
+- `19 passed`: frontend path/layout contract tests.
+- Python compile, TypeScript type-check, `git diff --check`, and the local Markdown-link check for 33 files passed.
+
+## 2026-07-18 — Incremental disclosure filter workflow
+
+### Purpose
+
+- Keep each stage 03 condition, execution state, completed result, and interrupted partial result in one canonical workflow JSON.
+- Reuse the previously inspected source count so recurring runs filter only newly appended stage 02 rows.
+- Fail explicitly when source-count integrity or saved-condition integrity no longer holds.
+
+### Implementation summary
+
+- Embedded completed and interrupted filter results in `<data_root>/03-filter/<workflow-name>.json`; same-condition saves preserve them, while condition or mode changes reset the workflow.
+- Added source offsets to the SQLite reader, count-regression checks, explicit search denominator/result numerator fields, interrupted partial-result capture, contiguous merge checks, duplicate receipt-number checks, and atomic replacement after a successful temporary merge.
+- Kept `<mode>/filtered.json` as a derived stage 04 compatibility file and connected both the manual filter route and disclosure automation stage 03 to the same canonical workflow contract.
+- Required automation runs from stage 03 onward to identify a saved condition-search preset and reject runtime mode or condition conflicts.
+- Added the `중단됨` workflow state to the existing UI terminology and documented the count-only, append-order integrity assumptions and the deliberate absence of an unverifiable historical membership hash.
+- No files under `resources/` were read or changed for this implementation.
+
+### Verification result
+
+- `111 passed`: disclosure Web app, workspace, and automation suites.
+- `33 passed`: focused disclosure filter service tests.
+- `18 passed`: frontend path/layout contract tests.
+- TypeScript type-check and Python compile checks passed.
+
+## 2026-07-17 — Documentation hierarchy normalization
+
+### Purpose
+
+- Match the disclosure 08, 09, and parent README structure to the established disclosure document format.
+- Move rules shared by disclosure stages into `docs/disclosures/README.md` so stage documents contain only stage-specific paths, values, and behavior.
+- Move rules shared by Ontology pages into `docs/ontology/README.md` and remove the same rules from child documents.
+
+### Implementation summary
+
+- Rebuilt the disclosure parent README with the standard Summary, Features, Fallbacks, Shutdowns, and Serving sections; normalized the 08 and 09 heading levels and moved the 09 data format under Summary details.
+- Centralized the disclosure workspace and separate-directory settings, mode isolation, shared HTML reuse test, diagnostic-display contract, common job state, cancellation, empty-value display, worker default, settings persistence, and shared configuration failures.
+- Left only stage-specific display counts and input/output contracts in the stage documents, moved correction-history browser rules from stage 00 to stage 08, and moved Ontology/Quantiwise display rules out of the disclosure automation document.
+- Moved the former Ontology common document's rules into `docs/ontology/README.md`, added shared shard-path, worker, job-state, display, and settings rules there, and reduced `docs/ontology/common/README.md` to a compatibility link.
+- Removed child duplicates for shard path resolution, missing-shard shutdown, company metadata merging, and the default date range. No files under `resources/` were read or changed.
+
+### Verification result
+
+- The disclosure format check confirmed that the parent, 08, and 09 documents have the same seven-heading sequence as stages 00–07.
+- The parent-rule audit confirmed the selected disclosure and Ontology common rules exist in their parent document and each audited rule appears in only one file.
+- All 13 disclosure Serving sections retain bold `Feature`, `Fallback`, and `Shutdown` groups in order with no nested level-four heading.
+- `git diff --check` and the local Markdown-link check for all files under `docs/` passed.
+
+## 2026-07-17 — Fallback logic documentation audit
+
+### Purpose
+
+- Reverify fallback and alternative-path behavior against the current code and document every reachable mechanism that was not already described under `docs/`.
+- Make output loss, partial results, compression/display limits, substitutions, recovery paths, and failure boundaries explicit without changing runtime behavior.
+
+### Implementation summary
+
+- Updated the matching disclosure-stage and ontology README files with current behavior classified under `Features`, `Fallbacks`, or `Shutdowns`.
+- Added parser and selector recovery, missing-field substitution, partial-result handling, compatibility inputs, retry and serial recovery, default source and period selection, transactional restoration, display/diagnostic limits, and lossy normalization rules.
+- Reclassified frontend-only display, browser-state, and in-browser calculation behavior under `docs/disclosures/README.md`; backend response limits, stored-output behavior, parser rules, and export-affecting graph state remain in their owning stage or ontology documents.
+- Rechecked two previously reported candidates against the current code and did not document them as active fallbacks: missing parse results are no longer cached as `{}`, and records without a usable sequence are skipped before the later sort default can be reached.
+- Removed the previously documented random edge-ID branch after confirming that the current graph validation flow supplies missing IDs and rejects duplicate IDs before the later normalizer, making that branch unreachable for accepted graph input.
+- Made documentation-only changes. No files under `resources/` were read or changed.
+
+### Verification result
+
+- `31 passed`: KIND JSON conversion and company classification tests.
+- `2 passed`: source-preview and existing-download validation tests.
+- `2 passed`: Quantiwise preview and invalid-date continuation tests. One dependency deprecation warning was reported.
+- `37 passed`: focused frontend tests for correction-history display logic, fallback boundaries, ontology workspaces, and the asset Excel utility.
+- `git diff --check` and the local Markdown-link check passed.
+
+## 2026-07-17 — Policy-inconsistent fallback removal
+
+### Purpose
+
+- Remove newly documented fallbacks that silently alter, omit, truncate, or partially return data and therefore conflict with the repository policy of retaining only correctness- or reliability-preserving recovery.
+- Keep frontend-only presentation behavior in the disclosure automation document while keeping parser, storage, and backend behavior in its owning disclosure or ontology document.
+
+### Implementation summary
+
+- Removed correction-matrix neighbor filling, permissive date and number salvage, the browser Triple Barrier 120-marker cap, and falsy-value display paths that hid numeric zero.
+- Rejected unknown KIND search conditions, unknown saved filters, invalid canonical result-page filenames, unusable external compressed records, legacy singular merge inputs, populated invalid preview dates, dangling ontology edges, and invalid relationship weights instead of silently substituting or omitting values.
+- Changed missing manifest shards, existing-download path/read errors, and market-unknown mapping-only rows under a specific market filter from partial or widened results to explicit failure or exclusion.
+- Preserved an explicit company count of zero and stopped Neo4j synchronization from inventing risk metadata when the source value is null.
+- Retained retries, transaction restoration, cache recomputation, bounded diagnostic display, parser recovery required for malformed KIND HTML, and serial recovery after process-pool failure because they preserve integrity without fabricating accepted output.
+- Removed the raw KIND disclosure-field compatibility input; `disclosure_type_groups` is now the only accepted disclosure-type request contract, including saved workflow snapshots.
+- Changed unreadable saved search conditions and broken result-page pagination from mismatch/partial-result states to explicit failures.
+- Removed sectionless table-row promotion, ragged-row right padding, the 1 MiB workflow-format scan limit, receipt-number and legacy-record year inference, and the external HTML compressor's second decoder/parser pass.
+- Kept the shared KIND HTML recovery parser as the single canonical reader; the external compression path now consumes that reader's result once instead of maintaining a separate recovery implementation.
+- Removed partial viewer-metadata compression: external compression now requires `acptNo`, both document selects, non-empty document numbers for every option, and a selected main document instead of dropping incomplete options. Removed only the 100-byte minimum from existing-HTML detection; its identifier check and reuse behavior remain unchanged.
+- Updated the owning fallback documents and focused regression tests. No files under `resources/` were read or changed.
+
+### Verification result
+
+- `159 passed`: focused Python suites for fallback policy, Neo4j synchronization, ontology, Quantiwise assets, integrated merge, company classification, and KIND web behavior.
+- `91 passed`: KIND download, JSON conversion, result-folder exploration, company classification, pagination, and the focused fallback-policy tests after the second removal pass.
+- `91 passed`: disclosure web-app, automation, and disclosure-time metadata tests.
+- `486 passed, 1 deselected`: KIND web-service regression suite excluding one pre-existing cancellation callback-count test unrelated to these changes. The four fixtures that still assumed removed table correction behavior passed after being changed to canonical table structure.
+- `63 passed`: KIND HTML conversion and download tests after strict viewer-metadata compression and removal of the existing-HTML 100-byte minimum.
+- `10 passed`: focused fallback-policy tests, including strict selected-document validation and the single shared viewer reader.
+- `35 passed, 452 deselected`: focused external HTML, viewer metadata, and compression web-service tests.
+- `39 passed`: focused frontend suites for fallback boundaries, correction history, ontology workspaces, and the asset Excel utility.
+- Graph viewer package build and market-desk TypeScript no-emit check passed.
+- Python bytecode compilation, `git diff --check`, the local Markdown-link check for 14 changed Markdown files, and the `resources/` scope check passed.
