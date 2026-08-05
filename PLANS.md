@@ -1,5 +1,29 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-05 — Guide·Behavior·Reference 문서 재분류
+
+### Purpose
+
+- 개정된 `diataxis/README.md`에 맞춰 기능 개요, 정상 동작, 예외 사양을 각각 `guides.md`, `behavior.md`, `reference.md`로 분리한다.
+- `02fa9b704ad970cf9cf98f7118b8e8b031bffe5d`의 중요한 기능 계약을 잃지 않으면서 `reference.md`에 섞여 있던 정상 흐름을 옮긴다.
+- 각 사실의 본문은 한 문서에만 두고 다른 문서에서는 링크한다.
+
+### Implementation summary
+
+- 공시분석 11개와 Ontology 5개 하위 모듈에 Guide와 Behavior를 만들었다. Guide에는 기능 개요와 사용 진입점, Behavior에는 자료 흐름·기본값·정상 처리·화면 동작만 배치했다.
+- Reference에는 복구, 중단, 입력 한계와 정상 범위를 벗어난 조건만 남겼다. 정상 처리 절을 기계적으로 옮긴 뒤에도 실패 처리나 지원 한계가 남은 절은 다시 Reference로 분리했다.
+- 기존 HTML 확인 절차를 공시분석 공통 Guide로 옮기고 별도 `html-download` 모듈과 새 체계에 없는 Explanation 문서를 제거했다.
+- 각 모듈 색인과 교차 링크를 Guide·Behavior·Reference 경계에 맞게 갱신했다.
+- `humanize-korean`으로 새 Guide 안내 문장을 검토하고 `_workspace/2026-08-05-004/final.md`에 결과를 기록했다.
+
+### Verification result
+
+- Markdown 51개와 하위 모듈 16개가 모두 새 파일 구조를 따르며 `docs/README.md`에서 도달한다. 끊어진 링크, 닫히지 않은 code fence, 허용되지 않은 파일명과 kebab-case 위반은 각각 0개였다.
+- Behavior에 복구·중단·한계 절이 없고 Reference에 정상 동작·자료 흐름 절이 없는지 확인했다. 적용 범위를 밝히는 소스 경로를 제외하면 모듈 안에서 45자 이상인 같은 본문 문장이 여러 문서 유형에 중복되지 않았다.
+- 기준 커밋의 기능 문서에 있던 inline code 값은 폐기한 분류 표지 두 개를 제외하고 모두 남았다. 숫자 표기는 `6단계`를 현재 단계명인 `06단계`로 쓴 경우만 달랐다.
+- `humanize-korean` 결과는 변경률 0.00%, B등급, 자체검증 6/6이며 S1·S2 패턴이 남지 않았다.
+- `git diff --check`를 통과했다. 문서만 바꿨으므로 runtime 시험은 하지 않았다.
+
 ## 2026-08-01 — Diátaxis 모듈 구조 복구
 
 ### Purpose
@@ -824,3 +848,20 @@
 - Confirmed the hero stays within two lines, the cover image loads at 1586 by 992, and the page has no horizontal overflow.
 - Confirmed the comparison table scrolls inside its own container on mobile and browser console inspection reported no warnings or errors.
 - `git diff --check` and the Korean-copy checks passed.
+
+## 2026-08-01 — Diátaxis description clarification
+
+### Purpose
+
+- Replace an abstract tutorial description with the concrete contents expected in a tutorial.
+- Remove the repeated `README.md` rule from the Diátaxis structure guide.
+
+### Implementation summary
+
+- Rewrote all four document definitions as short sentences and moved them into the module organization rules.
+- Consolidated the two `README.md` instructions into one module-index rule.
+
+### Verification result
+
+- Confirmed the abstract phrase, duplicate `README.md` instruction, and separate classification table are absent.
+- `git diff --check` passed.
