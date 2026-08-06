@@ -1,5 +1,25 @@
 # Graph View
 
-Graph View에서 회사별 공시 시간선과 관계 그래프를 조회하고 편집하거나 내보낸다. 표시와 저장 흐름은 [동작 문서](behavior.md), 불완전한 graph와 실행 오류 처리는 [예외 문서](reference.md)에서 확인한다.
+## 목적
+
+회사별 공시 시간선과 관계 그래프를 조회하고 편집하거나 내보낸다.
+
+## 핵심 기능
+
+### 관계 그래프 조회
+
+회사와 투자자 관계를 조회하고 큰 취득 관계를 탐색 가능한 그래프로 구성한다.
+
+### 그래프 표시와 내보내기
+
+공시 시간선을 표시하고 node와 edge의 주요 값을 graph JSON으로 내보낸다.
+
+### 위험도 다시 계산
+
+현재 그래프를 기준으로 KO 위험도를 다시 계산한다.
+
+### 배치와 pin 저장
+
+화면의 node 위치와 pin 상태를 layout JSON에 저장하고 다시 불러온다.
 
 표준 graph JSON 생성은 [공시 관계 그래프](../../disclosures/09-disclosure-graph/guides.md), 주가·공시 차트는 [Chart View](../chart-view/guides.md), Triple Barrier는 [공시 분석](../disclosure-analysis/guides.md)에서 설명한다.

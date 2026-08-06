@@ -1,17 +1,8 @@
-# 공시원문 변환 함수 예외 사양
+# 공시원문 변환 함수 Reference
 
-## 처리 계약
+## 구현 위치와 책임
 
-### 중단 조건
-
-#### 함수 입력 오류가 나면 중단
-
-메인 함수와 보조 함수가 해석할 수 없는 입력을 임의로 바꾸지 않는다.
-- 필수 경로·mode·필터·실행 옵션이 없거나 형식이 다르면 메인 함수를 실패 처리한다.
-- HTML·metadata 구조가 공통 입력 계약과 다르면 해당 결과를 만들지 않는다.
-
-#### 보조 결과 구조 오류가 나면 중단
-
-family나 warning 중간 결과가 공통 계약과 다르면 최종 payload를 만들지 않는다.
-- family·warning 구조가 공통 계약과 다르면 해당 결과를 만들지 않는다.
-- 세부 중단 조건은 [공시원문 변환 예외 사양](../common/reference.md)을 따른다.
+- Web workflow 진입점은 `features/disclosures/html_parse_common.py`이며 `PARSER_REGISTRY`에서 선택한 mode parser를 찾는다.
+- 메인 함수는 변환 실행, preview, 필터 후보 생성과 저장 결과 조회를 담당한다.
+- 보조 함수는 HTML·표 해석, metadata·family 연결, warning과 최종 payload 구성을 담당한다.
+- 단계 입출력은 [공시원문 변환 사양](../common/reference.md), 공통 중단 규칙은 [사례](../common/cases.md), mode별 업무값은 [mode 문서](../modes/README.md)를 따른다.
