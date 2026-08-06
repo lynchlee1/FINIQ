@@ -1,5 +1,27 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-06 — leaf 문서 링크 제거와 raw-table 위치 수정
+
+### Purpose
+
+- leaf 문서끼리 링크해 분류가 불분명한 내용을 넘기는 방식을 없앤다.
+- parser mode가 아닌 공통 원본 표 변환을 `modes` 트리 밖에 둔다.
+
+### Implementation summary
+
+- 모든 `guides.md`, `cases.md`, `reference.md`에서 다른 Markdown 문서를 가리키는 링크를 제거했다.
+- 링크만 있던 문장은 삭제하고, 해당 leaf가 직접 소유한 절차나 입력 계약은 문장 자체만으로 이해되게 고쳤다.
+- 고유한 정적 사실이 없어진 유무상증자 혼합 Reference는 삭제하고 색인에서 제외했다.
+- `raw-table`을 `07-html-parse/modes/raw-table`에서 `07-html-parse/raw-table`로 옮기고 두 README 색인을 갱신했다.
+
+### Verification result
+
+- leaf 문서 71개에 Markdown 링크가 하나도 남지 않았는지 확인했다.
+- Markdown 77개가 모두 `docs/README.md`에서 도달하며 끊어진 로컬 링크가 없는지 확인했다.
+- 빈 H2·H3 절, 빈 디렉터리, `behavior.md`, `modes/raw-table`이 남지 않았다.
+- 이전 문서의 inline code 용어는 현재 `docs/` 어딘가에 모두 남아 있고, 모듈 안의 문서 유형 사이에 긴 본문 문장 중복이 없는지 검사했다.
+- `git diff --check`를 통과했다. 문서 구조와 문장만 바꿨으므로 runtime 시험은 하지 않았다.
+
 ## 2026-08-06 — Guide·Cases·Reference 분류를 전체 문서에 적용
 
 ### Purpose

@@ -21,5 +21,3 @@
 ### 배치와 pin 저장
 
 화면의 node 위치와 pin 상태를 layout JSON에 저장하고 다시 불러온다.
-
-표준 graph JSON 생성은 [공시 관계 그래프](../../disclosures/09-disclosure-graph/guides.md), 주가·공시 차트는 [Chart View](../chart-view/guides.md), Triple Barrier는 [공시 분석](../disclosure-analysis/guides.md)에서 설명한다.

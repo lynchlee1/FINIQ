@@ -14,4 +14,3 @@
 
 family나 warning 중간 결과가 공통 계약과 다르면 최종 payload를 만들지 않는다.
 - family·warning 구조가 공통 계약과 다르면 해당 결과를 만들지 않는다.
-- 세부 중단 조건은 [공시원문 변환 사례](../common/cases.md)를 따른다.

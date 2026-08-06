@@ -25,7 +25,6 @@
 
 원본 공시와 선택 결과가 달라질 수 있는 SQLite를 사용하지 않는다.
 - `<data_root>/02-table/sqlite_manifest.json`이 없거나 FINIQ SQLite manifest 형식이 아니면 실패 처리한다.
-- [연도별 SQLite 변환](../02-table/reference.md)에 적은 조건을 검증하지 못하면 실패 처리한다.
 - 입력은 `data_root`로 지정한 작업공간의 `02-table/sqlite_manifest.json`만 사용한다.
 - manifest가 가리키는 SQLite 조각이 없거나 필수 열이 없으면 실패 처리한다.
 - manifest의 연도별 저장 행 수 합과 전체 저장 행 수가 다르거나, 실제 SQLite 행 수와 manifest의 저장 행 수가 다르면 실패 처리한다.
@@ -110,10 +109,6 @@
 ### 조건검색 워크플로우 실행 입력
 
 - 저장한 변환 유형과 조건이 화면 입력과 같을 때만 검색을 시작한다.
-
-### SQLite 입력 검증
-
-- SQLite와 manifest는 [연도별 SQLite 변환 Reference](../02-table/reference.md)의 무결성 검사를 통과해야 한다. 검사 실패 조건은 [Cases](../02-table/cases.md)에서 확인한다.
 
 ### 조건 검색
 

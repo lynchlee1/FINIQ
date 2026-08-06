@@ -21,5 +21,3 @@
 ### 회사 검색
 
 SQLite 공시 회사와 Quantiwise 가격 mapping의 회사를 하나의 검색 결과로 만든다.
-
-공시 00~09단계는 [공시분석 문서](../../disclosures/README.md)에서 설명한다.

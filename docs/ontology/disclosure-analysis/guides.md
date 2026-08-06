@@ -17,5 +17,3 @@
 ### 공시 그룹 분석
 
 선택한 공시 그룹의 SQLite와 KIND 분류 결과를 합쳐 분석 입력으로 사용한다.
-
-일반 가격 조회와 차트 구성은 [Chart View](../chart-view/guides.md)에서 설명한다.

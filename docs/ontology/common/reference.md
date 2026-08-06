@@ -4,7 +4,7 @@
 
 ### 작업공간
 
-- 공시 자료는 [공시분석 공통 사양](../../disclosures/common/reference.md)에 정한 `01-list`부터 `07-converted`까지 표준 경로를 사용한다. Ontology 화면은 개별 단계 경로를 보내지 않는다.
+- 공시 자료는 `작업공간 디렉토리`의 `01-list`부터 `07-converted`까지 표준 경로를 사용한다. Ontology 화면은 개별 단계 경로를 보내지 않는다.
 - `작업공간 디렉토리` 아래 `database/00-stock`에 주가 자료를 둔다.
 - 항목별 Parquet은 `database/00-stock/by_item`에 둔다.
 
@@ -15,7 +15,6 @@
 
 ### 화면 표시
 
-- 공통 표시 규칙은 [공시분석 공통 사양](../../disclosures/common/reference.md), 비동기 작업 복구 규칙은 [공시분석 사례](../../disclosures/common/cases.md)를 따른다.
 - 빈 값은 문맥에 따라 `-` 또는 `N/A`로 표시하고 숫자 `0`은 그대로 표시한다.
 
 ### 회사 검색 결과

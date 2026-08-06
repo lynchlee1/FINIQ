@@ -17,5 +17,3 @@
 ### 현재 가격 표시
 
 차트에서 가리키는 가격 봉을 제목의 현재값으로 표시한다.
-
-Triple Barrier 계산은 [공시 분석](../disclosure-analysis/guides.md)에서 설명한다.

@@ -5,4 +5,3 @@
 - `shareholder-meeting` — [Guide](shareholder-meeting/guides.md), [Cases](shareholder-meeting/cases.md), [Reference](shareholder-meeting/reference.md)
 - `asset-transaction` — [Guide](asset-transaction/guides.md)
 - `security-transaction` — [Guide](security-transaction/guides.md)
-- `raw-table` — [Guide](raw-table/guides.md), [Cases](raw-table/cases.md), [Reference](raw-table/reference.md)
