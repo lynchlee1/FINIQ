@@ -47,13 +47,17 @@ Organize each leaf module under `docs/` by the kind of statement being made.
 
 Use only the headings that have content.
 
-Use a module's `README.md` only to list and link its direct child modules. Put documentation files only in modules without child modules. Use `kebab-case` and do not create empty files or directories.
+Use `kebab-case` and do not create empty files or directories.
 
 ```text
 docs/
-├── README.md
+├── guides.md
+├── cases.md
+├── reference.md
 └── {module}/
-    ├── README.md
+    ├── guides.md
+    ├── cases.md
+    ├── reference.md
     └── {submodule}/
         ├── guides.md
         ├── cases.md

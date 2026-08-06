@@ -25,5 +25,3 @@ Quantiwise 입력과 시장 이력을 DataFrame index와 날짜 기준으로 합
 ### 변환 결과 표시
 
 backend가 반환한 출력 파일과 계정·날짜·회사 hash를 화면에 표시한다.
-
-가격 조회와 차트 구성은 [Chart View](../chart-view/guides.md)에서 설명한다.
