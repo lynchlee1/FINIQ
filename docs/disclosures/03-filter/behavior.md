@@ -24,7 +24,7 @@
 #### SQLite 입력 검증
 
 변환 결과가 원본 행을 빠짐없이 설명하는지 확인한 뒤 조건을 적용한다.
-- SQLite와 manifest는 [연도별 SQLite 변환 동작](../02-table/behavior.md)의 무결성 검사를 통과해야 한다. 검사 실패 조건은 [예외 사양](../02-table/reference.md)에서 확인한다.
+- SQLite와 manifest는 [연도별 SQLite 변환 Reference](../02-table/reference.md)의 무결성 검사를 통과해야 한다. 검사 실패 조건은 [Cases](../02-table/cases.md)에서 확인한다.
 
 #### 증분 검색 입력 범위 확정
 
