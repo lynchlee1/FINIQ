@@ -1,5 +1,49 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-05 — 문서 역할과 내부 구조 재정의
+
+### Purpose
+
+- 정상 기능과 조건부 동작을 겹치지 않게 분리한다.
+- 핵심 기능이 Guide에서 빠지는 일을 막고 정적 조회 사양에는 별도 자리를 둔다.
+
+### Implementation summary
+
+- `behavior.md`를 `cases.md`로 바꾸고 조건에 따라 결과가 달라지는 동작만 맡겼다.
+- Guide가 모든 핵심 기능과 정상 입력→결과 흐름을 한두 문장으로 설명하도록 했다.
+- Reference는 경로, 자료 구조, 상태와 허용값처럼 흐름이 없는 조회 사실만 맡겼다.
+- 같은 주제를 여러 파일에서 언급할 수는 있지만 조건, 결과, 값과 규칙의 본문은 한 파일만 소유하도록 정했다.
+- 세 문서의 내부 골격과 선택 기준을 `diataxis/README.md`에 추가했다.
+
+### Verification result
+
+- 02-table의 연도별 SQLite 생성은 Guide, 중복 접수번호와 잘못된 연도 처리는 Case, 경로와 manifest 구조는 Reference로 분류되는지 대조했다.
+- Guide의 기능 요약과 Case의 조건·결과가 같은 사실을 반복하지 않는지 검토했다.
+- 이번 변경은 문서화 규칙만 다루므로 기존 `docs/` 파일은 새 이름과 구조로 옮기지 않았다.
+- `git diff --check -- diataxis/README.md PLANS.md`를 통과했다.
+
+## 2026-08-05 — 07단계 mode 문서 분리
+
+### Purpose
+
+- mode별 추출 규칙이 많은 `07-html-parse`만 하위 모듈을 갖게 한다.
+- 공통 변환과 함수 책임을 mode 계약에서 분리하되 기존 문장을 빠뜨리거나 같은 계약을 복사하지 않는다.
+
+### Implementation summary
+
+- `07-html-parse` 루트에는 `common`, `functions`, `modes`만 연결하는 `README.md`를 두었다.
+- 사채발행과 주주총회를 독립 mode로 분리하고, 유무상증자는 `common`, `paid`, `bonus`, `mixed` 하위 모듈로 나눴다.
+- `asset-transaction`과 `security-transaction`은 각자 Guide와 Behavior를 갖되, 두 mode가 공유하는 결과 계약은 `raw-table`에서 한 번만 설명한다.
+- mode 고유 예외가 없는 leaf에는 `reference.md`를 만들지 않고 공통 예외 사양을 연결했다.
+- 공시분석 색인과 07단계 내부 링크를 새 경로로 갱신했다.
+
+### Verification result
+
+- 07단계 Markdown 30개를 포함한 전체 Markdown 78개가 `docs/README.md`에서 모두 도달하며 끊어진 링크는 0개였다.
+- 자식 모듈이 있는 디렉터리에는 `README.md`만 있고, leaf에는 Guide와 Behavior 및 필요한 Reference만 있는지 확인했다.
+- 분리 전 문서의 inline code 값은 모두 남았고, leaf 안에서 45자 이상인 같은 본문 문장이 여러 문서 유형에 중복되지 않았다.
+- `git diff --check -- docs/disclosures/07-html-parse docs/disclosures/README.md PLANS.md`를 통과했다. 문서 구조와 링크만 바꿨으므로 runtime 시험은 하지 않았다.
+
 ## 2026-08-05 — Guide·Behavior·Reference 문서 재분류
 
 ### Purpose

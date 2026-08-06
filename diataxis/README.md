@@ -1,20 +1,51 @@
 # Documentation Structure
 
-Organize documentation under `docs/` using the following roles.
+Organize each leaf module under `docs/` by the kind of statement being made.
 
-* `guides.md`: Give an at-a-glance overview of what the code does, its main features, and how users interact with it.
-* `behavior.md`: Describe the code's default state, normal execution flow, and expected behavior under ordinary conditions.
-* `reference.md`: Document only edge cases, limits, exceptional conditions, and behavior outside normal usage.
+* `guides.md`: List every major capability and describe its normal input-to-result flow. Include exact input or output names when they are essential to recognizing the capability.
+* `cases.md`: Describe behavior that is triggered by a condition, including supported variations, edge cases, recovery, limits, and stop conditions.
+* `reference.md`: Record static lookup facts such as paths, data shapes, fields, states, allowed values, and constants. Do not narrate flows or conditional outcomes.
 
-Apply these rules when classifying content:
+## Ownership rules
 
-1. Put feature summaries and usage entry points in `guides.md`.
-2. Put detailed normal behavior in `behavior.md`, even when it depends on common conditions or configuration.
-3. Put content in `reference.md` only when it describes an edge case or exceptional condition.
-4. Do not use `reference.md` as a general description of conditional behavior.
-5. A reader must be able to understand the module's purpose from `guides.md` and its normal operation from `behavior.md` without reading `reference.md`.
-6. Do not duplicate information across files.
-7. Create `reference.md` only when meaningful edge cases exist.
+1. Give every major capability its own section in `guides.md`. A reader must be able to discover what the module does without reading the other files.
+2. Put a normal input-to-result flow such as “read A and create B” in `guides.md`.
+3. Put a statement whose outcome depends on “if”, “when”, “unless” in `cases.md`.
+4. Put a fact that answers “what is the exact name, value, path, or shape?” in `reference.md`, unless that fact is essential to identifying a Guide's input or result.
+5. A topic may be named in more than one file, but each condition, outcome, value, and rule must have exactly one authoritative home. `guides.md` may summarize a capability but must not repeat its Case details.
+6. Avoid links between leaf documents. Keep each fact in the file that owns it instead of using links to compensate for unclear classification.
+
+## Internal structure
+
+`guides.md`:
+
+```text
+# {Module}
+## Purpose
+## Capabilities
+### {Capability}
+{One or two sentences describing the normal input-to-result flow.}
+## Usage  # only when users perform a task directly
+```
+
+`cases.md`:
+
+```text
+# {Module} Cases
+## When {condition}
+{The resulting behavior.}
+```
+
+`reference.md`:
+
+```text
+# {Module} Reference
+## Paths
+## Data formats
+## States and values
+```
+
+Use only the headings that have content.
 
 Use a module's `README.md` only to list and link its direct child modules. Put documentation files only in modules without child modules. Use `kebab-case` and do not create empty files or directories.
 
@@ -25,6 +56,6 @@ docs/
     ├── README.md
     └── {submodule}/
         ├── guides.md
-        ├── behavior.md
-        └── reference.md  # optional
+        ├── cases.md
+        └── reference.md
 ```
