@@ -279,9 +279,9 @@ def _load_html_parse_metadata(
 
 
 def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    acpt_no = str(item.get("acpt_no") or "")
-    if not acpt_no.isdigit():
-        raise ValueError("filtered metadata acpt_no must contain digits")
+    acpt_no = str(item.get("acpt_no") or "").strip()
+    if not acpt_no:
+        raise ValueError("filtered metadata acpt_no must not be empty")
     return acpt_no, {
         "market": _normalize_listing_market(item.get("market")),
         "company_name": str(item.get("company_name") or "").strip(),
@@ -292,9 +292,9 @@ def _filtered_metadata_item(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 def _compressed_external_html_metadata_item(
     item: dict[str, Any]
 ) -> tuple[str, dict[str, Any]]:
-    acpt_no = str(item.get("acpt_no") or "")
-    if not acpt_no.isdigit():
-        raise ValueError("compressed metadata acpt_no must contain digits")
+    acpt_no = str(item.get("acpt_no") or "").strip()
+    if not acpt_no:
+        raise ValueError("compressed metadata acpt_no must not be empty")
     selected_main_doc_no = str(item.get("selected_main_doc_no") or "").strip()
     return acpt_no, {
         "title": str(item.get("title") or "").strip(),

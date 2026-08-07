@@ -130,8 +130,13 @@ def _validate_kind_identifier(value: str, *, field_name: str) -> str:
     normalized_value = str(value).strip()
     if not normalized_value:
         raise ValueError(f"{field_name} must not be empty")
-    if not normalized_value.isdigit():
-        raise ValueError(f"{field_name} must contain only digits")
+    if (
+        normalized_value in {".", ".."}
+        or "/" in normalized_value
+        or "\\" in normalized_value
+        or "\x00" in normalized_value
+    ):
+        raise ValueError(f"{field_name} contains invalid path characters")
     return normalized_value
 
 

@@ -1019,23 +1019,158 @@
 - A broader 571-test run reached 402 passed and 166 skipped; three unrelated pre-existing failures remained in section-save cancellation, the missing HTML parser README and an external compression fixture.
 - Python compilation and `git diff --check` passed.
 
-## 2026-08-07 — Reclassified stage 01 input, output and recovery contracts
+## 2026-08-07 — Reclassified stage 01 input, output and conditional contracts
 
 ### Purpose
 
-- Make the stage 01 Reference the authoritative home for accepted inputs, defaults, output metadata, integrity, reuse and recovery contracts.
-- Leave normal capability summaries in Guides and conditional service or user-decision outcomes in Cases.
+- Make the stage 01 Reference the authoritative home for accepted inputs, defaults and output metadata.
+- Leave normal capability summaries in Guides and integrity, reuse, recovery, service and user-decision outcomes in Cases.
 
 ### Implementation summary
 
-- Moved search-input restrictions and defaults from Guides and Cases into `docs/disclosures/01-download/reference.md`.
-- Moved metadata creation, pagination, list-consistency, existing-result integrity and full-period recovery contracts into the Reference.
+- Moved accepted search-input restrictions and defaults into `docs/disclosures/01-download/reference.md`, while keeping invalid-input outcomes in Cases.
+- Moved metadata file formats and pagination fields into the Reference.
+- Moved list-consistency checks, existing-result integrity and full-period recovery contracts into Cases.
 - Kept the normal integrity-check, metadata and publication flow in Guides without repeating the exact contracts.
-- Kept KIND lookup failures, invalid-request outcomes, confirmation tokens and user approval behavior in Cases.
-- Extended the Reference ownership rule and skeleton in `diataxis/README.md` with input constraints, output integrity, and reuse and recovery sections.
+- Kept KIND lookup failures, confirmation tokens and user approval behavior in Cases.
+- Removed duplicate search-input constraints from Cases after consolidating them in the Reference.
+- Extended the Reference skeleton in `diataxis/README.md` with input constraints and defaults, and assigned conditional integrity, reuse and recovery behavior to Cases.
 
 ### Verification result
 
 - Confirmed the moved constraints and defaults have one authoritative occurrence under `01-download`.
-- Confirmed Guides retain normal flows, Cases retain conditional outcomes, and Reference owns the stored-artifact contracts.
-- Confirmed the Reference skeleton contains the new contract sections and `git diff --check` passes.
+- Confirmed no identical non-heading content remains across the stage 01 Guides, Cases and Reference files.
+- Confirmed Guides retain normal flows, Cases own conditional integrity and recovery behavior, and Reference owns input and stored-artifact formats.
+- Confirmed the Reference skeleton contains input constraints and defaults without integrity or recovery sections, and `git diff --check` passes.
+
+## 2026-08-07 — Reclassified stage 02 table documentation
+
+### Purpose
+
+- Apply the Guides, Cases and Reference ownership rules to `docs/disclosures/02-table`.
+
+### Implementation summary
+
+- Kept normal SQLite conversion capabilities in Guides.
+- Grouped conditional parsing, deduplication, failure and integrity behavior under the processing contract in Cases.
+- Split input artifact descriptions from accepted input constraints in Reference.
+- Moved row-count integrity equations from Reference to the corresponding failure Case.
+
+### Verification result
+
+- Confirmed each stage 02 fact has one authoritative home and no identical non-heading content is repeated across its three documents.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Reorganized disclosure References by artifact
+
+### Purpose
+
+- Make Reference documents readable file by file instead of separating all inputs, outputs, constraints and defaults into document-wide groups.
+
+### Implementation summary
+
+- Replaced the format-oriented Reference skeleton with artifact headings followed by I/O structure and optional defaults and exceptions.
+- Reorganized stage 01 and stage 02 References around exact artifact paths.
+- Kept allowed values and structural exceptions beside their artifact, while moving conditional creation and integrity behavior to Cases.
+
+### Verification result
+
+- Confirmed stage 01 and stage 02 References no longer contain document-wide input-format, output-format or input-constraint sections.
+- Confirmed every listed artifact has a brief input or output role and structure description.
+- Confirmed no identical non-heading content is repeated across each stage's Guides, Cases and Reference files.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Reduced artifact heading size in References
+
+### Purpose
+
+- Keep long code-formatted artifact paths from dominating Reference pages visually.
+
+### Implementation summary
+
+- Lowered artifact path headings from level two to level three in the stage 01 and stage 02 References.
+- Lowered their child structure, default and exception headings from level three to level four.
+- Applied the same hierarchy to the Reference skeleton in `diataxis/README.md`.
+
+### Verification result
+
+- Confirmed no code-formatted artifact path remains at heading level two in the updated References or skeleton.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Piloted feature-owned documentation in stages 01 and 02
+
+### Purpose
+
+- Test a two-document model where Reference owns file contracts and Features owns each feature's complete behavior.
+
+### Implementation summary
+
+- Added `features.md` to `01-download` and `02-table`.
+- Consolidated each feature's normal, conditional, failure and recovery behavior under one feature heading.
+- Removed the stage-specific `guides.md` and `cases.md` files after transferring their content.
+- Left the repository-wide documentation rules unchanged while the structure is limited to these two stages.
+
+### Verification result
+
+- Confirmed both pilot folders contain only `features.md` and `reference.md`.
+- Confirmed every non-heading statement from the removed Guides and Cases remains represented in its feature section without identical duplicates.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Standardized pilot document headings in English
+
+### Purpose
+
+- Avoid awkward translated headings in the stage 01 and stage 02 pilot documentation.
+
+### Implementation summary
+
+- Changed document titles, structural headings and feature names in both pilot folders to concise English terms.
+- Kept Korean explanatory body text and exact artifact path headings unchanged.
+
+### Verification result
+
+- Confirmed no Korean text remains in Markdown headings in the two pilot folders.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Fixed the two-document documentation format
+
+### Purpose
+
+- Make the stage 01 and stage 02 pilot format the repository-wide documentation contract.
+
+### Implementation summary
+
+- Replaced the Guides, Cases and Reference taxonomy in `diataxis/README.md` with Features and Reference.
+- Fixed feature ownership, artifact ownership, English heading rules and the exact heading hierarchy.
+- Added skeletons for both documents and updated the ideal folder tree.
+- Preserved `docs/disclosures/reference.md` as the exact path source for disclosure References.
+
+### Verification result
+
+- Confirmed `diataxis/README.md` no longer defines `guides.md` or `cases.md` as part of the target format.
+- Confirmed the skeleton matches the current stage 01 and stage 02 heading hierarchy.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Extended feature-owned disclosure docs and textual identifiers
+
+### Purpose
+
+- Apply the fixed Features/Reference format to disclosure stages 03 through 05.
+- Ensure KIND `company_id`, `acpt_no`, `doc_no` and DART `stock_code` values retain Roman letters instead of being validated or normalized as digits only.
+
+### Implementation summary
+
+- Added English-heading `features.md` documents for `03-filter`, `04-external-html-download` and `05-internal-html-download`, consolidated each feature's behavior and exceptions, and removed their superseded Guides and Cases.
+- Reorganized all three References by exact artifact path with file-specific I/O structure and structural defaults or exceptions.
+- Replaced digits-only KIND receipt and document validation with non-empty textual validation while retaining filename path-safety checks.
+- Preserved Roman letters in KIND company identifiers, DART stock codes, Quantiwise stock-code discovery and ontology UI stock-code normalization.
+- Added regression coverage for alphanumeric company, receipt, document and stock identifiers.
+
+### Verification result
+
+- Confirmed each updated stage contains only `features.md` and `reference.md`, uses English Markdown headings, follows the fixed heading hierarchy, and has no identical non-heading content shared by its two documents.
+- Confirmed the codebase has no `corp_code` or `rcept_no` implementation yet, and all persisted implemented identifier columns use text storage.
+- Passed 73 tests across ontology, KIND download and ontology-builder modules, 48 focused identifier/ontology tests, 91 asset/Quantiwise tests and all 24 ontology frontend tests.
+- Confirmed the Market Desk TypeScript project compiles with `tsc --noEmit`.
+- The broader KIND web-service module passed 327 tests and skipped 166; its two remaining failures are in untouched section-cancellation behavior and a missing parser README.
+- Confirmed `git diff --check` passes and the targeted numeric-assumption search reports no identifier conversion or digits-only validation.

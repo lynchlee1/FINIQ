@@ -16,6 +16,7 @@ from finiq.data.graph_models import EdgeTypes
 def test_normalize_company_id():
     assert normalize_company_id("22180") == "022180"
     assert normalize_company_id("005930") == "005930"
+    assert normalize_company_id("AB12C") == "AB12C"
     assert normalize_company_id("") == ""
     assert normalize_company_id(None) == ""
 

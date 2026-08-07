@@ -259,8 +259,8 @@ def create_workflows_router(
             )
             workflow_run = begin_filter_workflow_payload(body)
             body["source_offset"] = workflow_run["source_offset"]
-            body["source_expected_minimum"] = workflow_run[
-                "source_expected_minimum"
+            body["source_expected_count"] = workflow_run[
+                "source_expected_count"
             ]
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))

@@ -123,13 +123,12 @@ def _stock_column(company_id: str) -> str:
     raw = str(company_id or "").strip().upper()
     if raw.startswith("A"):
         return raw
-    digits = "".join(char for char in raw if char.isdigit())
-    return f"A{digits.zfill(6)}"
+    return f"A{raw.zfill(6)}" if raw.isdigit() else raw
 
 
 def _kind_company_id(company_id: str) -> str:
-    digits = "".join(char for char in str(company_id or "") if char.isdigit())
-    return digits.zfill(6) if digits else ""
+    raw = str(company_id or "").strip()
+    return raw.zfill(6) if raw.isdigit() else raw
 
 
 def kind_company_id_candidates(company_id: str) -> list[str]:
@@ -137,15 +136,24 @@ def kind_company_id_candidates(company_id: str) -> list[str]:
     if not primary:
         return []
     candidates = [primary]
-    shortened = primary.rstrip("0")
+    stored = (
+        primary[1:]
+        if len(primary) == 7 and primary.startswith("A") and primary[1:].isalnum()
+        else primary
+    )
+    if stored not in candidates:
+        candidates.append(stored)
+    shortened = stored.rstrip("0") if stored.isdigit() else stored
     if shortened and len(shortened) >= 5 and shortened not in candidates:
         candidates.append(shortened)
     return candidates
 
 
 def _display_stock_code(company_id: str) -> str:
-    digits = "".join(char for char in str(company_id or "") if char.isdigit())
-    return f"A{digits.zfill(6)}" if digits else ""
+    raw = str(company_id or "").strip().upper()
+    if raw.startswith("A"):
+        return raw
+    return f"A{raw.zfill(6)}" if raw.isdigit() else raw
 
 
 def _find_item_file(quanti_dir: Path, item: str) -> Path | None:

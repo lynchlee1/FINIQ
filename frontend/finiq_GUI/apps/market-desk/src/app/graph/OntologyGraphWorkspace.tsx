@@ -146,12 +146,13 @@ function MessageBox({ messages }: { messages: string[] }) {
 }
 
 function normalizeStockCode(value: string) {
-  const digits = value.replace(/\D/g, "");
-  return digits ? `A${digits.padStart(6, "0").slice(-6)}` : "";
+  const normalized = value.trim().toUpperCase();
+  if (/^A[A-Z0-9]{6}$/.test(normalized)) return normalized;
+  return /^[A-Z0-9]{6}$/.test(normalized) ? `A${normalized}` : normalized;
 }
 
 function isStockCodeKeyword(value: string) {
-  return /^A\d{6}$/.test(value.trim().toUpperCase());
+  return /^A[A-Z0-9]{6}$/.test(value.trim().toUpperCase());
 }
 
 function isAbortError(err: unknown) {

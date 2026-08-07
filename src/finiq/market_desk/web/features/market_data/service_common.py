@@ -328,7 +328,7 @@ def _parse_boolean_tokens(tokens: list[object]) -> bool:
         if token == ")":
             msg = "Unexpected closing parenthesis in filter blocks"
             raise ValueError(msg)
-        if isinstance(token, str) and token.casefold() in {"and", "or"}:
+        if isinstance(token, str) and token.casefold() in {"and", "xor", "or"}:
             msg = f"Unexpected operator in filter blocks: {token}"
             raise ValueError(msg)
         return bool(consume())
@@ -340,11 +340,18 @@ def _parse_boolean_tokens(tokens: list[object]) -> bool:
             result = parse_factor() and result
         return result
 
-    def parse_or() -> bool:
+    def parse_xor() -> bool:
         result = parse_and()
+        while isinstance(peek(), str) and peek().casefold() == "xor":
+            consume()
+            result = result != parse_and()
+        return result
+
+    def parse_or() -> bool:
+        result = parse_xor()
         while isinstance(peek(), str) and peek().casefold() == "or":
             consume()
-            result = parse_and() or result
+            result = parse_xor() or result
         return result
 
     result = parse_or()
@@ -399,7 +406,7 @@ def _validate_filter_blocks(blocks: object) -> list[dict[str, Any]]:
             raise ValueError(f"filter_blocks[{index}] must be an object")
         connector = block.get("connector")
         if (index == 0 and connector != "") or (
-            index > 0 and connector not in {"AND", "OR"}
+            index > 0 and connector not in {"AND", "XOR", "OR"}
         ):
             raise ValueError(f"filter_blocks[{index}].connector is invalid")
         field = block.get("field")

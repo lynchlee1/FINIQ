@@ -155,8 +155,8 @@ def collect_acpt_numbers_from_json(value: Any) -> list[str]:
         if not isinstance(disclosure, dict):
             raise ValueError(f"disclosures[{index}] must be an object")
         normalized = str(disclosure.get("acpt_no") or "").strip()
-        if not normalized.isdigit():
-            raise ValueError(f"disclosures[{index}].acpt_no must contain digits")
+        if not normalized:
+            raise ValueError(f"disclosures[{index}].acpt_no must not be empty")
         if normalized in seen:
             raise ValueError(f"duplicate acpt_no in disclosures: {normalized}")
         seen.add(normalized)
@@ -200,8 +200,8 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
         if not isinstance(disclosure, dict):
             raise ValueError(f"disclosures[{index}] must be an object")
         acpt_no = str(disclosure.get("acpt_no") or "").strip()
-        if not acpt_no.isdigit():
-            raise ValueError(f"disclosures[{index}].acpt_no must contain digits")
+        if not acpt_no:
+            raise ValueError(f"disclosures[{index}].acpt_no must not be empty")
         if acpt_no in metadata:
             raise ValueError(f"duplicate acpt_no in disclosures: {acpt_no}")
         metadata[acpt_no] = {
@@ -378,9 +378,9 @@ def _load_html_manifest_integrity(
         if not isinstance(disclosure, dict):
             raise ValueError(f"HTML manifest disclosures[{index}] must be an object")
         acpt_no = str(disclosure.get("acpt_no") or "").strip()
-        if not acpt_no.isdigit():
+        if not acpt_no:
             raise ValueError(
-                f"HTML manifest disclosures[{index}].acpt_no must contain digits"
+                f"HTML manifest disclosures[{index}].acpt_no must not be empty"
             )
         if acpt_no in seen:
             raise ValueError(f"duplicate acpt_no in HTML manifest: {acpt_no}")
@@ -718,7 +718,7 @@ def _collect_yearly_html_files(input_directory: Path) -> list[tuple[str, Path]]:
         files.extend(
             (year_directory.name, path)
             for path in sorted(year_directory.glob("*.html"))
-            if path.is_file() and path.stem.isdigit()
+            if path.is_file()
         )
     return files
 

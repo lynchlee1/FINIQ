@@ -54,7 +54,7 @@ def list_quanti_stock_codes(
         if name == "date":
             continue
         parts = name.rsplit("_", 1)
-        if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 6:
+        if len(parts) == 2 and parts[1].isalnum() and len(parts[1]) == 6:
             codes.append(parts[1])
     return sorted(set(codes))
 

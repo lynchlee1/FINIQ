@@ -132,12 +132,17 @@ def filter_disclosures_payload(
     source_offset = _required_nonnegative_integer(
         body.get("source_offset", 0), "source_offset"
     )
-    source_expected_minimum = _required_nonnegative_integer(
-        body.get("source_expected_minimum", source_offset),
-        "source_expected_minimum",
+    source_expected_count_value = body.get("source_expected_count")
+    source_expected_count = (
+        _required_nonnegative_integer(
+            source_expected_count_value,
+            "source_expected_count",
+        )
+        if source_expected_count_value is not None
+        else None
     )
-    if source_expected_minimum < source_offset:
-        raise ValueError("source_expected_minimum must be >= source_offset")
+    if source_expected_count is not None and source_expected_count < source_offset:
+        raise ValueError("source_expected_count must be >= source_offset")
 
     sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
     try:
@@ -148,12 +153,8 @@ def filter_disclosures_payload(
             "01단계부터 다시 실행하세요."
         ) from exc
     total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
-    if total_records < source_expected_minimum:
-        raise ValueError(
-            "03단계 원본 건수가 이전에 확인한 건수보다 적습니다. "
-            "02단계 데이터베이스를 초기화하고 01단계부터 다시 실행하세요. "
-            f"이전 확인={source_expected_minimum}, 현재 원본={total_records}"
-        )
+    if source_expected_count is not None and total_records != source_expected_count:
+        source_offset = 0
     target_records = total_records - source_offset
     records = _iter_sqlite_manifest_disclosure_records(
         sqlite_manifest_path,

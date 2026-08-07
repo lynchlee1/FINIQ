@@ -1783,8 +1783,8 @@ def _run_stage(
         }
         workflow_run = begin_filter_workflow_payload(filter_body)
         filter_body["source_offset"] = workflow_run["source_offset"]
-        filter_body["source_expected_minimum"] = workflow_run[
-            "source_expected_minimum"
+        filter_body["source_expected_count"] = workflow_run[
+            "source_expected_count"
         ]
         try:
             incremental_result = filter_disclosures_payload(

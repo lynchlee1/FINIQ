@@ -1,39 +1,45 @@
 # Documentation Structure
 
-Organize each leaf module under `docs/` by the kind of statement being made.
+Every leaf module under `docs/` uses exactly two documents.
 
-* `guides.md`: List every major capability and describe its normal input-to-result flow. Include exact input or output names when they are essential to recognizing the capability.
-* `cases.md`: Describe behavior that is triggered by a condition, including supported variations, edge cases, recovery, limits, and stop conditions.
-* `reference.md`: Record static lookup facts such as paths, data shapes, fields, states, allowed values, and constants. Do not narrate flows or conditional outcomes.
+* `features.md`: Give every feature one authoritative section containing its normal behavior, defaults, conditions, failures, recovery, limits, service behavior, UI behavior, and user decisions.
+* `reference.md`: Organize static file and stored-artifact contracts by exact path, including each artifact's I/O role, structure, fields, allowed values, defaults, and structural exceptions.
 
 ## Ownership rules
 
-1. Give every major capability its own section in `guides.md`. A reader must be able to discover what the module does without reading the other files.
-2. Put a normal input-to-result flow such as “read A and create B” in `guides.md`.
-3. Put a runtime, service, UI, or user-decision outcome that depends on “if”, “when”, or “unless” in `cases.md`.
-4. Put exact paths, formats, accepted input constraints, defaults, output-integrity invariants, and the metadata or stored-state contract needed for reuse and recovery in `reference.md`.
-5. A topic may be named in more than one file, but each condition, outcome, value, and rule must have exactly one authoritative home. `guides.md` may summarize a capability but must not repeat its Case details.
-6. Avoid links between leaf documents. Keep each fact in the file that owns it instead of using links to compensate for unclear classification.
+1. Give every feature its own `###` section in `features.md`. Do not split one feature across multiple documents.
+2. Put the feature's normal operation under `#### Behavior`.
+3. Put the same feature's defaults, conditional behavior, failures, recovery, limits, service behavior, UI behavior, and user decisions under `#### Defaults and Exceptions` when needed.
+4. Give every input or output file and stored artifact its own `###` section in `reference.md` using its exact path.
+5. Put an artifact's role, structure, format, and fields under `#### I/O Structure`. Put only allowed default values and structural exceptions under `#### Defaults and Exceptions` when needed.
+6. Keep runtime outcomes and recovery behavior in `features.md`; do not put them in `reference.md` as file exceptions.
+7. Give every fact one authoritative home. `features.md` may name an artifact but must not repeat its file structure, and `reference.md` must not repeat feature behavior.
+8. Use English for all Markdown headings. Explanatory body text may remain Korean.
+9. Avoid links between leaf documents. Keep each fact in the file that owns it instead of using links to compensate for unclear classification.
+10. In disclosure References, copy every folder name, filename, and placeholder exactly from `docs/disclosures/reference.md`. Do not replace path segments with Korean or English feature names.
 
 ## Internal structure
 
-`guides.md`:
+`features.md`:
 
 ```text
-# {Module}
+# {Module} Features
+
 ## Purpose
-## Capabilities
-### {Capability}
-{One or two sentences describing the normal input-to-result flow.}
-## Usage  # only when users perform a task directly
-```
 
-`cases.md`:
+{Module purpose.}
 
-```text
-# {Module} Cases
-## When {condition}
-{The resulting behavior.}
+## Features
+
+### {Feature}
+
+#### Behavior
+
+{Normal behavior.}
+
+#### Defaults and Exceptions  # only when the feature has them
+
+- {Default, condition, failure, recovery, or limit.}
 ```
 
 `reference.md`:
@@ -45,65 +51,51 @@ Organize each leaf module under `docs/` by the kind of statement being made.
 
 - `<data_root>/<exact-input-folder-a>/<input-artifact-a>` + `<data_root>/<exact-input-folder-b>/<input-artifact-b>` → `<data_root>/<exact-output-folder-a>/<output-artifact-a>` + `<data_root>/<exact-output-folder-b>/<output-artifact-b>`
 
-## Input formats
+### `<exact-input-folder-a>/<input-artifact-a>`
 
-### `<input-artifact-a>`
+#### I/O Structure
 
-- `{brief-purpose}`
+- `{input-role-and-brief-purpose}`
 - `{format-and-fields}`
 
-### `<input-artifact-b>`
+#### Defaults and Exceptions  # only when the artifact has them
 
-- `{brief-purpose}`
+- `{accepted-default-or-exception-value}`
+
+### `<exact-input-folder-b>/<input-artifact-b>`
+
+#### I/O Structure
+
+- `{input-role-and-brief-purpose}`
 - `{format-and-fields}`
 
-## Output formats
+### `<exact-output-folder-a>/<output-artifact-a>`
 
-### `<output-artifact-a>`
+#### I/O Structure
 
-- `{brief-purpose}`
+- `{output-role-and-brief-purpose}`
 - `{format-and-fields}`
 
-### `<output-artifact-b>`
+#### Defaults and Exceptions  # only when the artifact has them
 
-- `{brief-purpose}`
+- `{accepted-default-or-exception-value}`
+
+### `<exact-output-folder-b>/<output-artifact-b>`
+
+#### I/O Structure
+
+- `{output-role-and-brief-purpose}`
 - `{format-and-fields}`
-
-## Input constraints and defaults
-
-### `{constraint-or-default-group}`
-
-- `{accepted-values-and-required-metadata}`
-- `{default-values}`
-
-## Output integrity
-
-### `{integrity-group}`
-
-- `{invariant}`
-- `{publication-contract}`
-
-## Reuse and recovery
-
-### `{stored-state-group}`
-
-- `{reuse-requirement}`
-- `{recovery-state-contract}`
-
-## States and values
 ```
 
 ```text
 docs/
-├── guides.md
-├── cases.md
+├── features.md
 ├── reference.md
 └── {module}/
-    ├── guides.md
-    ├── cases.md
+    ├── features.md
     ├── reference.md
     └── {submodule}/
-        ├── guides.md
-        ├── cases.md
+        ├── features.md
         └── reference.md
 ```
