@@ -1040,6 +1040,23 @@
 - A broader 571-test run reached 402 passed and 166 skipped; three unrelated pre-existing failures remained in section-save cancellation, the missing HTML parser README and an external compression fixture.
 - Python compilation and `git diff --check` passed.
 
+## 2026-08-07 — Removed the remaining MarketDesk test failures
+
+### Purpose
+
+- Restore a clean MarketDesk test run after the section-save prevalidation and parser documentation reorganization.
+
+### Implementation summary
+
+- Changed the section-save cancellation test to request cancellation after the first output file exists instead of depending on an internal callback count consumed by prevalidation.
+- Pointed the parser-mode documentation assertion at `docs/disclosures/07-html-parse/modes/README.md` and matched registry underscore keys to the documented hyphenated folder names.
+
+### Verification result
+
+- Passed all 399 executed tests across the KIND web service and web app; 166 tests were skipped and no tests failed.
+- Passed all 20 disclosure/frontend path-layout tests and the MarketDesk TypeScript compile check.
+- `git diff --check` passed.
+
 ## 2026-08-07 — Reclassified stage 01 input, output and conditional contracts
 
 ### Purpose

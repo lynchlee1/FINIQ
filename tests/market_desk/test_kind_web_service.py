@@ -299,7 +299,9 @@ MIXED_RIGHTS_ISSUANCE_50_EXAMPLES = [
     "2010/20100927000095.html",
     "2010/20101004000068.html",
 ]
-HTML_PARSERS_DIR = REPO_ROOT / "src" / "finiq" / "market_desk" / "web" / "html_parsers"
+HTML_PARSE_MODES_DOC = (
+    REPO_ROOT / "docs" / "disclosures" / "07-html-parse" / "modes" / "README.md"
+)
 GUI_APP_DIR = REPO_ROOT / "frontend" / "finiq_GUI" / "apps" / "market-desk" / "src" / "app"
 GUI_EXTERNAL_HTML_DOWNLOAD_PAGE = GUI_APP_DIR / "external-html-download" / "page.tsx"
 GUI_EXTERNAL_HTML_DOWNLOAD_COMPONENT = GUI_APP_DIR / "external-html-download" / "_components" / "DisclosureHtmlDownloadPageView.tsx"
@@ -4140,12 +4142,8 @@ def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cance
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
         encoding="utf-8",
     )
-    checks = 0
-
     def cancel_check() -> bool:
-        nonlocal checks
-        checks += 1
-        return checks > 1
+        return (output_directory / "2008" / "20260401000001.html").is_file()
 
     payload = save_disclosure_html_sections_payload(
         {
@@ -6813,7 +6811,7 @@ def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkey
 
 
 def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
-    readme = (HTML_PARSERS_DIR / "README.md").read_text(encoding="utf-8")
+    mode_docs = HTML_PARSE_MODES_DOC.read_text(encoding="utf-8")
     download_ui_html = GUI_EXTERNAL_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     download_component_html = GUI_EXTERNAL_HTML_DOWNLOAD_COMPONENT.read_text(encoding="utf-8")
     internal_html_download_ui_html = GUI_INTERNAL_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
@@ -6831,7 +6829,7 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
 
     assert set(PARSER_REGISTRY) == EXPECTED_PARSE_MODES
     for mode in EXPECTED_PARSE_MODES:
-        assert mode in readme
+        assert mode.replace("_", "-") in mode_docs
         assert mode in parse_ui_html
     assert "/html-parse" in parse_ui_html
     assert "/internal-html-download" in parse_ui_html
