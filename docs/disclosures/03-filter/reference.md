@@ -2,7 +2,7 @@
 
 ## Paths
 
-- `<data_root>/02-table/sqlite_manifest.json`과 그 파일이 가리키는 `<data_root>/02-table/<YYYY>.sqlite`를 입력으로 받아 `<data_root>/03-filter/<workflow-name>.json`에 조건과 실행 결과를, `<data_root>/03-filter/<mode>/filtered.json`에 mode별 전달 결과를 저장한다.
+- `<data_root>/02-table/sqlite_manifest.json`과 그 파일이 가리키는 `<data_root>/02-table/<YYYY>.sqlite`를 입력으로 받아 `<data_root>/03-filter/<mode>/filter.json`에 조건과 실행 상태를, 같은 mode 폴더의 `filtered.json`에 전달 결과를 저장한다.
 
 ### `<data_root>/02-table/sqlite_manifest.json`
 
@@ -16,11 +16,11 @@
 
 - 연도별 공시 레코드를 검색하는 입력 SQLite 조각이다.
 
-### `<data_root>/03-filter/<workflow-name>.json`
+### `<data_root>/03-filter/<mode>/filter.json`
 
 #### I/O Structure
 
-- 검색 조건, 변환 유형, 실행 상태, 실행 metadata와 완료 또는 중단 결과를 함께 관리하는 원본 출력 파일이다.
+- mode를 정의하는 검색 조건, 실행 상태, 실행 metadata와 완료 또는 중단 결과를 함께 관리하는 원본 출력 파일이다.
 - 실행 상태는 `ready`, `running`, `interrupted`, `completed`, `failed`다.
 - 완료 결과는 `result`, 중단된 증분 결과는 `pending.result`에 둔다.
 - 결과에는 적용한 조건, 원본 공시 건수, 검색 시작 위치, 검색 대상 건수, 검사 완료 건수, 검색 결과 건수와 선택한 공시의 `acpt_no`를 기록한다.
@@ -29,7 +29,7 @@
 
 #### I/O Structure
 
-- `<workflow-name>.json`의 선택 결과를 다음 작업에 전달하는 mode별 파생 출력 파일이다.
+- 같은 mode의 `filter.json` 선택 결과를 다음 작업에 전달하는 파생 출력 파일이다.
 - `format`은 `kind_disclosure_filter_v1`이고 객체 맨 위의 `disclosures` 목록에 선택한 공시를 둔다.
 - 각 공시는 비어 있지 않은 `acpt_no`와 ISO 날짜로 시작하는 `disclosed_at`을 가진다.
 

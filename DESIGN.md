@@ -210,10 +210,9 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Internal HTML problem file setting | 문제 파일 표시 수 | Setting for the maximum combined problem-file rows returned by scan. |
 | Internal HTML folder summary row | 폴더 요약 | Row box showing selected-folder file and section counts. |
 | Internal HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
-| Disclosure filter mode folder | 파싱 모드 | Internal filter result folder key under `03-filter`. On `공시내역 필터링`, resolve it from the selected preset instead of rendering a separate selector in `데이터 경로`. |
-| Disclosure filter preset selector | 조건검색 프리셋 | Automatically lists condition-search workflow JSON files directly under `<data_root>/03-filter`; selecting one immediately applies its conditions. Do not add a manual load action on `공시내역 필터링`. |
-| Disclosure filter preset JSON name | 프리셋 이름 | File stem used when saving `<data_root>/03-filter/<name>.json`; keep the dropdown and this input available for adding workflows. |
-| Disclosure filter workflow status | 작업 상태 | Persist workflow state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed preset name shown in the selector. |
+| Disclosure filter mode folder | 파싱 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. |
+| Disclosure filter selector | 조건검색 필터 | Automatically lists mode-owned `filter.json` files; selecting one immediately applies its conditions. Do not add a separate name input, rename action, or manual load action on `공시내역 필터링`. |
+| Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. |
 | Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |

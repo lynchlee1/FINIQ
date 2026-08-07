@@ -1,6 +1,6 @@
 "use client"
 
-import { Pencil, Plus, Save, Trash2, Upload } from "lucide-react";
+import { Plus, Save, Trash2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 
@@ -71,14 +71,11 @@ type DisclosureConditionFilterCardProps = {
   conditions: DisclosureConditionBlock[];
   onConditionsChange: (conditions: DisclosureConditionBlock[]) => void;
   presets?: DisclosureConditionPreset[];
-  presetName: string;
   selectedPreset: string;
-  onPresetNameChange: (value: string) => void;
   onSelectedPresetChange: (value: string) => void;
   onLoadPreset: (name: string) => void;
   onLoadPresetFromJson?: () => void;
   onSavePreset: () => void;
-  onRenamePreset: () => void;
   onDeletePreset: () => void;
 };
 
@@ -176,14 +173,11 @@ export function DisclosureConditionFilterCard({
   conditions,
   onConditionsChange,
   presets = [],
-  presetName,
   selectedPreset,
-  onPresetNameChange,
   onSelectedPresetChange,
   onLoadPreset,
   onLoadPresetFromJson,
   onSavePreset,
-  onRenamePreset,
   onDeletePreset,
 }: DisclosureConditionFilterCardProps) {
   const updateCondition = (index: number, patch: Partial<DisclosureConditionBlock>) => {
@@ -212,40 +206,32 @@ export function DisclosureConditionFilterCard({
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-2">
-          <Label className="dark:text-slate-300">조건검색 프리셋</Label>
+          <Label className="dark:text-slate-300">조건검색 필터</Label>
           <div className={cn(
             "grid gap-2",
             onLoadPresetFromJson
-              ? "md:grid-cols-[minmax(150px,1fr)_minmax(150px,.9fr)_auto_auto_auto_auto]"
-              : "md:grid-cols-[minmax(150px,1fr)_minmax(150px,.9fr)_auto_auto_auto]",
+              ? "md:grid-cols-[minmax(150px,1fr)_auto_auto_auto]"
+              : "md:grid-cols-[minmax(150px,1fr)_auto_auto]",
           )}>
             <select
               value={selectedPreset}
               onChange={(event) => {
                 const nextPreset = event.target.value;
                 onSelectedPresetChange(nextPreset);
-                onPresetNameChange(nextPreset);
                 if (nextPreset) onLoadPreset(nextPreset);
               }}
               className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-              aria-label="조건검색 프리셋 선택"
+              aria-label="조건검색 필터 선택"
             >
-              <option value="">프리셋 선택</option>
+              <option value="">필터 선택</option>
               {presets.map((preset) => (
                 <option key={preset.name} value={preset.name}>
                   {preset.name}
                 </option>
               ))}
             </select>
-            <Input value={presetName} onChange={(event) => onPresetNameChange(event.target.value)} onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                onSavePreset();
-              }
-            }} placeholder="프리셋 이름" className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
             {onLoadPresetFromJson && <Button variant="outline" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>}
             <Button onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
-            <Button variant="outline" onClick={onRenamePreset} disabled={!selectedPreset}><Pencil className="mr-2 h-4 w-4" />수정</Button>
             <Button variant="outline" onClick={onDeletePreset} disabled={!selectedPreset}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
           </div>
         </div>

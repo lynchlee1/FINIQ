@@ -235,9 +235,10 @@ test("disclosure filter removes the parser mode from the data path card", async 
   const dataPathCard = source.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
 
   assert.match(source, /const \[mode, setMode\] = useState\(""\)/);
-  assert.match(source, /mode,\s*workflow_name: workflowName,\s*\.\.\.\(useSeparateOutputDirectory/);
-  assert.match(source, /if \(!mode\) \{[\s\S]*?조건검색 프리셋을 선택하세요/);
-  assert.match(source, /if \(!selectedPreset\) \{[\s\S]*?조건검색 프리셋을 선택하세요/);
+  assert.match(source, /data_root: rootDirectory,\s*mode,\s*\.\.\.\(useSeparateOutputDirectory/);
+  assert.doesNotMatch(source, /workflow_name/);
+  assert.match(source, /if \(!mode\) \{[\s\S]*?조건검색 필터를 선택하세요/);
+  assert.match(source, /if \(!selectedPreset\) \{[\s\S]*?조건검색 필터를 선택하세요/);
   assert.doesNotMatch(dataPathCard, /파싱 모드/);
   assert.doesNotMatch(dataPathCard, /<select/);
 });
@@ -261,13 +262,12 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.doesNotMatch(source, /onLoadPresetFromJson/);
   assert.match(conditionCardSource, /onLoadPresetFromJson\?: \(\) => void/);
   assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" onClick=\{onLoadPresetFromJson\}>/);
-  assert.match(conditionCardSource, /<option value="">프리셋 선택<\/option>/);
+  assert.match(conditionCardSource, /<option value="">필터 선택<\/option>/);
   assert.match(conditionCardSource, /<option key=\{preset\.name\} value=\{preset\.name\}>\s*\{preset\.name\}\s*<\/option>/);
   assert.doesNotMatch(conditionCardSource, /workflowStatusLabel/);
-  assert.match(conditionCardSource, /placeholder="프리셋 이름"/);
+  assert.doesNotMatch(conditionCardSource, /placeholder="프리셋 이름"/);
   assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
-  assert.match(conditionCardSource, /onClick=\{onRenamePreset\} disabled=\{!selectedPreset\}/);
-  assert.match(conditionCardSource, /\/>수정<\/Button>/);
+  assert.doesNotMatch(conditionCardSource, /onRenamePreset/);
   assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
   assert.match(conditionCardSource, /DisclosureFilterConnector = "" \| "AND" \| "XOR" \| "OR"/);
@@ -333,7 +333,7 @@ test("disclosure filter keeps workflow status scoped to the active workspace", a
   assert.match(source, /if \(requestId !== presetListRequestIdRef\.current\) return/);
   assert.match(source, /const isCurrentPresetWorkspace = \(dataRoot: string, requestId: number\)/);
   assert.ok(
-    (source.match(/if \(!isCurrentPresetWorkspace\(dataRoot, requestId\)\) return;/g) || []).length >= 8,
+    (source.match(/if \(!isCurrentPresetWorkspace\(dataRoot, requestId\)\) return;/g) || []).length >= 6,
     "모든 비동기 프리셋 응답은 현재 작업공간에만 적용해야 합니다.",
   );
   assert.match(source, /const selectedWorkflow = presets\.find\(\(preset\) => preset\.name === selectedPreset\)/);
@@ -353,7 +353,7 @@ test("disclosure condition presets use only the workspace JSON store", async () 
   for (const source of sources) {
     assert.match(source, /listDisclosureConditionPresets/);
     assert.match(source, /saveDisclosureConditionPreset/);
-    assert.match(source, /renameDisclosureConditionPreset/);
+    assert.doesNotMatch(source, /renameDisclosureConditionPreset/);
     assert.match(source, /deleteDisclosureConditionPreset/);
     assert.doesNotMatch(source, /condition_presets/);
     assert.doesNotMatch(source, /saveSetting\("condition_presets"/);
@@ -363,7 +363,7 @@ test("disclosure condition presets use only the workspace JSON store", async () 
   assert.match(storeSource, /const endpoint = "\/api\/disclosures\/filter\/presets"/);
   assert.match(storeSource, /data_root: dataRoot, action: "list"/);
   assert.match(storeSource, /data_root: dataRoot, action: "save", preset/);
-  assert.match(storeSource, /action: "rename"/);
+  assert.doesNotMatch(storeSource, /action: "rename"/);
   assert.match(storeSource, /action: "delete"/);
 });
 

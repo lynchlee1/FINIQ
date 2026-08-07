@@ -250,12 +250,6 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
         "shareholder_meeting",
     }:
         raise ValueError("unsupported parser_mode")
-    workflow_name = str(raw_selection.get("workflow_name") or "").strip()
-    if any(stage >= 3 for stage in execution_mask) and not workflow_name:
-        raise ValueError("조건검색 프리셋을 선택하세요.")
-    if workflow_name:
-        workflow_name = filter_workflow_path(data_root, workflow_name).stem
-
     return {
         "format": AUTOMATION_PROFILE_FORMAT,
         "name": str(payload.get("name") or "공시 자동화").strip() or "공시 자동화",
@@ -278,7 +272,6 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
                 "last_report_only": False,
             },
             "s3_selection": {
-                "workflow_name": workflow_name,
                 "filter_blocks": filter_blocks,
             },
             "s6_sections": {
@@ -347,9 +340,8 @@ def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
     root = Path(profile["data_root"])
     mode = profile["execution"]["parser_mode"]
     if stage == 3:
-        workflow_name = profile["decisions"]["s3_selection"]["workflow_name"]
         return [
-            filter_workflow_path(root, workflow_name),
+            filter_workflow_path(root, mode),
             root / "03-filter" / mode / "filtered.json",
         ]
     paths = {
@@ -728,7 +720,6 @@ def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
     try:
         expected = load_filter_workflow_result_payload(
             data_root=root,
-            name=selection["workflow_name"],
             mode=profile["execution"]["parser_mode"],
             condition_blocks=selection["filter_blocks"],
         )
@@ -1775,7 +1766,6 @@ def _run_stage(
         filter_body = {
             "data_root": str(root),
             "mode": mode,
-            "workflow_name": selection["workflow_name"],
             "filter_blocks": selection["filter_blocks"],
             "include_external_html_download_acpt_numbers": True,
             "filter_workers": execution["local_workers"],
@@ -1794,13 +1784,13 @@ def _run_stage(
             )
             mark_filter_workflow_query_completed(
                 data_root=root,
-                name=selection["workflow_name"],
+                mode=mode,
                 run_id=workflow_run["run_id"],
                 summary=incremental_result.get("summary"),
             )
             completed = complete_filter_workflow_payload(
                 data_root=root,
-                name=selection["workflow_name"],
+                mode=mode,
                 run_id=workflow_run["run_id"],
                 result=incremental_result,
             )
@@ -1810,7 +1800,7 @@ def _run_stage(
         except FilterCancelled as error:
             interrupt_filter_workflow_payload(
                 data_root=root,
-                name=selection["workflow_name"],
+                mode=mode,
                 run_id=workflow_run["run_id"],
                 partial_result=error.partial_payload,
             )
@@ -1818,7 +1808,7 @@ def _run_stage(
         except Exception as error:
             fail_filter_workflow_payload(
                 data_root=root,
-                name=selection["workflow_name"],
+                mode=mode,
                 run_id=workflow_run["run_id"],
                 error=error,
             )

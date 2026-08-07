@@ -1231,6 +1231,26 @@
 - Confirmed no identical non-heading content is duplicated within each Features and Reference pair.
 - Confirmed `git diff --check` passes.
 
+## 2026-08-07 — Migrated stage 09 disclosure graph documentation
+
+### Purpose
+
+- Apply the fixed Features and Reference format to disclosure graph generation and exploration.
+
+### Implementation summary
+
+- Consolidated graph input selection, building, fallback, loading and exploration behavior into feature-owned sections in `features.md`.
+- Reorganized `reference.md` by exact input and output artifact paths while preserving the graph schema and supported modes.
+- Removed the former Guide and Cases documents after transferring their content.
+
+### Verification result
+
+- Confirmed the stage 09 folder contains only `features.md` and `reference.md`.
+- Confirmed all headings are English and each feature owns its normal and exceptional behavior.
+- Confirmed the output path and filename match `docs/disclosures/reference.md`.
+- Confirmed no identical non-heading content is duplicated between Features and Reference.
+- Confirmed `git diff --check` passes.
+
 ## 2026-08-07 — Simplified section and change-log feature descriptions
 
 ### Purpose
@@ -1291,3 +1311,22 @@
 - Passed 397 tests across the KIND web service and web app; 166 were skipped and the two known unrelated failures remained in section-save cancellation and the missing HTML parser README.
 - Passed all 20 disclosure/frontend path-layout tests.
 - Python compilation and `git diff --check` passed.
+
+## 2026-08-07 — Strengthened shared button press feedback
+
+### Purpose
+
+- Make execution, cancellation and other button presses feel immediately acknowledged across MarketDesk.
+
+### Implementation summary
+
+- Added a 120 ms pressed-state transition to the shared button component.
+- Combined a one-pixel downward shift, slight scale reduction and opacity change for clear pointer and touch feedback.
+- Preserved opacity feedback while disabling the transform for reduced-motion preferences.
+- Added regression coverage for the shared pressed-state contract.
+
+### Verification result
+
+- Passed all 137 frontend tests, including 13 focused button and MarketDesk palette tests.
+- Completed the MarketDesk production build, including TypeScript and static page generation.
+- Confirmed `git diff --check` passes.

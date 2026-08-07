@@ -33,7 +33,6 @@ import { pickPath } from "@/lib/fileDialog";
 import {
   deleteDisclosureConditionPreset,
   listDisclosureConditionPresets,
-  renameDisclosureConditionPreset,
   saveDisclosureConditionPreset,
 } from "@/lib/disclosureConditionPresets";
 
@@ -277,7 +276,6 @@ export default function HtmlParsePage() {
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
   const filterCandidatesRequestIdRef = useRef(0);
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
-  const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [filterPresetPath, setFilterPresetPath] = useState("");
@@ -381,18 +379,11 @@ export default function HtmlParsePage() {
       setParseMode(preset.mode);
       void saveSetting("html_parse_mode", preset.mode);
     }
-    if (preset.name) setPresetName(preset.name);
     setStatus(statusMessage);
     setIsErrorStatus(false);
   }, [saveSetting, setIsErrorStatus, setStatus]);
 
   const savePreset = async () => {
-    const name = presetName.trim();
-    if (!name) {
-      setStatus("저장할 프리셋 이름을 입력하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
     if (!dataRoot?.trim()) {
       setStatus("작업공간 디렉토리를 선택하세요.");
       setIsErrorStatus(true);
@@ -400,13 +391,12 @@ export default function HtmlParsePage() {
     }
     try {
       const response = await saveDisclosureConditionPreset(dataRoot, {
-        name,
         mode: parseMode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       setPresets(response.presets);
-      setSelectedPreset(name);
-      setStatus(`조건검색 프리셋을 저장했습니다: ${name}`);
+      setSelectedPreset(parseMode);
+      setStatus(`조건검색 필터를 저장했습니다: ${parseMode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -424,48 +414,11 @@ export default function HtmlParsePage() {
     applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
   };
 
-  const renamePreset = async () => {
-    if (!selectedPreset) return;
-    const name = presetName.trim();
-    if (!name) {
-      setStatus("수정할 프리셋 이름을 입력하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    const preset = (presets || []).find((item: any) => item.name === selectedPreset);
-    if (!preset) {
-      setStatus("선택한 프리셋을 찾을 수 없습니다.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (name !== selectedPreset && (presets || []).some((item: any) => item.name === name)) {
-      setStatus(`이미 같은 이름의 프리셋이 있습니다: ${name}`);
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!dataRoot?.trim()) {
-      setStatus("작업공간 디렉토리를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    try {
-      const response = await renameDisclosureConditionPreset(dataRoot, selectedPreset, name);
-      setPresets(response.presets);
-      setSelectedPreset(name);
-      setPresetName(name);
-      setStatus(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${name}`);
-      setIsErrorStatus(false);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-      setIsErrorStatus(true);
-    }
-  };
-
   const loadFilterPresetFromJson = async () => {
     try {
       const sourceJsonPath = await pickPath({
         mode: "file",
-        title: "필터 결과 JSON 선택",
+        title: "필터 JSON 선택",
         defaultPath: filterPresetPath,
       });
       if (!sourceJsonPath) return;
@@ -474,9 +427,9 @@ export default function HtmlParsePage() {
         source_json_path: sourceJsonPath,
       });
       setSelectedPreset("");
-      applyPreset(preset, `필터 결과 JSON에서 조건을 불러왔습니다: ${preset.source_json_path || sourceJsonPath}`);
+      applyPreset(preset, `필터 JSON에서 조건을 불러왔습니다: ${preset.source_json_path || sourceJsonPath}`);
     } catch (err: any) {
-      setStatus(err.message || "필터 결과 JSON을 불러오지 못했습니다.");
+      setStatus(err.message || "필터 JSON을 불러오지 못했습니다.");
       setIsErrorStatus(true);
     }
   };
@@ -491,9 +444,8 @@ export default function HtmlParsePage() {
     try {
       const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
       setPresets(response.presets);
-      setPresetName((value) => value === selectedPreset ? "" : value);
       setSelectedPreset("");
-      setStatus(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
+      setStatus(`조건검색 필터를 삭제했습니다: ${selectedPreset}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -988,14 +940,11 @@ export default function HtmlParsePage() {
             conditions={conditions}
             onConditionsChange={setConditions}
             presets={presets || []}
-            presetName={presetName}
             selectedPreset={selectedPreset}
-            onPresetNameChange={setPresetName}
             onSelectedPresetChange={setSelectedPreset}
             onLoadPreset={loadPreset}
             onLoadPresetFromJson={loadFilterPresetFromJson}
             onSavePreset={savePreset}
-            onRenamePreset={renamePreset}
             onDeletePreset={deletePreset}
           />
 

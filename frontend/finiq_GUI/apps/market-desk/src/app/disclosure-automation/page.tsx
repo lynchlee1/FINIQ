@@ -40,7 +40,6 @@ import { pickPath } from "@/lib/fileDialog";
 import {
   deleteDisclosureConditionPreset,
   listDisclosureConditionPresets,
-  renameDisclosureConditionPreset,
   saveDisclosureConditionPreset,
 } from "@/lib/disclosureConditionPresets";
 
@@ -118,7 +117,7 @@ type StoredProfile = {
   securitiesLabel?: string;
   disclosureTypeGroups?: Record<string, string[]>;
   conditions?: DisclosureConditionBlock[];
-  filterPresetName?: string;
+  filterMode?: string;
   sectionRules?: Record<string, string[]>;
   rangeStart?: number;
   rangeEnd?: number;
@@ -234,7 +233,6 @@ export default function DisclosureAutomationPage() {
   const [reviewPatterns, setReviewPatterns] = useState<ReviewPattern[]>([]);
   const [reviewSelections, setReviewSelections] = useState<Record<string, string[]>>({});
   const [reviewDecided, setReviewDecided] = useState<Record<string, boolean>>({});
-  const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [filterPresetPath, setFilterPresetPath] = useState("");
@@ -320,8 +318,7 @@ export default function DisclosureAutomationPage() {
           ? [makeEmptyDisclosureCondition()]
           : normalizeDisclosureConditionBlocks(stored.conditions),
       );
-      setSelectedPreset(stored?.filterPresetName || "");
-      setPresetName(stored?.filterPresetName || "");
+      setSelectedPreset(stored?.filterMode || "");
       setSectionRules(stored?.sectionRules || {});
       setRangeStart(stored?.rangeStart ?? 1);
       setRangeEnd(stored?.rangeEnd ?? 7);
@@ -445,7 +442,6 @@ export default function DisclosureAutomationPage() {
           last_report_only: false,
         },
         s3_selection: {
-          workflow_name: selectedPreset,
           filter_blocks: validatedConditions(),
         },
         s6_sections: { unmatched_policy: "needs_review", section_save_rules: sectionRulesOverride },
@@ -475,7 +471,7 @@ export default function DisclosureAutomationPage() {
       securitiesLabel,
       disclosureTypeGroups,
       conditions: validatedConditions(),
-      filterPresetName: selectedPreset,
+      filterMode: selectedPreset,
       sectionRules: sectionRulesOverride,
       rangeStart,
       rangeEnd,
@@ -609,7 +605,6 @@ export default function DisclosureAutomationPage() {
   const applyPreset = (preset: DisclosureConditionPresetPayload, message: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
     if (preset.mode) setParserMode(preset.mode);
-    if (preset.name) setPresetName(preset.name);
     setNotification(message);
     setIsErrorStatus(false);
     setPlan(null);
@@ -626,12 +621,6 @@ export default function DisclosureAutomationPage() {
   };
 
   const savePreset = async () => {
-    const nextName = presetName.trim();
-    if (!nextName) {
-      setNotification("저장할 프리셋 이름을 입력하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
     if (!dataRoot.trim()) {
       setNotification("작업공간 디렉토리를 선택하세요.");
       setIsErrorStatus(true);
@@ -639,44 +628,12 @@ export default function DisclosureAutomationPage() {
     }
     try {
       const response = await saveDisclosureConditionPreset(dataRoot, {
-        name: nextName,
         mode: parserMode,
         condition_blocks: validatedConditions(),
       });
       setPresets(response.presets);
-      setSelectedPreset(nextName);
-      setNotification(`조건검색 프리셋을 저장했습니다: ${nextName}`);
-      setIsErrorStatus(false);
-    } catch (error) {
-      setNotification(error instanceof Error ? error.message : String(error));
-      setIsErrorStatus(true);
-    }
-  };
-
-  const renamePreset = async () => {
-    if (!selectedPreset) return;
-    const nextName = presetName.trim();
-    if (!nextName) {
-      setNotification("수정할 프리셋 이름을 입력하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (nextName !== selectedPreset && (presets || []).some((item: any) => item.name === nextName)) {
-      setNotification(`이미 같은 이름의 프리셋이 있습니다: ${nextName}`);
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!dataRoot.trim()) {
-      setNotification("작업공간 디렉토리를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    try {
-      const response = await renameDisclosureConditionPreset(dataRoot, selectedPreset, nextName);
-      setPresets(response.presets);
-      setSelectedPreset(nextName);
-      setPresetName(nextName);
-      setNotification(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${nextName}`);
+      setSelectedPreset(parserMode);
+      setNotification(`조건검색 필터를 저장했습니다: ${parserMode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setNotification(error instanceof Error ? error.message : String(error));
@@ -688,7 +645,7 @@ export default function DisclosureAutomationPage() {
     try {
       const sourceJsonPath = await pickPath({
         mode: "file",
-        title: "필터 결과 JSON 선택",
+        title: "필터 JSON 선택",
         defaultPath: filterPresetPath,
       });
       if (!sourceJsonPath) return;
@@ -697,9 +654,9 @@ export default function DisclosureAutomationPage() {
         source_json_path: sourceJsonPath,
       });
       setSelectedPreset("");
-      applyPreset(preset, `필터 결과 JSON에서 조건을 불러왔습니다: ${preset.source_json_path || sourceJsonPath}`);
+      applyPreset(preset, `필터 JSON에서 조건을 불러왔습니다: ${preset.source_json_path || sourceJsonPath}`);
     } catch (error) {
-      setNotification(error instanceof Error ? error.message : "필터 결과 JSON을 불러오지 못했습니다.");
+      setNotification(error instanceof Error ? error.message : "필터 JSON을 불러오지 못했습니다.");
       setIsErrorStatus(true);
     }
   };
@@ -714,9 +671,8 @@ export default function DisclosureAutomationPage() {
     try {
       const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
       setPresets(response.presets);
-      setPresetName((value) => value === selectedPreset ? "" : value);
       setSelectedPreset("");
-      setNotification(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
+      setNotification(`조건검색 필터를 삭제했습니다: ${selectedPreset}`);
       setIsErrorStatus(false);
     } catch (error) {
       setNotification(error instanceof Error ? error.message : String(error));
@@ -923,14 +879,11 @@ export default function DisclosureAutomationPage() {
               conditions={conditions}
               onConditionsChange={(value) => { setConditions(value); setPlan(null); }}
               presets={presets || []}
-              presetName={presetName}
               selectedPreset={selectedPreset}
-              onPresetNameChange={setPresetName}
               onSelectedPresetChange={setSelectedPreset}
               onLoadPreset={loadPreset}
               onLoadPresetFromJson={loadFilterPresetFromJson}
               onSavePreset={savePreset}
-              onRenamePreset={renamePreset}
               onDeletePreset={deletePreset}
             /> : <DisclosureLockedSettingsCard title="공시 조건" />}
           </div>

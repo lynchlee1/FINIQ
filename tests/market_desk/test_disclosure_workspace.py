@@ -363,7 +363,6 @@ def test_existing_filter_route_uses_workspace_stage_paths(
             "data_root": str(data_root),
             "action": "save",
             "preset": {
-                "name": "bond",
                 "mode": "bond_issuance",
                 "condition_blocks": [],
             },
@@ -375,7 +374,6 @@ def test_existing_filter_route_uses_workspace_stage_paths(
         json={
             "data_root": str(data_root),
             "mode": "bond_issuance",
-            "workflow_name": "bond",
             "filter_blocks": [],
         },
     )

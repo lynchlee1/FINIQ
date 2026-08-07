@@ -123,13 +123,13 @@ def _finish_filter_workflow(
 ) -> dict[str, Any]:
     mark_filter_workflow_query_completed(
         data_root=body.get("data_root"),
-        name=workflow_run["name"],
+        mode=workflow_run["mode"],
         run_id=workflow_run["run_id"],
         summary=payload.get("summary"),
     )
     completed_workflow = complete_filter_workflow_payload(
         data_root=body.get("data_root"),
-        name=workflow_run["name"],
+        mode=workflow_run["mode"],
         run_id=workflow_run["run_id"],
         result=payload,
     )
@@ -152,14 +152,14 @@ def _fail_filter_workflow(
     if isinstance(error, FilterCancelled):
         interrupt_filter_workflow_payload(
             data_root=body.get("data_root"),
-            name=workflow_run["name"],
+            mode=workflow_run["mode"],
             run_id=workflow_run["run_id"],
             partial_result=error.partial_payload,
         )
         return
     fail_filter_workflow_payload(
         data_root=body.get("data_root"),
-        name=workflow_run["name"],
+        mode=workflow_run["mode"],
         run_id=workflow_run["run_id"],
         error=error,
     )
@@ -167,19 +167,28 @@ def _fail_filter_workflow(
 
 def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
     source_path = Path(source_json_path).expanduser().resolve()
-    if source_path.name != "filtered.json":
-        raise ValueError("모드 폴더의 filtered.json 파일을 선택하세요.")
+    if source_path.name != "filter.json":
+        raise ValueError("모드 폴더의 filter.json 파일을 선택하세요.")
     if not source_path.is_file():
-        raise ValueError(f"필터 결과 JSON 파일을 찾을 수 없습니다: {source_path}")
+        raise ValueError(f"필터 JSON 파일을 찾을 수 없습니다: {source_path}")
     mode = validate_workspace_mode(source_path.parent.name)
 
     payload = json.loads(source_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("필터 결과 JSON 형식이 올바르지 않습니다.")
-    filters = payload.get("filters")
-    filter_blocks = filters.get("filter_blocks") if isinstance(filters, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("format") != "finiq_disclosure_filter_workflow"
+        or payload.get("mode") != mode
+    ):
+        raise ValueError("필터 JSON 형식이 올바르지 않습니다.")
+    steps = payload.get("steps")
+    condition_input = steps.get("condition_input") if isinstance(steps, dict) else None
+    filter_blocks = (
+        condition_input.get("filter_blocks")
+        if isinstance(condition_input, dict)
+        else None
+    )
     if not isinstance(filter_blocks, list):
-        raise ValueError("필터 결과 JSON에 filters.filter_blocks가 없습니다.")
+        raise ValueError("필터 JSON에 steps.condition_input.filter_blocks가 없습니다.")
     return {
         "format": "kind_disclosure_filter_preset_v1",
         "source_json_path": str(source_path),
@@ -326,7 +335,7 @@ def create_workflows_router(
     async def load_disclosure_filter_preset(payload: dict[str, Any]):
         source_json_path = str(payload.get("source_json_path") or "").strip()
         if not source_json_path:
-            raise HTTPException(status_code=400, detail="필터 결과 JSON 경로를 선택하세요.")
+            raise HTTPException(status_code=400, detail="필터 JSON 경로를 선택하세요.")
         try:
             return _load_filter_preset_file(source_json_path)
         except Exception as exc:
