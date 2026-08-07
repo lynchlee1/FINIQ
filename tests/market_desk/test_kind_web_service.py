@@ -4337,6 +4337,39 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
     ]
 
 
+def test_compress_disclosure_external_html_payload_rejects_year_mismatch(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "viewer_html"
+    year_directory = input_directory / "2024"
+    year_directory.mkdir(parents=True)
+    (input_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "AB202501010001",
+                        "disclosed_at": "2025-01-01 09:00",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (year_directory / "AB202501010001.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="year does not match disclosed_at"):
+        compress_disclosure_external_html_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path / "compressed"),
+            }
+        )
+
+
 def test_compress_disclosure_external_html_payload_rejects_mismatched_embedded_acpt_no(
     tmp_path: Path,
 ) -> None:

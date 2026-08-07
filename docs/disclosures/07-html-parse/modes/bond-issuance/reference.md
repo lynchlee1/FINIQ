@@ -1,9 +1,12 @@
-# 사채발행 변환 Reference
+# Bond Issuance Parse Reference
 
-## 적용 범위
+## Paths
 
-- 사채발행 parser가 추가하는 업무값과 mode별 검증만 설명한다.
+- `<data_root>/06-sections/<YYYY>/<acpt_no>.html`을 입력으로 받아 `<data_root>/07-converted/bond_issuance/parsed-bond_issuance.json`에 구조화 결과를 저장한다.
 
-## 결과 형식
+### `<data_root>/07-converted/bond_issuance/parsed-bond_issuance.json`
 
+#### I/O Structure
+
+- CB·EB·BW의 사채 조건, 자금조달 목적과 투자자 record를 담은 출력 파일이다.
 - `발행목적`과 `투자자`는 `[[이름, 금액], ...]` 구조다.

@@ -17,6 +17,7 @@ Every leaf module under `docs/` uses exactly two documents.
 8. Use English for all Markdown headings. Explanatory body text may remain Korean.
 9. Avoid links between leaf documents. Keep each fact in the file that owns it instead of using links to compensate for unclear classification.
 10. In disclosure References, copy every folder name, filename, and placeholder exactly from `docs/disclosures/reference.md`. Do not replace path segments with Korean or English feature names.
+11. Keep shared KIND and DART identifier semantics only in `docs/disclosures/reference.md`. Leaf documents may state a field's role and requiredness but must not repeat the shared identifier type rule.
 
 ## Internal structure
 
@@ -87,6 +88,8 @@ Every leaf module under `docs/` uses exactly two documents.
 - `{output-role-and-brief-purpose}`
 - `{format-and-fields}`
 ```
+
+The shared disclosure Reference may add an English `## Identifiers` registry. Give each source its own `###` section and put its key roles under `#### I/O Structure`.
 
 ```text
 docs/

@@ -1,5 +1,25 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-07 - 공시 식별자 규칙과 저장 연도 출처 통일
+
+### Purpose
+
+- KIND와 DART 식별자의 공통 형식 규칙을 공시분석 최상위 Reference 한 곳에서 관리한다.
+- 04단계와 05단계가 같은 `disclosed_at`을 저장 연도의 출처로 사용하도록 계약과 검증을 맞춘다.
+
+### Implementation summary
+
+- `docs/disclosures/reference.md`를 현재 Reference 골격에 맞추고 폴더별 역할과 KIND·DART 식별자 규칙을 정리했다.
+- 하위 문서에 반복되던 로마자 식별자 설명을 없애고, 공통 규칙을 하위 Reference에서 반복하지 않도록 `diataxis/README.md`에 명시했다.
+- 04단계가 03단계의 `disclosures[].disclosed_at` 연도로 외부 HTML을 저장하고 이를 `records[].metadata.disclosed_at`으로 전달하며, 05단계가 같은 값을 사용하는 흐름을 문서에 명확히 적었다.
+- 별도 압축 실행에서도 외부 HTML의 연도 폴더와 manifest의 `disclosed_at` 연도가 다르면 실패하도록 검증과 회귀 시험을 추가했다.
+
+### Verification result
+
+- 외부 HTML 압축과 압축 입력 관련 대상 시험 3개가 모두 통과했다.
+- `docs/` 전체에서 로마자 식별자 형식 설명이 `docs/disclosures/reference.md` 한 곳에만 남았는지 확인했다.
+- 변경한 문서의 제목이 영어인지 확인했고 `git diff --check`를 통과했다.
+
 ## 2026-08-07 - Flat and simple UI restoration
 
 ### Purpose
@@ -1187,6 +1207,45 @@
 
 - Confirmed `diataxis/README.md` no longer defines `guides.md` or `cases.md` as part of the target format.
 - Confirmed the skeleton matches the current stage 01 and stage 02 heading hierarchy.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Migrated stages 06, 07 and 08 to Features and Reference
+
+### Purpose
+
+- Apply the fixed two-document format to HTML section splitting, mode-based HTML parsing and change-log comparison.
+
+### Implementation summary
+
+- Consolidated stage 06 and stage 08 Guides and Cases into feature-owned `features.md` documents and reorganized their References by exact artifact path.
+- Consolidated stage 07 common processing, function responsibilities and shared raw-table behavior into root Features and Reference documents.
+- Classified every stage 07 parser mode as a submodule with its own Features and Reference documents.
+- Kept paid, bonus and mixed rights-issuance behavior as child submodules under the `rights-issuance` mode while moving common mode behavior to the mode root.
+- Replaced old Guide and Case indexes with English Features and Reference indexes.
+
+### Verification result
+
+- Confirmed no `guides.md` or `cases.md` remains in stages 06, 07 or 08.
+- Confirmed every leaf module contains a Features and Reference pair and all Markdown headings are English.
+- Confirmed disclosure paths use the exact folder names and filename patterns from `docs/disclosures/reference.md`.
+- Confirmed no identical non-heading content is duplicated within each Features and Reference pair.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Simplified section and change-log feature descriptions
+
+### Purpose
+
+- Make the section-title constraint readable and keep the change-log purpose open to future parser modes.
+
+### Implementation summary
+
+- Replaced the excluded-element list with a positive rule naming the only accepted heading and title locations.
+- Removed the fixed parser-mode list from the change-log purpose.
+
+### Verification result
+
+- Confirmed the accepted section-title source remains explicit without enumerating implementation-specific alternatives.
+- Confirmed the change-log purpose contains no current parser-mode names.
 - Confirmed `git diff --check` passes.
 
 ## 2026-08-07 — Extended feature-owned disclosure docs and textual identifiers

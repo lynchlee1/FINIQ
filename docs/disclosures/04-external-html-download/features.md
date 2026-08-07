@@ -16,8 +16,8 @@
 
 - 다운로드 대상은 `data_root`와 `mode`로만 정한다.
 - 필터 입력을 읽을 수 없거나 대상이 없으면 실패 처리한다.
-- 각 대상은 중복되지 않은 비어 있지 않은 텍스트 `acpt_no`와 ISO 날짜로 시작하는 `disclosed_at`을 가져야 한다. `acpt_no`는 로마자를 포함할 수 있으며 숫자로 변환하지 않는다.
-- 호환 field나 중첩된 값을 탐색하지 않으며, 저장 연도를 `acpt_no`에서 추론하지 않는다.
+- 각 대상은 중복되지 않은 비어 있지 않은 `acpt_no`와 ISO 날짜로 시작하는 `disclosed_at`을 가져야 한다.
+- `<YYYY>`는 필터 결과의 `disclosures[].disclosed_at` 연도에서 정한다. 호환 field나 중첩된 값을 탐색하지 않으며 `acpt_no`에서 연도를 추론하지 않는다.
 - 원본 화면 전체는 압축 JSON에 복사하지 않고 연도별 HTML 파일로 보존한다.
 
 ### Retry Failed External HTML Downloads
@@ -44,13 +44,14 @@
 
 #### Behavior
 
-공시와 문서를 식별하고 문서 선택 결과를 재현하는 정보만 압축 record에 저장한다. `acpt_no`는 HTML 파일명에서 확장자를 뺀 텍스트를 사용하고, 외부 화면에서 선택한 본문 문서 번호는 `selected_main_doc_no`에 저장한다.
+공시와 문서를 식별하고 문서 선택 결과를 재현하는 정보만 압축 record에 저장한다. `acpt_no`는 HTML 파일명에서 확장자를 뺀 값을 사용하고, 외부 화면에서 선택한 본문 문서 번호는 `selected_main_doc_no`에 저장한다. 필터 결과의 공시 metadata는 `records[].metadata`에 그대로 전달한다.
 
 #### Defaults and Exceptions
 
 - 압축할 폴더는 `input_directory`로만 받고 worker 수는 `parallel_workers`로만 받는다.
 - 외부 HTML 안에 `acptNo`, `mainDoc`, `attachedDoc` 또는 각 select의 option 목록이 없으면 실패 처리한다.
 - 외부 HTML에서 읽은 `acptNo`가 파일명과 다르면 실패 처리하며, 빈 `acptNo`를 파일명으로 대신하지 않는다.
+- 외부 HTML의 `<YYYY>` 폴더와 manifest metadata의 `disclosed_at` 연도가 다르면 실패 처리한다.
 - 문서 option 값이나 문서 번호가 비어 있거나 선택한 본문 문서 번호를 찾지 못하면 실패 처리한다.
 - 제목은 01단계 KIND 조건검색에서 받은 값만 쓰고 외부 HTML의 `<title>`이나 머리글로 보완하지 않는다.
 

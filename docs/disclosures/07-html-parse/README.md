@@ -1,6 +1,4 @@
-# 공시원문 변환 문서
+# Disclosure HTML Parse Documentation
 
-- `common` — [Guide](common/guides.md), [Cases](common/cases.md), [Reference](common/reference.md)
-- `functions` — [Guide](functions/guides.md), [Cases](functions/cases.md), [Reference](functions/reference.md)
-- `raw-table` — [Guide](raw-table/guides.md), [Cases](raw-table/cases.md), [Reference](raw-table/reference.md)
-- `modes` — [Mode 문서](modes/README.md)
+- Common processing — [Features](features.md), [Reference](reference.md)
+- Parser modes — [Submodules](modes/README.md)

@@ -10,12 +10,12 @@ KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
 
 #### Behavior
 
-04단계가 확정한 `records[].selected_main_doc_no`를 본문 문서 번호로, `records[].metadata.disclosed_at`을 저장 연도로 사용한다.
+04단계가 외부 화면에서 확정한 `records[].selected_main_doc_no`를 본문 문서 번호로 사용한다. 저장 연도는 03단계 필터 결과의 `disclosures[].disclosed_at`을 04단계가 `records[].metadata.disclosed_at`으로 전달한 값에서 정한다.
 
 #### Defaults and Exceptions
 
 - 일반 실행 입력은 `compressed-external-html.json`만 허용한다.
-- record가 객체가 아니거나 비어 있지 않은 텍스트 `acpt_no`가 없으면 실패 처리한다. `acpt_no`는 로마자를 포함할 수 있으며 숫자로 변환하지 않는다.
+- record가 객체가 아니거나 비어 있지 않은 `acpt_no`가 없으면 실패 처리한다.
 - `selected_main_doc_no`가 비어 있거나 연도별 외부 HTML의 `mainDoc`에서 직접 선택한 값이 아니면 실패 처리한다.
 - `metadata.disclosed_at`이 없거나 유효한 ISO 날짜로 시작하지 않으면 `records[].year`나 `acpt_no`로 저장 연도를 대신하지 않고 실패 처리한다.
 - 연도별 외부 HTML을 직접 입력하면 파일이 실제로 들어 있는 4자리 연도 폴더를 저장 연도로 사용한다.
