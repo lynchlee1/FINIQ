@@ -565,6 +565,23 @@ def test_fetch_search_page_refreshes_main_get_body(tmp_path: Path) -> None:
     assert len(session.get_calls) == 1
 
 
+def test_fetch_disclosure_viewer_html_preserves_text_identifiers(tmp_path: Path) -> None:
+    session = ViewerFakeSession()
+
+    output_path = fetch_disclosure_viewer_html(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        acpt_no="AB2026C001",
+        doc_no="DOC9Z",
+        timeout=5,
+        session=session,
+    )
+
+    assert output_path == tmp_path / "AB2026C001.html"
+    assert "acptno=AB2026C001" in str(session.get_calls[0]["url"])
+    assert "docno=DOC9Z" in str(session.get_calls[0]["url"])
+
+
 def test_download_disclosure_external_htmls_rate_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

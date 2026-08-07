@@ -215,6 +215,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. |
 | Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
+| Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |
 | Disclosure title search action | 실행 | Starts the restorable background title-search job in `공시내역 제목 검색` mode. Use the same execution label as the filtering mode. |
 | Disclosure title search result | 제목 검색 결과 | Lists distinct database titles and the matching disclosure count for each title. |
 | Disclosure title search worker count | 검색 worker 수 | Worker count for querying the stage 02 SQLite shards in `공시내역 제목 검색` mode. |

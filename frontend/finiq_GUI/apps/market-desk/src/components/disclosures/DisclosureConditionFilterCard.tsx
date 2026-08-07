@@ -34,7 +34,7 @@ export const DISCLOSURE_FILTER_OPERATOR_OPTIONS = [
 
 export type DisclosureFilterFieldKey = (typeof DISCLOSURE_FILTER_FIELD_OPTIONS)[number][0];
 export type DisclosureFilterOperatorKey = (typeof DISCLOSURE_FILTER_OPERATOR_OPTIONS)[number][0];
-export type DisclosureFilterConnector = "" | "AND" | "OR";
+export type DisclosureFilterConnector = "" | "AND" | "XOR" | "OR";
 
 export type DisclosureConditionBlock = {
   connector: DisclosureFilterConnector;
@@ -104,7 +104,7 @@ export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureCo
     }
     const row = item as Record<string, unknown>;
     const connector = row.connector;
-    if ((index === 0 && connector !== "") || (index > 0 && connector !== "AND" && connector !== "OR")) {
+    if ((index === 0 && connector !== "") || (index > 0 && connector !== "AND" && connector !== "XOR" && connector !== "OR")) {
       throw new Error(`condition_blocks[${index}].connector is invalid`);
     }
     if (!DISCLOSURE_FILTER_FIELD_OPTIONS.some(([key]) => key === row.field)) {
@@ -266,6 +266,7 @@ export function DisclosureConditionFilterCard({
                 >
                   <option value="">START</option>
                   <option value="AND">AND</option>
+                  <option value="XOR">XOR</option>
                   <option value="OR">OR</option>
                 </select>
                 <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[36px_68px_86px_72px_minmax(84px,.45fr)_minmax(112px,.55fr)_minmax(240px,3fr)_36px]">

@@ -271,14 +271,16 @@ test("ontology workspaces only strip A prefix from stock-code keywords", async (
   ]);
 
   for (const source of [graphSource, chartSource]) {
-    assert.match(source, /function isStockCodeKeyword\(value: string\) \{\s+return \/\^A\\d\{6\}\$\/\.test\(value\.trim\(\)\.toUpperCase\(\)\);\s+\}/);
+    assert.match(source, /function isStockCodeKeyword\(value: string\) \{\s+return \/\^A\[A-Z0-9\]\{6\}\$\/\.test\(value\.trim\(\)\.toUpperCase\(\)\);\s+\}/);
     assert.match(source, /isStockCodeKeyword\(keywordText\) \? normalizeStockCode\(keywordText\)\.slice\(1\) : keyword\.trim\(\)/);
     assert.doesNotMatch(source, /keywordText\.startsWith\("A"\)/);
+    assert.doesNotMatch(source, /replace\(\/\\D/);
   }
-  assert.match(analysisSource, /function isStockCodeKeyword\(value: string\) \{\s+return \/\^A\\d\{6\}\$\/\.test\(value\.trim\(\)\.toUpperCase\(\)\);\s+\}/);
+  assert.match(analysisSource, /function isStockCodeKeyword\(value: string\) \{\s+return \/\^A\[A-Z0-9\]\{6\}\$\/\.test\(value\.trim\(\)\.toUpperCase\(\)\);\s+\}/);
   assert.match(analysisSource, /isStockCodeKeyword\(keywordText\) \? normalizeStockCode\(keywordText\)\.slice\(1\) : runKeyword\.trim\(\)/);
   assert.match(analysisSource, /isStockCodeKeyword\(keywordText\) \? normalizeStockCode\(keywordText\)\.slice\(1\) : resultKeyword\.trim\(\)/);
   assert.doesNotMatch(analysisSource, /keywordText\.startsWith\("A"\)/);
+  assert.doesNotMatch(analysisSource, /replace\(\/\\D/);
 });
 
 test("ontology disclosure analysis keeps empty search state until the user searches", async () => {

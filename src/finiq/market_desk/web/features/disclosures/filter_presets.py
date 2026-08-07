@@ -552,14 +552,16 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ):
             raise ValueError("Save the filter conditions before running the workflow")
 
-        source_offset = _result_source_count(document.get("result"))
-        source_expected_minimum = source_offset
+        committed_result = document.get("result")
+        source_offset = _result_source_count(committed_result)
+        source_expected_count = (
+            _result_source_count(committed_result)
+            if isinstance(committed_result, dict)
+            else None
+        )
         pending_result = _pending_result(document)
         if pending_result is not None:
-            source_expected_minimum = max(
-                source_expected_minimum,
-                _filter_result_counts(pending_result)[0],
-            )
+            source_expected_count = _filter_result_counts(pending_result)[0]
             source_offset += _filter_result_counts(pending_result)[3]
 
         run_id = uuid.uuid4().hex
@@ -585,7 +587,7 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "path": str(path),
         "run_id": run_id,
         "source_offset": source_offset,
-        "source_expected_minimum": source_expected_minimum,
+        "source_expected_count": source_expected_count,
     }
 
 
@@ -639,6 +641,7 @@ def complete_filter_workflow_payload(
             require_complete=True,
         )
         source_disclosures = _filter_result_counts(current_result)[0]
+        current_source_offset = _filter_result_counts(current_result)[1]
         result_payloads: list[dict[str, Any]] = []
         committed_result = document.get("result")
         if isinstance(committed_result, dict):
@@ -646,6 +649,11 @@ def complete_filter_workflow_payload(
         pending_result = _pending_result(document)
         if pending_result is not None:
             result_payloads.append(pending_result)
+        if current_source_offset == 0 and any(
+            _result_source_count(payload) != source_disclosures
+            for payload in result_payloads
+        ):
+            result_payloads = []
         result_payloads.append(current_result)
         merged_result = _merge_filter_results(
             result_payloads,
@@ -703,13 +711,28 @@ def interrupt_filter_workflow_payload(
             working_path.unlink(missing_ok=True)
             _ACTIVE_RUNS.pop(_active_key(path), None)
             return None
-        committed_count = _result_source_count(document.get("result"))
+        source_disclosures, current_source_offset, _, _ = _filter_result_counts(
+            current_partial
+        )
+        committed_result = document.get("result")
+        committed_count = _result_source_count(committed_result)
         pending_payloads: list[dict[str, Any]] = []
         previous_pending = _pending_result(document)
         if previous_pending is not None:
             pending_payloads.append(previous_pending)
+        prior_payloads = [
+            payload
+            for payload in [committed_result, previous_pending]
+            if isinstance(payload, dict)
+        ]
+        if current_source_offset == 0 and any(
+            _result_source_count(payload) != source_disclosures
+            for payload in prior_payloads
+        ):
+            document["result"] = None
+            committed_count = 0
+            pending_payloads = []
         pending_payloads.append(current_partial)
-        source_disclosures = _filter_result_counts(current_partial)[0]
         merged_pending = _merge_filter_results(
             pending_payloads,
             condition_blocks=workflow["condition_blocks"],

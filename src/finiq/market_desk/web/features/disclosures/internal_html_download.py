@@ -80,7 +80,7 @@ def _validated_compressed_records(
             msg = f"compressed external HTML JSON record is not an object: index={index}"
             raise ValueError(msg)
         acpt_no = str(record.get("acpt_no") or "").strip()
-        if not acpt_no.isdigit():
+        if not acpt_no:
             msg = f"invalid acpt_no in compressed external HTML JSON: index={index}"
             raise ValueError(msg)
         validated.append((record, acpt_no))

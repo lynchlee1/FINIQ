@@ -1,0 +1,69 @@
+# Internal HTML Download Features
+
+## Purpose
+
+KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
+
+## Features
+
+### Determine Internal HTML Targets
+
+#### Behavior
+
+04단계가 확정한 `records[].selected_main_doc_no`를 본문 문서 번호로, `records[].metadata.disclosed_at`을 저장 연도로 사용한다.
+
+#### Defaults and Exceptions
+
+- 일반 실행 입력은 `compressed-external-html.json`만 허용한다.
+- record가 객체가 아니거나 비어 있지 않은 텍스트 `acpt_no`가 없으면 실패 처리한다. `acpt_no`는 로마자를 포함할 수 있으며 숫자로 변환하지 않는다.
+- `selected_main_doc_no`가 비어 있거나 연도별 외부 HTML의 `mainDoc`에서 직접 선택한 값이 아니면 실패 처리한다.
+- `metadata.disclosed_at`이 없거나 유효한 ISO 날짜로 시작하지 않으면 `records[].year`나 `acpt_no`로 저장 연도를 대신하지 않고 실패 처리한다.
+- 연도별 외부 HTML을 직접 입력하면 파일이 실제로 들어 있는 4자리 연도 폴더를 저장 연도로 사용한다.
+- `records[].acpt_no`가 중복되면 실패 처리한다.
+
+### Download Internal HTML
+
+#### Behavior
+
+선택한 공시에서 받은 KIND 본문 HTML을 원본 식별값과 함께 저장한다.
+
+#### Defaults and Exceptions
+
+- 새로 내려받은 본문이 HTML 판별 검사를 통과하지 못하면 방금 저장한 본문 파일을 삭제하고 실패 처리한다.
+
+### Reuse Existing Internal HTML
+
+#### Behavior
+
+구조와 원본 hash가 그대로인 기존 본문 HTML은 다시 받지 않는다.
+
+#### Defaults and Exceptions
+
+- HTML 식별 검사를 통과한 파일에서 바이트 수와 SHA-256을 계산해 manifest 기준값과 비교한다.
+
+### Validate Internal HTML Results
+
+#### Behavior
+
+요청 대상과 저장 결과의 `acpt_no` 집합이 같은지 확인한다.
+
+#### Defaults and Exceptions
+
+- 일반 실행 결과에 중복·누락·추가 `acpt_no`가 있으면 실패 처리한다.
+- 사용자가 작업을 취소하면 그 뒤 생긴 누락은 허용하되, 중복·추가 `acpt_no`는 계속 검사하고 발견하면 실패 처리한다.
+
+### Record Internal HTML Provenance
+
+#### Behavior
+
+검증을 통과한 내부 HTML을 같은 `acpt_no`의 원본 공시 metadata와 연결하고, 파일마다 바이트 수와 SHA-256을 manifest에 기록한다.
+
+#### Defaults and Exceptions
+
+- 저장한 `acpt_no`와 연결할 원본 metadata를 확정하지 못하거나 manifest를 저장하지 못하면 실패 처리한다.
+
+### Display Internal HTML Results
+
+#### Behavior
+
+다운로드·검증 결과를 바꾸지 않고 화면에 전달할 범위만 제한한다.

@@ -1943,14 +1943,14 @@ def test_build_disclosure_table_payload_rejects_classification_path_with_root(
 def test_collect_acpt_numbers_from_json_requires_canonical_records() -> None:
     payload = {
         "disclosures": [
-            {"acpt_no": "20250101000001"},
+            {"acpt_no": "AB202501010001"},
             {"acpt_no": "20250101000002"},
         ]
     }
 
-    assert collect_acpt_numbers_from_json(payload) == ["20250101000001", "20250101000002"]
+    assert collect_acpt_numbers_from_json(payload) == ["AB202501010001", "20250101000002"]
 
-    with pytest.raises(ValueError, match="acpt_no must contain digits"):
+    with pytest.raises(ValueError, match="acpt_no must not be empty"):
         collect_acpt_numbers_from_json({"disclosures": [{"acptNo": "20250101000001"}]})
 
 
@@ -2173,8 +2173,8 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
                         {
-                            "acpt_no": "20250101000001",
-                            "selected_main_doc_no": "20250101000999",
+                            "acpt_no": "AB202501010001",
+                            "selected_main_doc_no": "DOC202501Z",
                             "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -2193,11 +2193,11 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
     assert calls == [
         (
             tmp_path / "content_html" / "2025",
-            [{"acpt_no": "20250101000001", "doc_no": "20250101000999"}],
+            [{"acpt_no": "AB202501010001", "doc_no": "DOC202501Z"}],
         )
     ]
     assert payload["saved_files"] == [
-        str(tmp_path / "content_html" / "2025" / "20250101000001.html")
+        str(tmp_path / "content_html" / "2025" / "AB202501010001.html")
     ]
     assert payload["manifest_path"] == str(tmp_path / "content_html" / "kind_disclosure_html_manifest.json")
     assert payload["verification"] == {
@@ -4146,7 +4146,7 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
                 "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
                     {
-                        "acpt_no": "20250101000001",
+                        "acpt_no": "AB202501010001",
                         "market": "코스닥",
                         "company_name": "테스트",
                         "company_id": "123456",
@@ -4159,26 +4159,26 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         ),
         encoding="utf-8",
     )
-    (input_directory / "2025" / "20250101000001.html").write_text(
+    (input_directory / "2025" / "AB202501010001.html").write_text(
         """
         <html><body>
           <meta name="description" content="대한민국 대표 기업공시채널 KIND" />
           <script>
             var _TRK_PI = "PDV";
-            var _TRK_PN = "20250101000001";
+            var _TRK_PN = "AB202501010001";
           </script>
           <script src="../js/viewer.js?version=20250307"></script>
           <form name="docdownloadform" id="docdownloadform">
             <input type="hidden" name="docLocPath" id="docLocPath" value="/external/path" />
               </form>
-              <input type="hidden" name="acptNo" value="20250101000001" />
+              <input type="hidden" name="acptNo" value="AB202501010001" />
               <input type="hidden" name="tempTitle" value="뷰어 제목" />
           <h1 class="ttl">테스트 (123456)</h1>
           <select id="mainDoc">
-            <option value="20250101000999|Y" selected="selected">본문</option>
+            <option value="DOC202501Z|Y" selected="selected">본문</option>
           </select>
           <select id="attachedDoc">
-            <option value="20250101000888">첨부</option>
+            <option value="ATTACH2025A">첨부</option>
           </select>
           <select id="orgDisclsId" name="orgDiscls">
             <option value="">기공시선택</option>
@@ -4229,9 +4229,9 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         "source_sha256",
         "source_size_bytes",
     }
-    assert saved["records"][0]["acpt_no"] == "20250101000001"
+    assert saved["records"][0]["acpt_no"] == "AB202501010001"
     assert saved["records"][0]["title"] == "메타 제목"
-    assert saved["records"][0]["selected_main_doc_no"] == "20250101000999"
+    assert saved["records"][0]["selected_main_doc_no"] == "DOC202501Z"
     assert saved["records"][0]["metadata"]["market"] == "코스닥"
     assert "external_metadata" not in saved["records"][0]
     assert "main_docs" not in saved["records"][0]
@@ -4245,9 +4245,9 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
             "select_id": "mainDoc",
             "select_name": "",
             "option_index": 0,
-            "doc_no": "20250101000999",
+            "doc_no": "DOC202501Z",
             "text": "본문",
-            "value": "20250101000999|Y",
+            "value": "DOC202501Z|Y",
             "latest_flag": "Y",
             "selected": True,
         },
@@ -4255,9 +4255,9 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
             "select_id": "attachedDoc",
             "select_name": "",
             "option_index": 0,
-            "doc_no": "20250101000888",
+            "doc_no": "ATTACH2025A",
             "text": "첨부",
-            "value": "20250101000888",
+            "value": "ATTACH2025A",
             "latest_flag": None,
             "selected": False,
         },
@@ -7115,7 +7115,7 @@ def test_metadata_title_lookup_uses_full_filename_stem() -> None:
     )
 
 
-def test_parse_disclosure_html_payload_rejects_nonnumeric_metadata_acpt_no(
+def test_parse_disclosure_html_payload_rejects_empty_metadata_acpt_no(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "viewer_html"
@@ -7128,7 +7128,7 @@ def test_parse_disclosure_html_payload_rejects_nonnumeric_metadata_acpt_no(
             {
                 "disclosures": [
                     {
-                        "acpt_no": " report ",
+                        "acpt_no": "   ",
                         "company_name": "공백식별자회사",
                         "market": "코스닥",
                         "disclosed_at": "2025-01-02 09:00:00",
@@ -7144,7 +7144,7 @@ def test_parse_disclosure_html_payload_rejects_nonnumeric_metadata_acpt_no(
             {
                 "records": [
                     {
-                        "acpt_no": " report ",
+                        "acpt_no": "   ",
                         "title": "전환사채권 발행결정",
                         "selected_main_doc_no": "20250102000011",
                     }
@@ -7155,7 +7155,7 @@ def test_parse_disclosure_html_payload_rejects_nonnumeric_metadata_acpt_no(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="acpt_no must contain digits"):
+    with pytest.raises(ValueError, match="acpt_no must not be empty"):
         parse_disclosure_html_payload(
             {
                 "input_directory": str(input_directory),
@@ -9504,7 +9504,7 @@ def test_list_quanti_stock_codes_accepts_parent_directory(tmp_path: Path, monkey
     (by_item / "S100310.parquet").write_bytes(b"stub")
 
     class _FakeSchema:
-        names = ["date", "close_005930", "close_000660"]
+        names = ["date", "close_005930", "close_00A660"]
 
     class _FakeParquetFile:
         def __init__(self, path: Path) -> None:
@@ -9513,7 +9513,7 @@ def test_list_quanti_stock_codes_accepts_parent_directory(tmp_path: Path, monkey
 
     monkeypatch.setattr("finiq.market_desk.analytics.quanti.pq.ParquetFile", _FakeParquetFile)
 
-    assert list_quanti_stock_codes(quanti_root) == ["000660", "005930"]
+    assert list_quanti_stock_codes(quanti_root) == ["005930", "00A660"]
 
 
 def test_build_quanti_market_history_collapses_wide_market_item(tmp_path: Path) -> None:
@@ -9525,7 +9525,7 @@ def test_build_quanti_market_history_collapses_wide_market_item(tmp_path: Path) 
         {
             "date": pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-05", "2024-01-08"]),
             "테스트전자_005930": ["KOSDAQ", "KOSDAQ", "KOSPI", "KOSPI"],
-            "다른회사_000660": ["유가증권", "유가증권", None, None],
+            "다른회사_00A660": ["유가증권", "유가증권", None, None],
         }
     ).to_parquet(by_item / f"{market_item}.parquet", index=False)
     output_path = quanti_root / "market_history.parquet"
@@ -9540,13 +9540,13 @@ def test_build_quanti_market_history_collapses_wide_market_item(tmp_path: Path) 
     assert summary["stock_count"] == 2
     assert summary["interval_count"] == 3
     assert history[["stock_code", "market", "start_date", "end_date"]].to_dict("records") == [
-        {"stock_code": "000660", "market": "코스피", "start_date": date(2024, 1, 2), "end_date": date(2024, 1, 3)},
         {"stock_code": "005930", "market": "코스닥", "start_date": date(2024, 1, 2), "end_date": date(2024, 1, 4)},
         {"stock_code": "005930", "market": "코스피", "start_date": date(2024, 1, 5), "end_date": date(2024, 1, 8)},
+        {"stock_code": "00A660", "market": "코스피", "start_date": date(2024, 1, 2), "end_date": date(2024, 1, 3)},
     ]
     assert find_market_at(output_path, stock_code="005930", target_date=date(2024, 1, 4)) == "코스닥"
     assert find_market_at(output_path, stock_code="005930", target_date=date(2024, 1, 5)) == "코스피"
-    assert find_market_at(output_path, stock_code="000660", target_date=date(2024, 1, 4)) is None
+    assert find_market_at(output_path, stock_code="00A660", target_date=date(2024, 1, 4)) is None
 
 
 def test_build_quanti_market_history_rejects_unknown_market_values(tmp_path: Path) -> None:

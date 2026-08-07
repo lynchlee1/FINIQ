@@ -60,11 +60,11 @@ ORG_COMPANY_PATTERNS = [
 
 
 def normalize_company_id(company_id: str | None) -> str:
-    """Pad stock/company code to 6 digits (e.g. '22180' -> '022180')."""
+    """Normalize a textual KIND company identifier without discarding letters."""
     if not company_id:
         return ""
-    digits = "".join(char for char in str(company_id) if char.isdigit())
-    return digits.zfill(6) if digits else ""
+    normalized = str(company_id).strip()
+    return normalized.zfill(6) if normalized.isdigit() else normalized
 
 
 def parse_date_safe(date_str: str | None) -> date:
@@ -1050,4 +1050,3 @@ def export_ontology_to_web_json(
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(out_data, f, ensure_ascii=False, indent=2)
-

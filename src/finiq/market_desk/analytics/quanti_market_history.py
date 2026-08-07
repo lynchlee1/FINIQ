@@ -237,20 +237,24 @@ def _collapse_market_pairs(
 
 
 def _normalize_stock_code(stock_code: str) -> str:
-    digits = re.sub(r"\D+", "", str(stock_code))
-    if len(digits) != 6:
-        msg = f"stock_code must contain exactly 6 digits: {stock_code!r}"
+    normalized = str(stock_code).strip().upper()
+    if len(normalized) != 6 or not normalized.isalnum():
+        msg = f"stock_code must contain exactly 6 letters or digits: {stock_code!r}"
         raise ValueError(msg)
-    return digits
+    return normalized
 
 
 def _stock_code_from_column(column: str) -> str | None:
     normalized = str(column).strip().upper()
-    if normalized.startswith("A") and len(normalized) == 7 and normalized[1:].isdigit():
+    if (
+        normalized.startswith("A")
+        and len(normalized) == 7
+        and normalized[1:].isalnum()
+    ):
         return normalized[1:]
-    if normalized.isdigit() and len(normalized) == 6:
+    if normalized.isalnum() and len(normalized) == 6:
         return normalized
-    match = re.search(r"(?:^|_)([0-9]{6})$", normalized)
+    match = re.search(r"(?:^|_)([A-Z0-9]{6})$", normalized)
     return match.group(1) if match else None
 
 

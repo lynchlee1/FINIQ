@@ -140,8 +140,8 @@ def build_insight_payload(
     stock_code = str(stock_code_override or "").strip()
     if not stock_code:
         raise ValueError("종목코드를 입력해야 합니다.")
-    if not stock_code.isdigit() or len(stock_code) != 6:
-        raise ValueError("종목코드는 숫자 6자리여야 합니다.")
+    if not stock_code.isalnum() or len(stock_code) != 6:
+        raise ValueError("종목코드는 영문자 또는 숫자 6자리여야 합니다.")
 
     disclosure_frame = prepare_disclosure_dataframe(company)
     default_start, default_end = _default_period_from_company(company)

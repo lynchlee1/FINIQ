@@ -822,10 +822,11 @@ def _find_item_file(quanti_dir: Path, item: str) -> Path | None:
 
 def _display_stock_code(company_id: str) -> str:
     raw = str(company_id or "").strip().upper()
-    digits = "".join(char for char in raw if char.isdigit())
-    return f"A{digits.zfill(6)}" if digits else raw
+    if raw.startswith("A"):
+        return raw
+    return f"A{raw.zfill(6)}" if raw.isdigit() else raw
 
 
 def _kind_company_id(company_id: str) -> str:
-    digits = "".join(char for char in str(company_id or "") if char.isdigit())
-    return digits.zfill(6) if digits else ""
+    raw = str(company_id or "").strip()
+    return raw.zfill(6) if raw.isdigit() else raw

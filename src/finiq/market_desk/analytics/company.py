@@ -11,7 +11,7 @@ import zipfile
 
 import pandas as pd
 
-_A_STOCK_CODE_RE = re.compile(r"^A\d{6}$")
+_A_STOCK_CODE_RE = re.compile(r"^A[A-Z0-9]{6}$")
 _ALNUM_STOCK_CODE_RE = re.compile(r"^[A-Z0-9]{5,6}$")
 
 
