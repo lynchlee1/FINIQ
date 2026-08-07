@@ -19,7 +19,6 @@ from finiq.market_desk.web.features.downloads.kind_common import (
 def _save_filter_workflow(
     data_root: Path,
     *,
-    name: str = "bond",
     mode: str = "bond_issuance",
     condition_blocks: list[dict[str, object]] | None = None,
 ) -> None:
@@ -28,7 +27,6 @@ def _save_filter_workflow(
             "data_root": str(data_root),
             "action": "save",
             "preset": {
-                "name": name,
                 "mode": mode,
                 "condition_blocks": condition_blocks or [],
             },
@@ -436,7 +434,6 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
         json={
             "data_root": str(data_root),
             "mode": "bond_issuance",
-            "workflow_name": "bond",
             "filter_blocks": [],
             "external_html_transfer_path": str(transfer_dir),
         },
@@ -456,12 +453,12 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     assert result["mode"] == "bond_issuance"
     assert result["filter_workflow"]["status"] == "completed"
     workflow = json.loads(
-        (data_root / "03-filter" / "bond.json").read_text(encoding="utf-8")
+        (data_root / "03-filter" / "bond_issuance" / "filter.json").read_text(encoding="utf-8")
     )
     assert workflow["steps"]["database_query"]["status"] == "completed"
     assert workflow["steps"]["record"]["status"] == "completed"
     assert workflow["steps"]["record"]["path"] == str(
-        (data_root / "03-filter" / "bond.json").resolve()
+        (data_root / "03-filter" / "bond_issuance" / "filter.json").resolve()
     )
     assert workflow["result"]["summary"]["source_disclosures"] == 2
     assert workflow["result"]["integrity"] == {
@@ -560,12 +557,11 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
 ) -> None:
     data_root = tmp_path / "workspace"
     _save_filter_workflow(data_root)
-    workflow_path = data_root / "03-filter" / "bond.json"
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
 
     first_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
@@ -575,7 +571,7 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
     assert first_run["source_offset"] == 0
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=first_run["run_id"],
         summary={},
     )
@@ -588,7 +584,7 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
     )
     filter_presets.complete_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=first_run["run_id"],
         result=first,
     )
@@ -600,7 +596,6 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
     second_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
@@ -610,7 +605,7 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
     assert workflow_path.read_text(encoding="utf-8") == completed_before_save
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=second_run["run_id"],
         summary={},
     )
@@ -623,7 +618,7 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
     )
     completed = filter_presets.complete_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=second_run["run_id"],
         result=second,
     )
@@ -646,7 +641,6 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
     first_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
@@ -662,7 +656,7 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
     )
     interrupted = filter_presets.interrupt_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=first_run["run_id"],
         partial_result=partial,
     )
@@ -672,7 +666,6 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
     resumed_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
@@ -681,7 +674,7 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
     assert resumed_run["source_expected_count"] == 4
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=resumed_run["run_id"],
         summary={},
     )
@@ -694,7 +687,7 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
     )
     completed = filter_presets.complete_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=resumed_run["run_id"],
         result=remainder,
     )
@@ -716,20 +709,19 @@ def test_filter_workflow_replaces_saved_result_after_source_count_change(
     first_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
     )
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=first_run["run_id"],
         summary={},
     )
     filter_presets.complete_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=first_run["run_id"],
         result=_filter_result(
             source_disclosures=2,
@@ -743,20 +735,19 @@ def test_filter_workflow_replaces_saved_result_after_source_count_change(
     retry_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
     )
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=retry_run["run_id"],
         summary={},
     )
     completed = filter_presets.complete_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=retry_run["run_id"],
         result=_filter_result(
             source_disclosures=3,
@@ -779,20 +770,19 @@ def test_interrupted_filter_retry_drops_saved_result_after_source_count_change(
     first_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
     )
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=first_run["run_id"],
         summary={},
     )
     filter_presets.complete_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=first_run["run_id"],
         result=_filter_result(
             source_disclosures=2,
@@ -806,14 +796,13 @@ def test_interrupted_filter_retry_drops_saved_result_after_source_count_change(
     retry_run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
     )
     interrupted = filter_presets.interrupt_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=retry_run["run_id"],
         partial_result=_filter_result(
             source_disclosures=3,
@@ -827,7 +816,9 @@ def test_interrupted_filter_retry_drops_saved_result_after_source_count_change(
     )
 
     assert interrupted is not None
-    document = json.loads((data_root / "03-filter" / "bond.json").read_text())
+    document = json.loads(
+        (data_root / "03-filter" / "bond_issuance" / "filter.json").read_text()
+    )
     assert document["result"] is None
     assert document["pending"]["result"]["summary"]["source_offset"] == 0
     assert [
@@ -840,12 +831,11 @@ def test_filter_workflow_preserves_canonical_when_cancelled_before_first_row(
 ) -> None:
     data_root = tmp_path / "workspace"
     _save_filter_workflow(data_root)
-    workflow_path = data_root / "03-filter" / "bond.json"
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
     original = workflow_path.read_text(encoding="utf-8")
     run = filter_presets.begin_filter_workflow_payload(
         {
             "data_root": str(data_root),
-            "workflow_name": "bond",
             "mode": "bond_issuance",
             "filter_blocks": [],
         }
@@ -860,14 +850,14 @@ def test_filter_workflow_preserves_canonical_when_cancelled_before_first_row(
 
     interrupted = filter_presets.interrupt_filter_workflow_payload(
         data_root=data_root,
-        name="bond",
+        mode="bond_issuance",
         run_id=run["run_id"],
         partial_result=partial,
     )
 
     assert interrupted is None
     assert workflow_path.read_text(encoding="utf-8") == original
-    assert list(workflow_path.parent.glob(".bond.filter-run-*.json")) == []
+    assert list(workflow_path.parent.glob(".filter-run-*.json")) == []
 
 
 def test_filter_workflow_count_validation_rejects_fractional_numbers() -> None:
@@ -954,7 +944,6 @@ def test_filter_disclosures_records_query_failure_in_workflow(
         json={
             "data_root": str(data_root),
             "mode": "bond_issuance",
-            "workflow_name": "bond",
             "filter_blocks": [],
         },
     )
@@ -962,7 +951,7 @@ def test_filter_disclosures_records_query_failure_in_workflow(
     assert response.status_code == 400
     assert response.json()["detail"] == "query failed"
     workflow = json.loads(
-        (data_root / "03-filter" / "bond.json").read_text(encoding="utf-8")
+        (data_root / "03-filter" / "bond_issuance" / "filter.json").read_text(encoding="utf-8")
     )
     assert workflow["status"] == "failed"
     assert workflow["steps"]["database_query"]["status"] == "failed"
@@ -979,7 +968,6 @@ def test_filter_disclosures_requires_saved_workflow_conditions(tmp_path: Path) -
         json={
             "data_root": str(data_root),
             "mode": "bond_issuance",
-            "workflow_name": "bond",
             "filter_blocks": [{"field": "title", "operator": "contains", "value": "사채"}],
         },
     )
@@ -987,7 +975,7 @@ def test_filter_disclosures_requires_saved_workflow_conditions(tmp_path: Path) -
     assert response.status_code == 400
     assert "Save the filter conditions" in response.json()["detail"]
     workflow = json.loads(
-        (data_root / "03-filter" / "bond.json").read_text(encoding="utf-8")
+        (data_root / "03-filter" / "bond_issuance" / "filter.json").read_text(encoding="utf-8")
     )
     assert workflow["status"] == "ready"
 
@@ -1080,8 +1068,8 @@ def test_disclosure_filter_workflows_ignore_obsolete_filter_result_json(tmp_path
 
 def test_disclosure_filter_workflows_read_format_after_one_mib(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
-    _save_filter_workflow(data_root, name="large")
-    workflow_path = data_root / "03-filter" / "large.json"
+    _save_filter_workflow(data_root)
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
     document = json.loads(workflow_path.read_text(encoding="utf-8"))
     workflow_path.write_text(
         json.dumps({"padding": "x" * (1024 * 1024 + 1), **document}),
@@ -1092,13 +1080,12 @@ def test_disclosure_filter_workflows_read_format_after_one_mib(tmp_path: Path) -
         {"data_root": str(data_root), "action": "list"}
     )
 
-    assert [preset["name"] for preset in payload["presets"]] == ["large"]
+    assert [preset["mode"] for preset in payload["presets"]] == ["bond_issuance"]
 
 
-def test_disclosure_filter_presets_are_saved_as_named_workspace_json(tmp_path: Path) -> None:
+def test_disclosure_filter_is_saved_inside_its_mode_folder(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
     preset = {
-        "name": "전환사채",
         "mode": "bond_issuance",
         "condition_blocks": [
             {"field": "title", "operator": "contains", "value": "전환사채"}
@@ -1112,14 +1099,14 @@ def test_disclosure_filter_presets_are_saved_as_named_workspace_json(tmp_path: P
     )
 
     assert response.status_code == 200
-    presets_path = data_root / "03-filter" / "전환사채.json"
-    assert response.json()["path"] == str(presets_path.parent.resolve())
+    filter_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    assert response.json()["path"] == str((data_root / "03-filter").resolve())
     saved = response.json()["presets"][0]
-    assert saved["name"] == preset["name"]
+    assert saved["name"] == preset["mode"]
     assert saved["mode"] == preset["mode"]
     assert saved["condition_blocks"] == preset["condition_blocks"]
     assert saved["status"] == "ready"
-    document = json.loads(presets_path.read_text(encoding="utf-8"))
+    document = json.loads(filter_path.read_text(encoding="utf-8"))
     assert document["format"] == "finiq_disclosure_filter_workflow"
     assert document["mode"] == "bond_issuance"
     assert document["status"] == "ready"
@@ -1154,21 +1141,23 @@ def test_disclosure_filter_presets_serialize_concurrent_saves(
 
     monkeypatch.setattr(filter_presets, "_read_workflows", slow_read)
 
-    def save(name: str) -> None:
+    def save(mode: str) -> None:
         start.wait()
         filter_presets.manage_filter_presets_payload(
             {
                 "data_root": str(data_root),
                 "action": "save",
                 "preset": {
-                    "name": name,
-                    "mode": "bond_issuance",
+                    "mode": mode,
                     "condition_blocks": [],
                 },
             }
         )
 
-    threads = [threading.Thread(target=save, args=(name,)) for name in ("A", "B")]
+    threads = [
+        threading.Thread(target=save, args=(mode,))
+        for mode in ("bond_issuance", "rights_issuance")
+    ]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -1178,7 +1167,10 @@ def test_disclosure_filter_presets_serialize_concurrent_saves(
         {"data_root": str(data_root), "action": "list"}
     )
     assert maximum_active_reads == 1
-    assert [preset["name"] for preset in saved["presets"]] == ["A", "B"]
+    assert [preset["mode"] for preset in saved["presets"]] == [
+        "bond_issuance",
+        "rights_issuance",
+    ]
 
 
 def test_disclosure_filter_presets_list_missing_workspace_directory_as_empty(
@@ -1196,7 +1188,7 @@ def test_disclosure_filter_presets_list_missing_workspace_directory_as_empty(
     assert not (data_root / "03-filter").exists()
 
 
-def test_disclosure_filter_presets_rename_and_delete_workspace_entry(
+def test_disclosure_filter_delete_removes_mode_filter_only(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "workspace"
@@ -1207,7 +1199,6 @@ def test_disclosure_filter_presets_rename_and_delete_workspace_entry(
             "data_root": str(data_root),
             "action": "save",
             "preset": {
-                "name": "기존 이름",
                 "mode": "rights_issuance",
                 "condition_blocks": [],
             },
@@ -1215,32 +1206,18 @@ def test_disclosure_filter_presets_rename_and_delete_workspace_entry(
     )
     assert save_response.status_code == 200
 
-    rename_response = client.post(
-        "/api/disclosures/filter/presets",
-        json={
-            "data_root": str(data_root),
-            "action": "rename",
-            "name": "기존 이름",
-            "new_name": "새 이름",
-        },
-    )
-    assert rename_response.status_code == 200
-    assert rename_response.json()["presets"][0]["name"] == "새 이름"
-    assert not (data_root / "03-filter" / "기존 이름.json").exists()
-    assert (data_root / "03-filter" / "새 이름.json").is_file()
-
     delete_response = client.post(
         "/api/disclosures/filter/presets",
-        json={"data_root": str(data_root), "action": "delete", "name": "새 이름"},
+        json={"data_root": str(data_root), "action": "delete", "mode": "rights_issuance"},
     )
     assert delete_response.status_code == 200
     assert delete_response.json()["presets"] == []
-    assert not (data_root / "03-filter" / "새 이름.json").exists()
+    assert not (data_root / "03-filter" / "rights_issuance" / "filter.json").exists()
 
 
 def test_disclosure_filter_presets_reject_invalid_workspace_json(tmp_path: Path) -> None:
     data_root = tmp_path / "workspace"
-    presets_path = data_root / "03-filter" / "broken.json"
+    presets_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
     presets_path.parent.mkdir(parents=True)
     presets_path.write_text("[]", encoding="utf-8")
 
@@ -1250,7 +1227,7 @@ def test_disclosure_filter_presets_reject_invalid_workspace_json(tmp_path: Path)
     )
 
     assert response.status_code == 400
-    assert "broken.json" in response.json()["detail"]
+    assert "filter.json" in response.json()["detail"]
 
 
 def test_html_download_inspect_folder_route_deletes_unexpected_file(tmp_path: Path) -> None:

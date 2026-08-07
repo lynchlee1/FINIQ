@@ -14,19 +14,8 @@ export const listDisclosureConditionPresets = (dataRoot: string) =>
 
 export const saveDisclosureConditionPreset = (
   dataRoot: string,
-  preset: Pick<DisclosureConditionPreset, "name" | "mode" | "condition_blocks">,
+  preset: Pick<DisclosureConditionPreset, "mode" | "condition_blocks">,
 ) => apiPost<PresetStoreResponse>(endpoint, { data_root: dataRoot, action: "save", preset });
 
-export const renameDisclosureConditionPreset = (
-  dataRoot: string,
-  name: string,
-  newName: string,
-) => apiPost<PresetStoreResponse>(endpoint, {
-  data_root: dataRoot,
-  action: "rename",
-  name,
-  new_name: newName,
-});
-
-export const deleteDisclosureConditionPreset = (dataRoot: string, name: string) =>
-  apiPost<PresetStoreResponse>(endpoint, { data_root: dataRoot, action: "delete", name });
+export const deleteDisclosureConditionPreset = (dataRoot: string, mode: string) =>
+  apiPost<PresetStoreResponse>(endpoint, { data_root: dataRoot, action: "delete", mode });

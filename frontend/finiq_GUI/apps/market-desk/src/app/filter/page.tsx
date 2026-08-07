@@ -23,7 +23,6 @@ import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosur
 import {
   deleteDisclosureConditionPreset,
   listDisclosureConditionPresets,
-  renameDisclosureConditionPreset,
   saveDisclosureConditionPreset,
 } from "@/lib/disclosureConditionPresets";
 
@@ -69,15 +68,6 @@ function getKindDisclosureUrl(acptNo: string) {
   return `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=${encodeURIComponent(acptNo)}&docno=&viewerhost=&viewerport=`;
 }
 
-function normalizePresetName(value: string) {
-  return value.trim().replace(/\.json$/i, "").trim();
-}
-
-function modeFromPresetName(value: string) {
-  const name = normalizePresetName(value);
-  return FILTER_MODE_KEYS.find((key) => name === key || name.startsWith(`${key}_`)) || "";
-}
-
 export default function FilterPage() {
   const {
     output_root: rootDirectory,
@@ -92,7 +82,6 @@ export default function FilterPage() {
   const [taskMode, setTaskMode] = useState<FilterTaskMode>("filter");
   const [mode, setMode] = useState("");
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
-  const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [limitUnlimited, setLimitUnlimited] = useState(true);
@@ -179,7 +168,6 @@ export default function FilterPage() {
     const requestId = ++presetListRequestIdRef.current;
     setPresets([]);
     setSelectedPreset("");
-    setPresetName("");
     if (!rootDirectory?.trim()) {
       return;
     }
@@ -199,7 +187,6 @@ export default function FilterPage() {
     if (FILTER_MODE_KEYS.some((item) => item === preset.mode)) {
       setMode(preset.mode);
     }
-    setPresetName(preset.name);
     setStatus(statusMessage);
     setIsErrorStatus(false);
   }, [setIsErrorStatus, setStatus]);
@@ -218,7 +205,7 @@ export default function FilterPage() {
     return rows.slice(safeIndex * TITLE_PAGE_SIZE, (safeIndex + 1) * TITLE_PAGE_SIZE);
   }, [titlePageCount, titlePageIndex, titleResult]);
 
-  const buildPayload = (workflowName: string) => {
+  const buildPayload = () => {
     const configuredLimit = Number(limit);
     const configuredWorkers = Number(filterWorkers);
     const configuredProgressInterval = Number(progressInterval);
@@ -234,7 +221,6 @@ export default function FilterPage() {
     return {
       data_root: rootDirectory,
       mode,
-      workflow_name: workflowName,
       ...(useSeparateOutputDirectory ? {
         external_html_transfer_path: htmlTransferPath,
       } : {}),
@@ -292,7 +278,7 @@ export default function FilterPage() {
 
   const refreshPresetsAfterRun = async (
     dataRoot: string,
-    workflowName: string,
+    filterMode: string,
     requestId: number,
     waitForTerminalStatus: boolean,
   ) => {
@@ -302,7 +288,7 @@ export default function FilterPage() {
       const response = await listDisclosureConditionPresets(dataRoot);
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
-      const workflow = response.presets.find((preset) => preset.name === workflowName);
+      const workflow = response.presets.find((preset) => preset.mode === filterMode);
       if (!waitForTerminalStatus || workflow?.status !== "running") return;
       await new Promise((resolve) => setTimeout(resolve, retryDelay));
       retryDelay = Math.min(retryDelay * 2, 1000);
@@ -317,18 +303,18 @@ export default function FilterPage() {
       return;
     }
     if (!mode) {
-      setStatus("조건검색 프리셋을 선택하세요.");
+      setStatus("조건검색 필터를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
     if (!selectedPreset) {
-      setStatus("조건검색 프리셋을 선택하세요.");
+      setStatus("조건검색 필터를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
     const selectedWorkflow = presets.find((preset) => preset.name === selectedPreset);
     if (!selectedWorkflow) {
-      setStatus("선택한 프리셋을 찾을 수 없습니다.");
+      setStatus("선택한 필터를 찾을 수 없습니다.");
       setIsErrorStatus(true);
       return;
     }
@@ -345,9 +331,8 @@ export default function FilterPage() {
     let streamOutcome: "completed" | "aborted" | "failed" | null = null;
 
     try {
-      const filterPayload = buildPayload(selectedPreset);
+      const filterPayload = buildPayload();
       const saved = await saveDisclosureConditionPreset(dataRoot, {
-        name: selectedPreset,
         mode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
@@ -389,15 +374,8 @@ export default function FilterPage() {
   };
 
   const savePreset = async () => {
-    const name = normalizePresetName(presetName);
-    if (!name) {
-      setStatus("저장할 프리셋 이름을 입력하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    const presetMode = modeFromPresetName(name) || mode;
-    if (!rootDirectory?.trim() || !presetMode) {
-      setStatus(!rootDirectory?.trim() ? "작업공간 디렉토리를 선택하세요." : "파싱 모드가 포함된 프리셋을 먼저 선택하세요.");
+    if (!rootDirectory?.trim() || !mode) {
+      setStatus(!rootDirectory?.trim() ? "작업공간 디렉토리를 선택하세요." : "저장할 필터 모드를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -405,16 +383,13 @@ export default function FilterPage() {
     const requestId = presetListRequestIdRef.current;
     try {
       const response = await saveDisclosureConditionPreset(dataRoot, {
-        name,
-        mode: presetMode,
+        mode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
-      setMode(presetMode);
-      setSelectedPreset(name);
-      setPresetName(name);
-      setStatus(`조건검색 프리셋을 저장했습니다: ${name}`);
+      setSelectedPreset(mode);
+      setStatus(`조건검색 필터를 저장했습니다: ${mode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -425,51 +400,11 @@ export default function FilterPage() {
   const loadPreset = (name: string) => {
     const preset = (presets || []).find((item: any) => item.name === name);
     if (!preset) {
-      setStatus("선택한 프리셋을 찾을 수 없습니다.");
+      setStatus("선택한 필터를 찾을 수 없습니다.");
       setIsErrorStatus(true);
       return;
     }
-    applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
-  };
-
-  const renamePreset = async () => {
-    if (!selectedPreset) return;
-    const name = normalizePresetName(presetName);
-    if (!name) {
-      setStatus("수정할 프리셋 이름을 입력하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    const preset = (presets || []).find((item: any) => item.name === selectedPreset);
-    if (!preset) {
-      setStatus("선택한 프리셋을 찾을 수 없습니다.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (name !== selectedPreset && (presets || []).some((item: any) => item.name === name)) {
-      setStatus(`이미 같은 이름의 프리셋이 있습니다: ${name}`);
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!rootDirectory?.trim()) {
-      setStatus("작업공간 디렉토리를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    const dataRoot = rootDirectory;
-    const requestId = presetListRequestIdRef.current;
-    try {
-      const response = await renameDisclosureConditionPreset(dataRoot, selectedPreset, name);
-      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
-      setPresets(response.presets);
-      setSelectedPreset(name);
-      setPresetName(name);
-      setStatus(`조건검색 프리셋 이름을 수정했습니다: ${selectedPreset} -> ${name}`);
-      setIsErrorStatus(false);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-      setIsErrorStatus(true);
-    }
+    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${preset.name}`);
   };
 
   const deletePreset = async () => {
@@ -485,9 +420,8 @@ export default function FilterPage() {
       const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
-      setPresetName((value) => value === selectedPreset ? "" : value);
       setSelectedPreset("");
-      setStatus(`조건검색 프리셋을 삭제했습니다: ${selectedPreset}`);
+      setStatus(`조건검색 필터를 삭제했습니다: ${selectedPreset}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -564,13 +498,10 @@ export default function FilterPage() {
             conditions={conditions}
             onConditionsChange={setConditions}
             presets={presets || []}
-            presetName={presetName}
             selectedPreset={selectedPreset}
-            onPresetNameChange={setPresetName}
             onSelectedPresetChange={setSelectedPreset}
             onLoadPreset={loadPreset}
             onSavePreset={savePreset}
-            onRenamePreset={renamePreset}
             onDeletePreset={deletePreset}
           />
 

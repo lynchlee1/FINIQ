@@ -10,6 +10,17 @@ const pathPickerPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/Pa
 const graphViewerStylesPath = "frontend/finiq_GUI/apps/graph-viewer/src/globals.css";
 const marketDeskStylesPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 const graphViewerControllerPath = "frontend/finiq_GUI/packages/graph-viewer/src/core/useGraphViewer.ts";
+const sharedButtonPath = "frontend/finiq_GUI/packages/ui/src/components/ui/button.tsx";
+
+test("shared buttons provide immediate press feedback", async () => {
+  const source = await readFile(sharedButtonPath, "utf8");
+
+  assert.match(source, /duration-\[120ms\]/);
+  assert.match(source, /active:translate-y-px/);
+  assert.match(source, /active:scale-\[0\.97\]/);
+  assert.match(source, /active:opacity-80/);
+  assert.match(source, /motion-reduce:active:transform-none/);
+});
 
 test("standalone graph selection actions are connected to graph state", async () => {
   const source = await readFile(graphViewerExamplePath, "utf8");

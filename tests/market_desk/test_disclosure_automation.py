@@ -59,7 +59,6 @@ def _profile(root: Path, **overrides: object) -> dict[str, object]:
                 "last_report_only": False,
             },
             "s3_selection": {
-                "workflow_name": "bond",
                 "filter_blocks": [],
             },
             "s6_sections": {
@@ -652,7 +651,6 @@ def test_stage_three_uses_saved_workflow_and_filters_only_new_rows(
             "data_root": str(tmp_path),
             "action": "save",
             "preset": {
-                "name": "bond",
                 "mode": "bond_issuance",
                 "condition_blocks": [],
             },
@@ -722,7 +720,7 @@ def test_stage_three_uses_saved_workflow_and_filters_only_new_rows(
     assert second["summary"]["source_disclosures"] == 3
     assert [row["acpt_no"] for row in second["disclosures"]] == ["3", "1"]
     canonical = json.loads(
-        (tmp_path / "03-filter" / "bond.json").read_text(encoding="utf-8")
+        (tmp_path / "03-filter" / "bond_issuance" / "filter.json").read_text(encoding="utf-8")
     )
     transfer = json.loads(
         (
@@ -745,7 +743,6 @@ def test_stage_three_rejects_runtime_conditions_that_differ_from_workflow(
             "data_root": str(tmp_path),
             "action": "save",
             "preset": {
-                "name": "bond",
                 "mode": "bond_issuance",
                 "condition_blocks": [],
             },

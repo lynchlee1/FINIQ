@@ -50,17 +50,6 @@ def _workflow_directory(data_root: object) -> Path:
     return resolve_disclosure_workspace(str(data_root or "")).filtered
 
 
-def _normalize_name(value: object, *, field: str = "name") -> str:
-    name = str(value or "").strip()
-    if name.lower().endswith(".json"):
-        name = name[:-5].strip()
-    if not name:
-        raise ValueError(f"filter workflow {field} is required")
-    if name in {".", ".."} or "/" in name or "\\" in name or "\0" in name:
-        raise ValueError(f"filter workflow {field} must be a JSON file name")
-    return name
-
-
 def _normalize_condition_input(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("filter workflow must be an object")
@@ -69,9 +58,10 @@ def _normalize_condition_input(value: object) -> dict[str, Any]:
         isinstance(block, dict) for block in condition_blocks
     ):
         raise ValueError("filter workflow condition_blocks must be a list of objects")
+    mode = validate_workspace_mode(value.get("mode"))
     return {
-        "name": _normalize_name(value.get("name")),
-        "mode": validate_workspace_mode(value.get("mode")),
+        "name": mode,
+        "mode": mode,
         "condition_blocks": condition_blocks,
     }
 
@@ -251,7 +241,6 @@ def _pending_result(document: dict[str, Any]) -> dict[str, Any] | None:
 def _read_workflow(
     path: Path,
     *,
-    workflow_name: object | None = None,
     document: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     payload = _read_json_object(path) if document is None else document
@@ -280,11 +269,12 @@ def _read_workflow(
     condition_blocks = condition_step.get("filter_blocks")
     normalized = _normalize_condition_input(
         {
-            "name": path.stem if workflow_name is None else workflow_name,
-            "mode": payload.get("mode"),
+            "mode": path.parent.name,
             "condition_blocks": condition_blocks,
         }
     )
+    if payload.get("mode") != normalized["mode"]:
+        raise ValueError(f"filter workflow mode does not match its directory: {path}")
 
     result = payload.get("result")
     if result is not None:
@@ -334,9 +324,7 @@ def _read_workflows(directory: Path) -> list[dict[str, Any]]:
     if not directory.is_dir():
         raise ValueError(f"Invalid disclosure filter workflow directory: {directory}")
     workflows: list[dict[str, Any]] = []
-    for path in directory.glob("*.json"):
-        if path.name.startswith("."):
-            continue
+    for path in directory.glob("*/filter.json"):
         document = _read_json_object(path)
         if document.get("format") != FILTER_WORKFLOW_FORMAT:
             continue
@@ -369,32 +357,31 @@ def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
     atomic_write_json(path, payload)
 
 
-def _workflow_path(data_root: object, name: object) -> Path:
-    return _workflow_directory(data_root) / f"{_normalize_name(name)}.json"
+def _workflow_path(data_root: object, mode: object) -> Path:
+    mode = validate_workspace_mode(mode)
+    return _workflow_directory(data_root) / mode / "filter.json"
 
 
-def filter_workflow_path(data_root: object, name: object) -> Path:
-    return _workflow_path(data_root, name)
+def filter_workflow_path(data_root: object, mode: object) -> Path:
+    return _workflow_path(data_root, mode)
 
 
 def load_filter_workflow_result_payload(
     *,
     data_root: object,
-    name: object,
     mode: object,
     condition_blocks: object,
 ) -> dict[str, Any]:
-    path = _workflow_path(data_root, name)
+    path = _workflow_path(data_root, mode)
     requested = _normalize_condition_input(
         {
-            "name": path.stem,
             "mode": mode,
             "condition_blocks": condition_blocks,
         }
     )
     with _WORKFLOWS_LOCK:
         if not path.is_file():
-            raise ValueError(f"Filter workflow not found: {path.stem}")
+            raise ValueError(f"Filter workflow not found: {requested['mode']}")
         document, workflow = _read_workflow(path)
         if (
             workflow["mode"] != requested["mode"]
@@ -404,12 +391,12 @@ def load_filter_workflow_result_payload(
         if workflow["status"] != "completed" or not isinstance(
             document.get("result"), dict
         ):
-            raise ValueError(f"Filter workflow is not completed: {path.stem}")
+            raise ValueError(f"Filter workflow is not completed: {requested['mode']}")
         return copy.deepcopy(document["result"])
 
 
 def _working_path(path: Path, run_id: str) -> Path:
-    return path.with_name(f".{path.stem}.filter-run-{run_id}.json")
+    return path.with_name(f".filter-run-{run_id}.json")
 
 
 def _active_key(path: Path) -> str:
@@ -418,10 +405,10 @@ def _active_key(path: Path) -> str:
 
 def _require_active_run(path: Path, run_id: str) -> Path:
     if _ACTIVE_RUNS.get(_active_key(path)) != run_id:
-        raise ValueError(f"Filter workflow run is not active: {path.stem}")
+        raise ValueError(f"Filter workflow run is not active: {path.parent.name}")
     working_path = _working_path(path, run_id)
     if not working_path.is_file():
-        raise ValueError(f"Filter workflow run file is missing: {path.stem}")
+        raise ValueError(f"Filter workflow run file is missing: {path.parent.name}")
     return working_path
 
 
@@ -532,20 +519,19 @@ def _merge_filter_results(
 
 
 def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    path = _workflow_path(payload.get("data_root"), payload.get("workflow_name"))
+    path = _workflow_path(payload.get("data_root"), payload.get("mode"))
     requested = _normalize_condition_input(
         {
-            "name": path.stem,
             "mode": payload.get("mode"),
             "condition_blocks": payload.get("filter_blocks"),
         }
     )
     with _WORKFLOWS_LOCK:
         if not path.is_file():
-            raise ValueError(f"Filter workflow not found: {path.stem}")
+            raise ValueError(f"Filter workflow not found: {requested['mode']}")
         document, workflow = _read_workflow(path)
         if _active_key(path) in _ACTIVE_RUNS:
-            raise ValueError(f"Filter workflow is already running: {path.stem}")
+            raise ValueError(f"Filter workflow is already running: {requested['mode']}")
         if (
             workflow["mode"] != requested["mode"]
             or workflow["condition_blocks"] != requested["condition_blocks"]
@@ -592,17 +578,15 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def mark_filter_workflow_query_completed(
-    *, data_root: object, name: object, run_id: str, summary: object
+    *, data_root: object, mode: object, run_id: str, summary: object
 ) -> dict[str, Any]:
-    path = _workflow_path(data_root, name)
+    path = _workflow_path(data_root, mode)
     with _WORKFLOWS_LOCK:
         working_path = _require_active_run(path, run_id)
-        document, _workflow = _read_workflow(
-            working_path, workflow_name=path.stem
-        )
+        document, _workflow = _read_workflow(working_path)
         query_step = document["steps"]["database_query"]
         if document.get("status") != "running" or query_step.get("run_id") != run_id:
-            raise ValueError(f"Filter workflow run is not active: {path.stem}")
+            raise ValueError(f"Filter workflow run is not active: {path.parent.name}")
         query_step.update(
             {
                 "status": "completed",
@@ -616,25 +600,23 @@ def mark_filter_workflow_query_completed(
             "started_at": _utc_now(),
         }
         _write_workflow(working_path, document)
-        return _read_workflow(working_path, workflow_name=path.stem)[1]
+        return _read_workflow(working_path)[1]
 
 
 def complete_filter_workflow_payload(
     *,
     data_root: object,
-    name: object,
+    mode: object,
     run_id: str,
     result: object,
 ) -> dict[str, Any]:
-    path = _workflow_path(data_root, name)
+    path = _workflow_path(data_root, mode)
     with _WORKFLOWS_LOCK:
         working_path = _require_active_run(path, run_id)
-        document, workflow = _read_workflow(
-            working_path, workflow_name=path.stem
-        )
+        document, workflow = _read_workflow(working_path)
         record_step = document["steps"]["record"]
         if document.get("status") != "running" or record_step.get("run_id") != run_id:
-            raise ValueError(f"Filter workflow run is not active: {path.stem}")
+            raise ValueError(f"Filter workflow run is not active: {path.parent.name}")
         current_result = _validate_filter_result(
             result,
             condition_blocks=workflow["condition_blocks"],
@@ -685,17 +667,15 @@ def complete_filter_workflow_payload(
 def interrupt_filter_workflow_payload(
     *,
     data_root: object,
-    name: object,
+    mode: object,
     run_id: str,
     partial_result: object,
 ) -> dict[str, Any] | None:
-    path = _workflow_path(data_root, name)
+    path = _workflow_path(data_root, mode)
     with _WORKFLOWS_LOCK:
         try:
             working_path = _require_active_run(path, run_id)
-            document, workflow = _read_workflow(
-                working_path, workflow_name=path.stem
-            )
+            document, workflow = _read_workflow(working_path)
         except ValueError:
             return None
         current_partial = (
@@ -759,15 +739,13 @@ def interrupt_filter_workflow_payload(
 
 
 def fail_filter_workflow_payload(
-    *, data_root: object, name: object, run_id: str, error: object
+    *, data_root: object, mode: object, run_id: str, error: object
 ) -> dict[str, Any] | None:
-    path = _workflow_path(data_root, name)
+    path = _workflow_path(data_root, mode)
     with _WORKFLOWS_LOCK:
         try:
             working_path = _require_active_run(path, run_id)
-            document, _workflow = _read_workflow(
-                working_path, workflow_name=path.stem
-            )
+            document, _workflow = _read_workflow(working_path)
         except ValueError:
             return None
         query_step = document["steps"]["database_query"]
@@ -805,7 +783,7 @@ def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
             pass
         elif action == "save":
             workflow = _normalize_condition_input(payload.get("preset"))
-            path = directory / f"{workflow['name']}.json"
+            path = _workflow_path(payload.get("data_root"), workflow["mode"])
             if _active_key(path) in _ACTIVE_RUNS:
                 raise ValueError(f"Filter workflow is running: {workflow['name']}")
             preserve_existing = False
@@ -819,33 +797,17 @@ def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 _write_workflow(path, _new_workflow_document(workflow))
             workflows = [item for item in workflows if item["name"] != workflow["name"]]
             workflows.append(_read_workflow(path)[1])
-        elif action == "rename":
-            name = _normalize_name(payload.get("name"))
-            new_name = _normalize_name(payload.get("new_name"), field="new_name")
-            source_path = directory / f"{name}.json"
-            target_path = directory / f"{new_name}.json"
-            if not source_path.is_file():
-                raise ValueError(f"Filter workflow not found: {name}")
-            if _active_key(source_path) in _ACTIVE_RUNS:
-                raise ValueError(f"Filter workflow is running: {name}")
-            if source_path != target_path and target_path.exists():
-                raise ValueError(f"Filter workflow already exists: {new_name}")
-            source_path.rename(target_path)
-            workflows = [
-                {**item, "name": new_name} if item["name"] == name else item
-                for item in workflows
-            ]
         elif action == "delete":
-            name = _normalize_name(payload.get("name"))
-            workflow_path = directory / f"{name}.json"
+            mode = validate_workspace_mode(payload.get("mode"))
+            workflow_path = _workflow_path(payload.get("data_root"), mode)
             if not workflow_path.is_file():
-                raise ValueError(f"Filter workflow not found: {name}")
+                raise ValueError(f"Filter workflow not found: {mode}")
             if _active_key(workflow_path) in _ACTIVE_RUNS:
-                raise ValueError(f"Filter workflow is running: {name}")
+                raise ValueError(f"Filter workflow is running: {mode}")
             workflow_path.unlink()
-            workflows = [item for item in workflows if item["name"] != name]
+            workflows = [item for item in workflows if item["mode"] != mode]
         else:
-            raise ValueError("filter workflow action must be one of: list, save, rename, delete")
+            raise ValueError("filter workflow action must be one of: list, save, delete")
 
     return {
         "format": FILTER_WORKFLOW_DIRECTORY_FORMAT,

@@ -11,7 +11,7 @@
 - `disclosure-workspace.json`은 공시 작업공간 설정을 저장한다.
 - `01-list`는 KIND 조건검색 응답과 다운로드 metadata를 저장한다.
 - `02-table`은 연도별 공시 SQLite와 변환 manifest를 저장한다.
-- `03-filter`는 조건검색 workflow와 mode별 선택 결과를 저장한다.
+- `03-filter`는 mode별 조건검색 filter와 선택 결과를 저장한다.
 - `04-external-html-download`는 KIND 외부 HTML, 원본 연결 manifest와 압축한 문서 선택 정보를 저장한다.
 - `05-internal-html-download`는 KIND 본문 HTML과 원본 연결 manifest를 저장한다.
 - `06-sections`는 공시별로 선택한 목차의 HTML을 저장한다.
@@ -30,8 +30,8 @@
 │   ├── <YYYY>.sqlite
 │   └── sqlite_manifest.json
 ├── 03-filter/
-│   ├── <workflow-name>.json
 │   └── <mode>/
+│       ├── filter.json
 │       └── filtered.json
 ├── 04-external-html-download/
 │   └── <mode>/

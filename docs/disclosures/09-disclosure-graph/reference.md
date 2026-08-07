@@ -1,25 +1,30 @@
-# 공시 관계 그래프 Reference
+# Disclosure Graph Reference
 
-## 경로
+## Paths
 
 - `<data_root>/03-filter/<mode>/filtered.json`과 `<data_root>/07-converted/<mode>/parsed-<mode>.json`을 입력으로 받아 `<data_root>/09-disclosure-graph`에 `disclosure-graph.json`을 저장한다.
 
-## 입력 형식
+### `<data_root>/03-filter/<mode>/filtered.json`
 
-### `filtered.json`
+#### I/O Structure
 
-- 그래프 node에 연결할 회사·공시 metadata를 담은 파일이다.
+- 그래프 node에 연결할 회사·공시 metadata를 담은 입력 파일이다.
 
-### `parsed-<mode>.json`
+### `<data_root>/07-converted/<mode>/parsed-<mode>.json`
 
-- node와 edge로 바꿀 mode별 구조화 공시 결과를 담은 파일이다.
+#### I/O Structure
 
-## 출력 형식
+- node와 edge로 바꿀 mode별 구조화 공시 결과를 담은 입력 파일이다.
 
-### `disclosure-graph.json`
+#### Defaults and Exceptions
 
-- mode별 공시 결과를 node와 edge 집합 하나로 합친 그래프 파일이다.
 - 지원하는 `<mode>`는 `rights_issuance`, `bond_issuance`, `shareholder_meeting`이다.
+
+### `<data_root>/09-disclosure-graph/disclosure-graph.json`
+
+#### I/O Structure
+
+- mode별 공시 결과를 node와 edge 집합 하나로 합친 출력 파일이다.
 - `disclosure-graph.json`은 `finiq_disclosure_graph_v1` 형식을 쓰는 JSON 객체다.
 
 **`format`** — 형식: string. 내용: `finiq_disclosure_graph_v1`
