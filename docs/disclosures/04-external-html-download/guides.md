@@ -15,8 +15,6 @@
 
 - 선택한 `<mode>/filtered.json`에 기록된 접수번호만 다운로드한다.
 
-- 외부 HTML은 공시 연도와 접수번호를 사용해 `<year>/<acpt_no>.html`로 저장한다.
-
 - 외부 HTML은 문서 선택 화면이므로 실제 내부 HTML은 내부 저장 단계에서 별도로 받는다.
 
 ### 외부 HTML 압축 record 구성

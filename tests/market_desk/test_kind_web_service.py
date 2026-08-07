@@ -2076,44 +2076,16 @@ def test_write_disclosure_html_manifest_payload_rejects_noncanonical_receipt_lis
     assert not (output_directory / "kind_disclosure_html_manifest.json").exists()
 
 
-def test_write_disclosure_html_manifest_payload_from_external_directory_manifest(tmp_path: Path) -> None:
-    source_directory = tmp_path / "viewer_html"
-    (source_directory / "2025").mkdir(parents=True)
-    (source_directory / "kind_disclosure_html_manifest.json").write_text(
-        json.dumps(
+def test_write_disclosure_html_manifest_payload_rejects_source_directory(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="source_directory is not supported"):
+        write_disclosure_html_manifest_payload(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
-                "source_json_path": "filtered.json",
-                "disclosures": [
-                    {"acpt_no": "20250101000001", "market": "코스닥"},
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    (source_directory / "2025" / "20250101000001.html").write_text(
-        """
-        <html><body>
-          <select id="mainDoc">
-            <option value="20250101000099|Y" selected="selected">본문</option>
-          </select>
-        </body></html>
-        """,
-        encoding="utf-8",
-    )
-
-    payload = write_disclosure_html_manifest_payload(
-        {
-            "output_directory": str(tmp_path / "content_html"),
-            "source_directory": str(source_directory),
-        }
-    )
-
-    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
-    assert payload["requested_count"] == 1
-    assert manifest["source_json_path"] == str(source_directory.resolve())
-    assert manifest["disclosures"][0]["market"] == "코스닥"
+                "output_directory": str(tmp_path / "content_html"),
+                "source_directory": str(tmp_path / "viewer_html"),
+            }
+        )
 
 
 def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Path, monkeypatch) -> None:
@@ -2126,23 +2098,25 @@ def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Pat
         return [path]
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
-    external_dir = tmp_path / "viewer_html"
-    (external_dir / "2025").mkdir(parents=True)
-    (external_dir / "2025" / "20250101000001.html").write_text(
-        """
-        <html><body>
-          <select id="mainDoc">
-            <option value="20250101000099|Y" selected="selected">본문</option>
-          </select>
-        </body></html>
-        """,
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [{
+                    "acpt_no": "20250101000001",
+                    "selected_main_doc_no": "20250101000099",
+                    "metadata": {"disclosed_at": "2025-01-01"},
+                }],
+            }
+        ),
         encoding="utf-8",
     )
 
     payload = download_disclosure_internal_html_payload(
         {
             "output_directory": str(tmp_path / "content_html"),
-            "source_directory": str(external_dir),
+            "source_compressed_json_path": str(compressed_path),
             "progress_interval": 1,
         }
     )
@@ -2167,7 +2141,7 @@ def test_download_disclosure_internal_html_payload_rejects_json_only_input(tmp_p
             }
         )
     except ValueError as exc:
-        assert str(exc) == "source_directory or source_compressed_json_path is required"
+        assert str(exc) == "source_compressed_json_path is required"
     else:
         raise AssertionError("expected ValueError")
 
@@ -2637,46 +2611,16 @@ def test_download_disclosure_external_html_payload_logs_when_no_existing_html_ov
     assert "기존 HTML 겹침 없음: 전체 대상이 새로 저장됩니다." in payload["progress_log"]
 
 
-def test_check_disclosure_external_html_output_directory_uses_source_directory_manifest(tmp_path: Path) -> None:
-    source_directory = tmp_path / "kind_html"
-    output_directory = tmp_path / "kind_html_grouped"
-    (source_directory / "2025").mkdir(parents=True)
-    (source_directory / "2025" / "20250101000001.html").write_text(
-        """
-        <select id="mainDoc" name="mainDoc">
-          <option value="20250101000001|Y" selected="selected">본문</option>
-        </select>
-        """,
-        encoding="utf-8",
-    )
-    (source_directory / "kind_disclosure_html_manifest.json").write_text(
-        json.dumps(
+def test_check_disclosure_html_output_directory_rejects_source_directory(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="source_directory is not supported"):
+        check_disclosure_html_output_directory_payload(
             {
-                "format": "finiq_disclosure_html_manifest_v1",
-                "source_json_path": str(tmp_path / "filtered.json"),
-                "disclosures": [{"acpt_no": "20250101000001", "company_name": "A"}],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    (output_directory / "2025").mkdir(parents=True)
-    (output_directory / "2025" / "20250101000001.html").write_text(
-        _valid_download_html(), encoding="utf-8"
-    )
-
-    payload = check_disclosure_html_output_directory_payload(
-        {
-            "output_directory": str(output_directory),
-            "source_directory": str(source_directory),
-            "source_json_path": str(tmp_path / "wrong-filtered.json"),
-        }
-    )
-
-    assert payload["requested_count"] == 1
-    assert payload["existing_target_html_count"] == 1
-    assert payload["missing_target_html_count"] == 0
-    assert payload["deletion_candidate_count"] == 0
+                "output_directory": str(tmp_path / "content_html"),
+                "source_directory": str(tmp_path / "viewer_html"),
+            }
+        )
 
 
 def test_download_disclosure_external_html_payload_rejects_unexpected_resume_files(
@@ -2823,10 +2767,21 @@ def test_clean_disclosure_external_html_output_directory_dry_run_reports_delete_
 
 def test_clean_disclosure_external_html_output_directory_deletes_unexpected_content_files(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
-    source_directory = tmp_path / "viewer_html"
-    source_directory.mkdir()
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [{
+                    "acpt_no": "20250101000001",
+                    "selected_main_doc_no": "1",
+                    "metadata": {"disclosed_at": "2025-01-01"},
+                }],
+            }
+        ),
+        encoding="utf-8",
+    )
     output_directory = tmp_path / "content_html"
     (output_directory / "2025").mkdir(parents=True)
     expected = output_directory / "2025" / "20250101000001.html"
@@ -2834,18 +2789,10 @@ def test_clean_disclosure_external_html_output_directory_deletes_unexpected_cont
     expected.write_text("<html></html>", encoding="utf-8")
     unexpected.write_text("{}", encoding="utf-8")
 
-    monkeypatch.setattr(
-        "finiq.market_desk.web.features.disclosures.internal_html_download._collect_internal_cleanup_targets_from_external_directory",
-        lambda source, **kwargs: (
-            [{"acpt_no": "20250101000001", "doc_no": "1", "year": "2025"}],
-            None,
-        ),
-    )
-
     payload = clean_disclosure_html_output_directory_payload(
         {
             "output_directory": str(output_directory),
-            "source_directory": str(source_directory),
+            "source_compressed_json_path": str(compressed_path),
             "delete_confirmed": True,
             "delete_confirmation_text": "확인했습니다.",
         }
@@ -3332,24 +3279,25 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
 
     monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
 
-    external_dir = tmp_path / "viewer_html"
-    year_dir = external_dir / "2025"
-    year_dir.mkdir(parents=True)
-    (year_dir / "20250101000001.html").write_text(
-        """
-        <html><body>
-          <select id="mainDoc">
-            <option value="20250101000099|Y" selected="selected">본문</option>
-          </select>
-        </body></html>
-        """,
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [{
+                    "acpt_no": "20250101000001",
+                    "selected_main_doc_no": "20250101000099",
+                    "metadata": {"disclosed_at": "2025-01-01"},
+                }],
+            }
+        ),
         encoding="utf-8",
     )
 
     payload = download_disclosure_internal_html_payload(
         {
             "output_directory": str(tmp_path / "content_html"),
-            "source_directory": str(external_dir),
+            "source_compressed_json_path": str(compressed_path),
         }
     )
 
@@ -3362,60 +3310,18 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
     assert payload["saved_files"] == [str(tmp_path / "content_html" / "2025" / "20250101000001.html")]
 
 
-def test_download_disclosure_internal_html_payload_prefers_compressed_external_json(
+def test_download_disclosure_internal_html_payload_rejects_source_directory(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
-    calls: list[tuple[Path, list[dict[str, str]]]] = []
-
-    def fake_download(**kwargs):
-        output_directory = Path(kwargs["output_directory"])
-        targets = list(kwargs["targets"])
-        calls.append((output_directory, targets))
-        paths = [
-            output_directory / f"{target['acpt_no']}.html" for target in targets
-        ]
-        for path in paths:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(_valid_download_html(), encoding="utf-8")
-        return paths
-
-    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
-
     external_dir = tmp_path / "viewer_html"
     external_dir.mkdir()
-    (external_dir / "compressed-external-html.json").write_text(
-        json.dumps(
+    with pytest.raises(ValueError, match="source_directory is not supported"):
+        download_disclosure_internal_html_payload(
             {
-                "format": "finiq_disclosure_external_html_docs_v1",
-                "records": [
-                        {
-                            "acpt_no": "20250101000001",
-                            "selected_main_doc_no": "20250101000999",
-                            "metadata": {"disclosed_at": "2025-01-01"},
-                    }
-                ],
+                "output_directory": str(tmp_path / "content_html"),
+                "source_directory": str(external_dir),
             }
-        ),
-        encoding="utf-8",
-    )
-
-    payload = download_disclosure_internal_html_payload(
-        {
-            "output_directory": str(tmp_path / "content_html"),
-            "source_directory": str(external_dir),
-        }
-    )
-
-    assert calls == [
-        (
-            tmp_path / "content_html" / "2025",
-            [{"acpt_no": "20250101000001", "doc_no": "20250101000999"}],
         )
-    ]
-    assert payload["saved_files"] == [
-        str(tmp_path / "content_html" / "2025" / "20250101000001.html")
-    ]
 
 
 def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_sot(
@@ -3481,7 +3387,9 @@ def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_
     payload = download_disclosure_internal_html_payload(
         {
             "output_directory": str(tmp_path / "content_html"),
-            "source_directory": str(external_dir),
+            "source_compressed_json_path": str(
+                external_dir / "compressed-external-html.json"
+            ),
         }
     )
 

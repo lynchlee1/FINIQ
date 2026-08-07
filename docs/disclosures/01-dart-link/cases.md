@@ -1,4 +1,4 @@
-# KIND·DART 식별자 연결 Cases
+# KIND·DART 식별자 연결 기능 Cases
 
 ## 처리 계약
 

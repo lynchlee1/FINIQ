@@ -23,3 +23,10 @@ test("HTML reuse requires a hash baseline or explicit trust", () => {
   assert.match(page, /internal-html-download\/trust-existing\/start/);
   assert.match(page, /trust_existing_files: true/);
 });
+
+test("internal HTML save uses only the compressed external HTML JSON", () => {
+  assert.match(page, /source_compressed_json_path: internalSourceFilePath/);
+  assert.doesNotMatch(page, /source_directory:/);
+  assert.doesNotMatch(page, /폴더 입력/);
+  assert.doesNotMatch(page, /JSON 파일 입력/);
+});

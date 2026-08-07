@@ -19,7 +19,6 @@ import { formatInteger } from "@/lib/format";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 
 type DownloadVariant = "external" | "internal";
-type InternalSourceInputMode = "folder" | "file";
 type ExternalTaskMode = "download" | "compress";
 
 const DOWNLOAD_VARIANTS = {
@@ -138,9 +137,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   // Form State
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [sourcePath, setSourcePath] = useState("");
   const [externalTaskMode, setExternalTaskMode] = useState<ExternalTaskMode>("download");
-  const [internalSourceInputMode, setInternalSourceInputMode] = useState<InternalSourceInputMode>("folder");
   const [internalSourceFilePath, setInternalSourceFilePath] = useState("");
   const [compressInputDirectory, setCompressInputDirectory] = useState("");
   const [compressOutputDirectory, setCompressOutputDirectory] = useState("");
@@ -203,7 +200,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setCompressOutputDirectory(config.external_html_compress_output_directory || nextOutputDirectory);
 
       if (variant === "internal") {
-        setSourcePath(config.external_html_output_directory || "");
         setInternalSourceFilePath(config.external_html_compressed_json_path || "");
       }
     }).catch(err => {
@@ -224,17 +220,14 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     if (variant === "external") {
       return {};
     }
-    if (variant === "internal" && internalSourceInputMode === "file") {
+    if (variant === "internal" && useSeparateOutputDirectory) {
       return { source_compressed_json_path: internalSourceFilePath };
     }
-    if (useSeparateOutputDirectory) {
-      return { source_directory: sourcePath };
-    }
     return {};
-  }, [internalSourceFilePath, internalSourceInputMode, sourcePath, useSeparateOutputDirectory, variant]);
+  }, [internalSourceFilePath, useSeparateOutputDirectory, variant]);
 
-  const currentSourcePath = variant === "internal" && internalSourceInputMode === "file" ? internalSourceFilePath : dataRoot;
-  const currentSourceRequiredMessage = variant === "internal" && internalSourceInputMode === "file"
+  const currentSourcePath = variant === "internal" && useSeparateOutputDirectory ? internalSourceFilePath : dataRoot;
+  const currentSourceRequiredMessage = variant === "internal" && useSeparateOutputDirectory
     ? "외부 HTML 압축 JSON 파일을 선택하세요."
     : variantConfig.sourceRequiredMessage;
 
@@ -559,7 +552,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     setCompressInputDirectory(settings.external_html_output_directory || "");
     setCompressOutputDirectory(settings.external_html_compress_output_directory || "");
     if (variant === "internal") {
-      setSourcePath(settings.external_html_output_directory || "");
       setInternalSourceFilePath(settings.external_html_compressed_json_path || "");
     }
   };
@@ -568,11 +560,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     {
       id: "sourcePath",
       kind: "path",
-      label: variant === "internal" && internalSourceInputMode === "file" ? "입력 데이터 경로 (외부 HTML 압축 JSON)" : "작업공간 디렉토리",
+      label: variant === "internal" && useSeparateOutputDirectory ? "입력 데이터 경로 (외부 HTML 압축 JSON)" : "작업공간 디렉토리",
       help: undefined,
-      mode: variant === "internal" && internalSourceInputMode === "file" ? "file" : variantConfig.sourcePickMode,
-      value: variant === "internal" && internalSourceInputMode === "file" ? currentSourcePath : dataRoot,
-      onChange: variant === "internal" && internalSourceInputMode === "file" ? saveInternalSourceFilePath : saveWorkspaceDirectory,
+      mode: variant === "internal" && useSeparateOutputDirectory ? "file" : variantConfig.sourcePickMode,
+      value: currentSourcePath,
+      onChange: variant === "internal" && useSeparateOutputDirectory ? saveInternalSourceFilePath : saveWorkspaceDirectory,
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 4,
     },
@@ -746,30 +738,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           {showSaveWorkflow && (
             <HtmlWorkflowCard
               title="데이터 경로"
-              actions={variant === "internal" ? (
-                <div className="inline-flex gap-1 rounded-md border border-[color:var(--tv-border)] p-1">
-                  <Button
-                    type="button"
-                    variant={internalSourceInputMode === "folder" ? "default" : "ghost"}
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setInternalSourceInputMode("folder")}
-                  >
-                    <FolderOpen className="mr-2 h-4 w-4" />
-                    폴더 입력
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={internalSourceInputMode === "file" ? "default" : "ghost"}
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setInternalSourceInputMode("file")}
-                  >
-                    <FileJson className="mr-2 h-4 w-4" />
-                    JSON 파일 입력
-                  </Button>
-                </div>
-              ) : null}
             >
               <HtmlWorkflowForm fields={basePathFields} />
             {checkingExisting && !existingData && (

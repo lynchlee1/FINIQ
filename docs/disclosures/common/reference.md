@@ -4,29 +4,13 @@
 
 ### 작업공간
 
-`<data_root>`는 화면에서 고른 `작업공간 디렉토리`다. 별도 저장 경로를 켜지 않으면 공시 단계는 아래 경로를 사용한다.
+작업공간의 표준 경로와 파일 구성은 [이상적인 폴더 구조](../reference.md#이상적인-폴더-구조)를 따른다.
 
-```text
-<data_root>/
-├── 01-list/
-├── 02-table/
-├── 03-filter/
-├── 04-external-html-download/
-├── 05-internal-html-download/
-├── 06-sections/
-├── 07-converted/
-└── 09-disclosure-graph/
-```
-
-- 03단계 원본은 `03-filter/<workflow-name>.json`에 둔다.
-- 03단계 전달 파일과 04·05·07단계 결과는 `<mode>` 폴더로 나눈다.
-- 08단계는 07단계 결과를 읽는 조회 기능이므로 결과 폴더를 만들지 않는다.
-- 09단계는 여러 mode 결과를 `disclosure-graph.json` 하나로 합친다.
 - 화면이 별도 저장 경로를 받으면 입력과 결과 위치를 명시하며 이름순 탐색으로 대신하지 않는다.
 
 ### 비동기 작업
 
-- 04·05단계 취소는 이미 저장한 파일을 남기고 취소 상태를 돌려준다.
+- `04-external-html-download`와 `05-internal-html-download` 취소는 이미 저장한 파일을 남기고 취소 상태를 돌려준다.
 - worker 수는 양의 정수여야 한다. 기능 문서가 다른 기본값을 밝히면 그 값을 따른다.
 
 ### 화면 표시

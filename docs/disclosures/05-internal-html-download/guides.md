@@ -14,13 +14,13 @@
 
 - 압축 JSON 입력의 본문 문서 번호 SoT는 `records[].selected_main_doc_no`다.
 
-- 연도별 외부 HTML 직접 입력의 본문 문서 번호 SoT는 `mainDoc`에서 직접 고른 값이다.
+- 입력은 `compressed-external-html.json`만 허용한다.
+
+- 결과 저장 연도의 SoT는 `records[].metadata.disclosed_at`이다.
 
 ### 내부 HTML 저장
 
 선택한 공시에서 받은 KIND 본문 HTML을 원본 식별값과 함께 보존한다.
-
-- 본문은 선택한 mode, 공시 연도와 접수번호를 사용해 `<mode>/<year>/<acpt_no>.html`로 저장한다.
 
 ### 다운로드 대상 무결성 검사
 
