@@ -56,6 +56,8 @@ Use the smallest component that matches the job.
 - Reserve accent color for navigation selection, primary action, and active state.
 - Reserve warning color for user attention, parse warnings, and notification activity.
 - Avoid local color inventions in feature pages.
+- Keep structural surfaces flat with borders and tonal shifts instead of decorative shadows or transparency effects.
+- Use the larger 8px radius only for selection controls whose choices need a distinct selected silhouette; keep their selected state solid and high contrast.
 
 ## Review Checklist
 

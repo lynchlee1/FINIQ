@@ -606,7 +606,7 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
         }
     )
     assert second_run["source_offset"] == 2
-    assert second_run["source_expected_minimum"] == 2
+    assert second_run["source_expected_count"] == 2
     assert workflow_path.read_text(encoding="utf-8") == completed_before_save
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
@@ -678,7 +678,7 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
         }
     )
     assert resumed_run["source_offset"] == 2
-    assert resumed_run["source_expected_minimum"] == 4
+    assert resumed_run["source_expected_count"] == 4
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
         name="bond",
@@ -706,6 +706,133 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
         "3",
         "1",
     ]
+
+
+def test_filter_workflow_replaces_saved_result_after_source_count_change(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    first_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=data_root,
+        name="bond",
+        run_id=first_run["run_id"],
+        summary={},
+    )
+    filter_presets.complete_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=first_run["run_id"],
+        result=_filter_result(
+            source_disclosures=2,
+            source_offset=0,
+            disclosures=[
+                {"acpt_no": "1", "title": "old", "disclosed_at": "2025-01-01"}
+            ],
+        ),
+    )
+
+    retry_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=data_root,
+        name="bond",
+        run_id=retry_run["run_id"],
+        summary={},
+    )
+    completed = filter_presets.complete_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=retry_run["run_id"],
+        result=_filter_result(
+            source_disclosures=3,
+            source_offset=0,
+            disclosures=[
+                {"acpt_no": "2", "title": "new", "disclosed_at": "2025-01-02"}
+            ],
+        ),
+    )
+
+    assert completed["result"]["summary"]["source_disclosures"] == 3
+    assert [row["acpt_no"] for row in completed["result"]["disclosures"]] == ["2"]
+
+
+def test_interrupted_filter_retry_drops_saved_result_after_source_count_change(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    first_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=data_root,
+        name="bond",
+        run_id=first_run["run_id"],
+        summary={},
+    )
+    filter_presets.complete_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=first_run["run_id"],
+        result=_filter_result(
+            source_disclosures=2,
+            source_offset=0,
+            disclosures=[
+                {"acpt_no": "1", "title": "old", "disclosed_at": "2025-01-01"}
+            ],
+        ),
+    )
+
+    retry_run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "workflow_name": "bond",
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    interrupted = filter_presets.interrupt_filter_workflow_payload(
+        data_root=data_root,
+        name="bond",
+        run_id=retry_run["run_id"],
+        partial_result=_filter_result(
+            source_disclosures=3,
+            source_offset=0,
+            inspected_disclosures=1,
+            complete=False,
+            disclosures=[
+                {"acpt_no": "2", "title": "new", "disclosed_at": "2025-01-02"}
+            ],
+        ),
+    )
+
+    assert interrupted is not None
+    document = json.loads((data_root / "03-filter" / "bond.json").read_text())
+    assert document["result"] is None
+    assert document["pending"]["result"]["summary"]["source_offset"] == 0
+    assert [
+        row["acpt_no"] for row in document["pending"]["result"]["disclosures"]
+    ] == ["2"]
 
 
 def test_filter_workflow_preserves_canonical_when_cancelled_before_first_row(

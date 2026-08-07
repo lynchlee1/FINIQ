@@ -140,6 +140,8 @@ Borders plus tonal shift.
 - Do not add decorative shadows to analyst panels.
 - Dark mode uses the established GitHub-like slate palette from `globals.css`.
 - Separate dense data with dividers and background tone, not nested cards.
+- Keep cards and structural panels at an 8px radius and standard inputs and action buttons at a 6px radius.
+- Selection controls may use an 8px radius so adjacent choices remain distinct. Their selected state must use a solid accent fill and contrasting text rather than elevation.
 
 ## 8. UI Terminology
 

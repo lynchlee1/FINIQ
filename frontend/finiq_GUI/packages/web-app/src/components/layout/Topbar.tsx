@@ -65,7 +65,7 @@ export function Topbar({
   };
 
   return (
-    <header className="mb-6 flex w-full max-w-full flex-col gap-2 overflow-hidden rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 shadow-[var(--tv-shadow)] transition-colors lg:min-h-16 lg:flex-row lg:items-center lg:justify-between">
+    <header className="mb-6 flex w-full max-w-full flex-col gap-2 overflow-hidden rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 transition-colors lg:min-h-16 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex w-full min-w-0 items-center justify-between gap-3 px-2 py-1 lg:w-auto lg:shrink-0">
         <div className="flex min-w-0 flex-col lg:flex-row lg:items-center lg:gap-3">
           <p className="truncate text-xs font-semibold uppercase tracking-wide text-[var(--tv-muted)]">{brandLabel}</p>
@@ -91,7 +91,7 @@ export function Topbar({
               href={item.href}
               aria-current={activeItem?.href === item.href ? "page" : undefined}
               className={cn(
-                "min-h-9 shrink-0 whitespace-nowrap rounded-md px-1.5 py-2 text-center text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--tv-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--tv-surface)] sm:px-4",
+                "min-h-9 shrink-0 whitespace-nowrap rounded-lg px-1.5 py-2 text-center text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--tv-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--tv-surface)] sm:px-4",
                 activeItem?.href === item.href
                   ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
                   : "text-[var(--tv-muted)] hover:bg-[var(--tv-surface-raised)] hover:text-[var(--tv-text)]"

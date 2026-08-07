@@ -56,15 +56,15 @@ export function ActionDock({
 
   const iconClass = (active: boolean, selected: boolean, tone: "blue" | "amber" | "slate") => {
     if (selected) {
-      return "h-10 w-10 border-[color:var(--tv-border-strong)] bg-[var(--tv-surface-raised)] text-[var(--tv-text)] shadow-sm";
+      return "h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]";
     }
     if (active && tone === "blue") {
-      return "relative h-10 w-10 border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)] shadow-sm";
+      return "relative h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)]";
     }
     if (active && tone === "amber") {
-      return "relative h-10 w-10 border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)] shadow-sm";
+      return "relative h-10 w-10 rounded-lg border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]";
     }
-    return "relative h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm hover:text-[var(--tv-text)]";
+    return "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] hover:text-[var(--tv-text)]";
   };
 
   const renderPanel = (panel: DockPanel, title: string, content: ReactNode) => {
@@ -74,7 +74,7 @@ export function ActionDock({
       ? <div className="text-body text-[var(--tv-muted)]">알림 없음</div>
       : content;
     return (
-      <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+      <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-md md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-[var(--tv-text)]">{title}</CardTitle>
@@ -110,11 +110,12 @@ export function ActionDock({
 
   return (
     <div className="action-dock-root relative z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-[8.75rem] md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
-      <div className="flex h-14 items-center justify-center gap-2 rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 shadow-[var(--tv-shadow)] md:h-auto md:w-16 md:flex-col">
+      <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 md:h-auto md:w-16 md:flex-col">
         <Button
           variant="outline"
           size="icon"
           onClick={() => togglePanel("activity")}
+          aria-pressed={openPanel === "activity"}
           className={iconClass(activityActive, openPanel === "activity", "blue")}
           title={openPanel === "activity" ? `${activityTitle} 닫기` : `${activityTitle} 열기`}
         >
@@ -126,6 +127,7 @@ export function ActionDock({
           variant="outline"
           size="icon"
           onClick={() => togglePanel("notification")}
+          aria-pressed={openPanel === "notification"}
           className={iconClass(visibleNotificationActive, openPanel === "notification", "amber")}
           title={openPanel === "notification" ? `${notificationTitle} 닫기` : `${notificationTitle} 열기`}
         >
@@ -138,6 +140,7 @@ export function ActionDock({
             variant="outline"
             size="icon"
             onClick={() => togglePanel("settings")}
+            aria-pressed={openPanel === "settings"}
             className={iconClass(settingsActive, openPanel === "settings", "slate")}
             title={openPanel === "settings" ? `${settingsTitle} 닫기` : `${settingsTitle} 열기`}
           >

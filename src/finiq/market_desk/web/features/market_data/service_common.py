@@ -432,6 +432,26 @@ def _validate_filter_blocks(blocks: object) -> list[dict[str, Any]]:
         if not value.strip() and operator not in {"exists", "empty"}:
             raise ValueError(f"filter_blocks[{index}].value is required")
         validated.append(dict(block))
+    connector_scopes: list[set[str]] = [set()]
+    for index, block in enumerate(validated):
+        if index > 0:
+            connector_scopes[-1].add(str(block["connector"]))
+        for _ in range(block["open_count"]):
+            connector_scopes.append(set())
+        for _ in range(block["close_count"]):
+            if len(connector_scopes) == 1:
+                raise ValueError("Unmatched closing parenthesis in filter blocks")
+            if len(connector_scopes[-1]) > 1:
+                raise ValueError(
+                    "Mixed filter block connectors must be separated by parentheses"
+                )
+            connector_scopes.pop()
+    if len(connector_scopes) > 1:
+        raise ValueError("Unmatched opening parenthesis in filter blocks")
+    if len(connector_scopes[0]) > 1:
+        raise ValueError(
+            "Mixed filter block connectors must be separated by parentheses"
+        )
     return validated
 
 

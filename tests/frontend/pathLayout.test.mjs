@@ -270,6 +270,9 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /\/>수정<\/Button>/);
   assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!selectedPreset\}/);
   assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
+  assert.match(conditionCardSource, /DisclosureFilterConnector = "" \| "AND" \| "XOR" \| "OR"/);
+  assert.match(conditionCardSource, /<option value="XOR">XOR<\/option>/);
+  assert.match(conditionCardSource, /mixed condition block connectors must be separated by parentheses/);
 });
 
 test("disclosure filter page combines title search and recorded filtering", async () => {

@@ -845,7 +845,7 @@ export default function DownloadPage() {
         </section>
 
         <div className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-0 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
-          <div className="flex h-14 items-center justify-center gap-2 rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 shadow-[var(--tv-shadow)] md:h-auto md:w-16 md:flex-col">
+          <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 md:h-auto md:w-16 md:flex-col">
             <Button
               variant="outline"
               size="icon"
@@ -854,10 +854,13 @@ export default function DownloadPage() {
                 setNotificationPanelOpen(false);
                 setSettingsPanelOpen(false);
               }}
+              aria-pressed={downloadPanelOpen}
               className={
-                activeJobId
-                  ? "relative h-10 w-10 border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)] shadow-sm"
-                  : "relative h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
+                downloadPanelOpen
+                  ? "relative h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
+                  : activeJobId
+                    ? "relative h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)]"
+                    : "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"
               }
               title={downloadPanelOpen ? "실행 현황 닫기" : "실행 현황 열기"}
             >
@@ -875,10 +878,13 @@ export default function DownloadPage() {
                 setDownloadPanelOpen(false);
                 setSettingsPanelOpen(false);
               }}
+              aria-pressed={notificationPanelOpen}
               className={
-                lastInspectionCandidateCount > 0 || isErrorStatus || !!previewResult
-                  ? "relative h-10 w-10 border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)] shadow-sm"
-                  : "relative h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
+                notificationPanelOpen
+                  ? "relative h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
+                  : lastInspectionCandidateCount > 0 || isErrorStatus || !!previewResult
+                    ? "relative h-10 w-10 rounded-lg border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)]"
+                    : "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"
               }
               title={notificationPanelOpen ? "알림 닫기" : "알림 열기"}
             >
@@ -896,10 +902,11 @@ export default function DownloadPage() {
                 setDownloadPanelOpen(false);
                 setNotificationPanelOpen(false);
               }}
+              aria-pressed={settingsPanelOpen}
               className={
                 settingsPanelOpen
-                  ? "h-10 w-10 border-[color:var(--tv-border-strong)] bg-[var(--tv-surface)] text-[var(--tv-text)] shadow-sm"
-                  : "h-10 w-10 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] shadow-sm"
+                  ? "h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
+                  : "h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"
               }
               title={settingsPanelOpen ? "다운로드 설정 닫기" : "다운로드 설정 열기"}
             >
@@ -908,7 +915,7 @@ export default function DownloadPage() {
           </div>
 
           {notificationPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-md md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">알림</CardTitle>
@@ -983,7 +990,7 @@ export default function DownloadPage() {
           )}
 
           {settingsPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-md md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">다운로드 설정</CardTitle>
@@ -1083,7 +1090,7 @@ export default function DownloadPage() {
           )}
 
           {downloadPanelOpen && (
-            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+            <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-md md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">실행 현황</CardTitle>
