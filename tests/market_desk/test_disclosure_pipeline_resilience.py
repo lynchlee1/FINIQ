@@ -351,10 +351,16 @@ def test_download_payload_reports_parent_cancellation(
 def test_internal_html_download_cancellation_manifest_lists_only_saved_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    external_directory = tmp_path / "external"
-    (external_directory / "2025").mkdir(parents=True)
-    (external_directory / "2025" / "20250101000001.html").write_text(
-        "<html><body><select id='mainDoc'><option value='1|Y' selected>본문</option></select></body></html>",
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps({
+            "format": "finiq_disclosure_external_html_docs_v1",
+            "records": [{
+                "acpt_no": "20250101000001",
+                "selected_main_doc_no": "1",
+                "metadata": {"disclosed_at": "2025-01-01"},
+            }],
+        }),
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -365,7 +371,7 @@ def test_internal_html_download_cancellation_manifest_lists_only_saved_files(
     result = download_disclosure_internal_html_payload(
         {
             "output_directory": str(tmp_path / "content"),
-            "source_directory": str(external_directory),
+            "source_compressed_json_path": str(compressed_path),
         },
         cancel_check=lambda: True,
     )

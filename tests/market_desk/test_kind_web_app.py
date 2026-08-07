@@ -1296,17 +1296,16 @@ def test_external_html_trust_existing_route_creates_hash_baseline(
 
 
 def test_internal_html_download_inspect_folder_route_uses_yearly_layout(tmp_path: Path) -> None:
-    source_directory = tmp_path / "viewer_html"
-    source_year_directory = source_directory / "2025"
-    source_year_directory.mkdir(parents=True)
-    (source_year_directory / "20250101000001.html").write_text(
-        """
-        <html><body>
-          <select id="mainDoc">
-            <option value="20250101000099|Y" selected="selected">본문</option>
-          </select>
-        </body></html>
-        """,
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps({
+            "format": "finiq_disclosure_external_html_docs_v1",
+            "records": [{
+                "acpt_no": "20250101000001",
+                "selected_main_doc_no": "20250101000099",
+                "metadata": {"disclosed_at": "2025-01-01"},
+            }],
+        }),
         encoding="utf-8",
     )
     output_directory = tmp_path / "content_html"
@@ -1319,7 +1318,7 @@ def test_internal_html_download_inspect_folder_route_uses_yearly_layout(tmp_path
     response = client.post(
         "/api/disclosures/internal-html-download/inspect-folder",
         json={
-            "source_directory": str(source_directory),
+            "source_compressed_json_path": str(compressed_path),
             "output_directory": str(output_directory),
             "dry_run": True,
         },
@@ -1333,12 +1332,8 @@ def test_internal_html_download_inspect_folder_route_uses_yearly_layout(tmp_path
     assert payload["deletion_candidates"][0]["name"] == "2024/20240101000001.html"
 
 
-def test_internal_html_download_inspect_folder_uses_fast_source_scan(tmp_path: Path) -> None:
+def test_internal_html_download_inspect_folder_rejects_source_directory(tmp_path: Path) -> None:
     source_directory = tmp_path / "viewer_html"
-    (source_directory / "2025").mkdir(parents=True)
-    (source_directory / "2025" / "20250101000001.html").write_text(
-        "<html></html>", encoding="utf-8"
-    )
     output_directory = tmp_path / "content_html"
     output_directory.mkdir()
 
@@ -1352,25 +1347,21 @@ def test_internal_html_download_inspect_folder_uses_fast_source_scan(tmp_path: P
         },
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["source_type"] == "content"
-    assert payload["requested_count"] == 1
-    assert payload["deletion_candidate_count"] == 0
+    assert response.status_code == 400
+    assert "source_directory is not supported" in response.json()["detail"]
 
 
 def test_internal_html_download_check_existing_route_uses_yearly_layout(tmp_path: Path) -> None:
-    source_directory = tmp_path / "viewer_html"
-    source_year_directory = source_directory / "2025"
-    source_year_directory.mkdir(parents=True)
-    (source_year_directory / "20250101000001.html").write_text(
-        """
-        <html><body>
-          <select id="mainDoc">
-            <option value="20250101000099|Y" selected="selected">본문</option>
-          </select>
-        </body></html>
-        """,
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps({
+            "format": "finiq_disclosure_external_html_docs_v1",
+            "records": [{
+                "acpt_no": "20250101000001",
+                "selected_main_doc_no": "20250101000099",
+                "metadata": {"disclosed_at": "2025-01-01"},
+            }],
+        }),
         encoding="utf-8",
     )
     output_directory = tmp_path / "content_html"
@@ -1384,7 +1375,7 @@ def test_internal_html_download_check_existing_route_uses_yearly_layout(tmp_path
     response = client.post(
         "/api/disclosures/internal-html-download/check-existing",
         json={
-            "source_directory": str(source_directory),
+            "source_compressed_json_path": str(compressed_path),
             "output_directory": str(output_directory),
         },
     )

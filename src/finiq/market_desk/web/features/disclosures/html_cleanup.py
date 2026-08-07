@@ -9,46 +9,28 @@ from finiq.market_desk.web.features.disclosures.html_common import *
 def _load_internal_html_integrity_source(
     body: dict[str, Any],
 ) -> tuple[Any, str, list[str], dict[str, str]]:
-    source_directory_raw = str(body.get("source_directory") or "").strip()
+    if "source_directory" in body:
+        raise ValueError(
+            "source_directory is not supported; use source_compressed_json_path"
+        )
     source_compressed_json_path_raw = str(
         body.get("source_compressed_json_path") or ""
     ).strip()
-    if source_directory_raw and source_compressed_json_path_raw:
-        raise ValueError(
-            "source_directory and source_compressed_json_path cannot be used together"
+    if not source_compressed_json_path_raw:
+        raise ValueError("source_compressed_json_path is required")
+    source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
+    source_json = internal_html_download._load_compressed_external_html_file_payload(
+        source_path
+    )
+    targets, source_json = (
+        internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(
+            source_json
         )
-    if source_compressed_json_path_raw:
-        source_path = (
-            Path(source_compressed_json_path_raw).expanduser().resolve()
-        )
-        source_json = (
-            internal_html_download._load_compressed_external_html_file_payload(
-                source_path
-            )
-        )
-        targets, source_json = (
-            internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(
-                source_json
-            )
-        )
-    elif source_directory_raw:
-        source_path = Path(source_directory_raw).expanduser().resolve()
-        targets, source_json = (
-            internal_html_download._collect_internal_cleanup_targets_from_external_directory(
-                source_path
-            )
-        )
-    else:
-        raise ValueError("source_directory or source_compressed_json_path is required")
+    )
 
     targets = _apply_limit_to_targets(targets, body.get("limit"))
     acpt_numbers = [target["acpt_no"] for target in targets]
     target_years = {target["acpt_no"]: target["year"] for target in targets}
-    if source_json is None:
-        source_json = {
-            "format": "finiq_disclosure_html_manifest_v1",
-            "disclosures": [{"acpt_no": acpt_no} for acpt_no in acpt_numbers],
-        }
     return source_json, str(source_path), acpt_numbers, target_years
 
 
@@ -60,12 +42,11 @@ def clean_disclosure_html_output_directory_payload(
     if not output_directory:
         msg = "output_directory is required"
         raise ValueError(msg)
-    source_directory_raw = str(body.get("source_directory") or "").strip()
     source_compressed_json_path_raw = str(
         body.get("source_compressed_json_path") or ""
     ).strip()
 
-    if source_directory_raw or source_compressed_json_path_raw:
+    if "source_directory" in body or source_compressed_json_path_raw:
         _source_json, source_path, acpt_numbers, target_years = (
             _load_internal_html_integrity_source(body)
         )
@@ -321,15 +302,14 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         raise ValueError(msg)
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
-    source_directory_raw = str(body.get("source_directory") or "").strip()
+    if "source_directory" in body:
+        msg = "source_directory is not supported; use source_compressed_json_path"
+        raise ValueError(msg)
     source_compressed_json_path_raw = str(
         body.get("source_compressed_json_path") or ""
     ).strip()
     resolved_source_path = ""
 
-    if source_directory_raw and source_compressed_json_path_raw:
-        msg = "source_directory and source_compressed_json_path cannot be used together"
-        raise ValueError(msg)
     if source_compressed_json_path_raw:
         source_compressed_json_path = (
             Path(source_compressed_json_path_raw).expanduser().resolve()
@@ -337,24 +317,14 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         source_json = internal_html_download._load_compressed_external_html_file_payload(
             source_compressed_json_path
         )
-        targets, manifest_payload = internal_html_download._collect_internal_targets_from_compressed_payload(
-            source_json
+        targets, source_json = (
+            internal_html_download._collect_internal_targets_from_compressed_payload(
+                source_json
+            )
         )
         targets = _apply_limit_to_targets(targets, body.get("limit"))
         acpt_numbers = [target["acpt_no"] for target in targets]
-        source_json = manifest_payload
         resolved_source_path = str(source_compressed_json_path)
-    elif source_directory_raw:
-        source_directory = Path(source_directory_raw).expanduser().resolve()
-        targets, manifest_payload = internal_html_download._collect_internal_targets_from_external_directory(
-            source_directory,
-        )
-        targets = _apply_limit_to_targets(targets, body.get("limit"))
-        acpt_numbers = [target["acpt_no"] for target in targets]
-        source_json = manifest_payload or {
-            "disclosures": [{"acpt_no": acpt_no} for acpt_no in acpt_numbers]
-        }
-        resolved_source_path = str(source_directory)
     else:
         source_json, resolved_source_path = _load_workspace_filtered_payload(body)
         acpt_numbers = collect_acpt_numbers_from_json(source_json)

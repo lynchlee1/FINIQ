@@ -953,3 +953,89 @@
 
 - Confirmed the abstract phrase, duplicate `README.md` instruction, and separate classification table are absent.
 - `git diff --check` passed.
+
+## 2026-08-07 — Consolidated disclosure workspace documentation
+
+### Purpose
+
+- Keep the complete disclosure workspace layout and shared identifier rules in `docs/disclosures/reference.md` as the single source of truth.
+- Remove repeated layout trees and identifier descriptions from the remaining disclosure documents without changing the fixed DART-link documents.
+
+### Implementation summary
+
+- Replaced repeated stage directory trees with links to the fixed disclosure reference.
+- Kept stage-specific input relationships, validation rules, file semantics and runtime behavior in their owning documents.
+- Removed the repeated Roman-letter identifier note and aligned the external HTML input contract with the shared text-identifier rule.
+- Did not modify `docs/disclosures/reference.md` or any file under `docs/disclosures/01-dart-link/`.
+
+### Verification result
+
+- Confirmed the fixed reference and DART-link documents have no task-authored changes.
+- Confirmed remaining explicit paths describe stage-specific validation or traversal contracts rather than restating the full workspace layout.
+- Confirmed all newly added Markdown links resolve and `git diff --check` passes.
+
+## 2026-08-07 — Standardized reference input and output paths
+
+### Purpose
+
+- Give every disclosure Reference that declares filesystem input or output one consistent lookup format.
+- Use canonical folder and file paths instead of stage numbers or translated feature names.
+- Record the format in the repository documentation rules.
+
+### Implementation summary
+
+- Replaced inconsistent path descriptions in nine disclosure Reference files with the same input-to-storage sentence structure.
+- Copied every path segment, placeholder and filename from `docs/disclosures/reference.md`.
+- Combined inputs and outputs that belong to one flow in a single sentence and stated the actual behavior when no filesystem artifact exists.
+- Added a placeholder-only Reference skeleton with path, input-format and output-format sections to `diataxis/README.md` while preserving its existing edits.
+- Added a short purpose description for every input and output artifact in the nine disclosure Reference files.
+- Did not modify `docs/disclosures/reference.md` or any file under `docs/disclosures/01-dart-link/`.
+
+### Verification result
+
+- Confirmed all nine input/output Reference files describe one input-to-result flow in sentence form.
+- Confirmed all nine files contain input-format and output-format sections with artifact descriptions.
+- Confirmed path descriptions contain no stage-number or translated feature references.
+- Confirmed the fixed disclosure reference and DART-link files have no task-authored changes.
+- `git diff --check` passed.
+
+## 2026-08-07 — Single input contract for internal HTML download
+
+### Purpose
+
+- Make `compressed-external-html.json` the only stage 05 input and remove the alternate external HTML parsing path.
+
+### Implementation summary
+
+- Removed `source_directory` handling and direct external HTML parsing from internal HTML download, inspection, cleanup and manifest creation.
+- Kept `records[].selected_main_doc_no` as the document-number source of truth and `records[].metadata.disclosed_at` as the output-year source of truth.
+- Removed the folder/JSON input switch from the internal HTML screen; standard workspaces resolve the canonical JSON automatically, while separate-path mode selects that JSON file directly.
+- Updated stage 05 guides, reference material and regression tests to describe and enforce the single input contract.
+
+### Verification result
+
+- Internal HTML regression selection passed: 31 tests.
+- MarketDesk production build and all 135 frontend tests passed.
+- A broader 571-test run reached 402 passed and 166 skipped; three unrelated pre-existing failures remained in section-save cancellation, the missing HTML parser README and an external compression fixture.
+- Python compilation and `git diff --check` passed.
+
+## 2026-08-07 — Reclassified stage 01 input, output and recovery contracts
+
+### Purpose
+
+- Make the stage 01 Reference the authoritative home for accepted inputs, defaults, output metadata, integrity, reuse and recovery contracts.
+- Leave normal capability summaries in Guides and conditional service or user-decision outcomes in Cases.
+
+### Implementation summary
+
+- Moved search-input restrictions and defaults from Guides and Cases into `docs/disclosures/01-download/reference.md`.
+- Moved metadata creation, pagination, list-consistency, existing-result integrity and full-period recovery contracts into the Reference.
+- Kept the normal integrity-check, metadata and publication flow in Guides without repeating the exact contracts.
+- Kept KIND lookup failures, invalid-request outcomes, confirmation tokens and user approval behavior in Cases.
+- Extended the Reference ownership rule and skeleton in `diataxis/README.md` with input constraints, output integrity, and reuse and recovery sections.
+
+### Verification result
+
+- Confirmed the moved constraints and defaults have one authoritative occurrence under `01-download`.
+- Confirmed Guides retain normal flows, Cases retain conditional outcomes, and Reference owns the stored-artifact contracts.
+- Confirmed the Reference skeleton contains the new contract sections and `git diff --check` passes.

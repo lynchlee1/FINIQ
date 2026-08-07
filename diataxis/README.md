@@ -10,8 +10,8 @@ Organize each leaf module under `docs/` by the kind of statement being made.
 
 1. Give every major capability its own section in `guides.md`. A reader must be able to discover what the module does without reading the other files.
 2. Put a normal input-to-result flow such as “read A and create B” in `guides.md`.
-3. Put a statement whose outcome depends on “if”, “when”, “unless” in `cases.md`.
-4. Put a fact that answers “what is the exact name, value, path, or shape?” in `reference.md`, unless that fact is essential to identifying a Guide's input or result.
+3. Put a runtime, service, UI, or user-decision outcome that depends on “if”, “when”, or “unless” in `cases.md`.
+4. Put exact paths, formats, accepted input constraints, defaults, output-integrity invariants, and the metadata or stored-state contract needed for reuse and recovery in `reference.md`.
 5. A topic may be named in more than one file, but each condition, outcome, value, and rule must have exactly one authoritative home. `guides.md` may summarize a capability but must not repeat its Case details.
 6. Avoid links between leaf documents. Keep each fact in the file that owns it instead of using links to compensate for unclear classification.
 
@@ -40,14 +40,58 @@ Organize each leaf module under `docs/` by the kind of statement being made.
 
 ```text
 # {Module} Reference
+
 ## Paths
-## Data formats
+
+- `<data_root>/<exact-input-folder-a>/<input-artifact-a>` + `<data_root>/<exact-input-folder-b>/<input-artifact-b>` → `<data_root>/<exact-output-folder-a>/<output-artifact-a>` + `<data_root>/<exact-output-folder-b>/<output-artifact-b>`
+
+## Input formats
+
+### `<input-artifact-a>`
+
+- `{brief-purpose}`
+- `{format-and-fields}`
+
+### `<input-artifact-b>`
+
+- `{brief-purpose}`
+- `{format-and-fields}`
+
+## Output formats
+
+### `<output-artifact-a>`
+
+- `{brief-purpose}`
+- `{format-and-fields}`
+
+### `<output-artifact-b>`
+
+- `{brief-purpose}`
+- `{format-and-fields}`
+
+## Input constraints and defaults
+
+### `{constraint-or-default-group}`
+
+- `{accepted-values-and-required-metadata}`
+- `{default-values}`
+
+## Output integrity
+
+### `{integrity-group}`
+
+- `{invariant}`
+- `{publication-contract}`
+
+## Reuse and recovery
+
+### `{stored-state-group}`
+
+- `{reuse-requirement}`
+- `{recovery-state-contract}`
+
 ## States and values
 ```
-
-Use only the headings that have content.
-
-Use `kebab-case` and do not create empty files or directories.
 
 ```text
 docs/

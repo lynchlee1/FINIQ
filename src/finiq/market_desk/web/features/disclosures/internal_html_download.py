@@ -43,28 +43,6 @@ def _fetch_internal_html(
     return body_response.content
 
 
-def _load_compressed_external_html_payload(
-    source_directory: Path,
-) -> dict[str, Any] | None:
-    compressed_file = source_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
-    if not compressed_file.is_file():
-        return None
-
-    payload = json.loads(compressed_file.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        msg = f"compressed external HTML JSON is not an object: {compressed_file}"
-        raise ValueError(msg)
-    if payload.get("format") != "finiq_disclosure_external_html_docs_v1":
-        msg = f"compressed external HTML JSON has an invalid format: {compressed_file}"
-        raise ValueError(msg)
-    if not isinstance(payload.get("records"), list):
-        msg = f"compressed external HTML JSON records is not a list: {compressed_file}"
-        raise ValueError(msg)
-    payload = dict(payload)
-    payload["source_json_path"] = str(compressed_file)
-    return payload
-
-
 def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, Any]:
     if not source_path.is_file():
         msg = f"source_compressed_json_path does not exist: {source_path}"
@@ -155,122 +133,6 @@ def _collect_internal_cleanup_targets_from_compressed_payload(
         msg = "No internal HTML targets found in compressed external HTML JSON"
         raise ValueError(msg)
     return targets, payload
-
-
-def _collect_internal_targets_from_external_directory(
-    source_directory: Path,
-) -> tuple[list[dict[str, str]], Any]:
-    if not source_directory.is_dir():
-        msg = f"source_directory does not exist: {source_directory}"
-        raise ValueError(msg)
-
-    import json
-
-    manifest_path = source_directory / HTML_MANIFEST_FILENAME
-    manifest_payload: Any = None
-    manifest_order: list[str] = []
-    if manifest_path.is_file():
-        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        for disclosure in manifest_payload.get("disclosures") or []:
-            if not isinstance(disclosure, dict):
-                continue
-            acpt_no = str(disclosure.get("acpt_no") or "").strip()
-            if acpt_no.isdigit():
-                manifest_order.append(acpt_no)
-
-    compressed_payload = _load_compressed_external_html_payload(source_directory)
-    if compressed_payload is not None:
-        return _collect_internal_targets_from_compressed_payload(compressed_payload)
-
-    target_by_acpt_no: dict[str, dict[str, str]] = {}
-    html_paths = []
-    for year_directory in sorted(
-        path for path in source_directory.iterdir() if path.is_dir()
-    ):
-        if len(year_directory.name) == 4 and year_directory.name.isdigit():
-            html_paths.extend(sorted(year_directory.glob("*.html")))
-    for html_path in html_paths:
-        acpt_no = html_path.stem
-        if not acpt_no.isdigit():
-            continue
-        doc_no = dart_main_doc_no(html_path.read_bytes())
-        if not doc_no:
-            msg = f"selected main docNo not found in external HTML: {html_path}"
-            raise ValueError(msg)
-        year = html_path.parent.name
-        target_by_acpt_no[acpt_no] = {
-            "acpt_no": acpt_no,
-            "doc_no": doc_no,
-            "year": year,
-        }
-
-    ordered_acpt_numbers = [
-        acpt_no for acpt_no in manifest_order if acpt_no in target_by_acpt_no
-    ]
-    ordered_acpt_numbers.extend(
-        acpt_no
-        for acpt_no in sorted(target_by_acpt_no)
-        if acpt_no not in set(ordered_acpt_numbers)
-    )
-    targets = [target_by_acpt_no[acpt_no] for acpt_no in ordered_acpt_numbers]
-    if not targets:
-        msg = "No external HTML files found in source_directory"
-        raise ValueError(msg)
-    return targets, manifest_payload
-
-
-def _collect_internal_cleanup_targets_from_external_directory(
-    source_directory: Path,
-) -> tuple[list[dict[str, str]], Any]:
-    if not source_directory.is_dir():
-        msg = f"source_directory does not exist: {source_directory}"
-        raise ValueError(msg)
-
-    manifest_path = source_directory / HTML_MANIFEST_FILENAME
-    manifest_payload: Any = None
-    manifest_order: list[str] = []
-    if manifest_path.is_file():
-        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        for disclosure in manifest_payload.get("disclosures") or []:
-            if not isinstance(disclosure, dict):
-                continue
-            acpt_no = str(disclosure.get("acpt_no") or "").strip()
-            if acpt_no.isdigit():
-                manifest_order.append(acpt_no)
-
-    compressed_payload = _load_compressed_external_html_payload(source_directory)
-    if compressed_payload is not None:
-        return _collect_internal_cleanup_targets_from_compressed_payload(
-            compressed_payload
-        )
-
-    html_paths = []
-    for year_directory in sorted(
-        path for path in source_directory.iterdir() if path.is_dir()
-    ):
-        if len(year_directory.name) == 4 and year_directory.name.isdigit():
-            html_paths.extend(sorted(year_directory.glob("*.html")))
-    target_by_acpt_no: dict[str, dict[str, str]] = {}
-    for html_path in html_paths:
-        acpt_no = html_path.stem
-        if not acpt_no.isdigit():
-            continue
-        year = html_path.parent.name
-        target_by_acpt_no[acpt_no] = {"acpt_no": acpt_no, "doc_no": "", "year": year}
-
-    ordered_acpt_numbers = [
-        acpt_no for acpt_no in manifest_order if acpt_no in target_by_acpt_no
-    ]
-    ordered_acpt_numbers.extend(
-        acpt_no
-        for acpt_no in sorted(target_by_acpt_no)
-        if acpt_no not in set(ordered_acpt_numbers)
-    )
-    targets = [target_by_acpt_no[acpt_no] for acpt_no in ordered_acpt_numbers]
-    if not targets:
-        msg = "No external HTML files found in source_directory"
-        raise ValueError(msg)
-    return targets, manifest_payload
 
 
 def download_disclosure_internal_htmls(
@@ -410,27 +272,20 @@ def download_disclosure_internal_html_payload(
         msg = "output_directory is required"
         raise ValueError(msg)
 
-    source_directory_raw = str(body.get("source_directory") or "").strip()
+    if "source_directory" in body:
+        msg = "source_directory is not supported; use source_compressed_json_path"
+        raise ValueError(msg)
     source_compressed_json_path_raw = str(
         body.get("source_compressed_json_path") or ""
     ).strip()
-    if source_directory_raw and source_compressed_json_path_raw:
-        msg = "source_directory and source_compressed_json_path cannot be used together"
+    if not source_compressed_json_path_raw:
+        msg = "source_compressed_json_path is required"
         raise ValueError(msg)
-    if not source_directory_raw and not source_compressed_json_path_raw:
-        msg = "source_directory or source_compressed_json_path is required"
-        raise ValueError(msg)
-    if source_compressed_json_path_raw:
-        source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
-        compressed_payload = _load_compressed_external_html_file_payload(source_path)
-        targets, manifest_payload = _collect_internal_targets_from_compressed_payload(
-            compressed_payload
-        )
-    else:
-        source_path = Path(source_directory_raw).expanduser().resolve()
-        targets, manifest_payload = _collect_internal_targets_from_external_directory(
-            source_path,
-        )
+    source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
+    compressed_payload = _load_compressed_external_html_file_payload(source_path)
+    targets, source_json = _collect_internal_targets_from_compressed_payload(
+        compressed_payload
+    )
 
     targets = _apply_limit_to_targets(targets, body.get("limit"))
     acpt_numbers = [target["acpt_no"] for target in targets]
@@ -438,13 +293,6 @@ def download_disclosure_internal_html_payload(
         target["acpt_no"]: target["year"]
         for target in targets
     }
-    source_json = manifest_payload
-    if source_json is None:
-        source_json = {
-            "format": "finiq_disclosure_html_manifest_v1",
-            "disclosures": [{"acpt_no": acpt_no} for acpt_no in acpt_numbers],
-        }
-
     cancel_token = str(body.get("cancel_token") or "").strip() or None
     _clear_cancel_token(cancel_token)
 
