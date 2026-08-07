@@ -1,5 +1,26 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-07 - Flat and simple UI restoration
+
+### Purpose
+
+- Restore the flat, restrained MarketDesk visual language that preceded the 2026-07-08 UI shift.
+- Preserve the larger radius and solid selected-state contrast for adjacent selection controls so choices remain distinct and visible.
+
+### Implementation summary
+
+- Restored the documented slate and GitHub-like dark palettes, IBM Plex Sans KR and Space Grotesk typography, and border-led surface hierarchy through the existing shared tokens.
+- Removed decorative shadows and transparency effects from shared cards, navigation shells, workflow sidebars, tabs, and action docks; returned cards and panels to an 8px radius and ordinary inputs and buttons to a 6px radius.
+- Kept an 8px radius for top navigation, workflow navigation, tabs, mode toggles, and open action-dock buttons, with a solid accent fill and contrasting selected text.
+- Updated the design contracts and frontend regression coverage for the flat-surface and selection-control exception.
+
+### Verification result
+
+- `136 passed`: complete frontend contract suite, including the new flat-surface and selection-radius regressions.
+- Shared Web app TypeScript build and MarketDesk production build passed.
+- Browser checks on `/filter` passed in light and dark modes and at 390px mobile width without page-level horizontal overflow. Computed styles confirmed 8px shadowless cards, 6px shadowless inputs, and 8px solid-fill selection controls; the documented Slate and GitHub-like tokens and IBM Plex Sans KR were active.
+- `git diff --check` passed.
+
 ## 2026-08-06 — leaf 문서 링크 제거와 raw-table 위치 수정
 
 ### Purpose
@@ -1174,3 +1195,23 @@
 - Confirmed the Market Desk TypeScript project compiles with `tsc --noEmit`.
 - The broader KIND web-service module passed 327 tests and skipped 166; its two remaining failures are in untouched section-cancellation behavior and a missing parser README.
 - Confirmed `git diff --check` passes and the targeted numeric-assumption search reports no identifier conversion or digits-only validation.
+
+## 2026-08-07 — Retried changed disclosure sources and completed XOR filtering
+
+### Purpose
+
+- Restart stage 03 filtering whenever the current source count differs from the previously checked count, without resetting stages 01 or 02.
+- Support XOR across the shared disclosure condition filters.
+
+### Implementation summary
+
+- Documented that any source-count difference restarts the filter from the beginning and discards the saved incremental merge base.
+- Added XOR-aware SQL expression parsing to title search and required parentheses whenever different connector types are mixed in one expression.
+- Added matching backend and UI-input validation that rejects multiple connector types in the same parenthesis scope instead of inferring precedence.
+- Added regression coverage for both larger and smaller source-count changes, completed and interrupted retries, grouped XOR filtering, rejected ungrouped connector mixtures, SQLite title search and the XOR UI option.
+
+### Verification result
+
+- Passed 397 tests across the KIND web service and web app; 166 were skipped and the two known unrelated failures remained in section-save cancellation and the missing HTML parser README.
+- Passed all 20 disclosure/frontend path-layout tests.
+- Python compilation and `git diff --check` passed.

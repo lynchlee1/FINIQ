@@ -340,7 +340,7 @@ export function DisclosureAnalysisWorkspace() {
                     type="button"
                     variant={selectedAnalysisMode === mode ? "default" : "ghost"}
                     size="sm"
-                    className="h-8"
+                    className="h-8 rounded-lg"
                     aria-pressed={selectedAnalysisMode === mode}
                     onClick={() => setSelectedAnalysisMode(mode as "run" | "results")}
                   >

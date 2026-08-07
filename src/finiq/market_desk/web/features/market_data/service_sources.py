@@ -244,17 +244,15 @@ def _sqlite_title_filter_expression(
     if not filter_blocks:
         return "1 = 1", []
 
-    sql_parts: list[str] = []
-    parameters: list[str] = []
-    parenthesis_depth = 0
+    tokens: list[object] = []
     for index, block in enumerate(filter_blocks):
+        parameters: list[str] = []
         if index > 0:
-            sql_parts.append(str(block["connector"]))
+            tokens.append(str(block["connector"]))
         open_count = int(block["open_count"])
         close_count = int(block["close_count"])
-        if open_count:
-            sql_parts.append("(" * open_count)
-            parenthesis_depth += open_count
+        for _ in range(open_count):
+            tokens.append("(")
 
         field = str(block["field"])
         quoted_field = _quoted_sqlite_identifier(field)
@@ -327,16 +325,83 @@ def _sqlite_title_filter_expression(
 
         if block["not"]:
             predicate = f"NOT ({predicate})"
-        sql_parts.append(predicate)
-        if close_count:
-            parenthesis_depth -= close_count
-            if parenthesis_depth < 0:
-                raise ValueError("Unmatched closing parenthesis in filter blocks")
-            sql_parts.append(")" * close_count)
+        tokens.append((predicate, parameters))
+        for _ in range(close_count):
+            tokens.append(")")
 
-    if parenthesis_depth:
-        raise ValueError("Unmatched opening parenthesis in filter blocks")
-    return " ".join(sql_parts), parameters
+    return _parse_sql_boolean_tokens(tokens)
+
+
+def _parse_sql_boolean_tokens(tokens: list[object]) -> tuple[str, list[str]]:
+    position = 0
+
+    def peek() -> object | None:
+        return tokens[position] if position < len(tokens) else None
+
+    def consume() -> object:
+        nonlocal position
+        if position >= len(tokens):
+            raise ValueError("Unexpected end of filter blocks")
+        token = tokens[position]
+        position += 1
+        return token
+
+    def combine(
+        left: tuple[str, list[str]],
+        operator: str,
+        right: tuple[str, list[str]],
+    ) -> tuple[str, list[str]]:
+        left_sql, left_parameters = left
+        right_sql, right_parameters = right
+        if operator == "XOR":
+            sql = f"(({left_sql}) != ({right_sql}))"
+        else:
+            sql = f"(({left_sql}) {operator} ({right_sql}))"
+        return sql, [*left_parameters, *right_parameters]
+
+    def parse_factor() -> tuple[str, list[str]]:
+        token = peek()
+        if token == "(":
+            consume()
+            result = parse_or()
+            if peek() != ")":
+                raise ValueError("Missing closing parenthesis in filter blocks")
+            consume()
+            return result
+        if token == ")":
+            raise ValueError("Unexpected closing parenthesis in filter blocks")
+        if isinstance(token, str):
+            raise ValueError(f"Unexpected operator in filter blocks: {token}")
+        value = consume()
+        if not isinstance(value, tuple):
+            raise ValueError("Invalid predicate in filter blocks")
+        return value
+
+    def parse_and() -> tuple[str, list[str]]:
+        result = parse_factor()
+        while peek() == "AND":
+            consume()
+            result = combine(result, "AND", parse_factor())
+        return result
+
+    def parse_xor() -> tuple[str, list[str]]:
+        result = parse_and()
+        while peek() == "XOR":
+            consume()
+            result = combine(result, "XOR", parse_and())
+        return result
+
+    def parse_or() -> tuple[str, list[str]]:
+        result = parse_xor()
+        while peek() == "OR":
+            consume()
+            result = combine(result, "OR", parse_xor())
+        return result
+
+    result = parse_or()
+    if position != len(tokens):
+        raise ValueError(f"Unexpected token in filter blocks: {tokens[position]}")
+    return result
 
 
 def _query_sqlite_shard_titles(

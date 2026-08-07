@@ -786,7 +786,7 @@ def test_filter_disclosures_payload_filters_only_rows_after_source_offset(
         {
             "data_root": str(tmp_path),
             "source_offset": 2,
-            "source_expected_minimum": 2,
+            "source_expected_count": 3,
         }
     )
 
@@ -804,7 +804,7 @@ def test_filter_disclosures_payload_filters_only_rows_after_source_offset(
     }
 
 
-@pytest.mark.parametrize("field", ["source_offset", "source_expected_minimum"])
+@pytest.mark.parametrize("field", ["source_offset", "source_expected_count"])
 def test_filter_disclosures_payload_rejects_fractional_incremental_counts(
     tmp_path: Path,
     field: str,
@@ -834,7 +834,7 @@ def test_filter_disclosures_payload_offset_skips_complete_year_shards(
         {
             "data_root": str(tmp_path),
             "source_offset": 2,
-            "source_expected_minimum": 2,
+            "source_expected_count": 3,
         }
     )
 
@@ -842,19 +842,24 @@ def test_filter_disclosures_payload_offset_skips_complete_year_shards(
     assert [row["acpt_no"] for row in payload["disclosures"]] == ["3"]
 
 
-def test_filter_disclosures_payload_rejects_source_count_regression(
+@pytest.mark.parametrize("previous_count", [2, 4])
+def test_filter_disclosures_payload_retries_from_start_when_source_count_changes(
     tmp_path: Path,
+    previous_count: int,
 ) -> None:
     _write_filter_manifest_fixture(tmp_path)
 
-    with pytest.raises(ValueError, match="01단계부터 다시 실행"):
-        filter_disclosures_payload(
-            {
-                "data_root": str(tmp_path),
-                "source_offset": 2,
-                "source_expected_minimum": 4,
-            }
-        )
+    payload = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "source_offset": 2,
+            "source_expected_count": previous_count,
+        }
+    )
+
+    assert payload["summary"]["source_offset"] == 0
+    assert payload["summary"]["target_disclosures"] == 3
+    assert [row["acpt_no"] for row in payload["disclosures"]] == ["3", "2", "1"]
 
 
 def test_filter_disclosures_payload_returns_integrity_checked_partial_on_cancel(
@@ -1399,6 +1404,76 @@ def test_filter_disclosures_payload_supports_field_filter_blocks(tmp_path: Path)
     )
 
     assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["3", "1"]
+
+
+def test_disclosure_filters_support_xor_in_records_and_title_search(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+    filter_blocks = [
+        _filter_block(
+            open_count=1,
+            field="title",
+            operator="contains",
+            value="전환사채",
+        ),
+        _filter_block(
+            connector="XOR",
+            field="title",
+            operator="contains",
+            value="기타",
+            close_count=1,
+        ),
+        _filter_block(
+            connector="AND",
+            field="market",
+            operator="equals",
+            value="코스피",
+        ),
+    ]
+
+    filtered = filter_disclosures_payload(
+        {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
+    )
+    searched = search_disclosure_titles_payload(
+        {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
+    )
+
+    assert [row["acpt_no"] for row in filtered["disclosures"]] == ["2", "1"]
+    assert searched["titles"] == [
+        {"title": "[정정]전환사채발행결정", "disclosures": 1},
+        {"title": "기타 주요경영사항", "disclosures": 1},
+    ]
+
+
+def test_disclosure_filters_reject_mixed_connectors_without_grouping(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+    filter_blocks = [
+        _filter_block(field="title", operator="contains", value="전환사채"),
+        _filter_block(
+            connector="XOR",
+            field="title",
+            operator="contains",
+            value="기타",
+        ),
+        _filter_block(
+            connector="AND",
+            field="market",
+            operator="equals",
+            value="코스피",
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="must be separated by parentheses"):
+        filter_disclosures_payload(
+            {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
+        )
+    with pytest.raises(ValueError, match="must be separated by parentheses"):
+        search_disclosure_titles_payload(
+            {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
+        )
 
 
 def test_filter_disclosures_payload_can_ignore_spaces_in_block_values(tmp_path: Path) -> None:

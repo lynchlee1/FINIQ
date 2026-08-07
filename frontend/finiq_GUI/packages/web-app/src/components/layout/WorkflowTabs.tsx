@@ -13,7 +13,7 @@ export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
   const pathname = usePathname();
 
   return (
-    <nav className="overflow-x-auto rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-1 shadow-[var(--tv-shadow)] backdrop-blur transition-colors" aria-label="Workflow steps">
+    <nav className="overflow-x-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-1 transition-colors" aria-label="Workflow steps">
       <div className="flex min-w-max gap-1 lg:min-w-0">
         {tabs.map((tab) => {
           const isActive = pathname === tab.href;
@@ -24,7 +24,7 @@ export function WorkflowTabs({ tabs }: WorkflowTabsProps) {
               className={cn(
                 "flex min-w-[132px] flex-1 items-center justify-center gap-3 rounded-lg px-4 py-3 transition-all",
                 isActive
-                  ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)] shadow-sm"
+                  ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
                   : "text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
               )}
             >

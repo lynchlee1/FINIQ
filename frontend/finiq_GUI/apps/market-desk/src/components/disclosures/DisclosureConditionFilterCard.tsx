@@ -141,6 +141,22 @@ export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureCo
       close_count: row.close_count as number,
     };
   });
+  const connectorScopes: Set<DisclosureFilterConnector>[] = [new Set()];
+  blocks.forEach((block, index) => {
+    if (index > 0) connectorScopes[connectorScopes.length - 1].add(block.connector);
+    for (let count = 0; count < block.open_count; count += 1) connectorScopes.push(new Set());
+    for (let count = 0; count < block.close_count; count += 1) {
+      if (connectorScopes.length === 1) throw new Error("condition_blocks has an unmatched closing parenthesis");
+      if (connectorScopes[connectorScopes.length - 1].size > 1) {
+        throw new Error("mixed condition block connectors must be separated by parentheses");
+      }
+      connectorScopes.pop();
+    }
+  });
+  if (connectorScopes.length > 1) throw new Error("condition_blocks has an unmatched opening parenthesis");
+  if (connectorScopes[0].size > 1) {
+    throw new Error("mixed condition block connectors must be separated by parentheses");
+  }
   return blocks;
 }
 

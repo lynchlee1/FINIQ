@@ -16,7 +16,7 @@ export function WorkflowSidebar({ title, tabs = [], groups }: WorkflowSidebarPro
   const resolvedGroups = groups ?? [{ label: "Workflow", steps: tabs }];
 
   return (
-    <aside className="w-full min-w-0 self-start rounded-xl border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4 shadow-[var(--tv-shadow)] backdrop-blur transition-colors lg:sticky lg:top-7">
+    <aside className="w-full min-w-0 self-start rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4 transition-colors lg:sticky lg:top-7">
       <nav className="space-y-5" aria-label={title}>
         {resolvedGroups.map((group) => (
           <section key={group.label} className="space-y-1">
@@ -34,7 +34,7 @@ export function WorkflowSidebar({ title, tabs = [], groups }: WorkflowSidebarPro
                       "flex items-center rounded-lg py-2.5 pr-3 text-sm font-medium transition-all",
                       group.numbered ? "gap-1 pl-3" : "pl-6",
                       isActive
-                        ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)] shadow-sm"
+                        ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
                         : "text-[var(--tv-muted)] hover:text-[var(--tv-text)]"
                     )}
                   >

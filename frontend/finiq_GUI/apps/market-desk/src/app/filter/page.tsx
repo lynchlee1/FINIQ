@@ -511,7 +511,7 @@ export default function FilterPage() {
             type="button"
             variant={taskMode === "title-search" ? "default" : "ghost"}
             size="sm"
-            className="h-10 min-w-0 rounded-md px-2.5 font-semibold sm:min-w-44 sm:px-4"
+            className="h-10 min-w-0 rounded-lg px-2.5 font-semibold sm:min-w-44 sm:px-4"
             aria-pressed={taskMode === "title-search"}
             onClick={() => setTaskMode("title-search")}
           >
@@ -522,7 +522,7 @@ export default function FilterPage() {
             type="button"
             variant={taskMode === "filter" ? "default" : "ghost"}
             size="sm"
-            className="h-10 min-w-0 rounded-md px-2.5 font-semibold sm:min-w-44 sm:px-4"
+            className="h-10 min-w-0 rounded-lg px-2.5 font-semibold sm:min-w-44 sm:px-4"
             aria-pressed={taskMode === "filter"}
             onClick={() => setTaskMode("filter")}
           >
