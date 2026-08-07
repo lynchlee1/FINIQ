@@ -66,6 +66,14 @@ def compress_disclosure_external_html_payload(
             f"{len(missing_metadata_acpt_numbers)}건의 metadata를 찾지 못했습니다. "
             f"누락 접수번호 예시: {sample}"
         )
+    for year, html_path in html_files:
+        acpt_no = html_path.stem
+        metadata_year = _year_from_disclosure(acpt_no, metadata[acpt_no])
+        if year != metadata_year:
+            raise ValueError(
+                f"external HTML year does not match disclosed_at: "
+                f"{html_path} expected={metadata_year}"
+            )
 
     worker_count = _external_html_compress_workers(body, len(html_files))
 

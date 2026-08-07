@@ -24,7 +24,6 @@
 - 실행 상태는 `ready`, `running`, `interrupted`, `completed`, `failed`다.
 - 완료 결과는 `result`, 중단된 증분 결과는 `pending.result`에 둔다.
 - 결과에는 적용한 조건, 원본 공시 건수, 검색 시작 위치, 검색 대상 건수, 검사 완료 건수, 검색 결과 건수와 선택한 공시의 `acpt_no`를 기록한다.
-- `acpt_no`는 로마자를 포함할 수 있는 텍스트다.
 
 ### `<data_root>/03-filter/<mode>/filtered.json`
 
@@ -32,7 +31,7 @@
 
 - `<workflow-name>.json`의 선택 결과를 다음 작업에 전달하는 mode별 파생 출력 파일이다.
 - `format`은 `kind_disclosure_filter_v1`이고 객체 맨 위의 `disclosures` 목록에 선택한 공시를 둔다.
-- 각 공시는 비어 있지 않은 텍스트 `acpt_no`와 ISO 날짜로 시작하는 `disclosed_at`을 가진다.
+- 각 공시는 비어 있지 않은 `acpt_no`와 ISO 날짜로 시작하는 `disclosed_at`을 가진다.
 
 #### Defaults and Exceptions
 

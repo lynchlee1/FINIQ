@@ -9,7 +9,7 @@
 #### I/O Structure
 
 - 접수번호, 공시일 metadata와 선택한 본문 문서 번호를 담은 입력 파일이다.
-- `records[].acpt_no`는 로마자를 포함할 수 있는 텍스트다.
+- `records[].acpt_no`는 저장할 공시를 식별한다.
 - `records[].selected_main_doc_no`는 선택한 본문 문서 번호다.
 - `records[].metadata.disclosed_at`은 ISO 날짜로 시작한다.
 
@@ -18,7 +18,6 @@
 #### I/O Structure
 
 - KIND에서 받은 공시 본문 HTML을 원본 구조로 보존한 출력 파일이다.
-- 파일명의 `acpt_no`는 로마자를 포함할 수 있는 텍스트다.
 - `<YYYY>`는 입력 record의 `metadata.disclosed_at` 연도다.
 
 ### `<data_root>/05-internal-html-download/<mode>/kind_disclosure_html_manifest.json`

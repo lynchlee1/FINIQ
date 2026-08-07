@@ -1,7 +1,7 @@
-# 공시원문 변환 Mode 문서
+# Parser Mode Submodules
 
-- `bond-issuance` — [Guide](bond-issuance/guides.md), [Cases](bond-issuance/cases.md), [Reference](bond-issuance/reference.md)
-- `rights-issuance` — [하위 문서](rights-issuance/README.md)
-- `shareholder-meeting` — [Guide](shareholder-meeting/guides.md), [Cases](shareholder-meeting/cases.md), [Reference](shareholder-meeting/reference.md)
-- `asset-transaction` — [Guide](asset-transaction/guides.md)
-- `security-transaction` — [Guide](security-transaction/guides.md)
+- `asset-transaction` — [Features](asset-transaction/features.md), [Reference](asset-transaction/reference.md)
+- `bond-issuance` — [Features](bond-issuance/features.md), [Reference](bond-issuance/reference.md)
+- `rights-issuance` — [Submodules](rights-issuance/README.md)
+- `security-transaction` — [Features](security-transaction/features.md), [Reference](security-transaction/reference.md)
+- `shareholder-meeting` — [Features](shareholder-meeting/features.md), [Reference](shareholder-meeting/reference.md)
