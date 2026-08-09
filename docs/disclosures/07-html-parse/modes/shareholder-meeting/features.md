@@ -6,6 +6,12 @@
 
 ## Features
 
+### Select the Shareholder Meeting Mode
+
+#### Behavior
+
+- `parse_shareholder_meeting()`이 `shareholder_meeting` mode의 업무값을 공통 record에 추가한다.
+
 ### Parse Agendas
 
 #### Behavior
@@ -16,8 +22,8 @@
 
 #### Defaults and Exceptions
 
-- mode가 `RESULT`이면 `1. 결의사항`, `NOTICE`이면 `3. 의안 주요내용` 또는 `결의사항`을 정해진 순서로 확인한다.
-- mode가 없으면 두 유형을 모두 확인하며 유효한 목차나 행이 없으면 빈 목록을 저장한다.
+- 07단계 parser는 외부 title이나 `RESULT`·`NOTICE` 구분을 받지 않는다. `1. 결의사항`, `3. 의안 주요내용` 또는 `결의사항`과 일치하는 첫 `td`를 문서 순서대로 사용한다.
+- 유효한 목차나 행이 없으면 빈 목록을 저장한다.
 
 ### Parse Election Details
 

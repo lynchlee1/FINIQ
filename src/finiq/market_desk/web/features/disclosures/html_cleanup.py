@@ -103,7 +103,7 @@ def check_disclosure_html_output_directory_payload(
     payload["dry_run"] = True
     summary = clean_disclosure_html_output_directory_payload(payload)
     if summary.get("source_type") == "external":
-        source_json, source_json_path = _load_workspace_filtered_payload(body)
+        source_json, _source_json_path = _load_workspace_filtered_payload(body)
         acpt_numbers = collect_acpt_numbers_from_json(source_json)
         acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
         target_years = _target_years_from_json(source_json, acpt_numbers)
@@ -111,7 +111,7 @@ def check_disclosure_html_output_directory_payload(
             Path(summary["output_directory"]),
             acpt_numbers,
             target_years=target_years,
-            source_json_path=source_json_path,
+            source_json=source_json,
             structurally_valid_acpt_numbers=summary[
                 "existing_target_acpt_numbers"
             ],
@@ -119,14 +119,14 @@ def check_disclosure_html_output_directory_payload(
         integrity_summary.pop("_verified_integrity_by_acpt_no", None)
         summary.update(integrity_summary)
     elif summary.get("source_type") == "content":
-        _source_json, source_path, acpt_numbers, target_years = (
+        source_json, _source_path, acpt_numbers, target_years = (
             _load_internal_html_integrity_source(body)
         )
         integrity_summary = _inspect_html_integrity(
             Path(summary["output_directory"]),
             acpt_numbers,
             target_years=target_years,
-            source_json_path=source_path,
+            source_json=source_json,
             structurally_valid_acpt_numbers=summary[
                 "existing_target_acpt_numbers"
             ],
@@ -162,7 +162,7 @@ def create_external_html_integrity_baseline_payload(
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     _ensure_safe_html_cleanup_directory(resolved_output_directory)
 
-    source_json, source_json_path = _load_workspace_filtered_payload(body)
+    source_json, _source_json_path = _load_workspace_filtered_payload(body)
     acpt_numbers = collect_acpt_numbers_from_json(source_json)
     if not acpt_numbers:
         raise ValueError("No acpt_no values found in JSON")
@@ -205,7 +205,6 @@ def create_external_html_integrity_baseline_payload(
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
-        source_json_path=source_json_path,
         acpt_numbers=baseline_acpt_numbers,
         source_json=source_json,
         source_integrity=source_integrity,
@@ -237,7 +236,7 @@ def create_internal_html_integrity_baseline_payload(
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     _ensure_safe_html_cleanup_directory(resolved_output_directory)
 
-    source_json, source_path, acpt_numbers, target_years = (
+    source_json, _source_path, acpt_numbers, target_years = (
         _load_internal_html_integrity_source(body)
     )
     output_summary = _validate_html_output_directory_files(
@@ -277,7 +276,6 @@ def create_internal_html_integrity_baseline_payload(
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
-        source_json_path=source_path,
         acpt_numbers=baseline_acpt_numbers,
         source_json=source_json,
         source_integrity=source_integrity,
@@ -335,7 +333,6 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
-        source_json_path=resolved_source_path,
         acpt_numbers=acpt_numbers,
         source_json=source_json,
     )

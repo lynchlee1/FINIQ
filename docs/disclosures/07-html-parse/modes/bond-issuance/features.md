@@ -6,6 +6,18 @@
 
 ## Features
 
+### Select the Bond Issuance Mode
+
+#### Behavior
+
+- `parse_bond_issuance()`가 `bond_issuance` mode의 업무값을 공통 record에 추가한다.
+
+### Connect Company Metadata
+
+#### Behavior
+
+- metadata에 회사명이 있으면 `corp_name`에 저장한다.
+
 ### Find Fixed Cell Positions
 
 #### Behavior
@@ -38,7 +50,7 @@
 
 #### Defaults and Exceptions
 
-- 해당 표가 없으면 즉시 실패 처리한다.
+- 해당 표가 없으면 `투자자`를 `null`, 상태를 `source_not_found`로 기록하고 strong warning을 만든다.
 - 투자자 표에는 메인 표의 고정 N 규칙을 적용하지 않는다.
 
 ### Determine the Bond Type
@@ -168,3 +180,15 @@
 #### Defaults and Exceptions
 
 - 합계가 달라도 원본에서 읽은 값은 고치지 않는다.
+
+### Inspect Bond Parse Results
+
+#### Behavior
+
+- 조회 함수는 저장한 결과에서 사채 요약을 만든다.
+
+### Investigate Bond Parser Problems
+
+#### Behavior
+
+- 06단계 HTML과 `resources/KIND/bond_issuance`의 실제 KIND 파일을 대조한다.

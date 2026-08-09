@@ -118,7 +118,7 @@ filter가 정의하는 mode 폴더의 `filter.json`에 조건, 실행 상태, �
 
 #### Behavior
 
-조건 입력, 데이터베이스 검색, 결과 기록 순서와 각 단계의 시작·완료·중단 시각, 입력 경로, 원본 JSON 경로와 요약을 기록한다.
+조건 입력, 데이터베이스 검색, 결과 기록 순서와 각 단계의 시작·완료·중단 시각과 요약을 기록한다.
 
 #### Defaults and Exceptions
 
@@ -126,6 +126,7 @@ filter가 정의하는 mode 폴더의 `filter.json`에 조건, 실행 상태, �
 - 클라이언트 연결이 끊기면 지금까지 검사한 증분 결과를 `interrupted`로 저장한다. 검사 전에 끊겨 부분 결과가 없으면 원본은 실행 전 상태를 유지한다.
 - 일반 실행 오류는 기존 완료·중단 결과를 유지한 채 `failed` 상태와 오류를 기록한다.
 - 진행 단위나 숫자가 없거나 형식이 다르면 실패 처리한다.
+- `filter.json`과 `filtered.json`에는 SQLite manifest나 filter JSON의 절대 경로를 기록하지 않는다.
 
 ### Share Filter Workflows in the UI
 

@@ -62,7 +62,6 @@ def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, 
         )
         raise ValueError(msg)
     payload = dict(payload)
-    payload["source_json_path"] = str(source_path)
     return payload
 
 
@@ -344,7 +343,7 @@ def download_disclosure_internal_html_payload(
             resolved_output_directory,
             acpt_numbers,
             target_years=target_years,
-            source_json_path=str(source_path),
+            source_json=source_json,
             structurally_valid_acpt_numbers=output_summary[
                 "existing_target_acpt_numbers"
             ],
@@ -445,7 +444,6 @@ def download_disclosure_internal_html_payload(
     saved_acpt_numbers = [path.stem for path in saved_paths]
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
-        source_json_path=str(source_path),
         acpt_numbers=saved_acpt_numbers,
         source_json=source_json,
         source_integrity=source_integrity_by_acpt_no,

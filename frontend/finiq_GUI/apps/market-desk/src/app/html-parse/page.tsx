@@ -411,7 +411,7 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
       return;
     }
-    applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
+    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${preset.name}`);
   };
 
   const loadFilterPresetFromJson = async () => {
@@ -517,9 +517,8 @@ export default function HtmlParsePage() {
   const handleOpenWarningFiles = (groupKey: string) => {
     const pageInfo = warningPageInfoByGroup[groupKey];
     if (!pageInfo) return;
-    const resultInputDirectory = String(latestParseResult?.input_directory || "").trim();
     pageInfo.acptNumbers.forEach((acptNo) => {
-      window.open(warningSourceUrl(acptNo, resultInputDirectory), "_blank", "noopener,noreferrer");
+      window.open(warningSourceUrl(acptNo, inputDirectory), "_blank", "noopener,noreferrer");
     });
     setStatus(`${WARNING_LEVEL_LABELS[pageInfo.level]} ${pageInfo.warningCode} 파일 ${formatInteger(pageInfo.startIndex + 1)}-${formatInteger(pageInfo.endIndex)}번 열기를 요청했습니다.`);
     setIsErrorStatus(false);

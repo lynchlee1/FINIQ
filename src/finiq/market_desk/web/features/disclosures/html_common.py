@@ -319,7 +319,6 @@ def _relative_name(path: Path, root: Path) -> str:
 def _write_html_manifest(
     *,
     output_directory: Path,
-    source_json_path: str,
     acpt_numbers: list[str],
     source_json: Any,
     source_integrity: dict[str, dict[str, Any]] | None = None,
@@ -352,11 +351,21 @@ def _write_html_manifest(
         manifest_path,
         {
             "format": "finiq_disclosure_html_manifest_v1",
-            "source_json_path": source_json_path,
+            "source_fingerprint": _source_json_fingerprint(source_json),
             "disclosures": disclosures,
         },
     )
     return manifest_path
+
+
+def _source_json_fingerprint(source_json: Any) -> str:
+    encoded = json.dumps(
+        source_json,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _load_html_manifest_integrity(
@@ -401,7 +410,7 @@ def _load_html_manifest_integrity(
             "source_sha256": sha256,
             "source_size_bytes": size,
         }
-    return str(payload.get("source_json_path") or ""), integrity_by_acpt_no
+    return str(payload.get("source_fingerprint") or ""), integrity_by_acpt_no
 
 
 def _inspect_html_integrity(
@@ -409,13 +418,16 @@ def _inspect_html_integrity(
     acpt_numbers: list[str],
     *,
     target_years: dict[str, str],
-    source_json_path: str,
+    source_json: Any,
     structurally_valid_acpt_numbers: list[str],
 ) -> dict[str, Any]:
-    manifest_source_path, expected_integrity = _load_html_manifest_integrity(
+    manifest_source_fingerprint, expected_integrity = _load_html_manifest_integrity(
         output_directory
     )
-    source_matches = bool(manifest_source_path) and manifest_source_path == source_json_path
+    source_matches = (
+        bool(manifest_source_fingerprint)
+        and manifest_source_fingerprint == _source_json_fingerprint(source_json)
+    )
     structurally_valid = set(structurally_valid_acpt_numbers)
     unverified_acpt_numbers: list[str] = []
     hash_mismatch_acpt_numbers: list[str] = []

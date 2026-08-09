@@ -592,16 +592,12 @@ def _inspect_automation_download(profile: dict[str, Any]) -> dict[str, Any]:
 
 def _table_manifest(profile: dict[str, Any]) -> Path:
     root = Path(profile["data_root"])
-    expected_source = (root / "01-list" / ".automation-windows").resolve()
     path = root / "02-table" / "sqlite_manifest.json"
     try:
         manifest = _load_sqlite_manifest(path)
-        source_path = Path(
-            str(manifest.get("source_path") or "")
-        ).expanduser().resolve()
     except (OSError, ValueError, json.JSONDecodeError) as error:
         raise ValueError("공시내역 변환 매니페스트를 찾을 수 없습니다.") from error
-    if manifest.get("source_type") != "source_folder" or source_path != expected_source:
+    if manifest.get("source_type") != "source_folder":
         raise ValueError("공시내역 변환 매니페스트를 찾을 수 없습니다.")
     return path
 
@@ -622,7 +618,6 @@ def _filter_signature(payload: dict[str, Any]) -> str:
         {
             "format": payload.get("format"),
             "source_type": payload.get("source_type"),
-            "source_sqlite_manifest_path": payload.get("source_sqlite_manifest_path"),
             "filters": filters,
             "summary": payload.get("summary"),
             "disclosures": payload.get("disclosures"),
@@ -660,14 +655,6 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
     manifest_path = _table_manifest(profile)
     manifest = _load_sqlite_manifest(manifest_path)
     _validate_sqlite_manifest_counts(manifest_path, manifest)
-    source_path = Path(str(manifest.get("source_path") or "")).expanduser().resolve()
-    expected_source = (root / "01-list" / ".automation-windows").resolve()
-    if manifest.get("source_type") != "source_folder" or source_path != expected_source:
-        return _inspection_failure(
-            2,
-            reason="공시내역 변환 입력 경로가 현재 다운로드 경로와 다릅니다.",
-            details={"expected": str(expected_source), "actual": str(source_path)},
-        )
     table_result = filter_disclosures_payload(
         {
             "data_root": str(root),
@@ -919,7 +906,6 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
     if payload is None or payload.get("format") != "finiq_disclosure_html_parse_v1":
         return _inspection_failure(7, reason="공시원문 변환 결과가 없거나 손상되었습니다.")
     input_directory = (root / "06-sections" / ".automation-current").resolve()
-    saved_input = Path(str(payload.get("input_directory") or "")).expanduser().resolve()
     filters = payload.get("filter_settings") or {}
     html_files = (
         _collect_parse_html_files(input_directory, None)
@@ -938,7 +924,6 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
     valid = (
         payload.get("mode") == mode
         and not payload.get("cancelled")
-        and saved_input == input_directory
         and filters.get("filter_blocks") in (None, [])
         and filters.get("record_filters") in (None, [])
         and not errors

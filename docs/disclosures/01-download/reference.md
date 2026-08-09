@@ -22,6 +22,7 @@
 - `disclosureTypeArrXX`, `disclosureTypeXX`, `pDisclosureTypeXX`는 `disclosure_type_groups`에서 만들며 직접 입력하지 않는다.
 - 시장, 증권 종류와 공시 유형은 허용된 값만 사용한다.
 - 저장된 검색 조건은 현재 형식으로 정확히 바꿀 수 있어야 한다.
+- 실행 요청의 `output_directory`는 저장 위치를 정할 때만 사용하며 이 JSON에는 기록하지 않는다.
 
 #### Defaults and Exceptions
 
@@ -33,3 +34,5 @@
 #### I/O Structure
 
 - 페이지별 다운로드 진행 내역과 검증 상태를 기록한 출력 파일이다.
+- `saved_files`와 `last_saved_file`은 이 JSON이 있는 폴더를 기준으로 한 상대 파일명이다.
+- 내장된 `input`에도 `output_directory`를 기록하지 않는다.

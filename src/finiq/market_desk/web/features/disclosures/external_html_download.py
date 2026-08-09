@@ -15,7 +15,7 @@ def download_disclosure_external_html_payload(
         msg = "output_directory is required"
         raise ValueError(msg)
 
-    source_json, resolved_source_json_path = _load_workspace_filtered_payload(body)
+    source_json, _source_json_path = _load_workspace_filtered_payload(body)
 
     acpt_numbers = collect_acpt_numbers_from_json(source_json)
     if not acpt_numbers:
@@ -78,7 +78,7 @@ def download_disclosure_external_html_payload(
             resolved_output_directory,
             acpt_numbers,
             target_years=target_years,
-            source_json_path=resolved_source_json_path,
+            source_json=source_json,
             structurally_valid_acpt_numbers=output_summary[
                 "existing_target_acpt_numbers"
             ],
@@ -181,7 +181,6 @@ def download_disclosure_external_html_payload(
     ]
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
-        source_json_path=resolved_source_json_path,
         acpt_numbers=saved_acpt_numbers,
         source_json=source_json,
         source_integrity=source_integrity_by_acpt_no,

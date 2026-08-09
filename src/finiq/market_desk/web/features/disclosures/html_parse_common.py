@@ -802,7 +802,6 @@ def _build_payload(
     *,
     mode: str,
     cancelled: bool,
-    input_directory: Path,
     html_files: list[Path],
     records: list[dict[str, Any]],
     families: dict[str, dict[str, Any]],
@@ -815,7 +814,6 @@ def _build_payload(
         "format": "finiq_disclosure_html_parse_v1",
         "mode": mode,
         "cancelled": cancelled,
-        "input_directory": str(input_directory),
         "filter_settings": {
             "filter_blocks": filter_blocks,
             "record_filters": record_filters,
@@ -846,7 +844,6 @@ def _payload_from_state(
     return _build_payload(
         mode=request.mode,
         cancelled=cancelled,
-        input_directory=request.input_directory,
         html_files=request.html_files,
         records=state.records,
         families=request.families,

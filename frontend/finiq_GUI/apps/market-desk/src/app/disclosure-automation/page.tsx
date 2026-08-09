@@ -422,7 +422,7 @@ export default function DisclosureAutomationPage() {
   ) => {
     const execution = validatedExecution();
     if (executionMask.some((stage) => stage >= 3) && !selectedPreset) {
-      throw new Error("조건검색 프리셋을 선택하세요.");
+      throw new Error("조건검색 필터를 선택하세요.");
     }
     return {
       name,
@@ -617,7 +617,7 @@ export default function DisclosureAutomationPage() {
       setIsErrorStatus(true);
       return;
     }
-    applyPreset(preset, `조건검색 프리셋을 불러왔습니다: ${preset.name}`);
+    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${preset.name}`);
   };
 
   const savePreset = async () => {

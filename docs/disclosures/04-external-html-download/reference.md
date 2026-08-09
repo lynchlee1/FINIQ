@@ -25,6 +25,7 @@
 
 - 외부 HTML을 원본 공시 metadata와 연결하는 출력 파일이다.
 - 파일마다 `source_size_bytes`와 `source_sha256`을 기록한다.
+- 입력 JSON의 절대 경로 대신 내용으로 계산한 `source_fingerprint`를 기록한다.
 
 ### `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`
 

@@ -37,6 +37,7 @@ export default function HtmlBondSummaryPage() {
 
   // Form State
   const {
+    html_section_split_output_directory: inputPath,
     html_parse_output_directory: outputPath,
     fetchSettings,
     saveSetting,
@@ -55,6 +56,11 @@ export default function HtmlBondSummaryPage() {
       setIsErrorStatus(true);
       return;
     }
+    if (!inputPath) {
+      setStatus("입력 데이터 경로가 필요합니다.");
+      setIsErrorStatus(true);
+      return;
+    }
 
     setIsFetching(true);
     setStatus("채권 요약을 불러오는 중...");
@@ -65,6 +71,7 @@ export default function HtmlBondSummaryPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          input_directory: inputPath,
           output_path: outputPath,
           limit: bondLimit === "all" ? null : Number(bondLimit),
         }),
@@ -178,6 +185,16 @@ export default function HtmlBondSummaryPage() {
   }, [filteredRecords, selectedBondKey]);
 
   const conditionFields: HtmlWorkflowField[] = [
+    {
+      id: "inputPath",
+      kind: "path",
+      label: "입력 데이터 경로",
+      mode: "folder",
+      value: inputPath || "",
+      onChange: (val) => saveSetting("html_section_split_output_directory", val),
+      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
+      span: 2,
+    },
     {
       id: "outputPath",
       kind: "path",
