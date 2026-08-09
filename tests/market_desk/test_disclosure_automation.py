@@ -870,7 +870,7 @@ def test_section_inspection_uses_current_rules_and_exact_output(
     )
 
 
-def test_parse_inspection_compares_mode_inputs_filters_membership_and_mtime(
+def test_parse_inspection_compares_mode_filters_membership_and_mtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
@@ -890,7 +890,6 @@ def test_parse_inspection_compares_mode_inputs_filters_membership_and_mtime(
         "format": "finiq_disclosure_html_parse_v1",
         "mode": "bond_issuance",
         "cancelled": False,
-        "input_directory": str(input_directory),
         "filter_settings": {"filter_blocks": [], "record_filters": []},
         "summary": {"found_files": 1, "parsed_files": 1, "failed_files": 0},
         "records": [{"acpt_no": source.stem}],

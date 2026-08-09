@@ -19,7 +19,7 @@
 - `filter_blocks`가 목록이 아니면 실패 처리한다.
 - `skip_errors`는 불리언으로 명시해야 하며 없거나 다른 형식이면 실패 처리한다.
 - 확장자를 뺀 파일명이 같은 입력이 둘 이상이면 실행을 시작하지 않는다.
-- metadata를 사용하려면 `filtered_metadata_path`와 `compressed_metadata_path`를 직접 지정해야 하며 인접 파일을 탐색하지 않는다.
+- 두 metadata 파일은 선택 입력이다. 사용할 파일의 `filtered_metadata_path`나 `compressed_metadata_path`를 각각 직접 지정해야 하며 인접 파일을 탐색하지 않는다.
 - `filtered_metadata_path`를 지정하면 선택한 모든 HTML의 `disclosed_at`이 `YYYY-MM-DD HH:MM` 형식이어야 한다.
 - 압축 metadata의 각 record에는 `metadata` 객체가 있어야 하며 family 구성원에 `disclosed_at`이 없으면 실패 처리한다.
 
@@ -43,7 +43,6 @@
 #### Behavior
 
 - `features/disclosures/html_parse_common.py`의 `PARSER_REGISTRY`에서 선택한 mode parser를 찾는다.
-- `parse_bond_issuance()`, `parse_rights_issuance()`, `parse_shareholder_meeting()`, `parse_asset_transaction()`, `parse_security_transaction()` 중 선택한 함수만 실행한다.
 - 공통 식별값, 값별 상태와 warning 규칙에 mode별 업무값을 추가한다.
 - 외부 title은 함수 선언에 `title` 인자가 있는 parser에만 전달한다.
 
@@ -58,7 +57,6 @@
 - 지정된 `filtered.json`과 `compressed-external-html.json`에서 title·회사명·시장·공시시각·본문 문서번호를 연결한다.
 - 파일명 stem 전체를 `acpt_no`와 metadata 연결 key로 사용하며 밑줄로 자르거나 숫자인지 검사하지 않는다.
 - 완성된 correction family만 record에 연결하고 family 본문은 최상위 `families`에 한 번만 둔다.
-- `bond_issuance`와 `rights_issuance`는 metadata에 회사명이 있으면 `corp_name`도 저장한다.
 
 #### Defaults and Exceptions
 
@@ -73,9 +71,10 @@
 - metadata에 값이 있으면 `doc_no`, `disclosed_at`을 연결하고 family에는 `family_id`, `current_sequence`, `family_member_count`를 기록한다.
 - parser가 직접 반환한 `raw_tables`는 분석할 때만 사용하고 저장 record에서는 제거하며 `raw_rows`는 만들지 않는다.
 - `rcept_no`, `source_file`, 빈 `correction_families`는 만들지 않는다.
-- 입력 루트는 최상위 `input_directory`에 한 번만 기록하고 record·warning·error·preview는 `acpt_no`로 원본을 식별한다.
+- 실행 요청의 입력·출력 경로는 저장 payload에 기록하지 않고 record·warning·error·preview는 `acpt_no`로 원본을 식별한다.
 - `source_preview`는 바깥 record의 `acpt_no`를 반복하지 않는다.
 - 저장 결과에서 제외한 성공 record의 warning도 최상위 warning 집계에는 남긴다.
+- `summary.found_files`는 `limit` 적용 뒤 선택한 HTML 수, `parsed_files`는 필터를 통과해 저장한 record 수, `failed_files`는 건너뛴 파일 오류 수다.
 
 #### Defaults and Exceptions
 
@@ -121,7 +120,7 @@
 #### Behavior
 
 - `build_parse_filter_candidates_payload()`가 선택한 항목의 값별 개수와 접수번호 예시를 모든 입력에서 계산한다.
-- 접수번호 예시는 일부만 보여 주고 전체 개수는 모두 계산하며 저장 결과는 바꾸지 않는다.
+- 접수번호 예시는 값마다 최대 20개만 보여 주고 전체 개수는 모두 계산하며 저장 결과는 바꾸지 않는다.
 
 #### Defaults and Exceptions
 
@@ -132,23 +131,12 @@
 #### Behavior
 
 - `cancel_disclosure_html_parse()`가 실행 중인 변환에 취소 요청을 전달한다.
-- 조회 함수는 사채 요약, 정정 내역과 Excel 결과를 만든다.
+- 조회 함수는 Excel 결과를 만들며, 08단계는 이 단계가 저장한 correction family를 사용해 정정 내역을 만든다.
 
 #### Defaults and Exceptions
 
 - 진행 알림 간격이 정수가 아니거나 1보다 작으면 실패 처리한다.
 - 안내 수준, code, 접수번호나 예시 형식이 잘못되면 실패 처리한다.
-
-### Build Shared Raw Table Results
-
-#### Behavior
-
-- `asset_transaction`과 `security_transaction`은 공통 식별값과 원본 `raw_tables`를 만드는 같은 입력·결과 흐름을 사용한다.
-- 두 parser의 mode 전용 schema는 빈 객체다.
-
-#### Defaults and Exceptions
-
-- mode 전용 업무값, `field_parse_status`와 parser warning은 만들지 않는다.
 
 ### Investigate Parser Problems
 
@@ -156,7 +144,6 @@
 
 1. 제보받은 mode와 접수번호를 확인하고 같은 입력으로 변환을 다시 실행한다.
 2. 저장 결과와 안내를 찾고 해당 06단계 HTML을 연다.
-3. `bond_issuance`와 `rights_issuance`는 `resources/KIND/bond_issuance`, `resources/KIND/rights_issuance`의 실제 KIND 파일과도 대조한다.
-4. 기대값의 표와 칸을 현재 mode parser의 추출 규칙과 비교한다.
-5. 해당 parser의 함수 책임을 확인해 규칙을 고치고 실제 KIND 파일, test fixture와 합성 HTML로 검증한다.
-6. 변환을 다시 실행해 제보된 오류가 사라지고 다른 결과가 바뀌지 않았는지 확인한다.
+3. 기대값의 표와 칸을 현재 mode parser의 추출 규칙과 비교한다.
+4. 해당 parser의 함수 책임을 확인해 규칙을 고치고 실제 원본, test fixture와 합성 HTML로 검증한다.
+5. 변환을 다시 실행해 제보된 오류가 사라지고 다른 결과가 바뀌지 않았는지 확인한다.

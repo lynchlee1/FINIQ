@@ -939,9 +939,7 @@ def test_filter_disclosures_payload_uses_standard_manifest_name(
     payload = filter_disclosures_payload({"data_root": str(data_root)})
 
     assert not requested_path.exists()
-    assert payload["source_sqlite_manifest_path"] == str(
-        (sqlite_root / "sqlite_manifest.json").resolve()
-    )
+    assert "source_sqlite_manifest_path" not in payload
 
 
 def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path) -> None:
@@ -961,7 +959,7 @@ def test_filter_disclosures_payload_finds_manifest_from_data_root(tmp_path: Path
     payload = filter_disclosures_payload({"data_root": str(data_root)})
 
     assert payload["source_type"] == "sqlite_manifest"
-    assert payload["source_sqlite_manifest_path"] == str(manifest_path.resolve())
+    assert "source_sqlite_manifest_path" not in payload
     assert payload["summary"]["source_disclosures"] == 2
 
 
@@ -979,7 +977,7 @@ def test_filter_disclosures_payload_rejects_missing_manifest_shard_path(tmp_path
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for shard in manifest["shards"]:
-        shard["path"] = str(tmp_path / "stale" / Path(shard["path"]).name)
+        shard["relative_path"] = "missing.sqlite"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="SQLite shard not found"):
@@ -1594,9 +1592,13 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert payload["output_path"] == str(manifest_path.resolve())
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["format"] == "finiq_disclosure_table_manifest_v1"
+    assert "source_path" not in manifest
+    assert "manifest_path" not in manifest
+    assert "shard_root" not in manifest
     assert manifest["shards"][0]["year"] == "2025"
+    assert "path" not in manifest["shards"][0]
 
-    shard_path = Path(manifest["shards"][0]["path"])
+    shard_path = manifest_path.parent / manifest["shards"][0]["relative_path"]
     assert shard_path.parent == manifest_path.parent
     connection = sqlite3.connect(shard_path)
     try:
@@ -1736,7 +1738,9 @@ def test_build_disclosure_table_payload_ignores_repair_overlay(
     )
 
     assert payload["summary"]["source_rows"] == 2
-    assert payload["pages"][0]["source_file"] == str(original_page)
+    assert payload["pages"][0]["source_file"] == original_page.relative_to(
+        source_root
+    ).as_posix()
 
 
 def test_build_disclosure_table_payload_does_not_reread_failed_source_page(
@@ -1923,7 +1927,9 @@ def test_build_disclosure_table_payload_deduplicates_source_rows_by_acpt_no(
     assert manifest["summary"]["duplicate_rows"] == 1
     assert manifest["summary"]["disclosures"] == 1
 
-    with sqlite3.connect(manifest["shards"][0]["path"]) as connection:
+    with sqlite3.connect(
+        manifest_path.parent / manifest["shards"][0]["relative_path"]
+    ) as connection:
         rows = connection.execute(
             "SELECT acpt_no FROM disclosures"
         ).fetchall()
@@ -2082,13 +2088,8 @@ def test_write_disclosure_html_manifest_payload_from_workspace_filtered_json(
 
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert payload["requested_count"] == 2
-    assert manifest["source_json_path"] == str(
-        tmp_path
-        / "workspace"
-        / "03-filter"
-        / "bond_issuance"
-        / "filtered.json"
-    )
+    assert "source_json_path" not in manifest
+    assert len(manifest["source_fingerprint"]) == 64
     assert [item["acpt_no"] for item in manifest["disclosures"]] == [
         "20250101000001",
         "20250101000002",
@@ -2128,9 +2129,8 @@ def test_write_disclosure_html_manifest_payload_uses_selected_mode_filter_folder
 
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert payload["requested_count"] == 1
-    assert manifest["source_json_path"] == str(
-        data_root / "03-filter" / "bond_issuance" / "filtered.json"
-    )
+    assert "source_json_path" not in manifest
+    assert len(manifest["source_fingerprint"]) == 64
     assert [record["acpt_no"] for record in manifest["disclosures"]] == [
         "20250101000001",
     ]
@@ -4721,7 +4721,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
     assert payload["mode"] == "bond_issuance"
     assert payload["summary"] == {"found_files": 1, "parsed_files": 1, "failed_files": 0}
     assert payload["cancelled"] is False
-    assert payload["input_directory"] == str(viewer_dir.resolve())
+    assert "input_directory" not in payload
     assert "progress_log" not in payload
     assert payload["records"][0]["acpt_no"] == "20250101000001"
     assert payload["records"][0]["title"] == "Sample Disclosure"
@@ -4729,7 +4729,7 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
     assert "raw_rows" not in payload["records"][0]
     assert "raw_tables" not in payload["records"][0]
     assert stored["format"] == payload["format"]
-    assert stored["input_directory"] == str(viewer_dir.resolve())
+    assert "input_directory" not in stored
     assert "source_file" not in stored["records"][0]
     assert "progress_log" not in stored
 
@@ -5018,13 +5018,13 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
     )
 
     assert payload["summary"]["found_files"] == 1
-    assert payload["input_directory"] == str(input_dir.resolve())
+    assert "input_directory" not in payload
     assert "output_path" not in payload
     assert (bond_dir / "parsed-bond_issuance.json").is_file()
     stored = json.loads(
         (bond_dir / "parsed-bond_issuance.json").read_text(encoding="utf-8")
     )
-    assert stored["input_directory"] == str(input_dir.resolve())
+    assert "input_directory" not in stored
     assert "output_path" not in stored
     assert not (input_dir / "parsed-bond_issuance.json").exists()
     record = payload["records"][0]
@@ -5133,7 +5133,7 @@ def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
         }
     )
 
-    assert payload["input_directory"] == str(input_dir.resolve())
+    assert "input_directory" not in payload
     assert "output_path" not in payload
     assert (output_dir / "parsed-rights_issuance.json").is_file()
     assert not (input_dir / "parsed-rights_issuance.json").exists()
@@ -5167,7 +5167,7 @@ def test_parse_disclosure_html_payload_accepts_dotted_output_directory(
         }
     )
 
-    assert payload["input_directory"] == str(input_dir.resolve())
+    assert "input_directory" not in payload
     assert "output_path" not in payload
     assert (output_dir / "parsed-rights_issuance.json").is_file()
 
@@ -5476,13 +5476,15 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
 
 
 def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
-    parse_path = tmp_path / "parsed-bond_issuance.json"
+    (tmp_path / "06-sections").mkdir()
+    output_directory = tmp_path / "07-converted" / "bond_issuance"
+    output_directory.mkdir(parents=True)
+    parse_path = output_directory / "parsed-bond_issuance.json"
     parse_path.write_text(
         json.dumps(
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
-                "input_directory": str(tmp_path.resolve()),
                 "families": {
                     "20250102000002": {
                         "members": [
@@ -5519,7 +5521,9 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    payload = build_bond_parse_summary_payload({"output_path": str(tmp_path)})
+    payload = build_bond_parse_summary_payload(
+        {"input_directory": str(tmp_path / "06-sections"), "output_path": str(output_directory)}
+    )
 
     assert payload["format"] == "finiq_bond_parse_summary_v1"
     assert payload["summary"] == {
@@ -5537,13 +5541,16 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
 
 
 def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Path) -> None:
-    parse_path = tmp_path / "parsed-bond_issuance.json"
+    input_directory = tmp_path / "06-sections"
+    input_directory.mkdir()
+    output_directory = tmp_path / "07-converted" / "bond_issuance"
+    output_directory.mkdir(parents=True)
+    parse_path = output_directory / "parsed-bond_issuance.json"
     parse_path.write_text(
         json.dumps(
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
-                "input_directory": str(tmp_path.resolve()),
                 "records": [
                     {
                         "title": "전환사채권발행결정",
@@ -5556,7 +5563,9 @@ def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Pat
         encoding="utf-8",
     )
 
-    payload = build_bond_parse_summary_payload({"output_path": str(tmp_path)})
+    payload = build_bond_parse_summary_payload(
+        {"input_directory": str(input_directory), "output_path": str(output_directory)}
+    )
 
     assert payload["source_path"] == str(parse_path)
     assert payload["summary"]["records"] == 1
@@ -5575,8 +5584,9 @@ def test_build_bond_parse_summary_payload_rejects_missing_result_file_path(
 
 
 def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path) -> None:
-    (tmp_path / "2025").mkdir()
-    source_path = tmp_path / "2025" / "20250102000002.html"
+    input_directory = tmp_path / "06-sections"
+    (input_directory / "2025").mkdir(parents=True)
+    source_path = input_directory / "2025" / "20250102000002.html"
     source_path.write_text(
         """
         <html>
@@ -5593,13 +5603,14 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
         """,
         encoding="utf-8",
     )
-    parse_path = tmp_path / "parsed-bond_issuance.json"
+    output_directory = tmp_path / "07-converted" / "bond_issuance"
+    output_directory.mkdir(parents=True)
+    parse_path = output_directory / "parsed-bond_issuance.json"
     parse_path.write_text(
         json.dumps(
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
-                "input_directory": str(tmp_path.resolve()),
                 "records": [
                     {
                         "title": "전환사채권발행결정",
@@ -5616,7 +5627,9 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
         encoding="utf-8",
     )
 
-    payload = build_bond_parse_summary_payload({"output_path": str(tmp_path)})
+    payload = build_bond_parse_summary_payload(
+        {"input_directory": str(input_directory), "output_path": str(output_directory)}
+    )
 
     summary_record = payload["records"][0]
     preview = summary_record["source_preview"]

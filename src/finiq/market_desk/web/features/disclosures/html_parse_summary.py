@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from finiq.market_desk.web.features.disclosures.html_parse_support import *
 
+
 def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Load a bond_issuance parse result JSON and return UI-ready summary rows."""
     output_path_raw = str(
@@ -19,11 +20,12 @@ def build_bond_parse_summary_payload(body: dict[str, Any]) -> dict[str, Any]:
     if payload.get("mode") != "bond_issuance":
         msg = "parse result mode must be bond_issuance"
         raise ValueError(msg)
-    input_directory_raw = str(payload.get("input_directory") or "").strip()
+    input_directory_raw = str(body.get("input_directory") or "").strip()
     if not input_directory_raw:
-        msg = "parse result input_directory is required"
-        raise ValueError(msg)
+        raise ValueError("input_directory is required")
     input_directory = Path(input_directory_raw).expanduser().resolve()
+    if not input_directory.is_dir():
+        raise ValueError(f"input_directory does not exist: {input_directory}")
 
     limit = _parse_limit(body.get("limit"))
     records = list(payload.get("records") or [])

@@ -49,7 +49,6 @@ def _filter_result_payload(
     payload = {
         "format": "kind_disclosure_filter_v1",
         "source_type": source_kind,
-        "source_sqlite_manifest_path": str(sqlite_manifest_path),
         "filters": filters,
         "summary": {
             "source_disclosures": source_disclosures,

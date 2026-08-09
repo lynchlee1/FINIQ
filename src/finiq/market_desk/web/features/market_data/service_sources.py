@@ -54,11 +54,13 @@ def _quoted_sqlite_identifier(value: str) -> str:
 
 
 def _resolve_sqlite_shard_path(manifest_path: Path, shard: dict[str, Any]) -> Path:
-    manifest_parent = manifest_path.parent
-    shard_path = Path(str(shard.get("path") or "")).expanduser()
-    if not shard_path.is_absolute():
-        shard_path = (manifest_parent / shard_path).resolve()
-    return shard_path
+    relative_path = str(shard.get("relative_path") or "").strip()
+    if not relative_path:
+        raise ValueError("SQLite manifest shard.relative_path is required")
+    shard_path = Path(relative_path)
+    if shard_path.is_absolute() or len(shard_path.parts) != 1:
+        raise ValueError("SQLite manifest shard.relative_path must be a file name")
+    return (manifest_path.parent / shard_path).resolve()
 
 
 def _validate_sqlite_manifest_counts(

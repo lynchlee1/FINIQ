@@ -485,9 +485,6 @@ def _merge_filter_results(
     result = {
         "format": FILTER_RESULT_FORMAT,
         "source_type": latest_payload.get("source_type") or "sqlite_manifest",
-        "source_sqlite_manifest_path": latest_payload.get(
-            "source_sqlite_manifest_path"
-        ),
         "filters": filters,
         "summary": {
             "source_disclosures": source_disclosures,
@@ -558,10 +555,6 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "status": "running",
             "run_id": run_id,
             "started_at": _utc_now(),
-            "source_path": str(
-                resolve_disclosure_workspace(payload.get("data_root") or "").table
-                / "sqlite_manifest.json"
-            ),
             "source_offset": source_offset,
         }
         working_document["steps"]["record"] = {"status": "pending"}
@@ -653,7 +646,6 @@ def complete_filter_workflow_payload(
             {
                 "status": "completed",
                 "completed_at": _utc_now(),
-                "path": str(path),
                 "summary": merged_result["summary"],
             }
         )

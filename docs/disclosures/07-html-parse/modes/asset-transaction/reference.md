@@ -8,4 +8,4 @@
 
 #### I/O Structure
 
-- `asset_transaction` mode의 공통 record와 원본 표 변환 결과를 담은 출력 파일이다.
+- `asset_transaction` mode의 `acpt_no`, `mode`, 빈 `title`과 `상장구분`을 담은 출력 파일이다.

@@ -783,6 +783,8 @@ def test_kind_workflow_can_save_results_from_stored_inputs(tmp_path: Path) -> No
     assert checkpoint_payload["completed"] is True
     assert checkpoint_payload["last_saved_page"] == 2
     assert checkpoint_payload["saved_files"][-1].endswith("002_post_page_00002.body")
+    assert "output_directory" not in checkpoint_payload["input"]
+    assert all(not Path(path).is_absolute() for path in checkpoint_payload["saved_files"])
 
 
 def test_kind_workflow_parallel_checkpoint_contains_every_saved_file(
@@ -808,6 +810,7 @@ def test_kind_workflow_parallel_checkpoint_contains_every_saved_file(
     assert checkpoint["completed"] is True
     assert checkpoint["last_saved_page"] == 3
     assert checkpoint["last_saved_file"].endswith("003_post_page_00003.body")
+    assert not Path(checkpoint["last_saved_file"]).is_absolute()
     assert sorted(Path(path).name for path in checkpoint["saved_files"]) == [
         "000_mainGET.body",
         "001_post_page_00001.body",

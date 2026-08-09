@@ -6,6 +6,18 @@
 
 ## Features
 
+### Select the Rights Issuance Mode
+
+#### Behavior
+
+- `parse_rights_issuance()`가 `rights_issuance` mode의 업무값을 공통 record에 추가한다.
+
+### Connect Company Metadata
+
+#### Behavior
+
+- metadata에 회사명이 있으면 `corp_name`에 저장한다.
+
 ### Determine the Issuance Type
 
 #### Behavior
@@ -110,3 +122,11 @@
 
 - 결과에 `증자유형`, `신주의 종류와 수`, `증자 전 발행주식총수`, `발행목적`, `발행가액`, `증자방식`, `납입일`, `신주권교부예정일`, `상장예정일`, `발행대상자`를 넣는다.
 - 유형별 상세 결과는 `유상증자`와 `무상증자`에 저장하며 적용하지 않는 상세 결과는 `null`이다.
+- 유상증자와 유무상증자는 최상위 수량·목적·가액·방식·납입일·일정·발행대상자를 `유상증자`에 저장한다.
+- `유상증자`의 `신주배정기준일`과 `1주당 신주배정주식수`는 유상 부분에서 따로 읽는다.
+
+### Investigate Rights Issuance Parser Problems
+
+#### Behavior
+
+- 06단계 HTML과 `resources/KIND/rights_issuance`의 실제 KIND 파일을 대조한다.

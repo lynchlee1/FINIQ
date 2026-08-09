@@ -457,9 +457,9 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     )
     assert workflow["steps"]["database_query"]["status"] == "completed"
     assert workflow["steps"]["record"]["status"] == "completed"
-    assert workflow["steps"]["record"]["path"] == str(
-        (data_root / "03-filter" / "bond_issuance" / "filter.json").resolve()
-    )
+    assert "source_path" not in workflow["steps"]["database_query"]
+    assert "path" not in workflow["steps"]["record"]
+    assert "source_sqlite_manifest_path" not in workflow["result"]
     assert workflow["result"]["summary"]["source_disclosures"] == 2
     assert workflow["result"]["integrity"] == {
         "complete": True,

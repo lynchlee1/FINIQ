@@ -1,5 +1,45 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-09 - Reclassified mode-specific HTML parse documentation
+
+### Purpose
+
+- Keep the direct stage 07 documents limited to behavior shared by every parser mode.
+- Make each parser mode document own its named entry point and mode-specific behavior.
+
+### Implementation summary
+
+- Removed named parser entry points and mode-specific metadata, inspection, raw-table and investigation behavior from the direct Features and Reference.
+- Moved those statements into the corresponding asset transaction, security transaction, bond issuance, rights issuance or shareholder meeting documents.
+- Replaced mode-specific examples in the direct Reference with `<mode>` placeholders and kept the shared request and payload contracts there.
+
+### Verification result
+
+- Confirmed the direct README, Features and Reference contain no parser mode identifiers or mode-specific Korean feature names.
+- Confirmed the reclassified entry points, metadata, inspection, raw-table, warning-code and KIND investigation statements are present in their owning mode documents.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-09 — Made the stage 07 parse Reference easier to follow
+
+### Purpose
+
+- Preserve the complete stage 07 contract while making the document understandable in one pass.
+- Explain technical structures such as cell position, summary counts and source preview in the context where readers use them.
+
+### Implementation summary
+
+- Reordered the Reference around the actual flow from HTML and metadata input through parsing and filters to the saved result.
+- Split required and optional request fields, added a concrete 1-based `N` row example and translated parser terminology into direct explanations.
+- Separated top-level output, summary counts, common record fields, statuses, warnings, errors and correction families into focused sections.
+- Replaced the inspection bullet list with a compact comparison table and clarified that one preview record owns both its top-level `acpt_no` and nested source-table preview.
+
+### Verification result
+
+- Parsed both JSON examples successfully and confirmed all documented request, row, output, status and preview contract terms remain present.
+- Confirmed all stage 07 Markdown links resolve.
+- Passed `test_html_parse_modes_are_registered_documented_and_listed_in_ui`.
+- Confirmed `git diff --check -- docs/disclosures/07-html-parse/reference.md` passes.
+
 ## 2026-08-07 - 공시 식별자 규칙과 저장 연도 출처 통일
 
 ### Purpose
@@ -1330,3 +1370,73 @@
 - Passed all 137 frontend tests, including 13 focused button and MarketDesk palette tests.
 - Completed the MarketDesk production build, including TypeScript and static page generation.
 - Confirmed `git diff --check` passes.
+
+## 2026-08-07 — Made each disclosure filter its mode definition
+
+### Purpose
+
+- Remove the split identity between named filter workflow JSON files and mode result folders.
+- Store each filter definition and its filtered result together under the mode it defines.
+
+### Implementation summary
+
+- Changed the canonical stage 03 layout to `<data_root>/03-filter/<mode>/filter.json` and `<data_root>/03-filter/<mode>/filtered.json`.
+- Removed `workflow_name`, arbitrary filter names and rename behavior from backend execution, automation profiles and the shared filter UI.
+- Updated filter discovery, temporary run paths, JSON import, documentation, UI terminology and regression tests to use mode as the only filter identity.
+- Moved the existing `bond_issuance`, `rights_issuance` and `shareholder_meeting` filter definitions into their mode folders and updated their recorded canonical paths.
+
+### Verification result
+
+- Passed 127 focused Market Desk backend tests and 39 focused frontend tests.
+- Completed the Market Desk production build, including TypeScript and static page generation.
+- Confirmed all three migrated mode folders contain both `filter.json` and `filtered.json`, with no root-level stage 03 JSON remaining.
+- Did not execute disclosure filtering against the workspace database during migration or verification.
+
+## 2026-08-09 — Completed the stage 07 HTML parse documentation contract
+
+### Purpose
+
+- Correct stage 07 documentation that contradicted the current parser and saved-payload behavior.
+- Make the parse request, metadata, output schema, status, warning and inspection contracts usable without reading the implementation.
+- Remove subtype Reference files that repeated the same rights-issuance output path and feature summary.
+
+### Implementation summary
+
+- Corrected missing bond-investor-table handling, the saved location of `raw_tables`, shareholder-meeting agenda selection and optional metadata wording to match the current implementation.
+- Expanded the common Reference with request fields and defaults, 1-based `N` notation, input format requirements, saved payload and record schemas, status and warning contracts, correction-family fields, preview limits, filter-candidate examples, cancellation and export behavior.
+- Added valid request and saved-payload JSON examples and documented mode-specific bond, rights-issuance and shareholder-meeting record fields.
+- Consolidated paid, bonus and mixed rights-issuance output facts in the parent Reference and removed their three redundant Reference files and index links.
+
+### Verification result
+
+- Confirmed all Markdown links under `docs/` resolve and every stage 07 leaf document remains indexed.
+- Parsed both new JSON examples successfully and confirmed removed Reference paths are no longer mentioned.
+- Passed `test_html_parse_modes_are_registered_documented_and_listed_in_ui`.
+- Confirmed `git diff --check` passes.
+
+## 2026-08-09 — Separated execution paths from saved disclosure results
+
+### Purpose
+
+- Keep caller-selected input and output roots available for operational flexibility.
+- Keep stage file names and relative folder structure stable without copying absolute directories into result JSON.
+- Leave existing JSON and SQLite data unchanged.
+
+### Implementation summary
+
+- Preserved explicit stage input and output paths while retaining workspace paths as defaults.
+- Removed the output directory from stage 01 snapshots, stored checkpoint files relative to the selected output root, and removed absolute source, manifest and shard roots from stage 02 manifests.
+- Removed SQLite and filter result paths from stage 03 saved payloads, and replaced stage 04–05 manifest source paths with content fingerprints.
+- Removed `input_directory` from stage 07 saved results and made source-reading views accept the input directory as a request value.
+- Updated the common and stage 01–07 documentation to distinguish flexible execution paths from stable saved structure.
+
+### Verification result
+
+- Passed 165 focused download, Market Desk route, automation and workspace tests and 39 ontology manifest consumer tests.
+- Passed all 137 frontend tests and completed the Market Desk production build, including TypeScript and static page generation.
+- Confirmed every Markdown link under `docs/` resolves, both stage 07 JSON examples parse and the parser mode documentation registry test passes.
+- A broader 597-case backend run passed 429 tests and skipped 166; two unrelated external HTML compression fixtures still fail because their manifest metadata omits required `disclosed_at`.
+- Confirmed `git diff --check` passes for the changed code, tests and documentation.
+- Migrated 81 existing stage 01–03 JSON artifacts to the same path-free contract: removed redundant directory fields and converted saved file references to paths relative to their fixed stage roots.
+- Confirmed all migrated JSON parses, no absolute filesystem path remains, all 31,522 manifest pages and 37 shards resolve, and all three filter/result pairs remain identical.
+- Did not run a disclosure workflow or modify any SQLite, body, HTML or disclosure record data; all 37 SQLite shard sizes and modification times remained unchanged.

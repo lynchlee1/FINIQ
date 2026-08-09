@@ -914,7 +914,6 @@ class KindWorkflowInput:
         """현재 workflow 입력 상태를 JSON 친화적인 dict로 내보낸다."""
         return {
             "format": KIND_WORKFLOW_INPUT_FORMAT,
-            "output_directory": str(self.output_directory),
             "request_headers": dict(self.request_headers),
             "start_date": self.start_date,
             "end_date": self.end_date,
@@ -1371,11 +1370,13 @@ class KindWorkflow:
             page_number: int | None,
             request_data: KindSearchFormData | None,
         ) -> None:
-            resolved_output_path = str(output_path.resolve())
+            relative_output_path = output_path.resolve().relative_to(
+                self._require_input().output_directory
+            ).as_posix()
             with checkpoint_lock:
-                checkpoint.saved_files.append(resolved_output_path)
+                checkpoint.saved_files.append(relative_output_path)
                 checkpoint.saved_files.sort()
-                checkpoint.last_saved_file = resolved_output_path
+                checkpoint.last_saved_file = relative_output_path
                 checkpoint.last_saved_page = page_number
                 checkpoint.last_request_data = (
                     [] if request_data is None else list(request_data)
@@ -1461,7 +1462,9 @@ class KindWorkflow:
                 / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=final_page)
             ).resolve()
             if final_path.exists():
-                checkpoint.last_saved_file = str(final_path)
+                checkpoint.last_saved_file = final_path.relative_to(
+                    configured_input.output_directory
+                ).as_posix()
                 checkpoint.last_saved_page = final_page
                 checkpoint.last_request_data = list(
                     self.build_request_data(page_number=final_page)

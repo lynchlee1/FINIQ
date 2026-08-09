@@ -160,7 +160,7 @@ def _collect_source_folder_rows_by_year(
         page_number = result_page_number(body_path)
         pages.append(
             {
-                "source_file": str(body_path),
+                "source_file": body_path.relative_to(source_folder).as_posix(),
                 "source_page": page_number,
                 "source_rows": page_source_rows,
                 "written_rows": page_written_rows,
@@ -458,7 +458,6 @@ def _write_sqlite_shard(
     temporary_path.replace(shard_path)
     return {
         "year": shard_year,
-        "path": str(shard_path),
         "relative_path": shard_path.name,
         "companies": len(company_keys),
         "disclosures": len(rows),
@@ -640,10 +639,6 @@ def build_disclosure_table_payload(
         "schema_version": TABLE_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_type": source_type,
-        "source_path": str(source_path),
-        "source_classification_path": "",
-        "manifest_path": str(manifest_path),
-        "shard_root": str(shard_root),
         "table_name": table_name,
         "summary": {
             "companies": companies,
