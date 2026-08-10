@@ -1440,3 +1440,29 @@
 - Migrated 81 existing stage 01–03 JSON artifacts to the same path-free contract: removed redundant directory fields and converted saved file references to paths relative to their fixed stage roots.
 - Confirmed all migrated JSON parses, no absolute filesystem path remains, all 31,522 manifest pages and 37 shards resolve, and all three filter/result pairs remain identical.
 - Did not run a disclosure workflow or modify any SQLite, body, HTML or disclosure record data; all 37 SQLite shard sizes and modification times remained unchanged.
+
+## 2026-08-10 — Shared existing-data integrity inspection UI and state
+
+### Purpose
+
+- Reuse the current disclosure-download database integrity and metadata confirmation behavior on other MarketDesk pages.
+- Keep page-specific APIs and evidence while sharing request-state handling and status presentation.
+
+### Implementation summary
+
+- Added a generic data-integrity inspection hook that tracks result, loading and error state and ignores stale asynchronous responses by request key.
+- Added a common verdict-and-step panel with explicit complete, failed, ready, waiting and running states. Successful steps stay compact, while only a failed step shows its comparison table, affected files or affected ranges and repair action.
+- Moved the 01-page review into a standalone `기존 데이터 검토` card after search conditions. The pending file-inspection step replaces its `검사 필요` status with `검사하기`, while the bottom `작업 실행` card contains only preview, execution and cancellation controls.
+- Connected the ordered review to the actual metadata read, saved-setting comparison, page continuity/file-structure inspection and live KIND-count verification. A failed structure or KIND check blocks the download handoff.
+- Preserved the destructive-file cleanup workflow while presenting the saved-setting mismatch as a focused diff with `저장된 설정 적용`.
+- Removed the review-level update-range action and reduced the review typography to a 16px verdict, 15px step titles and 13px supporting text so it matches the surrounding MarketDesk density.
+- Moved disclosure-download inspection response types into the feature type contract and updated the shared UI terminology and frontend regression coverage.
+- Kept the page-specific API evidence in the page adapter and the reusable request-state and review-step markup in shared modules, without adding a fallback data source.
+
+### Verification result
+
+- Passed all 139 frontend tests, including review-card separation, contextual inspection action, product-scale typography, stale-request protection, full verification blocking and status contrast coverage.
+- Completed the MarketDesk production build, including TypeScript and static page generation.
+- Visually verified the real `/download` state in light and dark modes. The inspection action stays beside the pending file-inspection step, and the failed settings step shows only the one mismatched field and its repair action.
+- Confirmed the 390px viewport has no page-level horizontal overflow.
+- Confirmed `git diff --check` passes.

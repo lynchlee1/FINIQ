@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Activity, AlertTriangle, Bell, Info, X, Play, Search, Loader2, Trash2, FolderOpen, Settings } from "lucide-react";
+import { Activity, Bell, X, Play, Search, Loader2, Trash2, ShieldCheck, Settings } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { Input } from "@finiq/ui";
@@ -13,9 +13,9 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
-import { htmlControlClassName, htmlInsetPanelClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload } from "@/features/download/api";
-import type { DownloadOptions, DownloadPayload } from "@/features/download/types";
+import { htmlControlClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { cancelDownload, checkExistingDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload } from "@/features/download/api";
+import type { DownloadExistingPayload, DownloadExistingResponse, DownloadOptions, DownloadPayload, DownloadSavedFilters } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import {
@@ -23,11 +23,12 @@ import {
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
-
-const parseISODate = (dateStr: string) => {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  return new Date(year, month - 1, day);
-};
+import {
+  DataIntegrityInspectionPanel,
+  type DataIntegrityInspectionStep,
+  type DataIntegrityInspectionVerdict,
+} from "@/components/data-integrity/DataIntegrityInspectionPanel";
+import { useDataIntegrityInspection } from "@/hooks/useDataIntegrityInspection";
 
 const formatDateToISO = (date: Date) => {
   const y = date.getFullYear();
@@ -36,7 +37,7 @@ const formatDateToISO = (date: Date) => {
   return `${y}-${m}-${d}`;
 };
 
-const areDisclosureGroupsMatching = (g1: Record<string, string[]>, g2: Record<string, string[]>) => {
+export const areDisclosureGroupsMatching = (g1: Record<string, string[]>, g2: Record<string, string[]>) => {
   const canonicalize = (groups: Record<string, string[]>) => {
     const obj: Record<string, string[]> = {};
     for (const key of Object.keys(groups).sort()) {
@@ -59,7 +60,7 @@ const areFiltersMatching = (
     selectedDisclosures: Record<string, string[]>;
     lastReportOnly: boolean;
   },
-  saved: any
+  saved: DownloadSavedFilters | null | undefined
 ) => {
   if (!saved) return true;
   if (current.companyName.trim() !== (saved.company_name || "").trim()) return false;
@@ -73,18 +74,11 @@ const areFiltersMatching = (
   return true;
 };
 
-const checkExistingPayloadKey = (payload: {
-  output_directory: string;
-  start_date: string;
-  end_date: string;
-  company_name: string;
-  submitter_name: string;
-  market_label: string;
-  securities_label: string;
-  page_size: number;
-  last_report_only: boolean;
-  disclosure_type_groups: Record<string, string[]>;
-}) => JSON.stringify({
+type DownloadExistingInspectionPayload = DownloadExistingPayload & {
+  inspection_mode: "detect" | "verify";
+};
+
+const checkExistingPayloadKey = (payload: DownloadExistingPayload) => JSON.stringify({
   ...payload,
   disclosure_type_groups: Object.fromEntries(
     Object.entries(payload.disclosure_type_groups)
@@ -116,40 +110,10 @@ export default function DownloadPage() {
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
-  const [existingData, setExistingData] = useState<{
-    has_existing: boolean;
-    earliest_date?: string | null;
-    latest_date?: string | null;
-    ranges?: {
-      start_date: string | null;
-      end_date: string | null;
-      folder_name: string;
-      local_count: number | null;
-      kind_count: number | null;
-      status: "validated" | "stale" | "unverified";
-      error_detail: string | null;
-      metadata_missing?: boolean;
-      metadata_obsolete?: boolean;
-      metadata_status?: "ok" | "missing" | "obsolete" | "mismatch";
-      filters_match?: boolean;
-      folder_path: string;
-    }[];
-    saved_filters?: {
-      company_name: string;
-      submitter_name: string;
-      market_label: string;
-      securities_label: string;
-      disclosure_type_groups: Record<string, string[]>;
-      last_report_only: boolean;
-    } | null;
-  } | null>(null);
-  const [existingMetadataError, setExistingMetadataError] = useState<string | null>(null);
-  const [checkingExisting, setCheckingExisting] = useState(false);
   const [runStarting, setRunStarting] = useState(false);
   const isRunTriggeredRef = useRef(false);
   const capturedPayloadRef = useRef<DownloadPayload | null>(null);
   const activeInspectionKeyRef = useRef<string | null>(null);
-  const checkExistingRequestRef = useRef({ id: 0, key: "" });
   const [lastInspectedExistingKey, setLastInspectedExistingKey] = useState<string | null>(null);
 
   const {
@@ -172,18 +136,20 @@ export default function DownloadPage() {
     onSuccess: async (data) => {
       if (data && data.format === "kind_download_folder_cleanup_v1") {
         const candidateCount = data.dry_run ? (data.deletion_candidate_count || 0) : 0;
-        if (activeInspectionKeyRef.current) {
-          setLastInspectedExistingKey(activeInspectionKeyRef.current);
-          activeInspectionKeyRef.current = null;
+        const completedInspectionKey = activeInspectionKeyRef.current;
+        const verified = await checkExisting(outputDirectory, true);
+        const hasVerificationFailure = !verified || (verified.ranges?.some((range) => range.status === "stale") ?? false);
+        if (verified && completedInspectionKey) {
+          setLastInspectedExistingKey(completedInspectionKey);
         }
-        await checkExisting(useSettingsStore.getState().download_output_directory);
+        activeInspectionKeyRef.current = null;
         setLastInspectionCandidateCount(candidateCount);
         setResult(data);
         setStatus(buildInspectionStatus(data, !data.dry_run));
 
         if (isRunTriggeredRef.current) {
           isRunTriggeredRef.current = false;
-          if (candidateCount > 0) {
+          if (candidateCount > 0 || hasVerificationFailure) {
             setNotificationPanelOpen(true);
             setDownloadPanelOpen(false);
             setSettingsPanelOpen(false);
@@ -237,6 +203,27 @@ export default function DownloadPage() {
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [inspectRunning, setInspectRunning] = useState(false);
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
+  const {
+    result: existingInspectionResult,
+    error: existingMetadataError,
+    isChecking: checkingExisting,
+    runInspection: runExistingInspection,
+    clear: clearExistingInspection,
+  } = useDataIntegrityInspection<DownloadExistingInspectionPayload, DownloadExistingResponse>({
+    inspect: ({ inspection_mode, ...payload }) => (
+      inspection_mode === "verify"
+        ? checkExistingDownload(payload)
+        : detectExistingDownload(payload)
+    ),
+    onError: (message) => {
+      setStatus(message);
+      setIsErrorStatus(true);
+      setNotificationPanelOpen(true);
+    },
+  });
+  const existingData = existingInspectionResult?.has_existing
+    ? existingInspectionResult
+    : null;
 
   useEffect(() => {
     setJobRetentionInput(String(jobRetentionMinutes || 60));
@@ -310,15 +297,12 @@ export default function DownloadPage() {
     fetchOptions();
   }, [fetchOptions]);
 
-  const checkExisting = useCallback(async (dir: string) => {
+  const checkExisting = useCallback(async (dir: string, verifyWithKind = false) => {
     if (!dir) {
-      checkExistingRequestRef.current = { id: checkExistingRequestRef.current.id + 1, key: "" };
-      setCheckingExisting(false);
-      setExistingData(null);
-      setExistingMetadataError(null);
+      clearExistingInspection();
       return;
     }
-    const submittedPayload = {
+    const submittedPayload: DownloadExistingInspectionPayload = {
       output_directory: dir,
       start_date: startDate,
       end_date: endDate,
@@ -329,47 +313,10 @@ export default function DownloadPage() {
       page_size: Number(pageSize),
       last_report_only: lastReportOnly,
       disclosure_type_groups: selectedDisclosures,
+      inspection_mode: verifyWithKind ? "verify" : "detect",
     };
-    const requestId = checkExistingRequestRef.current.id + 1;
     const requestKey = checkExistingPayloadKey(submittedPayload);
-    checkExistingRequestRef.current = { id: requestId, key: requestKey };
-    setCheckingExisting(true);
-    setExistingMetadataError(null);
-
-    try {
-      const result = await detectExistingDownload(submittedPayload);
-      if (
-        checkExistingRequestRef.current.id !== requestId ||
-        checkExistingRequestRef.current.key !== requestKey
-      ) {
-        return;
-      }
-      if (result && result.has_existing) {
-        setExistingData(result);
-      } else {
-        setExistingData(null);
-      }
-      setExistingMetadataError(null);
-    } catch (error) {
-      if (
-        checkExistingRequestRef.current.id === requestId &&
-        checkExistingRequestRef.current.key === requestKey
-      ) {
-        const message = error instanceof Error ? error.message : String(error);
-        setExistingData(null);
-        setExistingMetadataError(message);
-        setStatus(message);
-        setIsErrorStatus(true);
-        setNotificationPanelOpen(true);
-      }
-    } finally {
-      if (
-        checkExistingRequestRef.current.id === requestId &&
-        checkExistingRequestRef.current.key === requestKey
-      ) {
-        setCheckingExisting(false);
-      }
-    }
+    return runExistingInspection(submittedPayload, requestKey);
   }, [
     startDate,
     endDate,
@@ -380,39 +327,13 @@ export default function DownloadPage() {
     pageSize,
     lastReportOnly,
     selectedDisclosures,
+    clearExistingInspection,
+    runExistingInspection,
   ]);
 
   useEffect(() => {
     checkExisting(outputDirectory);
   }, [outputDirectory, checkExisting]);
-
-  const handleApplyUpdateRange = () => {
-    if (!existingData || !existingData.latest_date) return;
-    try {
-      const latest = parseISODate(existingData.latest_date);
-      latest.setDate(latest.getDate() + 1);
-      const nextStartStr = formatDateToISO(latest);
-      
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(today.getDate() - 1);
-      const yesterdayStr = formatDateToISO(yesterday);
-      
-      if (nextStartStr > yesterdayStr) {
-        setStatus("이미 어제 날짜 공시 내역까지 다운로드되어 있거나 최신 상태입니다.");
-        return;
-      }
-      
-      setStartDate(nextStartStr);
-      setEndDate(yesterdayStr);
-      setStatus(`다운로드 기간이 업데이트용(어제까지)으로 변경되었습니다: ${nextStartStr} ~ ${yesterdayStr}`);
-    } catch (err: any) {
-      setStatus(`날짜 계산 중 오류가 발생했습니다: ${err.message}`);
-      setIsErrorStatus(true);
-    }
-  };
-
-
 
   const buildPayload = (): DownloadPayload => ({
     data_root: dataRoot,
@@ -497,7 +418,7 @@ export default function DownloadPage() {
       ? (deleted ? data.deleted_files : data.deletion_candidates)
       : [];
     const lines = [
-      deleted ? "파일 삭제 완료" : "폴더 검사 완료",
+      deleted ? "파일 삭제 완료" : "검사 완료",
       `대상 페이지: ${formatInteger(data.requested_count || data.summary?.total)}`,
       `연도별 분할: ${data.split_by_year ? "On" : "Off"}`,
       `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${formatInteger(deleted ? data.deleted_count : data.deletion_candidate_count)}`,
@@ -520,7 +441,7 @@ export default function DownloadPage() {
     try {
       setInspectRunning(true);
       setIsErrorStatus(false);
-      setStatus("폴더 검사 작업을 시작하는 중...");
+      setStatus("기존 데이터 검사를 시작하는 중...");
       setPreviewResult(null);
       isRunTriggeredRef.current = false;
       capturedPayloadRef.current = null;
@@ -614,6 +535,237 @@ export default function DownloadPage() {
     ? checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()))
     : "";
   const hasCompletedCurrentInspection = currentExistingKey === lastInspectedExistingKey;
+  const isCurrentInspectionRunning = inspectRunning || activeInspectionKeyRef.current === currentExistingKey;
+  const inspectionRanges = existingData?.ranges || [];
+  const staleRanges = inspectionRanges.filter((range) => range.status === "stale");
+  const inspectionCandidates = hasCompletedCurrentInspection && result?.format === "kind_download_folder_cleanup_v1"
+    ? (Array.isArray(result.deletion_candidates) ? result.deletion_candidates : [])
+    : [];
+  const savedFilters = existingData?.saved_filters;
+  const filterDifferences: { label: string; saved: string; current: string }[] = [];
+
+  if (savedFilters) {
+    if (savedFilters.company_name.trim() !== companyName.trim()) {
+      filterDifferences.push({ label: "회사명", saved: savedFilters.company_name || "전체", current: companyName || "전체" });
+    }
+    if (savedFilters.submitter_name.trim() !== submitterName.trim()) {
+      filterDifferences.push({ label: "제출인", saved: savedFilters.submitter_name || "전체", current: submitterName || "전체" });
+    }
+    if (savedFilters.market_label !== marketLabel) {
+      filterDifferences.push({ label: "시장", saved: savedFilters.market_label, current: marketLabel });
+    }
+    if (savedFilters.securities_label !== securitiesLabel) {
+      filterDifferences.push({ label: "증권종류", saved: savedFilters.securities_label, current: securitiesLabel });
+    }
+    if (!!savedFilters.last_report_only !== lastReportOnly) {
+      filterDifferences.push({ label: "최종보고서만", saved: savedFilters.last_report_only ? "예" : "아니오", current: lastReportOnly ? "예" : "아니오" });
+    }
+    if (!areDisclosureGroupsMatching(selectedDisclosures, savedFilters.disclosure_type_groups || {})) {
+      filterDifferences.push({ label: "공시 종류", saved: "저장된 선택", current: "현재 선택" });
+    }
+  }
+
+  let inspectionVerdict: DataIntegrityInspectionVerdict;
+  if (!outputDirectory) {
+    inspectionVerdict = {
+      label: "검토 대기",
+      title: "데이터 경로를 선택해 주세요",
+      description: "경로를 선택하면 기존 데이터와 메타데이터를 먼저 확인합니다.",
+      tone: "neutral",
+    };
+  } else if (checkingExisting && !existingInspectionResult) {
+    inspectionVerdict = {
+      label: "확인 중",
+      title: "기존 데이터와 메타데이터를 읽고 있습니다",
+      description: outputDirectory,
+      tone: "neutral",
+    };
+  } else if (existingMetadataError) {
+    inspectionVerdict = {
+      label: "검토 중단",
+      title: "메타데이터를 확인할 수 없습니다",
+      description: existingMetadataError,
+      tone: "error",
+    };
+  } else if (!existingData) {
+    inspectionVerdict = {
+      label: "검토 완료",
+      title: "기존 데이터가 없습니다",
+      description: "현재 조건으로 새 다운로드를 시작할 수 있습니다.",
+      tone: "success",
+    };
+  } else if (!filtersMatch) {
+    inspectionVerdict = {
+      label: "사용 불가",
+      title: "저장된 설정과 현재 조건이 다릅니다",
+      description: "설정을 맞추기 전에는 기존 데이터에 이어서 저장할 수 없습니다.",
+      tone: "error",
+    };
+  } else if (!hasCompletedCurrentInspection) {
+    inspectionVerdict = {
+      label: "검사 필요",
+      title: "메타데이터는 확인됐지만 파일 검사가 남아 있습니다",
+      description: "검사를 실행하면 저장 파일의 구성과 KIND 건수를 순서대로 확인합니다.",
+      tone: "warning",
+    };
+  } else if (inspectionCandidates.length > 0 || staleRanges.length > 0) {
+    inspectionVerdict = {
+      label: "사용 불가",
+      title: "기존 데이터에서 문제가 확인됐습니다",
+      description: "아래 실패 단계의 원인과 조치를 확인해 주세요.",
+      tone: "error",
+    };
+  } else {
+    inspectionVerdict = {
+      label: "사용 가능",
+      title: "기존 데이터를 안전하게 재사용할 수 있습니다",
+      description: `${existingData.earliest_date ?? "-"} ~ ${existingData.latest_date ?? "-"} · ${formatInteger(inspectionRanges.length)}개 범위 확인`,
+      tone: "success",
+    };
+  }
+
+  const inspectionSteps: DataIntegrityInspectionStep[] = [
+    {
+      key: "metadata",
+      title: "메타데이터 읽기",
+      summary: existingData
+        ? `${formatInteger(inspectionRanges.length)}개 저장 범위의 메타데이터를 확인했습니다.`
+        : existingMetadataError
+          ? "저장된 메타데이터를 읽지 못했습니다."
+          : "비교할 기존 데이터가 없습니다.",
+      status: existingMetadataError ? "failed" : checkingExisting && !existingInspectionResult ? "running" : "complete",
+      statusLabel: existingMetadataError ? "실패" : checkingExisting && !existingInspectionResult ? "확인 중" : "완료",
+      detail: existingMetadataError ? (
+        <p className="text-[13px] leading-5 text-[var(--tv-down-text)]">{existingMetadataError}</p>
+      ) : undefined,
+    },
+    {
+      key: "settings",
+      title: "현재 설정과 비교",
+      summary: !existingData
+        ? "비교할 저장 설정이 없습니다."
+        : filtersMatch
+          ? "저장된 검색 설정과 현재 조건이 같습니다."
+          : `${formatInteger(filterDifferences.length)}개 설정이 현재 조건과 다릅니다.`,
+      status: existingMetadataError ? "waiting" : !existingData || filtersMatch ? "complete" : "failed",
+      statusLabel: existingMetadataError ? "대기" : !existingData ? "대상 없음" : filtersMatch ? "일치" : "불일치",
+      detail: !filtersMatch && savedFilters ? (
+        <div className="space-y-3">
+          <div className="overflow-x-auto rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
+            <table className="w-full min-w-[32rem] text-left text-[13px] leading-5">
+              <thead className="border-b border-[color:var(--tv-border)] text-[var(--tv-muted)]">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">항목</th>
+                  <th className="px-3 py-2 font-semibold">저장된 설정</th>
+                  <th className="px-3 py-2 font-semibold">현재 설정</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filterDifferences.map((difference) => (
+                  <tr key={difference.label} className="border-b border-[color:var(--tv-border)] last:border-b-0">
+                    <th className="px-3 py-2 font-semibold text-[var(--tv-text)]">{difference.label}</th>
+                    <td className="px-3 py-2 text-[var(--tv-down-text)]">{difference.saved}</td>
+                    <td className="px-3 py-2 text-[var(--tv-text)]">{difference.current}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Button type="button" variant="outline" size="sm" className="h-8 text-[13px]" onClick={handleApplySavedFilters}>
+            저장된 설정 적용
+          </Button>
+        </div>
+      ) : undefined,
+    },
+    {
+      key: "files",
+      title: "저장 파일 구성 검사",
+      summary: !existingData
+        ? "검사할 기존 파일이 없습니다."
+        : !filtersMatch
+          ? "설정 불일치를 먼저 해결해야 합니다."
+          : isCurrentInspectionRunning
+            ? "페이지 번호의 연속성과 파일 구성을 검사하고 있습니다."
+          : !hasCompletedCurrentInspection
+            ? "페이지 번호의 연속성과 파일 구성을 검사할 준비가 됐습니다."
+            : inspectionCandidates.length > 0
+              ? `${formatInteger(inspectionCandidates.length)}개 파일에서 문제가 확인됐습니다.`
+              : "페이지 번호와 저장 파일 구성이 정상입니다.",
+      status: existingMetadataError || !filtersMatch
+        ? "waiting"
+        : !existingData
+          ? "complete"
+          : isCurrentInspectionRunning
+            ? "running"
+            : !hasCompletedCurrentInspection
+              ? "ready"
+              : inspectionCandidates.length > 0
+                ? "failed"
+                : "complete",
+      statusLabel: existingMetadataError || !filtersMatch
+        ? "대기"
+        : !existingData
+          ? "대상 없음"
+          : isCurrentInspectionRunning
+            ? "검사 중"
+            : !hasCompletedCurrentInspection
+              ? "검사 필요"
+              : inspectionCandidates.length > 0
+                ? "문제 발견"
+                : "통과",
+      detail: inspectionCandidates.length > 0 ? (
+        <ul className="max-h-48 space-y-2 overflow-y-auto text-[13px] leading-5 text-[var(--tv-down-text)]">
+          {inspectionCandidates.map((candidate: any) => (
+            <li key={candidate.path} className="rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] px-3 py-2">
+              <span className="font-semibold">{candidate.name}</span> · {candidate.reason}
+            </li>
+          ))}
+        </ul>
+      ) : undefined,
+      action: existingData && filtersMatch && !hasCompletedCurrentInspection ? {
+        label: isCurrentInspectionRunning ? "검사 중..." : "검사하기",
+        onClick: handleInspectFolder,
+        disabled: isCurrentInspectionRunning || !!activeJobId || runStarting || checkingExisting,
+        loading: isCurrentInspectionRunning,
+      } : undefined,
+    },
+    {
+      key: "kind-count",
+      title: "KIND 건수 비교",
+      summary: !existingData
+        ? "비교할 기존 데이터가 없습니다."
+        : !filtersMatch || !hasCompletedCurrentInspection
+          ? "앞 단계가 끝나면 로컬 건수와 KIND 현재 건수를 비교합니다."
+          : staleRanges.length > 0
+            ? `${formatInteger(staleRanges.length)}개 범위가 KIND 현재 상태와 일치하지 않습니다.`
+            : `${formatInteger(inspectionRanges.length)}개 범위의 로컬 건수와 KIND 건수가 일치합니다.`,
+      status: existingMetadataError || !filtersMatch || (existingData && !hasCompletedCurrentInspection)
+        ? "waiting"
+        : !existingData
+          ? "complete"
+          : staleRanges.length > 0
+            ? "failed"
+            : "complete",
+      statusLabel: existingMetadataError || !filtersMatch || (existingData && !hasCompletedCurrentInspection)
+        ? "대기"
+        : !existingData
+          ? "대상 없음"
+          : staleRanges.length > 0
+            ? "불일치"
+            : "통과",
+      detail: staleRanges.length > 0 ? (
+        <div className="max-h-64 space-y-2 overflow-y-auto">
+          {staleRanges.map((range) => (
+            <div key={range.folder_path} className="rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] px-3 py-2 text-[13px] leading-5 text-[var(--tv-down-text)]">
+              <p className="font-semibold">{range.folder_name} · {range.start_date ?? "-"} ~ {range.end_date ?? "-"}</p>
+              <p>로컬 {range.local_count == null ? "확인 실패" : `${formatInteger(range.local_count)}건`} / KIND {range.kind_count == null ? "확인 실패" : `${formatInteger(range.kind_count)}건`}</p>
+              {range.error_detail && <p>{range.error_detail}</p>}
+            </div>
+          ))}
+        </div>
+      ) : undefined,
+    },
+  ];
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
@@ -658,158 +810,26 @@ export default function DownloadPage() {
                   />
                 </div>
               )}
-
-              {checkingExisting && !existingData && (
-                <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
-                  <div className="flex items-start gap-3">
-                    <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
-                    <div className="space-y-1">
-                      <p className="font-semibold text-slate-900 dark:text-slate-100">기존 다운로드 폴더 확인 중...</p>
-                      <p className="text-caption break-all text-slate-500 dark:text-slate-400">
-                        선택한 데이터 경로의 폴더와 메타데이터 상태만 빠르게 확인하고 있습니다: {outputDirectory}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {existingData && existingData.has_existing && (
-                <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
-                      <div className="flex flex-col justify-between gap-3 border-b border-[color:var(--tv-border)] pb-3 md:flex-row md:items-center">
-                        <div className="space-y-1">
-                          <p className="text-body flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
-                            <FolderOpen className="h-4 w-4 text-[var(--tv-accent)]" />
-                            기존 다운로드 시도 범위 감지됨
-                            {checkingExisting && (
-                              <span className="text-caption inline-flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                재확인 중
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-caption text-slate-500 dark:text-slate-400">
-                            전체 범위: <span className="font-semibold">{existingData?.earliest_date}</span> ~ <span className="font-semibold">{existingData?.latest_date}</span>
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 shrink-0 self-start border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] hover:text-[var(--tv-accent)] md:self-auto"
-                          onClick={handleApplyUpdateRange}
-                          disabled={
-                            (existingData?.ranges?.some(r => r.status === "stale") ?? false) ||
-                            !filtersMatch
-                          }
-                        >
-                          이어서 다운로드하기 (업데이트)
-                        </Button>
-                      </div>
-
-                      {/* Range List */}
-                      <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                        {existingData?.ranges?.map((range, index) => {
-                          const metadataReady = range.status === "unverified" && !range.metadata_missing && range.metadata_status !== "mismatch";
-                          const statusTone = metadataReady ? "metadataOk" : range.status;
-                          const statusColors = {
-                            validated: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up-text)]",
-                            metadataOk: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up-text)]",
-                            stale: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down-text)]",
-                            unverified: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)]",
-                          };
-                          const statusLabels = {
-                            validated: "검증 완료: KIND 건수 일치",
-                            stale: range.metadata_missing
-                              ? "검증 실패: 메타데이터 없음"
-                              : "검증 실패: KIND 건수 불일치 (stale)",
-                            unverified: range.metadata_status === "mismatch"
-                              ? "메타데이터 설정 불일치"
-                              : "메타데이터 확인됨",
-                          };
-
-                          return (
-                            <div
-                              key={index}
-                              className="text-caption flex flex-col justify-between gap-2 rounded border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 sm:flex-row sm:items-center"
-                            >
-                              <div className="space-y-0.5">
-                                <p className="font-medium text-slate-800 dark:text-slate-200">
-                                  {range.folder_name} ({range.start_date ?? "-"} ~ {range.end_date ?? "-"})
-                                </p>
-                                <p className="text-caption text-slate-500 dark:text-slate-400">
-                                  로컬 건수: {range.local_count == null ? "-" : formatInteger(range.local_count)} | KIND 건수: {range.kind_count == null ? "-" : formatInteger(range.kind_count)}
-                                </p>
-                                {range.error_detail && (
-                                  <p className="text-caption flex items-center gap-1 font-medium text-[var(--tv-down-text)]">
-                                    <AlertTriangle className="h-3.5 w-3.5" />
-                                    {range.error_detail}
-                                  </p>
-                                )}
-                              </div>
-                              <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${statusColors[statusTone]}`}>
-                                {statusLabels[range.status]}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Warning message if stale ranges exist */}
-                      {existingData?.ranges?.some(r => r.status === "stale") && (
-                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down-text)]">
-                          <strong>경고:</strong> 기존 다운로드한 데이터 중 일부를 안전하게 재사용할 수 없습니다. KIND 건수가 다르거나 필수 메타데이터가 없습니다.
-                          해당 폴더를 삭제한 뒤 다시 다운로드해야 합니다.
-                        </div>
-                      )}
-
-                      {/* Warning message if filters mismatch */}
-                      {!filtersMatch && existingData?.saved_filters && (
-                        <div className="text-caption rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] p-3 text-[var(--tv-down-text)]">
-                          <strong>오류:</strong> 현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 폴더 내 데이터가 오염(mixed dataset)되는 것을 방지하기 위해 <strong>이어서 다운로드하기가 비활성화</strong>됩니다. 검색 필터를 메타데이터와 동일하게 일치시키거나 다른 경로를 선택해 주세요.
-                          <div className="mt-2 space-y-1 border-l-2 border-[color:var(--tv-down)] pl-3 opacity-90">
-                            {existingData.saved_filters.company_name.trim() !== companyName.trim() && (
-                              <p>• 회사명 불일치: (기존) &ldquo;{existingData.saved_filters.company_name}&rdquo; &harr; (현재) &ldquo;{companyName}&rdquo;</p>
-                            )}
-                            {existingData.saved_filters.submitter_name.trim() !== submitterName.trim() && (
-                              <p>• 제출인 불일치: (기존) &ldquo;{existingData.saved_filters.submitter_name}&rdquo; &harr; (현재) &ldquo;{submitterName}&rdquo;</p>
-                            )}
-                            {existingData.saved_filters.market_label !== marketLabel && (
-                              <p>• 시장 불일치: (기존) &ldquo;{existingData.saved_filters.market_label}&rdquo; &harr; (현재) &ldquo;{marketLabel}&rdquo;</p>
-                            )}
-                            {existingData.saved_filters.securities_label !== securitiesLabel && (
-                              <p>• 증권종류 불일치: (기존) &ldquo;{existingData.saved_filters.securities_label}&rdquo; &harr; (현재) &ldquo;{securitiesLabel}&rdquo;</p>
-                            )}
-                            {!!existingData.saved_filters.last_report_only !== lastReportOnly && (
-                              <p>• 최종보고서만 불일치: (기존) &ldquo;{existingData.saved_filters.last_report_only ? "예" : "아니오"}&rdquo; &harr; (현재) &ldquo;{lastReportOnly ? "예" : "아니오"}&rdquo;</p>
-                            )}
-                            {!areDisclosureGroupsMatching(selectedDisclosures, existingData.saved_filters.disclosure_type_groups || {}) && (
-                              <p>• 공시 종류 불일치</p>
-                            )}
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="mt-3 h-8 border-[color:var(--tv-down)] bg-[var(--tv-surface)] text-[var(--tv-down)]"
-                            onClick={handleApplySavedFilters}
-                          >
-                            기존 메타데이터 기준으로 설정 맞추기
-                          </Button>
-                        </div>
-                      )}
-
-                      {existingData?.ranges?.some(r => r.status === "unverified") && !hasCompletedCurrentInspection && (
-                        <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
-                          <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-                          <strong>알림:</strong> 일부 다운로드 범위는 아직 무결성 검사를 하지 않았습니다. 실행 또는 폴더 검사하기를 누르면 저장된 메타데이터를 기준으로 검사합니다.
-                        </div>
-                      )}
-                </div>
-              )}
-
               </>
             }
           />
+
+          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
+            <CardHeader className="gap-1.5">
+              <div className="space-y-1.5">
+                <CardTitle className="flex items-center gap-2 text-[16px] leading-6 dark:text-white">
+                  <ShieldCheck className="h-5 w-5 text-[var(--tv-accent)]" />
+                  기존 데이터 검토
+                </CardTitle>
+                <p className="text-[13px] leading-5 text-[var(--tv-muted)]">
+                  실행 전에 저장된 메타데이터, 현재 설정, 파일 구성, KIND 건수를 순서대로 확인합니다.
+                </p>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <DataIntegrityInspectionPanel verdict={inspectionVerdict} steps={inspectionSteps} />
+            </CardContent>
+          </Card>
 
           <DisclosureTypeSelectionCard
             options={options}
@@ -822,11 +842,7 @@ export default function DownloadPage() {
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <Button variant="outline" className="w-full" onClick={handleInspectFolder} disabled={!!activeJobId || inspectRunning || runStarting}>
-                  {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
-                  폴더 검사하기
-                </Button>
+              <div className="grid gap-3 md:grid-cols-3">
                 <Button variant="outline" className="w-full" onClick={handlePreview} disabled={!!activeJobId || runStarting}>
                   <Search className="mr-2 h-4 w-4" />
                   미리보기
