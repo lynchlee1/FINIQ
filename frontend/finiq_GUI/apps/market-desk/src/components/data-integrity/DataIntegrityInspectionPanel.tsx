@@ -1,0 +1,114 @@
+import type { ReactNode } from "react";
+import { AlertTriangle, Check, CircleDashed, Clock3, Loader2 } from "lucide-react";
+import { Button } from "@finiq/ui";
+
+export type DataIntegrityInspectionTone = "success" | "warning" | "error" | "neutral";
+export type DataIntegrityInspectionStepStatus = "complete" | "failed" | "ready" | "waiting" | "running";
+
+export type DataIntegrityInspectionVerdict = {
+  label: string;
+  title: ReactNode;
+  description: ReactNode;
+  tone: DataIntegrityInspectionTone;
+};
+
+export type DataIntegrityInspectionStep = {
+  key: string;
+  title: ReactNode;
+  summary: ReactNode;
+  status: DataIntegrityInspectionStepStatus;
+  statusLabel: string;
+  detail?: ReactNode;
+  action?: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    loading?: boolean;
+  };
+};
+
+type DataIntegrityInspectionPanelProps = {
+  verdict: DataIntegrityInspectionVerdict;
+  steps: DataIntegrityInspectionStep[];
+};
+
+const verdictClassNames: Record<DataIntegrityInspectionTone, string> = {
+  success: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up-text)]",
+  warning: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)]",
+  error: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down-text)]",
+  neutral: "border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)]",
+};
+
+const stepStatusClassNames: Record<DataIntegrityInspectionStepStatus, string> = {
+  complete: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up-text)]",
+  failed: "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down-text)]",
+  ready: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)]",
+  waiting: "border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-muted)]",
+  running: "border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)]",
+};
+
+function StepStatusIcon({ status }: { status: DataIntegrityInspectionStepStatus }) {
+  if (status === "complete") return <Check className="h-4 w-4" />;
+  if (status === "failed") return <AlertTriangle className="h-4 w-4" />;
+  if (status === "running") return <Loader2 className="h-4 w-4 animate-spin" />;
+  if (status === "ready") return <Clock3 className="h-4 w-4" />;
+  return <CircleDashed className="h-4 w-4" />;
+}
+
+export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityInspectionPanelProps) {
+  return (
+    <div className="space-y-4">
+      <section
+        className={`rounded-md border p-4 ${verdictClassNames[verdict.tone]}`}
+        role={verdict.tone === "error" ? "alert" : "status"}
+        aria-live="polite"
+      >
+        <div className="min-w-0 space-y-1.5">
+          <p className="text-[12px] font-semibold leading-4">{verdict.label}</p>
+          <p className="text-[16px] font-semibold leading-6">{verdict.title}</p>
+          <div className="break-words text-[13px] leading-5 opacity-90">{verdict.description}</div>
+        </div>
+      </section>
+
+      <ol className="overflow-hidden rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
+        {steps.map((step, index) => (
+          <li key={step.key} className="border-b border-[color:var(--tv-border)] last:border-b-0">
+            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 gap-3">
+                <span className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold ${stepStatusClassNames[step.status]}`}>
+                  {step.status === "waiting" || step.status === "ready" ? index + 1 : <StepStatusIcon status={step.status} />}
+                </span>
+                <div className="min-w-0 space-y-1">
+                  <p className="text-[15px] font-semibold leading-6 text-[var(--tv-text)]">{step.title}</p>
+                  <div className="text-[13px] leading-5 text-[var(--tv-muted)]">{step.summary}</div>
+                </div>
+              </div>
+              {step.action ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 shrink-0 self-start px-3 text-[13px]"
+                  onClick={step.action.onClick}
+                  disabled={step.action.disabled}
+                >
+                  {step.action.loading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  {step.action.label}
+                </Button>
+              ) : (
+                <span className={`inline-flex shrink-0 items-center gap-1.5 self-start rounded-md border px-2.5 py-1 text-[12px] font-semibold leading-4 ${stepStatusClassNames[step.status]}`}>
+                  <StepStatusIcon status={step.status} />
+                  {step.statusLabel}
+                </span>
+              )}
+            </div>
+            {step.detail && (
+              <div className="border-t border-[color:var(--tv-border)] bg-[var(--tv-control)] px-4 py-4 sm:pl-14">
+                {step.detail}
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}

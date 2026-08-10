@@ -91,6 +91,17 @@ All spacing derives from a base of 4px.
 - **Accessibility**: labels on every input/select; buttons disable while running.
 - **Motion**: no layout motion; hover/focus only.
 
+### Data Integrity Inspection Panel
+
+- **Structure**: a page-level review card owns the title. Inside it, show one overall verdict, an ordered inspection-step list, and detail only below the step that failed. The pending step owns its inspection action so the reason and next action stay together. Keep the review card separate from search-condition and execution cards.
+- **Type scale**: use a 16px verdict, 15px step title, and 13px descriptions, evidence and actions so the panel fits the surrounding product UI. Do not solve readability by enlarging every label equally; use hierarchy and spacing to separate decisions from evidence.
+- **Spacing**: 16px between verdict and steps; 16px row padding so each step remains readable without turning the review into a dashboard.
+- **States**: complete, failed, ready, waiting and running. Pair every color with an icon and explicit status label.
+- **Progressive disclosure**: keep successful steps compact. Render the settings comparison, affected files or affected ranges only in the failed step, with a bounded scroll area for long problem lists.
+- **Responsive behavior**: stack step status below the summary on narrow screens and allow comparison tables to scroll within the card instead of widening the page.
+- **Reuse**: pages provide their own verdict, ordered evidence and repair action through the shared panel and request hook. Do not copy the step-list markup into page components.
+- **Motion**: no layout motion; retain only the loading indicator and existing focus/press feedback.
+
 ### Segmented Mode Control
 
 - **Structure**: two or three buttons in a bordered row.
@@ -154,6 +165,19 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 - 새 기능명이 필요하면 먼저 이 절에 추가하고, 같은 변경에서 UI와 테스트를 맞춘다.
 - 버튼, 카드, 입력, 아이콘, 상태 표시는 기존 화면과 공통 컴포넌트/에셋을 우선 재사용한다.
 - 파일 형식 설명은 도움말이나 상세 문구에만 넣고 버튼명에는 넣지 않는다.
+
+### Existing Data Inspection
+
+| Concept | Preferred UI Term | Notes |
+| --- | --- | --- |
+| Existing data review card | 기존 데이터 검토 | A standalone preflight card placed after search conditions and before execution settings. |
+| Existing data integrity inspection action | 검사하기 | Replace the pending step's `검사 필요` status with this action. Runs the page-owned integrity APIs against the selected data path. |
+| Existing data reusable verdict | 사용 가능 | Use only when every page-owned inspection step passes. |
+| Existing data blocked verdict | 사용 불가 | Use when a mismatch or integrity failure blocks reuse. Keep the failed step and repair action visible. |
+| Existing data metadata-ready state | 메타데이터 확인됨 | Success state when required metadata exists and matches the current settings, even if the full remote-count integrity inspection has not run yet. |
+| Existing data integrity-complete state | 검증 완료 | Success state only after the page-owned integrity checks pass. Keep the specific evidence, such as a matching KIND count, in the status detail. |
+| Existing data inspection-required state | 검사 필요 | Warning state when metadata is readable but the full page-owned integrity inspection has not run for the current settings. |
+| Apply saved metadata settings | 저장된 설정 적용 | Repair action shown in the failed settings-comparison step. |
 
 ### Disclosure Automation Workflow
 
