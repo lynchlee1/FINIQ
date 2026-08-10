@@ -47,12 +47,36 @@ def _append_job_progress(job_id: str, message: str) -> None:
 
 def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
     payload = apply_workspace_defaults("kind_download", payload)
+    inspection_job_id = str(payload.pop("inspection_job_id", "") or "").strip()
     job_id = uuid.uuid4().hex
     job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
     with _DOWNLOAD_JOBS_LOCK:
         _purge_expired_download_jobs_locked()
+        if inspection_job_id:
+            inspection_job = _DOWNLOAD_JOBS.get(inspection_job_id)
+            if (
+                inspection_job is None
+                or inspection_job.status != "completed"
+                or inspection_job.result is None
+                or inspection_job.result.get("format") != "kind_download_folder_cleanup_v1"
+            ):
+                raise ValueError(
+                    f"completed inspection job not found: {inspection_job_id}"
+                )
+            existing_job_id = str(
+                inspection_job.result.get("download_job_id") or ""
+            ).strip()
+            if existing_job_id:
+                existing_job = _DOWNLOAD_JOBS.get(existing_job_id)
+                if existing_job is None:
+                    raise ValueError(
+                        f"download job not found: {existing_job_id}"
+                    )
+                return _job_snapshot(existing_job)
         _DOWNLOAD_JOBS[job_id] = job
         _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
+        if inspection_job_id:
+            inspection_job.result["download_job_id"] = job_id
 
     def _worker() -> None:
         acquired = False
@@ -135,20 +159,34 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
                 progress_callback=lambda message: _append_job_progress(job_id, message),
                 cancel_check=lambda: _is_download_cancelled(job_id),
             )
-            if _is_download_cancelled(job_id):
+            deletion_committed = (
+                result.get("dry_run") is False
+                and int(result.get("deleted_count") or 0) > 0
+            )
+            if not deletion_committed and _is_download_cancelled(job_id):
                 raise DownloadCancelled()
             with KIND_NETWORK_JOB_LOCK:
-                if _is_download_cancelled(job_id):
+                if not deletion_committed and _is_download_cancelled(job_id):
                     raise DownloadCancelled()
                 result["existing_downloads"] = check_existing_downloads(
                     str(payload.get("output_directory") or ""),
                     verify_with_kind=True,
                     current_payload=payload,
-                    cancel_check=lambda: _is_download_cancelled(job_id),
+                    cancel_check=(
+                        None
+                        if deletion_committed
+                        else lambda: _is_download_cancelled(job_id)
+                    ),
                 )
-            if _is_download_cancelled(job_id):
+            if not deletion_committed and _is_download_cancelled(job_id):
                 raise DownloadCancelled()
-            _update_job(job_id, status="completed", result=result)
+            with _DOWNLOAD_JOBS_LOCK:
+                if not deletion_committed and _is_download_cancelled(job_id):
+                    raise DownloadCancelled()
+                job = _DOWNLOAD_JOBS[job_id]
+                job.status = "completed"
+                job.result = result
+                job.updated_at = time.time()
             _append_job_progress(job_id, f"JOB inspect completed id={job_id}")
         except DownloadCancelled:
             _update_job(job_id, status="cancelled")

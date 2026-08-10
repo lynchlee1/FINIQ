@@ -4,6 +4,7 @@ import test from "node:test";
 
 const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx";
 const pollingHookPath = "frontend/finiq_GUI/apps/market-desk/src/hooks/useJobPolling.ts";
+const downloadApiPath = "frontend/finiq_GUI/apps/market-desk/src/features/download/api.ts";
 
 test("destructive cleanup stays bound to the inspected request", async () => {
   const source = await readFile(downloadPagePath, "utf8");
@@ -23,9 +24,10 @@ test("destructive cleanup stays bound to the inspected request", async () => {
 });
 
 test("inspection terminal processing owns an immutable job context", async () => {
-  const [page, polling] = await Promise.all([
+  const [page, polling, api] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
     readFile(pollingHookPath, "utf8"),
+    readFile(downloadApiPath, "utf8"),
   ]);
   const completedBlock = polling.slice(
     polling.indexOf('if (data.status === "completed")'),
@@ -35,7 +37,13 @@ test("inspection terminal processing owns an immutable job context", async () =>
   assert.match(page, /type DownloadInspectionContext = \{[\s\S]*?jobId: string;[\s\S]*?payload: DownloadPayload;[\s\S]*?runTriggered: boolean;/);
   assert.match(page, /sessionStorage\.setItem\([\s\S]*?JSON\.stringify\(activeInspection\)/);
   assert.match(page, /completedInspection\.jobId !== jobId/);
-  assert.match(page, /startDownloadJob\(completedPayload\)/);
+  assert.match(page, /startDownloadJob\(completedPayload, jobId\)/);
+  assert.ok(
+    page.indexOf("await startDownloadJob(completedPayload, jobId)")
+      < page.indexOf("clearActiveInspection(completedInspection)", page.indexOf("await startDownloadJob(completedPayload, jobId)")),
+  );
+  assert.match(api, /startDownload\(payload: DownloadPayload, inspectionJobId\?: string\)/);
+  assert.match(api, /inspectionJobId \? \{ inspection_job_id: inspectionJobId \} : \{\}/);
   assert.ok(completedBlock.indexOf("await onSuccess") < completedBlock.indexOf("setActiveJobId(null)"));
   assert.match(completedBlock, /activeJobIdRef\.current === jobId/);
   assert.match(completedBlock, /forgetJobId\(jobId\)/);
@@ -54,6 +62,7 @@ test("reload restores the inspection payload paired with the restored job", asyn
   assert.match(polling, /const \[isPollingRestored, setIsPollingRestored\] = useState\(false\)/);
   assert.match(polling, /setIsPollingRestored\(true\)/);
   assert.match(source, /if \(isPollingRestored && !loading && !activeJobId && activeInspection\?\.jobId\)/);
+  assert.match(source, /await startDownloadJob\(completedPayload, jobId\)[\s\S]{0,300}clearActiveInspection\(completedInspection\)/);
 });
 
 test("transient polling failures keep the active job and retry it", async () => {
