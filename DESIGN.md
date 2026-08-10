@@ -172,12 +172,11 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | --- | --- | --- |
 | Existing data review card | 기존 데이터 검토 | A standalone preflight card placed after search conditions and before execution settings. |
 | Existing data integrity inspection action | 검사하기 | Replace the pending step's `검사 필요` status with this action. Runs the page-owned integrity APIs against the selected data path. |
-| Existing data reusable verdict | 사용 가능 | Use only when every page-owned inspection step passes. |
+| Existing data clear verdict | 정상 | Use when no prior data blocks a new download or when every page-owned inspection step passes. |
 | Existing data blocked verdict | 사용 불가 | Use when a mismatch or integrity failure blocks reuse. Keep the failed step and repair action visible. |
-| Existing data metadata-ready state | 메타데이터 확인됨 | Success state when required metadata exists and matches the current settings, even if the full remote-count integrity inspection has not run yet. |
-| Existing data integrity-complete state | 검증 완료 | Success state only after the page-owned integrity checks pass. Keep the specific evidence, such as a matching KIND count, in the status detail. |
+| Existing data successful step state | 정상 | Use for every completed inspection step with no issue, including metadata, settings, saved files, and KIND count checks. Keep specific evidence in the step summary. |
 | Existing data inspection-required state | 검사 필요 | Warning state when metadata is readable but the full page-owned integrity inspection has not run for the current settings. |
-| Existing data inspection-complete notification | 검사 완료 | Passive green right-dock state after a manual inspection succeeds. Do not open a dock panel automatically. |
+| Existing data inspection-complete notification | 정상 | Passive green right-dock state after a manual inspection succeeds. Do not open a dock panel automatically. |
 | Apply saved metadata settings | 저장된 설정 적용 | Right-side repair action in the failed settings-comparison step, aligned with the inspection action. |
 
 ### Disclosure Automation Workflow

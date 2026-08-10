@@ -10,6 +10,7 @@ from typing import Any
 
 from finiq.market_desk.web.features.downloads.kind_api import run_download_action
 from finiq.market_desk.web.features.downloads.kind_common import *
+from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
 from finiq.market_desk.web.features.downloads.kind_inspect import inspect_download_output_directory_payload
 from finiq.market_desk.web.features.downloads.kind_coordination import KIND_NETWORK_JOB_LOCK
 from finiq.market_desk.web.features.downloads.kind_runner import _download_payload_summary
@@ -134,6 +135,19 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
                 progress_callback=lambda message: _append_job_progress(job_id, message),
                 cancel_check=lambda: _is_download_cancelled(job_id),
             )
+            if _is_download_cancelled(job_id):
+                raise DownloadCancelled()
+            with KIND_NETWORK_JOB_LOCK:
+                if _is_download_cancelled(job_id):
+                    raise DownloadCancelled()
+                result["existing_downloads"] = check_existing_downloads(
+                    str(payload.get("output_directory") or ""),
+                    verify_with_kind=True,
+                    current_payload=payload,
+                    cancel_check=lambda: _is_download_cancelled(job_id),
+                )
+            if _is_download_cancelled(job_id):
+                raise DownloadCancelled()
             _update_job(job_id, status="completed", result=result)
             _append_job_progress(job_id, f"JOB inspect completed id={job_id}")
         except DownloadCancelled:

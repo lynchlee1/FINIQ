@@ -30,6 +30,13 @@ export function useDataIntegrityInspection<TPayload, TResult>({
     setIsChecking(false);
   }, []);
 
+  const acceptResult = useCallback((nextResult: TResult) => {
+    requestRef.current = { id: requestRef.current.id + 1, key: "" };
+    setResult(nextResult);
+    setError(null);
+    setIsChecking(false);
+  }, []);
+
   const runInspection = useCallback(async (payload: TPayload, requestKey: string) => {
     const requestId = requestRef.current.id + 1;
     requestRef.current = { id: requestId, key: requestKey };
@@ -66,6 +73,7 @@ export function useDataIntegrityInspection<TPayload, TResult>({
     error,
     isChecking,
     runInspection,
+    acceptResult,
     clear,
   };
 }

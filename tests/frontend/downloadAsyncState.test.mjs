@@ -42,12 +42,18 @@ test("inspection terminal processing owns an immutable job context", async () =>
 });
 
 test("reload restores the inspection payload paired with the restored job", async () => {
-  const source = await readFile(downloadPagePath, "utf8");
+  const [source, polling] = await Promise.all([
+    readFile(downloadPagePath, "utf8"),
+    readFile(pollingHookPath, "utf8"),
+  ]);
 
   assert.match(source, /readStoredInspectionContext/);
   assert.match(source, /sessionStorage\.getItem\(DOWNLOAD_INSPECTION_STORAGE_KEY\)/);
   assert.match(source, /useRef<DownloadInspectionContext \| null>\(readStoredInspectionContext\(\)\)/);
   assert.match(source, /const completedPayload = completedInspection\.payload/);
+  assert.match(polling, /const \[isPollingRestored, setIsPollingRestored\] = useState\(false\)/);
+  assert.match(polling, /setIsPollingRestored\(true\)/);
+  assert.match(source, /if \(isPollingRestored && !loading && !activeJobId && activeInspection\?\.jobId\)/);
 });
 
 test("transient polling failures keep the active job and retry it", async () => {

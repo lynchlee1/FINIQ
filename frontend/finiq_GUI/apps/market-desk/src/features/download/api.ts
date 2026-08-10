@@ -31,7 +31,3 @@ export function inspectDownloadFolder(payload: DownloadInspectPayload) {
 export function detectExistingDownload(payload: DownloadExistingPayload) {
   return apiPost<DownloadExistingResponse>("/api/download/detect-existing", payload);
 }
-
-export function checkExistingDownload(payload: DownloadExistingPayload) {
-  return apiPost<DownloadExistingResponse>("/api/download/check-existing", { ...payload, verify_with_kind: true });
-}

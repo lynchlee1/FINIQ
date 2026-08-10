@@ -14,7 +14,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner, useActionDockFollow } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { cancelDownload, checkExistingDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload } from "@/features/download/api";
+import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload } from "@/features/download/api";
 import type { DownloadExistingPayload, DownloadExistingResponse, DownloadOptions, DownloadPayload, DownloadSavedFilters } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -74,10 +74,6 @@ const areFiltersMatching = (
   return true;
 };
 
-type DownloadExistingInspectionPayload = DownloadExistingPayload & {
-  inspection_mode: "detect" | "verify";
-};
-
 type DownloadInspectionContext = {
   jobId: string;
   key: string;
@@ -86,6 +82,7 @@ type DownloadInspectionContext = {
 };
 
 const DOWNLOAD_INSPECTION_STORAGE_KEY = "finiq.downloadInspectionContext:/download";
+const EXISTING_DATA_SUCCESS_LABEL = "정상";
 
 const readStoredInspectionContext = (): DownloadInspectionContext | null => {
   if (typeof window === "undefined") return null;
@@ -172,7 +169,7 @@ export default function DownloadPage() {
       ? `${dataRoot.replace(/\/$/, "")}/01-list`
       : "";
 
-  const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
+  const { status, isErrorStatus, activeJobId, isPollingRestored, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
     pollingEndpoint: "/api/download/jobs/{jobId}",
     onSuccess: async (data, jobId) => {
       if (data && data.format === "kind_download_folder_cleanup_v1") {
@@ -183,27 +180,9 @@ export default function DownloadPage() {
         const candidateCount = data.dry_run ? (data.deletion_candidate_count || 0) : 0;
         const completedInspectionKey = completedInspection.key;
         const completedPayload = completedInspection.payload;
-        const currentInspectionKey = outputDirectory
-          ? checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()))
-          : "";
-        let verified: DownloadExistingResponse | null | undefined = null;
-        try {
-          verified = completedInspectionKey !== currentInspectionKey
-            ? await checkExistingDownload(existingPayloadFromDownloadPayload(completedPayload))
-            : await checkExisting(
-                completedPayload.output_directory,
-                true,
-                completedPayload,
-              );
-        } catch (verificationError) {
-          const message = verificationError instanceof Error
-            ? verificationError.message
-            : String(verificationError);
-          setStatus(message);
-          setIsErrorStatus(true);
-        } finally {
-          clearActiveInspection(completedInspection);
-        }
+        const verified = data.existing_downloads as DownloadExistingResponse | null | undefined;
+        if (verified) acceptExistingInspectionResult(verified);
+        clearActiveInspection(completedInspection);
         const hasVerificationFailure = !verified || (verified.ranges?.some(
           (range) => range.status === "stale"
             || range.filters_match === false
@@ -286,13 +265,10 @@ export default function DownloadPage() {
     error: existingMetadataError,
     isChecking: checkingExisting,
     runInspection: runExistingInspection,
+    acceptResult: acceptExistingInspectionResult,
     clear: clearExistingInspection,
-  } = useDataIntegrityInspection<DownloadExistingInspectionPayload, DownloadExistingResponse>({
-    inspect: ({ inspection_mode, ...payload }) => (
-      inspection_mode === "verify"
-        ? checkExistingDownload(payload)
-        : detectExistingDownload(payload)
-    ),
+  } = useDataIntegrityInspection<DownloadExistingPayload, DownloadExistingResponse>({
+    inspect: detectExistingDownload,
     onError: (message) => {
       setStatus(message);
       setMetadataNotificationError(message);
@@ -386,37 +362,27 @@ export default function DownloadPage() {
 
   useEffect(() => {
     const activeInspection = activeInspectionRef.current;
-    if (!loading && !activeJobId && activeInspection?.jobId) {
+    if (isPollingRestored && !loading && !activeJobId && activeInspection?.jobId) {
       clearActiveInspection(activeInspection);
     }
-  }, [activeJobId, clearActiveInspection, loading]);
+  }, [activeJobId, clearActiveInspection, isPollingRestored, loading]);
 
-  const checkExisting = useCallback(async (
-    dir: string,
-    verifyWithKind = false,
-    sourcePayload?: DownloadPayload,
-  ) => {
+  const checkExisting = useCallback(async (dir: string) => {
     if (!dir) {
       clearExistingInspection();
       return;
     }
-    const submittedPayload: DownloadExistingInspectionPayload = {
-      ...(sourcePayload
-        ? existingPayloadFromDownloadPayload(sourcePayload)
-        : {
-            output_directory: dir,
-            start_date: startDate,
-            end_date: endDate,
-            company_name: companyName,
-            submitter_name: submitterName,
-            market_label: marketLabel,
-            securities_label: securitiesLabel,
-            page_size: Number(pageSize),
-            last_report_only: lastReportOnly,
-            disclosure_type_groups: selectedDisclosures,
-          }),
+    const submittedPayload: DownloadExistingPayload = {
       output_directory: dir,
-      inspection_mode: verifyWithKind ? "verify" : "detect",
+      start_date: startDate,
+      end_date: endDate,
+      company_name: companyName,
+      submitter_name: submitterName,
+      market_label: marketLabel,
+      securities_label: securitiesLabel,
+      page_size: Number(pageSize),
+      last_report_only: lastReportOnly,
+      disclosure_type_groups: selectedDisclosures,
     };
     const requestKey = checkExistingPayloadKey(submittedPayload);
     return runExistingInspection(submittedPayload, requestKey);
@@ -553,7 +519,7 @@ export default function DownloadPage() {
       ? (deleted ? data.deleted_files : data.deletion_candidates)
       : [];
     const lines = [
-      deleted ? "파일 삭제 완료" : "검사 완료",
+      deleted ? "파일 삭제 완료" : EXISTING_DATA_SUCCESS_LABEL,
       `대상 페이지: ${formatInteger(data.requested_count || data.summary?.total)}`,
       `연도별 분할: ${data.split_by_year ? "On" : "Off"}`,
       `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${formatInteger(deleted ? data.deleted_count : data.deletion_candidate_count)}`,
@@ -738,7 +704,7 @@ export default function DownloadPage() {
     };
   } else if (!existingData) {
     inspectionVerdict = {
-      label: "검토 완료",
+      label: EXISTING_DATA_SUCCESS_LABEL,
       title: "기존 데이터가 없습니다",
       description: "현재 조건으로 새 다운로드를 시작할 수 있습니다.",
       tone: "success",
@@ -766,7 +732,7 @@ export default function DownloadPage() {
     };
   } else {
     inspectionVerdict = {
-      label: "검증 완료",
+      label: EXISTING_DATA_SUCCESS_LABEL,
       title: "기존 데이터를 안전하게 재사용할 수 있습니다",
       description: `${existingData.earliest_date ?? "-"} ~ ${existingData.latest_date ?? "-"} · ${formatInteger(inspectionRanges.length)}개 범위 확인`,
       tone: "success",
@@ -788,7 +754,7 @@ export default function DownloadPage() {
         : checkingExisting && !existingInspectionResult
           ? "확인 중"
           : existingData
-            ? "메타데이터 확인됨"
+            ? EXISTING_DATA_SUCCESS_LABEL
             : "대상 없음",
       detail: existingMetadataError ? (
         <p className="text-[13px] leading-5 text-[var(--tv-down-text)]">{existingMetadataError}</p>
@@ -805,7 +771,7 @@ export default function DownloadPage() {
             ? `${formatInteger(filterDifferences.length)}개 설정이 현재 조건과 다릅니다.`
             : `${formatInteger(mismatchedFilterRanges.length)}개 저장 범위의 설정이 현재 조건과 다릅니다.`,
       status: existingMetadataError ? "waiting" : !existingData || filtersMatch ? "complete" : "failed",
-      statusLabel: existingMetadataError ? "대기" : !existingData ? "대상 없음" : filtersMatch ? "일치" : "불일치",
+      statusLabel: existingMetadataError ? "대기" : !existingData ? "대상 없음" : filtersMatch ? EXISTING_DATA_SUCCESS_LABEL : "불일치",
       detail: !filtersMatch && savedFilters ? (
         <div className="space-y-3">
           {filterDifferences.length > 0 && (
@@ -881,7 +847,7 @@ export default function DownloadPage() {
               ? "검사 필요"
               : inspectionCandidates.length > 0
                 ? "문제 발견"
-                : "통과",
+                : EXISTING_DATA_SUCCESS_LABEL,
       detail: inspectionCandidates.length > 0 ? (
         <ul className="max-h-48 space-y-2 overflow-y-auto text-[13px] leading-5 text-[var(--tv-down-text)]">
           {inspectionCandidates.map((candidate: any) => (
@@ -921,7 +887,7 @@ export default function DownloadPage() {
           ? "대상 없음"
           : staleRanges.length > 0
             ? "불일치"
-            : "통과",
+            : EXISTING_DATA_SUCCESS_LABEL,
       detail: staleRanges.length > 0 ? (
         <div className="max-h-64 space-y-2 overflow-y-auto">
           {staleRanges.map((range) => (
