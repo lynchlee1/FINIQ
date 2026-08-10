@@ -300,26 +300,26 @@ def _download_integrity_status(
     page_size: int,
     precomputed_status: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    pagination = _detect_pagination(output_directory)
     status: dict[str, Any] = {
         "output_directory": str(output_directory),
-        "pagination": pagination,
+        "pagination": None,
         "integrity_valid": False,
         "complete": False,
         "missing_pages": [],
         "errors": [],
     }
-    if precomputed_status is not None:
-        status.update(precomputed_status)
-        status["integrity_valid"] = True
-        total_pages = int(precomputed_status.get("total_pages") or 0)
-        downloaded_pages = int(precomputed_status.get("downloaded_pages") or 0)
-        status["complete"] = total_pages > 0 and downloaded_pages == total_pages
-        if total_pages > downloaded_pages:
-            status["missing_pages"] = list(range(downloaded_pages + 1, total_pages + 1))
-        return status
-
     try:
+        status["pagination"] = _detect_pagination(output_directory)
+        if precomputed_status is not None:
+            status.update(precomputed_status)
+            status["integrity_valid"] = True
+            total_pages = int(precomputed_status.get("total_pages") or 0)
+            downloaded_pages = int(precomputed_status.get("downloaded_pages") or 0)
+            status["complete"] = total_pages > 0 and downloaded_pages == total_pages
+            if total_pages > downloaded_pages:
+                status["missing_pages"] = list(range(downloaded_pages + 1, total_pages + 1))
+            return status
+
         inspected = inspect_download_directory_pages(
             output_directory,
             expected_page_size=page_size,
@@ -433,6 +433,16 @@ def _current_filters_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _filters_payloads_match(
     current: dict[str, Any], saved: dict[str, Any]
 ) -> bool:
+    def normalized_groups(payload: dict[str, Any]) -> dict[str, list[str]]:
+        normalized: dict[str, list[str]] = {}
+        for suffix, codes in dict(
+            payload.get("disclosure_type_groups") or {}
+        ).items():
+            normalized_codes = sorted(str(code) for code in codes)
+            if normalized_codes:
+                normalized[str(suffix)] = normalized_codes
+        return normalized
+
     return (
         str(current.get("company_name") or "").strip()
         == str(saved.get("company_name") or "").strip()
@@ -443,8 +453,7 @@ def _filters_payloads_match(
         and str(current.get("securities_label") or "전체")
         == str(saved.get("securities_label") or "전체")
         and bool(current.get("last_report_only")) == bool(saved.get("last_report_only"))
-        and json.dumps(current.get("disclosure_type_groups") or {}, sort_keys=True)
-        == json.dumps(saved.get("disclosure_type_groups") or {}, sort_keys=True)
+        and normalized_groups(current) == normalized_groups(saved)
     )
 
 

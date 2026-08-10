@@ -3071,6 +3071,44 @@ def test_inspect_download_output_directory_deletes_confirmed_mismatch(
     assert not (output_directory / "kind_workflow.input.json").exists()
 
 
+def test_inspect_download_output_directory_finishes_confirmed_deletion_batch(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "download"
+    output_directory.mkdir()
+    body_path = output_directory / "001_post_page_00001.body"
+    body_path.write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    input_path = output_directory / "kind_workflow.input.json"
+    input_path.write_text(
+        json.dumps(_trusted_download_input_snapshot(page_size=50)),
+        encoding="utf-8",
+    )
+    cancel_checks = 0
+
+    def cancel_after_deletion_starts() -> bool:
+        nonlocal cancel_checks
+        cancel_checks += 1
+        return cancel_checks >= 4
+
+    payload = inspect_download_output_directory_payload(
+        {
+            "mode": "single",
+            "output_directory": str(output_directory),
+            "page_size": 100,
+            "dry_run": False,
+            "delete_confirmed": True,
+            "delete_confirmation_text": "확인했습니다.",
+        },
+        cancel_check=cancel_after_deletion_starts,
+    )
+
+    assert payload["deleted_count"] == 2
+    assert not body_path.exists()
+    assert not input_path.exists()
+
+
 def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> None:
     def write_page(folder: Path, page_number: int, page_size: int, total_items: int, html_content: bytes | None = None) -> Path:
         p = folder / f"001_post_page_{page_number:05d}.body"
@@ -3087,13 +3125,14 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
     (dir_corrupt / "kind_workflow.input.json").write_text(json.dumps(_trusted_download_input_snapshot(page_size=100)), encoding="utf-8")
     write_page(dir_corrupt, 1, 100, 100, html_content=b"<html><body>no paging group</body></html>")
 
-    with pytest.raises(ValueError, match="pagination not found"):
-        inspect_download_output_directory_payload({
-            "mode": "single",
-            "output_directory": str(dir_corrupt),
-            "page_size": 100,
-            "dry_run": True,
-        })
+    res = inspect_download_output_directory_payload({
+        "mode": "single",
+        "output_directory": str(dir_corrupt),
+        "page_size": 100,
+        "dry_run": True,
+    })
+    assert res["deletion_candidate_count"] == 2
+    assert "페이지네이션 정보를 찾지 못했습니다" in res["deletion_candidates"][0]["reason"]
 
     # 2. Duplicate page
     dir_dup = tmp_path / "duplicate"
@@ -3213,6 +3252,32 @@ def test_inspect_download_output_directory_regression_cases(tmp_path: Path) -> N
     assert res["deletion_candidate_count"] == 2
     assert "20250101_20251231" in res["deletion_candidates"][0]["path"]
     assert "기대값" in res["deletion_candidates"][0]["reason"]
+
+    # 8. Folder range differs from metadata range
+    mismatched_range = dir_yearly / "20260101_20261231"
+    mismatched_range.mkdir()
+    (mismatched_range / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01",
+                end_date="2025-12-31",
+                page_size=100,
+            )
+        ),
+        encoding="utf-8",
+    )
+    write_page(mismatched_range, 1, 100, 100)
+
+    res = inspect_download_output_directory_payload({
+        "mode": "yearly",
+        "output_directory": str(dir_yearly),
+        "page_size": 100,
+        "dry_run": True,
+        "start_date": "2026-01-01",
+        "end_date": "2026-12-31",
+    })
+    assert res["deletion_candidate_count"] == 2
+    assert "메타데이터 기간 2025-01-01~2025-12-31" in res["deletion_candidates"][0]["reason"]
 
 
 def test_inspect_folder_job_cancellation(tmp_path: Path, monkeypatch) -> None:
@@ -4380,8 +4445,16 @@ def test_compress_disclosure_external_html_payload_rejects_mismatched_embedded_a
             {
                 "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
-                    {"acpt_no": "20250101000001", "title": "첫 번째 제목"},
-                    {"acpt_no": "20250101000002", "title": "두 번째 제목"},
+                    {
+                        "acpt_no": "20250101000001",
+                        "title": "첫 번째 제목",
+                        "disclosed_at": "2025-01-01",
+                    },
+                    {
+                        "acpt_no": "20250101000002",
+                        "title": "두 번째 제목",
+                        "disclosed_at": "2025-01-01",
+                    },
                 ]
             },
             ensure_ascii=False,
@@ -4479,8 +4552,16 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
             {
                 "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
-                    {"acpt_no": "20250101000001", "title": "첫 번째 제목"},
-                    {"acpt_no": "20250101000002", "title": "두 번째 제목"},
+                    {
+                        "acpt_no": "20250101000001",
+                        "title": "첫 번째 제목",
+                        "disclosed_at": "2025-01-01",
+                    },
+                    {
+                        "acpt_no": "20250101000002",
+                        "title": "두 번째 제목",
+                        "disclosed_at": "2025-01-01",
+                    },
                 ]
             },
             ensure_ascii=False,
@@ -9722,6 +9803,10 @@ def test_check_existing_downloads_empty(tmp_path: Path) -> None:
     res = check_existing_downloads(str(tmp_path))
     assert res == {"has_existing": False}
 
+    (tmp_path / "20260230_20261231").mkdir()
+    res = check_existing_downloads(str(tmp_path), verify_with_kind=False)
+    assert res == {"has_existing": False}
+
 
 def test_check_existing_downloads_reports_validation_exception_as_stale(
     tmp_path: Path, monkeypatch
@@ -9787,6 +9872,119 @@ def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
     assert res["ranges"][1]["start_date"] == "2026-05-02"
     assert res["ranges"][1]["end_date"] == "2026-06-01"
     assert res["ranges"][1]["status"] == "validated"
+
+
+def test_check_existing_downloads_preserves_each_range_filter_match(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count",
+        lambda snap: 100,
+    )
+
+    first_folder = tmp_path / "20260101_20260501"
+    first_folder.mkdir()
+    (first_folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (first_folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2026-01-01", end_date="2026-05-01"
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    second_folder = tmp_path / "20260502_20260601"
+    second_folder.mkdir()
+    (second_folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    second_snapshot = _trusted_download_input_snapshot(
+        start_date="2026-05-02", end_date="2026-06-01"
+    )
+    second_snapshot["search_filters"] = [["marketType", "1"]]
+    (second_folder / "kind_workflow.input.json").write_text(
+        json.dumps(second_snapshot), encoding="utf-8"
+    )
+
+    res = check_existing_downloads(
+        str(tmp_path),
+        current_payload={
+            "company_name": "",
+            "submitter_name": "",
+            "market_label": "전체",
+            "securities_label": "전체",
+            "disclosure_type_groups": {},
+            "last_report_only": False,
+        },
+    )
+
+    assert [item["filters_match"] for item in res["ranges"]] == [True, False]
+    assert [item["metadata_status"] for item in res["ranges"]] == ["ok", "mismatch"]
+
+
+def test_existing_download_filters_ignore_disclosure_code_order() -> None:
+    from finiq.market_desk.web.features.downloads.kind_common import (
+        _filters_payloads_match,
+    )
+
+    common = {
+        "company_name": "",
+        "submitter_name": "",
+        "market_label": "전체",
+        "securities_label": "전체",
+        "last_report_only": False,
+    }
+
+    assert _filters_payloads_match(
+        {**common, "disclosure_type_groups": {"01": ["0161", "0172"]}},
+        {**common, "disclosure_type_groups": {"01": ["0172", "0161"]}},
+    )
+    assert _filters_payloads_match(
+        {**common, "disclosure_type_groups": {}},
+        {**common, "disclosure_type_groups": {"01": []}},
+    )
+
+
+def test_existing_downloads_reject_folder_metadata_date_mismatch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from finiq.market_desk.web.features.downloads.kind_existing import (
+        check_existing_downloads,
+        detect_existing_downloads,
+    )
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count",
+        lambda snap: (_ for _ in ()).throw(
+            AssertionError("date mismatch must stop before querying KIND")
+        ),
+    )
+    folder = tmp_path / "20260101_20261231"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01", end_date="2025-12-31"
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    detected = detect_existing_downloads(str(tmp_path))
+    verified = check_existing_downloads(str(tmp_path))
+
+    assert detected["ranges"][0]["status"] == "stale"
+    assert verified["ranges"][0]["status"] == "stale"
+    assert "differs from metadata date range" in detected["ranges"][0]["error_detail"]
+    assert "differs from metadata date range" in verified["ranges"][0]["error_detail"]
 
 
 def test_check_existing_downloads_single(tmp_path: Path, monkeypatch) -> None:

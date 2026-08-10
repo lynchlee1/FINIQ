@@ -5,10 +5,12 @@ import test from "node:test";
 const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx";
 const inspectionPanelPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-integrity/DataIntegrityInspectionPanel.tsx";
 const inspectionHookPath = "frontend/finiq_GUI/apps/market-desk/src/hooks/useDataIntegrityInspection.ts";
+const actionDockPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/ActionDock.tsx";
+const actionDockFollowPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/useActionDockFollow.ts";
 const downloadApiPath = "frontend/finiq_GUI/apps/market-desk/src/features/download/api.ts";
 const globalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
-test("download review is separate from search conditions and its pending step owns the inspection action", async () => {
+test("download review is separate from search conditions and actionable steps own right-side actions", async () => {
   const [source, panel] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
     readFile(inspectionPanelPath, "utf8"),
@@ -22,12 +24,24 @@ test("download review is separate from search conditions and its pending step ow
   assert.ok(reviewCardStart > searchCardClose);
   assert.doesNotMatch(source.slice(searchCardStart, searchCardClose), /DataIntegrityInspectionPanel/);
   assert.match(source, /<CardTitle[^>]*>[\s\S]*기존 데이터 검토/);
+  const settingsStep = source.slice(source.indexOf('key: "settings"'), source.indexOf('key: "files"'));
+  assert.match(settingsStep, /action: !filtersMatch && savedFilters && filterDifferences\.length > 0 \? \{[\s\S]*label: "저장된 설정 적용"/);
+  assert.doesNotMatch(settingsStep, /<Button\b/);
   assert.match(source, /key: "files"[\s\S]{0,3500}label: isCurrentInspectionRunning \? "검사 중\.\.\." : "검사하기"/);
   assert.ok(source.indexOf("label: isCurrentInspectionRunning") < source.indexOf('key: "kind-count"'));
   assert.match(panel, /\{step\.action \? \([\s\S]{0,500}step\.action\.label/);
   assert.doesNotMatch(source, /업데이트 기간 적용/);
   assert.doesNotMatch(source, /폴더 검사하기/);
-  assert.match(source, /작업 실행[\s\S]{0,500}md:grid-cols-3/);
+  const executionCard = source.slice(
+    source.indexOf('<CardTitle className="dark:text-white">작업 실행</CardTitle>'),
+    source.indexOf("        </section>", source.indexOf('<CardTitle className="dark:text-white">작업 실행</CardTitle>')),
+  );
+  assert.match(executionCard, /md:grid-cols-3/);
+  assert.equal(executionCard.match(/<Button\b/g)?.length, 3);
+  assert.match(executionCard, />\s*미리보기\s*<\/Button>/);
+  assert.match(executionCard, /onClick=\{handleRun\}[\s\S]*?\n\s+실행\s*\n\s+<\/Button>/);
+  assert.match(executionCard, /\{UI_TEXT\.actions\.cancelJob\}/);
+  assert.doesNotMatch(executionCard, /검사하기|저장된 설정 적용|삭제 예정 파일/);
 });
 
 test("shared integrity panel presents a verdict, ordered steps and failure-only detail", async () => {
@@ -38,11 +52,14 @@ test("shared integrity panel presents a verdict, ordered steps and failure-only 
 
   assert.match(panel, /export type DataIntegrityInspectionStepStatus = "complete" \| "failed" \| "ready" \| "waiting" \| "running"/);
   assert.ok(panel.indexOf("verdict.label") < panel.indexOf("<ol className="));
-  assert.match(panel, /\{step\.detail && \(/);
+  assert.match(panel, /\{step\.status === "failed" && step\.detail && \(/);
+  assert.doesNotMatch(panel, /\{step\.detail && \(/);
   assert.match(panel, /step\.status === "waiting" \|\| step\.status === "ready" \? index \+ 1/);
   for (const label of ["메타데이터 읽기", "현재 설정과 비교", "저장 파일 구성 검사", "KIND 건수 비교"]) {
     assert.match(source, new RegExp(label));
   }
+  assert.match(source, /label: "검증 완료"/);
+  assert.match(source, /\? "메타데이터 확인됨"\s*: "대상 없음"/);
   assert.match(source, /filterDifferences\.map/);
   assert.match(source, /저장된 설정 적용/);
   assert.match(source, /staleRanges\.map/);
@@ -61,6 +78,13 @@ test("shared integrity hierarchy stays aligned with the surrounding product UI",
   assert.doesNotMatch(panel, /text-\[18px\]/);
 });
 
+test("shared integrity step statuses and action use the same control size", async () => {
+  const panel = await readFile(inspectionPanelPath, "utf8");
+
+  assert.match(panel, /const stepControlClassName = "h-8 w-28 shrink-0 self-start justify-center whitespace-nowrap"/);
+  assert.equal(panel.match(/\$\{stepControlClassName\}/g)?.length, 2);
+});
+
 test("shared inspection state ignores stale requests and full verification blocks execution", async () => {
   const [source, hook, api] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
@@ -75,7 +99,17 @@ test("shared inspection state ignores stale requests and full verification block
   assert.match(api, /checkExistingDownload[\s\S]{0,220}verify_with_kind: true/);
   assert.match(source, /const hasVerificationFailure = !verified \|\|/);
   assert.match(source, /if \(candidateCount > 0 \|\| hasVerificationFailure\)/);
+  assert.match(source, /const completedInspection = activeInspectionRef\.current/);
+  assert.match(source, /completedInspection\.jobId !== jobId/);
+  assert.match(source, /const completedPayload = completedInspection\.payload/);
+  assert.match(source, /checkExistingDownload\(existingPayloadFromDownloadPayload\(completedPayload\)\)/);
+  assert.match(source, /if \(verified\) \{\s*setLastInspectedExistingKey\(completedInspectionKey\);/);
+  assert.match(source, /clearActiveInspection\(completedInspection\)/);
   assert.match(source, /if \(existingMetadataError\) \{\s*throw new Error\(existingMetadataError\);/);
+  assert.match(source, /result\?\.dry_run === true[\s\S]{0,180}result\.deletion_candidates/);
+  assert.match(source, /const mismatchedFilterRanges = existingData\?\.ranges\?\.filter/);
+  assert.match(source, /mismatchedFilterRanges\.length === 0 && areFiltersMatching/);
+  assert.match(source, /mismatchedFilterRanges\.map/);
   assert.doesNotMatch(hook, /catch \{[\s\S]{0,300}setResult\(null\);/);
 });
 
@@ -88,6 +122,52 @@ test("download colored status surfaces use contrast text tokens", async () => {
   }
 
   assert.doesNotMatch(source, /bg-\[var\(--tv-(?:up|down|warning)-soft\)\][^"\n]*text-\[var\(--tv-(?:up|down|warning)\)\]/);
-  assert.match(source, /warning: "border-\[color:var\(--tv-warning\)\] bg-\[var\(--tv-warning-soft\)\] text-\[var\(--tv-warning-text\)\]"/);
-  assert.match(source, /error: "border-\[color:var\(--tv-down\)\] bg-\[var\(--tv-down-soft\)\] text-\[var\(--tv-down-text\)\]"/);
+  const verdictMappings = {
+    success: "--tv-up-text",
+    warning: "--tv-warning-text",
+    error: "--tv-down-text",
+    neutral: "--tv-text",
+  };
+  const stepMappings = {
+    complete: "--tv-up-text",
+    failed: "--tv-down-text",
+    ready: "--tv-warning-text",
+    waiting: "--tv-muted",
+    running: "--tv-accent",
+  };
+  for (const [state, token] of Object.entries(verdictMappings)) {
+    assert.match(source, new RegExp(`${state}: "[^"\\n]*text-\\[var\\(${token}\\)\\]"`));
+  }
+  for (const [state, token] of Object.entries(stepMappings)) {
+    assert.match(source, new RegExp(`${state}: "[^"\\n]*text-\\[var\\(${token}\\)\\]"`));
+  }
+});
+
+test("manual inspection reports through dock state without opening a panel", async () => {
+  const [source, globals, sharedDock, dockFollow] = await Promise.all([
+    readFile(downloadPagePath, "utf8"),
+    readFile(globalsPath, "utf8"),
+    readFile(actionDockPath, "utf8"),
+    readFile(actionDockFollowPath, "utf8"),
+  ]);
+  const inspectHandler = source.slice(source.indexOf("const handleInspectFolder"), source.indexOf("const handleRun"));
+
+  assert.doesNotMatch(inspectHandler, /setDownloadPanelOpen\(true\)/);
+  assert.doesNotMatch(inspectHandler, /setNotificationPanelOpen\(true\)/);
+  assert.match(source, /\} else \{\s*setNotificationPanelOpen\(false\);\s*setDownloadPanelOpen\(false\);/);
+  assert.match(source, /hasSuccessfulInspectionNotification[\s\S]{0,500}tv-up/);
+  assert.match(source, /hasWarningNotification[\s\S]{0,500}tv-warning/);
+  assert.match(source, /const actionDockRef = useActionDockFollow<HTMLDivElement>\(\)/);
+  assert.match(source, /<div ref=\{actionDockRef\} className="action-dock-root/);
+  assert.doesNotMatch(source, /md:sticky|md:top-\[/);
+  assert.match(sharedDock, /const dockRef = useActionDockFollow<HTMLDivElement>\(\)/);
+  assert.match(sharedDock, /<div ref=\{dockRef\} className="action-dock-root/);
+  assert.match(globals, /\.action-dock-host > \.action-dock-root \{[\s\S]{0,300}position: relative;[\s\S]{0,100}top: auto;/);
+  assert.match(dockFollow, /Math\.min\(maxTravel, Math\.max\(0, VIEWPORT_INSET - hostTop\)\)/);
+  assert.match(dockFollow, /translate3d\(0, \$\{current\}px, 0\)/);
+  assert.match(dockFollow, /prefers-reduced-motion: reduce/);
+  assert.match(dockFollow, /const \[dock, setDock\] = useState<T \| null>\(null\)/);
+  assert.match(dockFollow, /useCallback\(\(node: T \| null\) => setDock\(node\), \[\]\)/);
+  assert.match(dockFollow, /window\.requestAnimationFrame\(animate\)/);
+  assert.match(dockFollow, /window\.removeEventListener\("scroll", updateTarget\)/);
 });

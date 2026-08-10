@@ -106,7 +106,7 @@ test("job API responses keep their declared payload contracts", async () => {
 
   assert.doesNotMatch(clientSource, /response\.json\(\)\.catch\(\(\) => null\)/);
   assert.doesNotMatch(clientSource, /response\.text\(\)\.catch\(\(\) => ""\)/);
-  assert.match(pollingSource, /onSuccess\(data\.result\)/);
+  assert.match(pollingSource, /onSuccess\(data\.result, jobId\)/);
   assert.doesNotMatch(pollingSource, /onSuccess\(data\.result \|\| data\)/);
   assert.doesNotMatch(streamingSource, /const data = await response\.json\(\);\s*onResult\(data\)/);
   assert.doesNotMatch(sectionSource, /setInspectResult\(data\.result \|\| data\)/);

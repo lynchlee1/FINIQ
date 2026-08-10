@@ -47,6 +47,8 @@ const stepStatusClassNames: Record<DataIntegrityInspectionStepStatus, string> = 
   running: "border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)]",
 };
 
+const stepControlClassName = "h-8 w-28 shrink-0 self-start justify-center whitespace-nowrap";
+
 function StepStatusIcon({ status }: { status: DataIntegrityInspectionStepStatus }) {
   if (status === "complete") return <Check className="h-4 w-4" />;
   if (status === "failed") return <AlertTriangle className="h-4 w-4" />;
@@ -87,7 +89,7 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
                 <Button
                   type="button"
                   size="sm"
-                  className="h-8 shrink-0 self-start px-3 text-[13px]"
+                  className={`${stepControlClassName} px-3 text-[13px]`}
                   onClick={step.action.onClick}
                   disabled={step.action.disabled}
                 >
@@ -95,13 +97,13 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
                   {step.action.label}
                 </Button>
               ) : (
-                <span className={`inline-flex shrink-0 items-center gap-1.5 self-start rounded-md border px-2.5 py-1 text-[12px] font-semibold leading-4 ${stepStatusClassNames[step.status]}`}>
+                <span className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-semibold leading-4 ${stepControlClassName} ${stepStatusClassNames[step.status]}`}>
                   <StepStatusIcon status={step.status} />
                   {step.statusLabel}
                 </span>
               )}
             </div>
-            {step.detail && (
+            {step.status === "failed" && step.detail && (
               <div className="border-t border-[color:var(--tv-border)] bg-[var(--tv-control)] px-4 py-4 sm:pl-14">
                 {step.detail}
               </div>

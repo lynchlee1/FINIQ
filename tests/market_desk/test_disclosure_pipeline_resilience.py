@@ -391,7 +391,11 @@ def test_external_html_compression_rejects_receipt_number_mismatching_filename(
             {
                 "format": "finiq_disclosure_html_manifest_v1",
                 "disclosures": [
-                    {"acpt_no": "20250101000001", "title": "KIND 제목"}
+                    {
+                        "acpt_no": "20250101000001",
+                        "title": "KIND 제목",
+                        "disclosed_at": "2025-01-01",
+                    }
                 ],
             }
         ),
@@ -403,6 +407,9 @@ def test_external_html_compression_rejects_receipt_number_mismatching_filename(
           <input type="hidden" name="acptNo" value="20250101000002" />
           <select id="mainDoc">
             <option value="20250101000999|Y" selected="selected">본문</option>
+          </select>
+          <select id="attachedDoc">
+            <option value="20250101000888">첨부</option>
           </select>
         </body></html>
         """,

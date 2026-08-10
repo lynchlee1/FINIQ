@@ -77,17 +77,45 @@ def _expected_rows_for_page(
 def _validate_single_folder(
     folder: Path,
     folder_name: str,
-    _date_range: tuple[date, date],
+    date_range: tuple[date, date],
     *,
     verify_with_kind: bool = True,
+    current_filters: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     body_files = list(folder.glob("*_post_page_*.body"))
     if not body_files:
         return None
 
     input_snapshot = _require_current_download_input_snapshot(folder)
+    saved_filters = _snapshot_filters_payload(input_snapshot)
+    filters_match = (
+        _filters_payloads_match(current_filters, saved_filters)
+        if current_filters is not None
+        else True
+    )
+    metadata_status = "ok" if filters_match else "mismatch"
     start_date = date.fromisoformat(str(input_snapshot["start_date"]))
     end_date = date.fromisoformat(str(input_snapshot["end_date"]))
+
+    if (start_date, end_date) != date_range:
+        return {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "folder_name": folder_name,
+            "local_count": None,
+            "kind_count": None,
+            "status": "stale",
+            "error_detail": (
+                f"Folder date range ({date_range[0].isoformat()} to "
+                f"{date_range[1].isoformat()}) differs from metadata date range "
+                f"({start_date.isoformat()} to {end_date.isoformat()})."
+            ),
+            "metadata_missing": False,
+            "metadata_obsolete": False,
+            "metadata_status": metadata_status,
+            "filters_match": filters_match,
+            "folder_path": str(folder),
+        }
 
     status = "validated"
     error_detail = None
@@ -109,6 +137,8 @@ def _validate_single_folder(
                 "error_detail": "Failed to fetch current count from KIND (network error or timeout).",
                 "metadata_missing": False,
                 "metadata_obsolete": False,
+                "metadata_status": metadata_status,
+                "filters_match": filters_match,
                 "folder_path": str(folder),
             }
 
@@ -184,6 +214,8 @@ def _validate_single_folder(
         "error_detail": error_detail,
         "metadata_missing": False,
         "metadata_obsolete": False,
+        "metadata_status": metadata_status,
+        "filters_match": filters_match,
         "folder_path": str(folder),
     }
 
@@ -229,6 +261,9 @@ def check_existing_downloads(
 
     candidates = []
     discovery_errors: list[dict[str, Any]] = []
+    current_filters = (
+        _current_filters_payload(current_payload) if current_payload else None
+    )
 
     # Check for yearly subfolders (YYYYMMDD_YYYYMMDD)
     try:
@@ -242,6 +277,8 @@ def check_existing_downloads(
                     and parts[0].isdigit()
                     and parts[1].isdigit()
                 ):
+                    if not list(child.glob("*_post_page_*.body")):
+                        continue
                     try:
                         folder_start = date(
                             int(child.name[0:4]),
@@ -320,6 +357,7 @@ def check_existing_downloads(
                     item[1],
                     item[2],
                     verify_with_kind=verify_with_kind,
+                    current_filters=current_filters,
                 ),
                 max_pending=worker_count * 2,
             )
@@ -378,7 +416,7 @@ def detect_existing_downloads(
     if not output_directory.is_dir():
         return {"has_existing": False}
 
-    candidates: list[tuple[Path, str, tuple[date, date] | None]] = []
+    candidates: list[tuple[Path, str, tuple[date, date]]] = []
     for child in output_directory.iterdir():
         if not child.is_dir():
             continue
@@ -411,13 +449,8 @@ def detect_existing_downloads(
     saved_filters = None
     for folder, folder_name, folder_range in candidates:
         snapshot = _require_current_download_input_snapshot(folder)
-        folder_start = None
-        folder_end = None
-        try:
-            folder_start = date.fromisoformat(str(snapshot["start_date"]))
-            folder_end = date.fromisoformat(str(snapshot["end_date"]))
-        except Exception:
-            pass
+        folder_start = date.fromisoformat(str(snapshot["start_date"]))
+        folder_end = date.fromisoformat(str(snapshot["end_date"]))
 
         range_saved_filters = _snapshot_filters_payload(snapshot)
         filters_match = (
@@ -429,16 +462,21 @@ def detect_existing_downloads(
             saved_filters = range_saved_filters
 
         metadata_status = "ok" if filters_match else "mismatch"
+        date_range_matches = folder_range == (folder_start, folder_end)
 
         ranges_data.append(
             {
-                "start_date": folder_start.isoformat() if folder_start else None,
-                "end_date": folder_end.isoformat() if folder_end else None,
+                "start_date": folder_start.isoformat(),
+                "end_date": folder_end.isoformat(),
                 "folder_name": folder_name,
                 "local_count": None,
                 "kind_count": None,
-                "status": "unverified",
-                "error_detail": None,
+                "status": "unverified" if date_range_matches else "stale",
+                "error_detail": None if date_range_matches else (
+                    f"Folder date range ({folder_range[0].isoformat()} to "
+                    f"{folder_range[1].isoformat()}) differs from metadata date range "
+                    f"({folder_start.isoformat()} to {folder_end.isoformat()})."
+                ),
                 "metadata_missing": False,
                 "metadata_obsolete": False,
                 "metadata_status": metadata_status,

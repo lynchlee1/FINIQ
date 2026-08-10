@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Activity, Bell, Settings, X } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
+import { useActionDockFollow } from "./useActionDockFollow";
 
 type DockPanel = "activity" | "notification" | "settings" | null;
 
@@ -33,6 +34,7 @@ export function ActionDock({
   settingsContent,
   settingsActive = true,
 }: ActionDockProps) {
+  const dockRef = useActionDockFollow<HTMLDivElement>();
   const [openPanel, setOpenPanel] = useState<DockPanel>(null);
   const [notificationDismissed, setNotificationDismissed] = useState(false);
   const hasSettingsContent = settingsContent !== undefined && settingsContent !== null;
@@ -109,7 +111,7 @@ export function ActionDock({
   };
 
   return (
-    <div className="action-dock-root relative z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-[8.75rem] md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
+    <div ref={dockRef} className="action-dock-root relative z-40 md:inset-x-auto md:bottom-auto md:top-auto md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
       <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 md:h-auto md:w-16 md:flex-col">
         <Button
           variant="outline"
