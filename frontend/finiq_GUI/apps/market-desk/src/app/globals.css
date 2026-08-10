@@ -318,9 +318,10 @@ html, body {
     align-self: start;
     margin-top: 0 !important;
     justify-self: start;
-    position: sticky;
+    position: relative;
     right: auto;
-    top: 0;
+    top: auto;
+    will-change: transform;
   }
 }
 

@@ -177,7 +177,8 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Existing data metadata-ready state | 메타데이터 확인됨 | Success state when required metadata exists and matches the current settings, even if the full remote-count integrity inspection has not run yet. |
 | Existing data integrity-complete state | 검증 완료 | Success state only after the page-owned integrity checks pass. Keep the specific evidence, such as a matching KIND count, in the status detail. |
 | Existing data inspection-required state | 검사 필요 | Warning state when metadata is readable but the full page-owned integrity inspection has not run for the current settings. |
-| Apply saved metadata settings | 저장된 설정 적용 | Repair action shown in the failed settings-comparison step. |
+| Existing data inspection-complete notification | 검사 완료 | Passive green right-dock state after a manual inspection succeeds. Do not open a dock panel automatically. |
+| Apply saved metadata settings | 저장된 설정 적용 | Right-side repair action in the failed settings-comparison step, aligned with the inspection action. |
 
 ### Disclosure Automation Workflow
 
@@ -359,7 +360,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
 | Activity panel | 실행 현황 | Use for the right dock activity button and panel title across pages. |
-| Notification panel | 알림 | Use only for errors, warnings, confirmations, or user action required. |
+| Notification panel | 알림 | Use for errors, warnings, confirmations, user action required, or passive completion feedback. New content changes the dock icon tone but never opens the panel automatically. |
 | Notification clear action | 지우기 | Button in the right-side `알림` panel that clears the currently accumulated notification display. |
 | Settings panel | 설정 | Use as the generic right dock settings title unless a page-specific settings title is already established. |
 | Download parallel strategy setting | 병렬 처리 방식 | Selects whether workers are distributed across yearly ranges or pages within one year. |
@@ -368,3 +369,5 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Background job retention setting | 작업 기록 보관 시간 (분) | Retains terminal in-memory job status for the configured number of minutes. It never removes saved files or workflow metadata. |
 | Disclosure separate output directory setting | 저장 디렉토리 별도 설정하기 | Shared setting across all disclosure detail pages. Default is off. When off, hide the result-directory input and use the canonical stage directory under the workspace. |
 | Disclosure workspace root path | 작업공간 디렉토리 | Shared root directory shown on every disclosure detail page. All canonical stage paths are resolved below this directory. |
+
+Right dock panels align exactly with the workflow content at the top of the page. On desktop, they begin following only after scrolling past a `24px` viewport inset, using the shared bounded spring motion; reduced-motion mode moves directly to the same bounded position. Do not use a sticky top offset, because it shifts the dock out of alignment before scrolling begins.

@@ -12,7 +12,7 @@ import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-import { JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
+import { JobStatusLogger, PageLoadingSpinner, useActionDockFollow } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, checkExistingDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload, detectExistingDownload } from "@/features/download/api";
 import type { DownloadExistingPayload, DownloadExistingResponse, DownloadOptions, DownloadPayload, DownloadSavedFilters } from "@/features/download/types";
@@ -78,6 +78,25 @@ type DownloadExistingInspectionPayload = DownloadExistingPayload & {
   inspection_mode: "detect" | "verify";
 };
 
+type DownloadInspectionContext = {
+  jobId: string;
+  key: string;
+  payload: DownloadPayload;
+  runTriggered: boolean;
+};
+
+const DOWNLOAD_INSPECTION_STORAGE_KEY = "finiq.downloadInspectionContext:/download";
+
+const readStoredInspectionContext = (): DownloadInspectionContext | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.sessionStorage.getItem(DOWNLOAD_INSPECTION_STORAGE_KEY);
+    return stored ? JSON.parse(stored) as DownloadInspectionContext : null;
+  } catch {
+    return null;
+  }
+};
+
 const checkExistingPayloadKey = (payload: DownloadExistingPayload) => JSON.stringify({
   ...payload,
   disclosure_type_groups: Object.fromEntries(
@@ -102,6 +121,7 @@ const existingPayloadFromDownloadPayload = (payload: DownloadPayload) => ({
 });
 
 export default function DownloadPage() {
+  const actionDockRef = useActionDockFollow<HTMLDivElement>();
   const [options, setOptions] = useState<DownloadOptions | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,10 +131,31 @@ export default function DownloadPage() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [runStarting, setRunStarting] = useState(false);
-  const isRunTriggeredRef = useRef(false);
-  const capturedPayloadRef = useRef<DownloadPayload | null>(null);
-  const activeInspectionKeyRef = useRef<string | null>(null);
+  const activeInspectionRef = useRef<DownloadInspectionContext | null>(readStoredInspectionContext());
+  const cleanupCandidatePayloadRef = useRef<DownloadPayload | null>(null);
+  const [cleanupCandidateKey, setCleanupCandidateKey] = useState<string | null>(null);
+  const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
   const [lastInspectedExistingKey, setLastInspectedExistingKey] = useState<string | null>(null);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+
+  const clearActiveInspection = useCallback((expected?: DownloadInspectionContext | null) => {
+    if (expected && activeInspectionRef.current !== expected) return;
+    activeInspectionRef.current = null;
+    try {
+      window.sessionStorage.removeItem(DOWNLOAD_INSPECTION_STORAGE_KEY);
+    } catch {
+      // The in-memory context is still cleared when storage is unavailable.
+    }
+  }, []);
+
+  const clearCleanupCandidates = useCallback(() => {
+    cleanupCandidatePayloadRef.current = null;
+    setCleanupCandidateKey(null);
+    setLastInspectionCandidateCount(0);
+    setDeleteConfirmed(false);
+    setDeleteConfirmationText("");
+  }, []);
 
   const {
     output_root: dataRoot,
@@ -133,22 +174,57 @@ export default function DownloadPage() {
 
   const { status, isErrorStatus, activeJobId, startPolling, setStatus, setIsErrorStatus } = useJobPolling({
     pollingEndpoint: "/api/download/jobs/{jobId}",
-    onSuccess: async (data) => {
+    onSuccess: async (data, jobId) => {
       if (data && data.format === "kind_download_folder_cleanup_v1") {
+        const completedInspection = activeInspectionRef.current;
+        if (!completedInspection || completedInspection.jobId !== jobId) {
+          throw new Error("완료된 검사 작업의 실행 입력을 확인할 수 없습니다. 같은 조건으로 다시 검사해 주세요.");
+        }
         const candidateCount = data.dry_run ? (data.deletion_candidate_count || 0) : 0;
-        const completedInspectionKey = activeInspectionKeyRef.current;
-        const verified = await checkExisting(outputDirectory, true);
-        const hasVerificationFailure = !verified || (verified.ranges?.some((range) => range.status === "stale") ?? false);
-        if (verified && completedInspectionKey) {
+        const completedInspectionKey = completedInspection.key;
+        const completedPayload = completedInspection.payload;
+        const currentInspectionKey = outputDirectory
+          ? checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()))
+          : "";
+        let verified: DownloadExistingResponse | null | undefined = null;
+        try {
+          verified = completedInspectionKey !== currentInspectionKey
+            ? await checkExistingDownload(existingPayloadFromDownloadPayload(completedPayload))
+            : await checkExisting(
+                completedPayload.output_directory,
+                true,
+                completedPayload,
+              );
+        } catch (verificationError) {
+          const message = verificationError instanceof Error
+            ? verificationError.message
+            : String(verificationError);
+          setStatus(message);
+          setIsErrorStatus(true);
+        } finally {
+          clearActiveInspection(completedInspection);
+        }
+        const hasVerificationFailure = !verified || (verified.ranges?.some(
+          (range) => range.status === "stale"
+            || range.filters_match === false
+            || range.metadata_status === "mismatch"
+        ) ?? false);
+        if (verified) {
           setLastInspectedExistingKey(completedInspectionKey);
         }
-        activeInspectionKeyRef.current = null;
         setLastInspectionCandidateCount(candidateCount);
+        if (candidateCount > 0 && data.dry_run) {
+          cleanupCandidatePayloadRef.current = completedPayload;
+          setCleanupCandidateKey(completedInspectionKey);
+        } else {
+          clearCleanupCandidates();
+        }
         setResult(data);
-        setStatus(buildInspectionStatus(data, !data.dry_run));
+        if (verified) {
+          setStatus(buildInspectionStatus(data, !data.dry_run));
+        }
 
-        if (isRunTriggeredRef.current) {
-          isRunTriggeredRef.current = false;
+        if (completedInspection.runTriggered) {
           if (candidateCount > 0 || hasVerificationFailure) {
             setNotificationPanelOpen(true);
             setDownloadPanelOpen(false);
@@ -156,14 +232,14 @@ export default function DownloadPage() {
           } else {
             try {
               setStatus("다운로드 작업을 시작하는 중...");
-              await startDownloadJob();
+              await startDownloadJob(completedPayload);
             } catch (err: any) {
               setStatus(err.message);
               setIsErrorStatus(true);
             }
           }
         } else {
-          setNotificationPanelOpen(true);
+          setNotificationPanelOpen(false);
           setDownloadPanelOpen(false);
           setSettingsPanelOpen(false);
         }
@@ -171,13 +247,17 @@ export default function DownloadPage() {
         setResult(data);
       }
     },
-    onError: (error) => {
-      isRunTriggeredRef.current = false;
-      capturedPayloadRef.current = null;
+    onError: (error, jobId) => {
+      const activeInspection = activeInspectionRef.current;
+      if (activeInspection?.jobId === jobId) {
+        clearActiveInspection(activeInspection);
+      }
     },
-    onCancel: () => {
-      isRunTriggeredRef.current = false;
-      capturedPayloadRef.current = null;
+    onCancel: (jobId) => {
+      const activeInspection = activeInspectionRef.current;
+      if (activeInspection?.jobId === jobId) {
+        clearActiveInspection(activeInspection);
+      }
     },
   });
 
@@ -199,10 +279,8 @@ export default function DownloadPage() {
   const [lastReportOnly, setLastReportOnly] = useState(false);
   const [logLimit, setLogLimit] = useState("20");
   const [selectedDisclosures, setSelectedDisclosures] = useState<Record<string, string[]>>({});
-  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
-  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [inspectRunning, setInspectRunning] = useState(false);
-  const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
+  const [metadataNotificationError, setMetadataNotificationError] = useState<string | null>(null);
   const {
     result: existingInspectionResult,
     error: existingMetadataError,
@@ -217,13 +295,19 @@ export default function DownloadPage() {
     ),
     onError: (message) => {
       setStatus(message);
-      setIsErrorStatus(true);
-      setNotificationPanelOpen(true);
+      setMetadataNotificationError(message);
+      setNotificationPanelOpen(false);
     },
   });
   const existingData = existingInspectionResult?.has_existing
     ? existingInspectionResult
     : null;
+
+  useEffect(() => {
+    if (!checkingExisting && !existingMetadataError && (existingInspectionResult || !outputDirectory)) {
+      setMetadataNotificationError(null);
+    }
+  }, [checkingExisting, existingInspectionResult, existingMetadataError, outputDirectory]);
 
   useEffect(() => {
     setJobRetentionInput(String(jobRetentionMinutes || 60));
@@ -238,7 +322,10 @@ export default function DownloadPage() {
     await saveSetting("job_retention_minutes", normalized);
   };
 
-  const filtersMatch = areFiltersMatching(
+  const mismatchedFilterRanges = existingData?.ranges?.filter(
+    (range) => range.filters_match === false || range.metadata_status === "mismatch"
+  ) || [];
+  const filtersMatch = mismatchedFilterRanges.length === 0 && areFiltersMatching(
     {
       companyName,
       submitterName,
@@ -297,22 +384,38 @@ export default function DownloadPage() {
     fetchOptions();
   }, [fetchOptions]);
 
-  const checkExisting = useCallback(async (dir: string, verifyWithKind = false) => {
+  useEffect(() => {
+    const activeInspection = activeInspectionRef.current;
+    if (!loading && !activeJobId && activeInspection?.jobId) {
+      clearActiveInspection(activeInspection);
+    }
+  }, [activeJobId, clearActiveInspection, loading]);
+
+  const checkExisting = useCallback(async (
+    dir: string,
+    verifyWithKind = false,
+    sourcePayload?: DownloadPayload,
+  ) => {
     if (!dir) {
       clearExistingInspection();
       return;
     }
     const submittedPayload: DownloadExistingInspectionPayload = {
+      ...(sourcePayload
+        ? existingPayloadFromDownloadPayload(sourcePayload)
+        : {
+            output_directory: dir,
+            start_date: startDate,
+            end_date: endDate,
+            company_name: companyName,
+            submitter_name: submitterName,
+            market_label: marketLabel,
+            securities_label: securitiesLabel,
+            page_size: Number(pageSize),
+            last_report_only: lastReportOnly,
+            disclosure_type_groups: selectedDisclosures,
+          }),
       output_directory: dir,
-      start_date: startDate,
-      end_date: endDate,
-      company_name: companyName,
-      submitter_name: submitterName,
-      market_label: marketLabel,
-      securities_label: securitiesLabel,
-      page_size: Number(pageSize),
-      last_report_only: lastReportOnly,
-      disclosure_type_groups: selectedDisclosures,
       inspection_mode: verifyWithKind ? "verify" : "detect",
     };
     const requestKey = checkExistingPayloadKey(submittedPayload);
@@ -361,6 +464,7 @@ export default function DownloadPage() {
   const handlePreview = async () => {
     try {
       setPreviewResult(null);
+      setIsErrorStatus(false);
       setStatus("미리보기 생성 중...");
       const data = await previewDownload(buildPayload());
       setPreviewResult(data);
@@ -379,9 +483,7 @@ export default function DownloadPage() {
     }
   };
 
-  const startDownloadJob = async () => {
-    const payload = capturedPayloadRef.current || buildPayload();
-    capturedPayloadRef.current = null;
+  const startDownloadJob = async (payload: DownloadPayload) => {
     const data = await startDownload(payload);
     setPreviewResult(null);
     setResult(null);
@@ -402,15 +504,48 @@ export default function DownloadPage() {
     }
   };
 
-  const inspectExistingFiles = async (dryRun: boolean, customPayload?: any) => {
+  const inspectExistingFiles = async (
+    dryRun: boolean,
+    customPayload?: DownloadPayload,
+    runTriggered = false,
+  ) => {
     const basePayload = customPayload || buildPayload();
-    activeInspectionKeyRef.current = checkExistingPayloadKey(existingPayloadFromDownloadPayload(basePayload));
-    return inspectDownloadFolder({
-      ...basePayload,
-      dry_run: dryRun,
-      delete_confirmed: deleteConfirmed,
-      delete_confirmation_text: deleteConfirmationText,
-    });
+    const pendingInspection: DownloadInspectionContext = {
+      jobId: "",
+      key: checkExistingPayloadKey(existingPayloadFromDownloadPayload(basePayload)),
+      payload: basePayload,
+      runTriggered,
+    };
+    activeInspectionRef.current = pendingInspection;
+    if (dryRun) {
+      clearCleanupCandidates();
+    }
+    try {
+      const data = await inspectDownloadFolder({
+        ...basePayload,
+        dry_run: dryRun,
+        delete_confirmed: deleteConfirmed,
+        delete_confirmation_text: deleteConfirmationText,
+      });
+      const activeInspection = { ...pendingInspection, jobId: data.job_id };
+      activeInspectionRef.current = activeInspection;
+      try {
+        window.sessionStorage.setItem(
+          DOWNLOAD_INSPECTION_STORAGE_KEY,
+          JSON.stringify(activeInspection),
+        );
+      } catch {
+        // Polling still works during the current mount when storage is unavailable.
+      }
+      if (!dryRun) {
+        clearCleanupCandidates();
+      }
+      startPolling(data.job_id);
+      return data;
+    } catch (inspectionError) {
+      clearActiveInspection(pendingInspection);
+      throw inspectionError;
+    }
   };
 
   const buildInspectionStatus = (data: any, deleted: boolean) => {
@@ -443,17 +578,16 @@ export default function DownloadPage() {
       setIsErrorStatus(false);
       setStatus("기존 데이터 검사를 시작하는 중...");
       setPreviewResult(null);
-      isRunTriggeredRef.current = false;
-      capturedPayloadRef.current = null;
-      const data = await inspectExistingFiles(true);
-      startPolling(data.job_id);
-      setDownloadPanelOpen(true);
+      setResult(null);
+      await inspectExistingFiles(true);
+      setDownloadPanelOpen(false);
       setNotificationPanelOpen(false);
       setSettingsPanelOpen(false);
     } catch (err: any) {
+      clearActiveInspection();
       setStatus(err.message);
       setIsErrorStatus(true);
-      setNotificationPanelOpen(true);
+      setNotificationPanelOpen(false);
       setDownloadPanelOpen(false);
       setSettingsPanelOpen(false);
     } finally {
@@ -472,21 +606,17 @@ export default function DownloadPage() {
         throw new Error("현재 입력된 검색 필터가 기존 다운로드 폴더의 메타데이터와 다릅니다. 필터를 먼저 일치시켜 주세요.");
       }
       const payload = buildPayload();
-      capturedPayloadRef.current = payload;
-      isRunTriggeredRef.current = true;
       setIsErrorStatus(false);
       setPreviewResult(null);
       setStatus("기존 다운로드 파일을 검사하는 중...");
-      const data = await inspectExistingFiles(true, payload);
-      startPolling(data.job_id);
+      await inspectExistingFiles(true, payload, true);
       setDownloadPanelOpen(true);
       setNotificationPanelOpen(false);
       setSettingsPanelOpen(false);
     } catch (err: any) {
+      clearActiveInspection();
       setStatus(err.message);
       setIsErrorStatus(true);
-      isRunTriggeredRef.current = false;
-      capturedPayloadRef.current = null;
     } finally {
       setRunStarting(false);
     }
@@ -506,17 +636,19 @@ export default function DownloadPage() {
       setIsErrorStatus(false);
       setStatus("확인된 기존 파일을 삭제하는 중...");
       setPreviewResult(null);
-      isRunTriggeredRef.current = false;
-      const payload = capturedPayloadRef.current || buildPayload();
-      const data = await inspectExistingFiles(false, payload);
-      setLastInspectionCandidateCount(0);
+      const currentKey = checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()));
+      const payload = cleanupCandidatePayloadRef.current;
+      if (!payload || cleanupCandidateKey !== currentKey) {
+        throw new Error("현재 조건과 일치하는 삭제 예정 파일 검사가 없습니다. 같은 조건으로 다시 검사해 주세요.");
+      }
+      await inspectExistingFiles(false, payload);
       setDeleteConfirmed(false);
       setDeleteConfirmationText("");
-      startPolling(data.job_id);
       setDownloadPanelOpen(true);
       setNotificationPanelOpen(false);
       setSettingsPanelOpen(false);
     } catch (err: any) {
+      clearActiveInspection();
       setStatus(err.message);
       setIsErrorStatus(true);
       setNotificationPanelOpen(true);
@@ -535,10 +667,27 @@ export default function DownloadPage() {
     ? checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()))
     : "";
   const hasCompletedCurrentInspection = currentExistingKey === lastInspectedExistingKey;
-  const isCurrentInspectionRunning = inspectRunning || activeInspectionKeyRef.current === currentExistingKey;
+  const isCurrentInspectionRunning = inspectRunning || activeInspectionRef.current?.key === currentExistingKey;
+  const currentInspectionCandidateCount = cleanupCandidateKey === currentExistingKey
+    ? lastInspectionCandidateCount
+    : 0;
   const inspectionRanges = existingData?.ranges || [];
   const staleRanges = inspectionRanges.filter((range) => range.status === "stale");
-  const inspectionCandidates = hasCompletedCurrentInspection && result?.format === "kind_download_folder_cleanup_v1"
+  const hasInspectionFailureNotification = hasCompletedCurrentInspection && staleRanges.length > 0;
+  const hasSuccessfulInspectionNotification = hasCompletedCurrentInspection
+    && result?.format === "kind_download_folder_cleanup_v1"
+    && currentInspectionCandidateCount === 0
+    && staleRanges.length === 0
+    && !isErrorStatus
+    && !metadataNotificationError;
+  const hasWarningNotification = currentInspectionCandidateCount > 0
+    || hasInspectionFailureNotification
+    || isErrorStatus
+    || !!metadataNotificationError
+    || !!previewResult;
+  const inspectionCandidates = hasCompletedCurrentInspection
+    && result?.format === "kind_download_folder_cleanup_v1"
+    && result?.dry_run === true
     ? (Array.isArray(result.deletion_candidates) ? result.deletion_candidates : [])
     : [];
   const savedFilters = existingData?.saved_filters;
@@ -617,7 +766,7 @@ export default function DownloadPage() {
     };
   } else {
     inspectionVerdict = {
-      label: "사용 가능",
+      label: "검증 완료",
       title: "기존 데이터를 안전하게 재사용할 수 있습니다",
       description: `${existingData.earliest_date ?? "-"} ~ ${existingData.latest_date ?? "-"} · ${formatInteger(inspectionRanges.length)}개 범위 확인`,
       tone: "success",
@@ -634,7 +783,13 @@ export default function DownloadPage() {
           ? "저장된 메타데이터를 읽지 못했습니다."
           : "비교할 기존 데이터가 없습니다.",
       status: existingMetadataError ? "failed" : checkingExisting && !existingInspectionResult ? "running" : "complete",
-      statusLabel: existingMetadataError ? "실패" : checkingExisting && !existingInspectionResult ? "확인 중" : "완료",
+      statusLabel: existingMetadataError
+        ? "실패"
+        : checkingExisting && !existingInspectionResult
+          ? "확인 중"
+          : existingData
+            ? "메타데이터 확인됨"
+            : "대상 없음",
       detail: existingMetadataError ? (
         <p className="text-[13px] leading-5 text-[var(--tv-down-text)]">{existingMetadataError}</p>
       ) : undefined,
@@ -646,36 +801,50 @@ export default function DownloadPage() {
         ? "비교할 저장 설정이 없습니다."
         : filtersMatch
           ? "저장된 검색 설정과 현재 조건이 같습니다."
-          : `${formatInteger(filterDifferences.length)}개 설정이 현재 조건과 다릅니다.`,
+          : filterDifferences.length > 0
+            ? `${formatInteger(filterDifferences.length)}개 설정이 현재 조건과 다릅니다.`
+            : `${formatInteger(mismatchedFilterRanges.length)}개 저장 범위의 설정이 현재 조건과 다릅니다.`,
       status: existingMetadataError ? "waiting" : !existingData || filtersMatch ? "complete" : "failed",
       statusLabel: existingMetadataError ? "대기" : !existingData ? "대상 없음" : filtersMatch ? "일치" : "불일치",
       detail: !filtersMatch && savedFilters ? (
         <div className="space-y-3">
-          <div className="overflow-x-auto rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
-            <table className="w-full min-w-[32rem] text-left text-[13px] leading-5">
-              <thead className="border-b border-[color:var(--tv-border)] text-[var(--tv-muted)]">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">항목</th>
-                  <th className="px-3 py-2 font-semibold">저장된 설정</th>
-                  <th className="px-3 py-2 font-semibold">현재 설정</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filterDifferences.map((difference) => (
-                  <tr key={difference.label} className="border-b border-[color:var(--tv-border)] last:border-b-0">
-                    <th className="px-3 py-2 font-semibold text-[var(--tv-text)]">{difference.label}</th>
-                    <td className="px-3 py-2 text-[var(--tv-down-text)]">{difference.saved}</td>
-                    <td className="px-3 py-2 text-[var(--tv-text)]">{difference.current}</td>
+          {filterDifferences.length > 0 && (
+            <div className="overflow-x-auto rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
+              <table className="w-full min-w-[32rem] text-left text-[13px] leading-5">
+                <thead className="border-b border-[color:var(--tv-border)] text-[var(--tv-muted)]">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">항목</th>
+                    <th className="px-3 py-2 font-semibold">저장된 설정</th>
+                    <th className="px-3 py-2 font-semibold">현재 설정</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Button type="button" variant="outline" size="sm" className="h-8 text-[13px]" onClick={handleApplySavedFilters}>
-            저장된 설정 적용
-          </Button>
+                </thead>
+                <tbody>
+                  {filterDifferences.map((difference) => (
+                    <tr key={difference.label} className="border-b border-[color:var(--tv-border)] last:border-b-0">
+                      <th className="px-3 py-2 font-semibold text-[var(--tv-text)]">{difference.label}</th>
+                      <td className="px-3 py-2 text-[var(--tv-down-text)]">{difference.saved}</td>
+                      <td className="px-3 py-2 text-[var(--tv-text)]">{difference.current}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {mismatchedFilterRanges.length > 0 && (
+            <ul className="max-h-48 space-y-2 overflow-y-auto text-[13px] leading-5 text-[var(--tv-down-text)]">
+              {mismatchedFilterRanges.map((range) => (
+                <li key={range.folder_path} className="rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] px-3 py-2">
+                  <span className="font-semibold">{range.folder_name}</span> · {range.start_date ?? "-"} ~ {range.end_date ?? "-"}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : undefined,
+      action: !filtersMatch && savedFilters && filterDifferences.length > 0 ? {
+        label: "저장된 설정 적용",
+        onClick: handleApplySavedFilters,
+      } : undefined,
     },
     {
       key: "files",
@@ -860,7 +1029,7 @@ export default function DownloadPage() {
           </Card>
         </section>
 
-        <div className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:sticky md:inset-x-auto md:bottom-auto md:top-0 md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
+        <div ref={actionDockRef} className="action-dock-root fixed inset-x-4 bottom-4 z-40 md:relative md:inset-x-auto md:bottom-auto md:top-auto md:col-start-2 md:row-start-1 md:row-end-[-1] md:m-0 md:w-16 md:self-start md:justify-self-end" onClick={(event) => event.stopPropagation()}>
           <div className="flex h-14 items-center justify-center gap-2 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 md:h-auto md:w-16 md:flex-col">
             <Button
               variant="outline"
@@ -898,15 +1067,20 @@ export default function DownloadPage() {
               className={
                 notificationPanelOpen
                   ? "relative h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]"
-                  : lastInspectionCandidateCount > 0 || isErrorStatus || !!previewResult
+                  : hasWarningNotification
                     ? "relative h-10 w-10 rounded-lg border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning-text)]"
+                    : hasSuccessfulInspectionNotification
+                      ? "relative h-10 w-10 rounded-lg border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up-text)]"
                     : "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"
               }
               title={notificationPanelOpen ? "알림 닫기" : "알림 열기"}
             >
               <Bell className="h-5 w-5" />
-              {(lastInspectionCandidateCount > 0 || isErrorStatus || !!previewResult) && (
+              {hasWarningNotification && (
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-warning)]" />
+              )}
+              {hasSuccessfulInspectionNotification && (
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-up)]" />
               )}
             </Button>
 
@@ -947,14 +1121,14 @@ export default function DownloadPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {isErrorStatus ? (
+                {isErrorStatus || metadataNotificationError ? (
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">작업 알림</Label>
-                    <JobStatusLogger status={status} isErrorStatus={isErrorStatus} />
+                    <JobStatusLogger status={metadataNotificationError || status} isErrorStatus />
                   </div>
                 ) : null}
 
-                {previewResult && !isErrorStatus ? (
+                {previewResult && !isErrorStatus && !metadataNotificationError ? (
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">미리보기</Label>
                     <pre className="text-caption max-h-72 overflow-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-[var(--tv-text)]">
@@ -963,10 +1137,10 @@ export default function DownloadPage() {
                   </div>
                 ) : null}
 
-                {lastInspectionCandidateCount > 0 && (
+                {currentInspectionCandidateCount > 0 && (
                   <div className="space-y-4 border-t border-[color:var(--tv-border)] pt-4">
                     <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
-                      삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
+                      삭제 예정 파일 {formatInteger(currentInspectionCandidateCount)}개
                     </div>
                     <div className="flex items-center space-x-2">
                       <Checkbox id="downloadDeleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="border-[color:var(--tv-border)]" />
@@ -993,12 +1167,24 @@ export default function DownloadPage() {
                       }
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
-                      삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개 삭제
+                      삭제 예정 파일 {formatInteger(currentInspectionCandidateCount)}개 삭제
                     </Button>
                   </div>
                 )}
 
-                {!isErrorStatus && lastInspectionCandidateCount === 0 && !previewResult && (
+                {hasInspectionFailureNotification && currentInspectionCandidateCount === 0 && !isErrorStatus && !metadataNotificationError && (
+                  <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
+                    기존 데이터 검사에서 확인이 필요한 범위가 {formatInteger(staleRanges.length)}개 발견됐습니다.
+                  </div>
+                )}
+
+                {hasSuccessfulInspectionNotification && (
+                  <div className="text-body rounded-md border border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] p-3 text-[var(--tv-up-text)]">
+                    기존 데이터 검사가 완료됐습니다. 모든 검사 단계를 통과했습니다.
+                  </div>
+                )}
+
+                {!hasWarningNotification && !hasSuccessfulInspectionNotification && (
                   <div className="text-body text-slate-500 dark:text-slate-400">알림 없음</div>
                 )}
               </CardContent>

@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="메모, 현재 답, 기록, 검사, 접근 화면을 한 체계로 관리하는 짧은 지식 문서 안내서">
+  <title>지식은 한 문서에 살지 않는다</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --paper: #f3f4f1;
+      --paper-raised: #fafaf7;
+      --ink: #172025;
+      --muted: #5b6669;
+      --line: #bbc3c0;
+      --line-strong: #7f8d8b;
+      --accent: #246c72;
+      --accent-soft: #dce9e8;
+      --focus: #145f66;
+      --display: Georgia, "Times New Roman", "AppleMyungjo", serif;
+      --body: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #161b1d;
+        --paper-raised: #1d2426;
+        --ink: #e8ece8;
+        --muted: #acb7b5;
+        --line: #455254;
+        --line-strong: #778688;
+        --accent: #78b8ba;
+        --accent-soft: #223b3d;
+        --focus: #9ad3d4;
+      }
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
+    body {
+      margin: 0;
+      min-width: 0;
+      overflow-x: clip;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--body);
+      font-size: 16px;
+      line-height: 1.72;
+      text-rendering: optimizeLegibility;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: color-mix(in srgb, var(--accent) 70%, transparent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.22em;
+    }
+
+    a:hover {
+      color: var(--accent);
+    }
+
+    :focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 4px;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 0.75rem;
+      left: 0.75rem;
+      z-index: 10;
+      padding: 0.65rem 0.9rem;
+      background: var(--ink);
+      color: var(--paper);
+      transform: translateY(-180%);
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 3rem));
+      margin-inline: auto;
+    }
+
+    .masthead {
+      min-height: 4.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .masthead-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2rem;
+      min-height: 4.5rem;
+    }
+
+    .brand {
+      flex: 0 0 auto;
+      font-family: var(--display);
+      font-size: 1.08rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .toc {
+      min-width: 0;
+    }
+
+    .toc ul {
+      display: flex;
+      align-items: center;
+      gap: clamp(0.8rem, 2vw, 1.65rem);
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      white-space: nowrap;
+    }
+
+    .toc a {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+      align-items: end;
+      gap: clamp(2rem, 5vw, 5rem);
+      padding-block: clamp(3rem, 7vw, 6rem);
+      border-bottom: 1px solid var(--line-strong);
+    }
+
+    .hero-copy {
+      padding-bottom: clamp(0rem, 2vw, 1.5rem);
+    }
+
+    .kicker {
+      margin: 0 0 1.4rem;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.12em;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      overflow-wrap: break-word;
+    }
+
+    h1 {
+      max-width: 9.5em;
+      margin: 0;
+      font-family: var(--display);
+      font-size: clamp(2.7rem, 5.4vw, 5.1rem);
+      font-weight: 500;
+      letter-spacing: -0.045em;
+      line-height: 1.08;
+      text-wrap: balance;
+    }
+
+    .dek {
+      max-width: 31rem;
+      margin: 1.7rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.4vw, 1.16rem);
+      line-height: 1.65;
+    }
+
+    .cover {
+      margin: 0;
+    }
+
+    .cover img {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      background: #25292a;
+    }
+
+    .cover figcaption {
+      margin-top: 0.65rem;
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    main > section {
+      scroll-margin-top: 1.5rem;
+      padding-block: clamp(4.5rem, 8vw, 7.5rem);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-head {
+      max-width: 46rem;
+      margin-bottom: clamp(2rem, 4vw, 3.5rem);
+    }
+
+    h2 {
+      margin: 0;
+      font-family: var(--display);
+      font-size: clamp(2rem, 3.8vw, 3.5rem);
+      font-weight: 500;
+      letter-spacing: -0.035em;
+      line-height: 1.16;
+      text-wrap: balance;
+    }
+
+    .section-head p {
+      max-width: 62ch;
+      margin: 1rem 0 0;
+      color: var(--muted);
+    }
+
+    .model-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      margin: 0;
+      border-top: 2px solid var(--ink);
+    }
+
+    .model-grid > div {
+      display: grid;
+      grid-template-columns: minmax(8rem, 0.42fr) minmax(0, 1fr);
+      grid-column: 1 / -1;
+      gap: 1.5rem;
+      padding: 1.15rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .model-grid dt {
+      font-family: var(--display);
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .model-grid dd {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      border-top: 2px solid var(--ink);
+      border-bottom: 1px solid var(--line-strong);
+      scrollbar-color: var(--accent) var(--accent-soft);
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    th,
+    td {
+      padding: 0.9rem 1rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    thead th {
+      background: var(--accent-soft);
+      color: var(--ink);
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+    }
+
+    tbody th {
+      width: 9.5rem;
+      font-family: var(--display);
+      font-size: 1rem;
+    }
+
+    tbody tr:last-child th,
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .operating-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: operating;
+      border-top: 2px solid var(--ink);
+    }
+
+    .operating-list li {
+      display: grid;
+      grid-template-columns: 4rem minmax(0, 1fr);
+      gap: 1.5rem;
+      padding: 1.6rem 0;
+      border-bottom: 1px solid var(--line);
+      counter-increment: operating;
+    }
+
+    .operating-list li::before {
+      content: counter(operating, decimal-leading-zero);
+      color: var(--accent);
+      font-family: var(--display);
+      font-size: 1.4rem;
+    }
+
+    .operating-list h3 {
+      margin: 0 0 0.45rem;
+      font-family: var(--display);
+      font-size: 1.35rem;
+    }
+
+    .operating-list p {
+      max-width: 64ch;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .access-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 0.65fr);
+      gap: clamp(2rem, 6vw, 6rem);
+      align-items: start;
+    }
+
+    .access-layout > p {
+      margin: 0;
+      font-family: var(--display);
+      font-size: clamp(1.5rem, 2.6vw, 2.35rem);
+      line-height: 1.38;
+    }
+
+    .access-notes {
+      margin: 0;
+      padding: 1.25rem 0 0;
+      border-top: 2px solid var(--accent);
+    }
+
+    .access-notes dt {
+      margin-top: 1.2rem;
+      font-weight: 750;
+    }
+
+    .access-notes dt:first-child {
+      margin-top: 0;
+    }
+
+    .access-notes dd {
+      margin: 0.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .references {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0 3rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: source;
+      border-top: 2px solid var(--ink);
+    }
+
+    .references li {
+      display: grid;
+      grid-template-columns: 2.6rem minmax(0, 1fr);
+      gap: 0.75rem;
+      padding: 1.15rem 0;
+      border-bottom: 1px solid var(--line);
+      counter-increment: source;
+    }
+
+    .references li::before {
+      content: counter(source, decimal-leading-zero);
+      color: var(--accent);
+      font-family: var(--display);
+    }
+
+    .references a {
+      font-weight: 700;
+    }
+
+    .references span {
+      display: block;
+      margin-top: 0.2rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    footer {
+      padding-block: 2rem 3rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100% - 2rem, 42rem);
+      }
+
+      .masthead-inner {
+        display: block;
+        padding-block: 1rem;
+      }
+
+      .toc {
+        margin-top: 0.85rem;
+        overflow-x: auto;
+        padding-bottom: 0.35rem;
+      }
+
+      .toc ul {
+        width: max-content;
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+        align-items: start;
+        gap: 2.25rem;
+        padding-block: 3.25rem;
+      }
+
+      h1 {
+        max-width: 8.8em;
+        font-size: clamp(2.45rem, 12vw, 3.7rem);
+      }
+
+      .model-grid > div,
+      .access-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .model-grid > div {
+        gap: 0.35rem;
+      }
+
+      .operating-list li {
+        grid-template-columns: 2.5rem minmax(0, 1fr);
+        gap: 0.75rem;
+      }
+
+      .references {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      :root {
+        --paper: #ffffff;
+        --paper-raised: #ffffff;
+        --ink: #171717;
+        --muted: #444444;
+        --line: #aaaaaa;
+        --line-strong: #555555;
+        --accent: #255d62;
+        --accent-soft: #edf3f2;
+      }
+
+      @page {
+        size: A4;
+        margin: 15mm;
+      }
+
+      html {
+        scroll-behavior: auto;
+      }
+
+      body {
+        font-size: 10.5pt;
+      }
+
+      .skip-link,
+      .toc {
+        display: none;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .masthead,
+      .masthead-inner {
+        min-height: 0;
+      }
+
+      .masthead-inner {
+        padding-bottom: 8mm;
+      }
+
+      .hero {
+        grid-template-columns: 0.8fr 1.2fr;
+        gap: 10mm;
+        padding-block: 10mm;
+      }
+
+      h1 {
+        font-size: 30pt;
+      }
+
+      main > section {
+        padding-block: 11mm;
+      }
+
+      h2 {
+        font-size: 22pt;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table {
+        min-width: 0;
+        font-size: 8pt;
+      }
+
+      a {
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      .references a::after {
+        content: " (" attr(href) ")";
+        color: var(--muted);
+        font-size: 7pt;
+        font-weight: 400;
+        overflow-wrap: anywhere;
+      }
+
+      .cover img,
+      main > section,
+      .operating-list li,
+      .references li {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body id="top">
+  <a class="skip-link" href="#main">본문으로 이동</a>
+
+  <header class="masthead">
+    <div class="shell masthead-inner">
+      <a class="brand" href="#top">지식 문서 설계</a>
+      <nav class="toc" aria-label="보고서 목차">
+        <ul>
+          <li><a href="#model">다섯 층</a></li>
+          <li><a href="#comparison">비교</a></li>
+          <li><a href="#operation">운영</a></li>
+          <li><a href="#access">접근</a></li>
+          <li><a href="#sources">참고 자료</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <div class="shell hero">
+    <div class="hero-copy">
+      <p class="kicker">일하는 지식을 오래 쓰는 법</p>
+      <h1>지식은 한 문서에 살지 않는다</h1>
+      <p class="dek">메모, 현재 답, 기록, 검사, 접근 화면을 한 체계로 관리하는 짧은 안내서.</p>
+    </div>
+    <figure class="cover">
+      <img src="assets/knowledge-system-cover.png" width="1586" height="992" alt="노트와 문서를 여러 층으로 연결한 지식 체계 모형" fetchpriority="high">
+      <figcaption>한 내용도 쓰임과 수명에 따라 다른 층에 자리 잡는다.</figcaption>
+    </figure>
+  </div>
+
+  <main id="main" class="shell">
+    <section id="model" aria-labelledby="model-title">
+      <div class="section-head">
+        <h2 id="model-title">한 체계, 다섯 층</h2>
+        <p>좋은 지식 체계는 모든 내용을 한 도구에 넣지 않는다. 각 층이 맡을 질문과 갱신 시점을 분명히 둔다.</p>
+      </div>
+      <dl class="model-grid">
+        <div>
+          <dt>노트</dt>
+          <dd>관찰과 생각을 빠르게 잡는다. 연결은 나중 검색과 재사용을 돕는다.</dd>
+        </div>
+        <div>
+          <dt>현재 답</dt>
+          <dd>지금 따라야 할 절차와 설명을 짧게 쓴다. 낡으면 고쳐서 한 답만 남긴다.</dd>
+        </div>
+        <div>
+          <dt>기록</dt>
+          <dd>결정 당시 맥락, 선택, 결과를 시간 순서로 남긴다. 지난 판단을 새 답처럼 꾸미지 않는다.</dd>
+        </div>
+        <div>
+          <dt>실행 검사</dt>
+          <dd>코드, 스키마, 테스트가 중요한 규칙을 직접 확인한다. 설명과 실제 동작 사이 간격을 줄인다.</dd>
+        </div>
+        <div>
+          <dt>접근 화면</dt>
+          <dd>HTML, 검색, 질의응답, 번역이 같은 원천을 독자 상황에 맞춰 보여 준다.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section id="comparison" aria-labelledby="comparison-title">
+      <div class="section-head">
+        <h2 id="comparison-title">방법보다 역할을 먼저 고른다</h2>
+        <p>도구 이름부터 고르면 같은 내용을 여러 곳에 베끼기 쉽다. 아래 여섯 역할을 먼저 나누면 선택 기준이 단순해진다.</p>
+      </div>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="지식 문서 방법 비교표">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">역할</th>
+              <th scope="col">주요 질문</th>
+              <th scope="col">알맞은 방법</th>
+              <th scope="col">고칠 때</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">생각 포착</th>
+              <td>무엇을 발견했나</td>
+              <td>상호 연결 노트, 에버그린 노트</td>
+              <td>새 연결이나 반례를 찾을 때</td>
+            </tr>
+            <tr>
+              <th scope="row">현재 안내</th>
+              <td>지금 무엇을 해야 하나</td>
+              <td>질의응답, Diátaxis 설명과 사용법</td>
+              <td>행동이나 정책이 바뀔 때</td>
+            </tr>
+            <tr>
+              <th scope="row">결정 기록</th>
+              <td>왜 이 선택을 했나</td>
+              <td>아키텍처 결정 기록</td>
+              <td>새 결정을 추가할 때</td>
+            </tr>
+            <tr>
+              <th scope="row">규칙 검사</th>
+              <td>실제가 약속과 맞나</td>
+              <td>테스트, 스키마, API 계약</td>
+              <td>구현이나 계약이 바뀔 때</td>
+            </tr>
+            <tr>
+              <th scope="row">분류</th>
+              <td>이 자료를 어디에 둘까</td>
+              <td>PARA</td>
+              <td>일 상태가 바뀔 때</td>
+            </tr>
+            <tr>
+              <th scope="row">접근</th>
+              <td>이 독자는 어떻게 찾나</td>
+              <td>HTML, 검색, 지식 그래프, RAG</td>
+              <td>독자와 탐색 경로가 바뀔 때</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="operation" aria-labelledby="operation-title">
+      <div class="section-head">
+        <h2 id="operation-title">복사보다 갱신 경로를 설계한다</h2>
+        <p>문서 수보다 원천과 파생물 관계가 중요하다. 세 규칙이면 대부분 유지 비용을 줄일 수 있다.</p>
+      </div>
+      <ol class="operating-list">
+        <li>
+          <div>
+            <h3>원천을 한 곳에 둔다</h3>
+            <p>정책, 스키마, 결정처럼 핵심 사실마다 고칠 곳을 하나 정한다. 다른 화면은 링크하거나 변환한다.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>수명을 표시한다</h3>
+            <p>현재 답과 과거 기록을 섞지 않는다. 현재 답은 교체하고 기록은 새 항목을 더한다.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>검사를 가까이 둔다</h3>
+            <p>깨지면 큰 비용이 드는 규칙은 실행 검사로 옮긴다. 문장은 이유와 사용 맥락을 맡는다.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section id="access" aria-labelledby="access-title">
+      <div class="section-head">
+        <h2 id="access-title">접근 화면은 원천이 아니다</h2>
+      </div>
+      <div class="access-layout">
+        <p>웹 문서, 검색, AI 답변, 번역은 읽기 문턱을 낮춘다. 그러나 원천을 복제하면 편리함이 곧 불일치로 바뀐다.</p>
+        <dl class="access-notes">
+          <dt>HTML</dt>
+          <dd>구조, 링크, 표, 인쇄를 한 화면에 담는다.</dd>
+          <dt>RAG</dt>
+          <dd>질문에 맞는 원천 조각을 찾아 답을 만든다.</dd>
+          <dt>번역</dt>
+          <dd>내용 식별자와 원문 판을 함께 기록해 추적성을 지킨다.</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section id="sources" aria-labelledby="sources-title">
+      <div class="section-head">
+        <h2 id="sources-title">핵심 참고 자료</h2>
+        <p>방법을 실제로 적용할 때 먼저 확인할 일차 자료 여덟 곳이다.</p>
+      </div>
+      <ol class="references">
+        <li>
+          <div><a href="https://help.obsidian.md/">Obsidian Help</a><span>연결 노트와 로컬 지식 저장소</span></div>
+        </li>
+        <li>
+          <div><a href="https://fortelabs.com/blog/para/">The PARA Method</a><span>실행 가능성을 기준으로 한 자료 분류</span></div>
+        </li>
+        <li>
+          <div><a href="https://notes.andymatuschak.org/Evergreen_notes">Evergreen notes</a><span>시간이 지나도 다듬는 작은 노트</span></div>
+        </li>
+        <li>
+          <div><a href="https://diataxis.fr/">Diátaxis</a><span>튜토리얼, 사용법, 설명, 참고 자료 구분</span></div>
+        </li>
+        <li>
+          <div><a href="https://adr.github.io/">Architectural Decision Records</a><span>결정과 맥락을 남기는 기록 방식</span></div>
+        </li>
+        <li>
+          <div><a href="https://spec.openapis.org/oas/latest.html">OpenAPI Specification</a><span>기계가 읽는 API 계약</span></div>
+        </li>
+        <li>
+          <div><a href="https://html.spec.whatwg.org/">HTML Living Standard</a><span>접근 가능한 웹 문서 구조</span></div>
+        </li>
+        <li>
+          <div><a href="https://arxiv.org/abs/2005.11401">Retrieval-Augmented Generation</a><span>검색 근거를 활용하는 언어 모델 연구</span></div>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="shell">
+    <p>지식 문서 설계 보고서. 한 원천에서 여러 접근 경로를 만든다.</p>
+  </footer>
+</body>
+</html>

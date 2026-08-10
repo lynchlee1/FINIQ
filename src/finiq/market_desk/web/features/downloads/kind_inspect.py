@@ -27,6 +27,7 @@ def inspect_download_output_directory_payload(
     log("기존 다운로드 파일 구조를 검사하는 중...")
     base, targets = _download_cleanup_targets(payload)
     dry_run = bool(payload.get("dry_run", False))
+    yearly_mode = str(payload.get("mode") or "single").strip().lower() == "yearly"
 
     candidates_by_path: dict[str, dict[str, str]] = {}
     precomputed_statuses: dict[str, dict[str, int]] = {}
@@ -41,6 +42,19 @@ def inspect_download_output_directory_payload(
             continue
 
         input_snapshot = _require_current_download_input_snapshot(folder)
+
+        expected_folder_name = (
+            f"{str(input_snapshot['start_date']).replace('-', '')}_"
+            f"{str(input_snapshot['end_date']).replace('-', '')}"
+        )
+        if yearly_mode and folder.name != expected_folder_name:
+            reason = (
+                f"폴더 기간 {folder.name}과 메타데이터 기간 "
+                f"{input_snapshot['start_date']}~{input_snapshot['end_date']}이 다릅니다."
+            )
+            for path in body_files + _workflow_auxiliary_files(folder):
+                candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
+            continue
 
         saved_filters = _snapshot_filters_payload(input_snapshot)
         has_current_filters = {
@@ -94,7 +108,6 @@ def inspect_download_output_directory_payload(
             raise ValueError(msg)
         log(f"삭제 예정 파일 {len(deletion_candidates)}개 삭제 중...")
         for candidate in deletion_candidates:
-            check_cancel()
             Path(candidate["path"]).unlink(missing_ok=True)
         log("파일 삭제 완료.")
 
