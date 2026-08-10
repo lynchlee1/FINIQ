@@ -9,6 +9,7 @@
 #### I/O Structure
 
 - KIND 본문과 목차 heading을 원본 구조로 보존한 입력 HTML 파일이다.
+- `workers`는 목차 조합 요약, 분리 저장과 결과 검사에서 동시에 처리할 HTML 파일 수를 정한다.
 
 ### `<data_root>/06-sections/<YYYY>/<acpt_no>.html`
 

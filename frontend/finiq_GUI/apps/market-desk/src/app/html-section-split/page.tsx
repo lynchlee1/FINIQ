@@ -304,6 +304,7 @@ export default function HtmlSectionSplitPage() {
         body: JSON.stringify({
           data_root: dataRoot,
           input_directory: targetInputDirectory,
+          workers: parseOptionalNumber(workers),
         }),
       });
       if (!startResponse.ok) {

@@ -33,6 +33,7 @@
 - 같은 mode의 `filter.json` 선택 결과를 다음 작업에 전달하는 파생 출력 파일이다.
 - `format`은 `kind_disclosure_filter_v1`이고 객체 맨 위의 `disclosures` 목록에 선택한 공시를 둔다.
 - 각 공시는 비어 있지 않은 `acpt_no`와 ISO 날짜로 시작하는 `disclosed_at`을 가진다.
+- 회사 링크가 없던 공시는 `company_key`, `company_name`, `company_id`가 `null`이고, 원본 회사 칸 표시는 `company_cell_text`에 유지된다.
 - `source_sqlite_manifest_path`는 저장하지 않는다.
 
 #### Defaults and Exceptions

@@ -203,6 +203,7 @@ class KindCompanyClassificationResult:
     body_files: int
     companies: int
     disclosures: int
+    unlinked_disclosures: int
     output_path: str
     integrity_errors: list[str] = field(default_factory=list)
 
@@ -215,6 +216,7 @@ class KindCompanyClassificationIntegrityReport:
     body_files: int
     parsed_disclosures: int
     classified_disclosures: int
+    unlinked_disclosures: int
     duplicates_removed: int
     integrity_errors: list[str] = field(default_factory=list)
 
@@ -367,6 +369,9 @@ def _collect_company_records_from_folder(
             "body_files": int(cached_payload.get("body_files") or 0),
             "parsed_disclosures": int(cached_payload.get("parsed_disclosures") or 0),
             "classified_disclosures": int(cached_payload.get("classified_disclosures") or 0),
+            "unlinked_disclosures": int(
+                cached_payload.get("unlinked_disclosures") or 0
+            ),
             "intra_folder_duplicates": int(
                 cached_payload.get("intra_folder_duplicates") or 0
             ),
@@ -384,22 +389,25 @@ def _collect_company_records_from_folder(
     body_files = 0
     parsed_disclosures = 0
     classified_disclosures = 0
+    unlinked_disclosures = 0
     intra_folder_duplicates = 0
 
     for body_path in sorted_result_page_paths(target_folder):
         body_files += 1
         file_page_num = result_page_number(body_path)
         body_bytes = body_path.read_bytes()
-        rows = disclosure_rows(body_bytes)
+        try:
+            rows = disclosure_rows(body_bytes)
+        except ValueError as exc:
+            raise ValueError(f"{exc}: {body_path}") from exc
         actual_rows = len(rows)
         parsed_disclosures += actual_rows
 
         for row in rows:
             company_key = str(row.get("company_id") or "").strip()
             if not company_key:
-                raise ValueError(
-                    f"{target_folder.name} {file_page_num}페이지에 company_id가 없는 공시가 있습니다."
-                )
+                unlinked_disclosures += 1
+                continue
 
             classified_disclosures += 1
             company_name = str(row.get("company_name") or "").strip()
@@ -509,6 +517,7 @@ def _collect_company_records_from_folder(
             body_files=body_files,
             parsed_disclosures=parsed_disclosures,
             classified_disclosures=classified_disclosures,
+            unlinked_disclosures=unlinked_disclosures,
             intra_folder_duplicates=intra_folder_duplicates,
             companies=companies,
         )
@@ -518,6 +527,7 @@ def _collect_company_records_from_folder(
         "body_files": body_files,
         "parsed_disclosures": parsed_disclosures,
         "classified_disclosures": classified_disclosures,
+        "unlinked_disclosures": unlinked_disclosures,
         "intra_folder_duplicates": intra_folder_duplicates,
         "integrity_errors": integrity_errors,
         "folder_path": str(target_folder),
@@ -582,12 +592,13 @@ def _collect_all_folder_summaries(
 def _merge_folder_summaries(
     folder_summaries: list[dict[str, Any]],
     source_folder_count: int,
-) -> tuple[dict[str, Any], int, int, int, int, int, list[str]]:
+) -> tuple[dict[str, Any], int, int, int, int, int, int, list[str]]:
     """폴더 요약들을 병합해 전체 payload와 무결성 정보를 반환한다."""
     companies_by_key: dict[str, dict[str, Any]] = {}
     body_files = 0
     parsed_disclosures = 0
     raw_classified_disclosures = 0
+    unlinked_disclosures = 0
     seen_disclosure_keys: set[tuple[str, ...]] = set()
     duplicates_removed = 0
     all_integrity_errors: list[str] = []
@@ -596,6 +607,7 @@ def _merge_folder_summaries(
         body_files += int(folder_summary["body_files"])
         parsed_disclosures += int(folder_summary["parsed_disclosures"])
         raw_classified_disclosures += int(folder_summary["classified_disclosures"])
+        unlinked_disclosures += int(folder_summary["unlinked_disclosures"])
         duplicates_removed += int(folder_summary.get("intra_folder_duplicates") or 0)
         all_integrity_errors.extend(list(folder_summary.get("integrity_errors") or []))
         for company_key, incoming in dict(folder_summary["companies_by_key"]).items():
@@ -622,6 +634,7 @@ def _merge_folder_summaries(
             "body_files": body_files,
             "companies": len(companies),
             "disclosures": deduplicated_disclosures,
+            "unlinked_disclosures": unlinked_disclosures,
         },
         "companies": companies,
     }
@@ -629,6 +642,7 @@ def _merge_folder_summaries(
         payload,
         parsed_disclosures,
         raw_classified_disclosures,
+        unlinked_disclosures,
         duplicates_removed,
         source_folder_count,
         body_files,
@@ -659,6 +673,7 @@ def _build_company_classification_payload(
         payload,
         parsed_disclosures,
         raw_classified_disclosures,
+        unlinked_disclosures,
         duplicates_removed,
         source_folders,
         body_files,
@@ -670,6 +685,7 @@ def _build_company_classification_payload(
         body_files=body_files,
         parsed_disclosures=parsed_disclosures,
         classified_disclosures=raw_classified_disclosures,
+        unlinked_disclosures=unlinked_disclosures,
         duplicates_removed=duplicates_removed,
         integrity_errors=list(integrity_errors),
     )
@@ -819,11 +835,16 @@ def export_kind_company_classification(
     if integrity_report.integrity_errors:
         raise KindCompanyClassificationIntegrityError(integrity_report)
 
-    if integrity_report.classified_disclosures != integrity_report.parsed_disclosures:
+    if (
+        integrity_report.classified_disclosures
+        + integrity_report.unlinked_disclosures
+        != integrity_report.parsed_disclosures
+    ):
         msg = (
             "Disclosure classification count mismatch: "
             f"parsed {integrity_report.parsed_disclosures} disclosures but "
-            f"classified {integrity_report.classified_disclosures}."
+            f"classified {integrity_report.classified_disclosures} and retained "
+            f"{integrity_report.unlinked_disclosures} without a company relation."
         )
         raise ValueError(msg)
     if deduplicated_disclosures + integrity_report.duplicates_removed != integrity_report.classified_disclosures:
@@ -852,6 +873,7 @@ def export_kind_company_classification(
         body_files=integrity_report.body_files,
         companies=int(payload["summary"]["companies"]),
         disclosures=deduplicated_disclosures,
+        unlinked_disclosures=integrity_report.unlinked_disclosures,
         output_path=str(destination),
         integrity_errors=list(integrity_report.integrity_errors),
     )

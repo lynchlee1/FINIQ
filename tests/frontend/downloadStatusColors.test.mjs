@@ -97,7 +97,7 @@ test("shared inspection state ignores stale requests and full verification block
   assert.match(hook, /requestRef\.current\.id !== requestId \|\| requestRef\.current\.key !== requestKey/);
   assert.match(source, /inspect: detectExistingDownload/);
   assert.match(source, /const hasVerificationFailure = !verified \|\|/);
-  assert.match(source, /if \(candidateCount > 0 \|\| hasVerificationFailure\)/);
+  assert.match(source, /if \(hasInspectionFailure\)/);
   assert.match(source, /const completedInspection = activeInspectionRef\.current/);
   assert.match(source, /completedInspection\.jobId !== jobId/);
   assert.match(source, /const completedPayload = completedInspection\.payload/);
@@ -144,7 +144,7 @@ test("download colored status surfaces use contrast text tokens", async () => {
   }
 });
 
-test("manual inspection reports through dock state without opening a panel", async () => {
+test("manual inspection opens the activity panel and keeps progress visible", async () => {
   const [source, globals, sharedDock, dockFollow] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
     readFile(globalsPath, "utf8"),
@@ -153,12 +153,15 @@ test("manual inspection reports through dock state without opening a panel", asy
   ]);
   const inspectHandler = source.slice(source.indexOf("const handleInspectFolder"), source.indexOf("const handleRun"));
 
-  assert.doesNotMatch(inspectHandler, /setDownloadPanelOpen\(true\)/);
+  assert.match(inspectHandler, /setDownloadPanelOpen\(true\)/);
   assert.doesNotMatch(inspectHandler, /setNotificationPanelOpen\(true\)/);
-  assert.match(source, /\} else \{\s*clearActiveInspection\(completedInspection\);\s*setNotificationPanelOpen\(false\);\s*setDownloadPanelOpen\(false\);/);
+  assert.match(source, /\} else \{\s*clearActiveInspection\(completedInspection\);\s*setNotificationPanelOpen\(false\);\s*setDownloadPanelOpen\(true\);/);
   assert.match(source, /hasSuccessfulInspectionNotification[\s\S]{0,500}tv-up/);
   assert.match(source, /hasSuccessfulInspectionNotification = [\s\S]{0,350}&& filtersMatch/);
   assert.match(source, /hasSuccessfulInspectionNotification && \([\s\S]{0,350}\{EXISTING_DATA_SUCCESS_LABEL\}/);
+  assert.match(source, /const hasInspectionFailure = candidateCount > 0 \|\| hasVerificationFailure;/);
+  assert.match(source, /setIsErrorStatus\(hasInspectionFailure\)/);
+  assert.match(source, /failed \? "사용 불가" : deleted \? "파일 삭제 완료" : EXISTING_DATA_SUCCESS_LABEL/);
   assert.match(source, /hasWarningNotification[\s\S]{0,500}tv-warning/);
   assert.match(source, /const actionDockRef = useActionDockFollow<HTMLDivElement>\(\)/);
   assert.match(source, /<div ref=\{actionDockRef\} className="action-dock-root/);

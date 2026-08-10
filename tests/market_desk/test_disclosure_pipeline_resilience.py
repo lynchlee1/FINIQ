@@ -321,6 +321,41 @@ def test_internal_html_download_rejects_invalid_response(
     assert not (tmp_path / "20250101000001.html").exists()
 
 
+def test_internal_html_download_runs_targets_in_parallel_and_preserves_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    barrier = threading.Barrier(2)
+
+    def fake_fetch(*_args: object, **_kwargs: object) -> bytes:
+        barrier.wait(timeout=2)
+        return _valid_html().encode("utf-8")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fake_fetch,
+    )
+    targets = [
+        {"acpt_no": "20250101000002", "doc_no": "2"},
+        {"acpt_no": "20250101000001", "doc_no": "1"},
+    ]
+
+    saved = download_disclosure_internal_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        targets=targets,
+        max_requests_per_minute=100,
+        max_workers=2,
+    )
+
+    assert [path.stem for path in saved] == [
+        "20250101000002",
+        "20250101000001",
+    ]
+
+
 def test_download_payload_reports_parent_cancellation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

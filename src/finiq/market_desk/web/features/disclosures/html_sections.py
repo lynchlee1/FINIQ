@@ -458,13 +458,24 @@ def summarize_disclosure_html_section_kinds_payload(
         raise ValueError(msg)
 
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    workers = parse_html_section_worker_count(body.get("workers"))
     if progress_callback is not None:
-        progress_callback(f"목차 조합 확인 대상 HTML {len(html_files)}건을 찾았습니다.")
+        progress_callback(
+            f"목차 조합 확인 대상 HTML {len(html_files)}건을 찾았습니다. "
+            f"병렬 처리 {workers}개를 사용합니다."
+        )
     documents: list[dict[str, Any]] = []
-    for index, source_file in enumerate(html_files, start=1):
+    results = _map_html_files(
+        html_files,
+        workers,
+        lambda source_file: _source_document_with_sections(
+            input_directory, source_file
+        ),
+        cancel_check,
+    )
+    for index, document in enumerate(results, start=1):
         if cancel_check is not None and cancel_check():
             return {"cancelled": True}
-        document = _source_document_with_sections(input_directory, source_file)
         documents.append(document)
         if progress_callback is not None and (
             index == 1 or index == len(html_files) or index % 100 == 0

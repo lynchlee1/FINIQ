@@ -65,8 +65,9 @@ KIND와 DART의 모든 식별자는 로마자를 포함할 수 있는 텍스트�
 
 #### I/O Structure
 
-- `company_id`는 기업을 구분한다.
+- `company_id`는 회사 링크가 있는 공시에서 기업을 구분한다. 회사 링크가 없는 공시에는 `company_id`가 없을 수 있다.
 - `acpt_no`와 `doc_no`는 문서를 구분한다.
+- `company_cell_text`는 KIND 회사 칸의 원문 표시값이며 식별자가 아니다.
 
 ### DART
 

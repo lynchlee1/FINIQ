@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from finiq.concurrency import resolve_worker_count
+from finiq.concurrency import bounded_as_completed, resolve_worker_count
 from finiq.data_scraper.storage.result_files import (
     result_page_number,
     sorted_result_page_paths,
@@ -19,7 +19,7 @@ from finiq.market_desk.web.features.market_data.service_sources import (
     _parse_source_body_file,
 )
 
-TABLE_SCHEMA_VERSION = 2
+TABLE_SCHEMA_VERSION = 3
 DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
 MANIFEST_FILENAME = "sqlite_manifest.json"
@@ -95,8 +95,18 @@ def _row_year(row: dict[str, Any]) -> str:
 
 def _collect_source_folder_rows_by_year(
     source_folder: Path,
+    body_paths: list[Path],
     cancel_check: Callable[[], bool] | None = None,
-) -> tuple[dict[str, list[dict[str, Any]]], int, int, int, int, list[dict[str, Any]]]:
+    worker_count: int = 1,
+) -> tuple[
+    dict[str, list[dict[str, Any]]],
+    int,
+    int,
+    int,
+    int,
+    int,
+    list[dict[str, Any]],
+]:
     rows_by_year: dict[str, list[dict[str, Any]]] = {}
     seen_acpt_nos: set[str] = set()
     company_keys: set[str] = set()
@@ -104,16 +114,49 @@ def _collect_source_folder_rows_by_year(
     row_count = 0
     source_row_count = 0
     duplicate_row_count = 0
-    for body_path in _find_original_source_body_files(source_folder):
+    unlinked_disclosure_count = 0
+    indexed_records: list[list[dict[str, Any]] | None] = [None] * len(body_paths)
+    if worker_count <= 1 or len(body_paths) <= 1:
+        for index, body_path in enumerate(body_paths):
+            indexed_records[index] = _read_source_page_records(
+                body_path,
+                cancel_check=cancel_check,
+            )
+    else:
+        errors: list[Exception | None] = [None] * len(body_paths)
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="kind-table-source",
+        ) as executor:
+            completed = bounded_as_completed(
+                executor,
+                enumerate(body_paths),
+                lambda item: executor.submit(
+                    _read_source_page_records,
+                    item[1],
+                    cancel_check=cancel_check,
+                ),
+                max_pending=worker_count * 2,
+            )
+            for future, (index, _body_path) in completed:
+                if cancel_check and cancel_check():
+                    raise RuntimeError("Job cancelled")
+                try:
+                    indexed_records[index] = future.result()
+                except Exception as error:
+                    errors[index] = error
+        first_error = next((error for error in errors if error is not None), None)
+        if first_error is not None:
+            raise first_error
+
+    for body_path, records in zip(body_paths, indexed_records):
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
         page_source_rows = 0
         page_written_rows = 0
         page_duplicate_rows = 0
-        records = _read_source_page_records(
-            body_path,
-            cancel_check=cancel_check,
-        )
+        if records is None:
+            raise RuntimeError(f"Source page parsing did not return a result: {body_path}")
         for record in records:
             source_row_count += 1
             page_source_rows += 1
@@ -129,6 +172,7 @@ def _collect_source_folder_rows_by_year(
                 "company_key": record.get("company_key"),
                 "company_name": record.get("company_name"),
                 "company_id": record.get("company_id"),
+                "company_cell_text": record.get("company_cell_text"),
                 "market": record.get("market"),
                 "badges_json": json.dumps(
                     list(record.get("badges") or []), ensure_ascii=False
@@ -151,9 +195,10 @@ def _collect_source_folder_rows_by_year(
                 "source_page": record.get("source_page"),
             }
             company_key = str(row.get("company_key") or "").strip()
-            if not company_key:
-                raise ValueError(f"company_key is required: {body_path}")
-            company_keys.add(company_key)
+            if company_key:
+                company_keys.add(company_key)
+            else:
+                unlinked_disclosure_count += 1
             rows_by_year.setdefault(_row_year(row), []).append(row)
             row_count += 1
             page_written_rows += 1
@@ -173,6 +218,7 @@ def _collect_source_folder_rows_by_year(
         row_count,
         source_row_count,
         duplicate_row_count,
+        unlinked_disclosure_count,
         pages,
     )
 
@@ -263,6 +309,7 @@ def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) ->
             company_key TEXT,
             company_name TEXT,
             company_id TEXT,
+            company_cell_text TEXT,
             market TEXT,
             badges_json TEXT NOT NULL DEFAULT '[]',
             disclosed_at TEXT,
@@ -333,6 +380,7 @@ def _write_metadata(
     table_name: str,
     companies: int,
     disclosures: int,
+    unlinked_disclosures: int,
     fts_enabled: bool,
     shard_year: str,
 ) -> None:
@@ -355,6 +403,7 @@ def _write_metadata(
         "shard_year": shard_year,
         "companies": str(companies),
         "disclosures": str(disclosures),
+        "unlinked_disclosures": str(unlinked_disclosures),
         "fts_enabled": "true" if fts_enabled else "false",
     }
     connection.executemany(
@@ -377,7 +426,14 @@ def _write_sqlite_shard(
     if temporary_path.exists():
         temporary_path.unlink()
 
-    company_keys = {str(row["company_key"]).strip() for row in rows}
+    company_keys = {
+        str(row.get("company_key") or "").strip()
+        for row in rows
+        if str(row.get("company_key") or "").strip()
+    }
+    unlinked_disclosures = sum(
+        not str(row.get("company_key") or "").strip() for row in rows
+    )
     connection = sqlite3.connect(temporary_path)
     try:
         with connection:
@@ -389,6 +445,7 @@ def _write_sqlite_shard(
                     company_key,
                     company_name,
                     company_id,
+                    company_cell_text,
                     market,
                     badges_json,
                     disclosed_at,
@@ -411,6 +468,7 @@ def _write_sqlite_shard(
                     :company_key,
                     :company_name,
                     :company_id,
+                    :company_cell_text,
                     :market,
                     :badges_json,
                     :disclosed_at,
@@ -449,6 +507,7 @@ def _write_sqlite_shard(
                 table_name=table_name,
                 companies=len(company_keys),
                 disclosures=len(rows),
+                unlinked_disclosures=unlinked_disclosures,
                 fts_enabled=fts_enabled,
                 shard_year=shard_year,
             )
@@ -461,6 +520,7 @@ def _write_sqlite_shard(
         "relative_path": shard_path.name,
         "companies": len(company_keys),
         "disclosures": len(rows),
+        "unlinked_disclosures": unlinked_disclosures,
         "indexes": indexes,
         "fts_enabled": fts_enabled,
     }
@@ -588,20 +648,33 @@ def build_disclosure_table_payload(
     if progress_callback:
         progress_callback("공시 메타데이터를 로드합니다...")
 
+    source_body_paths = _find_original_source_body_files(source_path)
     _validate_source_page_ranges(
         source_path,
         cancel_check=cancel_check,
     )
+    source_workers = resolve_worker_count(
+        body.get("table_workers"),
+        item_count=len(source_body_paths),
+        field_name="table_workers",
+    )
+    if progress_callback:
+        progress_callback(
+            f"원본 BODY 페이지 병렬 파싱을 시작합니다. workers={source_workers}"
+        )
     (
         rows_by_year,
         companies,
         row_count,
         source_row_count,
         duplicate_row_count,
+        unlinked_disclosure_count,
         pages,
     ) = _collect_source_folder_rows_by_year(
         source_path,
+        source_body_paths,
         cancel_check=cancel_check,
+        worker_count=source_workers,
     )
     if source_row_count != row_count + duplicate_row_count:
         msg = (
@@ -645,6 +718,7 @@ def build_disclosure_table_payload(
             "source_rows": source_row_count,
             "duplicate_rows": duplicate_row_count,
             "disclosures": row_count,
+            "unlinked_disclosures": unlinked_disclosure_count,
             "shards": len(shards),
         },
         "pages": pages,
@@ -666,6 +740,7 @@ def build_disclosure_table_payload(
             "source_rows": source_row_count,
             "duplicate_rows": duplicate_row_count,
             "disclosures": row_count,
+            "unlinked_disclosures": unlinked_disclosure_count,
             "shards": len(shards),
             "fts_enabled": all(shard["fts_enabled"] for shard in shards)
             if shards

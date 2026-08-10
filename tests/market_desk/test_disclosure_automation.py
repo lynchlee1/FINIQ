@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import date
 from pathlib import Path
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -514,6 +515,53 @@ def test_automation_download_inspection_queries_every_saved_year(
     assert live_queries == _split_yearly_ranges(start, end)
 
 
+def test_automation_window_inspection_uses_configured_local_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    window_start = date(2026, 1, 1)
+    window_end = date(2026, 12, 31)
+    window_path = tmp_path / "window"
+    window_path.mkdir()
+    query = automation._window_query(profile, window_start, window_end)
+    snapshot = automation._automation_window_snapshot(
+        profile, window_start, window_end
+    )
+    captured_parallelism: list[object] = []
+
+    monkeypatch.setattr(
+        automation,
+        "_owned_window_manifest",
+        lambda _path: {
+            "query_hash": automation._canonical_hash(query),
+            "complete": True,
+        },
+    )
+    monkeypatch.setattr(
+        automation,
+        "_require_current_download_input_snapshot",
+        lambda _path: snapshot,
+    )
+
+    def fake_inspection(*_args: object, **kwargs: object) -> dict[str, int]:
+        captured_parallelism.append(kwargs.get("validation_parallelism"))
+        return {"total_pages": 1}
+
+    monkeypatch.setattr(
+        automation,
+        "inspect_download_directory_pages",
+        fake_inspection,
+    )
+
+    assert (
+        automation._window_local_page_count(
+            profile, window_path, window_start, window_end
+        )
+        == 1
+    )
+    assert captured_parallelism == [profile["execution"]["local_workers"]]
+
+
 def test_table_inspection_compares_source_records_and_sqlite_shards(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -527,7 +575,11 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     }
     monkeypatch.setattr(automation, "_table_manifest", lambda _profile: manifest_path)
     monkeypatch.setattr(automation, "_load_sqlite_manifest", lambda _path: manifest)
-    monkeypatch.setattr(automation, "_validate_sqlite_manifest_counts", lambda *_args: None)
+    monkeypatch.setattr(
+        automation,
+        "_validate_sqlite_manifest_counts",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(
         automation,
         "filter_disclosures_payload",
@@ -1332,6 +1384,7 @@ def test_stage_five_rebuilds_internal_html_without_reusing_current(
         output = Path(str(body["output_directory"]))
         existing_before_download.extend(output.rglob("*.html"))
         assert body["skip_existing"] is False
+        assert body["max_workers"] == profile["execution"]["local_workers"]
         path = output / "2026" / "20260712000001.html"
         path.parent.mkdir(parents=True)
         path.write_text("<html><body>new</body></html>", encoding="utf-8")
@@ -1406,6 +1459,58 @@ def test_stage_five_checkpoint_rejects_internal_html_hash_contamination(
     assert _active_html_outputs_valid(profile, 5) is False
 
 
+def test_stage_five_checkpoint_validates_html_files_in_parallel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    acpt_numbers = ["20260712000001", "20260712000002"]
+    filtered_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True)
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {"acpt_no": acpt_no, "disclosed_at": "2026-07-12 09:00"}
+                    for acpt_no in acpt_numbers
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    current = (
+        tmp_path
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
+    for acpt_no in acpt_numbers:
+        target = current / "2026" / f"{acpt_no}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("<html><body>ok</body></html>", encoding="utf-8")
+
+    expected_integrity = {acpt_no: {"sha256": acpt_no} for acpt_no in acpt_numbers}
+    barrier = threading.Barrier(2)
+
+    def blocking_validity(_path: Path) -> bool:
+        barrier.wait(timeout=2)
+        return True
+
+    monkeypatch.setattr(automation, "_is_valid_html", blocking_validity)
+    monkeypatch.setattr(
+        automation,
+        "_load_html_manifest_integrity",
+        lambda _current: (current / "manifest.json", expected_integrity),
+    )
+    monkeypatch.setattr(
+        automation,
+        "_hash_html_files",
+        lambda _files: (expected_integrity, False),
+    )
+
+    assert _active_html_outputs_valid(profile, 5) is True
+
+
 def test_stage_four_rejects_compressed_record_without_main_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1465,10 +1570,11 @@ def test_stage_six_rejects_source_without_sections(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    monkeypatch.setattr(
-        automation,
-        "summarize_disclosure_html_section_kinds_payload",
-        lambda *args, **kwargs: {
+    captured_workers: list[object] = []
+
+    def fake_summary(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        captured_workers.append(body.get("workers"))
+        return {
             "summary": {
                 "found_files": 1,
                 "documents_with_sections": 0,
@@ -1476,7 +1582,12 @@ def test_stage_six_rejects_source_without_sections(
                 "failed_files": 0,
             },
             "items": [],
-        },
+        }
+
+    monkeypatch.setattr(
+        automation,
+        "summarize_disclosure_html_section_kinds_payload",
+        fake_summary,
     )
     monkeypatch.setattr(
         automation,
@@ -1492,6 +1603,7 @@ def test_stage_six_rejects_source_without_sections(
             progress_callback=lambda _message: None,
             cancel_check=lambda: False,
         )
+    assert captured_workers == [profile["execution"]["local_workers"]]
 
 
 def test_stage_six_allows_an_empty_filtered_result(

@@ -5,6 +5,8 @@ from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
+import threading
+import time
 from typing import Any
 import zipfile
 
@@ -13,6 +15,7 @@ import pytest
 
 import finiq.market_desk.web.features.disclosures.table_export as table_export_module
 import finiq.market_desk.web.features.market_data.service_payloads as service_payloads_module
+import finiq.market_desk.web.features.market_data.service_sources as service_sources_module
 from finiq.config import QUANTI_DIR, STOCK_DATA_DIR
 from finiq.data_scraper.workflow import KIND_WORKFLOW_INPUT_FORMAT
 from finiq.market_desk.analytics.quanti_market_history import (
@@ -34,6 +37,9 @@ from finiq.market_desk.web.features.market_data.service_payloads import (
 from finiq.market_desk.web.features.market_data.service_records import (
     FilterCancelled,
     _progress_interval,
+)
+from finiq.market_desk.web.features.market_data.service_sources import (
+    _validate_sqlite_manifest_counts,
 )
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
@@ -547,6 +553,7 @@ def _write_filter_manifest_fixture(
                 "company_key": company_key,
                 "company_name": company.get("company_name"),
                 "company_id": company.get("company_id"),
+                "company_cell_text": company.get("company_name"),
                 "market": company.get("market"),
                 "badges_json": json.dumps(company.get("badges") or []),
                 "disclosed_at": disclosed_at,
@@ -584,7 +591,7 @@ def _write_filter_manifest_fixture(
         manifest_path,
         {
             "format": "finiq_disclosure_table_manifest_v1",
-            "schema_version": 2,
+            "schema_version": 3,
             "source_type": "source_folder",
             "source_path": str(tmp_path),
             "manifest_path": str(manifest_path),
@@ -595,6 +602,7 @@ def _write_filter_manifest_fixture(
                 "source_rows": row_count,
                 "duplicate_rows": 0,
                 "disclosures": row_count,
+                "unlinked_disclosures": 0,
                 "shards": len(shards),
             },
             "pages": [
@@ -1069,18 +1077,25 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_colum
     manifest_path = shard_root / "sqlite_manifest.json"
     manifest_path.write_text(
         json.dumps(
-            {
-                "format": "finiq_disclosure_table_manifest_v1",
-                "table_name": "disclosures",
-                "summary": {"companies": 1, "disclosures": 1, "shards": 1},
-                "shards": [
-                        {
-                            "year": "2025",
-                            "path": str(shard_path),
-                            "relative_path": shard_path.name,
+                {
+                    "format": "finiq_disclosure_table_manifest_v1",
+                    "schema_version": 3,
+                    "table_name": "disclosures",
+                    "summary": {
                         "companies": 1,
                         "disclosures": 1,
-                    }
+                        "unlinked_disclosures": 0,
+                        "shards": 1,
+                    },
+                    "shards": [
+                            {
+                                "year": "2025",
+                                "path": str(shard_path),
+                                "relative_path": shard_path.name,
+                            "companies": 1,
+                            "disclosures": 1,
+                            "unlinked_disclosures": 0,
+                        }
                 ],
             },
             ensure_ascii=False,
@@ -1140,11 +1155,74 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
         }
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 2
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema_version must be 3"):
+        filter_disclosures_payload({"data_root": str(tmp_path)})
+
+    manifest["schema_version"] = 3
     manifest["shards"][0]["disclosures"] = 3
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="SQLite shard disclosure count mismatch"):
         filter_disclosures_payload({"data_root": str(tmp_path)})
+
+
+def test_sqlite_manifest_count_validation_runs_shards_in_parallel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = tmp_path / "sqlite_manifest.json"
+    shard_names = ["2024.sqlite3", "2025.sqlite3"]
+    for shard_name in shard_names:
+        connection = sqlite3.connect(tmp_path / shard_name)
+        try:
+            connection.execute(
+                "CREATE TABLE disclosures (row_no INTEGER, company_key TEXT)"
+            )
+            connection.execute("INSERT INTO disclosures VALUES (1, 'company-1')")
+            connection.commit()
+        finally:
+            connection.close()
+
+    original_connect = sqlite3.connect
+    barrier = threading.Barrier(2)
+
+    class BlockingConnection:
+        def __init__(self, path: Path) -> None:
+            self.connection = original_connect(path)
+
+        def execute(self, sql: str):
+            barrier.wait(timeout=2)
+            return self.connection.execute(sql)
+
+        def close(self) -> None:
+            self.connection.close()
+
+    monkeypatch.setattr(
+        service_sources_module.sqlite3,
+        "connect",
+        lambda path: BlockingConnection(path),
+    )
+
+    _validate_sqlite_manifest_counts(
+        manifest_path,
+        {
+            "schema_version": 3,
+            "table_name": "disclosures",
+            "summary": {"disclosures": 2, "unlinked_disclosures": 0},
+            "shards": [
+                {
+                    "relative_path": shard_name,
+                    "disclosures": 1,
+                    "unlinked_disclosures": 0,
+                }
+                for shard_name in shard_names
+            ],
+        },
+        filter_workers=2,
+    )
 
 
 def test_filter_disclosures_payload_rejects_unaccounted_source_rows(
@@ -1586,7 +1664,9 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert payload["format"] == "finiq_disclosure_table_build_v1"
     assert payload["summary"]["companies"] == 2
     assert payload["summary"]["disclosures"] == 2
+    assert payload["summary"]["unlinked_disclosures"] == 0
     assert payload["summary"]["shards"] == 1
+    assert payload["summary"]["schema_version"] == 3
     assert not output_path.exists()
     assert manifest_path.exists()
     assert payload["output_path"] == str(manifest_path.resolve())
@@ -1628,6 +1708,130 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert metadata["shard_format"] == "finiq_disclosure_table_sqlite_shard"
     assert metadata["shard_year"] == "2025"
     assert metadata["table_name"] == "disclosures"
+    assert metadata["unlinked_disclosures"] == "0"
+
+
+def test_build_disclosure_table_payload_preserves_unlinked_disclosure(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    body_path = next((tmp_path / "20250101_20250131").glob("*_post_page_*.body"))
+    markup = body_path.read_text(encoding="utf-8")
+    body_path.write_text(
+        markup.replace(
+            "</tbody>",
+            """
+              <tr>
+                <td>3</td>
+                <td>2025-01-04 09:00</td>
+                <td>일괄신고</td>
+                <td>
+                  <a onclick="openDisclsViewer('20250104000001','')"
+                     title="의결권 행사 내역">의결권 행사 내역</a>
+                </td>
+                <td>유리자산운용</td>
+              </tr>
+            </tbody>
+            """,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(tmp_path / "02-table"),
+            "table_name": "disclosures",
+        }
+    )
+
+    manifest_path = Path(payload["manifest_path"])
+    shard_path = manifest_path.parent / payload["shards"][0]["relative_path"]
+    connection = sqlite3.connect(shard_path)
+    try:
+        row = connection.execute(
+            """
+            SELECT company_key, company_name, company_id, company_cell_text,
+                   submitter, acpt_no
+            FROM disclosures WHERE acpt_no = '20250104000001'
+            """
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert payload["summary"]["disclosures"] == 3
+    assert payload["summary"]["companies"] == 2
+    assert payload["summary"]["unlinked_disclosures"] == 1
+    assert payload["shards"][0]["unlinked_disclosures"] == 1
+    assert row == (
+        None,
+        None,
+        None,
+        "일괄신고",
+        "유리자산운용",
+        "20250104000001",
+    )
+
+    filtered = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "acpt_numbers": ["20250104000001"],
+        }
+    )
+    assert len(filtered["disclosures"]) == 1
+    assert filtered["disclosures"][0]["company_key"] is None
+    assert filtered["disclosures"][0]["company_name"] is None
+    assert filtered["disclosures"][0]["company_id"] is None
+    assert filtered["disclosures"][0]["company_cell_text"] == "일괄신고"
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["shards"][0]["unlinked_disclosures"] = 0
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="unlinked disclosure count mismatch"):
+        filter_disclosures_payload({"data_root": str(tmp_path)})
+
+
+def test_build_disclosure_table_payload_parses_source_pages_in_parallel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    source_root = _write_source_body_fixture(tmp_path)
+    first_page = next(source_root.rglob("*_post_page_*.body"))
+    second_page = first_page.with_name("001_post_page_00002.body")
+    second_page.write_text(
+        first_page.read_text(encoding="utf-8")
+        .replace("20250102000001", "20250104000001")
+        .replace("20250103000001", "20250105000001"),
+        encoding="utf-8",
+    )
+    original_parse = table_export_module._parse_source_body_file
+    barrier = threading.Barrier(2)
+
+    def synchronized_parse(path: Path) -> list[dict[str, Any]]:
+        barrier.wait(timeout=2)
+        return original_parse(path)
+
+    monkeypatch.setattr(
+        table_export_module,
+        "_parse_source_body_file",
+        synchronized_parse,
+    )
+    progress: list[str] = []
+
+    payload = build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(tmp_path / "02-table"),
+            "table_workers": 2,
+        },
+        progress_callback=progress.append,
+    )
+
+    assert payload["summary"]["source_rows"] == 4
+    assert payload["summary"]["disclosures"] == 4
+    assert "원본 BODY 페이지 병렬 파싱을 시작합니다. workers=2" in progress
 
 
 def test_build_disclosure_table_payload_rejects_classification_input(
@@ -3071,6 +3275,125 @@ def test_inspect_download_output_directory_deletes_confirmed_mismatch(
     assert not (output_directory / "kind_workflow.input.json").exists()
 
 
+def test_inspect_download_output_directory_uses_configured_page_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import finiq.concurrency as concurrency
+    import finiq.market_desk.web.features.downloads.kind_inspect as kind_inspect
+
+    output_directory = tmp_path / "download"
+    output_directory.mkdir()
+    (output_directory / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(
+            page_number=1,
+            page_size=100,
+            total_items=1,
+        )
+    )
+    (output_directory / "kind_workflow.input.json").write_text(
+        json.dumps(_trusted_download_input_snapshot(page_size=100)),
+        encoding="utf-8",
+    )
+    used_parallelism: list[int | None] = []
+
+    def fake_inspect(
+        _folder: Path,
+        *,
+        expected_page_size: int,
+        require_complete: bool,
+        validation_parallelism: int | None = None,
+    ) -> dict[str, int]:
+        assert expected_page_size == 100
+        assert require_complete is False
+        used_parallelism.append(validation_parallelism)
+        return {"downloaded_pages": 1, "total_pages": 1, "total_items": 1}
+
+    monkeypatch.setattr(concurrency, "available_cpu_count", lambda: 4)
+    monkeypatch.setattr(kind_inspect, "inspect_download_directory_pages", fake_inspect)
+
+    payload = kind_inspect.inspect_download_output_directory_payload(
+        {
+            "mode": "single",
+            "output_directory": str(output_directory),
+            "page_size": 100,
+            "worker_count": 3,
+            "dry_run": True,
+        }
+    )
+
+    assert used_parallelism == [3]
+    assert payload["summary"] == {"success": 1, "failed": 0, "total": 1}
+
+
+def test_inspect_download_output_directory_parallelizes_year_folders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import finiq.concurrency as concurrency
+    import finiq.market_desk.web.features.downloads.kind_inspect as kind_inspect
+
+    output_directory = tmp_path / "download"
+    ranges = [
+        ("20250101_20251231", "2025-01-01", "2025-12-31"),
+        ("20260101_20261231", "2026-01-01", "2026-12-31"),
+    ]
+    for folder_name, start_date, end_date in ranges:
+        folder = output_directory / folder_name
+        folder.mkdir(parents=True)
+        (folder / "001_post_page_00001.body").write_bytes(
+            _build_download_result_page_html(
+                page_number=1,
+                page_size=100,
+                total_items=1,
+            )
+        )
+        (folder / "kind_workflow.input.json").write_text(
+            json.dumps(
+                _trusted_download_input_snapshot(
+                    start_date=start_date,
+                    end_date=end_date,
+                    page_size=100,
+                )
+            ),
+            encoding="utf-8",
+        )
+
+    barrier = threading.Barrier(2)
+    used_parallelism: list[int | None] = []
+
+    def fake_inspect(
+        _folder: Path,
+        *,
+        expected_page_size: int,
+        require_complete: bool,
+        validation_parallelism: int | None = None,
+    ) -> dict[str, int]:
+        assert expected_page_size == 100
+        assert require_complete is False
+        used_parallelism.append(validation_parallelism)
+        barrier.wait(timeout=2)
+        return {"downloaded_pages": 1, "total_pages": 1, "total_items": 1}
+
+    monkeypatch.setattr(concurrency, "available_cpu_count", lambda: 4)
+    monkeypatch.setattr(kind_inspect, "inspect_download_directory_pages", fake_inspect)
+
+    payload = kind_inspect.inspect_download_output_directory_payload(
+        {
+            "mode": "yearly",
+            "output_directory": str(output_directory),
+            "start_date": "2025-01-01",
+            "end_date": "2026-12-31",
+            "page_size": 100,
+            "worker_count": 2,
+            "dry_run": True,
+        }
+    )
+
+    assert sorted(used_parallelism) == [1, 1]
+    assert payload["summary"] == {"success": 2, "failed": 0, "total": 2}
+
+
 def test_inspect_download_output_directory_finishes_confirmed_deletion_batch(
     tmp_path: Path,
 ) -> None:
@@ -3352,6 +3675,8 @@ def test_inspect_folder_job_runs_kind_verification_in_background(
         verify_with_kind=True,
         current_payload=None,
         cancel_check=None,
+        progress_callback=None,
+        parallel_workers=None,
     ):
         verification_calls.append(
             (output_directory, verify_with_kind, current_payload)
@@ -3378,7 +3703,12 @@ def test_inspect_folder_job_runs_kind_verification_in_background(
     job = start_inspect_folder_job(payload)
 
     assert verification_started.wait(timeout=1)
-    assert get_download_job(job["job_id"])["status"] == "running"
+    running_job = get_download_job(job["job_id"])
+    assert running_job["status"] == "running"
+    assert any(
+        "KIND 건수 비교 실행 순서를 기다리는 중입니다." in line
+        for line in running_job["progress_log"]
+    )
     release_verification.set()
 
     for _ in range(100):
@@ -3425,6 +3755,8 @@ def test_inspect_folder_job_cancels_during_kind_verification(
         verify_with_kind=True,
         current_payload=None,
         cancel_check=None,
+        progress_callback=None,
+        parallel_workers=None,
     ):
         received_cancel_checks.append(cancel_check)
         verification_started.set()
@@ -3526,6 +3858,8 @@ def test_inspect_folder_job_finishes_committed_deletion_after_cancel(
         verify_with_kind=True,
         current_payload=None,
         cancel_check=None,
+        progress_callback=None,
+        parallel_workers=None,
     ):
         verification_cancel_checks.append(cancel_check)
         return {"has_existing": False}
@@ -3766,11 +4100,13 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
     monkeypatch,
 ) -> None:
     calls: list[tuple[Path, list[dict[str, str]]]] = []
+    spacing_limiter_ids: list[int] = []
 
     def fake_download(**kwargs):
         output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
         calls.append((output_directory, targets))
+        spacing_limiter_ids.append(id(kwargs["spacing_limiter"]))
         paths = [
             output_directory / f"{target['acpt_no']}.html" for target in targets
         ]
@@ -3786,11 +4122,18 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
         json.dumps(
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
-                "records": [{
-                    "acpt_no": "20250101000001",
-                    "selected_main_doc_no": "20250101000099",
-                    "metadata": {"disclosed_at": "2025-01-01"},
-                }],
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000099",
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    },
+                    {
+                        "acpt_no": "20260101000001",
+                        "selected_main_doc_no": "20260101000099",
+                        "metadata": {"disclosed_at": "2026-01-01"},
+                    },
+                ],
             }
         ),
         encoding="utf-8",
@@ -3807,9 +4150,17 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
         (
             tmp_path / "content_html" / "2025",
             [{"acpt_no": "20250101000001", "doc_no": "20250101000099"}],
-        )
+        ),
+        (
+            tmp_path / "content_html" / "2026",
+            [{"acpt_no": "20260101000001", "doc_no": "20260101000099"}],
+        ),
     ]
-    assert payload["saved_files"] == [str(tmp_path / "content_html" / "2025" / "20250101000001.html")]
+    assert len(set(spacing_limiter_ids)) == 1
+    assert payload["saved_files"] == [
+        str(tmp_path / "content_html" / "2025" / "20250101000001.html"),
+        str(tmp_path / "content_html" / "2026" / "20260101000001.html"),
+    ]
 
 
 def test_download_disclosure_internal_html_payload_rejects_source_directory(
@@ -4332,6 +4683,47 @@ def test_list_disclosure_html_section_sources_ignores_hidden_automation_cache(
     )
 
     assert [item["source_name"] for item in result["documents"]] == [visible.name]
+
+
+def test_summarize_disclosure_html_section_kinds_payload_uses_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    for acpt_no in ("20260401000001", "20260402000001"):
+        (input_directory / f"{acpt_no}.html").write_text(
+            "<html><head></head><body>"
+            "<h2 class='SECTION-1' id='toc_1'><p>1</p></h2>"
+            "</body></html>",
+            encoding="utf-8",
+        )
+    original = disclosure_html_sections._source_document_with_sections
+    barrier = threading.Barrier(2)
+
+    def synchronized_source_document(
+        root: Path,
+        source_file: Path,
+    ) -> dict[str, Any]:
+        barrier.wait(timeout=2)
+        return original(root, source_file)
+
+    monkeypatch.setattr(
+        disclosure_html_sections,
+        "_source_document_with_sections",
+        synchronized_source_document,
+    )
+    progress: list[str] = []
+
+    payload = summarize_disclosure_html_section_kinds_payload(
+        {"input_directory": str(input_directory), "workers": 2},
+        progress_callback=progress.append,
+    )
+
+    assert payload["summary"]["found_files"] == 2
+    assert "병렬 처리 2개를 사용합니다" in progress[0]
 
 
 def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences(tmp_path: Path) -> None:
@@ -10198,8 +10590,38 @@ def test_check_existing_downloads_reports_validation_exception_as_stale(
     assert "validation exploded" in result["ranges"][0]["error_detail"]
 
 def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
+    import finiq.market_desk.web.features.downloads.kind_existing as kind_existing
     from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
-    monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
+    query_state = {"active": 0, "maximum": 0}
+    query_state_lock = threading.Lock()
+
+    def current_count(_snapshot: dict[str, Any]) -> int:
+        with query_state_lock:
+            query_state["active"] += 1
+            query_state["maximum"] = max(
+                query_state["maximum"], query_state["active"]
+            )
+        time.sleep(0.03)
+        with query_state_lock:
+            query_state["active"] -= 1
+        return 100
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count",
+        current_count,
+    )
+    original_inspect = kind_existing.inspect_download_directory_pages
+    used_page_workers: list[int | None] = []
+
+    def inspect_with_worker_capture(*args: Any, **kwargs: Any) -> dict[str, int]:
+        used_page_workers.append(kwargs.get("validation_parallelism"))
+        return original_inspect(*args, **kwargs)
+
+    monkeypatch.setattr(
+        kind_existing,
+        "inspect_download_directory_pages",
+        inspect_with_worker_capture,
+    )
 
     folder1 = tmp_path / "20260101_20260501"
     folder1.mkdir()
@@ -10221,7 +10643,12 @@ def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
         encoding="utf-8"
     )
 
-    res = check_existing_downloads(str(tmp_path))
+    progress_log = []
+    res = check_existing_downloads(
+        str(tmp_path),
+        progress_callback=progress_log.append,
+        parallel_workers=2,
+    )
     assert res["has_existing"] is True
     assert res["earliest_date"] == "2026-01-01"
     assert res["latest_date"] == "2026-06-01"
@@ -10232,6 +10659,13 @@ def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
     assert res["ranges"][1]["start_date"] == "2026-05-02"
     assert res["ranges"][1]["end_date"] == "2026-06-01"
     assert res["ranges"][1]["status"] == "validated"
+    assert progress_log[0] == (
+        "KIND 현재 건수와 로컬 파일 비교 시작: 2개 범위, 2개 워커."
+    )
+    assert sum("개 범위 완료" in line for line in progress_log) == 2
+    assert progress_log[-1] == "KIND 현재 건수와 로컬 파일 비교 완료."
+    assert used_page_workers == [1, 1]
+    assert query_state["maximum"] == 1
 
 
 def test_check_existing_downloads_preserves_each_range_filter_match(
@@ -10348,8 +10782,21 @@ def test_existing_downloads_reject_folder_metadata_date_mismatch(
 
 
 def test_check_existing_downloads_single(tmp_path: Path, monkeypatch) -> None:
+    import finiq.market_desk.web.features.downloads.kind_existing as kind_existing
     from finiq.market_desk.web.features.downloads.kind_existing import check_existing_downloads
     monkeypatch.setattr("finiq.market_desk.web.features.downloads.kind_existing.get_current_kind_total_count", lambda snap: 100)
+    original_inspect = kind_existing.inspect_download_directory_pages
+    used_page_workers: list[int | None] = []
+
+    def inspect_with_worker_capture(*args: Any, **kwargs: Any) -> dict[str, int]:
+        used_page_workers.append(kwargs.get("validation_parallelism"))
+        return original_inspect(*args, **kwargs)
+
+    monkeypatch.setattr(
+        kind_existing,
+        "inspect_download_directory_pages",
+        inspect_with_worker_capture,
+    )
 
     (tmp_path / "001_post_page_00001.body").write_bytes(
         _build_download_result_page_html(page_number=1, page_size=100, total_items=100)
@@ -10359,13 +10806,14 @@ def test_check_existing_downloads_single(tmp_path: Path, monkeypatch) -> None:
         encoding="utf-8"
     )
 
-    res = check_existing_downloads(str(tmp_path))
+    res = check_existing_downloads(str(tmp_path), parallel_workers=2)
     assert res["has_existing"] is True
     assert res["earliest_date"] == "2026-02-01"
     assert res["latest_date"] == "2026-03-01"
     assert res["ranges"][0]["start_date"] == "2026-02-01"
     assert res["ranges"][0]["end_date"] == "2026-03-01"
     assert res["ranges"][0]["status"] == "validated"
+    assert used_page_workers == [2]
 
 
 def test_check_existing_downloads_validated(tmp_path: Path, monkeypatch) -> None:

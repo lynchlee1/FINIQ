@@ -93,7 +93,9 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
             with KIND_NETWORK_JOB_LOCK:
                 result = run_download_action(
                     payload,
-                    progress_callback=lambda message: _append_job_progress(job_id, message),
+                    progress_callback=lambda message: _append_job_progress(
+                        job_id, message
+                    ),
                     cancel_check=lambda: _is_download_cancelled(job_id),
                 )
             _update_job(job_id, status="completed", result=result)
@@ -165,9 +167,11 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
             )
             if not deletion_committed and _is_download_cancelled(job_id):
                 raise DownloadCancelled()
+            _append_job_progress(job_id, "KIND 건수 비교 실행 순서를 기다리는 중입니다.")
             with KIND_NETWORK_JOB_LOCK:
                 if not deletion_committed and _is_download_cancelled(job_id):
                     raise DownloadCancelled()
+                _append_job_progress(job_id, "KIND 건수 비교 작업을 시작합니다.")
                 result["existing_downloads"] = check_existing_downloads(
                     str(payload.get("output_directory") or ""),
                     verify_with_kind=True,
@@ -177,7 +181,10 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
                         if deletion_committed
                         else lambda: _is_download_cancelled(job_id)
                     ),
+                    progress_callback=lambda message: _append_job_progress(job_id, message),
+                    parallel_workers=_as_worker_count(payload),
                 )
+                _append_job_progress(job_id, "KIND 건수 비교 작업이 끝났습니다.")
             if not deletion_committed and _is_download_cancelled(job_id):
                 raise DownloadCancelled()
             with _DOWNLOAD_JOBS_LOCK:

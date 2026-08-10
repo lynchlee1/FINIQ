@@ -64,24 +64,45 @@ def _resolve_sqlite_shard_path(manifest_path: Path, shard: dict[str, Any]) -> Pa
 
 
 def _validate_sqlite_manifest_counts(
-    manifest_path: Path, manifest: dict[str, Any]
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    filter_workers: object = None,
 ) -> None:
+    if manifest.get("schema_version") != 3:
+        raise ValueError(
+            f"SQLite manifest schema_version must be 3: {manifest_path}"
+        )
     table_name = (
         str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
     )
     quoted_table = _quoted_sqlite_identifier(table_name)
-    shard_total = 0
-    for shard in list(manifest.get("shards") or []):
+    shards = list(manifest.get("shards") or [])
+    worker_count = _resolve_filter_workers(filter_workers, len(shards))
+
+    def validate_shard(shard: dict[str, Any]) -> tuple[int, int]:
         shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
         if not shard_path.is_file():
             msg = f"SQLite shard not found: {shard_path}"
             raise ValueError(msg)
         expected = int(shard.get("disclosures") or 0)
+        expected_unlinked_value = shard.get("unlinked_disclosures")
+        if expected_unlinked_value is None:
+            raise ValueError(
+                f"SQLite manifest shard.unlinked_disclosures is required: {shard_path}"
+            )
+        expected_unlinked = int(expected_unlinked_value)
         connection = sqlite3.connect(shard_path)
         try:
-            actual = int(
-                connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0]
-            )
+            row = connection.execute(
+                f"""
+                SELECT COUNT(*),
+                       SUM(CASE WHEN company_key IS NULL THEN 1 ELSE 0 END)
+                FROM {quoted_table}
+                """
+            ).fetchone()
+            actual = int(row[0])
+            actual_unlinked = int(row[1] or 0)
         finally:
             connection.close()
         if actual != expected:
@@ -90,13 +111,43 @@ def _validate_sqlite_manifest_counts(
                 f"shard={shard_path}, manifest={expected}, rows={actual}"
             )
             raise ValueError(msg)
-        shard_total += expected
+        if actual_unlinked != expected_unlinked:
+            msg = (
+                "SQLite shard unlinked disclosure count mismatch: "
+                f"shard={shard_path}, manifest={expected_unlinked}, "
+                f"rows={actual_unlinked}"
+            )
+            raise ValueError(msg)
+        return expected, expected_unlinked
+
+    if worker_count == 1:
+        shard_counts = list(map(validate_shard, shards))
+    else:
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="sqlite-manifest-check",
+        ) as executor:
+            shard_counts = list(executor.map(validate_shard, shards))
+    shard_total = sum(disclosures for disclosures, _unlinked in shard_counts)
+    shard_unlinked_total = sum(unlinked for _disclosures, unlinked in shard_counts)
 
     summary_total = manifest.get("summary", {}).get("disclosures")
     if summary_total is not None and int(summary_total) != shard_total:
         msg = (
             "SQLite manifest disclosure summary does not match shard totals: "
             f"manifest={manifest_path}, summary={int(summary_total)}, shards={shard_total}"
+        )
+        raise ValueError(msg)
+    summary_unlinked = manifest.get("summary", {}).get("unlinked_disclosures")
+    if summary_unlinked is None:
+        raise ValueError(
+            f"SQLite manifest summary.unlinked_disclosures is required: {manifest_path}"
+        )
+    if int(summary_unlinked) != shard_unlinked_total:
+        msg = (
+            "SQLite manifest unlinked disclosure summary does not match shard totals: "
+            f"manifest={manifest_path}, summary={int(summary_unlinked)}, "
+            f"shards={shard_unlinked_total}"
         )
         raise ValueError(msg)
 
@@ -202,6 +253,7 @@ def _iter_sqlite_manifest_disclosure_records(
                     "company_key",
                     "company_name",
                     "company_id",
+                    "company_cell_text",
                     "market",
                     "disclosed_at",
                     "disclosed_date",
@@ -515,18 +567,14 @@ def _search_sqlite_manifest_titles(
 
 
 def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
-    try:
-        parsed_rows = disclosure_file_rows(file_path)
-    except ValueError as exc:
-        raise ValueError(f"{exc}: {file_path}") from exc
+    parsed_rows = disclosure_file_rows(file_path)
 
     rows: list[dict[str, Any]] = []
     for parsed_row in parsed_rows:
         row = dict(parsed_row)
         company_id = _clean_text(row.get("company_id"))
-        if not company_id:
-            raise ValueError(f"company_id is required: {file_path}")
-        row["company_key"] = company_id
+        row["company_id"] = company_id or None
+        row["company_key"] = company_id or None
         row["source_file"] = str(file_path)
         row["source_page"] = _result_page_number(file_path)
         rows.append(row)
