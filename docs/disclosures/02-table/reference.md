@@ -2,9 +2,23 @@
 
 ## Paths
 
-- `<data_root>/01-list/<YYYYMMDD>_<YYYYMMDD>`의 `*_post_page_*.body`와 `kind_workflow.input.json`을 입력으로 받아 `<data_root>/02-table`에 `<YYYY>.sqlite`와 `sqlite_manifest.json`을 저장한다.
+- `<data_root>/01-list` 아래 기간별 `<START_DATE>_<END_DATE>` 폴더의 `*_post_page_*.body`와 `kind_workflow.input.json`을 입력으로 받아 `<data_root>/02-table`에 `<YEAR>.sqlite`와 `sqlite_manifest.json`을 저장한다.
+- 기본 입력은 개별 기간 폴더가 아니라 여러 기간 폴더를 포함하는 `01-list`다. 변환기는 입력 경로 아래의 원본 페이지를 재귀적으로 수집한다.
 
-### `<data_root>/01-list/<YYYYMMDD>_<YYYYMMDD>/*_post_page_*.body`
+```text
+<data_root>/
+├── 01-list/
+│   ├── <START_DATE>_<END_DATE>/
+│   └── <NEXT_START_DATE>_<NEXT_END_DATE>/
+└── 02-table/
+    ├── <YEAR>.sqlite
+    └── sqlite_manifest.json
+```
+
+- 같은 `YEAR`에 속하는 기간 폴더의 공시는 하나의 `<YEAR>.sqlite`에 함께 저장한다.
+- `START_DATE`, `END_DATE`, `NEXT_START_DATE`, `NEXT_END_DATE`는 각 다운로드 요청의 실제 기간이며 `YYYYMMDD` 형식이다.
+
+### `<data_root>/01-list/<START_DATE>_<END_DATE>/*_post_page_*.body`
 
 #### I/O Structure
 
@@ -21,18 +35,21 @@
 
 - 회사 칸에는 이미지가 없을 수 있으며, 이미지가 있으면 모든 이미지에 비어 있지 않은 `alt`가 있다.
 
-### `<data_root>/01-list/<YYYYMMDD>_<YYYYMMDD>/kind_workflow.input.json`
+### `<data_root>/01-list/<START_DATE>_<END_DATE>/kind_workflow.input.json`
 
 #### I/O Structure
 
 - 다운로드에 사용한 검색 조건과 workflow metadata를 기록한 입력 파일이다.
 - workflow metadata에는 page size, 요청 간 대기 시간과 timeout이 있다.
 
-### `<data_root>/02-table/<YYYY>.sqlite`
+### `<data_root>/02-table/<YEAR>.sqlite`
 
 #### I/O Structure
 
 - 공시 레코드를 공시일 연도별로 나눈 출력 파일이다.
+- 같은 연도의 여러 기간 폴더에서 읽은 레코드는 폴더 경계와 관계없이 해당 연도의 `<YEAR>.sqlite` 하나에 합친다.
+- 연도 SQLite는 기존 파일에 증분 추가하지 않는다. 현재 입력 경로의 전체 원본으로 임시 파일을 만든 뒤 완성된 파일로 교체한다.
+- 따라서 입력을 특정 기간 폴더 하나로 제한하면 다른 기간의 기존 행은 자동으로 유지되지 않는다. 여러 기간을 합치려면 해당 폴더를 모두 포함하는 공통 상위 경로를 입력해야 한다.
 - 연도별 조각은 SQLite FTS5 표를 사용한다.
 
 ### `<data_root>/02-table/sqlite_manifest.json`

@@ -2,16 +2,17 @@
 
 ## Paths
 
-- KIND 조건검색 응답을 입력으로 받아 `<data_root>/01-list/<YYYYMMDD>_<YYYYMMDD>`에 `*_post_page_*.body`, `kind_workflow.input.json`, `kind_workflow.checkpoint.json`을 저장한다.
-- 하위 폴더 이름에는 연도별 시작일과 종료일을 `YYYYMMDD_YYYYMMDD` 형식으로 기록한다.
+- KIND 조건검색 응답을 입력으로 받아 `<data_root>/01-list/<START_DATE>_<END_DATE>`에 `*_post_page_*.body`, `kind_workflow.input.json`, `kind_workflow.checkpoint.json`을 저장한다.
+- `START_DATE`와 `END_DATE`는 한 요청을 연도 경계로 나눈 기간의 실제 시작일과 종료일이며 `YYYYMMDD` 형식으로 기록한다. 기간 폴더 하나가 반드시 달력 연도 전체를 뜻하지는 않는다.
+- 같은 연도에 여러 번 이어받으면 각 요청의 기간별 폴더를 나란히 보존한다. 앞선 폴더를 확장하거나 합치지 않는다.
 
-### `<data_root>/01-list/<YYYYMMDD>_<YYYYMMDD>/*_post_page_*.body`
+### `<data_root>/01-list/<START_DATE>_<END_DATE>/*_post_page_*.body`
 
 #### I/O Structure
 
 - KIND 조건검색 응답 본문을 페이지별로 보존한 출력 파일이다.
 
-### `<data_root>/01-list/<YYYYMMDD>_<YYYYMMDD>/kind_workflow.input.json`
+### `<data_root>/01-list/<START_DATE>_<END_DATE>/kind_workflow.input.json`
 
 #### I/O Structure
 
@@ -29,7 +30,7 @@
 - 회사명과 제출인은 `""`, 시장과 증권 종류는 `전체`다.
 - 처리 방법을 고르지 않으면 연도 단위로 나눈다.
 
-### `<data_root>/01-list/<YYYYMMDD>_<YYYYMMDD>/kind_workflow.checkpoint.json`
+### `<data_root>/01-list/<START_DATE>_<END_DATE>/kind_workflow.checkpoint.json`
 
 #### I/O Structure
 
