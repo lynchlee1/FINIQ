@@ -58,7 +58,7 @@ test("shared integrity panel presents a verdict, ordered steps and one success l
     assert.match(source, new RegExp(label));
   }
   assert.match(source, /const EXISTING_DATA_SUCCESS_LABEL = "정상"/);
-  assert.equal(source.match(/EXISTING_DATA_SUCCESS_LABEL/g)?.length, 8);
+  assert.equal(source.match(/EXISTING_DATA_SUCCESS_LABEL/g)?.length, 9);
   assert.doesNotMatch(source, /"검증 완료"|"메타데이터 확인됨"|filtersMatch \? "일치"|: "통과"/);
   assert.match(source, /filterDifferences\.map/);
   assert.match(source, /저장된 설정 적용/);
@@ -155,8 +155,10 @@ test("manual inspection reports through dock state without opening a panel", asy
 
   assert.doesNotMatch(inspectHandler, /setDownloadPanelOpen\(true\)/);
   assert.doesNotMatch(inspectHandler, /setNotificationPanelOpen\(true\)/);
-  assert.match(source, /\} else \{\s*setNotificationPanelOpen\(false\);\s*setDownloadPanelOpen\(false\);/);
+  assert.match(source, /\} else \{\s*clearActiveInspection\(completedInspection\);\s*setNotificationPanelOpen\(false\);\s*setDownloadPanelOpen\(false\);/);
   assert.match(source, /hasSuccessfulInspectionNotification[\s\S]{0,500}tv-up/);
+  assert.match(source, /hasSuccessfulInspectionNotification = [\s\S]{0,350}&& filtersMatch/);
+  assert.match(source, /hasSuccessfulInspectionNotification && \([\s\S]{0,350}\{EXISTING_DATA_SUCCESS_LABEL\}/);
   assert.match(source, /hasWarningNotification[\s\S]{0,500}tv-warning/);
   assert.match(source, /const actionDockRef = useActionDockFollow<HTMLDivElement>\(\)/);
   assert.match(source, /<div ref=\{actionDockRef\} className="action-dock-root/);

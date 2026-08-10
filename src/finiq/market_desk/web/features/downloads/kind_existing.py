@@ -317,6 +317,8 @@ def check_existing_downloads(
                                 f"Invalid download folder date range: {exc}",
                             )
                         )
+    except DownloadCancelled:
+        raise
     except Exception as exc:
         raise RuntimeError(f"Failed to inspect output directory: {exc}") from exc
 

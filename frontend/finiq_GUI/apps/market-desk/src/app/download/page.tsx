@@ -182,7 +182,6 @@ export default function DownloadPage() {
         const completedPayload = completedInspection.payload;
         const verified = data.existing_downloads as DownloadExistingResponse | null | undefined;
         if (verified) acceptExistingInspectionResult(verified);
-        clearActiveInspection(completedInspection);
         const hasVerificationFailure = !verified || (verified.ranges?.some(
           (range) => range.status === "stale"
             || range.filters_match === false
@@ -205,19 +204,23 @@ export default function DownloadPage() {
 
         if (completedInspection.runTriggered) {
           if (candidateCount > 0 || hasVerificationFailure) {
+            clearActiveInspection(completedInspection);
             setNotificationPanelOpen(true);
             setDownloadPanelOpen(false);
             setSettingsPanelOpen(false);
           } else {
             try {
               setStatus("다운로드 작업을 시작하는 중...");
-              await startDownloadJob(completedPayload);
+              await startDownloadJob(completedPayload, jobId);
             } catch (err: any) {
               setStatus(err.message);
               setIsErrorStatus(true);
+            } finally {
+              clearActiveInspection(completedInspection);
             }
           }
         } else {
+          clearActiveInspection(completedInspection);
           setNotificationPanelOpen(false);
           setDownloadPanelOpen(false);
           setSettingsPanelOpen(false);
@@ -449,8 +452,8 @@ export default function DownloadPage() {
     }
   };
 
-  const startDownloadJob = async (payload: DownloadPayload) => {
-    const data = await startDownload(payload);
+  const startDownloadJob = async (payload: DownloadPayload, inspectionJobId?: string) => {
+    const data = await startDownload(payload, inspectionJobId);
     setPreviewResult(null);
     setResult(null);
     setDownloadPanelOpen(true);
@@ -644,6 +647,7 @@ export default function DownloadPage() {
     && result?.format === "kind_download_folder_cleanup_v1"
     && currentInspectionCandidateCount === 0
     && staleRanges.length === 0
+    && filtersMatch
     && !isErrorStatus
     && !metadataNotificationError;
   const hasWarningNotification = currentInspectionCandidateCount > 0
@@ -1146,7 +1150,8 @@ export default function DownloadPage() {
 
                 {hasSuccessfulInspectionNotification && (
                   <div className="text-body rounded-md border border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] p-3 text-[var(--tv-up-text)]">
-                    기존 데이터 검사가 완료됐습니다. 모든 검사 단계를 통과했습니다.
+                    <span className="font-semibold">{EXISTING_DATA_SUCCESS_LABEL}</span>
+                    <p className="mt-1">기존 데이터 검사가 완료됐습니다. 모든 검사 단계를 통과했습니다.</p>
                   </div>
                 )}
 

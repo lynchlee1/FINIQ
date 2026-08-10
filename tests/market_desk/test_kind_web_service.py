@@ -3472,6 +3472,222 @@ def test_check_existing_downloads_honors_immediate_cancellation(tmp_path: Path) 
         check_existing_downloads(str(tmp_path), cancel_check=lambda: True)
 
 
+def test_check_existing_downloads_preserves_cancellation_during_discovery(
+    tmp_path: Path,
+) -> None:
+    from finiq.market_desk.web.features.downloads.kind_common import DownloadCancelled
+    from finiq.market_desk.web.features.downloads.kind_existing import (
+        check_existing_downloads,
+    )
+
+    (tmp_path / "unrelated").mkdir()
+    checks = 0
+
+    def cancel_during_discovery() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 2
+
+    with pytest.raises(DownloadCancelled):
+        check_existing_downloads(
+            str(tmp_path), cancel_check=cancel_during_discovery
+        )
+
+
+def test_inspect_folder_job_finishes_committed_deletion_after_cancel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import threading
+    import time
+
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
+        cancel_download_job,
+        get_download_job,
+        start_inspect_folder_job,
+    )
+
+    deletion_committed = threading.Event()
+    release_result = threading.Event()
+    verification_cancel_checks = []
+
+    def committed_deletion(payload, progress_callback=None, cancel_check=None):
+        deletion_committed.set()
+        assert release_result.wait(timeout=1)
+        return {
+            "format": "kind_download_folder_cleanup_v1",
+            "dry_run": False,
+            "deleted_count": 1,
+            "deleted_files": [{"name": "stale.body", "path": "stale.body"}],
+        }
+
+    def verify_remaining(
+        output_directory,
+        *,
+        verify_with_kind=True,
+        current_payload=None,
+        cancel_check=None,
+    ):
+        verification_cancel_checks.append(cancel_check)
+        return {"has_existing": False}
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.inspect_download_output_directory_payload",
+        committed_deletion,
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.check_existing_downloads",
+        verify_remaining,
+    )
+
+    job = start_inspect_folder_job(
+        {"output_directory": str(tmp_path), "mode": "single", "dry_run": False}
+    )
+    assert deletion_committed.wait(timeout=1)
+    cancel_download_job(job["job_id"])
+    release_result.set()
+
+    for _ in range(100):
+        status = get_download_job(job["job_id"])
+        if status["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+
+    assert status["status"] == "completed"
+    assert status["result"]["deleted_count"] == 1
+    assert status["result"]["existing_downloads"] == {"has_existing": False}
+    assert verification_cancel_checks == [None]
+
+
+def test_inspect_folder_job_cancellation_wins_finalization_race(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import threading
+    import time
+
+    from finiq.market_desk.web.features.downloads import kind_jobs
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
+        cancel_download_job,
+        get_download_job,
+        start_inspect_folder_job,
+    )
+
+    final_check_started = threading.Event()
+    release_final_check = threading.Event()
+    original_is_cancelled = kind_jobs._is_download_cancelled
+    checks = 0
+
+    def stale_final_cancel_check(job_id):
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            final_check_started.set()
+            assert release_final_check.wait(timeout=1)
+            return False
+        return original_is_cancelled(job_id)
+
+    monkeypatch.setattr(kind_jobs, "_is_download_cancelled", stale_final_cancel_check)
+    monkeypatch.setattr(
+        kind_jobs,
+        "inspect_download_output_directory_payload",
+        lambda payload, progress_callback=None, cancel_check=None: {
+            "format": "kind_download_folder_cleanup_v1",
+            "dry_run": True,
+            "deleted_count": 0,
+        },
+    )
+    monkeypatch.setattr(
+        kind_jobs,
+        "check_existing_downloads",
+        lambda *args, **kwargs: {"has_existing": False},
+    )
+
+    job = start_inspect_folder_job(
+        {"output_directory": str(tmp_path), "mode": "single", "dry_run": True}
+    )
+    assert final_check_started.wait(timeout=1)
+    cancel_download_job(job["job_id"])
+    release_final_check.set()
+
+    for _ in range(100):
+        status = get_download_job(job["job_id"])
+        if status["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+
+    assert status["status"] == "cancelled"
+    assert status["result"] is None
+
+
+def test_download_start_is_idempotent_for_completed_inspection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import threading
+    import time
+
+    from finiq.market_desk.web.features.downloads import kind_jobs
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
+        get_download_job,
+        start_download_job,
+        start_inspect_folder_job,
+    )
+
+    monkeypatch.setattr(
+        kind_jobs,
+        "inspect_download_output_directory_payload",
+        lambda payload, progress_callback=None, cancel_check=None: {
+            "format": "kind_download_folder_cleanup_v1",
+            "dry_run": True,
+            "deleted_count": 0,
+        },
+    )
+    monkeypatch.setattr(
+        kind_jobs,
+        "check_existing_downloads",
+        lambda *args, **kwargs: {"has_existing": False},
+    )
+
+    inspection = start_inspect_folder_job(
+        {"output_directory": str(tmp_path), "mode": "single", "dry_run": True}
+    )
+    for _ in range(100):
+        inspection_status = get_download_job(inspection["job_id"])
+        if inspection_status["status"] == "completed":
+            break
+        time.sleep(0.01)
+    assert inspection_status["status"] == "completed"
+
+    download_started = threading.Event()
+    release_download = threading.Event()
+    calls = 0
+
+    def blocking_download(payload, progress_callback=None, cancel_check=None):
+        nonlocal calls
+        calls += 1
+        download_started.set()
+        assert release_download.wait(timeout=1)
+        return {"summary": {}}
+
+    monkeypatch.setattr(kind_jobs, "run_download_action", blocking_download)
+    payload = {
+        "output_directory": str(tmp_path),
+        "mode": "single",
+        "inspection_job_id": inspection["job_id"],
+    }
+    first = start_download_job(dict(payload))
+    assert download_started.wait(timeout=1)
+    second = start_download_job(dict(payload))
+
+    assert second["job_id"] == first["job_id"]
+    assert calls == 1
+    release_download.set()
+    for _ in range(100):
+        download_status = get_download_job(first["job_id"])
+        if download_status["status"] == "completed":
+            break
+        time.sleep(0.01)
+    assert download_status["status"] == "completed"
+
+
 def test_download_job_logs_payload_summary_before_running_action(
     tmp_path: Path, monkeypatch
 ) -> None:
