@@ -198,12 +198,12 @@ export default function DownloadPage() {
           clearCleanupCandidates();
         }
         setResult(data);
-        if (verified) {
-          setStatus(buildInspectionStatus(data, !data.dry_run));
-        }
+        const hasInspectionFailure = candidateCount > 0 || hasVerificationFailure;
+        setStatus(buildInspectionStatus(data, !data.dry_run, hasInspectionFailure));
+        setIsErrorStatus(hasInspectionFailure);
 
         if (completedInspection.runTriggered) {
-          if (candidateCount > 0 || hasVerificationFailure) {
+          if (hasInspectionFailure) {
             clearActiveInspection(completedInspection);
             setNotificationPanelOpen(true);
             setDownloadPanelOpen(false);
@@ -222,7 +222,7 @@ export default function DownloadPage() {
         } else {
           clearActiveInspection(completedInspection);
           setNotificationPanelOpen(false);
-          setDownloadPanelOpen(false);
+          setDownloadPanelOpen(true);
           setSettingsPanelOpen(false);
         }
       } else {
@@ -517,12 +517,12 @@ export default function DownloadPage() {
     }
   };
 
-  const buildInspectionStatus = (data: any, deleted: boolean) => {
+  const buildInspectionStatus = (data: any, deleted: boolean, failed: boolean) => {
     const files = Array.isArray(deleted ? data.deleted_files : data.deletion_candidates)
       ? (deleted ? data.deleted_files : data.deletion_candidates)
       : [];
     const lines = [
-      deleted ? "파일 삭제 완료" : EXISTING_DATA_SUCCESS_LABEL,
+      failed ? "사용 불가" : deleted ? "파일 삭제 완료" : EXISTING_DATA_SUCCESS_LABEL,
       `대상 페이지: ${formatInteger(data.requested_count || data.summary?.total)}`,
       `연도별 분할: ${data.split_by_year ? "On" : "Off"}`,
       `${deleted ? "삭제 파일" : "삭제 예정 파일"}: ${formatInteger(deleted ? data.deleted_count : data.deletion_candidate_count)}`,
@@ -548,16 +548,16 @@ export default function DownloadPage() {
       setStatus("기존 데이터 검사를 시작하는 중...");
       setPreviewResult(null);
       setResult(null);
-      await inspectExistingFiles(true);
-      setDownloadPanelOpen(false);
+      setDownloadPanelOpen(true);
       setNotificationPanelOpen(false);
       setSettingsPanelOpen(false);
+      await inspectExistingFiles(true);
     } catch (err: any) {
       clearActiveInspection();
       setStatus(err.message);
       setIsErrorStatus(true);
       setNotificationPanelOpen(false);
-      setDownloadPanelOpen(false);
+      setDownloadPanelOpen(true);
       setSettingsPanelOpen(false);
     } finally {
       setInspectRunning(false);

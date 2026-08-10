@@ -145,7 +145,11 @@ def filter_disclosures_payload(
 
     sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
     try:
-        _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
+        _validate_sqlite_manifest_counts(
+            sqlite_manifest_path,
+            sqlite_manifest,
+            filter_workers=filter_workers,
+        )
     except ValueError as exc:
         raise ValueError(
             f"{exc} 02단계 데이터베이스를 초기화하고 "
@@ -315,10 +319,14 @@ def search_disclosure_titles_payload(
         resolve_disclosure_workspace(data_root).table / "sqlite_manifest.json"
     )
     sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
-    _validate_sqlite_manifest_counts(sqlite_manifest_path, sqlite_manifest)
     filter_blocks = _validate_filter_blocks(body.get("filter_blocks") or [])
     shards = list(sqlite_manifest.get("shards") or [])
     filter_workers = _resolve_filter_workers(body.get("filter_workers"), len(shards))
+    _validate_sqlite_manifest_counts(
+        sqlite_manifest_path,
+        sqlite_manifest,
+        filter_workers=filter_workers,
+    )
     matched_disclosures, title_counts = _search_sqlite_manifest_titles(
         sqlite_manifest_path,
         sqlite_manifest,

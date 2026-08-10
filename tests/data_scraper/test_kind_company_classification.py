@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from finiq.data_scraper.data.facade import load_company_classification_file
-from finiq.data_scraper.parse import companysummary_onclick, disclosure_rows
+from finiq.data_scraper.parse import (
+    companysummary_onclick,
+    disclosure_file_rows,
+    disclosure_rows,
+)
 from finiq.data_scraper.storage.classification_store import (
     company_classification_partial_path,
     folder_partial_signature,
@@ -131,6 +135,7 @@ def test_disclosure_rows_extract_company_market_badges_and_doc_numbers() -> None
         "row_no": "1",
         "company_name": "레이저옵텍",
         "company_id": "19955",
+        "company_cell_text": "레이저옵텍",
         "market": "코스닥",
         "badges": ["관리종목", "KOSDAQ150"],
         "disclosed_at": "2026-01-02 20:02",
@@ -145,6 +150,67 @@ def test_disclosure_rows_extract_company_market_badges_and_doc_numbers() -> None
         "doc_no": "20260102000688",
         "submitter": "시장감시위원회",
     }
+
+
+def test_disclosure_rows_keeps_disclosure_without_company_relation() -> None:
+    html = _results_page(
+        _row_html(
+            number=1,
+            disclosed_at="2026-01-02 20:02",
+            company_name="일괄신고",
+            company_id=None,
+            market=None,
+            badges=None,
+            title="집합투자업자 의결권 행사 내역",
+            acpt_no="20260102000687",
+            doc_no=None,
+            submitter="유리자산운용",
+        )
+    )
+
+    parsed = disclosure_rows(html)
+
+    assert parsed[0]["company_name"] is None
+    assert parsed[0]["company_id"] is None
+    assert parsed[0]["company_cell_text"] == "일괄신고"
+    assert parsed[0]["submitter"] == "유리자산운용"
+    assert parsed[0]["acpt_no"] == "20260102000687"
+
+
+def test_disclosure_rows_rejects_multiple_company_relations(tmp_path: Path) -> None:
+    html = _results_page(
+        """
+        <tr>
+          <td>1</td>
+          <td>2026-01-02 20:02</td>
+          <td>
+            <a id="companysum" onclick="companysummary_open('1')" title="회사1">회사1</a>
+            <a id="companysum" onclick="companysummary_open('2')" title="회사2">회사2</a>
+          </td>
+          <td><a onclick="openDisclsViewer('20260102000687','')">공시</a></td>
+          <td>제출인</td>
+        </tr>
+        """
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="row 1: KIND disclosure row must not contain multiple companysum links",
+    ):
+        disclosure_rows(html)
+
+    body_path = tmp_path / "001_post_page_00001.body"
+    body_path.write_text(html, encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        disclosure_file_rows(body_path)
+    assert "row 1" in str(exc_info.value)
+    assert str(body_path) in str(exc_info.value)
+
+    _write_workflow_input(tmp_path)
+    with pytest.raises(ValueError) as workflow_exc_info:
+        diagnose_kind_company_classification_integrity(tmp_path, parallelism=1)
+    assert "row 1" in str(workflow_exc_info.value)
+    assert str(body_path) in str(workflow_exc_info.value)
 
 
 def test_disclosure_rows_preserves_display_title_flags_and_later_correction() -> None:
@@ -281,6 +347,7 @@ def test_export_kind_company_classification_recurses_and_merges_same_company(
     assert result.body_files == 3
     assert result.companies == 4
     assert result.disclosures == 5
+    assert result.unlinked_disclosures == 0
 
     output_path = tmp_path / "kind.company_classification.sqlite"
     index_payload = load_company_classification_artifact(output_path)
@@ -292,6 +359,7 @@ def test_export_kind_company_classification_recurses_and_merges_same_company(
         "body_files": 3,
         "companies": 4,
         "disclosures": 5,
+        "unlinked_disclosures": 0,
     }
     assert [company["company_name"] for company in payload["companies"]] == [
         "비컴퍼니",
@@ -317,7 +385,7 @@ def test_export_kind_company_classification_recurses_and_merges_same_company(
     assert payload["companies"][3]["company_id"] == "IGNORED"
 
 
-def test_export_kind_company_classification_raises_when_any_row_is_unclassified(
+def test_export_kind_company_classification_counts_unlinked_disclosures(
     tmp_path: Path,
 ) -> None:
     folder = tmp_path / "broken"
@@ -341,10 +409,15 @@ def test_export_kind_company_classification_raises_when_any_row_is_unclassified(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="companysum link"):
-        export_kind_company_classification(tmp_path)
+    result = export_kind_company_classification(tmp_path)
+    report = diagnose_kind_company_classification_integrity(tmp_path)
 
-    assert not (tmp_path / "kind.company_classification.sqlite").exists()
+    assert result.companies == 0
+    assert result.disclosures == 0
+    assert result.unlinked_disclosures == 1
+    assert report.parsed_disclosures == 1
+    assert report.classified_disclosures == 0
+    assert report.unlinked_disclosures == 1
 
 
 def test_export_kind_mode_folders_supports_parallel_folder_exports(tmp_path: Path) -> None:

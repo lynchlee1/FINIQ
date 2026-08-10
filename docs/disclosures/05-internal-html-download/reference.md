@@ -12,6 +12,7 @@
 - `records[].acpt_no`는 저장할 공시를 식별한다.
 - `records[].selected_main_doc_no`는 선택한 본문 문서 번호다.
 - `records[].metadata.disclosed_at`은 ISO 날짜로 시작한다.
+- `max_workers`는 동시에 처리할 공시 대상 수를 정한다. 실제 KIND 요청 시작 간격은 worker와 연도 그룹 사이에서도 공유한다.
 
 ### `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`
 

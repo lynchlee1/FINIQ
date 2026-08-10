@@ -16,6 +16,8 @@
   - cache를 사용하지 않고 원본 결과 페이지를 다시 읽어 회사별 결과를 만든다.
 
 - **finiq/data_scraper/workflow/workflow.py**
+- **공시 행에 회사 ID가 없음**
+  - 공시를 임의 회사에 귀속하지 않는다. 회사별 결과에서는 제외하고 `unlinked_disclosures`에 포함하며, `parsed_disclosures = classified_disclosures + unlinked_disclosures`를 검증한다.
 - **회사 분류·보조 JSON 내보내기·페이지 검증에 쓸 process pool을 만들거나 사용하다 `BrokenProcessPool`, 운영체제·권한·runtime 오류가 발생함**
   - 같은 대상 전체를 직렬 처리로 다시 실행한다. 이 목록에 포함되지 않는 오류는 대체 처리하지 않는다.
 

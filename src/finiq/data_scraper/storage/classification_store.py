@@ -10,7 +10,7 @@ from typing import Any
 from .result_files import sorted_result_page_paths
 
 CLASSIFICATION_INDEX_FORMAT = "company_classification_index_v2"
-CLASSIFICATION_PARTIAL_FORMAT = "company_classification_partial_v2"
+CLASSIFICATION_PARTIAL_FORMAT = "company_classification_partial_v3"
 DEFAULT_CLASSIFICATION_SHARD_COMPANIES = 200
 
 def _company_key(company: dict[str, Any]) -> str:
@@ -102,6 +102,7 @@ def write_folder_partial_cache(
     body_files: int,
     parsed_disclosures: int,
     classified_disclosures: int,
+    unlinked_disclosures: int,
     intra_folder_duplicates: int,
     companies: list[dict[str, Any]],
 ) -> Path:
@@ -113,6 +114,7 @@ def write_folder_partial_cache(
         "body_files": body_files,
         "parsed_disclosures": parsed_disclosures,
         "classified_disclosures": classified_disclosures,
+        "unlinked_disclosures": unlinked_disclosures,
         "intra_folder_duplicates": intra_folder_duplicates,
         "companies": companies,
     }

@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -446,6 +447,7 @@ def _detail_download_payload(profile: dict[str, Any]) -> dict[str, Any]:
         "disclosure_type_groups": search["disclosure_type_groups"],
         "last_report_only": False,
         "page_size": profile["execution"]["page_size"],
+        "worker_count": profile["execution"]["local_workers"],
         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
         "timeout": profile["execution"]["timeout"],
     }
@@ -517,7 +519,10 @@ def _inspect_detail_download(profile: dict[str, Any]) -> dict[str, Any]:
 
     with KIND_NETWORK_JOB_LOCK:
         existing = check_existing_downloads(
-            str(root), verify_with_kind=True, current_payload=payload
+            str(root),
+            verify_with_kind=True,
+            current_payload=payload,
+            parallel_workers=profile["execution"]["local_workers"],
         )
     statuses = list(existing.get("ranges") or [])
     if len(statuses) != len(expected_folders):
@@ -654,7 +659,11 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
     manifest_path = _table_manifest(profile)
     manifest = _load_sqlite_manifest(manifest_path)
-    _validate_sqlite_manifest_counts(manifest_path, manifest)
+    _validate_sqlite_manifest_counts(
+        manifest_path,
+        manifest,
+        filter_workers=profile["execution"]["local_workers"],
+    )
     table_result = filter_disclosures_payload(
         {
             "data_root": str(root),
@@ -1235,6 +1244,7 @@ def _window_local_page_count(
         window_path,
         expected_page_size=profile["execution"]["page_size"],
         require_complete=True,
+        validation_parallelism=profile["execution"]["local_workers"],
     )
     total_pages = int(inspected.get("total_pages") or 0)
     if total_pages < 1:
@@ -1531,9 +1541,22 @@ def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
         ) / ".automation-current"
         actual_files = sorted(current.rglob("*.html"))
         actual_membership = {(path.stem, path.parent.name) for path in actual_files}
-        if actual_membership != expected_membership or any(
-            not _is_valid_html(path) for path in actual_files
-        ):
+        if actual_membership != expected_membership:
+            return False
+        validity_workers = resolve_worker_count(
+            profile["execution"]["local_workers"],
+            item_count=len(actual_files),
+            field_name="local_workers",
+        )
+        if validity_workers == 1:
+            html_files_valid = all(_is_valid_html(path) for path in actual_files)
+        else:
+            with ThreadPoolExecutor(
+                max_workers=validity_workers,
+                thread_name_prefix="automation-html-check",
+            ) as executor:
+                html_files_valid = all(executor.map(_is_valid_html, actual_files))
+        if not html_files_valid:
             return False
         if stage == 5:
             _manifest_source_path, expected_integrity = (
@@ -1927,6 +1950,7 @@ def _run_stage(
                         "timeout": execution["timeout"],
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
                         "max_requests_per_minute": KIND_AUTOMATION_CONTENT_REQUESTS_PER_MINUTE,
+                        "max_workers": execution["local_workers"],
                         "progress_interval": 25,
                         "cancel_token": uuid.uuid4().hex,
                     },
@@ -1966,6 +1990,7 @@ def _run_stage(
                 "input_directory": str(
                     _internal_mode_directory(profile) / ".automation-current"
                 ),
+                "workers": execution["local_workers"],
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,

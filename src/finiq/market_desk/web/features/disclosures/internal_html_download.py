@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import Counter
 
 from finiq.data_scraper.core.html_rate_limit import (
@@ -145,6 +146,8 @@ def download_disclosure_internal_htmls(
     skip_existing: bool = True,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    max_workers: int | None = None,
+    spacing_limiter: RequestSpacingLimiter | None = None,
 ) -> list[Path]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     if timeout <= 0:
@@ -158,14 +161,25 @@ def download_disclosure_internal_htmls(
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
+    worker_count = resolve_worker_count(
+        max_workers,
+        item_count=len(targets),
+        field_name="max_workers",
+    )
     normalized_headers = {
         str(key): str(value) for key, value in request_headers.items()
     }
-    saved_paths: list[Path] = []
-    min_interval_seconds = max(
-        wait_seconds_between_requests, 60.0 / max_requests_per_minute
-    )
-    spacing_limiter = RequestSpacingLimiter(min_interval_seconds)
+    if spacing_limiter is None:
+        min_interval_seconds = max(
+            wait_seconds_between_requests, 60.0 / max_requests_per_minute
+        )
+        spacing_limiter = RequestSpacingLimiter(min_interval_seconds)
+    progress_lock = Lock()
+
+    def report(message: str) -> None:
+        if progress_callback is not None:
+            with progress_lock:
+                progress_callback(message)
 
     def wait_for_request() -> None:
         if wait_for_html_download_request_slot(
@@ -174,48 +188,86 @@ def download_disclosure_internal_htmls(
         ):
             raise InterruptedError("internal HTML download cancelled")
 
-    with requests.Session() as session:
-        for target in targets:
-            acpt_no = target["acpt_no"]
-            doc_no = target["doc_no"]
-            if cancel_check is not None and cancel_check():
-                break
-            output_path = output_directory / VIEWER_HTML_FILENAME_TEMPLATE.format(
-                acpt_no=acpt_no
+    def download_target(
+        target: dict[str, str],
+        session: requests.Session,
+    ) -> Path | None:
+        acpt_no = target["acpt_no"]
+        doc_no = target["doc_no"]
+        if cancel_check is not None and cancel_check():
+            return None
+        output_path = output_directory / VIEWER_HTML_FILENAME_TEMPLATE.format(
+            acpt_no=acpt_no
+        )
+        if skip_existing and _is_valid_html(output_path):
+            report(f"Skipping existing KIND internal HTML: {output_path}")
+            return output_path
+        report(f"Fetching KIND internal HTML acpt_no={acpt_no} doc_no={doc_no}...")
+        try:
+            internal_html = _fetch_internal_html(
+                session,
+                acpt_no=acpt_no,
+                doc_no=doc_no,
+                request_headers=normalized_headers,
+                timeout=timeout,
+                before_request=wait_for_request,
             )
-            if skip_existing and _is_valid_html(output_path):
-                if progress_callback is not None:
-                    progress_callback(
-                        f"Skipping existing KIND internal HTML: {output_path}"
-                    )
-                saved_paths.append(output_path)
-                continue
-            if progress_callback is not None:
-                progress_callback(
-                    f"Fetching KIND internal HTML acpt_no={acpt_no} doc_no={doc_no}..."
+        except InterruptedError:
+            return None
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(internal_html)
+        if not _is_valid_html(output_path):
+            output_path.unlink(missing_ok=True)
+            raise ValueError(
+                f"Downloaded internal response for acpt_no={acpt_no} is invalid HTML"
+            )
+        report(f"Saved KIND internal HTML to: {output_path}")
+        return output_path
+
+    worker_local = threading.local()
+    worker_sessions: list[requests.Session] = []
+    worker_sessions_lock = Lock()
+
+    def download_parallel_target(
+        item: tuple[int, dict[str, str]],
+    ) -> tuple[int, Path | None]:
+        index, target = item
+        session = getattr(worker_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            worker_local.session = session
+            with worker_sessions_lock:
+                worker_sessions.append(session)
+        return index, download_target(target, session)
+
+    indexed_paths: list[Path | None] = [None] * len(targets)
+    if worker_count == 1:
+        with requests.Session() as session:
+            for index, target in enumerate(targets):
+                path = download_target(target, session)
+                indexed_paths[index] = path
+                if path is None and cancel_check is not None and cancel_check():
+                    break
+    else:
+        try:
+            with ThreadPoolExecutor(
+                max_workers=worker_count,
+                thread_name_prefix="kind-internal-html",
+            ) as executor:
+                completed = bounded_as_completed(
+                    executor,
+                    enumerate(targets),
+                    lambda item: executor.submit(download_parallel_target, item),
+                    max_pending=worker_count * 2,
                 )
-            try:
-                internal_html = _fetch_internal_html(
-                    session,
-                    acpt_no=acpt_no,
-                    doc_no=doc_no,
-                    request_headers=normalized_headers,
-                    timeout=timeout,
-                    before_request=wait_for_request,
-                )
-            except InterruptedError:
-                break
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(internal_html)
-            if not _is_valid_html(output_path):
-                output_path.unlink(missing_ok=True)
-                raise ValueError(
-                    f"Downloaded internal response for acpt_no={acpt_no} is invalid HTML"
-                )
-            saved_paths.append(output_path)
-            if progress_callback is not None:
-                progress_callback(f"Saved KIND internal HTML to: {output_path}")
-    return saved_paths
+                for future, (index, _target) in completed:
+                    result_index, path = future.result()
+                    indexed_paths[result_index] = path
+        finally:
+            for session in worker_sessions:
+                session.close()
+
+    return [path for path in indexed_paths if path is not None]
 
 
 def _verify_internal_download_membership(
@@ -297,24 +349,33 @@ def download_disclosure_internal_html_payload(
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     progress_interval = _parse_progress_interval(body.get("progress_interval"))
+    max_workers = resolve_worker_count(
+        body.get("max_workers"),
+        item_count=len(targets),
+        field_name="max_workers",
+    )
     progress_log: list[str] = []
     processed_count = 0
+    progress_lock = Lock()
 
     def emit(message: str) -> None:
-        progress_log.append(message)
-        if progress_callback is not None:
-            progress_callback(message)
+        with progress_lock:
+            progress_log.append(message)
+            if progress_callback is not None:
+                progress_callback(message)
 
     def handle_progress(message: str) -> None:
         nonlocal processed_count
         if message.startswith(
             ("Saved KIND internal HTML ", "Skipping existing KIND internal HTML")
         ):
-            processed_count += 1
+            with progress_lock:
+                processed_count += 1
+                current_count = processed_count
             emit(message)
-            if processed_count % progress_interval == 0:
+            if current_count % progress_interval == 0:
                 emit(
-                    f"HTML 내부 저장 중간 확인: {processed_count}/{len(acpt_numbers)}건 처리."
+                    f"HTML 내부 저장 중간 확인: {current_count}/{len(acpt_numbers)}건 처리."
                 )
             return
         if message.startswith("Fetching KIND internal HTML "):
@@ -330,6 +391,7 @@ def download_disclosure_internal_html_payload(
     )
     emit(f"이어하기 방식: 저장된 HTML 파일 건너뛰기")
     emit(f"진행 확인 간격: {progress_interval}건")
+    emit(f"병렬 처리: {max_workers}개 워커")
     existing_paths_by_acpt_no: dict[str, Path] = {}
     source_integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
     download_acpt_numbers = acpt_numbers
@@ -395,6 +457,25 @@ def download_disclosure_internal_html_payload(
     try:
         downloaded_paths = []
         if download_acpt_numbers:
+            timeout = float(body.get("timeout") or 20.0)
+            wait_seconds = float(body.get("wait_seconds") or 0.0)
+            max_requests_per_minute = int(
+                body.get("max_requests_per_minute") or 90
+            )
+            if timeout <= 0:
+                raise ValueError("timeout must be > 0")
+            if wait_seconds < 0:
+                raise ValueError("wait_seconds_between_requests must be >= 0")
+            if (
+                max_requests_per_minute < 1
+                or max_requests_per_minute > 100
+            ):
+                raise ValueError(
+                    "max_requests_per_minute must be between 1 and 100"
+                )
+            spacing_limiter = RequestSpacingLimiter(
+                max(wait_seconds, 60.0 / max_requests_per_minute)
+            )
             target_by_acpt_no = {target["acpt_no"]: target for target in targets}
             grouped_targets: dict[str, list[dict[str, str]]] = {}
             for acpt_no in download_acpt_numbers:
@@ -409,17 +490,15 @@ def download_disclosure_internal_html_payload(
                             {"acpt_no": target["acpt_no"], "doc_no": target["doc_no"]}
                             for target in group_targets
                         ],
-                        timeout=float(body.get("timeout") or 20.0),
-                        wait_seconds_between_requests=float(
-                            body.get("wait_seconds") or 0.0
-                        ),
-                        max_requests_per_minute=int(
-                            body.get("max_requests_per_minute") or 90
-                        ),
+                        timeout=timeout,
+                        wait_seconds_between_requests=wait_seconds,
+                        max_requests_per_minute=max_requests_per_minute,
                         skip_existing=False,
                         progress_callback=handle_progress,
                         cancel_check=lambda: _is_cancelled(cancel_token)
                         or bool(cancel_check and cancel_check()),
+                        max_workers=max_workers,
+                        spacing_limiter=spacing_limiter,
                     )
                 )
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())

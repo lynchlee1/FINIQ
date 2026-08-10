@@ -19,9 +19,12 @@ HTML로 저장한 KIND 조건검색 결과를 검색 가능한 연도별 SQLite 
 - 페이지별 pagination이 서로 다르면 변환을 중단한다.
 - 입력 페이지를 확정할 때 앞선 페이지 값, 다수결이나 복구 overlay로 입력을 추정하지 않는다.
 - 파일명에서 페이지 번호를 확정할 수 없으면 변환과 원본 직접 조회를 중단한다.
-- 결과표 범위, 회사·공시 식별값 또는 이미지 `alt`를 확정할 수 없으면 변환을 중단한다.
+- 결과표 범위, 공시 식별값, 존재하는 회사 링크의 식별값 또는 이미지 `alt`를 확정할 수 없으면 변환을 중단한다.
+- 회사 링크가 없는 행은 공시 자체가 유효하면 회사 관계가 없는 정상 공시로 저장한다. 회사명·제출인이나 회사 칸 문구로 회사 식별값을 대신 만들지 않는다.
+- 회사 링크가 둘 이상이면 한 회사를 확정할 수 없으므로 변환을 중단한다.
 - 원본 `.body`는 한 번만 읽으며 다른 표나 필드로 대신하지 않는다.
 - `classification_path`, 구형 JSON classification이나 이름순 파일 탐색을 사용하면 변환을 중단한다.
+- 원본 BODY 페이지는 `table_workers` 범위에서 병렬 파싱하고, 중복 제거와 SQLite 저장은 원본 페이지·행 순서로 적용한다.
 
 ### Deduplicate Disclosures
 
@@ -40,6 +43,10 @@ HTML로 저장한 KIND 조건검색 결과를 검색 가능한 연도별 SQLite 
 #### Behavior
 
 회사 칸에서 시장과 badge를 읽어 공시 행의 표시 정보로 저장한다.
+
+- 회사 링크가 있으면 `company_id`와 회사 링크의 `title`을 회사 관계로 저장하고 `company_key`는 `company_id`와 같게 둔다.
+- 회사 링크가 없으면 `company_key`, `company_name`, `company_id`를 `null`로 저장한다.
+- 회사 칸의 표시 문자열은 회사 관계와 분리해 `company_cell_text`에 저장한다.
 
 #### Defaults and Exceptions
 
@@ -80,7 +87,9 @@ SQLite 조각마다 원본과 변환 결과를 manifest에 기록한다.
 - 전체 `원본 행 수 = 실제 SQLite 행 수 + 중복 행 수`
 - 연도별 실제 SQLite 행 수 = manifest의 연도별 저장 행 수
 - 연도별 저장 행 수 합계 = manifest의 전체 저장 행 수
+- 회사 관계가 없는 저장 행 수 = manifest의 `unlinked_disclosures`
 
 #### Defaults and Exceptions
 
 - 페이지별, 연도별 또는 전체 행 수가 manifest와 실제 SQLite에서 일치하지 않으면 결과를 사용하지 않고 변환을 중단한다.
+- manifest를 다시 확인할 때 SQLite 조각의 실제 행 수 검증은 설정된 worker 수 안에서 조각별로 병렬 실행한다.

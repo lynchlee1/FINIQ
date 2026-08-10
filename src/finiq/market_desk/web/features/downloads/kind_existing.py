@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from threading import Lock
 from typing import Any, Callable
 
 from finiq.concurrency import bounded_as_completed, resolve_worker_count
@@ -88,6 +89,8 @@ def _validate_single_folder(
     verify_with_kind: bool = True,
     current_filters: dict[str, Any] | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    validation_parallelism: int | None = None,
+    kind_query_lock: Any | None = None,
 ) -> dict[str, Any] | None:
     _raise_if_cancelled(cancel_check)
     body_files = list(folder.glob("*_post_page_*.body"))
@@ -133,7 +136,11 @@ def _validate_single_folder(
     expected_page_size = int(input_snapshot["page_size"])
 
     if verify_with_kind:
-        kind_count = get_current_kind_total_count(input_snapshot)
+        if kind_query_lock is None:
+            kind_count = get_current_kind_total_count(input_snapshot)
+        else:
+            with kind_query_lock:
+                kind_count = get_current_kind_total_count(input_snapshot)
         _raise_if_cancelled(cancel_check)
         if kind_count is None:
             return {
@@ -193,6 +200,7 @@ def _validate_single_folder(
                 folder,
                 expected_page_size=expected_page_size,
                 require_complete=True,
+                validation_parallelism=validation_parallelism,
             )
             local_count = inspected.get("total_items")
         _raise_if_cancelled(cancel_check)
@@ -239,8 +247,15 @@ def check_existing_downloads(
     verify_with_kind: bool = True,
     current_payload: dict[str, Any] | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    progress_callback: Callable[[str], None] | None = None,
+    parallel_workers: int | None = None,
 ) -> dict[str, Any]:
     """Inspect output directory to detect and validate existing downloaded date ranges."""
+
+    def log(message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(message)
+
     _raise_if_cancelled(cancel_check)
     if not output_directory_raw:
         return {"has_existing": False}
@@ -364,9 +379,27 @@ def check_existing_downloads(
 
     ranges_data = list(discovery_errors)
     # Run validation checks concurrently in a ThreadPool
-    worker_count = resolve_worker_count(item_count=len(candidates))
+    requested_worker_count = resolve_worker_count(
+        parallel_workers,
+        field_name="parallel_workers",
+    )
+    worker_count = min(requested_worker_count, max(1, len(candidates)))
     if candidates:
+        comparison_label = (
+            "KIND 현재 건수와 로컬 파일 비교"
+            if verify_with_kind
+            else "로컬 파일 비교"
+        )
+        validation_parallelism = requested_worker_count if len(candidates) == 1 else 1
+        comparison_worker_count = (
+            requested_worker_count if len(candidates) == 1 else worker_count
+        )
+        log(
+            f"{comparison_label} 시작: {len(candidates)}개 범위, "
+            f"{comparison_worker_count}개 워커."
+        )
         _raise_if_cancelled(cancel_check)
+        kind_query_lock = Lock() if verify_with_kind else None
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             completed = bounded_as_completed(
                 executor,
@@ -379,10 +412,14 @@ def check_existing_downloads(
                     verify_with_kind=verify_with_kind,
                     current_filters=current_filters,
                     cancel_check=cancel_check,
+                    validation_parallelism=validation_parallelism,
+                    kind_query_lock=kind_query_lock,
                 ),
                 max_pending=worker_count * 2,
             )
-            for future, _candidate in completed:
+            for completed_count, (future, _candidate) in enumerate(
+                completed, start=1
+            ):
                 _raise_if_cancelled(cancel_check)
                 try:
                     res = future.result()
@@ -402,6 +439,11 @@ def check_existing_downloads(
                             (folder_start, folder_end),
                         )
                     )
+                log(
+                    f"{comparison_label}: {completed_count}/{len(candidates)}개 범위 완료 "
+                    f"({_candidate[1]})."
+                )
+        log(f"{comparison_label} 완료.")
 
     _raise_if_cancelled(cancel_check)
 

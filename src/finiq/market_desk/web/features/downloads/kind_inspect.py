@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -28,17 +29,26 @@ def inspect_download_output_directory_payload(
     base, targets = _download_cleanup_targets(payload)
     dry_run = bool(payload.get("dry_run", False))
     yearly_mode = str(payload.get("mode") or "single").strip().lower() == "yearly"
+    validation_parallelism = _as_worker_count(payload)
 
     candidates_by_path: dict[str, dict[str, str]] = {}
     precomputed_statuses: dict[str, dict[str, int]] = {}
+    validation_targets: list[tuple[int, Path, int]] = []
 
-    log("연도별 대상 폴더 수집 중...")
-    for folder, page_size in targets:
+    log(f"검사 대상 저장 폴더: {len(targets)}개.")
+    log(f"저장 파일 병렬 검사: {validation_parallelism}개 워커.")
+    for index, (folder, page_size) in enumerate(targets, start=1):
         check_cancel()
+        log(
+            f"저장 파일 구성 검사: {index}/{len(targets)}개 폴더 "
+            f"({folder.name})."
+        )
         if not folder.exists():
+            log(f"저장 파일 구성 검사 건너뜀: {folder.name} 폴더가 없습니다.")
             continue
         body_files = _result_body_files(folder)
         if not body_files:
+            log(f"저장 파일 구성 검사 건너뜀: {folder.name}에 저장 파일이 없습니다.")
             continue
 
         input_snapshot = _require_current_download_input_snapshot(folder)
@@ -54,6 +64,10 @@ def inspect_download_output_directory_payload(
             )
             for path in body_files + _workflow_auxiliary_files(folder):
                 candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
+            log(
+                f"저장 파일 구성 검사 완료: {index}/{len(targets)}개 폴더 "
+                f"({folder.name})."
+            )
             continue
 
         saved_filters = _snapshot_filters_payload(input_snapshot)
@@ -78,18 +92,58 @@ def inspect_download_output_directory_payload(
             reason = "현재 요청의 페이지 크기와 맞지 않는 기존 다운로드 상태"
             for path in body_files + _workflow_auxiliary_files(folder):
                 candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
+            log(
+                f"저장 파일 구성 검사 완료: {index}/{len(targets)}개 폴더 "
+                f"({folder.name})."
+            )
             continue
+        validation_targets.append((index, folder, page_size))
+
+    folder_workers = min(validation_parallelism, max(1, len(validation_targets)))
+    page_workers = validation_parallelism if len(validation_targets) == 1 else 1
+
+    def inspect_target(
+        target: tuple[int, Path, int],
+    ) -> tuple[int, Path, dict[str, int] | None, str | None]:
+        index, folder, page_size = target
+        check_cancel()
         try:
-            precomputed_statuses[str(folder)] = inspect_download_directory_pages(
+            status = inspect_download_directory_pages(
                 folder,
                 expected_page_size=page_size,
                 require_complete=False,
-                validation_parallelism=1,
+                validation_parallelism=page_workers,
             )
         except (OSError, ValueError) as exc:
-            reason = str(exc)
-            for path in body_files + _workflow_auxiliary_files(folder):
-                candidates_by_path[str(path)] = _relative_candidate(path, base, reason)
+            return index, folder, None, str(exc)
+        return index, folder, status, None
+
+    if folder_workers == 1:
+        validation_results = map(inspect_target, validation_targets)
+    else:
+        executor = ThreadPoolExecutor(
+            max_workers=folder_workers,
+            thread_name_prefix="kind-folder-inspection",
+        )
+        validation_results = executor.map(inspect_target, validation_targets)
+
+    try:
+        for index, folder, status, error in validation_results:
+            check_cancel()
+            if status is not None:
+                precomputed_statuses[str(folder)] = status
+            if error is not None:
+                for path in _result_body_files(folder) + _workflow_auxiliary_files(folder):
+                    candidates_by_path[str(path)] = _relative_candidate(
+                        path, base, error
+                    )
+            log(
+                f"저장 파일 구성 검사 완료: {index}/{len(targets)}개 폴더 "
+                f"({folder.name})."
+            )
+    finally:
+        if folder_workers > 1:
+            executor.shutdown()
 
     log("연도별 폴더 무결성 검사 완료.")
 

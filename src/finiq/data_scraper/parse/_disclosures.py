@@ -79,23 +79,29 @@ def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any]:
     submitter_cell = cells[4]
 
     company_links = company_cell.xpath(".//a[@id='companysum']")
-    if len(company_links) != 1:
-        raise ValueError("KIND disclosure row must contain exactly one companysum link")
+    if len(company_links) > 1:
+        raise ValueError("KIND disclosure row must not contain multiple companysum links")
     disclosure_links = disclosure_cell.xpath(
         ".//a[contains(@onclick, 'openDisclsViewer')]"
     )
     if len(disclosure_links) != 1:
         raise ValueError("KIND disclosure row must contain exactly one disclosure link")
-    company_link = company_links[0]
     disclosure_link = disclosure_links[0]
 
-    company_name = _clean_text(str(company_link.get("title") or ""))
-    if not company_name:
-        raise ValueError("KIND company link is missing a non-empty title")
-    company_info = companysummary_onclick(company_link.get("onclick"))
-    company_id = company_info.get("company_id") if company_info is not None else None
-    if not company_id:
-        raise ValueError("KIND company link is missing company_id")
+    company_cell_text = _display_text(company_cell)
+    company_name: str | None = None
+    company_id: str | None = None
+    if company_links:
+        company_link = company_links[0]
+        company_name = _clean_text(str(company_link.get("title") or ""))
+        if not company_name:
+            raise ValueError("KIND company link is missing a non-empty title")
+        company_info = companysummary_onclick(company_link.get("onclick"))
+        company_id = (
+            company_info.get("company_id") if company_info is not None else None
+        )
+        if not company_id:
+            raise ValueError("KIND company link is missing company_id")
 
     market, badges = _pick_market_and_badges(company_cell)
     disclosure_info = disclosure_onclick(disclosure_link.get("onclick"))
@@ -113,6 +119,7 @@ def _build_disclosure_row(row_tag: html.HtmlElement) -> dict[str, Any]:
         "row_no": _element_text(cells[0]),
         "company_name": company_name,
         "company_id": company_id,
+        "company_cell_text": company_cell_text,
         "market": market,
         "badges": badges,
         "disclosed_at": _element_text(cells[1]),
@@ -149,11 +156,18 @@ def disclosure_rows(html_markup: str | bytes) -> list[dict[str, Any]]:
         raise ValueError("KIND disclosure result table must contain exactly one tbody")
 
     rows: list[dict[str, Any]] = []
-    for row_tag in tbody_tags[0].xpath("./tr"):
-        rows.append(_build_disclosure_row(row_tag))
+    for row_index, row_tag in enumerate(tbody_tags[0].xpath("./tr"), start=1):
+        try:
+            rows.append(_build_disclosure_row(row_tag))
+        except ValueError as exc:
+            raise ValueError(f"KIND disclosure result row {row_index}: {exc}") from exc
     return rows
 
 
 def disclosure_file_rows(file_path: str | Path) -> list[dict[str, Any]]:
     """Read a KIND result body file and return parsed disclosure rows."""
-    return disclosure_rows(Path(file_path).read_bytes())
+    path = Path(file_path)
+    try:
+        return disclosure_rows(path.read_bytes())
+    except ValueError as exc:
+        raise ValueError(f"{exc}: {path}") from exc
