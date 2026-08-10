@@ -3328,6 +3328,150 @@ def test_inspect_folder_job_cancellation(tmp_path: Path, monkeypatch) -> None:
     assert any("cancelled" in msg.lower() for msg in status["progress_log"])
 
 
+def test_inspect_folder_job_runs_kind_verification_in_background(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import threading
+    import time
+
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
+        get_download_job,
+        start_inspect_folder_job,
+    )
+
+    def fake_inspect(payload, progress_callback=None, cancel_check=None):
+        return {"format": "kind_download_folder_cleanup_v1"}
+
+    verification_calls = []
+    verification_started = threading.Event()
+    release_verification = threading.Event()
+
+    def fake_check_existing(
+        output_directory,
+        *,
+        verify_with_kind=True,
+        current_payload=None,
+        cancel_check=None,
+    ):
+        verification_calls.append(
+            (output_directory, verify_with_kind, current_payload)
+        )
+        verification_started.set()
+        assert release_verification.wait(timeout=1)
+        return {"has_existing": True, "ranges": []}
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.inspect_download_output_directory_payload",
+        fake_inspect,
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.check_existing_downloads",
+        fake_check_existing,
+    )
+
+    payload = {
+        "mode": "single",
+        "output_directory": str(tmp_path),
+        "page_size": 100,
+        "dry_run": True,
+    }
+    job = start_inspect_folder_job(payload)
+
+    assert verification_started.wait(timeout=1)
+    assert get_download_job(job["job_id"])["status"] == "running"
+    release_verification.set()
+
+    for _ in range(100):
+        status = get_download_job(job["job_id"])
+        if status["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+
+    assert status["status"] == "completed"
+    assert status["result"]["existing_downloads"] == {
+        "has_existing": True,
+        "ranges": [],
+    }
+    assert verification_calls == [(str(tmp_path), True, payload)]
+
+
+def test_inspect_folder_job_cancels_during_kind_verification(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import threading
+    import time
+
+    from finiq.market_desk.web.features.downloads.kind_common import DownloadCancelled
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
+        cancel_download_job,
+        get_download_job,
+        start_inspect_folder_job,
+    )
+
+    verification_started = threading.Event()
+    release_without_callback = threading.Event()
+    received_cancel_checks = []
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.inspect_download_output_directory_payload",
+        lambda payload, progress_callback=None, cancel_check=None: {
+            "format": "kind_download_folder_cleanup_v1"
+        },
+    )
+
+    def cancellable_check_existing(
+        output_directory,
+        *,
+        verify_with_kind=True,
+        current_payload=None,
+        cancel_check=None,
+    ):
+        received_cancel_checks.append(cancel_check)
+        verification_started.set()
+        if cancel_check is None:
+            assert release_without_callback.wait(timeout=1)
+            return {"has_existing": False}
+        while not cancel_check():
+            time.sleep(0.005)
+        raise DownloadCancelled()
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.check_existing_downloads",
+        cancellable_check_existing,
+    )
+
+    job = start_inspect_folder_job(
+        {
+            "mode": "single",
+            "output_directory": str(tmp_path),
+            "page_size": 100,
+            "dry_run": True,
+        }
+    )
+    assert verification_started.wait(timeout=1)
+    cancel_download_job(job["job_id"])
+    release_without_callback.set()
+
+    for _ in range(100):
+        status = get_download_job(job["job_id"])
+        if status["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+
+    assert callable(received_cancel_checks[0])
+    assert status["status"] == "cancelled"
+
+
+def test_check_existing_downloads_honors_immediate_cancellation(tmp_path: Path) -> None:
+    from finiq.market_desk.web.features.downloads.kind_common import DownloadCancelled
+    from finiq.market_desk.web.features.downloads.kind_existing import (
+        check_existing_downloads,
+    )
+
+    with pytest.raises(DownloadCancelled):
+        check_existing_downloads(str(tmp_path), cancel_check=lambda: True)
+
+
 def test_download_job_logs_payload_summary_before_running_action(
     tmp_path: Path, monkeypatch
 ) -> None:

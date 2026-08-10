@@ -17,6 +17,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
   const [status, setStatus] = useState<string>("작업을 실행할 준비가 되었습니다.");
   const [isErrorStatus, setIsErrorStatus] = useState<boolean>(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [isPollingRestored, setIsPollingRestored] = useState(false);
   const activeJobIdRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const optionsRef = useRef<UseJobPollingOptions>(options);
@@ -165,7 +166,10 @@ export function useJobPolling(options: UseJobPollingOptions) {
 
   useEffect(() => {
     const storageKey = getStorageKey();
-    if (!storageKey) return;
+    if (!storageKey) {
+      setIsPollingRestored(true);
+      return;
+    }
 
     let storedJobId = "";
     try {
@@ -174,11 +178,13 @@ export function useJobPolling(options: UseJobPollingOptions) {
       storedJobId = "";
     }
 
-    if (!storedJobId) return;
-    activeJobIdRef.current = storedJobId;
-    setActiveJobId(storedJobId);
-    setIsErrorStatus(false);
-    pollJob(storedJobId);
+    if (storedJobId) {
+      activeJobIdRef.current = storedJobId;
+      setActiveJobId(storedJobId);
+      setIsErrorStatus(false);
+      pollJob(storedJobId);
+    }
+    setIsPollingRestored(true);
   }, [getStorageKey, pollJob]);
 
   const startPolling = useCallback(
@@ -228,6 +234,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
     status,
     isErrorStatus,
     activeJobId,
+    isPollingRestored,
     startPolling,
     appendStatus,
     resetStatus,

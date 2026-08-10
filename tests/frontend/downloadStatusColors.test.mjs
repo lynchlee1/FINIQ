@@ -7,7 +7,6 @@ const inspectionPanelPath = "frontend/finiq_GUI/apps/market-desk/src/components/
 const inspectionHookPath = "frontend/finiq_GUI/apps/market-desk/src/hooks/useDataIntegrityInspection.ts";
 const actionDockPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/ActionDock.tsx";
 const actionDockFollowPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/useActionDockFollow.ts";
-const downloadApiPath = "frontend/finiq_GUI/apps/market-desk/src/features/download/api.ts";
 const globalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
 test("download review is separate from search conditions and actionable steps own right-side actions", async () => {
@@ -44,7 +43,7 @@ test("download review is separate from search conditions and actionable steps ow
   assert.doesNotMatch(executionCard, /검사하기|저장된 설정 적용|삭제 예정 파일/);
 });
 
-test("shared integrity panel presents a verdict, ordered steps and failure-only detail", async () => {
+test("shared integrity panel presents a verdict, ordered steps and one success label", async () => {
   const [source, panel] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
     readFile(inspectionPanelPath, "utf8"),
@@ -58,8 +57,9 @@ test("shared integrity panel presents a verdict, ordered steps and failure-only 
   for (const label of ["메타데이터 읽기", "현재 설정과 비교", "저장 파일 구성 검사", "KIND 건수 비교"]) {
     assert.match(source, new RegExp(label));
   }
-  assert.match(source, /label: "검증 완료"/);
-  assert.match(source, /\? "메타데이터 확인됨"\s*: "대상 없음"/);
+  assert.match(source, /const EXISTING_DATA_SUCCESS_LABEL = "정상"/);
+  assert.equal(source.match(/EXISTING_DATA_SUCCESS_LABEL/g)?.length, 8);
+  assert.doesNotMatch(source, /"검증 완료"|"메타데이터 확인됨"|filtersMatch \? "일치"|: "통과"/);
   assert.match(source, /filterDifferences\.map/);
   assert.match(source, /저장된 설정 적용/);
   assert.match(source, /staleRanges\.map/);
@@ -86,23 +86,24 @@ test("shared integrity step statuses and action use the same control size", asyn
 });
 
 test("shared inspection state ignores stale requests and full verification blocks execution", async () => {
-  const [source, hook, api] = await Promise.all([
+  const [source, hook] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
     readFile(inspectionHookPath, "utf8"),
-    readFile(downloadApiPath, "utf8"),
   ]);
 
-  assert.match(source, /useDataIntegrityInspection<DownloadExistingInspectionPayload, DownloadExistingResponse>/);
+  assert.match(source, /useDataIntegrityInspection<DownloadExistingPayload, DownloadExistingResponse>/);
   assert.match(hook, /setIsChecking\(true\);\s*setError\(null\);/);
   assert.match(hook, /setError\(message\);\s*onErrorRef\.current\?\.\(message\);/);
   assert.match(hook, /requestRef\.current\.id !== requestId \|\| requestRef\.current\.key !== requestKey/);
-  assert.match(api, /checkExistingDownload[\s\S]{0,220}verify_with_kind: true/);
+  assert.match(source, /inspect: detectExistingDownload/);
   assert.match(source, /const hasVerificationFailure = !verified \|\|/);
   assert.match(source, /if \(candidateCount > 0 \|\| hasVerificationFailure\)/);
   assert.match(source, /const completedInspection = activeInspectionRef\.current/);
   assert.match(source, /completedInspection\.jobId !== jobId/);
   assert.match(source, /const completedPayload = completedInspection\.payload/);
-  assert.match(source, /checkExistingDownload\(existingPayloadFromDownloadPayload\(completedPayload\)\)/);
+  assert.match(source, /const verified = data\.existing_downloads as DownloadExistingResponse/);
+  assert.match(source, /acceptExistingInspectionResult\(verified\)/);
+  assert.doesNotMatch(source, /await checkExistingDownload\(existingPayloadFromDownloadPayload\(completedPayload\)\)/);
   assert.match(source, /if \(verified\) \{\s*setLastInspectedExistingKey\(completedInspectionKey\);/);
   assert.match(source, /clearActiveInspection\(completedInspection\)/);
   assert.match(source, /if \(existingMetadataError\) \{\s*throw new Error\(existingMetadataError\);/);

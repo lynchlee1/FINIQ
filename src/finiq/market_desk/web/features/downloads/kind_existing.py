@@ -5,13 +5,19 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from finiq.concurrency import bounded_as_completed, resolve_worker_count
 from finiq.data_scraper.core.constants import DISCLOSURE_GROUPS, MARKET_TYPES, SECURITIES_TYPES
 from finiq.data_scraper.workflow import inspect_download_directory_pages
 
 from finiq.market_desk.web.features.downloads.kind_common import *
+
+
+def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
+    if cancel_check is not None and cancel_check():
+        raise DownloadCancelled()
+
 
 def get_current_kind_total_count(input_snapshot: dict[str, Any]) -> int | None:
     """Make a live query to KIND to fetch the current total count for the given filters."""
@@ -81,7 +87,9 @@ def _validate_single_folder(
     *,
     verify_with_kind: bool = True,
     current_filters: dict[str, Any] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any] | None:
+    _raise_if_cancelled(cancel_check)
     body_files = list(folder.glob("*_post_page_*.body"))
     if not body_files:
         return None
@@ -126,6 +134,7 @@ def _validate_single_folder(
 
     if verify_with_kind:
         kind_count = get_current_kind_total_count(input_snapshot)
+        _raise_if_cancelled(cancel_check)
         if kind_count is None:
             return {
                 "start_date": start_date.isoformat(),
@@ -143,6 +152,7 @@ def _validate_single_folder(
             }
 
     try:
+        _raise_if_cancelled(cancel_check)
         if not verify_with_kind:
             # 1. Check page number continuity using filenames.
             page_nums = []
@@ -185,6 +195,9 @@ def _validate_single_folder(
                 require_complete=True,
             )
             local_count = inspected.get("total_items")
+        _raise_if_cancelled(cancel_check)
+    except DownloadCancelled:
+        raise
     except Exception as exc:
         status = "stale"
         if verify_with_kind:
@@ -225,8 +238,10 @@ def check_existing_downloads(
     *,
     verify_with_kind: bool = True,
     current_payload: dict[str, Any] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Inspect output directory to detect and validate existing downloaded date ranges."""
+    _raise_if_cancelled(cancel_check)
     if not output_directory_raw:
         return {"has_existing": False}
     try:
@@ -268,6 +283,7 @@ def check_existing_downloads(
     # Check for yearly subfolders (YYYYMMDD_YYYYMMDD)
     try:
         for child in output_directory.iterdir():
+            _raise_if_cancelled(cancel_check)
             if child.is_dir():
                 parts = child.name.split("_")
                 if (
@@ -311,6 +327,7 @@ def check_existing_downloads(
             if list(candidate[0].glob("*_post_page_*.body"))
         ]
         for folder, _folder_name, _folder_range in candidates:
+            _raise_if_cancelled(cancel_check)
             _require_current_download_input_snapshot(folder)
 
     # If no yearly subfolders, check the directory itself (Single mode)
@@ -347,6 +364,7 @@ def check_existing_downloads(
     # Run validation checks concurrently in a ThreadPool
     worker_count = resolve_worker_count(item_count=len(candidates))
     if candidates:
+        _raise_if_cancelled(cancel_check)
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             completed = bounded_as_completed(
                 executor,
@@ -358,14 +376,18 @@ def check_existing_downloads(
                     item[2],
                     verify_with_kind=verify_with_kind,
                     current_filters=current_filters,
+                    cancel_check=cancel_check,
                 ),
                 max_pending=worker_count * 2,
             )
             for future, _candidate in completed:
+                _raise_if_cancelled(cancel_check)
                 try:
                     res = future.result()
                     if res is not None:
                         ranges_data.append(res)
+                except DownloadCancelled:
+                    raise
                 except DownloadInputMetadataError:
                     raise
                 except Exception as exc:
@@ -378,6 +400,8 @@ def check_existing_downloads(
                             (folder_start, folder_end),
                         )
                     )
+
+    _raise_if_cancelled(cancel_check)
 
     if not ranges_data:
         return {"has_existing": False}
