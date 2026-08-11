@@ -5,6 +5,30 @@ import pytest
 from finiq.market_desk.web.features.disclosures import table_export
 
 
+def _source_inventory(
+    source_path: Path,
+    page_paths: list[Path],
+) -> table_export._SourceInventory:
+    page_number_by_path = {
+        path: index for index, path in enumerate(page_paths, start=1)
+    }
+    source_folders = tuple(sorted({path.parent.resolve() for path in page_paths}))
+    body_paths_by_folder = {
+        folder: tuple(path for path in page_paths if path.parent.resolve() == folder)
+        for folder in source_folders
+    }
+    return table_export._SourceInventory(
+        source_path=source_path,
+        source_folders=source_folders,
+        body_paths=tuple(page_paths),
+        body_paths_by_folder=body_paths_by_folder,
+        page_number_by_path=page_number_by_path,
+        page_count_by_folder={
+            folder: len(paths) for folder, paths in body_paths_by_folder.items()
+        },
+    )
+
+
 def _inspection_manifest() -> dict[str, object]:
     return {
         "format": table_export.MANIFEST_FORMAT,
@@ -72,8 +96,7 @@ def test_table_inspection_counts_source_without_building_row_collections(
     )
 
     result = table_export._inspect_source_folder_counts(
-        tmp_path,
-        [first_page, second_page],
+        _source_inventory(tmp_path, [first_page, second_page]),
         worker_count=2,
     )
 
@@ -136,11 +159,15 @@ def test_table_inspection_confirms_source_manifest_and_shards(
     page_path = source_path / "20260101_20261231" / "page.body"
     pages = [{"relative_path": "20260101_20261231/page.body", "source_rows": 2}]
 
-    monkeypatch.setattr(table_export, "_resolve_source", lambda _path: source_path)
-    monkeypatch.setattr(table_export, "_validate_source_page_ranges", lambda *_args, **_kwargs: None)
+    inventory = _source_inventory(source_path, [page_path])
+    monkeypatch.setattr(
+        table_export, "_build_source_inventory", lambda *_args, **_kwargs: inventory
+    )
+    monkeypatch.setattr(
+        table_export, "_validate_source_inventory", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(table_export, "_load_sqlite_manifest", lambda _path: _inspection_manifest())
     monkeypatch.setattr(table_export, "_validate_sqlite_manifest_counts", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(table_export, "_find_original_source_body_files", lambda _path: [page_path])
     monkeypatch.setattr(
         table_export,
         "_inspect_source_folder_counts",
@@ -169,11 +196,16 @@ def test_table_inspection_rejects_stale_manifest_summary(
     stale_manifest = _inspection_manifest()
     stale_manifest["summary"] = {**stale_manifest["summary"], "disclosures": 2}  # type: ignore[arg-type]
 
-    monkeypatch.setattr(table_export, "_resolve_source", lambda _path: source_path)
-    monkeypatch.setattr(table_export, "_validate_source_page_ranges", lambda *_args, **_kwargs: None)
+    page_path = source_path / "page.body"
+    inventory = _source_inventory(source_path, [page_path])
+    monkeypatch.setattr(
+        table_export, "_build_source_inventory", lambda *_args, **_kwargs: inventory
+    )
+    monkeypatch.setattr(
+        table_export, "_validate_source_inventory", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(table_export, "_load_sqlite_manifest", lambda _path: stale_manifest)
     monkeypatch.setattr(table_export, "_validate_sqlite_manifest_counts", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(table_export, "_find_original_source_body_files", lambda _path: [source_path / "page.body"])
     monkeypatch.setattr(
         table_export,
         "_inspect_source_folder_counts",
@@ -206,10 +238,13 @@ def test_table_inspection_uses_yearly_sqlite_file_term_for_missing_file(
 ) -> None:
     source_path = tmp_path / "01-list"
     source_path.mkdir()
-    monkeypatch.setattr(table_export, "_resolve_source", lambda _path: source_path)
+    inventory = _source_inventory(source_path, [source_path / "page.body"])
+    monkeypatch.setattr(
+        table_export, "_build_source_inventory", lambda *_args, **_kwargs: inventory
+    )
     monkeypatch.setattr(
         table_export,
-        "_validate_source_page_ranges",
+        "_validate_source_inventory",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(

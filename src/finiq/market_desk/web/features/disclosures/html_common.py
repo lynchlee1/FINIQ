@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
@@ -54,6 +55,36 @@ def _html_file_integrity(path: Path) -> dict[str, Any]:
             digest.update(chunk)
             size += len(chunk)
     return {
+        "source_sha256": digest.hexdigest(),
+        "source_size_bytes": size,
+    }
+
+
+def _html_file_validation_and_integrity(
+    path: Path,
+) -> tuple[bool, dict[str, Any] | None]:
+    digest = hashlib.sha256()
+    size = 0
+    valid = False
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
+    text_tail = ""
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+                size += len(chunk)
+                text = text_tail + decoder.decode(chunk)
+                if "<html" in text.lower() or "openDisclsViewer" in text:
+                    valid = True
+                text_tail = text[-16:]
+        text = text_tail + decoder.decode(b"", final=True)
+        if "<html" in text.lower() or "openDisclsViewer" in text:
+            valid = True
+    except Exception:
+        return False, None
+    if not valid:
+        return False, None
+    return True, {
         "source_sha256": digest.hexdigest(),
         "source_size_bytes": size,
     }
@@ -417,9 +448,9 @@ def _inspect_html_integrity(
     output_directory: Path,
     acpt_numbers: list[str],
     *,
-    target_years: dict[str, str],
     source_json: Any,
     structurally_valid_acpt_numbers: list[str],
+    actual_integrity_by_acpt_no: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     manifest_source_fingerprint, expected_integrity = _load_html_manifest_integrity(
         output_directory
@@ -429,37 +460,25 @@ def _inspect_html_integrity(
         and manifest_source_fingerprint == _source_json_fingerprint(source_json)
     )
     structurally_valid = set(structurally_valid_acpt_numbers)
+    reusable_acpt_numbers: list[str] = []
+    reusable_integrity: dict[str, dict[str, Any]] = {}
     unverified_acpt_numbers: list[str] = []
     hash_mismatch_acpt_numbers: list[str] = []
-    candidates: dict[str, Path] = {}
     for acpt_no in acpt_numbers:
         if acpt_no not in structurally_valid:
             continue
         if not source_matches or acpt_no not in expected_integrity:
             unverified_acpt_numbers.append(acpt_no)
             continue
-        target_path = _target_html_path(
-            output_directory,
-            acpt_no,
-            target_years=target_years,
-        )
-        if (
-            target_path.stat().st_size
-            != expected_integrity[acpt_no]["source_size_bytes"]
-        ):
+        actual_integrity = actual_integrity_by_acpt_no[acpt_no]
+        if actual_integrity["source_size_bytes"] != expected_integrity[acpt_no][
+            "source_size_bytes"
+        ]:
             hash_mismatch_acpt_numbers.append(acpt_no)
             continue
-        candidates[acpt_no] = target_path
-
-    actual_integrity, _ = _hash_html_files(candidates)
-    reusable_acpt_numbers: list[str] = []
-    reusable_integrity: dict[str, dict[str, Any]] = {}
-    for acpt_no in acpt_numbers:
-        if acpt_no not in actual_integrity:
-            continue
-        if actual_integrity[acpt_no] == expected_integrity[acpt_no]:
+        if actual_integrity == expected_integrity[acpt_no]:
             reusable_acpt_numbers.append(acpt_no)
-            reusable_integrity[acpt_no] = actual_integrity[acpt_no]
+            reusable_integrity[acpt_no] = actual_integrity
         else:
             hash_mismatch_acpt_numbers.append(acpt_no)
 
@@ -501,9 +520,12 @@ def _validate_html_output_directory_files(
     *,
     target_years: dict[str, str],
     allow_unexpected: bool = False,
+    collect_integrity: bool = False,
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     if not output_directory.exists():
-        return {
+        summary = {
             "existing_target_html_count": 0,
             "missing_target_html_count": len(acpt_numbers),
             "existing_target_acpt_numbers": [],
@@ -513,6 +535,9 @@ def _validate_html_output_directory_files(
             "auxiliary_file_count": 0,
             "total_file_count": 0,
         }
+        if collect_integrity:
+            summary["_target_integrity_by_acpt_no"] = {}
+        return summary
     if not output_directory.is_dir():
         msg = f"output_directory is not a directory: {output_directory}"
         raise ValueError(msg)
@@ -522,19 +547,32 @@ def _validate_html_output_directory_files(
     existing_paths = set(files)
     worker_count = _html_output_check_workers(len(acpt_numbers))
 
-    def target_status(acpt_no: str) -> tuple[str, Path, bool, bool]:
+    def target_status(
+        acpt_no: str,
+    ) -> tuple[str, Path, bool, bool, dict[str, Any] | None]:
+        if cancel_check is not None and cancel_check():
+            raise InterruptedError("HTML integrity scan cancelled")
         target_path = _target_html_path(
             output_directory,
             acpt_no,
             target_years=target_years,
         )
         exists = target_path in existing_paths
-        return acpt_no, target_path, exists and _is_valid_html(target_path), exists
+        if not exists:
+            return acpt_no, target_path, False, False, None
+        if collect_integrity:
+            valid, integrity = _html_file_validation_and_integrity(target_path)
+            if cancel_check is not None and cancel_check():
+                raise InterruptedError("HTML integrity scan cancelled")
+            return acpt_no, target_path, valid, True, integrity
+        return acpt_no, target_path, _is_valid_html(target_path), True, None
 
     if worker_count == 1:
         target_statuses = [target_status(acpt_no) for acpt_no in acpt_numbers]
     else:
-        indexed_statuses: list[tuple[str, Path, bool, bool] | None] = [
+        indexed_statuses: list[
+            tuple[str, Path, bool, bool, dict[str, Any] | None] | None
+        ] = [
             None
         ] * len(acpt_numbers)
         with ThreadPoolExecutor(
@@ -546,13 +584,27 @@ def _validate_html_output_directory_files(
                 lambda item: executor.submit(target_status, item[1]),
                 max_pending=worker_count * 2,
             )
-            for future, (index, _acpt_no) in completed:
+            for completed_count, (future, (index, _acpt_no)) in enumerate(
+                completed,
+                start=1,
+            ):
                 indexed_statuses[index] = future.result()
+                if (
+                    collect_integrity
+                    and progress_callback is not None
+                    and completed_count % 100 == 0
+                ):
+                    progress_callback(
+                        "HTML 해시 생성 중간 확인: "
+                        f"{completed_count}/{len(acpt_numbers)}건 처리."
+                    )
         target_statuses = [
             status for status in indexed_statuses if status is not None
         ]
 
-    allowed_paths = {target_path for _, target_path, _, _ in target_statuses}
+    allowed_paths = {
+        target_path for _, target_path, _, _, _integrity in target_statuses
+    }
     allowed_paths.update(
         output_directory / filename for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
     )
@@ -562,18 +614,24 @@ def _validate_html_output_directory_files(
             for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
         )
     existing_target_acpt_numbers = [
-        acpt_no for acpt_no, _, valid, _ in target_statuses if valid
+        acpt_no
+        for acpt_no, _, valid, _, _integrity in target_statuses
+        if valid
     ]
     missing_target_acpt_numbers = [
-        acpt_no for acpt_no, _, valid, _ in target_statuses if not valid
+        acpt_no
+        for acpt_no, _, valid, _, _integrity in target_statuses
+        if not valid
     ]
     invalid_target_acpt_numbers = [
         acpt_no
-        for acpt_no, _, valid, exists in target_statuses
+        for acpt_no, _, valid, exists, _integrity in target_statuses
         if exists and not valid
     ]
     allowed_file_count = sum(1 for path in files if path in allowed_paths)
-    present_target_count = sum(1 for _, _, _, exists in target_statuses if exists)
+    present_target_count = sum(
+        1 for _, _, _, exists, _integrity in target_statuses if exists
+    )
     target_html_count = len(existing_target_acpt_numbers)
     auxiliary_file_count = allowed_file_count - present_target_count
     unexpected_files = sorted(
@@ -600,7 +658,7 @@ def _validate_html_output_directory_files(
             "저장 경로를 비우거나, 대상 HTML만 있는 별도 폴더를 선택하세요."
         )
         raise ValueError(msg)
-    return {
+    summary = {
         "existing_target_html_count": target_html_count,
         "missing_target_html_count": len(missing_target_acpt_numbers),
         "existing_target_acpt_numbers": existing_target_acpt_numbers,
@@ -612,6 +670,13 @@ def _validate_html_output_directory_files(
         "unexpected_file_count": len(unexpected_files),
         "unexpected_files": unexpected_files,
     }
+    if collect_integrity:
+        summary["_target_integrity_by_acpt_no"] = {
+            acpt_no: integrity
+            for acpt_no, _, valid, _, integrity in target_statuses
+            if valid and integrity is not None
+        }
+    return summary
 
 
 def _delete_unexpected_html_output_directory_files(
@@ -620,9 +685,10 @@ def _delete_unexpected_html_output_directory_files(
     *,
     target_years: dict[str, str],
     dry_run: bool = False,
+    collect_integrity: bool = False,
 ) -> dict[str, Any]:
     if not output_directory.exists():
-        return {
+        summary = {
             "existing_target_html_count": 0,
             "missing_target_html_count": len(acpt_numbers),
             "existing_target_acpt_numbers": [],
@@ -633,6 +699,9 @@ def _delete_unexpected_html_output_directory_files(
             "total_file_count": 0,
             "deleted_files": [],
         }
+        if collect_integrity:
+            summary["_target_integrity_by_acpt_no"] = {}
+        return summary
     if not output_directory.is_dir():
         msg = f"output_directory is not a directory: {output_directory}"
         raise ValueError(msg)
@@ -674,6 +743,7 @@ def _delete_unexpected_html_output_directory_files(
         acpt_numbers,
         target_years=target_years,
         allow_unexpected=dry_run,
+        collect_integrity=collect_integrity,
     )
     summary["deleted_files"] = deleted_files
     return summary

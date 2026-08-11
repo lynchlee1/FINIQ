@@ -287,6 +287,53 @@ def test_internal_html_hash_mismatch_redownloads_only_changed_file(
     assert verified["hash_mismatch_target_html_count"] == 0
 
 
+@pytest.mark.parametrize("source_type", ["external", "internal"])
+def test_existing_html_structure_and_hash_share_one_file_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_type: str,
+) -> None:
+    acpt_no = "20250101000001"
+    if source_type == "external":
+        output_directory = tmp_path / "external"
+        body = _external_workspace_body(
+            tmp_path,
+            {
+                "disclosures": [
+                    {"acpt_no": acpt_no, "disclosed_at": "2025-01-01"}
+                ]
+            },
+            output_directory=str(output_directory),
+        )
+        create_baseline = create_external_html_integrity_baseline_payload
+    else:
+        body = _internal_html_body(tmp_path, [acpt_no])
+        output_directory = Path(str(body["output_directory"]))
+        create_baseline = create_internal_html_integrity_baseline_payload
+
+    target = output_directory / "2025" / f"{acpt_no}.html"
+    target.parent.mkdir(parents=True)
+    target.write_text(_valid_html(), encoding="utf-8")
+    create_baseline({**body, "trust_existing_files": True})
+
+    original_open = Path.open
+    target_reads = 0
+
+    def counted_open(path: Path, *args: object, **kwargs: object):
+        nonlocal target_reads
+        mode = str(args[0]) if args else str(kwargs.get("mode") or "r")
+        if path == target and "r" in mode:
+            target_reads += 1
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counted_open)
+
+    inspection = check_disclosure_html_output_directory_payload(body)
+
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert target_reads == 1
+
+
 def test_internal_html_resume_rejects_existing_file_without_hash_baseline(
     tmp_path: Path,
 ) -> None:
