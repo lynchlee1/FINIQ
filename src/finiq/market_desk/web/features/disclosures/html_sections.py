@@ -721,6 +721,9 @@ def inspect_disclosure_html_section_output_payload(
         lambda source_file: _selected_section_output(source_file, section_save_rules),
         cancel_check,
     )
+    if _cancel_requested(cancel_check):
+        return {"cancelled": True}
+
     actual_paths = (
         {
             path.relative_to(output_directory).as_posix(): path

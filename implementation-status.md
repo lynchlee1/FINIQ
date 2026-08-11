@@ -39,7 +39,7 @@
 
 ## 검증 상태
 
-- 전체 MarketDesk 및 KIND 관련 테스트: **669 passed, 166 skipped**
+- 전체 MarketDesk 및 KIND 관련 테스트: **672 passed, 166 skipped**
 - 기존 실패 4건: 변경 전과 동일
 - 프런트 정적 테스트 160건과 전체 production build: 통과
 - 변경 Python 파일 `py_compile` 및 `git diff --check`: 통과

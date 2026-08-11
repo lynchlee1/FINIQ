@@ -575,26 +575,30 @@ def _search_sqlite_manifest_titles(
 def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
     parsed_rows = disclosure_file_rows(file_path)
 
-    return _source_body_rows(file_path, parsed_rows)
+    return _source_body_rows(file_path, parsed_rows, _result_page_number(file_path))
 
 
 def _parse_source_body_page_file(
     file_path: Path,
+    source_page: int,
 ) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
     body_bytes = file_path.read_bytes()
     try:
         parsed_rows = disclosure_rows(body_bytes)
     except ValueError as exc:
         raise ValueError(f"{exc}: {file_path}") from exc
-    return _source_body_rows(file_path, parsed_rows), pagination_info(body_bytes)
+    return (
+        _source_body_rows(file_path, parsed_rows, source_page),
+        pagination_info(body_bytes),
+    )
 
 
 def _source_body_rows(
     file_path: Path,
     parsed_rows: list[dict[str, Any]],
+    source_page: int,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    source_page = _result_page_number(file_path)
     for parsed_row in parsed_rows:
         row = dict(parsed_row)
         company_id = _clean_text(row.get("company_id"))

@@ -186,10 +186,6 @@ def create_external_html_integrity_baseline_payload(
         raise ValueError("No acpt_no values found in JSON")
     acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
     target_years = _target_years_from_json(source_json, acpt_numbers)
-    if progress_callback is not None:
-        progress_callback(
-            f"현재 외부 HTML {len(acpt_numbers)}건의 기준 해시를 생성합니다."
-        )
     try:
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
@@ -212,6 +208,10 @@ def create_external_html_integrity_baseline_payload(
         raise ValueError("기준 해시를 생성할 정상 외부 HTML이 없습니다.")
 
     source_integrity = output_summary.pop("_target_integrity_by_acpt_no")
+    if progress_callback is not None:
+        progress_callback(
+            f"현재 외부 HTML {len(baseline_acpt_numbers)}건의 기준 해시를 생성합니다."
+        )
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
@@ -249,10 +249,6 @@ def create_internal_html_integrity_baseline_payload(
     source_json, _source_path, acpt_numbers, target_years = (
         _load_internal_html_integrity_source(body)
     )
-    if progress_callback is not None:
-        progress_callback(
-            f"현재 내부 HTML {len(acpt_numbers)}건의 기준 해시를 생성합니다."
-        )
     try:
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
@@ -275,6 +271,10 @@ def create_internal_html_integrity_baseline_payload(
         raise ValueError("기준 해시를 생성할 정상 내부 HTML이 없습니다.")
 
     source_integrity = output_summary.pop("_target_integrity_by_acpt_no")
+    if progress_callback is not None:
+        progress_callback(
+            f"현재 내부 HTML {len(baseline_acpt_numbers)}건의 기준 해시를 생성합니다."
+        )
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,

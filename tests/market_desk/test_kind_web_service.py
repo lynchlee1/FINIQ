@@ -1723,14 +1723,34 @@ def test_table_build_and_inspection_each_inventory_source_once(
     source_root = _write_source_body_fixture(tmp_path)
     output_path = tmp_path / "02-table"
     original_walk = table_export_module.os.walk
+    original_inventory_page_number = table_export_module.result_page_number
+    original_parser_page_number = service_sources_module._result_page_number
     walk_count = 0
+    inventory_page_number_count = 0
+    parser_page_number_count = 0
 
     def tracked_walk(*args: Any, **kwargs: Any):
         nonlocal walk_count
         walk_count += 1
         yield from original_walk(*args, **kwargs)
 
+    def tracked_inventory_page_number(path: Path) -> int:
+        nonlocal inventory_page_number_count
+        inventory_page_number_count += 1
+        return original_inventory_page_number(path)
+
+    def tracked_parser_page_number(path: Path) -> int:
+        nonlocal parser_page_number_count
+        parser_page_number_count += 1
+        return original_parser_page_number(path)
+
     monkeypatch.setattr(table_export_module.os, "walk", tracked_walk)
+    monkeypatch.setattr(
+        table_export_module, "result_page_number", tracked_inventory_page_number
+    )
+    monkeypatch.setattr(
+        service_sources_module, "_result_page_number", tracked_parser_page_number
+    )
 
     build_disclosure_table_payload(
         {
@@ -1739,8 +1759,12 @@ def test_table_build_and_inspection_each_inventory_source_once(
         }
     )
     assert walk_count == 1
+    assert inventory_page_number_count == 1
+    assert parser_page_number_count == 0
 
     walk_count = 0
+    inventory_page_number_count = 0
+    parser_page_number_count = 0
     inspection = table_export_module.inspect_disclosure_table_payload(
         {
             "root_directory": str(source_root),
@@ -1749,6 +1773,8 @@ def test_table_build_and_inspection_each_inventory_source_once(
     )
     assert inspection["confirmed"] is True
     assert walk_count == 1
+    assert inventory_page_number_count == 1
+    assert parser_page_number_count == 0
 
 
 def test_build_disclosure_table_payload_preserves_unlinked_disclosure(
@@ -1860,9 +1886,10 @@ def test_build_disclosure_table_payload_parses_source_pages_in_parallel(
 
     def synchronized_parse(
         path: Path,
+        source_page: int,
     ) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
         barrier.wait(timeout=2)
-        return original_parse(path)
+        return original_parse(path, source_page)
 
     monkeypatch.setattr(
         table_export_module,
@@ -2032,12 +2059,12 @@ def test_build_disclosure_table_payload_does_not_reread_failed_source_page(
 
     def _parse_with_transient_failure(
         body_path: Path,
+        source_page: int,
     ) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
-        page_number = table_export_module.result_page_number(body_path)
-        read_counts[page_number] += 1
-        if page_number == 2 and read_counts[page_number] == 1:
+        read_counts[source_page] += 1
+        if source_page == 2 and read_counts[source_page] == 1:
             raise OSError("temporary read failure")
-        return original_parse(body_path)
+        return original_parse(body_path, source_page)
 
     monkeypatch.setattr(
         table_export_module,
@@ -2086,10 +2113,11 @@ def test_build_disclosure_table_payload_does_not_retry_source_page_without_acpt_
 
     def _count_parse(
         body_path: Path,
+        source_page: int,
     ) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
         nonlocal read_count
         read_count += 1
-        return original_parse(body_path)
+        return original_parse(body_path, source_page)
 
     monkeypatch.setattr(
         table_export_module,
@@ -5166,6 +5194,37 @@ def test_section_output_inspection_compares_each_content_before_next_result(
 
     assert checked["summary"]["integrity_ok"] is True
     assert comparisons == ["a.html", "b.html"]
+
+
+def test_section_output_inspection_stops_before_output_scan_when_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    output_directory.mkdir()
+    monkeypatch.setattr(
+        disclosure_html_sections,
+        "_collect_html_files",
+        lambda *_args, **_kwargs: [],
+    )
+
+    def reject_output_scan(*_args: object, **_kwargs: object):
+        raise AssertionError("cancelled inspection must not scan output files")
+
+    monkeypatch.setattr(Path, "rglob", reject_output_scan)
+
+    checked = inspect_disclosure_html_section_output_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {},
+        },
+        cancel_check=lambda: True,
+    )
+
+    assert checked == {"cancelled": True}
 
 
 def test_section_save_ignores_automation_cache_below_standard_input(

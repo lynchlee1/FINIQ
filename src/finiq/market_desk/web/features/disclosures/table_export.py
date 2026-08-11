@@ -158,6 +158,7 @@ def _collect_source_folder_rows_by_year(
             for body_path in body_paths:
                 yield body_path, _read_source_page_records(
                     body_path,
+                    source_page=inventory.page_number_by_path[body_path],
                     cancel_check=cancel_check,
                 )
             return
@@ -172,6 +173,7 @@ def _collect_source_folder_rows_by_year(
                 records_batch = executor.map(
                     lambda path: _read_source_page_records(
                         path,
+                        source_page=inventory.page_number_by_path[path],
                         cancel_check=cancel_check,
                     ),
                     batch,
@@ -288,6 +290,7 @@ def _inspect_source_folder_counts(
             for body_path in body_paths:
                 yield body_path, _read_source_page_records(
                     body_path,
+                    source_page=inventory.page_number_by_path[body_path],
                     cancel_check=None,
                 )
             return
@@ -302,6 +305,7 @@ def _inspect_source_folder_counts(
                 records_batch = executor.map(
                     lambda path: _read_source_page_records(
                         path,
+                        source_page=inventory.page_number_by_path[path],
                         cancel_check=None,
                     ),
                     batch,
@@ -370,11 +374,12 @@ def _inspect_source_folder_counts(
 def _read_source_page_records(
     body_path: Path,
     *,
+    source_page: int,
     cancel_check: Callable[[], bool] | None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     if cancel_check and cancel_check():
         raise RuntimeError("Job cancelled")
-    records, paging = _parse_source_body_page_file(body_path)
+    records, paging = _parse_source_body_page_file(body_path, source_page)
     if paging is None:
         raise ValueError(f"{body_path}: 페이지네이션 정보를 찾지 못했습니다.")
     if any(not str(record.get("acpt_no") or "").strip() for record in records):

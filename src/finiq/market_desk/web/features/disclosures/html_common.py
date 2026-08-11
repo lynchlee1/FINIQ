@@ -595,7 +595,7 @@ def _validate_html_output_directory_files(
                     and completed_count % 100 == 0
                 ):
                     progress_callback(
-                        "HTML 해시 생성 중간 확인: "
+                        "기준 해시 생성 대상 확인: "
                         f"{completed_count}/{len(acpt_numbers)}건 처리."
                     )
         target_statuses = [
