@@ -131,6 +131,7 @@
 #### Behavior
 
 - `cancel_disclosure_html_parse()`가 실행 중인 변환에 취소 요청을 전달한다.
+- `기존 데이터 검토`는 현재 설정과 입력 HTML로 임시 결과를 다시 계산하고 저장된 `parsed-<mode>.json` 전체와 비교한다.
 - 조회 함수는 Excel 결과를 만들며, 08단계는 이 단계가 저장한 correction family를 사용해 정정 내역을 만든다.
 
 #### Defaults and Exceptions

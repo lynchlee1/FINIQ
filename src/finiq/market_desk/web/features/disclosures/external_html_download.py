@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+from collections import deque
+
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 def download_disclosure_external_html_payload(
@@ -35,7 +38,7 @@ def download_disclosure_external_html_payload(
         item_count=len(acpt_numbers),
         field_name="max_workers",
     )
-    progress_log: list[str] = []
+    progress_log: deque[str] = deque(maxlen=100)
     processed_count = 0
 
     def emit(message: str) -> None:
@@ -55,6 +58,7 @@ def download_disclosure_external_html_payload(
                 )
             return
         if message.startswith("Fetching KIND external HTML "):
+            emit(message)
             return
         emit(message)
 
@@ -69,6 +73,8 @@ def download_disclosure_external_html_payload(
     source_integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
     download_acpt_numbers = acpt_numbers
     if bool(body.get("skip_existing", True)):
+        existing_check_started_at = time.monotonic()
+        emit("기존 HTML 구조 및 기준 해시 검사를 시작합니다.")
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
             acpt_numbers,
@@ -114,7 +120,10 @@ def download_disclosure_external_html_payload(
             )
             for acpt_no in existing_acpt_numbers
         }
-        emit("저장 디렉토리 검사 완료: 대상 HTML/메타데이터 외 파일 없음.")
+        emit(
+            "저장 디렉토리 검사 완료: 대상 HTML/메타데이터 외 파일 없음 · "
+            f"{time.monotonic() - existing_check_started_at:.1f}초."
+        )
         emit(
             "기존 HTML 겹침 확인: "
             f"{output_summary['existing_target_html_count']}/{len(acpt_numbers)}건."
@@ -168,8 +177,16 @@ def download_disclosure_external_html_payload(
             for acpt_no in acpt_numbers
             if acpt_no in saved_paths_by_acpt_no
         ]
+        hash_started_at = time.monotonic()
+        emit(f"새 HTML 기준 해시 생성을 시작합니다: {len(downloaded_paths)}건.")
         downloaded_integrity, _ = _hash_html_files(
-            {path.stem: path for path in downloaded_paths}
+            {path.stem: path for path in downloaded_paths},
+            progress_callback=emit,
+            cancel_check=cancel_check,
+        )
+        emit(
+            f"새 HTML 기준 해시 생성 완료: {len(downloaded_integrity)}건 · "
+            f"{time.monotonic() - hash_started_at:.1f}초."
         )
         source_integrity_by_acpt_no.update(downloaded_integrity)
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
@@ -200,5 +217,5 @@ def download_disclosure_external_html_payload(
         "missing_acpt_numbers": missing_acpt_numbers,
         "saved_files": [str(path) for path in saved_paths],
         "manifest_path": str(manifest_path),
-        "progress_log": progress_log[-100:],
+        "progress_log": list(progress_log),
     }

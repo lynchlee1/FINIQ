@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -130,11 +131,9 @@ class ParseRunState:
     records: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)
-    progress_log: list[str] = field(default_factory=list)
     processed_this_run: int = 0
 
     def emit(self, message: str) -> None:
-        self.progress_log.append(message)
         if self.progress_callback is not None:
             self.progress_callback(message)
 
@@ -271,9 +270,8 @@ def _load_html_parse_metadata(
         ) = _load_compressed_external_html_metadata_index(compressed_metadata_path)
         families.update(compressed_families)
     for acpt_no in sorted(set(filtered_metadata_index) | set(compressed_metadata_index)):
-        metadata: dict[str, Any] = {}
-        metadata.update(filtered_metadata_index.get(acpt_no, {}))
-        metadata.update(compressed_metadata_index.get(acpt_no, {}))
+        metadata = filtered_metadata_index.pop(acpt_no, {})
+        metadata.update(compressed_metadata_index.pop(acpt_no, {}))
         metadata_index[acpt_no] = metadata
     return metadata_index, families
 
@@ -1316,11 +1314,49 @@ def parse_disclosure_html_payload(
         _clear_cancel_token(request.cancel_token)
 
     state.emit(f"파싱 결과 JSON 저장 중: {request.output_path}")
-    state.emit(f"파싱 결과 JSON 저장 완료: {request.output_path}")
-
     payload = _payload_from_state(request, state, cancelled=cancelled)
     _write_parse_payload(payload, request.output_path)
+    state.emit(f"파싱 결과 JSON 저장 완료: {request.output_path}")
     return payload
+
+
+def inspect_disclosure_html_parse_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Recompute the current parse result and compare it with the saved JSON."""
+    mode = str(body.get("mode") or "").strip()
+    output_directory = Path(
+        str(body.get("output_directory") or "").strip()
+    ).expanduser().resolve()
+    result_path = _resolve_parse_result_path(output_directory, mode)
+
+    try:
+        saved = _load_parse_payload(result_path)
+        if saved.get("cancelled") is True or saved.get("errors"):
+            raise ValueError("저장된 공시원문 변환 결과에 취소 또는 실패 기록이 있습니다.")
+        with tempfile.TemporaryDirectory(prefix="finiq-parse-inspection-") as temporary:
+            rebuilt = parse_disclosure_html_payload(
+                {
+                    **body,
+                    "output_directory": temporary,
+                    "cancel_token": "",
+                }
+            )
+        if rebuilt != saved:
+            raise ValueError("현재 설정과 입력 HTML로 다시 계산한 결과가 저장된 변환 결과와 다릅니다.")
+    except Exception as error:
+        return {
+            "format": "finiq_disclosure_html_parse_inspection_v1",
+            "confirmed": False,
+            "reason": str(error),
+            "result_path": str(result_path),
+        }
+
+    return {
+        "format": "finiq_disclosure_html_parse_inspection_v1",
+        "confirmed": True,
+        "reason": "현재 설정으로 다시 변환한 내용이 저장된 결과와 모두 일치합니다.",
+        "result_path": str(result_path),
+        "summary": saved.get("summary") or {},
+    }
 
 
 

@@ -10,6 +10,9 @@ export type JobSnapshot<T = unknown> = {
   status: JobStatus;
   created_at?: number;
   updated_at?: number;
+  server_time: number;
+  elapsed_seconds: number;
+  progress_idle_seconds: number;
   progress_log?: string[];
   result?: T;
   error?: string | null;

@@ -4,6 +4,7 @@ import json
 import queue
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -33,7 +34,10 @@ from finiq.market_desk.web.features.disclosures.html_common import (
 from finiq.market_desk.web.features.disclosures.html_parse_changes import (
     build_parse_change_log_payload,
 )
-from finiq.market_desk.web.features.disclosures.html_parse_common import cancel_disclosure_html_parse
+from finiq.market_desk.web.features.disclosures.html_parse_common import (
+    cancel_disclosure_html_parse,
+    inspect_disclosure_html_parse_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_export import (
     build_parse_export_xlsx,
 )
@@ -55,7 +59,10 @@ from finiq.market_desk.web.features.disclosures.html_sections import (
     summarize_disclosure_html_section_kinds_payload,
 )
 from finiq.market_desk.web.jobs import job_manager
-from finiq.market_desk.web.features.disclosures.table_export import build_disclosure_table_payload
+from finiq.market_desk.web.features.disclosures.table_export import (
+    build_disclosure_table_payload,
+    inspect_disclosure_table_payload,
+)
 from finiq.market_desk.web.features.disclosure_workflow.automation import (
     build_automation_plan_payload,
     inspect_disclosure_workspace_payload,
@@ -71,6 +78,7 @@ from finiq.market_desk.web.features.market_data.service_records import FilterCan
 FilterDisclosuresPayload = Callable[..., dict[str, Any]]
 SearchDisclosureTitlesPayload = Callable[..., dict[str, Any]]
 RunJobWorker = Callable[[str, str, dict[str, Any]], None]
+FILTER_STREAM_HEARTBEAT_SECONDS = 10.0
 
 
 def _filter_output_directory(value: object) -> str:
@@ -279,6 +287,9 @@ def create_workflows_router(
             def generate():
                 cancel_event = threading.Event()
                 events: queue.Queue[dict[str, Any]] = queue.Queue()
+                stream_started_at = time.monotonic()
+                last_progress_at = stream_started_at
+                last_heartbeat_at = stream_started_at
 
                 def run_filter() -> None:
                     try:
@@ -310,7 +321,25 @@ def create_workflows_router(
                         try:
                             event = events.get(timeout=0.1)
                         except queue.Empty:
+                            now = time.monotonic()
+                            if (
+                                thread.is_alive()
+                                and now - last_progress_at >= FILTER_STREAM_HEARTBEAT_SECONDS
+                                and now - last_heartbeat_at >= FILTER_STREAM_HEARTBEAT_SECONDS
+                            ):
+                                yield json.dumps(
+                                    {
+                                        "type": "heartbeat",
+                                        "elapsed_seconds": now - stream_started_at,
+                                        "progress_idle_seconds": now - last_progress_at,
+                                    },
+                                    ensure_ascii=False,
+                                ) + "\n"
+                                last_heartbeat_at = now
                             continue
+                        if event.get("type") == "progress":
+                            last_progress_at = time.monotonic()
+                            last_heartbeat_at = last_progress_at
                         yield json.dumps(event, ensure_ascii=False) + "\n"
                 finally:
                     cancel_event.set()
@@ -363,6 +392,13 @@ def create_workflows_router(
             payload=payload,
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/table/inspect")
+    async def inspect_disclosure_table(payload: dict[str, Any]):
+        return await run_in_threadpool(
+            inspect_disclosure_table_payload,
+            apply_workspace_defaults("table_build", payload),
         )
 
     @router.post("/api/disclosures/workspace/prepare")
@@ -723,6 +759,13 @@ def create_workflows_router(
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/html/parse/inspect")
+    async def inspect_html_parse_route(payload: dict[str, Any]):
+        return await run_in_threadpool(
+            inspect_disclosure_html_parse_payload,
+            apply_workspace_defaults("parse", payload),
+        )
 
     @router.post("/api/disclosures/html/parse/filter-candidates")
     async def parse_filter_candidates_route(payload: dict[str, Any]):

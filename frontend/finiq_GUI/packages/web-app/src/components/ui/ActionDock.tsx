@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, Bell, Settings, X } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { useActionDockFollow } from "./useActionDockFollow";
 
 type DockPanel = "activity" | "notification" | "settings" | null;
+
+export type ActionDockNotificationTone = "neutral" | "success" | "warning" | "error";
 
 type ActionDockProps = {
   activityTitle?: string;
@@ -14,11 +16,11 @@ type ActionDockProps = {
   notificationTitle?: string;
   notificationContent?: ReactNode;
   notificationActive?: boolean;
+  notificationTone?: ActionDockNotificationTone;
   notificationDismissible?: boolean;
   notificationResetKey?: string | number | boolean | null;
   settingsTitle?: string;
   settingsContent?: ReactNode;
-  settingsActive?: boolean;
 };
 
 export function ActionDock({
@@ -28,11 +30,11 @@ export function ActionDock({
   notificationTitle = "알림",
   notificationContent,
   notificationActive = false,
+  notificationTone = "warning",
   notificationDismissible = true,
   notificationResetKey = null,
   settingsTitle = "설정",
   settingsContent,
-  settingsActive = true,
 }: ActionDockProps) {
   const dockRef = useActionDockFollow<HTMLDivElement>();
   const [openPanel, setOpenPanel] = useState<DockPanel>(null);
@@ -50,24 +52,40 @@ export function ActionDock({
     if (notificationActive) {
       setNotificationDismissed(false);
     }
-  }, [notificationActive, notificationResetKey]);
+  }, [notificationActive, notificationResetKey, notificationTone]);
 
   const togglePanel = (panel: DockPanel) => {
     setOpenPanel((current) => current === panel ? null : panel);
   };
 
-  const iconClass = (active: boolean, selected: boolean, tone: "blue" | "amber" | "slate") => {
-    if (selected) {
-      return "h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)]";
-    }
-    if (active && tone === "blue") {
-      return "relative h-10 w-10 rounded-lg border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)]";
-    }
-    if (active && tone === "amber") {
-      return "relative h-10 w-10 rounded-lg border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]";
-    }
+  const iconClass = (active: boolean) => {
+    if (active) return "relative h-10 w-10 rounded-lg";
     return "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] hover:text-[var(--tv-text)]";
   };
+
+  const iconStyle = (active: boolean, selected: boolean, tone: ActionDockNotificationTone): CSSProperties | undefined => {
+    if (!active || tone === "neutral") return undefined;
+    const tokens = tone === "error"
+      ? ["--tv-down", "--tv-down-soft", "--tv-down-text"]
+      : tone === "warning"
+        ? ["--tv-warning", "--tv-warning-soft", "--tv-warning-text"]
+        : ["--tv-up", "--tv-up-soft", "--tv-up-text"];
+    return {
+      borderColor: `var(${tokens[0]})`,
+      backgroundColor: `var(${tokens[1]})`,
+      color: `var(${tokens[2]})`,
+      outline: selected ? `2px solid var(${tokens[0]})` : undefined,
+      outlineOffset: selected ? "1px" : undefined,
+    };
+  };
+
+  const notificationDotClass = notificationTone === "error"
+    ? "bg-[var(--tv-down)]"
+    : notificationTone === "warning"
+      ? "bg-[var(--tv-warning)]"
+      : notificationTone === "success"
+        ? "bg-[var(--tv-up)]"
+        : "bg-[var(--tv-muted)]";
 
   const renderPanel = (panel: DockPanel, title: string, content: ReactNode) => {
     if (openPanel !== panel) return null;
@@ -118,11 +136,11 @@ export function ActionDock({
           size="icon"
           onClick={() => togglePanel("activity")}
           aria-pressed={openPanel === "activity"}
-          className={iconClass(activityActive, openPanel === "activity", "blue")}
+          className={iconClass(false)}
           title={openPanel === "activity" ? `${activityTitle} 닫기` : `${activityTitle} 열기`}
         >
           <Activity className="h-5 w-5" />
-          {activityActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-accent)]" />}
+          {activityActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-muted)]" />}
         </Button>
 
         <Button
@@ -130,11 +148,12 @@ export function ActionDock({
           size="icon"
           onClick={() => togglePanel("notification")}
           aria-pressed={openPanel === "notification"}
-          className={iconClass(visibleNotificationActive, openPanel === "notification", "amber")}
+          className={iconClass(visibleNotificationActive && notificationTone !== "neutral")}
+          style={iconStyle(visibleNotificationActive, openPanel === "notification", notificationTone)}
           title={openPanel === "notification" ? `${notificationTitle} 닫기` : `${notificationTitle} 열기`}
         >
           <Bell className="h-5 w-5" />
-          {visibleNotificationActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-warning)]" />}
+          {visibleNotificationActive && <span className={`absolute right-2 top-2 h-2 w-2 rounded-full ${notificationDotClass}`} />}
         </Button>
 
         {hasSettingsContent && (
@@ -143,7 +162,7 @@ export function ActionDock({
             size="icon"
             onClick={() => togglePanel("settings")}
             aria-pressed={openPanel === "settings"}
-            className={iconClass(settingsActive, openPanel === "settings", "slate")}
+            className={iconClass(false)}
             title={openPanel === "settings" ? `${settingsTitle} 닫기` : `${settingsTitle} 열기`}
           >
             <Settings className="h-5 w-5" />

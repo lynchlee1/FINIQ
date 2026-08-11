@@ -96,11 +96,21 @@ test("replaced jobs ignore late polling responses and errors", async () => {
   );
 });
 
-test("metadata retry success clears only its own notification error", async () => {
+test("job polling distinguishes a responsive status API from silent work", async () => {
+  const source = await readFile(pollingHookPath, "utf8");
+
+  assert.match(source, /const LONG_PROGRESS_SILENCE_SECONDS = 10/);
+  assert.match(source, /data\.elapsed_seconds/);
+  assert.match(source, /data\.progress_idle_seconds >= LONG_PROGRESS_SILENCE_SECONDS/);
+  assert.match(source, /진행 확인: 상태 조회 정상/);
+  assert.match(source, /새 로그 \$\{idle\}째 없음/);
+});
+
+test("download inspection errors are created only by explicit inspection work", async () => {
   const source = await readFile(downloadPagePath, "utf8");
 
-  assert.match(source, /metadataNotificationError/);
-  assert.match(source, /setMetadataNotificationError\(message\)/);
-  assert.match(source, /!checkingExisting && !existingMetadataError[\s\S]*?setMetadataNotificationError\(null\)/);
-  assert.match(source, /isErrorStatus \|\| metadataNotificationError/);
+  assert.doesNotMatch(source, /metadataNotificationError|checkingExisting|detectExistingDownload/);
+  assert.match(source, /setExistingMetadataError\(error\.message\)/);
+  assert.match(source, /setExistingMetadataError\(err\.message\)/);
+  assert.match(source, /isErrorStatus \|\| existingMetadataError/);
 });

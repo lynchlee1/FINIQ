@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, Callable, Iterable, Iterator, TypeVar
 
 from lxml import etree, html
 
@@ -319,7 +320,7 @@ def _section_signature(sections: list[dict[str, Any]]) -> str:
     ).strip()
 
 
-def _section_patterns(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _section_patterns(documents: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     counts: dict[str, dict[str, Any]] = {}
     for document in documents:
         sections = list(document.get("sections") or [])
@@ -457,14 +458,20 @@ def summarize_disclosure_html_section_kinds_payload(
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
 
-    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
+    collect_started_at = time.monotonic()
+    if progress_callback is not None:
+        progress_callback(
+            "입력 폴더에서 목차 조합 확인 대상 HTML을 찾습니다. "
+            f"병렬 처리 {workers}개를 사용합니다."
+        )
+    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     if progress_callback is not None:
         progress_callback(
             f"목차 조합 확인 대상 HTML {len(html_files)}건을 찾았습니다. "
+            f"파일 탐색 {time.monotonic() - collect_started_at:.1f}초 · "
             f"병렬 처리 {workers}개를 사용합니다."
         )
-    documents: list[dict[str, Any]] = []
     results = _map_html_files(
         html_files,
         workers,
@@ -473,22 +480,31 @@ def summarize_disclosure_html_section_kinds_payload(
         ),
         cancel_check,
     )
-    for index, document in enumerate(results, start=1):
-        if cancel_check is not None and cancel_check():
-            return {"cancelled": True}
-        documents.append(document)
-        if progress_callback is not None and (
-            index == 1 or index == len(html_files) or index % 100 == 0
-        ):
-            progress_callback(f"목차 조합 확인 중: {index}/{len(html_files)}건 처리.")
+    document_count = 0
 
-    items = _section_patterns(documents)
+    def iter_documents():
+        nonlocal document_count
+        for index, document in enumerate(results, start=1):
+            if cancel_check is not None and cancel_check():
+                return
+            document_count = index
+            if progress_callback is not None and (
+                index == 1 or index == len(html_files) or index % 100 == 0
+            ):
+                progress_callback(
+                    f"목차 조합 확인 중: {index}/{len(html_files)}건 처리."
+                )
+            yield document
+
+    items = _section_patterns(iter_documents())
+    if cancel_check is not None and cancel_check():
+        return {"cancelled": True}
     return {
         "format": "finiq_disclosure_html_section_kind_summary_v1",
         "input_directory": str(input_directory),
         "summary": {
             "found_files": len(html_files),
-            "documents_with_sections": len(documents),
+            "documents_with_sections": document_count,
             "files_without_sections": 0,
             "failed_files": 0,
             "unique_kinds": len(items),
@@ -536,6 +552,9 @@ def inspect_disclosure_html_sections_payload(
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
 
+    collect_started_at = time.monotonic()
+    if progress_callback is not None:
+        progress_callback("입력 폴더에서 목차 확인 대상 HTML을 찾습니다.")
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
 
@@ -566,7 +585,9 @@ def inspect_disclosure_html_sections_payload(
         }
 
     emit(
-        f"목차 확인 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다."
+        f"목차 확인 대상 HTML {len(html_files)}건을 찾았습니다. "
+        f"파일 탐색 {time.monotonic() - collect_started_at:.1f}초 · "
+        f"병렬 처리 {workers}개를 사용합니다."
     )
     results = _map_html_files(html_files, workers, inspect_one, cancel_check)
     documents: list[dict[str, Any]] = []
@@ -794,9 +815,25 @@ def save_disclosure_html_sections_payload(
         msg = "output_directory must be different from input_directory"
         raise ValueError(msg)
 
+    progress_log: deque[str] = deque(maxlen=200)
+
+    def emit(message: str) -> None:
+        progress_log.append(message)
+        if progress_callback is not None:
+            progress_callback(message)
+
+    collect_started_at = time.monotonic()
+    emit("입력 폴더에서 목차 분리 대상 HTML을 찾습니다.")
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
     section_save_rules = _section_save_rules(body.get("section_save_rules"))
+    emit(
+        f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. "
+        f"파일 탐색 {time.monotonic() - collect_started_at:.1f}초 · "
+        f"병렬 처리 {workers}개를 사용합니다."
+    )
+    validation_started_at = time.monotonic()
+    emit("목차 저장 규칙 사전 검사를 시작합니다.")
     for _ in _map_html_files(
         html_files,
         workers,
@@ -806,6 +843,10 @@ def save_disclosure_html_sections_payload(
         cancel_check,
     ):
         pass
+    emit(
+        "목차 저장 규칙 사전 검사 완료: "
+        f"{time.monotonic() - validation_started_at:.1f}초."
+    )
     if _cancel_requested(cancel_check):
         return {"cancelled": True}
 
@@ -813,12 +854,6 @@ def save_disclosure_html_sections_payload(
     saved_files: list[str] = []
     expected_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
-    progress_log: list[str] = []
-
-    def emit(message: str) -> None:
-        progress_log.append(message)
-        if progress_callback is not None:
-            progress_callback(message)
 
     def save_one(source_file: Path) -> dict[str, Any]:
         selected = _selected_section_output(source_file, section_save_rules)
@@ -854,9 +889,6 @@ def save_disclosure_html_sections_payload(
             "expected": [str(output_path)],
         }
 
-    emit(
-        f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. 병렬 처리 {workers}개를 사용합니다."
-    )
     results = _map_html_files(html_files, workers, save_one, cancel_check)
     for index, result in enumerate(results, start=1):
         if _cancel_requested(cancel_check):
@@ -896,5 +928,5 @@ def save_disclosure_html_sections_payload(
         "expected_files": expected_files,
         "missing_files": missing_files,
         "skipped_files": skipped_files,
-        "progress_log": progress_log[-200:],
+        "progress_log": list(progress_log),
     }

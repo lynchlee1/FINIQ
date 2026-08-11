@@ -657,8 +657,9 @@ export function OntologyChartWorkspace() {
           </div>
         }
         notificationActive={!!error}
+        notificationTone="error"
         notificationContent={
-          <div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-600 dark:text-slate-300"}>
+          <div className={error ? "text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>
             {error || "알림 없음"}
           </div>
         }

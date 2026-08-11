@@ -601,9 +601,9 @@ def _table_manifest(profile: dict[str, Any]) -> Path:
     try:
         manifest = _load_sqlite_manifest(path)
     except (OSError, ValueError, json.JSONDecodeError) as error:
-        raise ValueError("공시내역 변환 매니페스트를 찾을 수 없습니다.") from error
+        raise ValueError("공시내역 변환 기록을 찾을 수 없습니다.") from error
     if manifest.get("source_type") != "source_folder":
-        raise ValueError("공시내역 변환 매니페스트를 찾을 수 없습니다.")
+        raise ValueError("공시내역 변환 기록을 찾을 수 없습니다.")
     return path
 
 
@@ -686,7 +686,7 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
     ):
         return _inspection_failure(
             2,
-            reason="다운로드 원본과 SQLite 공시 레코드가 일치하지 않습니다.",
+            reason="다운로드한 원본 데이터와 SQLite 파일의 공시 내용이 일치하지 않습니다.",
             details={
                 "source_rows": source_count,
                 "source_duplicate_rows": source_duplicate_count,
@@ -697,7 +697,7 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
         )
     return _inspection_success(
         2,
-        reason="다운로드 원본, SQLite 매니페스트와 실제 shard 레코드가 모두 일치합니다.",
+        reason="다운로드한 원본 데이터와 변환 기록, 연도별 SQLite 파일의 내용이 모두 일치합니다.",
         details={
             "source_rows": source_count,
             "duplicate_rows": source_duplicate_count,
@@ -982,7 +982,7 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
         )
     return _inspection_success(
         7,
-        reason="파서 설정, 입력 HTML 전체와 변환 레코드가 일치합니다.",
+        reason="변환 설정과 입력 HTML, 저장된 결과가 모두 일치합니다.",
         details={"records": len(records)},
     )
 

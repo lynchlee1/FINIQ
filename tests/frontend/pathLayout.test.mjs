@@ -20,6 +20,14 @@ const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph
 const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
 const marketDeskGlobalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
+test("streamed disclosure filtering reports ten-second progress silence", async () => {
+  const source = await readFile(jobStreamingHookPath, "utf8");
+
+  assert.match(source, /event\.type === "heartbeat"/);
+  assert.match(source, /작업 스레드 실행 중/);
+  assert.match(source, /새 진행 \$\{formatElapsed\(progressIdleSeconds\)\}째 없음/);
+});
+
 test("html section split path fields stack vertically", async () => {
   const source = await readFile(htmlSectionSplitPath, "utf8");
   const pathFieldsBlock = source.match(/const folderPathFields:[\s\S]*?const splitOptionFields:/)?.[0] ?? "";
@@ -258,7 +266,7 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
 
   assert.match(source, /listDisclosureConditionPresets\(rootDirectory\)/);
   assert.doesNotMatch(source, /pickPath/);
-  assert.doesNotMatch(source, /\/api\/disclosures\/filter\/preset/);
+  assert.doesNotMatch(source, /\/api\/disclosures\/filter\/preset(?:["/])/);
   assert.doesNotMatch(source, /onLoadPresetFromJson/);
   assert.match(conditionCardSource, /onLoadPresetFromJson\?: \(\) => void/);
   assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" onClick=\{onLoadPresetFromJson\}>/);
@@ -285,6 +293,7 @@ test("disclosure filter page combines title search and recorded filtering", asyn
   assert.match(source, /<DisclosureConditionFilterCard/);
   assert.match(source, /listDisclosureConditionPresets\(rootDirectory\)/);
   assert.match(source, /type FilterTaskMode = "title-search" \| "filter"/);
+  assert.match(source, /const \[taskMode, setTaskMode\] = useState<FilterTaskMode>\("title-search"\)/);
   assert.match(source, /setTaskMode\("title-search"\)[\s\S]*?공시내역 제목 검색/);
   assert.match(source, /setTaskMode\("filter"\)[\s\S]*?공시내역 필터링/);
   assert.ok(
@@ -316,6 +325,21 @@ test("disclosure filter page combines title search and recorded filtering", asyn
   assert.match(source, /<CardTitle className="dark:text-white">필터 결과<\/CardTitle>/);
 });
 
+test("disclosure filter inspection checks every folder without a selected filter", async () => {
+  const source = await readFile(filterPagePath, "utf8");
+  const handler = source.slice(
+    source.indexOf("const handleInspectExistingFilter"),
+    source.indexOf("if (loading)", source.indexOf("const handleInspectExistingFilter")),
+  );
+
+  assert.match(handler, /action: "inspect"/);
+  assert.match(handler, /data_root: dataRoot/);
+  assert.match(handler, /response\.presets\s*\.filter\(\(preset\) => preset\.status !== "completed"\)/);
+  assert.match(handler, /isCurrentPresetWorkspace\(dataRoot, requestId\)/);
+  assert.doesNotMatch(handler, /selectedPreset|selectedWorkflow|condition_blocks/);
+  assert.match(source, /title: "조건검색 폴더 전체 검사"/);
+});
+
 test("disclosure automation exposes filter presets for every dependent stage range", async () => {
   const source = await readFile(disclosureAutomationPagePath, "utf8");
 
@@ -336,7 +360,7 @@ test("disclosure filter keeps workflow status scoped to the active workspace", a
     (source.match(/if \(!isCurrentPresetWorkspace\(dataRoot, requestId\)\) return;/g) || []).length >= 6,
     "모든 비동기 프리셋 응답은 현재 작업공간에만 적용해야 합니다.",
   );
-  assert.match(source, /const selectedWorkflow = presets\.find\(\(preset\) => preset\.name === selectedPreset\)/);
+  assert.match(source, /const selectedWorkflow = useMemo\([\s\S]*?presets\.find\(\(preset\) => preset\.name === selectedPreset\)/);
   assert.match(source, /status: "running"/);
   assert.match(source, /streamOutcome === "aborted"/);
   assert.match(source, /workflow\?\.status !== "running"/);

@@ -12,6 +12,29 @@ interface UseJobPollingOptions {
   formatStatus?: (data: JobSnapshot<any>) => string[];
 }
 
+const LONG_PROGRESS_SILENCE_SECONDS = 10;
+
+function formatElapsed(seconds: number) {
+  const wholeSeconds = Math.floor(seconds);
+  if (wholeSeconds < 60) return `${wholeSeconds}초`;
+  const minutes = Math.floor(wholeSeconds / 60);
+  const remainingSeconds = wholeSeconds % 60;
+  return `${minutes}분 ${remainingSeconds}초`;
+}
+
+function jobTimingLines(data: JobSnapshot<any>) {
+  if (data.status !== "queued" && data.status !== "running") return [];
+  const elapsed = formatElapsed(data.elapsed_seconds);
+  const idle = formatElapsed(data.progress_idle_seconds);
+  const progressState = data.progress_idle_seconds >= LONG_PROGRESS_SILENCE_SECONDS
+    ? `새 로그 ${idle}째 없음`
+    : `마지막 로그 ${idle} 전`;
+  return [
+    `작업 경과: ${elapsed}`,
+    `진행 확인: 상태 조회 정상 · ${progressState}`,
+  ];
+}
+
 export function useJobPolling(options: UseJobPollingOptions) {
   const { cancelEndpoint } = options;
   const [status, setStatus] = useState<string>("작업을 실행할 준비가 되었습니다.");
@@ -79,6 +102,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
 
         if (formatStatus) {
           const lines = formatStatus(data);
+          lines.splice(1, 0, ...jobTimingLines(data));
           setStatus(lines.join("\n"));
         } else {
           const statusLabel = (s: string) => {
@@ -93,6 +117,7 @@ export function useJobPolling(options: UseJobPollingOptions) {
           };
 
           const lines = [`작업 상태: ${statusLabel(data.status)}`];
+          lines.push(...jobTimingLines(data));
           if (data.error) lines.push(`오류: ${data.error}`);
           if (data.progress_log?.length) {
             lines.push("", "최근 로그:", ...data.progress_log.slice(-10));

@@ -342,6 +342,23 @@ def test_job_manager_status_updates_do_not_deadlock() -> None:
     assert any("JOB start" in line for line in snapshot["progress_log"])
 
 
+def test_job_manager_snapshot_reports_elapsed_and_progress_silence(monkeypatch) -> None:
+    import finiq.market_desk.web.jobs as jobs_module
+
+    manager = JobManager()
+    job = manager.create_job("job-timing", "parse")
+    job.created_at = 100.0
+    job.updated_at = 112.5
+    monkeypatch.setattr(jobs_module.time, "time", lambda: 125.0)
+
+    snapshot = manager.get_snapshot("job-timing")
+
+    assert snapshot is not None
+    assert snapshot["server_time"] == 125.0
+    assert snapshot["elapsed_seconds"] == 25.0
+    assert snapshot["progress_idle_seconds"] == 12.5
+
+
 def test_job_manager_purges_only_expired_terminal_jobs() -> None:
     manager = JobManager(retention_minutes=60)
     completed = manager.create_job("completed", "download")
@@ -468,6 +485,42 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
         "search_result_disclosures": 2,
         "inspected_disclosures": 2,
     }
+
+
+def test_filter_disclosures_stream_reports_long_progress_silence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import finiq.market_desk.web.routers.workflows as workflows_router
+
+    def slow_filter_disclosures_payload(body, **_kwargs):
+        time.sleep(0.15)
+        return _filter_result(
+            source_disclosures=0,
+            source_offset=int(body["source_offset"]),
+            disclosures=[],
+        )
+
+    monkeypatch.setattr(web_app, "filter_disclosures_payload", slow_filter_disclosures_payload)
+    monkeypatch.setattr(workflows_router, "FILTER_STREAM_HEARTBEAT_SECONDS", 0.01)
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+
+    with TestClient(app).stream(
+        "POST",
+        "/api/disclosures/filter",
+        headers={"Accept": "application/x-ndjson"},
+        json={
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+            "external_html_transfer_path": str(tmp_path / "filtered"),
+        },
+    ) as response:
+        events = [json.loads(line) for line in response.iter_lines() if line]
+
+    heartbeat = next(event for event in events if event["type"] == "heartbeat")
+    assert heartbeat["elapsed_seconds"] >= 0.01
+    assert heartbeat["progress_idle_seconds"] >= 0.01
 
 
 def test_search_disclosure_titles_is_read_only(tmp_path: Path, monkeypatch) -> None:
@@ -1064,6 +1117,30 @@ def test_disclosure_filter_workflows_ignore_obsolete_filter_result_json(tmp_path
     assert payload["format"] == "finiq_disclosure_filter_workflow_directory"
     assert payload["path"] == str(source_path.parent.resolve())
     assert payload["presets"] == []
+
+
+def test_disclosure_filter_inspection_rejects_wrong_format_in_mode_folder(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text(json.dumps({"format": "wrong"}), encoding="utf-8")
+    client = TestClient(app)
+
+    listed = client.post(
+        "/api/disclosures/filter/presets",
+        json={"data_root": str(data_root), "action": "list"},
+    )
+    inspected = client.post(
+        "/api/disclosures/filter/presets",
+        json={"data_root": str(data_root), "action": "inspect"},
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["presets"] == []
+    assert inspected.status_code == 400
+    assert str(workflow_path) in inspected.json()["detail"]
 
 
 def test_disclosure_filter_workflows_read_format_after_one_mib(tmp_path: Path) -> None:

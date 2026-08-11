@@ -35,6 +35,23 @@ import {
   listDisclosureConditionPresets,
   saveDisclosureConditionPreset,
 } from "@/lib/disclosureConditionPresets";
+import {
+  SingleCheckDataIntegrityInspectionCard,
+  type SingleCheckDataIntegrityInspectionState,
+} from "@/components/data-integrity/DataIntegrityInspectionCard";
+import { useDataIntegrityInspection } from "@/hooks/useDataIntegrityInspection";
+
+type ParseInspectionResult = {
+  format: "finiq_disclosure_html_parse_inspection_v1";
+  confirmed: boolean;
+  reason: string;
+  result_path: string;
+  summary?: {
+    found_files?: number;
+    parsed_files?: number;
+    failed_files?: number;
+  };
+};
 
 type ParseExecutionOptionConfig = {
   field: string;
@@ -208,10 +225,26 @@ export default function HtmlParsePage() {
     parallel_worker_count: defaultParallelWorkers,
     saveSetting,
   } = useSettingsStore();
+  const activeParseInspectionRef = useRef<{ jobId: string; key: string } | null>(null);
+  const currentParseInspectionKeyRef = useRef("");
 
   const [loading, setLoading] = useState(true);
   const [latestParseResult, setLatestParseResult] = useState<any>(null);
   const [warningOpenPages, setWarningOpenPages] = useState<Record<string, number>>({});
+  const {
+    result: inspectionResult,
+    error: inspectionError,
+    isChecking: inspectionRunning,
+    runInspection,
+    acceptResult: acceptInspectionResult,
+    clear: clearInspection,
+  } = useDataIntegrityInspection<Record<string, unknown>, ParseInspectionResult>({
+    inspect: (payload) => apiPost<ParseInspectionResult>("/api/disclosures/html/parse/inspect", payload),
+    onError: (message) => {
+      setStatus(message);
+      setIsErrorStatus(true);
+    },
+  });
 
   const formatStatus = useCallback((data: any) => {
     const statusLbl = (s: string) => {
@@ -251,8 +284,34 @@ export default function HtmlParsePage() {
   } = useJobPolling({
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     formatStatus,
-    onSuccess: (result) => {
+    onSuccess: (result, jobId) => {
       setLatestParseResult(result);
+      const context = activeParseInspectionRef.current;
+      if (!context || context.jobId !== jobId) return;
+      activeParseInspectionRef.current = null;
+      if (context.key !== currentParseInspectionKeyRef.current) return;
+      const failedFiles = Number(result?.summary?.failed_files || 0);
+      acceptInspectionResult({
+        format: "finiq_disclosure_html_parse_inspection_v1",
+        confirmed: result?.cancelled !== true && failedFiles === 0,
+        reason: result?.cancelled === true
+          ? "변환 작업이 취소되었습니다."
+          : failedFiles > 0
+            ? `변환에 실패한 파일이 ${failedFiles}개 있습니다.`
+            : "변환 과정에서 현재 설정으로 입력 HTML을 처리한 내용과 저장된 결과를 확인했습니다.",
+        result_path: "",
+        summary: result?.summary,
+      });
+    },
+    onError: (_error, jobId) => {
+      if (activeParseInspectionRef.current?.jobId === jobId) {
+        activeParseInspectionRef.current = null;
+      }
+    },
+    onCancel: (jobId) => {
+      if (activeParseInspectionRef.current?.jobId === jobId) {
+        activeParseInspectionRef.current = null;
+      }
     },
   });
 
@@ -283,8 +342,15 @@ export default function HtmlParsePage() {
   const [previewData, setPreviewData] = useState<any>(null);
   const selectedParseMode = PARSE_MODE_CONFIGS[parseMode] || DISCLOSURE_PARSE_MODES[0];
   const executionOptionConfig = selectedParseMode.executionOptions[0] || null;
+  const activeRecordFilters = executionOptionConfig && selectedExecutionOptionValues.length ? [
+    {
+      field: executionOptionConfig.field,
+      operator: "in",
+      value: selectedExecutionOptionValues,
+    },
+  ] : [];
 
-  const startJob = useCallback(async (endpoint: string, payload: any) => {
+  const startJob = useCallback(async (endpoint: string, payload: any, inspectionKey?: string) => {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -293,6 +359,9 @@ export default function HtmlParsePage() {
       });
       if (!response.ok) throw new Error("Job start failed");
       const data = await response.json();
+      if (inspectionKey) {
+        activeParseInspectionRef.current = { jobId: data.job_id, key: inspectionKey };
+      }
       startPolling(data.job_id);
     } catch (err: any) {
       setStatus(err.message);
@@ -338,6 +407,23 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
     });
   }, [dataRoot, setIsErrorStatus, setStatus]);
+
+  useEffect(() => {
+    clearInspection();
+  }, [
+    clearInspection,
+    conditions,
+    dataRoot,
+    inputDirectory,
+    limit,
+    outputDirectory,
+    parallelWorkers,
+    parseMode,
+    progressInterval,
+    selectedExecutionOptionValues,
+    skipErrors,
+    useSeparateOutputDirectory,
+  ]);
 
   const handleWorkspaceDirectoryChange = async (val: string) => {
     filterCandidatesRequestIdRef.current += 1;
@@ -459,6 +545,33 @@ export default function HtmlParsePage() {
     }
   }, [isJobActive]);
 
+  const buildParseInspectionPayload = () => ({
+    data_root: dataRoot,
+    input_directory: useSeparateOutputDirectory ? inputDirectory : "",
+    output_directory: useSeparateOutputDirectory ? outputDirectory : "",
+    mode: parseMode,
+    limit: limit ? Number(limit) : null,
+    skip_errors: skipErrors,
+    progress_interval: Number(progressInterval),
+    parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
+    filter_blocks: normalizeDisclosureConditionBlocks(conditions),
+    record_filters: activeRecordFilters,
+  });
+  const currentParseInspectionKey = JSON.stringify({
+    dataRoot,
+    inputDirectory,
+    outputDirectory,
+    useSeparateOutputDirectory,
+    parseMode,
+    limit,
+    skipErrors,
+    progressInterval,
+    parallelWorkers,
+    conditions,
+    activeRecordFilters,
+  });
+  currentParseInspectionKeyRef.current = currentParseInspectionKey;
+
   const handleRun = async () => {
     if (!dataRoot) {
       setStatus("작업공간 디렉토리를 선택하세요.");
@@ -470,33 +583,22 @@ export default function HtmlParsePage() {
       setIsErrorStatus(true);
       return;
     }
-    const activeRecordFilters = executionOptionConfig && selectedExecutionOptionValues.length ? [
-      {
-        field: executionOptionConfig.field,
-        operator: "in",
-        value: selectedExecutionOptionValues,
-      },
-    ] : [];
     const cancelToken = window.crypto.randomUUID();
     setActiveCancelToken(cancelToken);
     setLatestParseResult(null);
     setWarningOpenPages({});
 
+    const inspectionPayload = buildParseInspectionPayload();
     const payload = {
-      data_root: dataRoot,
-      input_directory: useSeparateOutputDirectory ? inputDirectory : "",
-      output_directory: useSeparateOutputDirectory ? outputDirectory : "",
-      mode: parseMode,
-      limit: limit ? Number(limit) : null,
-      skip_errors: skipErrors,
-      progress_interval: Number(progressInterval),
-      parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
-      filter_blocks: normalizeDisclosureConditionBlocks(conditions),
-      record_filters: activeRecordFilters,
+      ...inspectionPayload,
       cancel_token: cancelToken,
     };
 
-    startJob("/api/disclosures/html/parse/start", payload);
+    startJob(
+      "/api/disclosures/html/parse/start",
+      payload,
+      currentParseInspectionKey,
+    );
   };
 
   const handleCancel = async () => {
@@ -636,6 +738,26 @@ export default function HtmlParsePage() {
     } finally {
       setPreviewLoading(false);
     }
+  };
+
+  const handleInspectExistingParse = async () => {
+    if (!dataRoot || !inputDirectory) {
+      setStatus("입력 데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (useSeparateOutputDirectory && !outputDirectory) {
+      setStatus("결과 데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const payload = buildParseInspectionPayload();
+    setStatus("기존 변환 데이터 검사를 시작합니다...");
+    setIsErrorStatus(false);
+    const result = await runInspection(payload, JSON.stringify(payload));
+    if (!result) return;
+    setStatus(result.confirmed ? "정상" : result.reason);
+    setIsErrorStatus(!result.confirmed);
   };
 
   const parseSettingFields: HtmlWorkflowField[] = [
@@ -866,6 +988,30 @@ export default function HtmlParsePage() {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
+  const hasInspectionInput = !!dataRoot
+    && !!inputDirectory
+    && (!useSeparateOutputDirectory || !!outputDirectory);
+  const inspectionState: SingleCheckDataIntegrityInspectionState = !hasInspectionInput
+    ? "waiting"
+    : inspectionRunning
+      ? "running"
+      : inspectionError || inspectionResult?.confirmed === false
+        ? "failed"
+        : inspectionResult?.confirmed
+          ? "success"
+          : "ready";
+  const inspectionCopy = {
+    waiting: ["입력 경로와 결과 경로를 선택하세요", "경로를 선택한 다음 현재 설정으로 변환 결과를 다시 계산해 저장된 결과와 비교하세요."],
+    ready: ["기존 변환 결과 검사가 필요합니다", "현재 설정과 입력 HTML을 기준으로 저장된 결과를 확인하세요."],
+    running: ["기존 변환 결과를 다시 계산하고 있습니다", "현재 설정으로 입력 HTML을 다시 변환해 저장된 결과와 비교합니다."],
+    success: ["기존 변환 결과를 그대로 사용해도 됩니다", inspectionResult?.reason || "정상"],
+    failed: ["기존 변환 결과에 문제가 있습니다", inspectionError || inspectionResult?.reason || "검사 결과를 확인하세요."],
+  }[inspectionState];
+  const inspectionSummary = inspectionResult?.summary;
+  const inspectionStepSummary = inspectionSummary
+    ? `대상 ${formatInteger(inspectionSummary.found_files)}개 중 ${formatInteger(inspectionSummary.parsed_files)}개를 변환했고 ${formatInteger(inspectionSummary.failed_files)}개는 실패했습니다.`
+    : inspectionResult?.reason || "현재 설정으로 다시 계산한 결과와 저장된 결과 전체를 비교합니다.";
+
   return (
     <HtmlWorkflowPage
       eyebrow="HTML Parse Guide"
@@ -874,6 +1020,21 @@ export default function HtmlParsePage() {
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
+          <SingleCheckDataIntegrityInspectionCard
+            description="실행 전에 현재 설정으로 입력 HTML을 다시 변환해 저장된 결과와 비교합니다."
+            state={inspectionState}
+            verdictTitle={inspectionCopy[0]}
+            verdictDescription={inspectionCopy[1]}
+            stepTitle="입력 HTML 변환 결과 검사"
+            stepSummary={inspectionStepSummary}
+            action={hasInspectionInput ? {
+              label: inspectionRunning ? "검사 중..." : "검사하기",
+              onClick: handleInspectExistingParse,
+              disabled: inspectionRunning || isJobActive,
+              loading: inspectionRunning,
+            } : undefined}
+          />
+
           <HtmlWorkflowCard
             title="데이터 경로"
           >
@@ -1019,11 +1180,12 @@ export default function HtmlParsePage() {
             />
           }
           notificationActive={isErrorStatus || !!executionOptionExampleNotice || warningReports.length > 0}
+          notificationTone={isErrorStatus ? "error" : warningReports.length > 0 ? "warning" : "neutral"}
           notificationResetKey={notificationResetKey}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (
-                <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+                <div className="whitespace-pre-wrap text-sm text-[var(--tv-down-text)]">{status || "오류 내용을 확인할 수 없습니다."}</div>
               ) : executionOptionExampleNotice ? (
                 <div className="space-y-3">
                   <div className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-[#30363d] dark:bg-[#0d1117]">
@@ -1055,7 +1217,7 @@ export default function HtmlParsePage() {
                 </div>
               ) : warningReports.length ? (
                 <div className="space-y-3">
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  <div className="rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] px-3 py-2 text-sm text-[var(--tv-warning-text)]">
                     경고 리포트 {formatInteger(warningReports.length)}건, 경고 {formatInteger(warningCount)}건
                   </div>
                   <div className="space-y-2">

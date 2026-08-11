@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from finiq.concurrency import bounded_as_completed, resolve_worker_count
+from finiq.concurrency import resolve_worker_count
 from finiq.data_scraper.storage.result_files import (
     result_page_number,
     sorted_result_page_paths,
 )
 from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
 from finiq.market_desk.web.features.market_data.service_sources import (
-    _parse_source_body_file,
+    _load_sqlite_manifest,
+    _parse_source_body_page_file,
+    _validate_sqlite_manifest_counts,
 )
 
 TABLE_SCHEMA_VERSION = 3
@@ -115,48 +118,46 @@ def _collect_source_folder_rows_by_year(
     source_row_count = 0
     duplicate_row_count = 0
     unlinked_disclosure_count = 0
-    indexed_records: list[list[dict[str, Any]] | None] = [None] * len(body_paths)
-    if worker_count <= 1 or len(body_paths) <= 1:
-        for index, body_path in enumerate(body_paths):
-            indexed_records[index] = _read_source_page_records(
-                body_path,
-                cancel_check=cancel_check,
-            )
-    else:
-        errors: list[Exception | None] = [None] * len(body_paths)
+    source_page_counts = _source_page_counts(body_paths)
+    source_pagination: dict[Path, tuple[int, int]] = {}
+
+    def iter_page_records():
+        if worker_count <= 1 or len(body_paths) <= 1:
+            for body_path in body_paths:
+                yield body_path, _read_source_page_records(
+                    body_path,
+                    cancel_check=cancel_check,
+                )
+            return
+
+        batch_size = worker_count * 2
         with ThreadPoolExecutor(
             max_workers=worker_count,
             thread_name_prefix="kind-table-source",
         ) as executor:
-            completed = bounded_as_completed(
-                executor,
-                enumerate(body_paths),
-                lambda item: executor.submit(
-                    _read_source_page_records,
-                    item[1],
-                    cancel_check=cancel_check,
-                ),
-                max_pending=worker_count * 2,
-            )
-            for future, (index, _body_path) in completed:
-                if cancel_check and cancel_check():
-                    raise RuntimeError("Job cancelled")
-                try:
-                    indexed_records[index] = future.result()
-                except Exception as error:
-                    errors[index] = error
-        first_error = next((error for error in errors if error is not None), None)
-        if first_error is not None:
-            raise first_error
+            for offset in range(0, len(body_paths), batch_size):
+                batch = body_paths[offset : offset + batch_size]
+                records_batch = executor.map(
+                    lambda path: _read_source_page_records(
+                        path,
+                        cancel_check=cancel_check,
+                    ),
+                    batch,
+                )
+                yield from zip(batch, records_batch)
 
-    for body_path, records in zip(body_paths, indexed_records):
+    for body_path, (records, paging) in iter_page_records():
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
+        _validate_source_page_pagination(
+            body_path,
+            paging,
+            source_page_counts=source_page_counts,
+            source_pagination=source_pagination,
+        )
         page_source_rows = 0
         page_written_rows = 0
         page_duplicate_rows = 0
-        if records is None:
-            raise RuntimeError(f"Source page parsing did not return a result: {body_path}")
         for record in records:
             source_row_count += 1
             page_source_rows += 1
@@ -223,17 +224,170 @@ def _collect_source_folder_rows_by_year(
     )
 
 
+def _inspect_source_folder_counts(
+    source_folder: Path,
+    body_paths: list[Path],
+    *,
+    worker_count: int,
+) -> tuple[
+    dict[str, tuple[int, int]],
+    int,
+    int,
+    int,
+    int,
+    int,
+    list[dict[str, Any]],
+]:
+    """Count source rows without retaining disclosure records in memory."""
+    shard_counts: dict[str, tuple[int, int]] = {}
+    seen_acpt_nos: set[str] = set()
+    company_keys: set[str] = set()
+    pages: list[dict[str, Any]] = []
+    row_count = 0
+    source_row_count = 0
+    duplicate_row_count = 0
+    unlinked_disclosure_count = 0
+    source_page_counts = _source_page_counts(body_paths)
+    source_pagination: dict[Path, tuple[int, int]] = {}
+
+    def iter_page_records():
+        if worker_count <= 1 or len(body_paths) <= 1:
+            for body_path in body_paths:
+                yield body_path, _read_source_page_records(
+                    body_path,
+                    cancel_check=None,
+                )
+            return
+
+        batch_size = worker_count * 2
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="kind-table-inspect-source",
+        ) as executor:
+            for offset in range(0, len(body_paths), batch_size):
+                batch = body_paths[offset : offset + batch_size]
+                records_batch = executor.map(
+                    lambda path: _read_source_page_records(
+                        path,
+                        cancel_check=None,
+                    ),
+                    batch,
+                )
+                yield from zip(batch, records_batch)
+
+    for body_path, (records, paging) in iter_page_records():
+        _validate_source_page_pagination(
+            body_path,
+            paging,
+            source_page_counts=source_page_counts,
+            source_pagination=source_pagination,
+        )
+        page_source_rows = 0
+        page_written_rows = 0
+        page_duplicate_rows = 0
+        for record in records:
+            source_row_count += 1
+            page_source_rows += 1
+            acpt_no = str(record.get("acpt_no") or "").strip()
+            if acpt_no in seen_acpt_nos:
+                duplicate_row_count += 1
+                page_duplicate_rows += 1
+                continue
+            seen_acpt_nos.add(acpt_no)
+
+            company_key = str(record.get("company_key") or "").strip()
+            if company_key:
+                company_keys.add(company_key)
+            else:
+                unlinked_disclosure_count += 1
+
+            year = _row_year(
+                {"disclosed_date": _date_part(record.get("disclosed_at"))}
+            )
+            disclosures, unlinked = shard_counts.get(year, (0, 0))
+            shard_counts[year] = (
+                disclosures + 1,
+                unlinked + (0 if company_key else 1),
+            )
+            row_count += 1
+            page_written_rows += 1
+
+        pages.append(
+            {
+                "source_file": body_path.relative_to(source_folder).as_posix(),
+                "source_page": result_page_number(body_path),
+                "source_rows": page_source_rows,
+                "written_rows": page_written_rows,
+                "duplicate_rows": page_duplicate_rows,
+            }
+        )
+
+    return (
+        shard_counts,
+        len(company_keys),
+        row_count,
+        source_row_count,
+        duplicate_row_count,
+        unlinked_disclosure_count,
+        pages,
+    )
+
+
 def _read_source_page_records(
     body_path: Path,
     *,
     cancel_check: Callable[[], bool] | None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     if cancel_check and cancel_check():
         raise RuntimeError("Job cancelled")
-    records = _parse_source_body_file(body_path)
+    records, paging = _parse_source_body_page_file(body_path)
+    if paging is None:
+        raise ValueError(f"{body_path}: 페이지네이션 정보를 찾지 못했습니다.")
     if any(not str(record.get("acpt_no") or "").strip() for record in records):
         raise ValueError(f"acpt_no is required for every disclosure: {body_path}")
-    return records
+    return records, paging
+
+
+def _source_page_counts(body_paths: list[Path]) -> dict[Path, int]:
+    counts: dict[Path, int] = {}
+    for body_path in body_paths:
+        folder = body_path.parent.resolve()
+        counts[folder] = counts.get(folder, 0) + 1
+    return counts
+
+
+def _validate_source_page_pagination(
+    body_path: Path,
+    paging: dict[str, int],
+    *,
+    source_page_counts: dict[Path, int],
+    source_pagination: dict[Path, tuple[int, int]],
+) -> None:
+    folder = body_path.parent.resolve()
+    filename_page = result_page_number(body_path)
+    current_page = int(paging["current_page"])
+    total_pages = int(paging["total_pages"])
+    total_items = int(paging["total_items"])
+    if current_page != filename_page:
+        raise ValueError(
+            f"{body_path}: 파일명 페이지={filename_page}, "
+            f"BODY 페이지={current_page}로 서로 다릅니다."
+        )
+    expected_page_count = source_page_counts[folder]
+    if total_pages != expected_page_count:
+        raise ValueError(
+            f"{folder}: BODY의 전체 페이지 수 {total_pages}와 "
+            f"저장된 페이지 수 {expected_page_count}가 다릅니다."
+        )
+    expected_pagination = source_pagination.setdefault(
+        folder,
+        (total_pages, total_items),
+    )
+    if expected_pagination != (total_pages, total_items):
+        raise ValueError(
+            f"{folder}: BODY 페이지 사이의 전체 페이지 수 또는 "
+            "전체 공시 건수가 다릅니다."
+        )
 
 
 def _validate_source_page_ranges(
@@ -272,7 +426,7 @@ def _validate_source_page_ranges(
             ) from error
 
         page_paths = sorted_result_page_paths(folder)
-        if not any(result_page_number(path) >= 1 for path in page_paths):
+        if not page_paths:
             raise ValueError(
                 f"{folder}: kind_workflow.input.json이 있지만 공시 결과 페이지가 없습니다."
             )
@@ -288,6 +442,13 @@ def _validate_source_page_ranges(
         if duplicate_pages:
             duplicate_text = ", ".join(str(page) for page in duplicate_pages)
             raise ValueError(f"{folder}: 중복되는 페이지 번호 {duplicate_text}이 있습니다.")
+        actual_pages = sorted(page_numbers)
+        expected_pages = list(range(1, len(page_paths) + 1))
+        if actual_pages != expected_pages:
+            raise ValueError(
+                f"{folder}: 페이지 번호가 1부터 연속적이지 않습니다. "
+                f"확인된 페이지: {actual_pages}"
+            )
 
 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:
@@ -496,8 +657,8 @@ def _write_sqlite_shard(
             )
             if inserted_count != len(rows):
                 msg = (
-                    "SQLite shard row count mismatch: "
-                    f"shard={shard_path}, inserted={inserted_count}, expected={len(rows)}"
+                    "SQLite 파일의 행 수가 다릅니다: "
+                    f"파일={shard_path}, 저장={inserted_count}, 예상={len(rows)}"
                 )
                 raise ValueError(msg)
             _write_metadata(
@@ -560,7 +721,7 @@ def _write_sqlite_shards(
             _raise_if_cancelled(cancel_check)
             if progress_callback:
                 progress_callback(
-                    f"[{i}/{total_shards}] {year}년 샤드 생성 중... ({len(shard_rows)} 건)"
+                    f"[{i}/{total_shards}] {year}년 SQLite 파일 생성 중... ({len(shard_rows)}건)"
                 )
             shard_path = shard_root / f"{year}.sqlite"
             shards.append(
@@ -576,7 +737,9 @@ def _write_sqlite_shards(
         return shards
 
     if progress_callback:
-        progress_callback(f"연도 샤드 병렬 생성을 사용합니다. workers={worker_count}")
+        progress_callback(
+            f"연도별 SQLite 파일을 병렬로 생성합니다. worker 수={worker_count}"
+        )
 
     shards_by_year: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(
@@ -588,7 +751,7 @@ def _write_sqlite_shards(
                 _raise_if_cancelled(cancel_check)
                 if progress_callback:
                     progress_callback(
-                        f"[{i}/{total_shards}] {year}년 샤드 생성 예약... ({len(shard_rows)} 건)"
+                        f"[{i}/{total_shards}] {year}년 SQLite 파일 생성 대기... ({len(shard_rows)}건)"
                     )
                 shard_path = shard_root / f"{year}.sqlite"
                 future = executor.submit(
@@ -615,7 +778,7 @@ def _write_sqlite_shards(
                     completed += 1
                     if progress_callback:
                         progress_callback(
-                            f"[{completed}/{total_shards}] {year}년 샤드 생성 완료 ({result['disclosures']} 건)"
+                            f"[{completed}/{total_shards}] {year}년 SQLite 파일 생성 완료 ({result['disclosures']}건)"
                         )
         except RuntimeError as exc:
             if str(exc) == "Job cancelled":
@@ -648,6 +811,7 @@ def build_disclosure_table_payload(
     if progress_callback:
         progress_callback("공시 메타데이터를 로드합니다...")
 
+    metadata_started_at = time.monotonic()
     source_body_paths = _find_original_source_body_files(source_path)
     _validate_source_page_ranges(
         source_path,
@@ -660,7 +824,7 @@ def build_disclosure_table_payload(
     )
     if progress_callback:
         progress_callback(
-            f"원본 BODY 페이지 병렬 파싱을 시작합니다. workers={source_workers}"
+            f"다운로드한 원본 페이지를 병렬로 읽습니다. worker 수={source_workers}"
         )
     (
         rows_by_year,
@@ -689,9 +853,12 @@ def build_disclosure_table_payload(
 
     if progress_callback:
         progress_callback(
-            f"데이터 분류 완료 (회사: {companies}개, 연도 샤드: {len(rows_by_year)}개, workers: {shard_workers}). 샤드 생성을 시작합니다..."
+            f"데이터 분류 완료: {time.monotonic() - metadata_started_at:.1f}초 "
+            f"(회사: {companies}개, 연도별 SQLite 파일: {len(rows_by_year)}개, "
+            f"worker 수: {shard_workers}). SQLite 파일 생성을 시작합니다..."
         )
 
+    shard_started_at = time.monotonic()
     shards = _write_sqlite_shards(
         rows_by_year=rows_by_year,
         shard_root=shard_root,
@@ -705,7 +872,10 @@ def build_disclosure_table_payload(
 
     _raise_if_cancelled(cancel_check)
     if progress_callback:
-        progress_callback("매니페스트 파일을 기록합니다...")
+        progress_callback(
+            f"SQLite 파일 생성 완료: {time.monotonic() - shard_started_at:.1f}초. "
+            "변환 기록 파일을 저장합니다..."
+        )
 
     manifest = {
         "format": MANIFEST_FORMAT,
@@ -749,4 +919,93 @@ def build_disclosure_table_payload(
         },
         "pages": pages,
         "shards": shards,
+    }
+
+
+def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Compare the current source pages, manifest, and SQLite shard contents."""
+    root_directory = str(body.get("root_directory") or "").strip()
+    output_path_raw = str(body.get("output_path") or "").strip()
+    manifest_path = _manifest_output_path(output_path_raw)
+
+    try:
+        source_path = _resolve_source(root_directory)
+        _validate_source_page_ranges(source_path, cancel_check=None)
+        manifest = _load_sqlite_manifest(manifest_path)
+        _validate_sqlite_manifest_counts(
+            manifest_path,
+            manifest,
+            filter_workers=body.get("table_workers"),
+        )
+
+        source_body_paths = _find_original_source_body_files(source_path)
+        source_workers = resolve_worker_count(
+            body.get("table_workers"),
+            item_count=len(source_body_paths),
+            field_name="table_workers",
+        )
+        (
+            shard_counts,
+            companies,
+            row_count,
+            source_row_count,
+            duplicate_row_count,
+            unlinked_disclosure_count,
+            pages,
+        ) = _inspect_source_folder_counts(
+            source_path,
+            source_body_paths,
+            worker_count=source_workers,
+        )
+
+        expected_summary = {
+            "companies": companies,
+            "source_rows": source_row_count,
+            "duplicate_rows": duplicate_row_count,
+            "disclosures": row_count,
+            "unlinked_disclosures": unlinked_disclosure_count,
+            "shards": len(shard_counts),
+        }
+        actual_summary = manifest.get("summary")
+        if actual_summary != expected_summary:
+            raise ValueError("다운로드한 원본 데이터의 건수와 변환 기록의 요약이 다릅니다.")
+        if manifest.get("pages") != pages:
+            raise ValueError("다운로드한 원본 데이터와 변환 기록에 적힌 페이지별 건수가 다릅니다.")
+
+        expected_shards = [
+            {
+                "year": year,
+                "disclosures": disclosures,
+                "unlinked_disclosures": unlinked_disclosures,
+            }
+            for year, (disclosures, unlinked_disclosures) in sorted(
+                shard_counts.items()
+            )
+        ]
+        actual_shards = [
+            {
+                "year": str(shard.get("year") or ""),
+                "disclosures": int(shard.get("disclosures") or 0),
+                "unlinked_disclosures": int(
+                    shard.get("unlinked_disclosures") or 0
+                ),
+            }
+            for shard in manifest.get("shards") or []
+        ]
+        if actual_shards != expected_shards:
+            raise ValueError("다운로드한 원본 데이터의 연도별 건수와 SQLite 파일 구성이 다릅니다.")
+    except Exception as error:
+        return {
+            "format": "finiq_disclosure_table_inspection_v1",
+            "confirmed": False,
+            "reason": str(error),
+            "manifest_path": str(manifest_path),
+        }
+
+    return {
+        "format": "finiq_disclosure_table_inspection_v1",
+        "confirmed": True,
+        "reason": "다운로드한 원본 데이터와 변환 기록, 연도별 SQLite 파일의 내용이 모두 일치합니다.",
+        "manifest_path": str(manifest_path),
+        "summary": expected_summary,
     }

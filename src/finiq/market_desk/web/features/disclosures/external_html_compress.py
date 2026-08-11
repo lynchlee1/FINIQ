@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import deque
+
 from finiq.concurrency import bounded_as_completed
 from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
 from finiq.market_desk.web.features.disclosures.html_common import *
@@ -29,7 +31,7 @@ def compress_disclosure_external_html_payload(
         else input_directory
     )
 
-    progress_log: list[str] = []
+    progress_log: deque[str] = deque(maxlen=100)
 
     def emit(message: str) -> None:
         progress_log.append(message)
@@ -146,6 +148,7 @@ def compress_disclosure_external_html_payload(
         assert indexed_record is not None
         _year, _acpt_no, record = indexed_record
         records.append(record)
+    indexed_records.clear()
 
     written_files: list[str] = []
     output_path = output_directory / "compressed-external-html.json"
@@ -193,5 +196,5 @@ def compress_disclosure_external_html_payload(
         "metadata_check": metadata_check,
         "processing_verification": processing_verification,
         "verification": verification,
-        "progress_log": progress_log[-100:],
+        "progress_log": list(progress_log),
     }

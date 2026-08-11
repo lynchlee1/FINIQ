@@ -138,6 +138,8 @@ filter가 정의하는 mode 폴더의 `filter.json`에 조건, 실행 상태, �
 #### Defaults and Exceptions
 
 - 선택 목록은 `03-filter/<mode>/filter.json`만 읽는다.
+- 화면은 처음 열 때 `공시내역 제목 검색`을 선택한다.
+- `기존 데이터 검토`는 현재 선택한 filter와 관계없이 `03-filter/<mode>/filter.json`을 각각 읽어 설정·처리 단계·결과 무결성을 검사한다.
 - 공시내역 필터링 화면에는 수동 `불러오기` 버튼을 표시하지 않는다.
 - 03단계와 후속 단계의 실행 설정에는 선택한 filter의 mode가 들어간다.
 - 저장한 mode와 조건이 화면 입력과 같을 때만 검색을 시작한다.

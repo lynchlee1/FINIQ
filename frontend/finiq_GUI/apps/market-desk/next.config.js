@@ -9,6 +9,7 @@ const nextConfig = {
     root: path.resolve(__dirname, '../../..'),
   },
   experimental: {
+    proxyTimeout: 10 * 60 * 1000,
     staleTimes: {
       dynamic: 30,
     },
