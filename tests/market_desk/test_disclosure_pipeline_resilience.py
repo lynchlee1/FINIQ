@@ -334,6 +334,49 @@ def test_existing_html_structure_and_hash_share_one_file_read(
     assert target_reads == 1
 
 
+@pytest.mark.parametrize("source_type", ["external", "internal"])
+def test_html_integrity_baseline_progress_reports_only_valid_targets(
+    tmp_path: Path,
+    source_type: str,
+) -> None:
+    acpt_numbers = ["20250101000001", "20250101000002"]
+    if source_type == "external":
+        output_directory = tmp_path / "external"
+        body = _external_workspace_body(
+            tmp_path,
+            {
+                "disclosures": [
+                    {"acpt_no": acpt_no, "disclosed_at": "2025-01-01"}
+                    for acpt_no in acpt_numbers
+                ]
+            },
+            output_directory=str(output_directory),
+        )
+        create_baseline = create_external_html_integrity_baseline_payload
+        target_label = "외부"
+    else:
+        body = _internal_html_body(tmp_path, acpt_numbers)
+        output_directory = Path(str(body["output_directory"]))
+        create_baseline = create_internal_html_integrity_baseline_payload
+        target_label = "내부"
+
+    target = output_directory / "2025" / f"{acpt_numbers[0]}.html"
+    target.parent.mkdir(parents=True)
+    target.write_text(_valid_html(), encoding="utf-8")
+    progress: list[str] = []
+
+    result = create_baseline(
+        {**body, "trust_existing_files": True},
+        progress_callback=progress.append,
+    )
+
+    assert result["hashed_count"] == 1
+    assert (
+        f"현재 {target_label} HTML 1건의 기준 해시를 생성합니다." in progress
+    )
+    assert not any("HTML 2건의 기준 해시를 생성합니다." in line for line in progress)
+
+
 def test_internal_html_resume_rejects_existing_file_without_hash_baseline(
     tmp_path: Path,
 ) -> None:
