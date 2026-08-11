@@ -18,11 +18,15 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import apply_work
 
 
 def _job_snapshot(job: DownloadJob) -> dict[str, Any]:
+    server_time = time.time()
     return {
         "job_id": job.id,
         "status": job.status,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
+        "server_time": server_time,
+        "elapsed_seconds": max(0.0, server_time - job.created_at),
+        "progress_idle_seconds": max(0.0, server_time - job.updated_at),
         "progress_log": list(job.progress_log),
         "result": job.result,
         "error": job.error,
@@ -80,17 +84,34 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
 
     def _worker() -> None:
         acquired = False
+        worker_started_at = time.monotonic()
         try:
             _append_job_progress(job_id, f"JOB queued id={job_id}")
+            queue_wait_started_at = time.monotonic()
             _DOWNLOAD_JOB_SEMAPHORE.acquire()
             acquired = True
+            _append_job_progress(
+                job_id,
+                "실행 대기 완료: "
+                f"{time.monotonic() - queue_wait_started_at:.1f}초. 작업을 시작합니다.",
+            )
             if _is_download_cancelled(job_id):
                 raise DownloadCancelled()
             _update_job(job_id, status="running")
             _append_job_progress(job_id, f"JOB start id={job_id}")
             for line in _download_payload_summary(payload):
                 _append_job_progress(job_id, f"JOB {line}")
+            network_wait_started_at = time.monotonic()
+            _append_job_progress(
+                job_id, "다른 KIND 네트워크 작업이 끝날 때까지 대기합니다."
+            )
             with KIND_NETWORK_JOB_LOCK:
+                _append_job_progress(
+                    job_id,
+                    "KIND 네트워크 작업 대기 완료: "
+                    f"{time.monotonic() - network_wait_started_at:.1f}초. "
+                    "다운로드를 시작합니다.",
+                )
                 result = run_download_action(
                     payload,
                     progress_callback=lambda message: _append_job_progress(
@@ -98,6 +119,10 @@ def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
                     ),
                     cancel_check=lambda: _is_download_cancelled(job_id),
                 )
+            _append_job_progress(
+                job_id,
+                f"다운로드 처리 완료: 총 {time.monotonic() - worker_started_at:.1f}초.",
+            )
             _update_job(job_id, status="completed", result=result)
             _append_job_progress(job_id, f"JOB completed id={job_id}")
         except DownloadCancelled:
@@ -167,11 +192,17 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
             )
             if not deletion_committed and _is_download_cancelled(job_id):
                 raise DownloadCancelled()
+            count_wait_started_at = time.monotonic()
             _append_job_progress(job_id, "KIND 건수 비교 실행 순서를 기다리는 중입니다.")
             with KIND_NETWORK_JOB_LOCK:
                 if not deletion_committed and _is_download_cancelled(job_id):
                     raise DownloadCancelled()
-                _append_job_progress(job_id, "KIND 건수 비교 작업을 시작합니다.")
+                _append_job_progress(
+                    job_id,
+                    "KIND 건수 비교 대기 완료: "
+                    f"{time.monotonic() - count_wait_started_at:.1f}초. "
+                    "비교 작업을 시작합니다.",
+                )
                 result["existing_downloads"] = check_existing_downloads(
                     str(payload.get("output_directory") or ""),
                     verify_with_kind=True,

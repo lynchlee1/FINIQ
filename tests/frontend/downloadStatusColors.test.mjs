@@ -4,30 +4,32 @@ import test from "node:test";
 
 const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx";
 const inspectionPanelPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-integrity/DataIntegrityInspectionPanel.tsx";
+const inspectionCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-integrity/DataIntegrityInspectionCard.tsx";
 const inspectionHookPath = "frontend/finiq_GUI/apps/market-desk/src/hooks/useDataIntegrityInspection.ts";
 const actionDockPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/ActionDock.tsx";
 const actionDockFollowPath = "frontend/finiq_GUI/packages/web-app/src/components/ui/useActionDockFollow.ts";
 const globalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
-test("download review is separate from search conditions and actionable steps own right-side actions", async () => {
-  const [source, panel] = await Promise.all([
+test("download review is first and actionable steps own right-side actions", async () => {
+  const [source, panel, card] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
     readFile(inspectionPanelPath, "utf8"),
+    readFile(inspectionCardPath, "utf8"),
   ]);
   const searchCardStart = source.indexOf("<DisclosureSearchConditionCard");
-  const reviewCardStart = source.indexOf("기존 데이터 검토");
+  const reviewCardStart = source.indexOf("<DataIntegrityInspectionCard");
   const searchCardClose = source.indexOf("          />", searchCardStart);
 
   assert.ok(searchCardStart >= 0);
   assert.ok(searchCardClose > searchCardStart);
-  assert.ok(reviewCardStart > searchCardClose);
+  assert.ok(reviewCardStart >= 0 && reviewCardStart < searchCardStart);
   assert.doesNotMatch(source.slice(searchCardStart, searchCardClose), /DataIntegrityInspectionPanel/);
-  assert.match(source, /<CardTitle[^>]*>[\s\S]*기존 데이터 검토/);
+  assert.match(card, /<CardTitle[^>]*>[\s\S]*기존 데이터 검토/);
   const settingsStep = source.slice(source.indexOf('key: "settings"'), source.indexOf('key: "files"'));
   assert.match(settingsStep, /action: !filtersMatch && savedFilters && filterDifferences\.length > 0 \? \{[\s\S]*label: "저장된 설정 적용"/);
   assert.doesNotMatch(settingsStep, /<Button\b/);
-  assert.match(source, /key: "files"[\s\S]{0,3500}label: isCurrentInspectionRunning \? "검사 중\.\.\." : "검사하기"/);
-  assert.ok(source.indexOf("label: isCurrentInspectionRunning") < source.indexOf('key: "kind-count"'));
+  assert.match(source, /key: "metadata"[\s\S]{0,2200}label: isCurrentInspectionRunning \? "검사 중\.\.\." : "검사하기"/);
+  assert.ok(source.indexOf("label: isCurrentInspectionRunning") < source.indexOf('key: "settings"'));
   assert.match(panel, /\{step\.action \? \([\s\S]{0,500}step\.action\.label/);
   assert.doesNotMatch(source, /업데이트 기간 적용/);
   assert.doesNotMatch(source, /폴더 검사하기/);
@@ -66,15 +68,15 @@ test("shared integrity panel presents a verdict, ordered steps and one success l
 });
 
 test("shared integrity hierarchy stays aligned with the surrounding product UI", async () => {
-  const [source, panel] = await Promise.all([
-    readFile(downloadPagePath, "utf8"),
+  const [card, panel] = await Promise.all([
+    readFile(inspectionCardPath, "utf8"),
     readFile(inspectionPanelPath, "utf8"),
   ]);
 
   assert.match(panel, /text-\[16px\][^\n]*\{verdict\.title\}/);
   assert.match(panel, /text-\[15px\][^\n]*\{step\.title\}/);
   assert.match(panel, /text-\[13px\][^\n]*\{step\.summary\}/);
-  assert.match(source, /CardTitle className="[^"]*text-\[16px\]/);
+  assert.match(card, /CardTitle className="[^"]*text-\[16px\]/);
   assert.doesNotMatch(panel, /text-\[18px\]/);
 });
 
@@ -91,11 +93,11 @@ test("shared inspection state ignores stale requests and full verification block
     readFile(inspectionHookPath, "utf8"),
   ]);
 
-  assert.match(source, /useDataIntegrityInspection<DownloadExistingPayload, DownloadExistingResponse>/);
+  assert.match(source, /useState<DownloadExistingResponse \| null>\(null\)/);
   assert.match(hook, /setIsChecking\(true\);\s*setError\(null\);/);
   assert.match(hook, /setError\(message\);\s*onErrorRef\.current\?\.\(message\);/);
   assert.match(hook, /requestRef\.current\.id !== requestId \|\| requestRef\.current\.key !== requestKey/);
-  assert.match(source, /inspect: detectExistingDownload/);
+  assert.doesNotMatch(source, /detectExistingDownload|runExistingInspection/);
   assert.match(source, /const hasVerificationFailure = !verified \|\|/);
   assert.match(source, /if \(hasInspectionFailure\)/);
   assert.match(source, /const completedInspection = activeInspectionRef\.current/);
@@ -162,7 +164,8 @@ test("manual inspection opens the activity panel and keeps progress visible", as
   assert.match(source, /const hasInspectionFailure = candidateCount > 0 \|\| hasVerificationFailure;/);
   assert.match(source, /setIsErrorStatus\(hasInspectionFailure\)/);
   assert.match(source, /failed \? "사용 불가" : deleted \? "파일 삭제 완료" : EXISTING_DATA_SUCCESS_LABEL/);
-  assert.match(source, /hasWarningNotification[\s\S]{0,500}tv-warning/);
+  assert.match(source, /const dockToneStyle = [\s\S]{0,500}tv-warning[\s\S]{0,500}tv-up/);
+  assert.match(source, /style=\{hasWarningNotification \|\| hasSuccessfulInspectionNotification[\s\S]{0,150}dockToneStyle\(notificationTone, notificationPanelOpen\)/);
   assert.match(source, /const actionDockRef = useActionDockFollow<HTMLDivElement>\(\)/);
   assert.match(source, /<div ref=\{actionDockRef\} className="action-dock-root/);
   assert.doesNotMatch(source, /md:sticky|md:top-\[/);

@@ -271,7 +271,7 @@ export default function DisclosureAutomationPage() {
         setDownloadConflicts(conflicts);
         setDownloadConfirmation(result.download_confirmation || "");
         setNotification(`페이지 수 충돌 ${formatInteger(conflicts.length)}개를 확인하세요.`);
-        setIsErrorStatus(true);
+        setIsErrorStatus(false);
         return;
       }
       setDownloadConflicts([]);
@@ -283,12 +283,14 @@ export default function DisclosureAutomationPage() {
         setReviewDecided({});
         window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(patterns));
         setNotification(`Pending · 목차 조합 ${formatInteger(patterns.length)}개에 입력이 필요합니다.`);
+        setIsErrorStatus(false);
       } else {
         setReviewPatterns([]);
         window.localStorage.removeItem(REVIEW_STORAGE_KEY);
         setNotification("공시 자동화가 완료되었습니다.");
+        setIsErrorStatus(false);
       }
-      void refreshPlan(result.workflow_status === "needs_review" ? "review" : "resume");
+      void refreshPlan(result.workflow_status === "needs_review" ? "review" : "resume", false);
     },
     onError: (error) => setNotification(error.message),
     onCancel: () => setNotification("실행을 취소했습니다. 완료된 단계는 다음 실행에서 재사용됩니다."),
@@ -486,12 +488,17 @@ export default function DisclosureAutomationPage() {
     if (!rootSaved || !modeSaved) throw new Error("공시 자동화 설정을 저장하지 못했습니다.");
   };
 
-  async function refreshPlan(trigger: "sync" | "resume" | "review" = "sync") {
+  async function refreshPlan(
+    trigger: "sync" | "resume" | "review" = "sync",
+    announce = true,
+  ) {
     try {
       const next = await apiPost<AutomationPlan>("/api/disclosure-workflows/plan", buildProfile(trigger));
       setPlan(next);
-      setNotification(next.execution_allowed ? "실행 계획을 확인했습니다." : "차단된 단계의 선행 결과를 확인하세요.");
-      setIsErrorStatus(!next.execution_allowed);
+      if (announce) {
+        setNotification(next.execution_allowed ? "실행 계획을 확인했습니다." : "차단된 단계의 선행 결과를 확인하세요.");
+        setIsErrorStatus(!next.execution_allowed);
+      }
       return next;
     } catch (error) {
       setNotification(error instanceof Error ? error.message : String(error));
@@ -694,7 +701,7 @@ export default function DisclosureAutomationPage() {
     const unresolved = reviewPatterns.filter((pattern) => !reviewDecided[pattern.signature]);
     if (unresolved.length) {
       setNotification(`Pending · 목차 조합 ${formatInteger(unresolved.length)}개가 아직 결정되지 않았습니다.`);
-      setIsErrorStatus(true);
+      setIsErrorStatus(false);
       return;
     }
     const nextRules = { ...sectionRules, ...reviewSelections };
@@ -707,6 +714,13 @@ export default function DisclosureAutomationPage() {
   const runStageStatus = (stage: number) => runResult?.stages.find((item) => item.stage === stage)?.status;
   const planForStage = (stage: number) => plan?.stages.find((item) => item.stage === stage);
   const inspectionForStage = (stage: number) => workspaceInspections[stage];
+  const notificationTone = isErrorStatus
+    ? "error"
+    : downloadConflicts.length || reviewPatterns.length
+      ? "warning"
+      : runResult?.workflow_status === "completed" && notification === "공시 자동화가 완료되었습니다."
+        ? "success"
+        : "neutral";
 
   if (initializationError) throw initializationError;
   if (loading) return <PageLoadingSpinner message="공시 자동화 설정을 불러오는 중입니다..." />;
@@ -929,6 +943,7 @@ export default function DisclosureAutomationPage() {
           activityActive={!!activeJobId}
           activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} isCancellable={!!activeJobId} onCancel={cancelJob} />}
           notificationActive={isErrorStatus || !!downloadConflicts.length || !!reviewPatterns.length || !!notification}
+          notificationTone={notificationTone}
           notificationDismissible={!downloadConflicts.length}
           notificationResetKey={`${notification}:${downloadConfirmation}:${reviewPatterns.length}`}
           notificationContent={
@@ -936,7 +951,7 @@ export default function DisclosureAutomationPage() {
               <p className="whitespace-pre-wrap">{notification || "알림 없음"}</p>
               {downloadConflicts.length ? <>
                 <ul className="space-y-2">
-                  {downloadConflicts.map((conflict) => <li key={conflict.range} className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                  {downloadConflicts.map((conflict) => <li key={conflict.range} className="rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                     <p className="font-medium">{conflict.range}</p>
                     <p>{conflict.reason}</p>
                     {conflict.saved_pages != null || conflict.kind_pages != null ? <p>저장 {conflict.saved_pages ?? "확인 불가"}페이지 · KIND {conflict.kind_pages ?? "확인 불가"}페이지</p> : null}
@@ -946,7 +961,7 @@ export default function DisclosureAutomationPage() {
                   <RefreshCw className="mr-2 h-4 w-4" />전체 다시 받기
                 </Button>
               </> : null}
-              {reviewPatterns.length ? <p className="font-medium text-amber-700 dark:text-amber-300">Pending · 목차 조합 {formatInteger(reviewPatterns.length)}개를 결정하세요.</p> : null}
+              {reviewPatterns.length ? <p className="font-medium text-[var(--tv-warning-text)]">Pending · 목차 조합 {formatInteger(reviewPatterns.length)}개를 결정하세요.</p> : null}
             </div>
           }
           settingsTitle="실행 설정"

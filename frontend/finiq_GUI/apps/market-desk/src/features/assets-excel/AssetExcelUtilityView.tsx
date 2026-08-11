@@ -1603,15 +1603,16 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             />
           }
           notificationActive={isErrorStatus || skippedRows.length > 0 || conflictCount > 0 || duplicateNotificationActive}
+          notificationTone={isErrorStatus ? "error" : skippedRows.length > 0 || conflictCount > 0 || duplicateDeletionCandidateCount > 0 || duplicateMismatchedRows.length > 0 ? "warning" : "success"}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (
-                <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">{status || "오류 내용을 확인할 수 없습니다."}</div>
+                <div className="whitespace-pre-wrap text-sm text-[var(--tv-down-text)]">{status || "오류 내용을 확인할 수 없습니다."}</div>
               ) : duplicateNotificationActive ? (
                 <div className="space-y-4">
                   {duplicateDeletionCandidateCount > 0 ? (
                     <div className="space-y-3 border-b border-slate-200 pb-4 dark:border-[#30363d]">
-                      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                      <div className="rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-sm text-[var(--tv-warning-text)]">
                         삭제 예정 파일 {formatInteger(duplicateDeletionCandidateCount)}개
                       </div>
                       <div className="max-h-40 overflow-auto rounded-md border border-slate-200 dark:border-[#30363d]">
@@ -1661,7 +1662,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                     </div>
                   ) : null}
                   {duplicateDeletedCount > 0 ? (
-                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+                    <div className="rounded-md border border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] p-3 text-sm text-[var(--tv-up-text)]">
                       중복 파일 {formatInteger(duplicateDeletedCount)}개를 삭제했습니다.
                     </div>
                   ) : null}
@@ -1686,7 +1687,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   </div>
                 </div>
               ) : skippedRows.length > 0 || conflictCount > 0 ? (
-                <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+                <div className="space-y-2 rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-sm text-[var(--tv-warning-text)]">
                   <div className="font-medium">확인 필요</div>
                   <div>건너뛴 Sheet {formatInteger(skippedRows.length)}개, 값 충돌 {formatInteger(conflictCount)}개가 있습니다.</div>
                 </div>

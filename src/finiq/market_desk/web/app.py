@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import time
 from typing import Any, Callable
 
 from fastapi import FastAPI
@@ -171,6 +172,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
 
 
 def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
+    worker_started_at = time.monotonic()
     try:
         if not job_manager.start_job(job_id):
             return
@@ -202,13 +204,22 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
             "internal_html_download",
             "disclosure_automation",
         }:
-            progress_callback("다른 KIND 네트워크 작업이 끝날 때까지 대기합니다.")
+            network_wait_started_at = time.monotonic()
+            progress_callback(
+                "다른 KIND 네트워크 작업이 끝날 때까지 대기합니다."
+            )
             with KIND_NETWORK_JOB_LOCK:
+                progress_callback(
+                    "KIND 네트워크 작업 대기 완료: "
+                    f"{time.monotonic() - network_wait_started_at:.1f}초. "
+                    "실제 처리를 시작합니다."
+                )
                 result = handler(apply_workspace_defaults(kind, payload), **kwargs)
         else:
             handler_payload = (
                 payload if kind == "title_search" else apply_workspace_defaults(kind, payload)
             )
+            progress_callback(f"실제 처리 시작: kind={kind}")
             result = handler(handler_payload, **kwargs)
 
         if job_manager.is_cancelled(job_id) or (
@@ -217,6 +228,10 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
             job_manager.cancel_job(job_id)
             return
 
+        progress_callback(
+            f"실제 처리 완료: kind={kind} · "
+            f"총 {time.monotonic() - worker_started_at:.1f}초"
+        )
         job_manager.complete_job(job_id, result)
     except Exception as exc:
         if job_manager.is_cancelled(job_id):

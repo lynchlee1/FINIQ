@@ -592,6 +592,7 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     confirmed = automation._inspect_detail_table(profile)
 
     assert confirmed["confirmed"] is True
+    assert confirmed["reason"] == "다운로드한 원본 데이터와 변환 기록, 연도별 SQLite 파일의 내용이 모두 일치합니다."
 
     monkeypatch.setattr(
         automation,
@@ -605,7 +606,7 @@ def test_table_inspection_compares_source_records_and_sqlite_shards(
     mismatch = automation._inspect_detail_table(profile)
 
     assert mismatch["confirmed"] is False
-    assert "레코드" in mismatch["reason"]
+    assert mismatch["reason"] == "다운로드한 원본 데이터와 SQLite 파일의 공시 내용이 일치하지 않습니다."
 
     manifest["summary"] = {
         "source_rows": 2,

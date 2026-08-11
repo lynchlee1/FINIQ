@@ -25,6 +25,11 @@ import {
   listDisclosureConditionPresets,
   saveDisclosureConditionPreset,
 } from "@/lib/disclosureConditionPresets";
+import { DataIntegrityInspectionCard } from "@/components/data-integrity/DataIntegrityInspectionCard";
+import type {
+  DataIntegrityInspectionStep,
+  DataIntegrityInspectionVerdict,
+} from "@/components/data-integrity/DataIntegrityInspectionPanel";
 
 const FILTER_PAGE_SIZE = 20;
 const TITLE_PAGE_SIZE = 50;
@@ -63,6 +68,14 @@ type TitleSearchResult = {
 
 type FilterTaskMode = "title-search" | "filter";
 
+const FILTER_WORKFLOW_STATUS_LABELS: Record<string, string> = {
+  ready: "입력 완료",
+  running: "실행 중",
+  interrupted: "중단됨",
+  completed: "완료",
+  failed: "실패",
+};
+
 
 function getKindDisclosureUrl(acptNo: string) {
   return `https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno=${encodeURIComponent(acptNo)}&docno=&viewerhost=&viewerport=`;
@@ -79,7 +92,7 @@ export default function FilterPage() {
   } = useSettingsStore();
 
   const [loading, setLoading] = useState(true);
-  const [taskMode, setTaskMode] = useState<FilterTaskMode>("filter");
+  const [taskMode, setTaskMode] = useState<FilterTaskMode>("title-search");
   const [mode, setMode] = useState("");
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
   const [selectedPreset, setSelectedPreset] = useState("");
@@ -92,6 +105,13 @@ export default function FilterPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [titleResult, setTitleResult] = useState<TitleSearchResult | null>(null);
   const [titlePageIndex, setTitlePageIndex] = useState(0);
+  const [inspectionRunning, setInspectionRunning] = useState(false);
+  const [inspectionError, setInspectionError] = useState("");
+  const [inspectionSummary, setInspectionSummary] = useState<{
+    total: number;
+    completed: number;
+    issues: string[];
+  } | null>(null);
   const {
     status: filterStatus,
     setStatus: setFilterStatus,
@@ -182,6 +202,12 @@ export default function FilterPage() {
     });
   }, [rootDirectory, setIsErrorStatus, setStatus]);
 
+  useEffect(() => {
+    setInspectionRunning(false);
+    setInspectionError("");
+    setInspectionSummary(null);
+  }, [rootDirectory]);
+
   const applyPreset = useCallback((preset: DisclosureConditionPreset, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
     if (FILTER_MODE_KEYS.some((item) => item === preset.mode)) {
@@ -192,6 +218,10 @@ export default function FilterPage() {
   }, [setIsErrorStatus, setStatus]);
 
   const pageCount = Math.max(1, Math.ceil((result?.disclosures?.length || 0) / FILTER_PAGE_SIZE));
+  const selectedWorkflow = useMemo(
+    () => presets.find((preset) => preset.name === selectedPreset) || null,
+    [presets, selectedPreset],
+  );
   const pageRows = useMemo(() => {
     const rows = result?.disclosures || [];
     const safeIndex = Math.min(Math.max(pageIndex, 0), pageCount - 1);
@@ -312,7 +342,6 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
-    const selectedWorkflow = presets.find((preset) => preset.name === selectedPreset);
     if (!selectedWorkflow) {
       setStatus("선택한 필터를 찾을 수 없습니다.");
       setIsErrorStatus(true);
@@ -338,6 +367,8 @@ export default function FilterPage() {
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(saved.presets);
+      setInspectionError("");
+      setInspectionSummary(null);
       setPresets((items) => items.map((preset) => preset.name === selectedPreset ? {
         ...preset,
         status: "running",
@@ -388,6 +419,8 @@ export default function FilterPage() {
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
+      setInspectionError("");
+      setInspectionSummary(null);
       setSelectedPreset(mode);
       setStatus(`조건검색 필터를 저장했습니다: ${mode}`);
       setIsErrorStatus(false);
@@ -420,6 +453,8 @@ export default function FilterPage() {
       const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
+      setInspectionError("");
+      setInspectionSummary(null);
       setSelectedPreset("");
       setStatus(`조건검색 필터를 삭제했습니다: ${selectedPreset}`);
       setIsErrorStatus(false);
@@ -429,9 +464,128 @@ export default function FilterPage() {
     }
   };
 
+  const handleInspectExistingFilter = async () => {
+    if (!rootDirectory?.trim()) {
+      setStatus("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const dataRoot = rootDirectory;
+    const requestId = presetListRequestIdRef.current;
+    setInspectionRunning(true);
+    setInspectionError("");
+    setInspectionSummary(null);
+    try {
+      const response = await apiPost<{
+        presets: DisclosureConditionPreset[];
+      }>("/api/disclosures/filter/presets", {
+        data_root: dataRoot,
+        action: "inspect",
+      });
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      setPresets(response.presets);
+      const issues = response.presets
+        .filter((preset) => preset.status !== "completed")
+        .map((preset) => `${preset.name}: ${FILTER_WORKFLOW_STATUS_LABELS[preset.status]}`);
+      const summary = {
+        total: response.presets.length,
+        completed: response.presets.length - issues.length,
+        issues,
+      };
+      setInspectionSummary(summary);
+      setStatus(issues.length
+        ? `조건검색 폴더 ${issues.length}개에 문제가 있습니다.`
+        : `조건검색 폴더 ${summary.total}개를 모두 확인했습니다.`);
+      setIsErrorStatus(issues.length > 0);
+    } catch (error) {
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setInspectionError(message);
+      setStatus(message);
+      setIsErrorStatus(true);
+    } finally {
+      if (isCurrentPresetWorkspace(dataRoot, requestId)) {
+        setInspectionRunning(false);
+      }
+    }
+  };
+
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
+
+  let inspectionVerdict: DataIntegrityInspectionVerdict;
+  if (!rootDirectory?.trim()) {
+    inspectionVerdict = {
+      label: "대기",
+      title: "작업공간 디렉토리를 선택하세요",
+      description: "작업공간 디렉토리를 선택한 다음 조건검색 폴더를 모두 검사하세요.",
+      tone: "neutral",
+    };
+  } else if (inspectionRunning) {
+    inspectionVerdict = {
+      label: "검사 중",
+      title: "조건검색 폴더 전체를 확인하고 있습니다",
+      description: "각 폴더의 저장 설정과 처리 단계를 확인하고 결과에 문제가 없는지 검사합니다.",
+      tone: "neutral",
+    };
+  } else if (inspectionError || inspectionSummary?.issues.length) {
+    inspectionVerdict = {
+      label: "사용 불가",
+      title: "조건검색 폴더에 문제가 있습니다",
+      description: inspectionError || `${inspectionSummary?.issues.length || 0}개 폴더의 처리가 완료되지 않았습니다.`,
+      tone: "error",
+    };
+  } else if (inspectionSummary) {
+    inspectionVerdict = {
+      label: "정상",
+      title: "모든 조건검색 폴더가 정상입니다",
+      description: `조건검색 폴더 ${inspectionSummary.total}개의 저장 설정과 처리 단계, 결과를 모두 확인했습니다.`,
+      tone: "success",
+    };
+  } else {
+    inspectionVerdict = {
+      label: "대기",
+      title: "검사를 시작하지 않았습니다",
+      description: "검사하기를 누르면 현재 선택한 필터와 관계없이 조건검색 폴더를 모두 확인합니다.",
+      tone: "neutral",
+    };
+  }
+  const inspectionSteps: DataIntegrityInspectionStep[] = [
+    {
+      key: "filter-folders",
+      title: "조건검색 폴더 전체 검사",
+      summary: inspectionError
+        || (inspectionSummary
+          ? `전체 ${inspectionSummary.total}개 중 ${inspectionSummary.completed}개가 정상입니다.`
+          : "각 조건검색 폴더의 저장 설정과 처리 단계를 확인하고 결과에 문제가 없는지 검사합니다."),
+      status: inspectionRunning
+        ? "running"
+        : inspectionError || inspectionSummary?.issues.length
+          ? "failed"
+          : inspectionSummary
+          ? "complete"
+          : "waiting",
+      statusLabel: inspectionRunning
+        ? "검사 중"
+        : inspectionError || inspectionSummary?.issues.length
+          ? "사용 불가"
+          : inspectionSummary
+          ? "정상"
+          : "대기",
+      detail: inspectionSummary?.issues.length ? (
+        <ul className="space-y-1 text-[13px] leading-5 text-[var(--tv-down-text)]">
+          {inspectionSummary.issues.map((issue) => <li key={issue}>{issue}</li>)}
+        </ul>
+      ) : undefined,
+      action: rootDirectory?.trim() ? {
+        label: inspectionRunning ? "검사 중..." : "검사하기",
+        onClick: handleInspectExistingFilter,
+        disabled: inspectionRunning || isJobActive,
+        loading: inspectionRunning,
+      } : undefined,
+    },
+  ];
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
@@ -468,6 +622,12 @@ export default function FilterPage() {
 
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
+          <DataIntegrityInspectionCard
+            description="실행 전에 저장된 조건검색 설정과 처리 단계를 확인하고 결과에 문제가 없는지 검사합니다."
+            verdict={inspectionVerdict}
+            steps={inspectionSteps}
+          />
+
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
           <CardTitle className="dark:text-white">데이터 경로</CardTitle>
@@ -640,7 +800,8 @@ export default function FilterPage() {
             />
           }
           notificationActive={isErrorStatus}
-          notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-red-600 dark:text-red-300" : "text-sm text-slate-500 dark:text-slate-400"}>{isErrorStatus ? status : "알림 없음"}</div>}
+          notificationTone="error"
+          notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>{isErrorStatus ? status : "알림 없음"}</div>}
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">

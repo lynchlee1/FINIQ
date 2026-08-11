@@ -123,12 +123,16 @@ class JobManager:
             job = self._jobs.get(job_id)
             if not job:
                 return None
+            server_time = time.time()
             return {
                 "job_id": job.id,
                 "kind": job.kind,
                 "status": job.status,
                 "created_at": job.created_at,
                 "updated_at": job.updated_at,
+                "server_time": server_time,
+                "elapsed_seconds": max(0.0, server_time - job.created_at),
+                "progress_idle_seconds": max(0.0, server_time - job.updated_at),
                 "progress_log": list(job.progress_log),
                 "result": job.result,
                 "error": job.error,

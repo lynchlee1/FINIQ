@@ -1,5 +1,13 @@
 import { useState, useCallback, useRef } from "react";
 
+function formatElapsed(seconds: number) {
+  const wholeSeconds = Math.floor(seconds);
+  if (wholeSeconds < 60) return `${wholeSeconds}초`;
+  const minutes = Math.floor(wholeSeconds / 60);
+  const remainingSeconds = wholeSeconds % 60;
+  return `${minutes}분 ${remainingSeconds}초`;
+}
+
 export function useJobStreaming() {
   const [status, setStatus] = useState<string>("");
   const [isErrorStatus, setIsErrorStatus] = useState<boolean>(false);
@@ -77,6 +85,15 @@ export function useJobStreaming() {
             const records = recordCount.toLocaleString("ko-KR");
             appendStatus(`${unit} ${completed.toLocaleString("ko-KR")}/${total.toLocaleString("ko-KR")} 완료 · 누적 ${records}건`);
             if (onProgress) onProgress(progress);
+          } else if (event.type === "heartbeat") {
+            const elapsedSeconds = event.elapsed_seconds;
+            const progressIdleSeconds = event.progress_idle_seconds;
+            if (![elapsedSeconds, progressIdleSeconds].every((item) => typeof item === "number" && Number.isFinite(item))) {
+              throw new Error("heartbeat times must be finite numbers");
+            }
+            appendStatus(
+              `작업 스레드 실행 중 · 총 경과 ${formatElapsed(elapsedSeconds)} · 새 진행 ${formatElapsed(progressIdleSeconds)}째 없음`
+            );
           } else if (event.type === "result") {
             onResult(event.payload);
             return "completed" as const;

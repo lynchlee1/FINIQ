@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import threading
-from collections import Counter
+import time
+from collections import Counter, deque
 
 from finiq.data_scraper.core.html_rate_limit import (
     RequestSpacingLimiter,
@@ -354,7 +355,7 @@ def download_disclosure_internal_html_payload(
         item_count=len(targets),
         field_name="max_workers",
     )
-    progress_log: list[str] = []
+    progress_log: deque[str] = deque(maxlen=100)
     processed_count = 0
     progress_lock = Lock()
 
@@ -396,6 +397,8 @@ def download_disclosure_internal_html_payload(
     source_integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
     download_acpt_numbers = acpt_numbers
     if bool(body.get("skip_existing", True)):
+        existing_check_started_at = time.monotonic()
+        emit("기존 HTML 구조 및 기준 해시 검사를 시작합니다.")
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
             acpt_numbers,
@@ -441,7 +444,10 @@ def download_disclosure_internal_html_payload(
             )
             for acpt_no in existing_acpt_numbers
         }
-        emit("저장 디렉토리 검사 완료: 대상 HTML/메타데이터 외 파일 없음.")
+        emit(
+            "저장 디렉토리 검사 완료: 대상 HTML/메타데이터 외 파일 없음 · "
+            f"{time.monotonic() - existing_check_started_at:.1f}초."
+        )
         emit(
             "기존 HTML 겹침 확인: "
             f"{output_summary['existing_target_html_count']}/{len(acpt_numbers)}건."
@@ -514,20 +520,43 @@ def download_disclosure_internal_html_payload(
             for acpt_no in acpt_numbers
             if acpt_no in saved_paths_by_acpt_no
         ]
-        downloaded_integrity, _ = _hash_html_files(
-            {path.stem: path for path in downloaded_paths}
+        hash_started_at = time.monotonic()
+        emit(f"새 HTML 기준 해시 생성을 시작합니다: {len(downloaded_paths)}건.")
+        downloaded_integrity, hash_cancelled = _hash_html_files(
+            {path.stem: path for path in downloaded_paths},
+            progress_callback=emit,
+            cancel_check=lambda: _is_cancelled(cancel_token)
+            or bool(cancel_check and cancel_check()),
         )
-        source_integrity_by_acpt_no.update(downloaded_integrity)
+        cancelled = (
+            cancelled
+            or hash_cancelled
+            or _is_cancelled(cancel_token)
+            or bool(cancel_check and cancel_check())
+        )
+        if cancelled:
+            emit(
+                "새 HTML 기준 해시 생성을 중지했습니다: "
+                f"{time.monotonic() - hash_started_at:.1f}초."
+            )
+        else:
+            emit(
+                f"새 HTML 기준 해시 생성 완료: {len(downloaded_integrity)}건 · "
+                f"{time.monotonic() - hash_started_at:.1f}초."
+            )
+            source_integrity_by_acpt_no.update(downloaded_integrity)
     finally:
         _clear_cancel_token(cancel_token)
     saved_acpt_numbers = [path.stem for path in saved_paths]
-    manifest_path = _write_html_manifest(
-        output_directory=resolved_output_directory,
-        acpt_numbers=saved_acpt_numbers,
-        source_json=source_json,
-        source_integrity=source_integrity_by_acpt_no,
-    )
-    emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
+    manifest_path = None
+    if not cancelled:
+        manifest_path = _write_html_manifest(
+            output_directory=resolved_output_directory,
+            acpt_numbers=saved_acpt_numbers,
+            source_json=source_json,
+            source_integrity=source_integrity_by_acpt_no,
+        )
+        emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
     emit(
         f"HTML 내부 저장 {'중지' if cancelled else '완료'}: 저장 파일 {len(saved_paths)}/{len(acpt_numbers)}건."
     )
@@ -539,7 +568,7 @@ def download_disclosure_internal_html_payload(
         "cancelled": cancelled,
         "acpt_numbers": acpt_numbers,
         "saved_files": [str(path) for path in saved_paths],
-        "manifest_path": str(manifest_path),
+        "manifest_path": str(manifest_path) if manifest_path is not None else "",
         "verification": verification,
-        "progress_log": progress_log[-100:],
+        "progress_log": list(progress_log),
     }

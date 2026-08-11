@@ -23,6 +23,7 @@ from finiq.data_scraper.workflow import (
     KindWorkflow,
     inspect_download_directory_pages,
     run_download,
+    validate_downloaded_result_page,
     validate_kind_workflow_input_snapshot,
 )
 
@@ -993,6 +994,31 @@ def test_inspect_download_directory_pages_requires_complete_when_requested(
             require_complete=True,
             validation_parallelism=2,
         )
+
+
+def test_validate_downloaded_result_page_reads_body_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page_path = tmp_path / "001_post_page_00001.body"
+    page_path.write_bytes(
+        build_result_page_html(page_number=1, page_size=100, total_items=100)
+    )
+    original_read_bytes = Path.read_bytes
+    read_count = 0
+
+    def counted_read_bytes(path: Path) -> bytes:
+        nonlocal read_count
+        if path.resolve() == page_path.resolve():
+            read_count += 1
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted_read_bytes)
+
+    result = validate_downloaded_result_page(page_path, expected_page_size=100)
+
+    assert result == {"current_page": 1, "total_pages": 1, "total_items": 100}
+    assert read_count == 1
 
 
 def test_inspect_download_directory_pages_detects_pagination_mismatch(

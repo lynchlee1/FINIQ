@@ -25,6 +25,7 @@ FINIQ MarketDesk is a quiet analyst cockpit: dense, exact, and calm under noisy 
 ### Rules
 
 - Blue is reserved for active controls, focus, and primary execution. Do not use it as ambient decoration.
+- Right-dock semantic colors are limited to green for successful completion, amber for attention or user action, and red for errors. Running, informational, inactive, and empty states retain the default control styling with no semantic tone.
 - Tables and metrics use tonal shift first, borders second, and shadows never.
 - Raw hex values should stay in `globals.css` tokens or legacy compatibility classes; new UI should prefer token-backed Tailwind colors already used in the app.
 
@@ -170,14 +171,17 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
-| Existing data review card | 기존 데이터 검토 | A standalone preflight card placed after search conditions and before execution settings. |
-| Existing data integrity inspection action | 검사하기 | Replace the pending step's `검사 필요` status with this action. Runs the page-owned integrity APIs against the selected data path. |
+| Existing data review card | 기존 데이터 검토 | A standalone preflight card placed first in a numbered workflow page, before search conditions or path and execution settings. |
+| Existing data integrity inspection action | 검사하기 | Replace the pending step's `대기` status with this action. Runs the page-owned integrity APIs against the selected data path only after the user clicks it. |
 | Existing data clear verdict | 정상 | Use when no prior data blocks a new download or when every page-owned inspection step passes. |
 | Existing data blocked verdict | 사용 불가 | Use when a mismatch or integrity failure blocks reuse. Keep the failed step and repair action visible. |
 | Existing data successful step state | 정상 | Use for every completed inspection step with no issue, including metadata, settings, saved files, and KIND count checks. Keep specific evidence in the step summary. |
-| Existing data inspection-required state | 검사 필요 | Warning state when metadata is readable but the full page-owned integrity inspection has not run for the current settings. |
+| Existing data inspection-pending state | 대기 | Neutral default before the user clicks `검사하기`. Loading a page or changing an input clears prior evidence but must not start an integrity API. |
 | Existing data inspection-complete notification | 정상 | Passive green right-dock state after a manual inspection succeeds. Do not open a dock panel automatically. |
 | Apply saved metadata settings | 저장된 설정 적용 | Right-side repair action in the failed settings-comparison step, aligned with the inspection action. |
+| Downloaded disclosure source data | 다운로드한 원본 데이터 | User-facing name for the downloaded page data checked before disclosure table conversion. |
+| Disclosure conversion manifest | 변환 기록 | User-facing name for the manifest that records conversion summaries and output files. Do not expose `매니페스트` in guidance text. |
+| Year-partitioned SQLite shard | 연도별 SQLite 파일 | User-facing name for a SQLite shard split by year. Keep `shard` as an internal implementation term only. |
 
 ### Disclosure Automation Workflow
 
@@ -237,7 +241,8 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filter mode folder | 파싱 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. |
 | Disclosure filter selector | 조건검색 필터 | Automatically lists mode-owned `filter.json` files; selecting one immediately applies its conditions. Do not add a separate name input, rename action, or manual load action on `공시내역 필터링`. |
 | Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
-| Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. |
+| Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. The page opens in `공시내역 제목 검색`. |
+| Disclosure filter existing-data inspection scope | 조건검색 폴더 전체 검사 | Manual inspection on stage 03 checks every mode-owned `03-filter/<mode>/filter.json` independently; it does not require a selected `조건검색 필터`. |
 | Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |
@@ -366,7 +371,11 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Parallel yearly ranges option | 여러 연도 병렬 처리 | Runs multiple yearly download folders concurrently. |
 | Parallel pages within one year option | 한 연도 내 페이지 병렬 처리 | Runs yearly folders in sequence and downloads pages within the active year concurrently. |
 | Background job retention setting | 작업 기록 보관 시간 (분) | Retains terminal in-memory job status for the configured number of minutes. It never removes saved files or workflow metadata. |
+| Active job elapsed time | 작업 경과 | Show server-reported elapsed time while a right-dock background job is queued or running. |
+| Active job progress freshness | 진행 확인 | Pair `상태 조회 정상` with either the age of the latest log or `새 로그 N초째 없음` after 10 seconds. This reports observed API/log freshness and does not claim that silent work has stopped. |
 | Disclosure separate output directory setting | 저장 디렉토리 별도 설정하기 | Shared setting across all disclosure detail pages. Default is off. When off, hide the result-directory input and use the canonical stage directory under the workspace. |
 | Disclosure workspace root path | 작업공간 디렉토리 | Shared root directory shown on every disclosure detail page. All canonical stage paths are resolved below this directory. |
 
 Right dock panels align exactly with the workflow content at the top of the page. On desktop, they begin following only after scrolling past a `24px` viewport inset, using the shared bounded spring motion; reduced-motion mode moves directly to the same bounded position. Do not use a sticky top offset, because it shifts the dock out of alignment before scrolling begins.
+
+Right dock buttons and notices use only three semantic tones: green for successful completion; amber for warnings or required decisions; red for errors. Running and informational states use the unchanged default control styling, as do inactive controls and `알림 없음`. Opening a panel keeps its semantic tone only while that state is active.

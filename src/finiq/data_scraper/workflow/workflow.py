@@ -1034,12 +1034,16 @@ def validate_downloaded_result_page(
 ) -> dict[str, int]:
     """저장된 KIND 결과 페이지가 고정 페이지 크기와 맞는지 검사한다."""
     resolved_path = Path(page_path).resolve()
-    paging = pagination_info(resolved_path.read_bytes())
+    page_bytes = resolved_path.read_bytes()
+    paging = pagination_info(page_bytes)
     if paging is None:
         msg = f"페이지 무결성 검사 실패: {resolved_path.name}에서 페이지네이션 정보를 찾지 못했습니다."
         raise ValueError(msg)
 
-    actual_rows = len(disclosure_file_rows(resolved_path))
+    try:
+        actual_rows = len(disclosure_rows(page_bytes))
+    except ValueError as exc:
+        raise ValueError(f"{exc}: {resolved_path}") from exc
     expected_rows = _expected_rows_for_page(
         total_items=int(paging["total_items"]),
         current_page=int(paging["current_page"]),

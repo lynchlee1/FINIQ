@@ -210,7 +210,8 @@ export default function Home() {
         activityActive={loading}
         activityContent={<JobStatusLogger status={loading ? "회사 목록을 불러오는 중입니다." : `회사 ${formatNumber(companies.length)}개를 불러왔습니다.`} isErrorStatus={false} />}
         notificationActive={!!error}
-        notificationContent={<div className={error ? "text-sm text-red-600 dark:text-red-300" : "text-sm dark:text-slate-300"}>{error || "알림 없음"}</div>}
+        notificationTone="error"
+        notificationContent={<div className={error ? "text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>{error || "알림 없음"}</div>}
         settingsTitle="시스템 설정"
         settingsContent={
           <>

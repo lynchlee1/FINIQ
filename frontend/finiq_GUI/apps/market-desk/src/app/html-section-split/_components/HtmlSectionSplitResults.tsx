@@ -430,18 +430,18 @@ export function HtmlSectionSplitActionDock({
   let notificationContent: ReactNode;
   if (isErrorStatus) {
     notificationContent = (
-      <div className="whitespace-pre-wrap text-sm text-red-600 dark:text-red-300">
+      <div className="whitespace-pre-wrap text-sm text-[var(--tv-down-text)]">
         {status || "오류 내용을 확인할 수 없습니다."}
       </div>
     );
   } else if (problemFileCount > 0) {
     notificationContent = (
-      <div className="text-sm text-slate-600 dark:text-slate-300">
+      <div className="text-sm text-[var(--tv-warning-text)]">
         문제 파일 {formatInteger(problemFileCount)}건이 표시되었습니다.
       </div>
     );
   } else {
-    notificationContent = <div className="text-sm text-slate-500 dark:text-slate-400">알림 없음</div>;
+    notificationContent = <div className="text-sm text-[var(--tv-muted)]">알림 없음</div>;
   }
 
   return (
@@ -456,6 +456,7 @@ export function HtmlSectionSplitActionDock({
         />
       }
       notificationActive={isErrorStatus || problemFileCount > 0}
+      notificationTone={isErrorStatus ? "error" : "warning"}
       notificationContent={notificationContent}
       settingsTitle="설정"
       settingsContent={

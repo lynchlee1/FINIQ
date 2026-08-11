@@ -23,6 +23,10 @@ import {
   type SectionPattern,
   type SplitResult,
 } from "./_components/HtmlSectionSplitResults";
+import {
+  SingleCheckDataIntegrityInspectionCard,
+  type SingleCheckDataIntegrityInspectionState,
+} from "@/components/data-integrity/DataIntegrityInspectionCard";
 
 function statusLabel(status: string) {
   if (status === "queued") return "대기 중";
@@ -75,6 +79,8 @@ export default function HtmlSectionSplitPage() {
   const [reportLimit, setReportLimit] = useState("50");
   const [workers, setWorkers] = useState("1");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
+  const [integrityInspectionResult, setIntegrityInspectionResult] = useState<InspectResult | null>(null);
+  const [integrityInspectionError, setIntegrityInspectionError] = useState("");
   const [sectionPatterns, setSectionPatterns] = useState<SectionPattern[]>([]);
   const [selectedPatternTocIds, setSelectedPatternTocIds] = useState<Record<string, string[]>>({});
   const [page, setPage] = useState(1);
@@ -85,10 +91,14 @@ export default function HtmlSectionSplitPage() {
   const [activeReviewView, setActiveReviewView] = useState<ReviewView>("source");
   const [isSplitting, setIsSplitting] = useState(false);
   const [isInspecting, setIsInspecting] = useState(false);
+  const [isIntegrityInspecting, setIsIntegrityInspecting] = useState(false);
   const [isLoadingSectionPatterns, setIsLoadingSectionPatterns] = useState(false);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
+  const integrityInspectAbortControllerRef = useRef<AbortController | null>(null);
   const sectionPatternAbortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
+  const activeIntegrityInspectionRef = useRef<{ jobId: string; key: string } | null>(null);
+  const currentIntegrityInspectionKeyRef = useRef("");
 
   const formatStatus = useCallback((data: any) => {
     const res = data.result || {};
@@ -126,17 +136,44 @@ export default function HtmlSectionSplitPage() {
   } = useJobPolling({
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     cancelEndpoint: "/api/disclosures/html/cancel",
-    onSuccess: (data) => {
+    onSuccess: (data, jobId) => {
+      const inspectionContext = activeIntegrityInspectionRef.current;
+      if (inspectionContext?.jobId === jobId) {
+        activeIntegrityInspectionRef.current = null;
+        setIsIntegrityInspecting(false);
+        if (inspectionContext.key !== currentIntegrityInspectionKeyRef.current) return;
+        if (data?.format !== "finiq_disclosure_html_section_inspect_v1") {
+          setIntegrityInspectionError("입력 HTML 검사 결과 형식이 올바르지 않습니다.");
+          return;
+        }
+        setIntegrityInspectionResult(data);
+        setIntegrityInspectionError("");
+        setStatus(`입력 HTML 검사 완료: ${formatInteger(data.summary?.found_files || 0)}개`);
+        return;
+      }
       if (data?.format === "finiq_disclosure_html_section_inspect_v1") {
         setInspectResult(data);
         setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.documents_with_sections || 0)}개 공시`);
       }
       setIsInspecting(false);
     },
-    onError: () => {
+    onError: (error, jobId) => {
+      const inspectionContext = activeIntegrityInspectionRef.current;
+      if (inspectionContext?.jobId === jobId) {
+        activeIntegrityInspectionRef.current = null;
+        setIsIntegrityInspecting(false);
+        if (inspectionContext.key !== currentIntegrityInspectionKeyRef.current) return;
+        setIntegrityInspectionError(error.message);
+      }
       setIsInspecting(false);
     },
-    onCancel: () => {
+    onCancel: (jobId) => {
+      const inspectionContext = activeIntegrityInspectionRef.current;
+      if (inspectionContext?.jobId === jobId) {
+        activeIntegrityInspectionRef.current = null;
+        setIsIntegrityInspecting(false);
+        if (inspectionContext.key !== currentIntegrityInspectionKeyRef.current) return;
+      }
       setIsInspecting(false);
       setStatus("작업을 중단했습니다.");
       setIsErrorStatus(false);
@@ -152,6 +189,14 @@ export default function HtmlSectionSplitPage() {
   const patternsWithoutSelection = sectionPatterns.filter(
     (pattern) => !Object.prototype.hasOwnProperty.call(selectedPatternTocIds, pattern.signature),
   );
+  const integrityInspectionPayload = {
+    data_root: dataRoot,
+    mode: htmlParseMode,
+    input_directory: useSeparateOutputDirectory ? inputDirectory : "",
+    workers: parseOptionalNumber(workers),
+  };
+  const currentIntegrityInspectionKey = JSON.stringify(integrityInspectionPayload);
+  currentIntegrityInspectionKeyRef.current = currentIntegrityInspectionKey;
 
   useEffect(() => {
     activeJobIdRef.current = activeJobId;
@@ -178,6 +223,7 @@ export default function HtmlSectionSplitPage() {
   useEffect(() => {
     return () => {
       inspectAbortControllerRef.current?.abort();
+      integrityInspectAbortControllerRef.current?.abort();
       sectionPatternAbortControllerRef.current?.abort();
       if (activeJobIdRef.current) {
         fetch("/api/disclosures/html/cancel", {
@@ -190,6 +236,8 @@ export default function HtmlSectionSplitPage() {
   }, []);
 
   const handleWorkspaceDirectoryChange = async (value: string) => {
+    integrityInspectAbortControllerRef.current?.abort();
+    integrityInspectAbortControllerRef.current = null;
     sectionPatternAbortControllerRef.current?.abort();
     sectionPatternAbortControllerRef.current = null;
     if (await saveSetting("output_root", value)) {
@@ -198,6 +246,9 @@ export default function HtmlSectionSplitPage() {
       setOutputDirectory(settings.html_section_split_output_directory || "");
     }
     setInspectResult(null);
+    setIntegrityInspectionResult(null);
+    setIntegrityInspectionError("");
+    setIsIntegrityInspecting(false);
     setSectionPatterns([]);
     setSelectedPatternTocIds({});
     setIsLoadingSectionPatterns(false);
@@ -208,6 +259,14 @@ export default function HtmlSectionSplitPage() {
     setSelectedSectionId("");
     setActiveReviewView("source");
   };
+
+  useEffect(() => {
+    integrityInspectAbortControllerRef.current?.abort();
+    integrityInspectAbortControllerRef.current = null;
+    setIntegrityInspectionResult(null);
+    setIntegrityInspectionError("");
+    setIsIntegrityInspecting(false);
+  }, [dataRoot, htmlParseMode, inputDirectory, useSeparateOutputDirectory, workers]);
 
   const handleOutputDirectoryChange = (value: string) => {
     setOutputDirectory(value);
@@ -432,6 +491,62 @@ export default function HtmlSectionSplitPage() {
     }
   };
 
+  const inspectExistingData = async () => {
+    if (!inputDirectory) {
+      setStatus("입력 데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    integrityInspectAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    integrityInspectAbortControllerRef.current = abortController;
+    const inspectionKey = currentIntegrityInspectionKey;
+    setIsIntegrityInspecting(true);
+    setIntegrityInspectionResult(null);
+    setIntegrityInspectionError("");
+    setIsErrorStatus(false);
+    setStatus("입력 HTML 전체를 검사하고 있습니다...");
+    try {
+      const response = await fetch("/api/disclosures/html/sections/inspect/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
+        body: JSON.stringify(integrityInspectionPayload),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.detail || "입력 HTML 검사에 실패했습니다.");
+      }
+      const data = await response.json();
+      const jobId = String(data.job_id || "");
+      if (!jobId) {
+        throw new Error("입력 HTML 검사 작업 ID를 받지 못했습니다.");
+      }
+      if (integrityInspectAbortControllerRef.current !== abortController
+        || inspectionKey !== currentIntegrityInspectionKeyRef.current) {
+        fetch("/api/disclosures/html/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: jobId }),
+        }).catch(() => undefined);
+        return;
+      }
+      activeIntegrityInspectionRef.current = { jobId, key: inspectionKey };
+      startPolling(jobId);
+    } catch (err: any) {
+      if (err?.name === "AbortError") return;
+      const message = errorMessage(err);
+      setIntegrityInspectionError(message);
+      setStatus(message);
+      setIsErrorStatus(true);
+      setIsIntegrityInspecting(false);
+    } finally {
+      if (integrityInspectAbortControllerRef.current === abortController) {
+        integrityInspectAbortControllerRef.current = null;
+      }
+    }
+  };
+
   const inspectFolder = () => {
     loadSourcePage(1, { refreshSectionPatterns: true });
   };
@@ -571,6 +686,28 @@ export default function HtmlSectionSplitPage() {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
+  const integrityProblemFiles = integrityInspectionResult?.problem_files || [];
+  const inspectionState: SingleCheckDataIntegrityInspectionState = !inputDirectory
+    ? "waiting"
+    : isIntegrityInspecting
+      ? "running"
+      : integrityInspectionError
+        ? "failed"
+      : integrityInspectionResult
+        ? integrityProblemFiles.length > 0 ? "failed" : "success"
+        : "ready";
+  const inspectionCopy = {
+    waiting: ["입력 데이터 경로를 선택하세요", "내부 HTML 데이터 경로를 선택한 다음 기존 원문의 목차 구성을 검사하세요."],
+    ready: ["기존 원문 데이터 검사가 필요합니다", "목차 분리 전에 입력 HTML 전체의 구성을 확인하세요."],
+    running: ["기존 원문 데이터를 확인하고 있습니다", "입력 HTML을 읽어 목차 구성과 문제 파일을 확인합니다."],
+    success: ["기존 원문 데이터를 그대로 사용해도 됩니다", `목차가 있는 공시 ${formatInteger(integrityInspectionResult?.summary?.documents_with_sections || 0)}개를 확인했습니다.`],
+    failed: ["기존 원문 데이터에 문제가 있습니다", integrityInspectionError || `읽거나 처리할 수 없는 파일 ${formatInteger(integrityProblemFiles.length)}개를 확인하세요.`],
+  }[inspectionState];
+  const inspectionStepSummary = integrityInspectionError
+    || (integrityInspectionResult
+      ? `대상 ${formatInteger(integrityInspectionResult.summary?.found_files || 0)}개, 목차 없음 ${formatInteger(integrityInspectionResult.summary?.files_without_sections || 0)}개, 문제 파일 ${formatInteger(integrityProblemFiles.length)}개입니다.`
+      : "입력 HTML을 읽어 목차 구성과 문제 파일을 확인합니다.");
+
   return (
     <HtmlWorkflowPage
       eyebrow="Disclosure Section Desk"
@@ -579,6 +716,21 @@ export default function HtmlSectionSplitPage() {
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
+          <SingleCheckDataIntegrityInspectionCard
+            description="실행 전에 입력 HTML의 목차 구성과 문제 파일을 확인합니다."
+            state={inspectionState}
+            verdictTitle={inspectionCopy[0]}
+            verdictDescription={inspectionCopy[1]}
+            stepTitle="입력 HTML과 목차 구성 검사"
+            stepSummary={inspectionStepSummary}
+            action={inputDirectory ? {
+              label: isIntegrityInspecting ? "검사 중..." : "검사하기",
+              onClick: inspectExistingData,
+              disabled: isIntegrityInspecting || isInspecting || isJobActive,
+              loading: isIntegrityInspecting,
+            } : undefined}
+          />
+
           <HtmlWorkflowCard
             title="데이터 경로"
           >

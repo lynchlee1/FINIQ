@@ -36,8 +36,8 @@ export function JobStatusLogger({
         className={cn(
           "min-h-[120px] max-h-[360px] overflow-auto rounded-lg border p-4 font-mono text-xs whitespace-pre-wrap leading-relaxed",
           isErrorStatus
-            ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300"
-            : "bg-slate-50 dark:bg-[#090d12] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-blue-100"
+            ? "border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] text-[var(--tv-down-text)]"
+            : "border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)]"
         )}
       >
         {status}

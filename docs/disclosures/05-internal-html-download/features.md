@@ -44,6 +44,7 @@ KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
 #### Defaults and Exceptions
 
 - HTML 식별 검사를 통과한 파일에서 바이트 수와 SHA-256을 계산해 manifest 기준값과 비교한다.
+- `기존 데이터 검토`를 실행하면 현재 대상과 저장 파일 구성을 비교하고 manifest의 기준 hash를 확인한다.
 
 ### Validate Internal HTML Results
 
@@ -55,6 +56,7 @@ KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
 
 - 일반 실행 결과에 중복·누락·추가 `acpt_no`가 있으면 실패 처리한다.
 - 사용자가 작업을 취소하면 그 뒤 생긴 누락은 허용하되, 중복·추가 `acpt_no`는 계속 검사하고 발견하면 실패 처리한다.
+- 다운로드 또는 기준 해시 생성 중 취소되면 manifest를 새로 저장하지 않고 취소 결과를 반환한다.
 
 ### Record Internal HTML Provenance
 
@@ -71,3 +73,5 @@ KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
 #### Behavior
 
 다운로드·검증 결과를 바꾸지 않고 화면에 전달할 범위만 제한한다.
+
+- 실행 결과의 진행 내역은 생성 중부터 최근 100줄만 보관한다.

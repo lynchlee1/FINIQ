@@ -17,6 +17,11 @@ import {
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
+import { DataIntegrityInspectionCard } from "@/components/data-integrity/DataIntegrityInspectionCard";
+import type {
+  DataIntegrityInspectionStep,
+  DataIntegrityInspectionVerdict,
+} from "@/components/data-integrity/DataIntegrityInspectionPanel";
 
 type DownloadVariant = "external" | "internal";
 type ExternalTaskMode = "download" | "compress";
@@ -128,11 +133,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [lastInspectionResult, setLastInspectionResult] = useState<any>(null);
   const [existingData, setExistingData] = useState<any>(null);
   const [existingCheckError, setExistingCheckError] = useState("");
-  const [checkingExisting, setCheckingExisting] = useState(false);
-  const [existingCheckRefreshKey, setExistingCheckRefreshKey] = useState(0);
+  const [existingCheckCompleted, setExistingCheckCompleted] = useState(false);
   const [trustExistingConfirmed, setTrustExistingConfirmed] = useState(false);
-  const checkExistingRequestRef = useRef({ id: 0, key: "" });
-  const checkExistingAbortControllerRef = useRef<AbortController | null>(null);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
   // Form State
@@ -167,7 +169,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     formatStatus,
     onSuccess: (nextResult) => {
       setResult(nextResult);
-      setExistingCheckRefreshKey((current) => current + 1);
+      setExistingData(null);
+      setExistingCheckError("");
+      setExistingCheckCompleted(false);
+      setLastInspectionCandidateCount(0);
+      setLastInspectionResult(null);
     },
   });
 
@@ -293,77 +299,19 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     variant,
   ]);
 
-  const checkExisting = useCallback(async () => {
-    if (!currentSourcePath || !outputDirectory) {
-      checkExistingRequestRef.current = { id: checkExistingRequestRef.current.id + 1, key: "" };
-      setExistingData(null);
-      setExistingCheckError("");
-      setCheckingExisting(false);
-      return;
-    }
-    const payload = buildCleanupPayload(true);
-    const requestId = checkExistingRequestRef.current.id + 1;
-    const requestKey = JSON.stringify({
-      endpoint: variantConfig.checkExistingEndpoint,
-      payload,
-    });
-    checkExistingRequestRef.current = { id: requestId, key: requestKey };
-    setCheckingExisting(true);
-
-    const controller = new AbortController();
-    checkExistingAbortControllerRef.current = controller;
-
-    try {
-      const response = await fetch(variantConfig.checkExistingEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const data = await readJsonResponse(response, "Existing HTML check failed");
-      if (!response.ok) throw new Error(data.detail || "Existing HTML check failed");
-      if (
-        checkExistingRequestRef.current.id !== requestId ||
-        checkExistingRequestRef.current.key !== requestKey
-      ) {
-        return;
-      }
-      setExistingCheckError("");
-      setExistingData(data.has_existing ? data : null);
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return;
-      }
-      if (
-        checkExistingRequestRef.current.id === requestId &&
-        checkExistingRequestRef.current.key === requestKey
-      ) {
-        setExistingCheckError(err.message || "기존 원문 데이터 경로 재확인에 실패했습니다.");
-      }
-    } finally {
-      if (
-        checkExistingRequestRef.current.id === requestId &&
-        checkExistingRequestRef.current.key === requestKey
-      ) {
-        if (!controller.signal.aborted) {
-          setCheckingExisting(false);
-        }
-      }
-    }
-  }, [currentSourcePath, outputDirectory, buildCleanupPayload, variantConfig.checkExistingEndpoint]);
-
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      checkExisting();
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [checkExisting, existingCheckRefreshKey]);
+    inspectAbortControllerRef.current?.abort();
+    inspectAbortControllerRef.current = null;
+    setInspectRunning(false);
+    setExistingData(null);
+    setExistingCheckError("");
+    setExistingCheckCompleted(false);
+    setLastInspectionCandidateCount(0);
+    setLastInspectionResult(null);
+  }, [currentSourcePath, dataRoot, htmlParseMode, limit, outputDirectory, useSeparateOutputDirectory]);
 
   useEffect(() => {
     return () => {
-      if (checkExistingAbortControllerRef.current) {
-        checkExistingAbortControllerRef.current.abort();
-      }
       if (inspectAbortControllerRef.current) {
         inspectAbortControllerRef.current.abort();
       }
@@ -390,10 +338,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
     try {
       setInspectRunning(true);
+      setExistingCheckError("");
+      setExistingCheckCompleted(false);
       setIsErrorStatus(false);
       setStatus("폴더를 검사하는 중입니다...");
       const payload = buildCleanupPayload(true);
-      const response = await fetch(variantConfig.inspectEndpoint, {
+      const response = await fetch(variantConfig.checkExistingEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -405,6 +355,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       const deleteCandidates = Array.isArray(data.deletion_candidates) ? data.deletion_candidates : [];
       setLastInspectionCandidateCount(data.deletion_candidate_count || 0);
       setLastInspectionResult(data);
+      setExistingData(data.has_existing ? data : null);
+      setExistingCheckCompleted(true);
       const lines = [
         "폴더 검사 완료",
         `대상 접수번호: ${formatInteger(data.requested_count)}`,
@@ -417,6 +369,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setStatus(lines.join("\n"));
     } catch (err: any) {
       if (err.name === 'AbortError') return;
+      setExistingCheckError(err.message || "기존 원문 데이터 검사에 실패했습니다.");
+      setExistingCheckCompleted(false);
       setStatus(err.message);
       setIsErrorStatus(true);
     } finally {
@@ -474,6 +428,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       const deletedFiles = Array.isArray(data.deleted_files) ? data.deleted_files : [];
       setLastInspectionCandidateCount(0);
       setLastInspectionResult(data);
+      setExistingData(null);
+      setExistingCheckCompleted(false);
       setDeleteConfirmed(false);
       setDeleteConfirmationText("");
       const lines = [
@@ -698,6 +654,104 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const showSaveWorkflow =
     (variant === "external" && externalTaskMode === "download") ||
     variant === "internal";
+  const hasInspectionInput = !!currentSourcePath && !!outputDirectory;
+  const integrityProblemCount = existingData
+    ? Number(existingData.invalid_target_html_count || 0)
+      + Number(existingData.hash_mismatch_target_html_count || 0)
+      + Number(existingData.hash_unverified_target_html_count || 0)
+      + Number(existingData.deletion_candidate_count || 0)
+    : 0;
+  let inspectionVerdict: DataIntegrityInspectionVerdict;
+  if (!hasInspectionInput) {
+    inspectionVerdict = {
+      label: "대기",
+      title: "데이터 경로를 선택하세요",
+      description: "입력 경로와 결과 경로를 선택한 다음 검사하기를 누르세요.",
+      tone: "neutral",
+    };
+  } else if (inspectRunning) {
+    inspectionVerdict = {
+      label: "검사 중",
+      title: "기존 원문 데이터를 확인하고 있습니다",
+      description: "현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다.",
+      tone: "neutral",
+    };
+  } else if (existingCheckError || integrityProblemCount > 0) {
+    inspectionVerdict = {
+      label: "사용 불가",
+      title: "기존 원문 데이터에 문제가 있습니다",
+      description: existingCheckError || existingDetail,
+      tone: "error",
+    };
+  } else if (existingCheckCompleted) {
+    inspectionVerdict = {
+      label: "정상",
+      title: existingData ? "기존 원문 데이터를 그대로 사용해도 됩니다" : "기존 원문 데이터가 없습니다",
+      description: existingData
+        ? existingSummary
+        : "현재 대상과 충돌하는 기존 원문 파일이 없습니다.",
+      tone: "success",
+    };
+  } else {
+    inspectionVerdict = {
+      label: "대기",
+      title: "검사를 시작하지 않았습니다",
+      description: "검사하기를 누르면 현재 경로의 저장 파일과 해시 구성을 확인합니다.",
+      tone: "neutral",
+    };
+  }
+  const inspectionSteps: DataIntegrityInspectionStep[] = [
+    {
+      key: "target-files",
+      title: "현재 대상과 저장 파일 비교",
+      summary: existingData
+        ? `대상 ${formatInteger(existingData.requested_count)}건 중 ${formatInteger(existingData.existing_target_html_count)}건은 저장되어 있고 ${formatInteger(existingData.download_required_target_html_count ?? existingData.missing_target_html_count)}건은 새로 저장해야 합니다.`
+        : existingCheckCompleted
+          ? "현재 대상과 충돌하는 기존 저장 파일이 없습니다."
+          : "데이터 경로를 선택하면 현재 대상과 저장 파일을 비교합니다.",
+      status: inspectRunning
+        ? "running"
+        : existingCheckError
+          ? "failed"
+          : existingCheckCompleted
+            ? "complete"
+            : "waiting",
+      statusLabel: inspectRunning
+        ? "검사 중"
+        : existingCheckError
+          ? "사용 불가"
+          : existingCheckCompleted
+            ? "정상"
+            : "대기",
+    },
+    {
+      key: "integrity",
+      title: "해시와 폴더 구성 검사",
+      summary: existingData
+        ? `해시 불일치 ${formatInteger(existingData.hash_mismatch_target_html_count)}건, 기준 없음 ${formatInteger(existingData.hash_unverified_target_html_count)}건, 대상 외 파일 ${formatInteger(existingData.deletion_candidate_count)}개입니다.`
+        : "저장 파일의 기준 해시와 대상 외 파일을 확인합니다.",
+      status: inspectRunning
+        ? "running"
+        : integrityProblemCount > 0 || !!existingCheckError
+          ? "failed"
+          : existingCheckCompleted
+            ? "complete"
+            : "waiting",
+      statusLabel: inspectRunning
+        ? "검사 중"
+        : integrityProblemCount > 0 || existingCheckError
+          ? "사용 불가"
+          : existingCheckCompleted
+            ? "정상"
+            : "대기",
+      action: hasInspectionInput ? {
+        label: inspectRunning ? "검사 중..." : "검사하기",
+        onClick: handleInspectFolder,
+        disabled: inspectRunning || isJobActive,
+        loading: inspectRunning,
+      } : undefined,
+    },
+  ];
 
   return (
     <HtmlWorkflowPage
@@ -736,24 +790,21 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           {showSaveWorkflow && (
+            <DataIntegrityInspectionCard
+              description="실행 전에 현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."
+              verdict={inspectionVerdict}
+              steps={inspectionSteps}
+            />
+          )}
+
+          {showSaveWorkflow && (
             <HtmlWorkflowCard
               title="데이터 경로"
             >
               <HtmlWorkflowForm fields={basePathFields} />
-            {checkingExisting && !existingData && (
-              <div className={`${htmlInsetPanelClassName} text-body`}>
-                <div className="flex items-start gap-3">
-                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-500 dark:text-slate-400" />
-                  <div className="space-y-1">
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">기존 원문 데이터 경로 자동 병렬 확인 중...</p>
-                    <p className="text-caption break-all text-slate-500 dark:text-slate-400">{outputDirectory}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-            {existingCheckError && !existingData && !checkingExisting && (
+            {existingCheckError && !existingData && (
               <div className="text-body rounded-lg border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-4 text-[var(--tv-warning)]">
-                <p className="font-semibold">기존 원문 데이터 경로 재확인 실패</p>
+                <p className="font-semibold">기존 원문 데이터 검사 실패</p>
                 <p className="text-caption mt-1 break-words">{existingCheckError}</p>
               </div>
             )}
@@ -764,12 +815,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                     <p className="text-body flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
                       <FolderOpen className="h-4 w-4 text-[var(--tv-accent)]" />
                       기존 원문 저장 범위 감지됨
-                      {checkingExisting && (
-                        <span className="text-caption inline-flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          재확인 중
-                        </span>
-                      )}
                     </p>
                     <p className="text-caption text-slate-500 dark:text-slate-400">
                       저장됨: <span className="font-semibold">{formatInteger(existingData.existing_target_html_count || 0)}</span>건
@@ -928,11 +973,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
             />
           }
           notificationActive={isErrorStatus || !!existingCheckError || lastInspectionCandidateCount > 0 || !!lastInspectionResult}
+          notificationTone={isErrorStatus ? "error" : existingCheckError || lastInspectionCandidateCount > 0 ? "warning" : "success"}
           notificationContent={
             <>
               {lastInspectionCandidateCount > 0 && (
                 <div className="space-y-3">
-                  <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                  <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                     삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
                   </div>
                   <div className="flex items-center space-x-2">
@@ -960,10 +1006,10 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                 </div>
               )}
               {!lastInspectionCandidateCount && !lastInspectionResult && isErrorStatus && (
-                <div className="text-body whitespace-pre-wrap text-[var(--tv-down)]">{status || "오류 내용을 확인할 수 없습니다."}</div>
+                <div className="text-body whitespace-pre-wrap text-[var(--tv-down-text)]">{status || "오류 내용을 확인할 수 없습니다."}</div>
               )}
               {!lastInspectionCandidateCount && !lastInspectionResult && !isErrorStatus && existingCheckError && (
-                <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
+                <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                   {existingCheckError}
                 </div>
               )}

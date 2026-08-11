@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from finiq.data_scraper.parse import disclosure_file_rows
+from finiq.data_scraper.parse import (
+    disclosure_file_rows,
+    disclosure_rows,
+    pagination_info,
+)
 from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.market_desk.web.features.market_data.service_records import *
 
@@ -83,7 +87,7 @@ def _validate_sqlite_manifest_counts(
     def validate_shard(shard: dict[str, Any]) -> tuple[int, int]:
         shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
         if not shard_path.is_file():
-            msg = f"SQLite shard not found: {shard_path}"
+            msg = f"연도별 SQLite 파일을 찾을 수 없습니다: {shard_path}"
             raise ValueError(msg)
         expected = int(shard.get("disclosures") or 0)
         expected_unlinked_value = shard.get("unlinked_disclosures")
@@ -107,15 +111,15 @@ def _validate_sqlite_manifest_counts(
             connection.close()
         if actual != expected:
             msg = (
-                "SQLite shard disclosure count mismatch: "
-                f"shard={shard_path}, manifest={expected}, rows={actual}"
+                "연도별 SQLite 파일의 공시 건수가 다릅니다: "
+                f"파일={shard_path}, 변환 기록={expected}, 실제 행={actual}"
             )
             raise ValueError(msg)
         if actual_unlinked != expected_unlinked:
             msg = (
-                "SQLite shard unlinked disclosure count mismatch: "
-                f"shard={shard_path}, manifest={expected_unlinked}, "
-                f"rows={actual_unlinked}"
+                "연도별 SQLite 파일의 회사 미연결 공시 건수가 다릅니다: "
+                f"파일={shard_path}, 변환 기록={expected_unlinked}, "
+                f"실제 행={actual_unlinked}"
             )
             raise ValueError(msg)
         return expected, expected_unlinked
@@ -240,7 +244,7 @@ def _iter_sqlite_manifest_disclosure_records(
             continue
         shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
         if not shard_path.is_file():
-            msg = f"SQLite shard not found: {shard_path}"
+            msg = f"연도별 SQLite 파일을 찾을 수 없습니다: {shard_path}"
             raise ValueError(msg)
         connection = sqlite3.connect(shard_path)
         connection.row_factory = sqlite3.Row
@@ -531,7 +535,9 @@ def _search_sqlite_manifest_titles(
     def query_shard(shard: dict[str, Any]) -> tuple[int, list[tuple[str, int]]]:
         shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
         if not shard_path.is_file():
-            raise ValueError(f"SQLite shard not found: {shard_path}")
+            raise ValueError(
+                f"연도별 SQLite 파일을 찾을 수 없습니다: {shard_path}"
+            )
         return _query_sqlite_shard_titles(
             shard_path,
             table_name,
@@ -569,6 +575,24 @@ def _search_sqlite_manifest_titles(
 def _parse_source_body_file(file_path: Path) -> list[dict[str, Any]]:
     parsed_rows = disclosure_file_rows(file_path)
 
+    return _source_body_rows(file_path, parsed_rows)
+
+
+def _parse_source_body_page_file(
+    file_path: Path,
+) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
+    body_bytes = file_path.read_bytes()
+    try:
+        parsed_rows = disclosure_rows(body_bytes)
+    except ValueError as exc:
+        raise ValueError(f"{exc}: {file_path}") from exc
+    return _source_body_rows(file_path, parsed_rows), pagination_info(body_bytes)
+
+
+def _source_body_rows(
+    file_path: Path,
+    parsed_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for parsed_row in parsed_rows:
         row = dict(parsed_row)

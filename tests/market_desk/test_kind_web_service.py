@@ -635,6 +635,11 @@ def _write_source_body_fixture(tmp_path: Path) -> Path:
     (source_dir / "001_post_page_00001.body").write_text(
         """
         <html><body>
+          <section class="paging-group">
+            <div class="paging type-00">
+              전체 <em>2</em>건 : <strong>1</strong>/1
+            </div>
+          </section>
           <table summary="회사명 공시제목">
             <tbody>
               <tr>
@@ -988,7 +993,7 @@ def test_filter_disclosures_payload_rejects_missing_manifest_shard_path(tmp_path
         shard["relative_path"] = "missing.sqlite"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="SQLite shard not found"):
+    with pytest.raises(ValueError, match="연도별 SQLite 파일을 찾을 수 없습니다"):
         filter_disclosures_payload(
             {
                 "data_root": str(data_root),
@@ -1165,7 +1170,7 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_count_mismatch(
     manifest["shards"][0]["disclosures"] = 3
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="SQLite shard disclosure count mismatch"):
+    with pytest.raises(ValueError, match="연도별 SQLite 파일의 공시 건수가 다릅니다"):
         filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
@@ -1787,7 +1792,10 @@ def test_build_disclosure_table_payload_preserves_unlinked_disclosure(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["shards"][0]["unlinked_disclosures"] = 0
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(ValueError, match="unlinked disclosure count mismatch"):
+    with pytest.raises(
+        ValueError,
+        match="연도별 SQLite 파일의 회사 미연결 공시 건수가 다릅니다",
+    ):
         filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
@@ -1800,22 +1808,30 @@ def test_build_disclosure_table_payload_parses_source_pages_in_parallel(
     source_root = _write_source_body_fixture(tmp_path)
     first_page = next(source_root.rglob("*_post_page_*.body"))
     second_page = first_page.with_name("001_post_page_00002.body")
+    first_markup = first_page.read_text(encoding="utf-8")
+    first_page.write_text(
+        first_markup.replace("<strong>1</strong>/1", "<strong>1</strong>/2"),
+        encoding="utf-8",
+    )
     second_page.write_text(
-        first_page.read_text(encoding="utf-8")
+        first_markup
+        .replace("<strong>1</strong>/1", "<strong>2</strong>/2")
         .replace("20250102000001", "20250104000001")
         .replace("20250103000001", "20250105000001"),
         encoding="utf-8",
     )
-    original_parse = table_export_module._parse_source_body_file
+    original_parse = table_export_module._parse_source_body_page_file
     barrier = threading.Barrier(2)
 
-    def synchronized_parse(path: Path) -> list[dict[str, Any]]:
+    def synchronized_parse(
+        path: Path,
+    ) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
         barrier.wait(timeout=2)
         return original_parse(path)
 
     monkeypatch.setattr(
         table_export_module,
-        "_parse_source_body_file",
+        "_parse_source_body_page_file",
         synchronized_parse,
     )
     progress: list[str] = []
@@ -1831,7 +1847,7 @@ def test_build_disclosure_table_payload_parses_source_pages_in_parallel(
 
     assert payload["summary"]["source_rows"] == 4
     assert payload["summary"]["disclosures"] == 4
-    assert "원본 BODY 페이지 병렬 파싱을 시작합니다. workers=2" in progress
+    assert "다운로드한 원본 페이지를 병렬로 읽습니다. worker 수=2" in progress
 
 
 def test_build_disclosure_table_payload_rejects_classification_input(
@@ -1976,10 +1992,12 @@ def test_build_disclosure_table_payload_does_not_reread_failed_source_page(
     ).replace(b"20250101000001", b"20250101000002")
     (folder / "001_post_page_00001.body").write_bytes(page_one)
     (folder / "002_post_page_00002.body").write_bytes(page_two)
-    original_parse = table_export_module._parse_source_body_file
+    original_parse = table_export_module._parse_source_body_page_file
     read_counts: dict[int, int] = {1: 0, 2: 0}
 
-    def _parse_with_transient_failure(body_path: Path) -> list[dict[str, Any]]:
+    def _parse_with_transient_failure(
+        body_path: Path,
+    ) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
         page_number = table_export_module.result_page_number(body_path)
         read_counts[page_number] += 1
         if page_number == 2 and read_counts[page_number] == 1:
@@ -1988,7 +2006,7 @@ def test_build_disclosure_table_payload_does_not_reread_failed_source_page(
 
     monkeypatch.setattr(
         table_export_module,
-        "_parse_source_body_file",
+        "_parse_source_body_page_file",
         _parse_with_transient_failure,
     )
 
@@ -2028,15 +2046,21 @@ def test_build_disclosure_table_payload_does_not_retry_source_page_without_acpt_
     (folder / "001_post_page_00001.body").write_bytes(
         valid_page.replace(b"20250101000001", b"")
     )
-    original_parse = table_export_module._parse_source_body_file
+    original_parse = table_export_module._parse_source_body_page_file
     read_count = 0
 
-    def _count_parse(body_path: Path) -> list[dict[str, Any]]:
+    def _count_parse(
+        body_path: Path,
+    ) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
         nonlocal read_count
         read_count += 1
         return original_parse(body_path)
 
-    monkeypatch.setattr(table_export_module, "_parse_source_body_file", _count_parse)
+    monkeypatch.setattr(
+        table_export_module,
+        "_parse_source_body_page_file",
+        _count_parse,
+    )
 
     with pytest.raises(ValueError, match="missing acpt_no"):
         build_disclosure_table_payload(
@@ -2100,6 +2124,126 @@ def test_build_disclosure_table_payload_rejects_duplicate_source_page_numbers(
                 "output_path": str(tmp_path / "02-table"),
             }
         )
+
+
+def test_build_disclosure_table_payload_rejects_missing_source_page(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "01-list"
+    folder = source_root / "20250101_20251231"
+    folder.mkdir(parents=True)
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01",
+                end_date="2025-12-31",
+                page_size=1,
+            )
+        ),
+        encoding="utf-8",
+    )
+    page_one = _build_download_result_page_html(
+        page_number=1,
+        page_size=1,
+        total_items=3,
+    )
+    page_three = _build_download_result_page_html(
+        page_number=3,
+        page_size=1,
+        total_items=3,
+    ).replace(b"20250101000001", b"20250101000003")
+    (folder / "001_post_page_00001.body").write_bytes(page_one)
+    (folder / "003_post_page_00003.body").write_bytes(page_three)
+
+    with pytest.raises(ValueError, match="페이지 번호가 1부터 연속적이지 않습니다"):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+                "table_workers": 2,
+            }
+        )
+
+
+def test_build_and_inspect_disclosure_table_reject_body_page_mismatch(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "01-list"
+    folder = source_root / "20250101_20251231"
+    folder.mkdir(parents=True)
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2025-01-01",
+                end_date="2025-12-31",
+                page_size=1,
+            )
+        ),
+        encoding="utf-8",
+    )
+    page_one = _build_download_result_page_html(
+        page_number=1,
+        page_size=1,
+        total_items=2,
+    )
+    page_two = _build_download_result_page_html(
+        page_number=2,
+        page_size=1,
+        total_items=2,
+    ).replace(b"20250101000001", b"20250101000002")
+    first_path = folder / "001_post_page_00001.body"
+    second_path = folder / "002_post_page_00002.body"
+    first_path.write_bytes(page_one)
+    mismatched_page_two = page_two.replace(
+        b"<strong>2</strong>",
+        b"<strong>1</strong>",
+    )
+    second_path.write_bytes(mismatched_page_two)
+
+    output_path = tmp_path / "02-table"
+    mismatch_message = "파일명 페이지=2, BODY 페이지=1로 서로 다릅니다"
+    with pytest.raises(ValueError, match=mismatch_message):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(output_path),
+                "table_workers": 2,
+            }
+        )
+
+    second_path.write_bytes(page_two.replace(b"<em>2</em>", b"<em>3</em>"))
+    with pytest.raises(
+        ValueError,
+        match="BODY 페이지 사이의 전체 페이지 수 또는 전체 공시 건수가 다릅니다",
+    ):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(output_path),
+                "table_workers": 2,
+            }
+        )
+
+    second_path.write_bytes(page_two)
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_path),
+            "table_workers": 2,
+        }
+    )
+    second_path.write_bytes(mismatched_page_two)
+
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_path),
+            "table_workers": 2,
+        }
+    )
+
+    assert inspection["confirmed"] is False
+    assert mismatch_message in inspection["reason"]
 
 
 def test_build_disclosure_table_payload_deduplicates_source_rows_by_acpt_no(
@@ -2411,6 +2555,62 @@ def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Pat
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["disclosures"][0]["source_size_bytes"] > 0
     assert len(manifest["disclosures"][0]["source_sha256"]) == 64
+
+
+def test_download_disclosure_internal_html_payload_stops_when_hashing_is_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_download(**kwargs):
+        target = kwargs["targets"][0]
+        path = Path(kwargs["output_directory"]) / f"{target['acpt_no']}.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_valid_download_html(), encoding="utf-8")
+        return [path]
+
+    def cancelled_hash(paths_by_acpt_no, *, progress_callback, cancel_check):
+        assert list(paths_by_acpt_no) == ["20250101000001"]
+        cancel_disclosure_html_download("cancel-during-hash")
+        assert cancel_check()
+        return {}, True
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fake_download,
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._hash_html_files",
+        cancelled_hash,
+    )
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000999",
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = download_disclosure_internal_html_payload(
+        {
+            "output_directory": str(tmp_path / "content_html"),
+            "source_compressed_json_path": str(compressed_path),
+            "cancel_token": "cancel-during-hash",
+        }
+    )
+
+    assert payload["cancelled"] is True
+    assert payload["manifest_path"] == ""
+    assert any("기준 해시 생성을 중지했습니다" in line for line in payload["progress_log"])
+    assert not any("기준 해시 생성 완료" in line for line in payload["progress_log"])
 
 
 def test_download_disclosure_internal_html_payload_rejects_json_only_input(tmp_path: Path) -> None:

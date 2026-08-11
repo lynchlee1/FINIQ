@@ -123,6 +123,17 @@ test("download page-count conflicts require confirmation in the notification pan
   assert.match(page, /startRun\("sync", sectionRules, downloadConfirmation\)/);
 });
 
+test("automation notifications keep completion, decisions, and errors on distinct tones", async () => {
+  const page = await readFile(pagePath, "utf8");
+
+  assert.match(page, /workflow_status === "needs_download_confirmation"[\s\S]*?setIsErrorStatus\(false\)/);
+  assert.match(page, /Pending · 목차 조합 \$\{formatInteger\(unresolved\.length\)\}개가 아직 결정되지 않았습니다\.[\s\S]*?setIsErrorStatus\(false\)/);
+  assert.match(page, /const notificationTone = isErrorStatus[\s\S]*?\? "error"[\s\S]*?downloadConflicts\.length \|\| reviewPatterns\.length[\s\S]*?\? "warning"[\s\S]*?workflow_status === "completed"[\s\S]*?\? "success"[\s\S]*?: "neutral"/);
+  assert.match(page, /notificationTone=\{notificationTone\}/);
+  assert.match(page, /refreshPlan\(result\.workflow_status === "needs_review" \? "review" : "resume", false\)/);
+  assert.match(page, /if \(announce\) \{[\s\S]*?setNotification\([\s\S]*?setIsErrorStatus\(!next\.execution_allowed\);[\s\S]*?\}/);
+});
+
 test("automation and detail pages share the same judgment setting components", async () => {
   const [page, downloadPage, sectionResults] = await Promise.all([
     readFile(pagePath, "utf8"),

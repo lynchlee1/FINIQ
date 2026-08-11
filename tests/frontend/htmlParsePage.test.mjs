@@ -133,12 +133,12 @@ test("html parse page removes resume and excel export controls", async () => {
 
 test("html parse page sends parallel worker count", async () => {
   const source = await readFile(pagePath, "utf8");
-  const runHandler = source.match(/const handleRun = async \(\) => \{[\s\S]*?startJob\("\/api\/disclosures\/html\/parse\/start", payload\);[\s\S]*?\};/)?.[0] ?? "";
+  const inspectionPayload = source.match(/const buildParseInspectionPayload = \(\) => \(\{[\s\S]*?\}\);/)?.[0] ?? "";
   const settingsBlock = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
 
   assert.match(source, /const \[parallelWorkers, setParallelWorkers\] = useState\(""\)/);
   assert.match(source, /const \[progressInterval, setProgressInterval\] = useState\("1000"\)/);
-  assert.match(runHandler, /parallel_workers: parallelWorkers \? Number\(parallelWorkers\) : null/);
+  assert.match(inspectionPayload, /parallel_workers: parallelWorkers \? Number\(parallelWorkers\) : null/);
   assert.match(settingsBlock, /id: "parallelWorkers"[\s\S]*?label: "병렬 워커 수"/);
   assert.match(settingsBlock, /help: "앱 최초 접속 시 확인한 CPU 기준 기본값을 사용합니다\."/);
   assert.match(source, /parallel_worker_count: defaultParallelWorkers/);
@@ -149,7 +149,7 @@ test("html parse page renders parse-mode specific filters in separate options ca
   const candidateCardSource = await readFile(candidateCardPath, "utf8");
   const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?<\/CardContent>\s*<\/Card>/)?.[0] ?? "";
   const optionsCardContent = source.match(/<CardTitle className="dark:text-white">실행 옵션<\/CardTitle>[\s\S]*?<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>/)?.[0] ?? "";
-  const runHandler = source.match(/const handleRun = async \(\) => \{[\s\S]*?startJob\("\/api\/disclosures\/html\/parse\/start", payload\);[\s\S]*?\};/)?.[0] ?? "";
+  const inspectionPayload = source.match(/const buildParseInspectionPayload = \(\) => \(\{[\s\S]*?\}\);/)?.[0] ?? "";
   const modeHandler = source.match(/const handleParseModeChange = \(val: string\) => \{[\s\S]*?\};/)?.[0] ?? "";
 
   assert.match(source, /type ParseModeConfig =/);
@@ -218,7 +218,7 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /executionOptionExampleNotice\.examples\.map/);
   assert.match(source, /window\.open\(executionOptionExampleUrl\(example, executionOptionInputDirectory\), "_blank", "noopener,noreferrer"\)/);
   assert.match(source, />\s*열기\s*</);
-  assert.match(runHandler, /record_filters: activeRecordFilters/);
-  assert.match(runHandler, /field: executionOptionConfig\.field/);
-  assert.match(runHandler, /operator: "in"/);
+  assert.match(inspectionPayload, /record_filters: activeRecordFilters/);
+  assert.match(source, /const activeRecordFilters = executionOptionConfig[\s\S]*?field: executionOptionConfig\.field/);
+  assert.match(source, /const activeRecordFilters = executionOptionConfig[\s\S]*?operator: "in"/);
 });

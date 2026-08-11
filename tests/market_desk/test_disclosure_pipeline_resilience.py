@@ -383,7 +383,7 @@ def test_download_payload_reports_parent_cancellation(
     assert manifest["disclosures"] == []
 
 
-def test_internal_html_download_cancellation_manifest_lists_only_saved_files(
+def test_internal_html_download_cancellation_stops_before_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     compressed_path = tmp_path / "compressed-external-html.json"
@@ -412,8 +412,8 @@ def test_internal_html_download_cancellation_manifest_lists_only_saved_files(
     )
 
     assert result["cancelled"] is True
-    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
-    assert manifest["disclosures"] == []
+    assert result["manifest_path"] == ""
+    assert not (tmp_path / "content" / "kind_disclosure_html_manifest.json").exists()
 
 
 def test_external_html_compression_rejects_receipt_number_mismatching_filename(

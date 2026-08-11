@@ -25,6 +25,7 @@ HTML로 저장한 KIND 조건검색 결과를 검색 가능한 연도별 SQLite 
 - 원본 `.body`는 한 번만 읽으며 다른 표나 필드로 대신하지 않는다.
 - `classification_path`, 구형 JSON classification이나 이름순 파일 탐색을 사용하면 변환을 중단한다.
 - 원본 BODY 페이지는 `table_workers` 범위에서 병렬 파싱하고, 중복 제거와 SQLite 저장은 원본 페이지·행 순서로 적용한다.
+- 병렬 파싱 결과는 최대 `table_workers * 2`개 페이지씩 입력 순서로 소비하며 전체 페이지의 원시 행 목록을 한꺼번에 보관하지 않는다.
 
 ### Deduplicate Disclosures
 
@@ -88,6 +89,7 @@ SQLite 조각마다 원본과 변환 결과를 manifest에 기록한다.
 - 연도별 실제 SQLite 행 수 = manifest의 연도별 저장 행 수
 - 연도별 저장 행 수 합계 = manifest의 전체 저장 행 수
 - 회사 관계가 없는 저장 행 수 = manifest의 `unlinked_disclosures`
+- `기존 데이터 검토`는 다운로드한 원본 페이지를 다시 집계하고 변환 기록의 페이지·전체·연도별 건수와 실제 연도별 SQLite 파일의 행 수를 모두 비교한다.
 
 #### Defaults and Exceptions
 

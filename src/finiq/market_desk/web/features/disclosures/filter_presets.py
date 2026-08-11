@@ -318,7 +318,9 @@ def _read_workflow(
     return payload, workflow
 
 
-def _read_workflows(directory: Path) -> list[dict[str, Any]]:
+def _read_workflows(
+    directory: Path, *, require_workflow_format: bool = False
+) -> list[dict[str, Any]]:
     if not directory.exists():
         return []
     if not directory.is_dir():
@@ -327,6 +329,8 @@ def _read_workflows(directory: Path) -> list[dict[str, Any]]:
     for path in directory.glob("*/filter.json"):
         document = _read_json_object(path)
         if document.get("format") != FILTER_WORKFLOW_FORMAT:
+            if require_workflow_format:
+                raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
             continue
         _payload, workflow = _read_workflow(path, document=document)
         workflows.append(workflow)
@@ -773,6 +777,8 @@ def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
         if action == "list":
             pass
+        elif action == "inspect":
+            workflows = _read_workflows(directory, require_workflow_format=True)
         elif action == "save":
             workflow = _normalize_condition_input(payload.get("preset"))
             path = _workflow_path(payload.get("data_root"), workflow["mode"])
@@ -799,7 +805,9 @@ def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
             workflow_path.unlink()
             workflows = [item for item in workflows if item["mode"] != mode]
         else:
-            raise ValueError("filter workflow action must be one of: list, save, delete")
+            raise ValueError(
+                "filter workflow action must be one of: list, inspect, save, delete"
+            )
 
     return {
         "format": FILTER_WORKFLOW_DIRECTORY_FORMAT,
