@@ -594,13 +594,14 @@ def _source_body_rows(
     parsed_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    source_page = _result_page_number(file_path)
     for parsed_row in parsed_rows:
         row = dict(parsed_row)
         company_id = _clean_text(row.get("company_id"))
         row["company_id"] = company_id or None
         row["company_key"] = company_id or None
         row["source_file"] = str(file_path)
-        row["source_page"] = _result_page_number(file_path)
+        row["source_page"] = source_page
         rows.append(row)
     return rows
 

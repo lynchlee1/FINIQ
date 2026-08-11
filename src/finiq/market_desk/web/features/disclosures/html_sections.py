@@ -700,7 +700,7 @@ def inspect_disclosure_html_section_output_payload(
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Rebuild expected section output in memory and compare every saved HTML."""
+    """Rebuild and compare each expected section output without retaining contents."""
     input_directory_raw = str(body.get("input_directory") or "").strip()
     output_directory_raw = str(body.get("output_directory") or "").strip()
     if not input_directory_raw:
@@ -721,26 +721,6 @@ def inspect_disclosure_html_section_output_payload(
         lambda source_file: _selected_section_output(source_file, section_save_rules),
         cancel_check,
     )
-    if _cancel_requested(cancel_check):
-        return {"cancelled": True}
-
-    expected: dict[str, str] = {}
-    problems: list[dict[str, str]] = []
-    for source_file, result in zip(html_files, results):
-        if result["status"] != "ok":
-            problems.append(
-                {
-                    "source_file": str(source_file),
-                    "error": str(result.get("error") or result["status"]),
-                }
-            )
-            continue
-        if int(result.get("selected_sections") or 0) == 0:
-            continue
-        expected[_relative_source_path(input_directory, source_file)] = str(
-            result["content"]
-        )
-
     actual_paths = (
         {
             path.relative_to(output_directory).as_posix(): path
@@ -754,21 +734,41 @@ def inspect_disclosure_html_section_output_payload(
         if output_directory.is_dir()
         else {}
     )
-    missing_files = sorted(set(expected) - set(actual_paths))
-    unexpected_files = sorted(set(actual_paths) - set(expected))
-    mismatched_files = sorted(
-        relative_path
-        for relative_path in set(expected) & set(actual_paths)
-        if actual_paths[relative_path].read_text(encoding="utf-8")
-        != expected[relative_path]
-    )
+    expected_relative_paths: set[str] = set()
+    problems: list[dict[str, str]] = []
+    missing_files: list[str] = []
+    mismatched_files: list[str] = []
+    for source_file, result in zip(html_files, results):
+        if result["status"] != "ok":
+            problems.append(
+                {
+                    "source_file": str(source_file),
+                    "error": str(result.get("error") or result["status"]),
+                }
+            )
+            continue
+        if int(result.get("selected_sections") or 0) == 0:
+            continue
+        relative_path = _relative_source_path(input_directory, source_file)
+        expected_relative_paths.add(relative_path)
+        actual_path = actual_paths.get(relative_path)
+        if actual_path is None:
+            missing_files.append(relative_path)
+        elif actual_path.read_text(encoding="utf-8") != str(result["content"]):
+            mismatched_files.append(relative_path)
+    if _cancel_requested(cancel_check):
+        return {"cancelled": True}
+
+    missing_files.sort()
+    mismatched_files.sort()
+    unexpected_files = sorted(set(actual_paths) - expected_relative_paths)
     integrity_ok = not (
         problems or missing_files or unexpected_files or mismatched_files
     )
     if progress_callback is not None:
         progress_callback(
             "목차 분리 결과 검사 완료: "
-            f"예상 {len(expected)}건, 누락 {len(missing_files)}건, "
+            f"예상 {len(expected_relative_paths)}건, 누락 {len(missing_files)}건, "
             f"내용 불일치 {len(mismatched_files)}건"
         )
     return {
@@ -777,7 +777,7 @@ def inspect_disclosure_html_section_output_payload(
         "output_directory": str(output_directory),
         "summary": {
             "found_files": len(html_files),
-            "expected_files": len(expected),
+            "expected_files": len(expected_relative_paths),
             "actual_files": len(actual_paths),
             "problem_files": len(problems),
             "missing_files": len(missing_files),

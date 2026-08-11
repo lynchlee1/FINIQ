@@ -403,15 +403,19 @@ def download_disclosure_internal_html_payload(
             resolved_output_directory,
             acpt_numbers,
             target_years=target_years,
+            collect_integrity=True,
+        )
+        actual_integrity_by_acpt_no = output_summary.pop(
+            "_target_integrity_by_acpt_no"
         )
         integrity_summary = _inspect_html_integrity(
             resolved_output_directory,
             acpt_numbers,
-            target_years=target_years,
             source_json=source_json,
             structurally_valid_acpt_numbers=output_summary[
                 "existing_target_acpt_numbers"
             ],
+            actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
         )
         unverified_acpt_numbers = integrity_summary[
             "hash_unverified_target_acpt_numbers"

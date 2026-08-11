@@ -34,8 +34,10 @@ def _load_internal_html_integrity_source(
     return source_json, str(source_path), acpt_numbers, target_years
 
 
-def clean_disclosure_html_output_directory_payload(
+def _clean_disclosure_html_output_directory_payload(
     body: dict[str, Any],
+    *,
+    collect_integrity: bool,
 ) -> dict[str, Any]:
     """Delete files that would block HTML download resume from the output directory."""
     output_directory = str(body.get("output_directory") or "").strip()
@@ -80,6 +82,7 @@ def clean_disclosure_html_output_directory_payload(
         acpt_numbers,
         target_years=target_years,
         dry_run=dry_run,
+        collect_integrity=collect_integrity,
     )
     return {
         "format": "kind_disclosure_html_folder_cleanup_v1",
@@ -95,41 +98,56 @@ def clean_disclosure_html_output_directory_payload(
     }
 
 
+def clean_disclosure_html_output_directory_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Delete files that would block HTML download resume from the output directory."""
+    return _clean_disclosure_html_output_directory_payload(
+        body,
+        collect_integrity=False,
+    )
+
+
 def check_disclosure_html_output_directory_payload(
     body: dict[str, Any],
 ) -> dict[str, Any]:
     """Inspect existing HTML download files without deleting anything."""
     payload = dict(body)
     payload["dry_run"] = True
-    summary = clean_disclosure_html_output_directory_payload(payload)
+    summary = _clean_disclosure_html_output_directory_payload(
+        payload,
+        collect_integrity=True,
+    )
+    actual_integrity_by_acpt_no = summary.pop(
+        "_target_integrity_by_acpt_no"
+    )
     if summary.get("source_type") == "external":
         source_json, _source_json_path = _load_workspace_filtered_payload(body)
         acpt_numbers = collect_acpt_numbers_from_json(source_json)
         acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
-        target_years = _target_years_from_json(source_json, acpt_numbers)
         integrity_summary = _inspect_html_integrity(
             Path(summary["output_directory"]),
             acpt_numbers,
-            target_years=target_years,
             source_json=source_json,
             structurally_valid_acpt_numbers=summary[
                 "existing_target_acpt_numbers"
             ],
+            actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
         )
         integrity_summary.pop("_verified_integrity_by_acpt_no", None)
         summary.update(integrity_summary)
     elif summary.get("source_type") == "content":
-        source_json, _source_path, acpt_numbers, target_years = (
+        source_json, _source_path, acpt_numbers, _target_years = (
             _load_internal_html_integrity_source(body)
         )
         integrity_summary = _inspect_html_integrity(
             Path(summary["output_directory"]),
             acpt_numbers,
-            target_years=target_years,
             source_json=source_json,
             structurally_valid_acpt_numbers=summary[
                 "existing_target_acpt_numbers"
             ],
+            actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
         )
         integrity_summary.pop("_verified_integrity_by_acpt_no", None)
         summary.update(integrity_summary)
@@ -168,33 +186,20 @@ def create_external_html_integrity_baseline_payload(
         raise ValueError("No acpt_no values found in JSON")
     acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
     target_years = _target_years_from_json(source_json, acpt_numbers)
-    output_summary = _validate_html_output_directory_files(
-        resolved_output_directory,
-        acpt_numbers,
-        target_years=target_years,
-    )
-    baseline_acpt_numbers = output_summary["existing_target_acpt_numbers"]
-    if not baseline_acpt_numbers:
-        raise ValueError("기준 해시를 생성할 정상 외부 HTML이 없습니다.")
-
     if progress_callback is not None:
         progress_callback(
-            f"현재 외부 HTML {len(baseline_acpt_numbers)}건의 기준 해시를 생성합니다."
+            f"현재 외부 HTML {len(acpt_numbers)}건의 기준 해시를 생성합니다."
         )
-    paths_by_acpt_no = {
-        acpt_no: _target_html_path(
+    try:
+        output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
-            acpt_no,
+            acpt_numbers,
             target_years=target_years,
+            collect_integrity=True,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
-        for acpt_no in baseline_acpt_numbers
-    }
-    source_integrity, cancelled = _hash_html_files(
-        paths_by_acpt_no,
-        progress_callback=progress_callback,
-        cancel_check=cancel_check,
-    )
-    if cancelled:
+    except InterruptedError:
         return {
             "format": "finiq_disclosure_external_html_integrity_baseline_v1",
             "cancelled": True,
@@ -202,6 +207,11 @@ def create_external_html_integrity_baseline_payload(
             "requested_count": len(acpt_numbers),
             "hashed_count": 0,
         }
+    baseline_acpt_numbers = output_summary["existing_target_acpt_numbers"]
+    if not baseline_acpt_numbers:
+        raise ValueError("기준 해시를 생성할 정상 외부 HTML이 없습니다.")
+
+    source_integrity = output_summary.pop("_target_integrity_by_acpt_no")
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
@@ -239,33 +249,20 @@ def create_internal_html_integrity_baseline_payload(
     source_json, _source_path, acpt_numbers, target_years = (
         _load_internal_html_integrity_source(body)
     )
-    output_summary = _validate_html_output_directory_files(
-        resolved_output_directory,
-        acpt_numbers,
-        target_years=target_years,
-    )
-    baseline_acpt_numbers = output_summary["existing_target_acpt_numbers"]
-    if not baseline_acpt_numbers:
-        raise ValueError("기준 해시를 생성할 정상 내부 HTML이 없습니다.")
-
     if progress_callback is not None:
         progress_callback(
-            f"현재 내부 HTML {len(baseline_acpt_numbers)}건의 기준 해시를 생성합니다."
+            f"현재 내부 HTML {len(acpt_numbers)}건의 기준 해시를 생성합니다."
         )
-    paths_by_acpt_no = {
-        acpt_no: _target_html_path(
+    try:
+        output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
-            acpt_no,
+            acpt_numbers,
             target_years=target_years,
+            collect_integrity=True,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
-        for acpt_no in baseline_acpt_numbers
-    }
-    source_integrity, cancelled = _hash_html_files(
-        paths_by_acpt_no,
-        progress_callback=progress_callback,
-        cancel_check=cancel_check,
-    )
-    if cancelled:
+    except InterruptedError:
         return {
             "format": "finiq_disclosure_internal_html_integrity_baseline_v1",
             "cancelled": True,
@@ -273,6 +270,11 @@ def create_internal_html_integrity_baseline_payload(
             "requested_count": len(acpt_numbers),
             "hashed_count": 0,
         }
+    baseline_acpt_numbers = output_summary["existing_target_acpt_numbers"]
+    if not baseline_acpt_numbers:
+        raise ValueError("기준 해시를 생성할 정상 내부 HTML이 없습니다.")
+
+    source_integrity = output_summary.pop("_target_integrity_by_acpt_no")
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,

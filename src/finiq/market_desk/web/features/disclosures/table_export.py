@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from finiq.concurrency import resolve_worker_count
-from finiq.data_scraper.storage.result_files import (
-    result_page_number,
-    sorted_result_page_paths,
-)
+from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
 from finiq.market_desk.web.features.market_data.service_sources import (
     _load_sqlite_manifest,
@@ -27,6 +26,16 @@ DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
 MANIFEST_FILENAME = "sqlite_manifest.json"
 SQLITE_FORMAT = "finiq_disclosure_table_sqlite_shard"
+
+
+@dataclass(frozen=True)
+class _SourceInventory:
+    source_path: Path
+    source_folders: tuple[Path, ...]
+    body_paths: tuple[Path, ...]
+    body_paths_by_folder: dict[Path, tuple[Path, ...]]
+    page_number_by_path: dict[Path, int]
+    page_count_by_folder: dict[Path, int]
 
 
 def _date_part(value: object) -> str:
@@ -56,36 +65,59 @@ def _manifest_output_path(raw_path: str) -> Path:
     return output_path / MANIFEST_FILENAME
 
 
-def _source_has_body_files(path: Path) -> bool:
-    return path.is_dir() and bool(_find_original_source_body_files(path))
-
-
-def _find_original_source_body_files(root: Path) -> list[Path]:
-    resolved_root = root.resolve()
-    source_folders = {
-        path.parent.resolve()
-        for path in resolved_root.rglob("*_post_page_*.body")
-        if not any(
-            part.startswith(".")
-            for part in path.relative_to(resolved_root).parts[:-1]
-        )
-    }
-    return [
-        path
-        for folder in sorted(source_folders)
-        for path in sorted_result_page_paths(folder)
-    ]
-
-
-def _resolve_source(root_directory: str) -> Path:
+def _build_source_inventory(
+    root_directory: str,
+    *,
+    cancel_check: Callable[[], bool] | None,
+) -> _SourceInventory:
     if not root_directory:
         raise ValueError("root_directory is required")
     source_path = Path(root_directory).expanduser().resolve()
     if not source_path.is_dir():
         raise FileNotFoundError(f"KIND source directory not found: {source_path}")
-    if not _source_has_body_files(source_path):
+
+    metadata_folders: set[Path] = set()
+    body_paths_by_folder: dict[Path, list[Path]] = {}
+    page_number_by_path: dict[Path, int] = {}
+    for directory, directory_names, filenames in os.walk(source_path):
+        if cancel_check and cancel_check():
+            raise RuntimeError("Job cancelled")
+        directory_names[:] = [
+            name for name in directory_names if not name.startswith(".")
+        ]
+        folder = Path(directory).resolve()
+        if "kind_workflow.input.json" in filenames:
+            metadata_folders.add(folder)
+        for filename in filenames:
+            if "_post_page_" not in filename or not filename.endswith(".body"):
+                continue
+            body_path = folder / filename
+            page_number_by_path[body_path] = result_page_number(body_path)
+            body_paths_by_folder.setdefault(folder, []).append(body_path)
+
+    if not body_paths_by_folder:
         raise ValueError(f"KIND body files not found: {source_path}")
-    return source_path
+
+    source_folders = tuple(sorted(metadata_folders | set(body_paths_by_folder)))
+    body_paths: list[Path] = []
+    sorted_body_paths_by_folder: dict[Path, tuple[Path, ...]] = {}
+    page_count_by_folder: dict[Path, int] = {}
+    for folder in source_folders:
+        folder_paths = sorted(
+            body_paths_by_folder.get(folder, []),
+            key=lambda path: (page_number_by_path[path], path.name),
+        )
+        body_paths.extend(folder_paths)
+        sorted_body_paths_by_folder[folder] = tuple(folder_paths)
+        page_count_by_folder[folder] = len(folder_paths)
+    return _SourceInventory(
+        source_path=source_path,
+        source_folders=source_folders,
+        body_paths=tuple(body_paths),
+        body_paths_by_folder=sorted_body_paths_by_folder,
+        page_number_by_path=page_number_by_path,
+        page_count_by_folder=page_count_by_folder,
+    )
 
 
 def _row_year(row: dict[str, Any]) -> str:
@@ -97,8 +129,7 @@ def _row_year(row: dict[str, Any]) -> str:
 
 
 def _collect_source_folder_rows_by_year(
-    source_folder: Path,
-    body_paths: list[Path],
+    inventory: _SourceInventory,
     cancel_check: Callable[[], bool] | None = None,
     worker_count: int = 1,
 ) -> tuple[
@@ -118,7 +149,8 @@ def _collect_source_folder_rows_by_year(
     source_row_count = 0
     duplicate_row_count = 0
     unlinked_disclosure_count = 0
-    source_page_counts = _source_page_counts(body_paths)
+    source_folder = inventory.source_path
+    body_paths = inventory.body_paths
     source_pagination: dict[Path, tuple[int, int]] = {}
 
     def iter_page_records():
@@ -152,7 +184,8 @@ def _collect_source_folder_rows_by_year(
         _validate_source_page_pagination(
             body_path,
             paging,
-            source_page_counts=source_page_counts,
+            page_number_by_path=inventory.page_number_by_path,
+            page_count_by_folder=inventory.page_count_by_folder,
             source_pagination=source_pagination,
         )
         page_source_rows = 0
@@ -203,7 +236,7 @@ def _collect_source_folder_rows_by_year(
             rows_by_year.setdefault(_row_year(row), []).append(row)
             row_count += 1
             page_written_rows += 1
-        page_number = result_page_number(body_path)
+        page_number = inventory.page_number_by_path[body_path]
         pages.append(
             {
                 "source_file": body_path.relative_to(source_folder).as_posix(),
@@ -225,8 +258,7 @@ def _collect_source_folder_rows_by_year(
 
 
 def _inspect_source_folder_counts(
-    source_folder: Path,
-    body_paths: list[Path],
+    inventory: _SourceInventory,
     *,
     worker_count: int,
 ) -> tuple[
@@ -247,7 +279,8 @@ def _inspect_source_folder_counts(
     source_row_count = 0
     duplicate_row_count = 0
     unlinked_disclosure_count = 0
-    source_page_counts = _source_page_counts(body_paths)
+    source_folder = inventory.source_path
+    body_paths = inventory.body_paths
     source_pagination: dict[Path, tuple[int, int]] = {}
 
     def iter_page_records():
@@ -279,7 +312,8 @@ def _inspect_source_folder_counts(
         _validate_source_page_pagination(
             body_path,
             paging,
-            source_page_counts=source_page_counts,
+            page_number_by_path=inventory.page_number_by_path,
+            page_count_by_folder=inventory.page_count_by_folder,
             source_pagination=source_pagination,
         )
         page_source_rows = 0
@@ -315,7 +349,7 @@ def _inspect_source_folder_counts(
         pages.append(
             {
                 "source_file": body_path.relative_to(source_folder).as_posix(),
-                "source_page": result_page_number(body_path),
+                "source_page": inventory.page_number_by_path[body_path],
                 "source_rows": page_source_rows,
                 "written_rows": page_written_rows,
                 "duplicate_rows": page_duplicate_rows,
@@ -348,23 +382,16 @@ def _read_source_page_records(
     return records, paging
 
 
-def _source_page_counts(body_paths: list[Path]) -> dict[Path, int]:
-    counts: dict[Path, int] = {}
-    for body_path in body_paths:
-        folder = body_path.parent.resolve()
-        counts[folder] = counts.get(folder, 0) + 1
-    return counts
-
-
 def _validate_source_page_pagination(
     body_path: Path,
     paging: dict[str, int],
     *,
-    source_page_counts: dict[Path, int],
+    page_number_by_path: dict[Path, int],
+    page_count_by_folder: dict[Path, int],
     source_pagination: dict[Path, tuple[int, int]],
 ) -> None:
     folder = body_path.parent.resolve()
-    filename_page = result_page_number(body_path)
+    filename_page = page_number_by_path[body_path]
     current_page = int(paging["current_page"])
     total_pages = int(paging["total_pages"])
     total_items = int(paging["total_items"])
@@ -373,7 +400,7 @@ def _validate_source_page_pagination(
             f"{body_path}: 파일명 페이지={filename_page}, "
             f"BODY 페이지={current_page}로 서로 다릅니다."
         )
-    expected_page_count = source_page_counts[folder]
+    expected_page_count = page_count_by_folder[folder]
     if total_pages != expected_page_count:
         raise ValueError(
             f"{folder}: BODY의 전체 페이지 수 {total_pages}와 "
@@ -390,28 +417,12 @@ def _validate_source_page_pagination(
         )
 
 
-def _validate_source_page_ranges(
-    source_folder: Path,
+def _validate_source_inventory(
+    inventory: _SourceInventory,
     *,
     cancel_check: Callable[[], bool] | None,
 ) -> None:
-    source_folders = {
-        path.parent.resolve()
-        for path in source_folder.rglob("kind_workflow.input.json")
-        if not any(
-            part.startswith(".")
-            for part in path.relative_to(source_folder).parts[:-1]
-        )
-    }
-    source_folders.update(
-        path.parent.resolve()
-        for path in source_folder.rglob("*_post_page_*.body")
-        if not any(
-            part.startswith(".")
-            for part in path.relative_to(source_folder).parts[:-1]
-        )
-    )
-    for folder in sorted(source_folders):
+    for folder in inventory.source_folders:
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
         metadata_path = folder / "kind_workflow.input.json"
@@ -425,14 +436,14 @@ def _validate_source_page_ranges(
                 f"{folder}: kind_workflow.input.json metadata is invalid: {error}"
             ) from error
 
-        page_paths = sorted_result_page_paths(folder)
+        page_paths = inventory.body_paths_by_folder[folder]
         if not page_paths:
             raise ValueError(
                 f"{folder}: kind_workflow.input.json이 있지만 공시 결과 페이지가 없습니다."
             )
         page_numbers: dict[int, int] = {}
         for path in page_paths:
-            page_number = result_page_number(path)
+            page_number = inventory.page_number_by_path[path]
             page_numbers[page_number] = page_numbers.get(page_number, 0) + 1
         duplicate_pages = sorted(
             page_number
@@ -800,7 +811,11 @@ def build_disclosure_table_payload(
     root_directory = str(body.get("root_directory") or "").strip()
     if str(body.get("classification_path") or "").strip():
         raise ValueError("classification_path is not supported; use root_directory")
-    source_path = _resolve_source(root_directory)
+    source_inventory = _build_source_inventory(
+        root_directory,
+        cancel_check=cancel_check,
+    )
+    source_path = source_inventory.source_path
     source_type = "source_folder"
 
     output_path_raw = str(body.get("output_path") or "").strip()
@@ -812,9 +827,9 @@ def build_disclosure_table_payload(
         progress_callback("공시 메타데이터를 로드합니다...")
 
     metadata_started_at = time.monotonic()
-    source_body_paths = _find_original_source_body_files(source_path)
-    _validate_source_page_ranges(
-        source_path,
+    source_body_paths = source_inventory.body_paths
+    _validate_source_inventory(
+        source_inventory,
         cancel_check=cancel_check,
     )
     source_workers = resolve_worker_count(
@@ -835,8 +850,7 @@ def build_disclosure_table_payload(
         unlinked_disclosure_count,
         pages,
     ) = _collect_source_folder_rows_by_year(
-        source_path,
-        source_body_paths,
+        source_inventory,
         cancel_check=cancel_check,
         worker_count=source_workers,
     )
@@ -929,8 +943,12 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
     manifest_path = _manifest_output_path(output_path_raw)
 
     try:
-        source_path = _resolve_source(root_directory)
-        _validate_source_page_ranges(source_path, cancel_check=None)
+        source_inventory = _build_source_inventory(
+            root_directory,
+            cancel_check=None,
+        )
+        source_path = source_inventory.source_path
+        _validate_source_inventory(source_inventory, cancel_check=None)
         manifest = _load_sqlite_manifest(manifest_path)
         _validate_sqlite_manifest_counts(
             manifest_path,
@@ -938,7 +956,7 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
             filter_workers=body.get("table_workers"),
         )
 
-        source_body_paths = _find_original_source_body_files(source_path)
+        source_body_paths = source_inventory.body_paths
         source_workers = resolve_worker_count(
             body.get("table_workers"),
             item_count=len(source_body_paths),
@@ -953,8 +971,7 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
             unlinked_disclosure_count,
             pages,
         ) = _inspect_source_folder_counts(
-            source_path,
-            source_body_paths,
+            source_inventory,
             worker_count=source_workers,
         )
 

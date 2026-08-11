@@ -40,6 +40,7 @@
 
 - 현재 파일에서 계산한 바이트 수와 SHA-256을 manifest에 기록된 값과 비교한다.
 - `기존 데이터 검토`를 실행하면 현재 대상과 저장 파일 구성을 비교하고 manifest의 기준 hash를 확인한다.
+- 기존 HTML의 구조 판별과 SHA-256 계산은 파일을 한 번 순차 읽은 결과로 각각 수행한다.
 
 ### Build Compressed External HTML Records
 

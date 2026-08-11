@@ -1716,6 +1716,41 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert metadata["unlinked_disclosures"] == "0"
 
 
+def test_table_build_and_inspection_each_inventory_source_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_path = tmp_path / "02-table"
+    original_walk = table_export_module.os.walk
+    walk_count = 0
+
+    def tracked_walk(*args: Any, **kwargs: Any):
+        nonlocal walk_count
+        walk_count += 1
+        yield from original_walk(*args, **kwargs)
+
+    monkeypatch.setattr(table_export_module.os, "walk", tracked_walk)
+
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_path),
+        }
+    )
+    assert walk_count == 1
+
+    walk_count = 0
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_path),
+        }
+    )
+    assert inspection["confirmed"] is True
+    assert walk_count == 1
+
+
 def test_build_disclosure_table_payload_preserves_unlinked_disclosure(
     tmp_path: Path,
 ) -> None:
@@ -5084,6 +5119,53 @@ def test_section_output_inspection_reuses_save_selection_and_detects_content_cha
 
     assert changed["summary"]["integrity_ok"] is False
     assert changed["mismatched_files"] == [source.name]
+
+
+def test_section_output_inspection_compares_each_content_before_next_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    output_directory.mkdir()
+    source_files = [input_directory / "a.html", input_directory / "b.html"]
+    for source_file in source_files:
+        source_file.touch()
+        (output_directory / source_file.name).touch()
+
+    comparisons: list[str] = []
+    original_read_text = Path.read_text
+
+    def tracked_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.parent == output_directory:
+            comparisons.append(path.name)
+            return path.name
+        return original_read_text(path, *args, **kwargs)
+
+    def stream_results(*_args: object, **_kwargs: object):
+        yield {"status": "ok", "selected_sections": 1, "content": "a.html"}
+        assert comparisons == ["a.html"]
+        yield {"status": "ok", "selected_sections": 1, "content": "b.html"}
+
+    monkeypatch.setattr(
+        disclosure_html_sections,
+        "_collect_html_files",
+        lambda *_args, **_kwargs: source_files,
+    )
+    monkeypatch.setattr(disclosure_html_sections, "_map_html_files", stream_results)
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+
+    checked = inspect_disclosure_html_section_output_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {},
+        }
+    )
+
+    assert checked["summary"]["integrity_ok"] is True
+    assert comparisons == ["a.html", "b.html"]
 
 
 def test_section_save_ignores_automation_cache_below_standard_input(
