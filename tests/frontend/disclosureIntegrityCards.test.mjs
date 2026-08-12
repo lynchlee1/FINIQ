@@ -69,6 +69,30 @@ test("HTML inspection uses the workspace output when separate output is disabled
   assert.match(htmlDownload, /\{existingData\.output_directory\}/);
 });
 
+test("completed disclosure inspections replace their action while request failures remain retryable", async () => {
+  const [filter, table, sectionSplit, htmlParse] = await Promise.all([
+    readFile(paths.filter, "utf8"),
+    readFile("frontend/finiq_GUI/apps/market-desk/src/app/table/page.tsx", "utf8"),
+    readFile(paths.sectionSplit, "utf8"),
+    readFile(paths.htmlParse, "utf8"),
+  ]);
+
+  assert.match(filter, /action: rootDirectory\?\.trim\(\) && !inspectionSummary \? \{/);
+  assert.match(table, /action=\{hasInspectionInput && !inspectionResult \? \{/);
+  assert.match(sectionSplit, /action=\{inputDirectory && !integrityInspectionResult \? \{/);
+  assert.match(htmlParse, /action=\{hasInspectionInput && !inspectionResult \? \{/);
+});
+
+test("filter inspection ignores responses invalidated by preset mutations", async () => {
+  const filter = await readFile(paths.filter, "utf8");
+
+  assert.match(filter, /const inspectionRequestIdRef = useRef\(0\)/);
+  assert.match(filter, /const inspectionRequestId = \+\+inspectionRequestIdRef\.current/);
+  assert.match(filter, /inspectionRequestIdRef\.current !== inspectionRequestId/);
+  assert.match(filter, /setPresets\(saved\.presets\);\s+inspectionRequestIdRef\.current \+= 1;\s+setInspectionRunning\(false\)/);
+  assert.match(filter, /setPresets\(response\.presets\);\s+inspectionRequestIdRef\.current \+= 1;\s+setInspectionRunning\(false\)/);
+});
+
 test("integrity responses stay bound to the inputs that started them", async () => {
   const [download, filter, htmlDownload, table, htmlParse] = await Promise.all([
     readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),
