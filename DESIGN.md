@@ -106,6 +106,7 @@ All spacing derives from a base of 4px.
 ### Segmented Mode Control
 
 - **Structure**: two or three buttons in a bordered row.
+- **Reuse**: page-level workflow mode controls use the shared `WorkflowModeSwitch`; the component owns track/button styling and the `--space-3` gap to its content. Pages provide only options, current value and state updates.
 - **Variants**: active tonal fill, inactive transparent.
 - **Spacing**: `--space-1` button gap, `--space-2` horizontal padding.
 - **Layout**: the containing track should hug its options on desktop and become full-width only when mobile space requires it. Do not wrap a compact mode control in an otherwise empty full-width card.

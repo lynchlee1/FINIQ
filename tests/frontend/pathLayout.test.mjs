@@ -5,6 +5,7 @@ import test from "node:test";
 const htmlSectionSplitPath = "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/page.tsx";
 const tablePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/table/page.tsx";
 const htmlWorkflowTemplatePath = "frontend/finiq_GUI/apps/market-desk/src/components/html-workflow/HtmlWorkflowTemplate.tsx";
+const workflowModeSwitchPath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/WorkflowModeSwitch.tsx";
 const filterPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/filter/page.tsx";
 const htmlParsePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx";
 const disclosureAutomationPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/disclosure-automation/page.tsx";
@@ -284,26 +285,30 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
 });
 
 test("disclosure filter page combines title search and recorded filtering", async () => {
-  const [source, webAppFrameSource, globalsSource] = await Promise.all([
+  const [source, webAppFrameSource, globalsSource, modeSwitchSource] = await Promise.all([
     readFile(filterPagePath, "utf8"),
     readFile(webAppFramePath, "utf8"),
     readFile(marketDeskGlobalsPath, "utf8"),
+    readFile(workflowModeSwitchPath, "utf8"),
   ]);
 
   assert.match(source, /<DisclosureConditionFilterCard/);
   assert.match(source, /listDisclosureConditionPresets\(rootDirectory\)/);
   assert.match(source, /type FilterTaskMode = "title-search" \| "filter"/);
   assert.match(source, /const \[taskMode, setTaskMode\] = useState<FilterTaskMode>\("title-search"\)/);
-  assert.match(source, /setTaskMode\("title-search"\)[\s\S]*?공시내역 제목 검색/);
-  assert.match(source, /setTaskMode\("filter"\)[\s\S]*?공시내역 필터링/);
+  assert.match(source, /\{ value: "title-search", label: "공시내역 제목 검색", icon: Search \}/);
+  assert.match(source, /\{ value: "filter", label: "공시내역 필터링", icon: Filter \}/);
   assert.ok(
-    source.indexOf('data-testid="filter-mode-control"')
+    source.indexOf("<WorkflowModeSwitch")
       < source.indexOf('className="relative action-dock-host'),
     "동작 전환은 본문 위의 모드 컨트롤에 있어야 합니다.",
   );
-  assert.match(source, /role="group"\s+aria-label="공시 작업 모드"/);
-  assert.match(source, /aria-pressed=\{taskMode === "title-search"\}/);
-  assert.match(source, /aria-pressed=\{taskMode === "filter"\}/);
+  assert.match(source, /ariaLabel="공시 작업 모드"/);
+  assert.match(source, /options=\{FILTER_TASK_MODE_OPTIONS\}/);
+  assert.match(source, /onValueChange=\{setTaskMode\}/);
+  assert.match(source, /testId="filter-mode-control"/);
+  assert.match(modeSwitchSource, /role="group"\s+aria-label=\{ariaLabel\}/);
+  assert.match(modeSwitchSource, /aria-pressed=\{selected\}/);
   assert.match(source, /useJobPolling/);
   assert.match(source, /pollingEndpoint: "\/api\/disclosures\/titles\/jobs\/\{jobId\}"/);
   assert.match(source, /"\/api\/disclosures\/titles\/search\/start"/);
@@ -323,6 +328,29 @@ test("disclosure filter page combines title search and recorded filtering", asyn
   assert.match(source, /filter_blocks: normalizeDisclosureConditionBlocks\(conditions\)/);
   assert.match(source, /<CardTitle className="dark:text-white">제목 검색 결과<\/CardTitle>/);
   assert.match(source, /<CardTitle className="dark:text-white">필터 결과<\/CardTitle>/);
+});
+
+test("disclosure mode controls use a transparent compact row near the workflow cards", async () => {
+  const [modeSwitchSource, templateSource, filterSource, htmlDownloadSource] = await Promise.all([
+    readFile(workflowModeSwitchPath, "utf8"),
+    readFile(htmlWorkflowTemplatePath, "utf8"),
+    readFile(filterPagePath, "utf8"),
+    readFile(
+      "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
+      "utf8",
+    ),
+  ]);
+
+  assert.match(modeSwitchSource, /<div className="space-y-3">/);
+  assert.match(modeSwitchSource, /className="inline-flex w-full gap-1 rounded-md border border-\[color:var\(--tv-border\)\] p-1 sm:w-auto"/);
+  assert.match(modeSwitchSource, /className="h-8 flex-1 gap-1 px-2 duration-150 sm:flex-none"/);
+  assert.match(templateSource, /return <WorkflowModeSwitch \{\.\.\.modeSwitch\}>\{children\}<\/WorkflowModeSwitch>/);
+  assert.match(filterSource, /<WorkflowModeSwitch[\s\S]*?options=\{FILTER_TASK_MODE_OPTIONS\}/);
+  assert.match(htmlDownloadSource, /modeSwitch=\{variant === "external" \? \{/);
+  assert.match(htmlDownloadSource, /options: EXTERNAL_TASK_MODE_OPTIONS/);
+  for (const source of [filterSource, htmlDownloadSource]) {
+    assert.doesNotMatch(source, /inline-flex .*border-\[color:var\(--tv-border\)\].*p-1/);
+  }
 });
 
 test("disclosure filter inspection checks every folder without a selected filter", async () => {
