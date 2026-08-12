@@ -404,7 +404,7 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
               </Button>
             </div>
             <div className="space-y-4 p-4 text-sm">
-              <div className="grid grid-cols-4 gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 <Button type="button" variant="outline" size="xs" onClick={handleJumpSelected} disabled={!selectedNode}>
                   <MapPin className="h-3 w-3" />
                   이동
@@ -414,9 +414,6 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
                 </Button>
                 <Button type="button" variant="outline" size="xs" onClick={handleHideSelected} disabled={selectedNodeCount + selectedEdgeCount === 0}>
                   숨김
-                </Button>
-                <Button type="button" variant="outline" size="xs" onClick={showAll}>
-                  전체
                 </Button>
               </div>
               <div className="rounded-md border border-[#30363d] bg-[#0d1117] p-3 text-xs text-slate-300">

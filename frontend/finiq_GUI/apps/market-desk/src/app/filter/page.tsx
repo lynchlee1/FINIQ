@@ -166,6 +166,7 @@ export default function FilterPage() {
     : isFilterErrorStatus;
   const isJobActive = isStreaming || !!titleJobId;
   const presetListRequestIdRef = useRef(0);
+  const inspectionRequestIdRef = useRef(0);
   const currentDataRootRef = useRef(rootDirectory);
   currentDataRootRef.current = rootDirectory;
 
@@ -212,6 +213,7 @@ export default function FilterPage() {
   }, [rootDirectory, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
+    inspectionRequestIdRef.current += 1;
     setInspectionRunning(false);
     setInspectionError("");
     setInspectionSummary(null);
@@ -376,6 +378,8 @@ export default function FilterPage() {
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(saved.presets);
+      inspectionRequestIdRef.current += 1;
+      setInspectionRunning(false);
       setInspectionError("");
       setInspectionSummary(null);
       setPresets((items) => items.map((preset) => preset.name === selectedPreset ? {
@@ -428,6 +432,8 @@ export default function FilterPage() {
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
+      inspectionRequestIdRef.current += 1;
+      setInspectionRunning(false);
       setInspectionError("");
       setInspectionSummary(null);
       setSelectedPreset(mode);
@@ -462,6 +468,8 @@ export default function FilterPage() {
       const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
+      inspectionRequestIdRef.current += 1;
+      setInspectionRunning(false);
       setInspectionError("");
       setInspectionSummary(null);
       setSelectedPreset("");
@@ -481,6 +489,7 @@ export default function FilterPage() {
     }
     const dataRoot = rootDirectory;
     const requestId = presetListRequestIdRef.current;
+    const inspectionRequestId = ++inspectionRequestIdRef.current;
     setInspectionRunning(true);
     setInspectionError("");
     setInspectionSummary(null);
@@ -491,7 +500,8 @@ export default function FilterPage() {
         data_root: dataRoot,
         action: "inspect",
       });
-      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)
+        || inspectionRequestIdRef.current !== inspectionRequestId) return;
       setPresets(response.presets);
       const issues = response.presets
         .filter((preset) => preset.status !== "completed")
@@ -507,13 +517,15 @@ export default function FilterPage() {
         : `조건검색 폴더 ${summary.total}개를 모두 확인했습니다.`);
       setIsErrorStatus(issues.length > 0);
     } catch (error) {
-      if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      if (!isCurrentPresetWorkspace(dataRoot, requestId)
+        || inspectionRequestIdRef.current !== inspectionRequestId) return;
       const message = error instanceof Error ? error.message : String(error);
       setInspectionError(message);
       setStatus(message);
       setIsErrorStatus(true);
     } finally {
-      if (isCurrentPresetWorkspace(dataRoot, requestId)) {
+      if (isCurrentPresetWorkspace(dataRoot, requestId)
+        && inspectionRequestIdRef.current === inspectionRequestId) {
         setInspectionRunning(false);
       }
     }
@@ -587,7 +599,7 @@ export default function FilterPage() {
           {inspectionSummary.issues.map((issue) => <li key={issue}>{issue}</li>)}
         </ul>
       ) : undefined,
-      action: rootDirectory?.trim() ? {
+      action: rootDirectory?.trim() && !inspectionSummary ? {
         label: inspectionRunning ? "검사 중..." : "검사하기",
         onClick: handleInspectExistingFilter,
         disabled: inspectionRunning || isJobActive,

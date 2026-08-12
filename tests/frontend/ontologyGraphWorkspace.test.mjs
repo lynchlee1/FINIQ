@@ -90,6 +90,7 @@ test("ontology graph workspace restores the Obsidian-like node graph canvas", as
   assert.match(nodeGraphSource, /현재 레이아웃 저장/);
   assert.match(nodeGraphSource, /저장된 레이아웃 불러오기/);
   assert.match(nodeGraphSource, /숨김 초기화/);
+  assert.equal(nodeGraphSource.match(/onClick=\{showAll\}/g)?.length, 1);
   assert.match(nodeGraphSource, /그래프 JSON 내보내기/);
   assert.match(nodeGraphSource, /SVG 내보내기/);
   assert.match(nodeGraphSource, /PNG 내보내기/);

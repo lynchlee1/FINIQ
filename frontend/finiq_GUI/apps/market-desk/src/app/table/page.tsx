@@ -266,7 +266,7 @@ export default function TablePage() {
             verdictDescription={inspectionCopy[1]}
             stepTitle="원본 데이터와 변환 결과 검사"
             stepSummary={inspectionStepSummary}
-            action={hasInspectionInput && !inspectionResult?.confirmed ? {
+            action={hasInspectionInput && !inspectionResult ? {
               label: inspectionRunning ? "검사 중..." : "검사하기",
               onClick: handleInspect,
               disabled: inspectionRunning || !!activeJobId,

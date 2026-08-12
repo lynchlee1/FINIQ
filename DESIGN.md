@@ -324,6 +324,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Ontology node graph | 공시 관계 그래프 | Obsidian-like graph-viewer canvas showing company, disclosure group, and disclosure event relationships. |
 | Ontology node search | 노드 검색 | Search input for nodes inside the Ontology node graph. |
 | Ontology graph unpin action | 핀 해제 | Clears pinned nodes in the Ontology node graph. |
+| Ontology graph hidden-state reset action | 숨김 초기화 | Keep one action in the top graph toolbar; do not duplicate it in the selected-item detail panel. |
 | Ontology event-price chart | 주가-공시 차트 | Plot combining Quantiwise price candles and KIND disclosure markers. |
 | Ontology chart condition panel | 공시 조건 | Top condition box on Chart View that manages company search, `resources/KIND` disclosure category selection, and chart display buttons. |
 | Ontology chart company section | 회사명 | Section label for company-name search in the Chart View condition panel. |
