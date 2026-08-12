@@ -747,6 +747,11 @@ export default function DownloadPage() {
       tone: "success",
     };
   }
+  const inspectionResultStatus = inspectionVerdict.tone === "success"
+    ? { status: "complete", label: "정상" } as const
+    : inspectionVerdict.tone === "error"
+      ? { status: "failed", label: "사용 불가" } as const
+      : undefined;
 
   const inspectionSteps: DataIntegrityInspectionStep[] = [
     {
@@ -776,11 +781,13 @@ export default function DownloadPage() {
       detail: existingMetadataError ? (
         <p className="text-[13px] leading-5 text-[var(--tv-down-text)]">{existingMetadataError}</p>
       ) : undefined,
-      action: outputDirectory && !hasCompletedCurrentInspection ? {
+      action: outputDirectory ? {
         label: isCurrentInspectionRunning ? "검사 중..." : "검사하기",
         onClick: handleInspectFolder,
         disabled: isCurrentInspectionRunning || !!activeJobId || runStarting,
         loading: isCurrentInspectionRunning,
+        showResultStatus: true,
+        resultStatus: inspectionResultStatus,
       } : undefined,
     },
     {

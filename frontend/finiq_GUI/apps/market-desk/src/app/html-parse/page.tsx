@@ -1027,11 +1027,12 @@ export default function HtmlParsePage() {
             verdictDescription={inspectionCopy[1]}
             stepTitle="입력 HTML 변환 결과 검사"
             stepSummary={inspectionStepSummary}
-            action={hasInspectionInput && !inspectionResult ? {
+            action={hasInspectionInput ? {
               label: inspectionRunning ? "검사 중..." : "검사하기",
               onClick: handleInspectExistingParse,
               disabled: inspectionRunning || isJobActive,
               loading: inspectionRunning,
+              showResultStatus: true,
             } : undefined}
           />
 

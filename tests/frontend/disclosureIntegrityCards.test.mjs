@@ -9,6 +9,7 @@ const paths = {
   htmlParse: "frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx",
 };
 const cardPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-integrity/DataIntegrityInspectionCard.tsx";
+const panelPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-integrity/DataIntegrityInspectionPanel.tsx";
 
 test("numbered disclosure pages reuse the shared integrity card", async () => {
   const [sources, card] = await Promise.all([
@@ -58,7 +59,7 @@ test("HTML inspection uses the workspace output when separate output is disabled
     /const hasInspectionInput = !!currentSourcePath && \(!useSeparateOutputDirectory \|\| !!outputDirectory\)/,
   );
   assert.doesNotMatch(htmlDownload, /if \(!outputDirectory\) \{/);
-  assert.match(htmlDownload, /action: hasInspectionInput && !existingCheckCompleted \? \{/);
+  assert.match(htmlDownload, /action: hasInspectionInput \? \{/);
   assert.equal(htmlDownload.match(/onClick: handleInspectFolder/g)?.length, 1);
   assert.doesNotMatch(htmlDownload, /폴더 검사하기/);
   assert.match(
@@ -69,18 +70,31 @@ test("HTML inspection uses the workspace output when separate output is disabled
   assert.match(htmlDownload, /\{existingData\.output_directory\}/);
 });
 
-test("completed disclosure inspections replace their action while request failures remain retryable", async () => {
-  const [filter, table, sectionSplit, htmlParse] = await Promise.all([
+test("completed disclosure inspections reuse their result control for another inspection", async () => {
+  const [download, filter, htmlDownload, table, sectionSplit, htmlParse, panel] = await Promise.all([
+    readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),
     readFile(paths.filter, "utf8"),
+    readFile(paths.htmlDownload, "utf8"),
     readFile("frontend/finiq_GUI/apps/market-desk/src/app/table/page.tsx", "utf8"),
     readFile(paths.sectionSplit, "utf8"),
     readFile(paths.htmlParse, "utf8"),
+    readFile(panelPath, "utf8"),
   ]);
 
-  assert.match(filter, /action: rootDirectory\?\.trim\(\) && !inspectionSummary \? \{/);
-  assert.match(table, /action=\{hasInspectionInput && !inspectionResult \? \{/);
-  assert.match(sectionSplit, /action=\{inputDirectory && !integrityInspectionResult \? \{/);
-  assert.match(htmlParse, /action=\{hasInspectionInput && !inspectionResult \? \{/);
+  assert.match(download, /action: outputDirectory \? \{/);
+  assert.match(filter, /action: rootDirectory\?\.trim\(\) \? \{/);
+  assert.match(htmlDownload, /action: hasInspectionInput \? \{/);
+  assert.match(table, /action=\{hasInspectionInput \? \{/);
+  assert.match(sectionSplit, /action=\{inputDirectory \? \{/);
+  assert.match(htmlParse, /action=\{hasInspectionInput \? \{/);
+  for (const source of [download, filter, htmlDownload, table, sectionSplit, htmlParse]) {
+    assert.match(source, /showResultStatus: true/);
+  }
+  assert.match(download, /inspectionVerdict\.tone === "success"[\s\S]*status: "complete", label: "정상"[\s\S]*inspectionVerdict\.tone === "error"[\s\S]*status: "failed", label: "사용 불가"/);
+  assert.match(download, /resultStatus: inspectionResultStatus/);
+  assert.match(panel, /const displayedStatus = resultStatus\?\.status \?\? step\.status/);
+  assert.match(panel, /const displayedStatusLabel = resultStatus\?\.label \?\? step\.statusLabel/);
+  assert.match(panel, /aria-label=\{showResultStatus \? `\$\{displayedStatusLabel\}, 검사하기` : undefined\}/);
 });
 
 test("filter inspection ignores responses invalidated by preset mutations", async () => {

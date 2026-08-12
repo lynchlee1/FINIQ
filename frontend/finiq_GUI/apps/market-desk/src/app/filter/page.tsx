@@ -599,11 +599,12 @@ export default function FilterPage() {
           {inspectionSummary.issues.map((issue) => <li key={issue}>{issue}</li>)}
         </ul>
       ) : undefined,
-      action: rootDirectory?.trim() && !inspectionSummary ? {
+      action: rootDirectory?.trim() ? {
         label: inspectionRunning ? "검사 중..." : "검사하기",
         onClick: handleInspectExistingFilter,
         disabled: inspectionRunning || isJobActive,
         loading: inspectionRunning,
+        showResultStatus: true,
       } : undefined,
     },
   ];

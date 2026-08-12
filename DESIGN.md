@@ -173,7 +173,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
 | Existing data review card | 기존 데이터 검토 | A standalone preflight card placed first in a numbered workflow page, before search conditions or path and execution settings. |
-| Existing data integrity inspection action | 검사하기 | Replace the pending step's `대기` status with this action. Runs the page-owned integrity APIs against the selected data path only after the user clicks it. |
+| Existing data integrity inspection action | 검사하기 | Use one right-side control: show `검사하기` before the first run, a loading state while running, and the clickable result `정상` or `사용 불가` afterward. Clicking a result runs the same inspection again. |
 | Existing data clear verdict | 정상 | Use when no prior data blocks a new download or when every page-owned inspection step passes. |
 | Existing data blocked verdict | 사용 불가 | Use when a mismatch or integrity failure blocks reuse. Keep the failed step and repair action visible. |
 | Existing data successful step state | 정상 | Use for every completed inspection step with no issue, including metadata, settings, saved files, and KIND count checks. Keep specific evidence in the step summary. |
