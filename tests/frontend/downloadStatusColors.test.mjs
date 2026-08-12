@@ -30,7 +30,8 @@ test("download review is first and actionable steps own right-side actions", asy
   assert.doesNotMatch(settingsStep, /<Button\b/);
   assert.match(source, /key: "metadata"[\s\S]{0,2200}label: isCurrentInspectionRunning \? "검사 중\.\.\." : "검사하기"/);
   assert.ok(source.indexOf("label: isCurrentInspectionRunning") < source.indexOf('key: "settings"'));
-  assert.match(panel, /\{step\.action \? \([\s\S]{0,500}step\.action\.label/);
+  assert.match(panel, /\{step\.action \? \(/);
+  assert.match(panel, /\{step\.action\.label\}/);
   assert.doesNotMatch(source, /업데이트 기간 적용/);
   assert.doesNotMatch(source, /폴더 검사하기/);
   const executionCard = source.slice(

@@ -24,6 +24,11 @@ export type DataIntegrityInspectionStep = {
     onClick: () => void;
     disabled?: boolean;
     loading?: boolean;
+    showResultStatus?: boolean;
+    resultStatus?: {
+      status: "complete" | "failed";
+      label: string;
+    };
   };
 };
 
@@ -73,43 +78,60 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
       </section>
 
       <ol className="overflow-hidden rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
-        {steps.map((step, index) => (
-          <li key={step.key} className="border-b border-[color:var(--tv-border)] last:border-b-0">
-            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex min-w-0 gap-3">
-                <span className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold ${stepStatusClassNames[step.status]}`}>
-                  {step.status === "waiting" || step.status === "ready" ? index + 1 : <StepStatusIcon status={step.status} />}
-                </span>
-                <div className="min-w-0 space-y-1">
-                  <p className="text-[15px] font-semibold leading-6 text-[var(--tv-text)]">{step.title}</p>
-                  <div className="text-[13px] leading-5 text-[var(--tv-muted)]">{step.summary}</div>
+        {steps.map((step, index) => {
+          const resultStatus = step.action?.resultStatus;
+          const displayedStatus = resultStatus?.status ?? step.status;
+          const displayedStatusLabel = resultStatus?.label ?? step.statusLabel;
+          const showResultStatus = !!step.action?.showResultStatus && (displayedStatus === "complete" || displayedStatus === "failed");
+          return (
+            <li key={step.key} className="border-b border-[color:var(--tv-border)] last:border-b-0">
+              <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 gap-3">
+                  <span className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold ${stepStatusClassNames[step.status]}`}>
+                    {step.status === "waiting" || step.status === "ready" ? index + 1 : <StepStatusIcon status={step.status} />}
+                  </span>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-[15px] font-semibold leading-6 text-[var(--tv-text)]">{step.title}</p>
+                    <div className="text-[13px] leading-5 text-[var(--tv-muted)]">{step.summary}</div>
+                  </div>
                 </div>
+                {step.action ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={showResultStatus ? "outline" : undefined}
+                    className={`${stepControlClassName} px-3 text-[13px] ${showResultStatus ? stepStatusClassNames[displayedStatus] : ""}`}
+                    onClick={step.action.onClick}
+                    disabled={step.action.disabled}
+                    aria-label={showResultStatus ? `${displayedStatusLabel}, 검사하기` : undefined}
+                  >
+                    {showResultStatus ? (
+                      <>
+                        <StepStatusIcon status={displayedStatus} />
+                        {displayedStatusLabel}
+                      </>
+                    ) : (
+                      <>
+                        {step.action.loading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                        {step.action.label}
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <span className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-semibold leading-4 ${stepControlClassName} ${stepStatusClassNames[step.status]}`}>
+                    <StepStatusIcon status={step.status} />
+                    {step.statusLabel}
+                  </span>
+                )}
               </div>
-              {step.action ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className={`${stepControlClassName} px-3 text-[13px]`}
-                  onClick={step.action.onClick}
-                  disabled={step.action.disabled}
-                >
-                  {step.action.loading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                  {step.action.label}
-                </Button>
-              ) : (
-                <span className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-semibold leading-4 ${stepControlClassName} ${stepStatusClassNames[step.status]}`}>
-                  <StepStatusIcon status={step.status} />
-                  {step.statusLabel}
-                </span>
+              {step.status === "failed" && step.detail && (
+                <div className="border-t border-[color:var(--tv-border)] bg-[var(--tv-control)] px-4 py-4 sm:pl-14">
+                  {step.detail}
+                </div>
               )}
-            </div>
-            {step.status === "failed" && step.detail && (
-              <div className="border-t border-[color:var(--tv-border)] bg-[var(--tv-control)] px-4 py-4 sm:pl-14">
-                {step.detail}
-              </div>
-            )}
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
     </div>
   );

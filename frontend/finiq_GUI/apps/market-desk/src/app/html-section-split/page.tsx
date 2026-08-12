@@ -723,11 +723,12 @@ export default function HtmlSectionSplitPage() {
             verdictDescription={inspectionCopy[1]}
             stepTitle="입력 HTML과 목차 구성 검사"
             stepSummary={inspectionStepSummary}
-            action={inputDirectory && !integrityInspectionResult ? {
+            action={inputDirectory ? {
               label: isIntegrityInspecting ? "검사 중..." : "검사하기",
               onClick: inspectExistingData,
               disabled: isIntegrityInspecting || isInspecting || isJobActive,
               loading: isIntegrityInspecting,
+              showResultStatus: true,
             } : undefined}
           />
 

@@ -754,11 +754,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           : existingCheckCompleted
             ? "정상"
             : "대기",
-      action: hasInspectionInput && !existingCheckCompleted ? {
+      action: hasInspectionInput ? {
         label: inspectRunning ? "검사 중..." : "검사하기",
         onClick: handleInspectFolder,
         disabled: inspectRunning || isJobActive,
         loading: inspectRunning,
+        showResultStatus: true,
       } : undefined,
     },
   ];
