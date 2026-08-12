@@ -49,6 +49,26 @@ test("existing-data inspections start only from explicit actions", async () => {
   assert.match(htmlDownload, /onClick: handleInspectFolder/);
 });
 
+test("HTML inspection uses the workspace output when separate output is disabled", async () => {
+  const htmlDownload = await readFile(paths.htmlDownload, "utf8");
+
+  assert.match(htmlDownload, /if \(useSeparateOutputDirectory && !outputDirectory\)/);
+  assert.match(
+    htmlDownload,
+    /const hasInspectionInput = !!currentSourcePath && \(!useSeparateOutputDirectory \|\| !!outputDirectory\)/,
+  );
+  assert.doesNotMatch(htmlDownload, /if \(!outputDirectory\) \{/);
+  assert.match(htmlDownload, /action: hasInspectionInput && !existingCheckCompleted \? \{/);
+  assert.equal(htmlDownload.match(/onClick: handleInspectFolder/g)?.length, 1);
+  assert.doesNotMatch(htmlDownload, /폴더 검사하기/);
+  assert.match(
+    htmlDownload,
+    /notificationTone=\{isErrorStatus \? "error" : existingCheckError \|\| integrityProblemCount > 0 \? "warning" : "success"\}/,
+  );
+  assert.doesNotMatch(htmlDownload, /description: existingCheckError \|\| existingDetail/);
+  assert.match(htmlDownload, /\{existingData\.output_directory\}/);
+});
+
 test("integrity responses stay bound to the inputs that started them", async () => {
   const [download, filter, htmlDownload, table, htmlParse] = await Promise.all([
     readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),

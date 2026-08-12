@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Filter, Play, Loader2, Search } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
+import {
+  WorkflowModeSwitch,
+  type WorkflowModeOption,
+} from "@/components/layout/WorkflowModeSwitch";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -67,6 +71,11 @@ type TitleSearchResult = {
 };
 
 type FilterTaskMode = "title-search" | "filter";
+
+const FILTER_TASK_MODE_OPTIONS: readonly WorkflowModeOption<FilterTaskMode>[] = [
+  { value: "title-search", label: "공시내역 제목 검색", icon: Search },
+  { value: "filter", label: "공시내역 필터링", icon: Filter },
+];
 
 const FILTER_WORKFLOW_STATUS_LABELS: Record<string, string> = {
   ready: "입력 완료",
@@ -589,37 +598,13 @@ export default function FilterPage() {
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
-      <div className="flex w-full items-center" data-testid="filter-mode-control">
-        <div
-          className="grid w-full grid-cols-2 gap-1 rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface-muted)] p-1 sm:w-auto"
-          role="group"
-          aria-label="공시 작업 모드"
-        >
-          <Button
-            type="button"
-            variant={taskMode === "title-search" ? "default" : "ghost"}
-            size="sm"
-            className="h-10 min-w-0 rounded-lg px-2.5 font-semibold sm:min-w-44 sm:px-4"
-            aria-pressed={taskMode === "title-search"}
-            onClick={() => setTaskMode("title-search")}
-          >
-            <Search className="h-4 w-4" />
-            공시내역 제목 검색
-          </Button>
-          <Button
-            type="button"
-            variant={taskMode === "filter" ? "default" : "ghost"}
-            size="sm"
-            className="h-10 min-w-0 rounded-lg px-2.5 font-semibold sm:min-w-44 sm:px-4"
-            aria-pressed={taskMode === "filter"}
-            onClick={() => setTaskMode("filter")}
-          >
-            <Filter className="h-4 w-4" />
-            공시내역 필터링
-          </Button>
-        </div>
-      </div>
-
+      <WorkflowModeSwitch
+        ariaLabel="공시 작업 모드"
+        value={taskMode}
+        options={FILTER_TASK_MODE_OPTIONS}
+        onValueChange={setTaskMode}
+        testId="filter-mode-control"
+      >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <DataIntegrityInspectionCard
@@ -836,6 +821,7 @@ export default function FilterPage() {
           }
         />
       </div>
+      </WorkflowModeSwitch>
     </WorkflowPageShell>
   );
 }

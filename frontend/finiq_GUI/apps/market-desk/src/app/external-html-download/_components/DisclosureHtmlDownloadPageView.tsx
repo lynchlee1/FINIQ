@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { AlertTriangle, FileJson, FolderOpen, Info, Play, ShieldCheck, Square, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, FileJson, FolderOpen, Info, Play, ShieldCheck, Square, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -22,9 +22,15 @@ import type {
   DataIntegrityInspectionStep,
   DataIntegrityInspectionVerdict,
 } from "@/components/data-integrity/DataIntegrityInspectionPanel";
+import type { WorkflowModeOption } from "@/components/layout/WorkflowModeSwitch";
 
 type DownloadVariant = "external" | "internal";
 type ExternalTaskMode = "download" | "compress";
+
+const EXTERNAL_TASK_MODE_OPTIONS: readonly WorkflowModeOption<ExternalTaskMode>[] = [
+  { value: "download", label: "외부 HTML 저장", icon: FolderOpen },
+  { value: "compress", label: "외부 HTML 압축", icon: FileJson },
+];
 
 const DOWNLOAD_VARIANTS = {
   external: {
@@ -308,6 +314,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     setExistingCheckCompleted(false);
     setLastInspectionCandidateCount(0);
     setLastInspectionResult(null);
+    setDeleteConfirmed(false);
+    setDeleteConfirmationText("");
   }, [currentSourcePath, dataRoot, htmlParseMode, limit, outputDirectory, useSeparateOutputDirectory]);
 
   useEffect(() => {
@@ -324,7 +332,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setIsErrorStatus(true);
       return;
     }
-    if (!outputDirectory) {
+    if (useSeparateOutputDirectory && !outputDirectory) {
       setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
@@ -340,6 +348,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setInspectRunning(true);
       setExistingCheckError("");
       setExistingCheckCompleted(false);
+      setDeleteConfirmed(false);
+      setDeleteConfirmationText("");
       setIsErrorStatus(false);
       setStatus("폴더를 검사하는 중입니다...");
       const payload = buildCleanupPayload(true);
@@ -654,7 +664,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const showSaveWorkflow =
     (variant === "external" && externalTaskMode === "download") ||
     variant === "internal";
-  const hasInspectionInput = !!currentSourcePath && !!outputDirectory;
+  const hasInspectionInput = !!currentSourcePath && (!useSeparateOutputDirectory || !!outputDirectory);
   const integrityProblemCount = existingData
     ? Number(existingData.invalid_target_html_count || 0)
       + Number(existingData.hash_mismatch_target_html_count || 0)
@@ -680,7 +690,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     inspectionVerdict = {
       label: "사용 불가",
       title: "기존 원문 데이터에 문제가 있습니다",
-      description: existingCheckError || existingDetail,
+      description: existingCheckError || "아래 실패 단계의 원인과 조치를 확인해 주세요.",
       tone: "error",
     };
   } else if (existingCheckCompleted) {
@@ -744,7 +754,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           : existingCheckCompleted
             ? "정상"
             : "대기",
-      action: hasInspectionInput ? {
+      action: hasInspectionInput && !existingCheckCompleted ? {
         label: inspectRunning ? "검사 중..." : "검사하기",
         onClick: handleInspectFolder,
         disabled: inspectRunning || isJobActive,
@@ -762,30 +772,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       description={isExternalCompressMode
         ? "저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
         : variantConfig.description}
-      actions={variant === "external" ? (
-        <div className="inline-flex rounded-md border border-[color:var(--tv-border)] p-1">
-          <Button
-            type="button"
-            variant={externalTaskMode === "download" ? "default" : "ghost"}
-            size="sm"
-            className="h-8"
-            onClick={() => setExternalTaskMode("download")}
-          >
-            <FolderOpen className="mr-2 h-4 w-4" />
-            외부 HTML 저장
-          </Button>
-          <Button
-            type="button"
-            variant={externalTaskMode === "compress" ? "default" : "ghost"}
-            size="sm"
-            className="h-8"
-            onClick={() => setExternalTaskMode("compress")}
-          >
-            <FileJson className="mr-2 h-4 w-4" />
-            외부 HTML 압축
-          </Button>
-        </div>
-      ) : null}
+      modeSwitch={variant === "external" ? {
+        ariaLabel: "외부 HTML 작업 모드",
+        value: externalTaskMode,
+        options: EXTERNAL_TASK_MODE_OPTIONS,
+        onValueChange: setExternalTaskMode,
+      } : undefined}
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
@@ -810,7 +802,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
             )}
             {existingData && (
               <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
-                <div className="flex flex-col gap-3 border-b border-[color:var(--tv-border)] pb-3 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1 border-b border-[color:var(--tv-border)] pb-3">
                   <div className="space-y-1">
                     <p className="text-body flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
                       <FolderOpen className="h-4 w-4 text-[var(--tv-accent)]" />
@@ -826,27 +818,13 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                       {" "} / 대상 외 파일: <span className="font-semibold">{formatInteger(existingData.deletion_candidate_count || 0)}</span>개
                     </p>
                   </div>
-                  <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                    {(existingData.deletion_candidate_count || 0) > 0 && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 shrink-0 self-start border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] hover:text-[var(--tv-accent)] md:self-auto"
-                        onClick={handleInspectFolder}
-                        disabled={isJobActive || inspectRunning}
-                      >
-                        폴더 검사하기
-                      </Button>
-                    )}
-                  </div>
                 </div>
 
                 <div className="space-y-2">
                   <div className="text-caption flex flex-col justify-between gap-2 rounded border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 sm:flex-row sm:items-center">
                     <div className="space-y-0.5">
                       <p className="font-medium text-slate-800 dark:text-slate-200">{existingSummary}</p>
-                      <p className="text-caption break-all text-slate-500 dark:text-slate-400">{outputDirectory}</p>
+                      <p className="text-caption break-all text-slate-500 dark:text-slate-400">{existingData.output_directory}</p>
                     </div>
                     {existingStatus && (
                       <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${existingStatus.className}`}>
@@ -939,11 +917,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                 <CardTitle className="dark:text-white">작업 실행</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Button variant="outline" className="h-10 w-full" onClick={handleInspectFolder} disabled={isJobActive || inspectRunning}>
-                    {inspectRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FolderOpen className="mr-2 h-4 w-4" />}
-                    폴더 검사하기
-                  </Button>
+                <div className="grid gap-3 md:grid-cols-2">
                   <Button
                     className="h-10 w-full"
                     onClick={handleRun}
@@ -973,7 +947,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
             />
           }
           notificationActive={isErrorStatus || !!existingCheckError || lastInspectionCandidateCount > 0 || !!lastInspectionResult}
-          notificationTone={isErrorStatus ? "error" : existingCheckError || lastInspectionCandidateCount > 0 ? "warning" : "success"}
+          notificationTone={isErrorStatus ? "error" : existingCheckError || integrityProblemCount > 0 ? "warning" : "success"}
           notificationContent={
             <>
               {lastInspectionCandidateCount > 0 && (

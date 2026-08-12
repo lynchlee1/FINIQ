@@ -5,6 +5,10 @@ import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
+import {
+  WorkflowModeSwitch,
+  type WorkflowModeSwitchProps,
+} from "@/components/layout/WorkflowModeSwitch";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 
 export const htmlControlClassName = "text-body h-10 border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)] placeholder:text-[var(--tv-subtle)]";
@@ -14,12 +18,12 @@ export const htmlPageNoticeClassName = "rounded-lg border border-[color:var(--tv
 export const htmlInsetPanelClassName = "rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4";
 export const htmlTableFrameClassName = "max-h-80 overflow-auto rounded-md border border-[color:var(--tv-border)]";
 
-type HtmlWorkflowPageProps = {
+type HtmlWorkflowPageProps<TMode extends string> = {
   eyebrow?: string;
   title: string;
   description: string;
   notice?: ReactNode;
-  actions?: ReactNode;
+  modeSwitch?: Omit<WorkflowModeSwitchProps<TMode>, "children">;
   children: ReactNode;
 };
 
@@ -118,24 +122,27 @@ type HtmlWorkflowFormProps = {
   className?: string;
 };
 
-export function HtmlWorkflowPage({
+export function HtmlWorkflowPage<TMode extends string>({
   eyebrow: _eyebrow = "HTML Workflow",
   title: _title,
   description: _description,
   notice,
-  actions,
+  modeSwitch,
   children,
-}: HtmlWorkflowPageProps) {
+}: HtmlWorkflowPageProps<TMode>) {
+  if (modeSwitch) {
+    return <WorkflowModeSwitch {...modeSwitch}>{children}</WorkflowModeSwitch>;
+  }
+
+  if (!notice) return <>{children}</>;
+
   return (
-    <>
-      {(actions || notice) ? (
-        <section className={htmlPageNoticeClassName}>
-          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-          {notice ? <div className={actions ? "mt-4" : ""}>{notice}</div> : null}
-        </section>
-      ) : null}
+    <div className="space-y-6">
+      <section className={htmlPageNoticeClassName}>
+        <div>{notice}</div>
+      </section>
       {children}
-    </>
+    </div>
   );
 }
 
