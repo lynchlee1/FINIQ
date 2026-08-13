@@ -1,0 +1,302 @@
+{
+  "schema_version": 1,
+  "method": "Codex multi-agent document adjudication",
+  "performed_on": "2026-08-13",
+  "model_identity": "unavailable to repository",
+  "model_identity_note": "The repository records the Codex multi-agent workflow but the exact hosted model identity and snapshot are not exposed as repository-verifiable metadata; no identity was guessed.",
+  "runtime_llm_dependency": false,
+  "prompt_path": "adjudication_prompt.md",
+  "prompt_sha256": "a462f040c91a2c8344f6a956ab65a9148eac1ffa161343bbef0b52dc68a675ce",
+  "reviewers": [
+    {
+      "agent_path": "/root/candidate_2026_audit",
+      "role": "full-pair source review, assertion inventory, fixture and invariant review"
+    },
+    {
+      "agent_path": "/root/candidate_2026_audit/positive_candidates",
+      "role": "independent proposed and option-grant candidate review"
+    },
+    {
+      "agent_path": "/root",
+      "role": "semantic grammar owner and final resolution of the named-proposer disagreement"
+    },
+    {
+      "agent_path": "/root/completion_ai_scope",
+      "role": "independent completion audit and correction-after proposer adjudication"
+    }
+  ],
+  "cases": [
+    {
+      "acpt_no": "20180102000452",
+      "positive_labels": ["박화영 is a director candidate", "김좌진 serves at 주식회사 엔에스엔 as auditor", "business-purpose change rows are preserved"],
+      "negative_boundaries": ["the unnamed phrase 주주 제안 is not a proposer entity", "NOTICE does not create elected_as"],
+      "rationale": "The full notice contains named election-detail rows, an explicit other-company role, and business-purpose rows; it does not identify a proposer next to the generic shareholder-proposal phrase.",
+      "disagreements": [],
+      "resolution": "Accepted as a legacy notice and election-detail golden case."
+    },
+    {
+      "acpt_no": "20180102000266",
+      "positive_labels": ["안성일 is the named auditor candidate", "the auditor election row records 상근"],
+      "negative_boundaries": ["상근 is a role attribute rather than a person", "no proposer is named"],
+      "rationale": "The complete result pair explicitly names 안성일 in the auditor-election section and records employment mode separately.",
+      "disagreements": [],
+      "resolution": "Accepted as the legacy auditor-detail golden case."
+    },
+    {
+      "acpt_no": "20260224000928",
+      "positive_labels": ["nested candidate subagendas remain distinct", "이재영 is elected after a passed result"],
+      "negative_boundaries": ["유성무 is not elected after a rejected result", "이사회 추천 is not a person"],
+      "rationale": "The result text gives a terminal outcome for each nested candidate agenda, allowing direct passed-versus-rejected adjudication.",
+      "disagreements": [],
+      "resolution": "Accepted with candidate and active-election polarity assertions."
+    },
+    {
+      "acpt_no": "20260123000326",
+      "positive_labels": ["김한민 is an audit-committee and outside-director candidate", "numbered terminal outcomes form separate agendas"],
+      "negative_boundaries": ["no rejected candidate receives elected_as", "감사위원회 대표 is not a person"],
+      "rationale": "All named candidate proposals in this result are explicitly rejected while unrelated numbered charter proposals have their own outcomes.",
+      "disagreements": [],
+      "resolution": "Accepted as a rejected-candidate and numbered-agenda boundary case."
+    },
+    {
+      "acpt_no": "20260126000552",
+      "positive_labels": ["three voting proposals are agendas", "@meeting includes all three voting proposals"],
+      "negative_boundaries": ["preceding audit and business report ordinals are not agendas", "감사보고 is not a person"],
+      "rationale": "The legacy cell switches from report items to voting matters; only the latter parenthesized ordinals are in agenda scope.",
+      "disagreements": [],
+      "resolution": "Accepted as the legacy ordinal-state golden case."
+    },
+    {
+      "acpt_no": "20260130000481",
+      "positive_labels": ["the title following an empty proposal marker is one passed agenda"],
+      "negative_boundaries": ["영업양수 is not an organization name", "no acquisition target is explicitly named"],
+      "rationale": "The result places the title and approval wording on the line after the numbered marker but names no transaction counterparty.",
+      "disagreements": [],
+      "resolution": "Accepted as an empty-marker continuation case."
+    },
+    {
+      "acpt_no": "20260112000592",
+      "positive_labels": ["김성균 and Hugues Dusseaux are named removal subjects", "termination subjects remain linked to their agendas"],
+      "negative_boundaries": ["NOTICE emits no removed_from", "전원 is not a person"],
+      "rationale": "The notice schedules named removal proposals but cannot establish that any office has ended.",
+      "disagreements": [],
+      "resolution": "Accepted with notice-phase termination safety assertions."
+    },
+    {
+      "acpt_no": "20260224000004",
+      "positive_labels": ["김성균 has a passed auditor removal", "김성균 removed_from the reporting company"],
+      "negative_boundaries": ["임신영 is not removed after rejection", "group wording does not create a person"],
+      "rationale": "The result explicitly passes 김성균's removal and rejects the compared removal proposal.",
+      "disagreements": [],
+      "resolution": "Accepted as the passed-versus-rejected removal golden case."
+    },
+    {
+      "acpt_no": "20260327003214",
+      "positive_labels": ["전득영 resigned_from after a passed agenda", "오영표 resigned_from after a passed agenda"],
+      "negative_boundaries": ["the action word 사임 is not a person", "resignation is not relabelled as removal"],
+      "rationale": "Both named resignation agendas are passed and explicitly identify the affected directors.",
+      "disagreements": [],
+      "resolution": "Accepted as the active resignation golden case."
+    },
+    {
+      "acpt_no": "20180309001014",
+      "positive_labels": ["박존찬형 is a name-first removal subject", "문종국 is an auditor removal subject"],
+      "negative_boundaries": ["NOTICE creates no removed_from", "a causal resignation clause does not become a person"],
+      "rationale": "Compact historical titles explicitly bind names and offices but the disclosure is only a notice.",
+      "disagreements": [],
+      "resolution": "Accepted as a historical name-first termination case."
+    },
+    {
+      "acpt_no": "20260312002120",
+      "positive_labels": ["조승용 and 권종오 are explicit director candidates"],
+      "negative_boundaries": ["감사 보수한도 승인선임 does not name a person", "NOTICE creates no elected_as"],
+      "rationale": "Election detail rows name four people, while the malformed compensation-limit agenda contains no personal name.",
+      "disagreements": [],
+      "resolution": "Accepted with a compensation-limit false-person boundary."
+    },
+    {
+      "acpt_no": "20260331003952",
+      "positive_labels": ["여윤미 is elected as outside director", "여윤미 is elected as audit-committee member"],
+      "negative_boundaries": ["박기수 is withdrawn and not an entity or elected officer", "one person is not duplicated across the two offices"],
+      "rationale": "The remarks explicitly withdraw 박기수 and retain 여윤미, whose detail rows establish both offices.",
+      "disagreements": [],
+      "resolution": "Accepted as a named-withdrawal and multi-office dedup case."
+    },
+    {
+      "acpt_no": "20260316002280",
+      "positive_labels": ["장영수 and 허윤 are explicit audit-committee candidates"],
+      "negative_boundaries": ["감사의원회 의원이 되는 사외이사 is a role surface rather than a person", "NOTICE creates no elected_as"],
+      "rationale": "Named election-detail rows provide the people; the standalone agenda grammar supplies an office only.",
+      "disagreements": [],
+      "resolution": "Accepted as a malformed role-surface negative case."
+    },
+    {
+      "acpt_no": "20260225000885",
+      "positive_labels": ["박주현 is the named auditor candidate and agenda subject"],
+      "negative_boundaries": ["박주현 is not the proposer merely because the agenda says 주주 제안", "NOTICE creates no elected_as"],
+      "rationale": "The source labels 박주현 after 후보자; it does not identify the shareholder who proposed the agenda.",
+      "disagreements": [],
+      "resolution": "Accepted with candidate-versus-proposer separation."
+    },
+    {
+      "acpt_no": "20260310001962",
+      "positive_labels": ["삼일회계법인 is the current appointed external auditor"],
+      "negative_boundaries": ["외부감사인 is a role and not an organization name", "the auditor is not a serves_at employer"],
+      "rationale": "The reference section explicitly reports 삼일회계법인 as selected for the stated terms.",
+      "disagreements": [],
+      "resolution": "Accepted as an external-auditor appointment case."
+    },
+    {
+      "acpt_no": "20260316001346",
+      "positive_labels": ["한울회계법인 is the former external auditor", "대주회계법인 is the current appointed external auditor"],
+      "negative_boundaries": ["외부감사인 변경 is not an organization", "auditor firms are not voting managers"],
+      "rationale": "The source uses an explicit from-to auditor change construction.",
+      "disagreements": [],
+      "resolution": "Accepted with former/current state assertions."
+    },
+    {
+      "acpt_no": "20260304000686",
+      "positive_labels": ["한국예탁결제원 is the active electronic-voting manager"],
+      "negative_boundaries": ["the same assertion must not also create a provider edge", "전자투표시스템 is not an organization"],
+      "rationale": "The source explicitly entrusts management work to 한국예탁결제원, so manager semantics take precedence over its system mention.",
+      "disagreements": [],
+      "resolution": "Accepted as the manager-versus-provider precedence case."
+    },
+    {
+      "acpt_no": "20260305000989",
+      "positive_labels": ["한국예탁결제원 is the planned electronic-voting manager", "전동진 serves at ㈜동승 as outside director"],
+      "negative_boundaries": ["the following representative-director delegation is unrelated", "한국예탁결제원 is not duplicated as a provider"],
+      "rationale": "The current-meeting clause explicitly delegates voting management; a later unrelated delegation must not extend that capture.",
+      "disagreements": [],
+      "resolution": "Accepted with the completed-clause boundary."
+    },
+    {
+      "acpt_no": "20260316002584",
+      "positive_labels": ["삼성증권 is the active electronic-voting and proxy system provider"],
+      "negative_boundaries": ["삼성증권 is not asserted as the voting manager", "전자위임장권유시스템 is not an organization"],
+      "rationale": "The source identifies the provider in a current-meeting system line and lists both electronic services without delegating management.",
+      "disagreements": [],
+      "resolution": "Accepted as a named system-provider case."
+    },
+    {
+      "acpt_no": "20260316000503",
+      "positive_labels": ["이니셜 1호 투자조합 and explicit companions are transferors", "강지연 is a person transferor", "㈜와비사비홀딩스 is the transferee"],
+      "negative_boundaries": ["외 2인 is not an entity", "the buyer is not a current shareholder merely from the contract"],
+      "rationale": "The source expands the named seller roster and gives a directed share-sale contract to the named buyer.",
+      "disagreements": [],
+      "resolution": "Accepted as the explicit transfer-party golden case."
+    },
+    {
+      "acpt_no": "20260119000577",
+      "positive_labels": ["헤일로 마이크로일렉트로닉스 인터내셔널 코퍼레이션 is the proposed allottee", "the same organization is identified as current maximum shareholder"],
+      "negative_boundaries": ["배정대상자 is a label and not an entity", "the proposal does not by itself assert transferee_of"],
+      "rationale": "The labelled allottee row gives one complete organization name and explicitly calls it the company's maximum shareholder.",
+      "disagreements": [],
+      "resolution": "Accepted as the proposed-allottee golden case."
+    },
+    {
+      "acpt_no": "20260407001104",
+      "positive_labels": ["파라택시스코리아 is the named merger target"],
+      "negative_boundaries": ["당사 is not a separate organization entity", "generic 합병 language alone is insufficient"],
+      "rationale": "The agenda remarks explicitly say that the reporting company absorbs 파라택시스코리아.",
+      "disagreements": [],
+      "resolution": "Accepted as an agenda-level merger-target case."
+    },
+    {
+      "acpt_no": "20260311001268",
+      "positive_labels": ["(주)제니스월드 is the named business-purpose merger target"],
+      "negative_boundaries": ["종속회사 is a role and not an organization name", "the reason must not absorb legal modifiers into the name"],
+      "rationale": "The selected business-purpose reason directly names (주)제니스월드 in an absorption-merger construction.",
+      "disagreements": [],
+      "resolution": "Accepted as a business-purpose merger positive."
+    },
+    {
+      "acpt_no": "20110318000850",
+      "positive_labels": ["이윤상 remains an outside-director candidate from the election detail"],
+      "negative_boundaries": ["계열회사 is a generic merger role and not an entity", "계열회사 흡수합병 creates no merger_target_of"],
+      "rationale": "The business-purpose reason contains only a generic group-company role, while a separate election row explicitly names 이윤상.",
+      "disagreements": [],
+      "resolution": "Accepted as a historical generic-merger negative."
+    },
+    {
+      "acpt_no": "20251209000323",
+      "positive_labels": ["핑장소재기술유한공사 is the passed divestment target", "GeneVision AI Technology Holdings Ltd. is the passed acquisition target"],
+      "negative_boundaries": ["자회사 is a role rather than the target name", "the two directed stake transactions are not merger targets"],
+      "rationale": "Two passed agendas explicitly name one divested subsidiary stake and one acquired company stake.",
+      "disagreements": [],
+      "resolution": "Accepted as the paired acquisition/divestment golden case."
+    },
+    {
+      "acpt_no": "20260311001748",
+      "positive_labels": ["강태범, 장정석, and 박종원 each proposed the 2,000-won dividend agenda", "the same three people each proposed the stock-split agenda"],
+      "negative_boundaries": ["the comma-separated roster is three people rather than one entity", "named proposers are not director candidates"],
+      "rationale": "Both notice agendas contain the explicit structured surface 주주제안_강태범,장정석,박종원.",
+      "disagreements": ["The parser initially emitted no proposed edges because the existing grammar did not split an underscore-led comma roster; source adjudication identified six explicit proposer facts."],
+      "resolution": "The semantic grammar owner added the structural roster grammar; the golden expects six proposed edges and no candidate edge for the three proposers."
+    },
+    {
+      "acpt_no": "20260330001464",
+      "positive_labels": ["강태범, 장정석, and 박종원 remain proposers of both rejected shareholder proposals"],
+      "negative_boundaries": ["rejection does not erase the descriptive proposed relationship", "rejected proposals create no active election for the proposers"],
+      "rationale": "The result repeats the explicit three-person proposer roster on two agendas and marks both agendas rejected.",
+      "disagreements": ["The parser initially emitted no proposed edges before the structural underscore/comma proposer grammar was added."],
+      "resolution": "The golden preserves six descriptive proposed edges while keeping both proposal outcomes rejected."
+    },
+    {
+      "acpt_no": "20260326001553",
+      "positive_labels": ["김광연, 이수민, and 최경환 each receive a passed option_granted_by relationship", "each beneficiary is also a stock-option agenda subject"],
+      "negative_boundaries": ["김정훈 is a director candidate and not an option beneficiary", "부여대상자 is a label rather than a person"],
+      "rationale": "Three separate passed result rows explicitly bracket each named stock-option beneficiary.",
+      "disagreements": [],
+      "resolution": "Two Codex agents independently confirmed the three positive option grants; accepted as the real option-grant golden case."
+    },
+    {
+      "acpt_no": "20260109000278",
+      "positive_labels": ["성영철 currently serves at ㈜알엔투테크놀로지 as 대표이사", "이재호 currently serves at 대한감정평가법인 as 이사", "both relationships are evidenced by the 주요경력(현직포함) field"],
+      "negative_boundaries": ["김성환's generic 재직 wording does not establish a named position", "김지성's 딜 본부 wording describes an organizational unit rather than a supported position"],
+      "rationale": "The career rows explicitly separate two current organization-plus-position clauses from one generic employment clause and one department-only clause.",
+      "disagreements": [],
+      "resolution": "Accepted with two positive serves_at relationships and explicit 재직/본부 negative boundaries."
+    },
+    {
+      "acpt_no": "20260105000566",
+      "positive_labels": ["김한민 currently serves at 인덕회계법인 as 이사", "the relationship evidence comes from 주요경력(현직포함)"],
+      "negative_boundaries": ["왕현철's 교수 career surface is outside the supported corporate-position relationship boundary", "최호석's 파트너변호사 career surface is outside that boundary"],
+      "rationale": "The adjudicated scope models the explicit current 이사 clause while retaining 교수 and 파트너변호사 text only in the election career payload.",
+      "disagreements": [],
+      "resolution": "Accepted as one positive major-career serves_at case with two professional-role negatives."
+    },
+    {
+      "acpt_no": "20260106000409",
+      "positive_labels": ["한정수 currently serves at 주식회사 비츠조명 as 대표이사", "한정수 currently serves at 마케팅회사 위드잇 as 사외이사", "하석민 currently serves at 대한시니어 치과 학회 as 부회장"],
+      "negative_boundaries": ["대표이사 and 사외이사 are positions and must not be absorbed into organization names", "하석민's former 교수 clause must not become a current serves_at relationship"],
+      "rationale": "One career cell contains multiple explicit current organization-position clauses, while a separate historical 교수 clause has opposite temporal polarity.",
+      "disagreements": [],
+      "resolution": "Accepted with named target, position, current-state, and 주요경력(현직포함) evidence assertions."
+    },
+    {
+      "acpt_no": "20160808000455",
+      "positive_labels": ["에이피우주항공 주식회사 is the named merger target"],
+      "negative_boundaries": ["비상장법인인 is a legal-status modifier and not part of the organization name", "당사 is the reporting company and not a second organization entity"],
+      "rationale": "The agenda says that the listed reporting company absorbs the explicitly named unlisted company; the legal-status phrase only modifies that counterparty.",
+      "disagreements": [],
+      "resolution": "Accepted with the modifier stripped and the merger target directed to @reporting_company."
+    },
+    {
+      "acpt_no": "20100210000221",
+      "positive_labels": ["조규관 explicitly proposes the three named director candidates", "조규관 explicitly proposes the named auditor candidate", "the two proposed relationships target the corresponding director and auditor agendas"],
+      "negative_boundaries": ["정정전의 구제안자는 not authoritative and creates no entity", "arbitrary correction prose and non-reference-note correction rows are not proposer sources"],
+      "rationale": "The exact correction comparison table identifies a reference-note row and gives authoritative 정정후 sentences that name 조규관 as 제안자/제안인 for candidate rosters also present in the election-detail tables.",
+      "disagreements": ["The initial title-only proposer grammar omitted this explicit correction-after source; independent completion audit classified it as a deterministic P2 recall gap."],
+      "resolution": "Accepted as a typed correction-after source with exact direct-cell headers, full-line grammar, matching election identities, unique office-compatible agenda linkage, and original table/row/column evidence."
+    },
+    {
+      "acpt_no": "20081126000092",
+      "positive_labels": ["동화케미칼(주) is the named merger target in the passed result"],
+      "negative_boundaries": ["동화기업(주) is the reporting-company side identified by metadata and must not become its own target entity", "the two-party phrase must not be captured as one organization name"],
+      "rationale": "The agenda names 동화기업(주) and 동화케미칼(주), while metadata identifies 동화기업 as the reporting company; the other party is therefore the merger target.",
+      "disagreements": [],
+      "resolution": "Accepted as the historical two-party metadata-side disambiguation case."
+    }
+  ]
+}

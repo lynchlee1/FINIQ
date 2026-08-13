@@ -197,18 +197,43 @@ def test_build_ontology_graph(tmp_path: Path):
     sh_meeting_parsed = tmp_path / "parsed-sh.json"
     sh_meeting_parsed_data = {
         "records": [
-            {
-                "acpt_no": "20260430002086",
-                "agendas": [
-                    "제1호 의안: 이사 선임의 건"
-                ],
-                "elections": [
+                {
+                    "acpt_no": "20260430002086",
+                    "disclosure_phase": "result",
+                    "meeting_date": "2026-04-30",
+                "agenda_records": [
                     {
-                        "candidate_name": "강감찬",
-                        "role": "사내이사",
-                        "is_outside": False
+                        "agenda_ref": "agenda:0",
+                        "title": "제1호 의안: 이사 선임의 건",
+                        "status": "passed",
                     }
-                ]
+                ],
+                "entities": [
+                    {
+                        "entity_ref": "person:gang",
+                        "entity_type": "person",
+                        "name": "강감찬",
+                    }
+                ],
+                "relationships": [
+                    {
+                        "source_ref": "@meeting",
+                        "target_ref": "agenda:0",
+                        "relationship_type": "includes",
+                        "attributes": {},
+                        "evidence": {"raw_text": "제1호 의안: 이사 선임의 건"},
+                    },
+                    {
+                        "source_ref": "person:gang",
+                        "target_ref": "@reporting_company",
+                        "relationship_type": "elected_as",
+                        "attributes": {
+                            "office_type": "director",
+                            "outcome": "passed",
+                        },
+                        "evidence": {"raw_text": "강감찬 사내이사 선임"},
+                    },
+                ],
             }
         ]
     }
@@ -253,7 +278,7 @@ def test_build_ontology_graph(tmp_path: Path):
     assert "person_026178_강감찬" in nodes
     assert nodes["person_026178_강감찬"].name == "강감찬"
     
-    director_edges = [e for e in edges if e.edge_type == EdgeTypes.DIRECTOR_OF]
+    director_edges = [e for e in edges if e.edge_type == EdgeTypes.ELECTED_AS]
     assert len(director_edges) == 1
     assert director_edges[0].source_id == "person_026178_강감찬"
     assert director_edges[0].target_id == "company_026178"
@@ -372,7 +397,7 @@ def test_build_ontology_graph(tmp_path: Path):
 
 
 
-def test_shareholder_meeting_no_title(tmp_path):
+def test_shareholder_meeting_rejects_alternate_filtered_fields(tmp_path):
     import json
     from finiq.data.ontology_builder import build_ontology_graph, export_ontology_to_web_json
 
@@ -380,22 +405,33 @@ def test_shareholder_meeting_no_title(tmp_path):
     filtered_path = tmp_path / "shareholder_meeting_filtered.json"
     parsed_path = tmp_path / "shareholder_meeting_parsed.json"
 
-    # Filtered disclosure with NO title key
+    # Legacy aliases do not substitute for the current filtered schema.
     filtered_data = {
         "disclosures": [
             {
                 "acpt_no": "2026000001",
-                "company_id": "022180",
-                "company_name": "NoTitleCo",
-                "disclosed_date": "2026-01-01"
+                "company_key": "022180",
+                "submitter": "NoTitleCo",
+                "disclosed_at": "2026-01-01",
             }
         ]
     }
     with open(filtered_path, "w", encoding="utf-8") as f:
         json.dump(filtered_data, f)
 
-    # Empty parsed details
-    parsed_data = {"records": []}
+    parsed_data = {
+        "records": [
+            {
+                "acpt_no": "2026000001",
+                "title": "정기주주총회결과",
+                "meeting_date": "2026-01-02",
+                "source_file": "/legacy/2026000001.html",
+                "agenda_records": [],
+                "entities": [],
+                "relationships": [],
+            }
+        ]
+    }
     with open(parsed_path, "w", encoding="utf-8") as f:
         json.dump(parsed_data, f)
 
@@ -411,9 +447,2027 @@ def test_shareholder_meeting_no_title(tmp_path):
     with open(out_web_json, "r", encoding="utf-8") as f:
         web_data = json.load(f)
 
-    # Verify nodes and labels
-    web_nodes = web_data["nodes"]
-    assert any(n["id"] == "shareholder_meeting_2026000001" for n in web_nodes)
-    meeting_node = next(n for n in web_nodes if n["id"] == "shareholder_meeting_2026000001")
-    assert meeting_node["label"] == "주주총회"
-    assert meeting_node["properties"]["meeting_type"] == "주주총회"
+    assert not any(
+        node["id"] == "shareholder_meeting_2026000001"
+        for node in web_data["nodes"]
+    )
+
+
+def test_shareholder_alternate_company_fields_do_not_rebind_organizations(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260000000001",
+                        "company_id": "111111",
+                        "company_name": "정상회사",
+                        "disclosed_date": "2026-01-01",
+                        "title": "정기주주총회결과",
+                    },
+                    {
+                        "acpt_no": "20260000000002",
+                        "company_key": "222222",
+                        "submitter": "대체필드회사",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20260000000001",
+                        "disclosure_phase": "result",
+                        "meeting_date": "2026-01-02",
+                        "agenda_records": [],
+                        "entities": [
+                            {
+                                "entity_ref": "organization:0",
+                                "entity_type": "organization",
+                                "name": "대체필드회사",
+                            }
+                        ],
+                        "relationships": [],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, _, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    assert "org_대체필드회사" in nodes
+    assert "company_222222" not in nodes
+
+
+def test_shareholder_meeting_semantic_entities_and_relationships(tmp_path: Path):
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260327002490",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-03-27",
+                        "title": "정기주주총회결과",
+                        "source_file": "/data/20260327002490.html",
+                    },
+                    {
+                        "acpt_no": "20260327009999",
+                        "company_id": "654321",
+                        "company_name": "비시드파트너스",
+                        "disclosed_date": "2026-03-27",
+                        "title": "정기주주총회결과",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20260327002490",
+                        "disclosure_phase": "result",
+                        "meeting_date": "2026년 03월 26일",
+                        "agenda_records": [
+                            {
+                                "agenda_ref": "agenda:0",
+                                "number": "4-4",
+                                "title": "사외이사 박준구 선임의 건",
+                                "status": "passed",
+                            },
+                            {
+                                "agenda_ref": "agenda:1",
+                                "number": "6",
+                                "title": "주식매수선택권 부여의 건",
+                                "status": "passed",
+                            },
+                        ],
+                        "entities": [
+                            {
+                                "entity_ref": "person:park",
+                                "entity_type": "person",
+                                "name": "박준구",
+                                "attributes": {"birth_month": "1964년 02월"},
+                                "mentions": [{"section": "사외이사선임 세부내역", "row_index": 2}],
+                            },
+                            {
+                                "entity_ref": "person:lee",
+                                "entity_type": "person",
+                                "name": "이수민",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:employer",
+                                "entity_type": "organization",
+                                "name": "비시드파트너스(주)",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:unlisted-employer",
+                                "entity_type": "organization",
+                                "name": "외부연구원",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:proposer",
+                                "entity_type": "organization",
+                                "name": "유진이엔티㈜",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:auditor",
+                                "entity_type": "organization",
+                                "name": "삼일회계법인",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:former-auditor",
+                                "entity_type": "organization",
+                                "name": "삼정회계법인",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:voting-manager",
+                                "entity_type": "organization",
+                                "name": "KB국민은행",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "@meeting",
+                                "target_ref": "agenda:0",
+                                "relationship_type": "includes",
+                                "attributes": {},
+                                "evidence": {
+                                    "table_index": 4,
+                                    "row_index": 2,
+                                    "raw_text": "사외이사 박준구 선임의 건",
+                                },
+                            },
+                            {
+                                "source_ref": "@meeting",
+                                "target_ref": "agenda:1",
+                                "relationship_type": "includes",
+                                "attributes": {},
+                                "evidence": {
+                                    "table_index": 4,
+                                    "row_index": 3,
+                                    "raw_text": "주식매수선택권 부여의 건",
+                                },
+                            },
+                            {
+                                "source_ref": "person:park",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {"office_type": "outside_director", "outcome": "passed"},
+                                "evidence": {
+                                    "table_index": 4,
+                                    "row_index": 2,
+                                    "raw_text": "박준구 사외이사 후보",
+                                },
+                            },
+                            {
+                                "source_ref": "person:park",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "elected_as",
+                                "attributes": {"office_type": "outside_director", "outcome": "passed"},
+                                "evidence": {
+                                    "table_index": 4,
+                                    "row_index": 2,
+                                    "raw_text": "박준구 사외이사 선임",
+                                },
+                            },
+                            {
+                                "source_ref": "person:park",
+                                "target_ref": "agenda:0",
+                                "relationship_type": "subject_of",
+                                "attributes": {"action": "appointment"},
+                                "evidence": {
+                                    "table_index": 4,
+                                    "row_index": 2,
+                                    "raw_text": "사외이사 박준구 선임의 건",
+                                },
+                            },
+                            {
+                                "source_ref": "org:proposer",
+                                "target_ref": "agenda:0",
+                                "relationship_type": "proposed",
+                                "attributes": {},
+                                "evidence": {
+                                    "field": "remarks",
+                                    "raw_text": "유진이엔티 제안",
+                                },
+                            },
+                            {
+                                "source_ref": "person:park",
+                                "target_ref": "org:employer",
+                                "relationship_type": "serves_at",
+                                "attributes": {"position": "대표이사", "is_current": True},
+                                "evidence": {
+                                    "field": "other_company",
+                                    "raw_text": "비시드파트너스 대표이사",
+                                },
+                            },
+                            {
+                                "source_ref": "person:park",
+                                "target_ref": "org:unlisted-employer",
+                                "relationship_type": "serves_at",
+                                "attributes": {"position": "고문", "is_current": True},
+                                "evidence": {
+                                    "field": "other_company",
+                                    "raw_text": "외부연구원 고문",
+                                },
+                            },
+                            {
+                                "source_ref": "person:park",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "serves_at",
+                                "attributes": {
+                                    "position": "대표이사",
+                                    "is_current": True,
+                                },
+                                "evidence": {
+                                    "field": "major_career",
+                                    "raw_text": "현) 차백신연구소 대표이사",
+                                },
+                            },
+                            {
+                                "source_ref": "person:lee",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "option_granted_by",
+                                "attributes": {"outcome": "passed"},
+                                "evidence": {
+                                    "field": "agenda",
+                                    "raw_text": "이수민 주식매수선택권 부여",
+                                },
+                            },
+                            {
+                                "source_ref": "org:auditor",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "external_auditor_of",
+                                "attributes": {"state": "current", "action": "appointed"},
+                                "evidence": {
+                                    "field": "기타 투자판단에 참고할 사항",
+                                    "raw_text": "삼일회계법인 선임",
+                                },
+                            },
+                            {
+                                "source_ref": "org:former-auditor",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "external_auditor_of",
+                                "attributes": {"state": "former", "action": "replaced"},
+                                "evidence": {
+                                    "field": "기타 투자판단에 참고할 사항",
+                                    "raw_text": "삼정회계법인에서 변경",
+                                },
+                            },
+                            {
+                                "source_ref": "org:voting-manager",
+                                "target_ref": "@meeting",
+                                "relationship_type": "electronic_voting_manager_for",
+                                "attributes": {
+                                    "delegation_status": "planned",
+                                    "services": ["electronic_voting"],
+                                },
+                                "evidence": {
+                                    "field": "기타 투자판단에 참고할 사항",
+                                    "raw_text": "KB국민은행에 관리업무 위탁",
+                                },
+                            },
+                            {
+                                "source_ref": "org:voting-manager",
+                                "target_ref": "@meeting",
+                                "relationship_type": "electronic_voting_system_provider_for",
+                                "attributes": {"services": ["electronic_voting_system"]},
+                                "evidence": {
+                                    "field": "기타 투자판단에 참고할 사항",
+                                    "raw_text": "KB국민은행 전자투표시스템",
+                                },
+                            },
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    meeting = nodes["shareholder_meeting_20260327002490"]
+    assert meeting.event_date == date(2026, 3, 26)
+    assert meeting.properties["disclosure_phase"] == "result"
+    assert nodes["agenda_20260327002490_0"].status == "passed"
+    assert "person_026178_박준구_196402" in nodes
+    assert nodes["person_026178_박준구_196402"].properties["mentions"][0]["row_index"] == 2
+    assert "person_026178_이수민" in nodes
+    assert "company_654321" in nodes
+    assert "org_외부연구원" in nodes
+    assert "org_유진이엔티" in nodes
+
+    semantic_types = {
+        edge.edge_type
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20260327002490"
+    }
+    assert {
+        EdgeTypes.CANDIDATE_FOR,
+        EdgeTypes.ELECTED_AS,
+        EdgeTypes.SUBJECT_OF,
+        EdgeTypes.PROPOSED,
+        EdgeTypes.SERVES_AT,
+        EdgeTypes.OPTION_GRANTED_BY,
+        EdgeTypes.EXTERNAL_AUDITOR_OF,
+        EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR,
+        EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR,
+    } <= semantic_types
+    includes = [
+        edge
+        for edge in edges
+        if edge.edge_type == EdgeTypes.INCLUDES
+        and edge.source_id == "shareholder_meeting_20260327002490"
+    ]
+    assert {edge.target_id for edge in includes} == {
+        "agenda_20260327002490_0",
+        "agenda_20260327002490_1",
+    }
+    serves_at = [edge for edge in edges if edge.edge_type == EdgeTypes.SERVES_AT]
+    assert {edge.target_id for edge in serves_at} == {
+        "company_026178",
+        "company_654321",
+        "org_외부연구원",
+    }
+    elected = next(edge for edge in edges if edge.edge_type == EdgeTypes.ELECTED_AS)
+    assert elected.is_active is True
+    assert elected.start_date == date(2026, 3, 26)
+    assert elected.properties["evidence"]["details"]["table_index"] == 4
+    assert elected.properties["evidence"]["details"]["row_index"] == 2
+    external_auditors = [
+        edge for edge in edges if edge.edge_type == EdgeTypes.EXTERNAL_AUDITOR_OF
+    ]
+    assert {edge.properties["state"]: edge.is_active for edge in external_auditors} == {
+        "current": True,
+        "former": False,
+    }
+    assert all(edge.start_date is None for edge in external_auditors)
+    voting_manager = next(
+        edge
+        for edge in edges
+        if edge.edge_type == EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR
+    )
+    assert voting_manager.target_id == "shareholder_meeting_20260327002490"
+    assert voting_manager.start_date == date(2026, 3, 26)
+    voting_system_provider = next(
+        edge
+        for edge in edges
+        if edge.edge_type == EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR
+    )
+    assert voting_system_provider.target_id == "shareholder_meeting_20260327002490"
+    assert voting_system_provider.start_date == date(2026, 3, 26)
+    assert voting_system_provider.is_active is None
+
+
+def test_shareholder_meeting_notice_never_creates_active_office_relation(tmp_path: Path):
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260311000932",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-03-11",
+                        "title": "정기주주총회소집결의",
+                    },
+                    {
+                        "acpt_no": "20260311000933",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-03-11",
+                        "title": "임시주주총회소집공고",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                            {
+                                "acpt_no": "20260311000932",
+                                "disclosure_phase": "notice",
+                                "meeting_date": "2026-03-27",
+                            "agenda_records": [],
+                            "entities": [
+                            {
+                                "entity_ref": "person:choi",
+                                "entity_type": "person",
+                                "name": "최종학",
+                                "attributes": {"birth_month": "1967년 02월"},
+                                "mentions": [],
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:choi",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {"office_type": "outside_director"},
+                                "evidence": {
+                                    "field": "후보자",
+                                    "raw_text": "최종학 사외이사 후보",
+                                },
+                            },
+                            {
+                                "source_ref": "person:choi",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "elected_as",
+                                "attributes": {"outcome": "passed"},
+                                "evidence": {},
+                            },
+                        ],
+                    },
+                        {
+                            "acpt_no": "20260311000933",
+                            "meeting_date": "2026-03-28",
+                            "elections": [{"name": "유호선", "section_type": "outside_director"}],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    assert "person_026178_최종학_196702" in nodes
+    assert any(edge.edge_type == EdgeTypes.CANDIDATE_FOR for edge in edges)
+    assert not any(
+        edge.edge_type in {
+            EdgeTypes.ELECTED_AS,
+            EdgeTypes.DIRECTOR_OF,
+            EdgeTypes.AUDITOR_OF,
+            EdgeTypes.AUDIT_COMMITTEE_MEMBER_OF,
+        }
+        for edge in edges
+    )
+    assert "person_026178_유호선" not in nodes
+
+
+def test_shareholder_missing_semantic_schema_does_not_reinterpret_raw_fields(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260109000651",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-01-09",
+                        "title": "임시주주총회결과",
+                    },
+                    {
+                        "acpt_no": "20260109000653",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-01-09",
+                        "title": "임시주주총회결과",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                        {
+                            "acpt_no": "20260109000651",
+                            "meeting_date": "2026-01-20",
+                            "agendas": ["감사 선임의 건"],
+                        "elections": [
+                            {"name": "이은녕", "birth_month": "1963년 08월", "section_type": "auditor"},
+                            {
+                                "name": "이은석",
+                                "birth_month": "1968년 03월",
+                                "section_type": "audit_committee_member",
+                            },
+                        ],
+                    },
+                        {
+                            "acpt_no": "20260109000653",
+                            "meeting_date": "2026-01-20",
+                            "agenda_records": [
+                            {
+                                "agenda_ref": "agenda:0",
+                                "title": "감사 선임의 건",
+                            }
+                        ],
+                        "entities": [
+                            {
+                                "entity_ref": "person:auditor",
+                                "entity_type": "person",
+                                "name": "이은녕",
+                            }
+                        ],
+                        "elections": [
+                            {
+                                "name": "이은녕",
+                                "birth_month": "1963년 08월",
+                                "section_type": "auditor",
+                            }
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    assert "company_026178" in nodes
+    assert "shareholder_meeting_20260109000651" in nodes
+    assert "shareholder_meeting_20260109000653" in nodes
+    assert "agenda_20260109000651_0" not in nodes
+    assert "agenda_20260109000653_0" not in nodes
+    assert "person_026178_이은녕_196308" not in nodes
+    assert "person_026178_이은석_196803" not in nodes
+    assert {edge.edge_type for edge in edges} == {EdgeTypes.HELD}
+    assert len(edges) == 2
+
+
+def test_shareholder_phase_is_not_inferred_from_title(tmp_path: Path) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260109000652",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-01-09",
+                        "title": "임시주주총회결과",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                        {
+                            "acpt_no": "20260109000652",
+                            "meeting_date": "2026-01-20",
+                            "agenda_records": [],
+                        "entities": [
+                            {
+                                "entity_ref": "person:auditor",
+                                "entity_type": "person",
+                                "name": "이은녕",
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:auditor",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {"office_type": "auditor"},
+                                "evidence": {"raw_text": "이은녕 감사 후보"},
+                            },
+                            {
+                                "source_ref": "person:auditor",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "elected_as",
+                                "attributes": {
+                                    "office_type": "auditor",
+                                    "outcome": "passed",
+                                },
+                                "evidence": {"raw_text": "이은녕 감사 선임"},
+                            },
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    meeting = nodes["shareholder_meeting_20260109000652"]
+    assert meeting.properties["disclosure_phase"] == ""
+    assert "person_026178_이은녕" in nodes
+    assert any(edge.edge_type == EdgeTypes.CANDIDATE_FOR for edge in edges)
+    assert not any(edge.edge_type == EdgeTypes.ELECTED_AS for edge in edges)
+
+
+def test_shareholder_transaction_relationships_resolve_without_invented_dates(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260316000503",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-03-16",
+                        "title": "정기주주총회소집결의",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20260316000503",
+                        "disclosure_phase": "notice",
+                        "meeting_date": "2026-03-31",
+                        "agenda_records": [
+                            {
+                                "agenda_ref": "agenda:0",
+                                "number": "1",
+                                "title": "GeneVision 지분 인수의 건",
+                            }
+                        ],
+                        "entities": [
+                            {
+                                "entity_ref": "person:seller",
+                                "entity_type": "person",
+                                "name": "강지연",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:buyer",
+                                "entity_type": "organization",
+                                "name": "㈜와비사비홀딩스",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                            {
+                                "entity_ref": "org:target",
+                                "entity_type": "organization",
+                                "name": "GeneVision",
+                                "attributes": {},
+                                "mentions": [],
+                            },
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "@meeting",
+                                "target_ref": "agenda:0",
+                                "relationship_type": "includes",
+                                "attributes": {},
+                                "evidence": {"raw_text": "GeneVision 지분 인수의 건"},
+                            },
+                            {
+                                "source_ref": "person:seller",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "transferor_of",
+                                "attributes": {"disclosure_phase": "notice"},
+                                "evidence": {"raw_text": "강지연이 주식매매계약을 체결"},
+                            },
+                            {
+                                "source_ref": "person:seller",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "shareholder_of",
+                                "attributes": {"maximum": True, "is_current": True},
+                                "evidence": {"raw_text": "최대주주인 강지연"},
+                            },
+                            {
+                                "source_ref": "org:buyer",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "transferee_of",
+                                "attributes": {"disclosure_phase": "notice"},
+                                "evidence": {"raw_text": "㈜와비사비홀딩스와 주식매매계약"},
+                            },
+                            {
+                                "source_ref": "org:target",
+                                "target_ref": "agenda:0",
+                                "relationship_type": "acquisition_target_of",
+                                "attributes": {"disclosure_phase": "notice"},
+                                "evidence": {"raw_text": "GeneVision 지분 인수의 건"},
+                            },
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    _, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    transaction_edges = {
+        edge.edge_type: edge
+        for edge in edges
+        if edge.edge_type
+        in {
+            EdgeTypes.TRANSFEROR_OF,
+            EdgeTypes.TRANSFEREE_OF,
+            EdgeTypes.SHAREHOLDER_OF,
+            EdgeTypes.ACQUISITION_TARGET_OF,
+        }
+    }
+    assert set(transaction_edges) == {
+        EdgeTypes.TRANSFEROR_OF,
+        EdgeTypes.TRANSFEREE_OF,
+        EdgeTypes.SHAREHOLDER_OF,
+        EdgeTypes.ACQUISITION_TARGET_OF,
+    }
+    assert all(edge.start_date is None for edge in transaction_edges.values())
+    assert transaction_edges[EdgeTypes.SHAREHOLDER_OF].is_active is True
+    assert transaction_edges[EdgeTypes.ACQUISITION_TARGET_OF].target_id == (
+        "agenda_20260316000503_0"
+    )
+
+
+def test_shareholder_semantic_boundary_rejects_bad_refs_and_missing_evidence(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260401000001",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-04-01",
+                        "title": "정기주주총회결과",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                        {
+                            "acpt_no": "20260401000001",
+                            "disclosure_phase": "result",
+                            "meeting_date": "2026-04-01",
+                        "agenda_records": [
+                            {"agenda_ref": "agenda:valid", "title": "이사 선임의 건"},
+                            {"agenda_ref": "agenda:duplicate", "title": "중복 의안 1"},
+                            {"agenda_ref": "agenda:duplicate", "title": "중복 의안 2"},
+                            {"agenda_ref": "shared:ref", "title": "교차 충돌 의안"},
+                            {"agenda_ref": "@meeting", "title": "예약어 의안"},
+                        ],
+                        "entities": [
+                            {
+                                "entity_ref": "person:valid",
+                                "entity_type": "person",
+                                "name": "김유효",
+                            },
+                            {
+                                "entity_ref": "person:duplicate",
+                                "entity_type": "person",
+                                "name": "중복일",
+                            },
+                            {
+                                "entity_ref": "person:duplicate",
+                                "entity_type": "person",
+                                "name": "중복이",
+                            },
+                            {
+                                "entity_ref": "shared:ref",
+                                "entity_type": "organization",
+                                "name": "충돌법인",
+                            },
+                            {
+                                "entity_ref": "@reporting_company",
+                                "entity_type": "organization",
+                                "name": "예약감사법인",
+                            },
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "@meeting",
+                                "target_ref": "agenda:valid",
+                                "relationship_type": "includes",
+                                "attributes": {},
+                                "evidence": {"table_index": 1, "row_index": 0},
+                            },
+                            {
+                                "source_ref": "person:valid",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {},
+                                "evidence": {"raw_text": "김유효 이사 후보"},
+                            },
+                            {
+                                "source_ref": "person:valid",
+                                "target_ref": "agenda:valid",
+                                "relationship_type": "subject_of",
+                                "attributes": {},
+                                "evidence": {"field": "후보자"},
+                            },
+                            {
+                                "source_ref": "person:valid",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {},
+                                "evidence": {},
+                            },
+                            {
+                                "source_ref": "person:valid",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {},
+                                "evidence": {"table_index": 2},
+                            },
+                            {
+                                "source_ref": "person:valid",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {},
+                                "evidence": {"raw_text": "   ", "field": " "},
+                            },
+                            {
+                                "source_ref": "@meeting",
+                                "target_ref": "agenda:duplicate",
+                                "relationship_type": "includes",
+                                "attributes": {},
+                                "evidence": {"raw_text": "중복 의안"},
+                            },
+                            {
+                                "source_ref": "person:duplicate",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "candidate_for",
+                                "attributes": {},
+                                "evidence": {"raw_text": "중복 후보"},
+                            },
+                            {
+                                "source_ref": "shared:ref",
+                                "target_ref": "agenda:valid",
+                                "relationship_type": "proposed",
+                                "attributes": {},
+                                "evidence": {"raw_text": "교차 충돌"},
+                            },
+                            {
+                                "source_ref": "@reporting_company",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "external_auditor_of",
+                                "attributes": {},
+                                "evidence": {"raw_text": "예약어 충돌"},
+                            },
+                            {
+                                "source_ref": "@meeting",
+                                "target_ref": "@meeting",
+                                "relationship_type": "includes",
+                                "attributes": {},
+                                "evidence": {"raw_text": "예약어 의안"},
+                            },
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    semantic_edges = [
+        edge for edge in edges if edge.properties.get("acpt_no") == "20260401000001"
+    ]
+    assert [edge.edge_type for edge in semantic_edges].count(EdgeTypes.INCLUDES) == 0
+    assert [edge.edge_type for edge in semantic_edges].count(EdgeTypes.CANDIDATE_FOR) == 1
+    assert [edge.edge_type for edge in semantic_edges].count(EdgeTypes.SUBJECT_OF) == 0
+    assert len(semantic_edges) == 1
+    assert "person_026178_중복일" not in nodes
+    assert "person_026178_중복이" not in nodes
+    assert "org_충돌법인" not in nodes
+    assert "org_예약감사법인" not in nodes
+
+
+def test_shareholder_semantic_boundary_enforces_endpoint_kinds(tmp_path: Path) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+
+    def relationship(
+        source_ref: str,
+        target_ref: str,
+        relationship_type: str,
+        attributes: dict | None = None,
+    ) -> dict:
+        return {
+            "source_ref": source_ref,
+            "target_ref": target_ref,
+            "relationship_type": relationship_type,
+            "attributes": attributes or {},
+            "evidence": {"raw_text": f"{relationship_type} 근거"},
+        }
+
+    approved = {"outcome": "passed"}
+    valid_relationships = [
+        relationship("@meeting", "agenda:0", "includes"),
+        relationship("person:p", "@reporting_company", "candidate_for"),
+        relationship("person:p", "@reporting_company", "elected_as", approved),
+        relationship("person:p", "@reporting_company", "removed_from", approved),
+        relationship("person:p", "@reporting_company", "resigned_from", approved),
+        relationship("person:p", "agenda:0", "subject_of"),
+        relationship("org:o", "agenda:0", "proposed"),
+        relationship("person:p", "org:o", "serves_at"),
+        relationship("person:p", "@reporting_company", "option_granted_by", approved),
+        relationship("org:o", "@reporting_company", "external_auditor_of"),
+        relationship("org:o", "@meeting", "electronic_voting_manager_for"),
+        relationship("org:o", "@meeting", "electronic_voting_system_provider_for"),
+        relationship("person:p", "@reporting_company", "transferor_of"),
+        relationship("org:o", "@reporting_company", "transferee_of"),
+        relationship("org:o", "@reporting_company", "proposed_allottee_of"),
+        relationship("org:o", "agenda:0", "merger_target_of"),
+        relationship("org:o", "@reporting_company", "acquisition_target_of"),
+        relationship("org:o", "agenda:0", "divestment_target_of"),
+        relationship("person:p", "@reporting_company", "shareholder_of"),
+    ]
+    invalid_relationships = [
+        relationship("@reporting_company", "agenda:0", "includes"),
+        relationship("org:o", "@reporting_company", "candidate_for"),
+        relationship("org:o", "@reporting_company", "elected_as", approved),
+        relationship("org:o", "@reporting_company", "removed_from", approved),
+        relationship("org:o", "@reporting_company", "resigned_from", approved),
+        relationship("@meeting", "agenda:0", "subject_of"),
+        relationship("@meeting", "agenda:0", "proposed"),
+        relationship("org:o", "org:o", "serves_at"),
+        relationship("org:o", "@reporting_company", "option_granted_by", approved),
+        relationship("person:p", "@reporting_company", "external_auditor_of"),
+        relationship("person:p", "@meeting", "electronic_voting_manager_for"),
+        relationship("person:p", "@meeting", "electronic_voting_system_provider_for"),
+        relationship("@meeting", "@reporting_company", "transferor_of"),
+        relationship("@meeting", "@reporting_company", "transferee_of"),
+        relationship("@meeting", "@reporting_company", "proposed_allottee_of"),
+        relationship("person:p", "agenda:0", "merger_target_of"),
+        relationship("org:o", "@meeting", "acquisition_target_of"),
+        relationship("org:o", "person:p", "divestment_target_of"),
+        relationship("@meeting", "@reporting_company", "shareholder_of"),
+    ]
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260401000002",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-04-01",
+                        "title": "정기주주총회결과",
+                    },
+                    {
+                        "acpt_no": "20260401000003",
+                        "company_id": "654321",
+                        "company_name": "비시드파트너스",
+                        "disclosed_date": "2026-04-01",
+                        "title": "정기주주총회결과",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                        {
+                            "acpt_no": "20260401000002",
+                            "disclosure_phase": "result",
+                            "meeting_date": "2026-04-01",
+                        "agenda_records": [{"agenda_ref": "agenda:0", "title": "의안"}],
+                        "entities": [
+                            {
+                                "entity_ref": "person:p",
+                                "entity_type": "person",
+                                "name": "김유효",
+                            },
+                            {
+                                "entity_ref": "org:o",
+                                "entity_type": "organization",
+                                "name": "비시드파트너스(주)",
+                            },
+                        ],
+                        "relationships": valid_relationships + invalid_relationships,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    _, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    semantic_edges = [
+        edge for edge in edges if edge.properties.get("acpt_no") == "20260401000002"
+    ]
+    expected_types = {
+        EdgeTypes.INCLUDES,
+        EdgeTypes.CANDIDATE_FOR,
+        EdgeTypes.ELECTED_AS,
+        EdgeTypes.REMOVED_FROM,
+        EdgeTypes.RESIGNED_FROM,
+        EdgeTypes.SUBJECT_OF,
+        EdgeTypes.PROPOSED,
+        EdgeTypes.SERVES_AT,
+        EdgeTypes.OPTION_GRANTED_BY,
+        EdgeTypes.EXTERNAL_AUDITOR_OF,
+        EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR,
+        EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR,
+        EdgeTypes.TRANSFEROR_OF,
+        EdgeTypes.TRANSFEREE_OF,
+        EdgeTypes.PROPOSED_ALLOTTEE_OF,
+        EdgeTypes.MERGER_TARGET_OF,
+        EdgeTypes.ACQUISITION_TARGET_OF,
+        EdgeTypes.DIVESTMENT_TARGET_OF,
+        EdgeTypes.SHAREHOLDER_OF,
+    }
+    assert {edge.edge_type for edge in semantic_edges} == expected_types
+    assert len(semantic_edges) == len(expected_types)
+    serves_at = next(edge for edge in semantic_edges if edge.edge_type == EdgeTypes.SERVES_AT)
+    assert serves_at.target_id == "company_654321"
+
+
+def test_shareholder_termination_edges_require_passed_result_and_end_at_meeting(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260401000101",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-04-01",
+                        "title": "임시주주총회결과",
+                    },
+                    {
+                        "acpt_no": "20260401000102",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-04-01",
+                        "title": "임시주주총회소집결의",
+                    },
+                    {
+                        "acpt_no": "20260401000103",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-04-01",
+                        "title": "임시주주총회결과",
+                    },
+                    *[
+                        {
+                            "acpt_no": f"2026040100010{suffix}",
+                            "company_id": "26178",
+                            "company_name": "차백신연구소",
+                            "disclosed_date": "2026-04-01",
+                            "title": "임시주주총회결과",
+                        }
+                        for suffix in range(4, 8)
+                    ],
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def record(
+        acpt_no: str,
+        phase: str,
+        outcome: str,
+        *,
+        attribute_name: str = "outcome",
+    ) -> dict:
+        return {
+            "acpt_no": acpt_no,
+            "disclosure_phase": phase,
+            "meeting_date": "2026년 03월 31일",
+            "agenda_records": [],
+            "entities": [
+                {
+                    "entity_ref": "person:director",
+                    "entity_type": "person",
+                    "name": f"임원{acpt_no[-1]}",
+                }
+            ],
+            "relationships": [
+                {
+                    "source_ref": "person:director",
+                    "target_ref": "@reporting_company",
+                    "relationship_type": relationship_type,
+                    "attributes": {attribute_name: outcome},
+                    "evidence": {"raw_text": f"{relationship_type} 근거"},
+                }
+                for relationship_type in ("removed_from", "resigned_from")
+            ],
+        }
+
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    record("20260401000101", "result", "passed"),
+                    record("20260401000102", "notice", "passed"),
+                    record("20260401000103", "result", "rejected"),
+                    record(
+                        "20260401000104",
+                        "result",
+                        "passed",
+                        attribute_name="status",
+                    ),
+                    record(
+                        "20260401000105",
+                        "result",
+                        "passed",
+                        attribute_name="result",
+                    ),
+                    record("20260401000106", "result", "approved"),
+                    record("20260401000107", "result", "가결"),
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    _, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    termination_edges = [
+        edge
+        for edge in edges
+        if edge.edge_type in {EdgeTypes.REMOVED_FROM, EdgeTypes.RESIGNED_FROM}
+    ]
+    assert {edge.edge_type for edge in termination_edges} == {
+        EdgeTypes.REMOVED_FROM,
+        EdgeTypes.RESIGNED_FROM,
+    }
+    assert {edge.properties["acpt_no"] for edge in termination_edges} == {
+        "20260401000101"
+    }
+    assert all(edge.start_date is None for edge in termination_edges)
+    assert all(edge.end_date == date(2026, 3, 31) for edge in termination_edges)
+    assert all(edge.is_active is False for edge in termination_edges)
+
+
+def test_shareholder_termination_does_not_infer_missing_birth_identity(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+
+    def disclosure(acpt_no: str, meeting_date: str) -> dict:
+        return {
+            "acpt_no": acpt_no,
+            "company_id": "26178",
+            "company_name": "차백신연구소",
+            "disclosed_date": meeting_date,
+            "title": "임시주주총회결과",
+        }
+
+    def semantic_record(
+        acpt_no: str,
+        meeting_date: str,
+        name: str,
+        birth_month: str,
+        relationship_type: str,
+    ) -> dict:
+        attributes = {"office_type": "director", "outcome": "passed"}
+        person_attributes = {"birth_month": birth_month} if birth_month else {}
+        return {
+            "acpt_no": acpt_no,
+            "disclosure_phase": "result",
+            "meeting_date": meeting_date,
+            "agenda_records": [],
+            "entities": [
+                {
+                    "entity_ref": "person:director",
+                    "entity_type": "person",
+                    "name": name,
+                    "attributes": person_attributes,
+                }
+            ],
+            "relationships": [
+                {
+                    "source_ref": "person:director",
+                    "target_ref": "@reporting_company",
+                    "relationship_type": relationship_type,
+                    "attributes": attributes,
+                    "evidence": {"raw_text": f"{name} {relationship_type}"},
+                }
+            ],
+        }
+
+    disclosures = [
+        disclosure("20220331000101", "2022-03-31"),
+        disclosure("20190329000101", "2019-03-29"),
+        disclosure("20200330000101", "2020-03-30"),
+        disclosure("20220331000102", "2022-03-31"),
+        disclosure("20220331000201", "2022-03-31"),
+        disclosure("20180330000201", "2018-03-30"),
+        disclosure("20190329000201", "2019-03-29"),
+    ]
+    records = [
+        semantic_record(
+            "20220331000101", "2022년 03월 31일", "홍길동", "", "removed_from"
+        ),
+        semantic_record(
+            "20190329000101",
+            "2019년 03월 29일",
+            "홍길동",
+            "1980년 01월",
+            "elected_as",
+        ),
+        semantic_record(
+            "20200330000101",
+            "2020년 03월 30일",
+            "홍길동",
+            "1980년 01월",
+            "elected_as",
+        ),
+        semantic_record(
+            "20220331000102",
+            "2022년 03월 31일",
+            "홍길동",
+            "1980년 01월",
+            "elected_as",
+        ),
+        semantic_record(
+            "20220331000201", "2022년 03월 31일", "김동명", "", "resigned_from"
+        ),
+        semantic_record(
+            "20180330000201",
+            "2018년 03월 30일",
+            "김동명",
+            "1970년 02월",
+            "elected_as",
+        ),
+        semantic_record(
+            "20190329000201",
+            "2019년 03월 29일",
+            "김동명",
+            "1980년 02월",
+            "elected_as",
+        ),
+    ]
+    filtered_path.write_text(
+        json.dumps({"disclosures": disclosures}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps({"records": records}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    assert "person_026178_홍길동_198001" in nodes
+    assert "person_026178_홍길동" in nodes
+    birthless_termination = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220331000101"
+        and edge.edge_type == EdgeTypes.REMOVED_FROM
+    )
+    assert birthless_termination.source_id == "person_026178_홍길동"
+
+    prior_unique_appointments = [
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") in {"20190329000101", "20200330000101"}
+        and edge.edge_type in {EdgeTypes.DIRECTOR_OF, EdgeTypes.ELECTED_AS}
+    ]
+    assert len(prior_unique_appointments) == 2
+    assert all(edge.end_date is None for edge in prior_unique_appointments)
+    assert all(edge.is_active is True for edge in prior_unique_appointments)
+
+    same_day_appointment = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220331000102"
+        and edge.edge_type == EdgeTypes.ELECTED_AS
+    )
+    assert same_day_appointment.end_date is None
+    assert same_day_appointment.is_active is True
+
+    assert {
+        "person_026178_김동명",
+        "person_026178_김동명_197002",
+        "person_026178_김동명_198002",
+    } <= nodes.keys()
+    ambiguous_termination = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220331000201"
+        and edge.edge_type == EdgeTypes.RESIGNED_FROM
+    )
+    assert ambiguous_termination.source_id == "person_026178_김동명"
+    ambiguous_appointments = [
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") in {"20180330000201", "20190329000201"}
+        and edge.edge_type == EdgeTypes.ELECTED_AS
+    ]
+    assert len(ambiguous_appointments) == 2
+    assert all(edge.end_date is None for edge in ambiguous_appointments)
+    assert all(edge.is_active is True for edge in ambiguous_appointments)
+
+
+def test_shareholder_termination_requires_exact_person_and_office_identity(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20200330000701",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2020-03-30",
+                        "title": "정기주주총회결과",
+                    },
+                    {
+                        "acpt_no": "20220331000701",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2022-03-31",
+                        "title": "임시주주총회결과",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20200330000701",
+                        "disclosure_phase": "result",
+                        "meeting_date": "2020년 03월 30일",
+                        "agenda_records": [],
+                        "entities": [
+                            {
+                                "entity_ref": "person:known",
+                                "entity_type": "person",
+                                "name": "복수직책",
+                                "attributes": {"birth_month": "1980년 01월"},
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:known",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "elected_as",
+                                "attributes": {
+                                    "office_type": "director",
+                                    "outcome": "passed",
+                                },
+                                "evidence": {"raw_text": "복수직책 이사 선임"},
+                            }
+                        ],
+                    },
+                    {
+                        "acpt_no": "20220331000701",
+                        "disclosure_phase": "result",
+                        "meeting_date": "2022년 03월 31일",
+                        "agenda_records": [
+                            {
+                                "agenda_ref": "agenda:director",
+                                "title": "이사 복수직책 해임의 건",
+                                "status": "passed",
+                            },
+                            {
+                                "agenda_ref": "agenda:auditor",
+                                "title": "감사 복수직책 해임의 건",
+                                "status": "passed",
+                            },
+                        ],
+                        "entities": [
+                            {
+                                "entity_ref": "person:birthless",
+                                "entity_type": "person",
+                                "name": "복수직책",
+                                "attributes": {},
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:birthless",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "removed_from",
+                                "attributes": {
+                                    "office_type": "director",
+                                    "outcome": "passed",
+                                },
+                                "evidence": {"raw_text": "복수직책 이사 해임"},
+                            },
+                            {
+                                "source_ref": "person:birthless",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "removed_from",
+                                "attributes": {
+                                    "office_type": "auditor",
+                                    "outcome": "passed",
+                                },
+                                "evidence": {"raw_text": "복수직책 감사 해임"},
+                            },
+                            {
+                                "source_ref": "person:birthless",
+                                "target_ref": "agenda:director",
+                                "relationship_type": "subject_of",
+                                "attributes": {
+                                    "action": "removal",
+                                    "office_types": ["director"],
+                                },
+                                "evidence": {"raw_text": "복수직책 이사 해임"},
+                            },
+                            {
+                                "source_ref": "person:birthless",
+                                "target_ref": "agenda:auditor",
+                                "relationship_type": "subject_of",
+                                "attributes": {
+                                    "action": "removal",
+                                    "office_types": ["auditor"],
+                                },
+                                "evidence": {"raw_text": "복수직책 감사 해임"},
+                            },
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    born_id = "person_026178_복수직책_198001"
+    birthless_id = "person_026178_복수직책"
+    assert {born_id, birthless_id} <= nodes.keys()
+    terminations = {
+        edge.properties["office_type"]: edge
+        for edge in edges
+        if edge.edge_type == EdgeTypes.REMOVED_FROM
+        and edge.properties.get("acpt_no") == "20220331000701"
+    }
+    assert terminations["director"].source_id == birthless_id
+    assert terminations["auditor"].source_id == birthless_id
+    subjects = [
+        edge
+        for edge in edges
+        if edge.edge_type == EdgeTypes.SUBJECT_OF
+        and edge.properties.get("acpt_no") == "20220331000701"
+    ]
+    assert len(subjects) == 2
+    assert all(edge.source_id == birthless_id for edge in subjects)
+    appointment = next(
+        edge
+        for edge in edges
+        if edge.edge_type == EdgeTypes.ELECTED_AS
+        and edge.properties.get("acpt_no") == "20200330000701"
+    )
+    assert appointment.source_id == born_id
+    assert appointment.end_date is None
+    assert appointment.is_active is True
+
+
+def test_shareholder_termination_reconciliation_excludes_same_day_and_future_identity(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+
+    def disclosure(acpt_no: str, disclosed_date: str, title: str) -> dict:
+        return {
+            "acpt_no": acpt_no,
+            "company_id": "26178",
+            "company_name": "차백신연구소",
+            "disclosed_date": disclosed_date,
+            "title": title,
+        }
+
+    def record(
+        acpt_no: str,
+        meeting_date: str,
+        name: str,
+        birth_month: str,
+        relationship_type: str,
+        phase: str = "result",
+    ) -> dict:
+        return {
+            "acpt_no": acpt_no,
+            "disclosure_phase": phase,
+            "meeting_date": meeting_date,
+            "agenda_records": [],
+            "entities": [
+                {
+                    "entity_ref": "person:subject",
+                    "entity_type": "person",
+                    "name": name,
+                    "attributes": (
+                        {"birth_month": birth_month} if birth_month else {}
+                    ),
+                }
+            ],
+            "relationships": [
+                {
+                    "source_ref": "person:subject",
+                    "target_ref": "@reporting_company",
+                    "relationship_type": relationship_type,
+                    "attributes": {
+                        "office_type": "director",
+                        "outcome": "passed",
+                    },
+                    "evidence": {"raw_text": f"{name} {relationship_type}"},
+                }
+            ],
+        }
+
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    disclosure("20200330000301", "2020-03-30", "정기주주총회결과"),
+                    disclosure("20220331000301", "2022-03-31", "임시주주총회결과"),
+                    disclosure("20230330000301", "2023-03-30", "정기주주총회소집결의"),
+                    disclosure("20220331000401", "2022-03-31", "임시주주총회결과"),
+                    disclosure("20230330000401", "2023-03-30", "정기주주총회결과"),
+                    disclosure("20220331000601", "2022-03-31", "임시주주총회결과"),
+                    disclosure("20220331000602", "2022-03-31", "임시주주총회결과"),
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    record(
+                        "20200330000301",
+                        "2020년 03월 30일",
+                        "미래후보",
+                        "",
+                        "elected_as",
+                    ),
+                    record(
+                        "20220331000301",
+                        "2022년 03월 31일",
+                        "미래후보",
+                        "",
+                        "removed_from",
+                    ),
+                    record(
+                        "20230330000301",
+                        "2023년 03월 30일",
+                        "미래후보",
+                        "1975년 05월",
+                        "candidate_for",
+                        "notice",
+                    ),
+                    record(
+                        "20220331000401",
+                        "2022년 03월 31일",
+                        "미래선임",
+                        "",
+                        "resigned_from",
+                    ),
+                    record(
+                        "20230330000401",
+                        "2023년 03월 30일",
+                        "미래선임",
+                        "1980년 08월",
+                        "elected_as",
+                    ),
+                    record(
+                        "20220331000601",
+                        "2022년 03월 31일",
+                        "동일일교체",
+                        "",
+                        "removed_from",
+                    ),
+                    record(
+                        "20220331000602",
+                        "2022년 03월 31일",
+                        "동일일교체",
+                        "1980년 01월",
+                        "elected_as",
+                    ),
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    assert {
+        "person_026178_미래후보",
+        "person_026178_미래후보_197505",
+        "person_026178_미래선임",
+        "person_026178_미래선임_198008",
+        "person_026178_동일일교체",
+        "person_026178_동일일교체_198001",
+    } <= nodes.keys()
+    prior_birthless_appointment = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20200330000301"
+        and edge.edge_type == EdgeTypes.ELECTED_AS
+    )
+    prior_birthless_termination = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220331000301"
+        and edge.edge_type == EdgeTypes.REMOVED_FROM
+    )
+    assert prior_birthless_appointment.source_id == "person_026178_미래후보"
+    assert prior_birthless_termination.source_id == "person_026178_미래후보"
+    assert prior_birthless_appointment.end_date == date(2022, 3, 31)
+    assert prior_birthless_appointment.is_active is False
+
+    future_only_termination = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220331000401"
+        and edge.edge_type == EdgeTypes.RESIGNED_FROM
+    )
+    future_appointment = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20230330000401"
+        and edge.edge_type == EdgeTypes.ELECTED_AS
+    )
+    assert future_only_termination.source_id == "person_026178_미래선임"
+    assert future_appointment.source_id == "person_026178_미래선임_198008"
+    assert future_appointment.end_date is None
+    assert future_appointment.is_active is True
+
+    same_day_termination = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220331000601"
+        and edge.edge_type == EdgeTypes.REMOVED_FROM
+    )
+    same_day_appointment = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220331000602"
+        and edge.edge_type == EdgeTypes.ELECTED_AS
+    )
+    assert same_day_termination.source_id == "person_026178_동일일교체"
+    assert same_day_appointment.source_id == "person_026178_동일일교체_198001"
+    assert same_day_appointment.end_date is None
+    assert same_day_appointment.is_active is True
+
+
+def test_shareholder_lifecycle_edges_require_explicit_meeting_date(
+    tmp_path: Path,
+) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20200330000501",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2020-03-30",
+                        "title": "정기주주총회결과",
+                    },
+                    {
+                        "acpt_no": "20220401000501",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2022-04-01",
+                        "title": "임시주주총회결과",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20200330000501",
+                        "disclosure_phase": "result",
+                        "meeting_date": "2020년 03월 30일",
+                        "agenda_records": [],
+                        "entities": [
+                            {
+                                "entity_ref": "person:director",
+                                "entity_type": "person",
+                                "name": "무일종료일",
+                                "attributes": {"birth_month": "1970년 01월"},
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:director",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "elected_as",
+                                "attributes": {
+                                    "office_type": "director",
+                                    "outcome": "passed",
+                                },
+                                "evidence": {"raw_text": "무일종료일 선임"},
+                            }
+                        ],
+                    },
+                    {
+                        "acpt_no": "20220401000501",
+                        "disclosure_phase": "result",
+                        "agenda_records": [],
+                        "entities": [
+                            {
+                                "entity_ref": "person:director",
+                                "entity_type": "person",
+                                "name": "무일종료일",
+                                "attributes": {"birth_month": "1970년 01월"},
+                            },
+                            {
+                                "entity_ref": "org:voting",
+                                "entity_type": "organization",
+                                "name": "예탁결제원",
+                            },
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:director",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "removed_from",
+                                "attributes": {
+                                    "office_type": "director",
+                                    "outcome": "passed",
+                                },
+                                "evidence": {"raw_text": "무일종료일 해임"},
+                            },
+                            {
+                                "source_ref": "org:voting",
+                                "target_ref": "@meeting",
+                                "relationship_type": "electronic_voting_manager_for",
+                                "attributes": {},
+                                "evidence": {"raw_text": "전자투표 관리업무 위탁"},
+                            },
+                            {
+                                "source_ref": "org:voting",
+                                "target_ref": "@meeting",
+                                "relationship_type": "electronic_voting_system_provider_for",
+                                "attributes": {},
+                                "evidence": {"raw_text": "전자투표 시스템 제공"},
+                            },
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    _, edges, _ = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    appointment = next(
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20200330000501"
+        and edge.edge_type == EdgeTypes.ELECTED_AS
+    )
+    assert appointment.end_date is None
+    assert appointment.is_active is True
+    missing_date_edges = [
+        edge
+        for edge in edges
+        if edge.properties.get("acpt_no") == "20220401000501"
+    ]
+    assert missing_date_edges == []
+
+
+def test_shareholder_meeting_skips_superseded_correction_records(tmp_path: Path) -> None:
+    filtered_path = tmp_path / "shareholder-filtered.json"
+    parsed_path = tmp_path / "shareholder-parsed.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260301000001",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-03-01",
+                        "title": "정기주주총회결과",
+                        "has_later_correction": "true",
+                    },
+                    {
+                        "acpt_no": "20260302000001",
+                        "company_id": "26178",
+                        "company_name": "차백신연구소",
+                        "disclosed_date": "2026-03-02",
+                        "title": "정정 정기주주총회결과",
+                        "has_later_correction": "0",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parsed_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                        {
+                            "acpt_no": "20260301000001",
+                            "disclosure_phase": "result",
+                            "meeting_date": "2026-03-01",
+                        "agenda_records": [],
+                        "entities": [
+                            {
+                                "entity_ref": "person:old",
+                                "entity_type": "person",
+                                "name": "구후보",
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:old",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "elected_as",
+                                "attributes": {"outcome": "passed"},
+                                "evidence": {
+                                    "field": "구 공시 후보자",
+                                    "raw_text": "구후보 선임",
+                                },
+                            }
+                        ],
+                    },
+                        {
+                            "acpt_no": "20260302000001",
+                            "disclosure_phase": "result",
+                            "meeting_date": "2026-03-02",
+                        "agenda_records": [],
+                        "entities": [
+                            {
+                                "entity_ref": "person:new",
+                                "entity_type": "person",
+                                "name": "신후보",
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source_ref": "person:new",
+                                "target_ref": "@reporting_company",
+                                "relationship_type": "elected_as",
+                                "attributes": {"outcome": "passed"},
+                                "evidence": {
+                                    "field": "정정 공시 후보자",
+                                    "raw_text": "신후보 선임",
+                                },
+                            }
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, metadata = build_ontology_graph(
+        shareholder_meeting_filtered_path=filtered_path,
+        shareholder_meeting_parsed_path=parsed_path,
+    )
+
+    coverage = metadata["source_coverage"]["shareholder_meeting"]
+    assert coverage["processed_count"] == 1
+    assert coverage["skipped_count"] == 1
+    assert "shareholder_meeting_20260301000001" not in nodes
+    assert "person_026178_구후보" not in nodes
+    assert "shareholder_meeting_20260302000001" in nodes
+    assert "person_026178_신후보" in nodes
+    elected_edges = [edge for edge in edges if edge.edge_type == EdgeTypes.ELECTED_AS]
+    assert len(elected_edges) == 1
+    assert elected_edges[0].source_id == "person_026178_신후보"
+    assert elected_edges[0].is_active is True

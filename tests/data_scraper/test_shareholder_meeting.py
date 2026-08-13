@@ -10,6 +10,14 @@ KIND_HTML_DIR = os.path.join(
 KIND_CONTENTS_DIR = os.path.join(
     os.path.dirname(__file__), "..", "..", "samples", "kind_html_contents"
 )
+GOLDEN_SOURCE_DIR = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "fixtures",
+    "shareholder_meeting",
+    "golden",
+    "sources",
+)
 
 def test_parse_shareholder_meeting_all_samples() -> None:
     """기존 샘플 중 주주총회 공시를 성공적으로 파싱하고 안건이 리스트로 반환되는지 확인한다."""
@@ -115,8 +123,9 @@ def test_parse_shareholder_meeting_edge_case() -> None:
 
 
 def test_parse_shareholder_meeting_extracts_detailed_sections() -> None:
-    ext_path = os.path.join(KIND_HTML_DIR, "20180102000452.html")
-    int_path = os.path.join(KIND_CONTENTS_DIR, "20180102000452.html")
+    source_dir = os.path.join(GOLDEN_SOURCE_DIR, "20180102000452")
+    ext_path = os.path.join(source_dir, "external.html")
+    int_path = os.path.join(source_dir, "internal.html")
 
     with open(ext_path, "r", encoding="utf-8") as f:
         ext_html = f.read()
@@ -125,14 +134,18 @@ def test_parse_shareholder_meeting_extracts_detailed_sections() -> None:
 
     result = parse_shareholder_meeting(ext_html, int_html)
 
-    assert result["agenda_items"][0] == "가.보고안건 - 감사보고"
+    assert result["agenda_items"][0] == "제1-1호의 의안 : 사내이사 박화영 선임의 건"
     assert len(result["director_elections"]) == 4
     assert result["director_elections"][0]["성명"] == "박화영"
     assert result["director_elections"][0]["주요경력(현직포함)"]
     assert len(result["outside_director_elections"]) == 2
     assert result["outside_director_elections"][0]["이사 등으로 재직 중인 다른 법인명(직위)"] == "주식회사 엔에스엔(감사)"
     assert result["auditor_elections"] == []
-    assert result["business_purpose_changes"] == [
+    business_changes = [
+        {key: value for key, value in change.items() if key != "evidence"}
+        for change in result["business_purpose_changes"]
+    ]
+    assert business_changes == [
         {"category": "사업목적 추가", "reason": "-", "content": "-"},
         {
             "category": "사업목적 변경",
@@ -142,13 +155,20 @@ def test_parse_shareholder_meeting_extracts_detailed_sections() -> None:
         },
         {"category": "사업목적 삭제", "reason": "-", "content": "-"},
     ]
+    assert all(
+        change["evidence"]["section_title"] == "사업목적 변경 세부내역"
+        and change["evidence"]["table_index"] >= 0
+        and change["evidence"]["row_index"] >= 1
+        for change in result["business_purpose_changes"]
+    )
     assert "의약품 제조 및 판매업" in result["business_purpose_changes"][1]["before"]
     assert "의약품의 제조, 매매 및 소분업" in result["business_purpose_changes"][1]["after"]
 
 
 def test_parse_shareholder_meeting_extracts_auditor_details() -> None:
-    ext_path = os.path.join(KIND_HTML_DIR, "20180102000266.html")
-    int_path = os.path.join(KIND_CONTENTS_DIR, "20180102000266.html")
+    source_dir = os.path.join(GOLDEN_SOURCE_DIR, "20180102000266")
+    ext_path = os.path.join(source_dir, "external.html")
+    int_path = os.path.join(source_dir, "internal.html")
 
     with open(ext_path, "r", encoding="utf-8") as f:
         ext_html = f.read()

@@ -5406,9 +5406,11 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
               <input type="hidden" name="tempTitle" value="뷰어 제목" />
           <h1 class="ttl">테스트 (123456)</h1>
           <select id="mainDoc">
+            <option value="">본문선택</option>
             <option value="DOC202501Z|Y" selected="selected">본문</option>
           </select>
           <select id="attachedDoc">
+            <option value="">첨부문서선택</option>
             <option value="ATTACH2025A">첨부</option>
           </select>
           <select id="orgDisclsId" name="orgDiscls">
@@ -5475,7 +5477,7 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         {
             "select_id": "mainDoc",
             "select_name": "",
-            "option_index": 0,
+            "option_index": 1,
             "doc_no": "DOC202501Z",
             "text": "본문",
             "value": "DOC202501Z|Y",
@@ -5485,7 +5487,7 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         {
             "select_id": "attachedDoc",
             "select_name": "",
-            "option_index": 0,
+            "option_index": 1,
             "doc_no": "ATTACH2025A",
             "text": "첨부",
             "value": "ATTACH2025A",
@@ -8705,6 +8707,81 @@ def test_parse_disclosure_html_payload_injects_compressed_title_for_bond_parser(
         warning["warning"].startswith("종류: 정해진 출처에서 값을 찾지 못했습니다.")
         for warning in payload["warnings"]
     )
+
+
+def test_parse_disclosure_html_payload_injects_company_name_for_shareholder_parser(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    html_path = _html_parse_file(input_dir, "20250102000013.html")
+    html_path.write_text(
+        """
+        <html><body>
+          <span>이사선임 세부내역</span>
+          <table>
+            <tr><th>성명</th><th>주요경력(현직포함)</th></tr>
+            <tr><td>김현재</td><td>현) 보고회사 대표이사</td></tr>
+          </table>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    (tmp_path / "filtered.json").write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250102000013",
+                        "company_name": "보고회사",
+                        "market": "코스닥",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "compressed-external-html.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20250102000013",
+                        "title": "[보고회사] 정기주주총회소집결의",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = parse_disclosure_html_payload(
+        {
+            "mode": "shareholder_meeting",
+            "skip_errors": False,
+            "input_directory": str(input_dir),
+            "output_directory": str(output_dir),
+            **_html_parse_metadata_paths(
+                filtered_path=tmp_path / "filtered.json",
+                compressed_path=tmp_path / "compressed-external-html.json",
+            ),
+        }
+    )
+
+    record = payload["records"][0]
+    assert record["disclosure_phase"] == "notice"
+    assert not any(
+        entity["entity_type"] == "organization"
+        for entity in record["entities"]
+    )
+    assert [
+        relation["target_ref"]
+        for relation in record["relationships"]
+        if relation["relationship_type"] == "serves_at"
+    ] == ["@reporting_company"]
 
 
 def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(

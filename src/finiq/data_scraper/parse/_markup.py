@@ -29,7 +29,7 @@ def decode_html_markup(html_markup: str | bytes) -> str:
     dammit = UnicodeDammit(html_markup, is_html=True)
     if dammit.unicode_markup is not None:
         return dammit.unicode_markup
-    return html_markup.decode("utf-8")
+    raise ValueError("Unable to decode HTML markup")
 
 
 def parse_html_with_recovery(html_markup: str | bytes) -> BeautifulSoup:

@@ -75,7 +75,7 @@ def test_decode_html_markup_rejects_undecodable_bytes(monkeypatch) -> None:
 
     monkeypatch.setattr(_markup, "UnicodeDammit", lambda *args, **kwargs: UndetectedMarkup())
 
-    with pytest.raises(UnicodeDecodeError):
+    with pytest.raises(ValueError, match="Unable to decode HTML markup"):
         _markup.decode_html_markup(b"\xff")
 
 
@@ -359,18 +359,65 @@ def test_viewer_html_extracts_selected_main_docno() -> None:
             "<select id='attachedDoc'></select>",
             "attachedDoc options are required",
         ),
-        (
-            "<input name='acptNo' value='20250101000001'>"
-            "<select id='mainDoc'><option value='1|Y' selected>본문</option></select>"
-            "<select id='attachedDoc'><option value=''>첨부문서선택</option></select>",
-            "attachedDoc option docNo is required",
-        ),
     ],
 )
 def test_viewer_html_requires_complete_compression_metadata(
     html: str, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
+        viewer_html(html, require_complete_metadata=True)
+
+
+def test_viewer_html_complete_metadata_allows_kind_placeholders() -> None:
+    html = """
+    <input name="acptNo" value="20250101000001">
+    <select id="mainDoc">
+      <option value="">본문선택</option>
+      <option value="1|Y" selected>본문</option>
+    </select>
+    <select id="attachedDoc">
+      <option value="">첨부문서선택</option>
+      <option value="2">첨부</option>
+    </select>
+    """
+
+    parsed = viewer_html(html, require_complete_metadata=True)
+
+    assert parsed["selected_main_doc_no"] == "1"
+
+
+def test_viewer_html_complete_metadata_allows_no_attached_documents() -> None:
+    html = """
+    <input name="acptNo" value="20250101000001">
+    <select id="mainDoc">
+      <option value="">본문선택</option>
+      <option value="1|Y" selected>본문</option>
+    </select>
+    <select id="attachedDoc">
+      <option value="">첨부문서선택</option>
+    </select>
+    """
+
+    parsed = viewer_html(html, require_complete_metadata=True)
+
+    assert parsed["attached_docs"][0]["doc_no"] == ""
+
+
+def test_viewer_html_complete_metadata_rejects_non_placeholder_empty_option() -> None:
+    html = """
+    <input name="acptNo" value="20250101000001">
+    <select id="mainDoc">
+      <option value="">본문선택</option>
+      <option value="1|Y" selected>본문</option>
+      <option value="">빈 문서</option>
+    </select>
+    <select id="attachedDoc">
+      <option value="">첨부문서선택</option>
+      <option value="2">첨부</option>
+    </select>
+    """
+
+    with pytest.raises(ValueError, match="mainDoc option docNo is required: 2"):
         viewer_html(html, require_complete_metadata=True)
 
 

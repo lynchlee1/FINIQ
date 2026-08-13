@@ -35,6 +35,8 @@ def _compact_document_options(parsed: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(document, dict):
                 continue
             doc_no = str(document.get("doc_no") or "").strip()
+            if not doc_no:
+                continue
             documents.append(
                 {
                     "select_id": str(document.get("select_id") or ""),
