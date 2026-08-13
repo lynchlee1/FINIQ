@@ -118,4 +118,25 @@ class EdgeTypes:
     
     # Persons/Orgs <-> Companies
     DIRECTOR_OF = "DIRECTOR_OF" # Person -> Company (사내/사외이사 등)
+    AUDITOR_OF = "AUDITOR_OF"   # Person -> Company (감사)
+    AUDIT_COMMITTEE_MEMBER_OF = "AUDIT_COMMITTEE_MEMBER_OF" # Person -> Company
+    CANDIDATE_FOR = "CANDIDATE_FOR" # Person -> Company
+    ELECTED_AS = "ELECTED_AS"   # Person -> Company
+    REMOVED_FROM = "REMOVED_FROM" # Person -> Company
+    RESIGNED_FROM = "RESIGNED_FROM" # Person -> Company
+    OPTION_GRANTED_BY = "OPTION_GRANTED_BY" # Person -> Company
+    EXTERNAL_AUDITOR_OF = "EXTERNAL_AUDITOR_OF" # Organization -> Company
+    TRANSFEROR_OF = "TRANSFEROR_OF" # Person/Organization -> Company
+    TRANSFEREE_OF = "TRANSFEREE_OF" # Person/Organization -> Company
+    PROPOSED_ALLOTTEE_OF = "PROPOSED_ALLOTTEE_OF" # Person/Organization -> Company
+    MERGER_TARGET_OF = "MERGER_TARGET_OF" # Organization -> Company
     SHAREHOLDER_OF = "SHAREHOLDER_OF" # Person/Org -> Company (주주)
+
+    # Persons/Orgs <-> Agendas/Organizations
+    SUBJECT_OF = "SUBJECT_OF"   # Person/Org -> Agenda
+    PROPOSED = "PROPOSED"       # Person/Org -> Agenda
+    SERVES_AT = "SERVES_AT"     # Person -> Organization/Company
+    ACQUISITION_TARGET_OF = "ACQUISITION_TARGET_OF" # Organization -> Agenda
+    DIVESTMENT_TARGET_OF = "DIVESTMENT_TARGET_OF" # Organization -> Agenda
+    ELECTRONIC_VOTING_MANAGER_FOR = "ELECTRONIC_VOTING_MANAGER_FOR" # Organization -> Meeting
+    ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR = "ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR" # Organization -> Meeting

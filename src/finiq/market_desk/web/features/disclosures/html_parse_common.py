@@ -991,8 +991,21 @@ def _metadata_title_for_file(
     return title or None
 
 
+def _metadata_company_name_for_file(
+    html_file: Path, metadata_index: dict[str, dict[str, Any]]
+) -> str | None:
+    acpt_no = html_file.stem
+    metadata = metadata_index.get(acpt_no) or {}
+    company_name = str(metadata.get("company_name") or "").strip()
+    return company_name or None
+
+
 def _parser_accepts_title(parser: ParseFunction) -> bool:
     return "title" in signature(parser).parameters
+
+
+def _parser_accepts_reporting_company_name(parser: ParseFunction) -> bool:
+    return "reporting_company_name" in signature(parser).parameters
 
 
 def _parse_html_file_record(request: ParseRequest, html_file: Path) -> dict[str, Any]:
@@ -1000,6 +1013,9 @@ def _parse_html_file_record(request: ParseRequest, html_file: Path) -> dict[str,
     title = _metadata_title_for_file(html_file, request.metadata_index)
     if title and _parser_accepts_title(request.parser):
         parser_kwargs["title"] = title
+    company_name = _metadata_company_name_for_file(html_file, request.metadata_index)
+    if company_name and _parser_accepts_reporting_company_name(request.parser):
+        parser_kwargs["reporting_company_name"] = company_name
     return request.parser(html_file.read_bytes(), **parser_kwargs)
 
 

@@ -138,10 +138,27 @@ def viewer_html(
                 raise ValueError(f"KIND viewer {select_id} select is required")
             if not documents:
                 raise ValueError(f"KIND viewer {select_id} options are required")
+            if select_id == "mainDoc" and not any(
+                str(document.get("doc_no") or "").strip()
+                for document in documents
+            ):
+                raise ValueError(
+                    f"KIND viewer {select_id} document options are required"
+                )
+            placeholder_label = {
+                "mainDoc": "본문선택",
+                "attachedDoc": "첨부문서선택",
+            }[select_id]
             invalid_option_indexes = [
                 str(document["option_index"])
                 for document in documents
                 if not str(document.get("doc_no") or "").strip()
+                and not (
+                    document["option_index"] == 0
+                    and not str(document.get("value") or "").strip()
+                    and not document.get("selected")
+                    and document.get("label") == placeholder_label
+                )
             ]
             if invalid_option_indexes:
                 raise ValueError(

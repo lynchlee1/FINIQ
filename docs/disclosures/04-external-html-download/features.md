@@ -54,7 +54,8 @@
 - 외부 HTML 안에 `acptNo`, `mainDoc`, `attachedDoc` 또는 각 select의 option 목록이 없으면 실패 처리한다.
 - 외부 HTML에서 읽은 `acptNo`가 파일명과 다르면 실패 처리하며, 빈 `acptNo`를 파일명으로 대신하지 않는다.
 - 외부 HTML의 `<YYYY>` 폴더와 manifest metadata의 `disclosed_at` 연도가 다르면 실패 처리한다.
-- 문서 option 값이나 문서 번호가 비어 있거나 선택한 본문 문서 번호를 찾지 못하면 실패 처리한다.
+- 첫 option이 선택되지 않은 정식 `본문선택` 또는 `첨부문서선택` 안내 option이면 빈 값과 빈 문서 번호를 허용하고 압축 record의 `docs`에서는 제외한다. 그 밖의 빈 option 값·문서 번호와 선택한 본문 문서 번호 누락은 실패 처리한다.
+- 첨부문서가 없는 공시는 `첨부문서선택` 안내 option만 있어도 허용한다.
 - 제목은 01단계 KIND 조건검색에서 받은 값만 쓰고 외부 HTML의 `<title>`이나 머리글로 보완하지 않는다.
 
 ### Record External HTML Provenance

@@ -1,0 +1,692 @@
+{
+  "schema_version": 1,
+  "description": "Byte-fixed KIND shareholder-meeting receipt pairs with deterministic parser and adjudicated semantic expectations.",
+  "canonicalization": "UTF-8 JSON, ensure_ascii=false, sort_keys=true, separators=(',', ':')",
+  "adjudication_prompt": "adjudication_prompt.md",
+  "adjudication_artifact": "adjudication.json",
+  "adjudication_artifact_sha256": "c96f82b78ebe1a9b9518772cff45054e35c105d0396a9171d6167e2198b428c9",
+  "cases": [
+    {
+      "acpt_no": "20180102000452",
+      "tags": ["legacy-notice", "elections", "serves-at", "business-purpose"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2018/20180102000452.html",
+        "external_fixture": "sources/20180102000452/external.html",
+        "external_sha256": "c59149ba10b0db0577e119a8a7e71de1c7134d3915d78ce7d6ba011dadcee60e",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2018/20180102000452.html",
+        "internal_fixture": "sources/20180102000452/internal.html",
+        "internal_sha256": "e154e24b022aff6804c6e0d53f62812d02445401ca490582d9ee51101e66fc84"
+      },
+      "canonical_output_sha256": "f41531c1c5c6b624727684d8041cf39fbdc9f4e14faa4cc0cc9afad979e9804d",
+      "assertions": {
+        "mode": "NOTICE",
+        "disclosure_phase": "notice",
+        "agendas_include": [{"number": "1-1", "title_contains": "박화영 선임"}],
+        "entities": {
+          "include": [{"name": "박화영", "entity_type": "person"}, {"name": "주식회사 엔에스엔", "entity_type": "organization"}],
+          "exclude": [{"name": "주주 제안", "entity_type": "person"}]
+        },
+        "relationships": {
+          "include": [{"source_name": "박화영", "source_type": "person", "target_ref": "@reporting_company", "relationship_type": "candidate_for", "attributes_subset": {"office_type": "director"}}, {"source_name": "김좌진", "source_type": "person", "target_name": "주식회사 엔에스엔", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "감사"}}],
+          "exclude": [{"relationship_type": "elected_as"}, {"relationship_type": "proposed"}]
+        }
+      }
+    },
+    {
+      "acpt_no": "20180102000266",
+      "tags": ["legacy-result", "auditor-election"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2018/20180102000266.html",
+        "external_fixture": "sources/20180102000266/external.html",
+        "external_sha256": "366f05eadd013447871ecc186ee6085707b6a4818382ad6dd3592d33cae86147",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2018/20180102000266.html",
+        "internal_fixture": "sources/20180102000266/internal.html",
+        "internal_sha256": "946b7a2db594b6b4e7efd08b31e01684911111224ed0314df927b322d06efe5a"
+      },
+      "canonical_output_sha256": "fa4416ac6e021f38816a570bdd67c3a54d10b019b5da20074d590e1cbc339f43",
+      "assertions": {
+        "mode": "RESULT",
+        "disclosure_phase": "result",
+        "agendas_include": [{"title_contains": "감사 안성일 선임"}],
+        "entities": {"include": [{"name": "안성일", "entity_type": "person"}], "exclude": [{"name": "상근", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "안성일", "target_ref": "@reporting_company", "relationship_type": "candidate_for", "attributes_subset": {"office_type": "auditor"}}], "exclude": [{"relationship_type": "proposed"}]}
+      }
+    },
+    {
+      "acpt_no": "20260224000928",
+      "tags": ["legacy-result", "nested-agenda", "passed-rejected"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260224000928.html",
+        "external_fixture": "sources/20260224000928/external.html",
+        "external_sha256": "9eb067afe7d252f6b42d1227e36c64be4c8e2d8e3f297633472f193ea292c041",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260224000928.html",
+        "internal_fixture": "sources/20260224000928/internal.html",
+        "internal_sha256": "e37abc5a5ede505288ebfa972f11e54541ae95d8e43a97fb4cef2110d70176e3"
+      },
+      "canonical_output_sha256": "36d0662ee09da72358767e9e71aa51ca04b982aadaddcef01659c830621bca16",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result",
+        "agendas_include": [{"number": "2-01", "status": "passed", "title_contains": "이재영 선임"}, {"number": "2-03", "status": "rejected", "title_contains": "유성무 선임"}],
+        "entities": {"include": [{"name": "이재영", "entity_type": "person"}, {"name": "유성무", "entity_type": "person"}], "exclude": [{"name": "이사회 추천", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "이재영", "target_ref": "@reporting_company", "relationship_type": "elected_as", "attributes_subset": {"outcome": "passed"}}], "exclude": [{"source_name": "유성무", "relationship_type": "elected_as"}]}
+      }
+    },
+    {
+      "acpt_no": "20260123000326",
+      "tags": ["legacy-result", "numbered-agenda", "all-rejected-candidates"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260123000326.html",
+        "external_fixture": "sources/20260123000326/external.html",
+        "external_sha256": "d4a9a335c8df1c3355ef56ccbdfc421b7a9f67e730c6f2ce68d3a9d38ec547fb",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260123000326.html",
+        "internal_fixture": "sources/20260123000326/internal.html",
+        "internal_sha256": "df46acfe6fb2739460979bf19432c4c9f84f72073f924dfff51a7f2133111034"
+      },
+      "canonical_output_sha256": "402d681bf7ab99bd95d5f3ccf96a3ba0279e126d944e07ede4392618c25e6054",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result",
+        "agendas_include": [{"number": "2-1", "status": "rejected", "title_contains": "김병준 선임"}, {"number": "3", "status": "rejected", "title_contains": "김한민 선임"}],
+        "entities": {"include": [{"name": "김한민", "entity_type": "person"}], "exclude": [{"name": "감사위원회 대표", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "김한민", "target_ref": "@reporting_company", "relationship_type": "candidate_for", "attributes_subset": {"office_type": "audit_committee_member"}}], "exclude": [{"relationship_type": "elected_as"}]}
+      }
+    },
+    {
+      "acpt_no": "20260126000552",
+      "tags": ["legacy-notice", "ordinal-boundary", "no-entities"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260126000552.html",
+        "external_fixture": "sources/20260126000552/external.html",
+        "external_sha256": "fd01eb4c00c7f2b447aee542efdf2e2e3daf26dfc6f75ec0899b13f83ff34383",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260126000552.html",
+        "internal_fixture": "sources/20260126000552/internal.html",
+        "internal_sha256": "6e570a5e9c212318633269ba5bedec5eee7d4e698085daa29a8183023264040c"
+      },
+      "canonical_output_sha256": "1a200d7fcda2a0089c6abf03b1434ea207066389670605020f6e946a226932a7",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice",
+        "agendas_include": [{"number": "1", "title_contains": "재무제표"}, {"number": "3", "title_contains": "감사 보수한도"}],
+        "entities": {"include": [], "exclude": [{"name": "감사보고", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_ref": "@meeting", "relationship_type": "includes", "min_count": 3}], "exclude": [{"relationship_type": "candidate_for"}, {"relationship_type": "elected_as"}]}
+      }
+    },
+    {
+      "acpt_no": "20260130000481",
+      "tags": ["legacy-result", "empty-marker", "next-line-outcome"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260130000481.html",
+        "external_fixture": "sources/20260130000481/external.html",
+        "external_sha256": "32ff56797caa3c3bafeb3573cb91b48838612facb8aed612b5fcecd2414c054c",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260130000481.html",
+        "internal_fixture": "sources/20260130000481/internal.html",
+        "internal_sha256": "9c50fd37d9985272e952599c5741eaaa57f90ea51340eb7946717588cc06faa0"
+      },
+      "canonical_output_sha256": "50d88d7ebe00330fc6b7b4fce4b5319005d7a7e0b3645f13b13aa04c10234bf9",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result",
+        "agendas_include": [{"number": "1", "status": "passed", "title_contains": "영업양수"}],
+        "entities": {"include": [], "exclude": [{"name": "영업양수", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_ref": "@meeting", "target_ref": "agenda:0", "relationship_type": "includes"}], "exclude": [{"relationship_type": "elected_as"}, {"relationship_type": "acquisition_target_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20260112000592",
+      "tags": ["notice", "termination-subject", "no-active-removal"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260112000592.html",
+        "external_fixture": "sources/20260112000592/external.html",
+        "external_sha256": "4f32fd12ae842044c114f2fdb87df721348cb7b550e894f7289ca0de65bb743c",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260112000592.html",
+        "internal_fixture": "sources/20260112000592/internal.html",
+        "internal_sha256": "2947d22ca5f3eeccfef5ebb10b41cf746a24fe9e8eaeed86d36faa5d68f1fcda"
+      },
+      "canonical_output_sha256": "dd4293578f21db5c913e394930c2785faaf7960562c3641ca0da5184bc46eec5",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice",
+        "agendas_include": [{"title_contains": "김성균"}],
+        "entities": {"include": [{"name": "김성균", "entity_type": "person"}, {"name": "Hugues Dusseaux", "entity_type": "person"}], "exclude": [{"name": "전원", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "김성균", "relationship_type": "subject_of", "attributes_subset": {"action": "removal"}}], "exclude": [{"relationship_type": "removed_from"}, {"relationship_type": "resigned_from"}]}
+      }
+    },
+    {
+      "acpt_no": "20260224000004",
+      "tags": ["result", "termination", "passed-vs-rejected"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260224000004.html",
+        "external_fixture": "sources/20260224000004/external.html",
+        "external_sha256": "3a9907cfeece221f782721d5656acca88d89d87a2935be1678662532ed4cb4a1",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260224000004.html",
+        "internal_fixture": "sources/20260224000004/internal.html",
+        "internal_sha256": "5126f197a185a2bf131271bec03073200717ceb56ec80793de0a71d12c7de691"
+      },
+      "canonical_output_sha256": "90f597a6840e9d03d757edd91d37cd7ab12f83c89e2b8ae098f1e0a8cc9c27c0",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result",
+        "agendas_include": [{"status": "passed", "title_contains": "김성균"}, {"status": "rejected", "title_contains": "임신영"}],
+        "entities": {"include": [{"name": "김성균", "entity_type": "person"}, {"name": "임신영", "entity_type": "person"}], "exclude": [{"name": "전원", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "김성균", "target_ref": "@reporting_company", "relationship_type": "removed_from", "attributes_subset": {"outcome": "passed", "office_type": "auditor"}}], "exclude": [{"source_name": "임신영", "relationship_type": "removed_from"}]}
+      }
+    },
+    {
+      "acpt_no": "20260327003214",
+      "tags": ["result", "resignation", "passed-only"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260327003214.html",
+        "external_fixture": "sources/20260327003214/external.html",
+        "external_sha256": "70346f77144058bc3a705051a09ac4d203933faef1247162f3fc3c7eb14b780c",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260327003214.html",
+        "internal_fixture": "sources/20260327003214/internal.html",
+        "internal_sha256": "28a52fd2e6431a7b37fea62bbc9abf0c78c216f80e2207b96cc3b8ed93427564"
+      },
+      "canonical_output_sha256": "ffaf1d85938fc9ec7f55ef7f5d27f4f1fdaa9d55bfa3bcc9c5510c507160e4f7",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result",
+        "agendas_include": [{"status": "passed", "title_contains": "전득영 사임"}, {"status": "passed", "title_contains": "오영표 사임"}],
+        "entities": {"include": [{"name": "전득영", "entity_type": "person"}, {"name": "오영표", "entity_type": "person"}], "exclude": [{"name": "사임", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "전득영", "target_ref": "@reporting_company", "relationship_type": "resigned_from", "attributes_subset": {"outcome": "passed"}}, {"source_name": "오영표", "target_ref": "@reporting_company", "relationship_type": "resigned_from", "attributes_subset": {"outcome": "passed"}}], "exclude": [{"relationship_type": "removed_from"}]}
+      }
+    },
+    {
+      "acpt_no": "20180309001014",
+      "tags": ["legacy-notice", "name-first-termination", "no-active-removal"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2018/20180309001014.html",
+        "external_fixture": "sources/20180309001014/external.html",
+        "external_sha256": "1bbb15e7e888fd16ee2fe8bbcc086af2332da971bc002b8884ca004e65ebec7b",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2018/20180309001014.html",
+        "internal_fixture": "sources/20180309001014/internal.html",
+        "internal_sha256": "d8a851056c5e881c61dcad30b583d9a38f35a1753929d82f8fa47639602da743"
+      },
+      "canonical_output_sha256": "42080328ae26817c1771765647d93375227d820bc556933adf42f3afe9226efd",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice",
+        "agendas_include": [{"title_contains": "박존찬형이사 해임"}],
+        "entities": {"include": [{"name": "박존찬형", "entity_type": "person"}, {"name": "문종국", "entity_type": "person"}], "exclude": [{"name": "사임서 제출로 인한 감사", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "박존찬형", "relationship_type": "subject_of", "attributes_subset": {"action": "removal"}}], "exclude": [{"relationship_type": "removed_from"}]}
+      }
+    },
+    {
+      "acpt_no": "20260312002120",
+      "tags": ["notice", "compensation-limit-negative", "candidate-surface"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260312002120.html",
+        "external_fixture": "sources/20260312002120/external.html",
+        "external_sha256": "f7256f6f6c7195b8d8c17975cc7caf16df3239cfefe77809ad6c86b8c99ae36c",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260312002120.html",
+        "internal_fixture": "sources/20260312002120/internal.html",
+        "internal_sha256": "c9f180f043f38e7f1efbcbda36c7b3836017849f5b058c4097db4b161a5cc514"
+      },
+      "canonical_output_sha256": "937406cc1b236e912cfd7bbc79193bd50f311ff326dd06b6513e63da89cbe1a7",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice",
+        "agendas_include": [{"title_contains": "감사 보수한도 승인선임"}],
+        "entities": {"include": [{"name": "조승용", "entity_type": "person"}, {"name": "권종오", "entity_type": "person"}], "exclude": [{"name": "보수한도 승인", "entity_type": "person"}, {"name": "보수한도", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "조승용", "target_ref": "@reporting_company", "relationship_type": "candidate_for", "attributes_subset": {"office_type": "director"}}], "exclude": [{"relationship_type": "elected_as"}, {"source_name": "보수한도 승인", "relationship_type": "subject_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20260331003952",
+      "tags": ["result", "named-withdrawal", "multi-office-dedup"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260331003952.html",
+        "external_fixture": "sources/20260331003952/external.html",
+        "external_sha256": "8ab974196f50578342d5edc3ab4bbc91e5125f7f565efd69353d05097ee232ed",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260331003952.html",
+        "internal_fixture": "sources/20260331003952/internal.html",
+        "internal_sha256": "a64ef52b286010dbd3556d3fd63644ae410795d357f0e0b05710385612d463ae"
+      },
+      "canonical_output_sha256": "3677d0a909812578ee793491f8350f30cd2f22d85c6ed10096f6da1c9f0ba851",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result",
+        "agendas_include": [{"status": "passed", "title_contains": "감사위원회 위원이 되는 사외이사"}],
+        "entities": {"include": [{"name": "여윤미", "entity_type": "person"}], "exclude": [{"name": "박기수", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "여윤미", "target_ref": "@reporting_company", "relationship_type": "elected_as", "attributes_subset": {"office_type": "outside_director", "outcome": "passed"}}, {"source_name": "여윤미", "target_ref": "@reporting_company", "relationship_type": "elected_as", "attributes_subset": {"office_type": "audit_committee_member", "outcome": "passed"}}], "exclude": [{"source_name": "박기수", "relationship_type": "elected_as"}]}
+      }
+    },
+    {
+      "acpt_no": "20260316002280",
+      "tags": ["notice", "role-surface-negative", "audit-committee"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260316002280.html",
+        "external_fixture": "sources/20260316002280/external.html",
+        "external_sha256": "b6f205b0e1342fc039e0f9db690a31499348449d8555000a6f7138a9d40d5244",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260316002280.html",
+        "internal_fixture": "sources/20260316002280/internal.html",
+        "internal_sha256": "07f4932ca356b6406ab0613bc6904924304d518fbe241bc84dabd8d2c1bff22d"
+      },
+      "canonical_output_sha256": "0b91d0477bc48f3c8c90c98ac62da6a8ecee1584612d322a3d889c854de9a381",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice",
+        "agendas_include": [{"title_contains": "감사의원회 의원이 되는 사외이사"}],
+        "entities": {"include": [{"name": "장영수", "entity_type": "person"}, {"name": "허윤", "entity_type": "person"}], "exclude": [{"name": "감사의원회 의원이 되는 사외이사", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "장영수", "target_ref": "@reporting_company", "relationship_type": "candidate_for", "attributes_subset": {"office_type": "audit_committee_member"}}], "exclude": [{"relationship_type": "elected_as"}]}
+      }
+    },
+    {
+      "acpt_no": "20260225000885",
+      "tags": ["notice", "shareholder-proposal-candidate", "proposer-negative"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260225000885.html",
+        "external_fixture": "sources/20260225000885/external.html",
+        "external_sha256": "a979431f2bb89aa0e55563bff357a7cb88736eb00680b0878807ec585465b365",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260225000885.html",
+        "internal_fixture": "sources/20260225000885/internal.html",
+        "internal_sha256": "319693f4f93d38575c879c30b0cc4e80d3882c1bd96f8ddafd6605d9dcd0f7e9"
+      },
+      "canonical_output_sha256": "f5f57d2387674113d0738ecc2be3412bb490790bc75614a5d1b81bd3ff9e9ef3",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice",
+        "agendas_include": [{"title_contains": "주주제안:후보자 박주현"}],
+        "entities": {"include": [{"name": "박주현", "entity_type": "person"}], "exclude": [{"name": "후보자 박주현", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "박주현", "target_ref": "@reporting_company", "relationship_type": "candidate_for", "attributes_subset": {"office_type": "auditor"}}], "exclude": [{"source_name": "박주현", "relationship_type": "proposed"}, {"relationship_type": "elected_as"}]}
+      }
+    },
+    {
+      "acpt_no": "20260310001962",
+      "tags": ["notice", "external-auditor", "appointed"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260310001962.html",
+        "external_fixture": "sources/20260310001962/external.html",
+        "external_sha256": "e512d4b603a2147fdf15f5afb6550904ec31073f276aba94e7ee97b77074a8cb",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260310001962.html",
+        "internal_fixture": "sources/20260310001962/internal.html",
+        "internal_sha256": "179c4e66d5fed08da9cee113eec2f89df79958286f1fa80d7a24b99226e92af1"
+      },
+      "canonical_output_sha256": "9750771b03070d1c23d1d33ef3157b78ee5f83b2ed2b0339ea7cdce1d1087d77",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "감사의 보수한도"}],
+        "entities": {"include": [{"name": "삼일회계법인", "entity_type": "organization"}], "exclude": [{"name": "외부감사인", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "삼일회계법인", "target_ref": "@reporting_company", "relationship_type": "external_auditor_of", "attributes_subset": {"state": "current", "action": "appointed"}}], "exclude": [{"source_name": "삼일회계법인", "relationship_type": "serves_at"}]}
+      }
+    },
+    {
+      "acpt_no": "20260316001346",
+      "tags": ["notice", "external-auditor-change", "former-current"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260316001346.html",
+        "external_fixture": "sources/20260316001346/external.html",
+        "external_sha256": "b11b1916c337003560ea203c8708d037c02158c56be13814d01bf1e27426f51a",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260316001346.html",
+        "internal_fixture": "sources/20260316001346/internal.html",
+        "internal_sha256": "f4daf7e40624d5c5427039d59dfab4985ffb2e0657222adebb39a52d35d04434"
+      },
+      "canonical_output_sha256": "119a0eb7ae036363e375bb8801f0539ef69509b8029901e697874d10bc609ae4",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "재무제표"}],
+        "entities": {"include": [{"name": "한울회계법인", "entity_type": "organization"}, {"name": "대주회계법인", "entity_type": "organization"}], "exclude": [{"name": "외부감사인 변경", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "한울회계법인", "target_ref": "@reporting_company", "relationship_type": "external_auditor_of", "attributes_subset": {"state": "former", "action": "replaced"}}, {"source_name": "대주회계법인", "target_ref": "@reporting_company", "relationship_type": "external_auditor_of", "attributes_subset": {"state": "current", "action": "appointed"}}], "exclude": [{"source_name": "한울회계법인", "relationship_type": "electronic_voting_manager_for"}]}
+      }
+    },
+    {
+      "acpt_no": "20260304000686",
+      "tags": ["notice", "voting-manager", "manager-provider-precedence"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260304000686.html",
+        "external_fixture": "sources/20260304000686/external.html",
+        "external_sha256": "fdd8b4d5e8f43bb35e4039979c5b59ea16ce9a62dad886c053d0e1d5b9414a16",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260304000686.html",
+        "internal_fixture": "sources/20260304000686/internal.html",
+        "internal_sha256": "d88c4a3e62b6304a335217cb0c6ed5cc67a49439e1549b0b304dced4163ba4dc"
+      },
+      "canonical_output_sha256": "a4fa0ce68e78eb7fe5d04b8f67d2c8c9194f2d9d97f0c6c35e3096034316e3c4",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "이사 보수한도"}],
+        "entities": {"include": [{"name": "한국예탁결제원", "entity_type": "organization"}], "exclude": [{"name": "전자투표시스템", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "한국예탁결제원", "target_ref": "@meeting", "relationship_type": "electronic_voting_manager_for", "attributes_subset": {"delegation_status": "active"}}], "exclude": [{"source_name": "한국예탁결제원", "relationship_type": "electronic_voting_system_provider_for"}]}
+      }
+    },
+    {
+      "acpt_no": "20260305000989",
+      "tags": ["notice", "voting-manager", "unrelated-delegation-negative", "serves-at"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260305000989.html",
+        "external_fixture": "sources/20260305000989/external.html",
+        "external_sha256": "cf2ab2ee64a6ec74489f1ea6effb9ee4e6e0d8a1da503e6c34c0de1e8c87d10c",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260305000989.html",
+        "internal_fixture": "sources/20260305000989/internal.html",
+        "internal_sha256": "db56fbb7fc8320add56f25d7de466873574218e5c868244b15ce59b915eb1dda"
+      },
+      "canonical_output_sha256": "ef0e04334c31832e42c7df70b60858877456d6ae4841250363fe46b902faee05",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "정관 일부 변경"}],
+        "entities": {"include": [{"name": "한국예탁결제원", "entity_type": "organization"}, {"name": "㈜동승", "entity_type": "organization"}], "exclude": [{"name": "대표이사", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "한국예탁결제원", "target_ref": "@meeting", "relationship_type": "electronic_voting_manager_for", "attributes_subset": {"delegation_status": "planned"}}, {"source_name": "전동진", "target_name": "㈜동승", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "사외이사"}}], "exclude": [{"source_name": "한국예탁결제원", "relationship_type": "electronic_voting_system_provider_for"}]}
+      }
+    },
+    {
+      "acpt_no": "20260316002584",
+      "tags": ["notice", "voting-system-provider", "electronic-proxy"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260316002584.html",
+        "external_fixture": "sources/20260316002584/external.html",
+        "external_sha256": "99ef8fe89e1942a418da9e2a92af62324806ad7ae45eb67d2a23c763da235c98",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260316002584.html",
+        "internal_fixture": "sources/20260316002584/internal.html",
+        "internal_sha256": "a9352d18b15869e0624b460baa4fc50f8de176e4d3fdfb95fbe72dd65bc9fef8"
+      },
+      "canonical_output_sha256": "739122e22ac00903f217d094bcf324c42cd0c2299d6e863266a7c7afeadb0bf4",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "이태규"}],
+        "entities": {"include": [{"name": "삼성증권", "entity_type": "organization"}, {"name": "이태규", "entity_type": "person"}], "exclude": [{"name": "전자위임장권유시스템", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "삼성증권", "target_ref": "@meeting", "relationship_type": "electronic_voting_system_provider_for", "attributes_subset": {"usage_status": "active", "services": ["electronic_voting", "electronic_proxy"]}}], "exclude": [{"source_name": "삼성증권", "relationship_type": "electronic_voting_manager_for"}]}
+      }
+    },
+    {
+      "acpt_no": "20260316000503",
+      "tags": ["notice", "share-transfer", "shareholder", "person-party"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260316000503.html",
+        "external_fixture": "sources/20260316000503/external.html",
+        "external_sha256": "17bc7506dc97420fe854b5ef24a3d5bd1b9846fcd34c5f2eeab00612655528fc",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260316000503.html",
+        "internal_fixture": "sources/20260316000503/internal.html",
+        "internal_sha256": "5e1ad159c19972d1fa1edcb7efb429d09c8dd85245e3fe554f5d9cc47531f437"
+      },
+      "canonical_output_sha256": "43e6fa5b3a1550838b0b7516e6713d9ab01a81daed04de28ab2502f35ca74a63",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "재무제표"}],
+        "entities": {"include": [{"name": "이니셜 1호 투자조합", "entity_type": "organization"}, {"name": "강지연", "entity_type": "person"}, {"name": "㈜와비사비홀딩스", "entity_type": "organization"}], "exclude": [{"name": "외 2인", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "이니셜 1호 투자조합", "target_ref": "@reporting_company", "relationship_type": "shareholder_of", "attributes_subset": {"maximum": true, "is_current": true}}, {"source_name": "강지연", "target_ref": "@reporting_company", "relationship_type": "transferor_of"}, {"source_name": "㈜와비사비홀딩스", "target_ref": "@reporting_company", "relationship_type": "transferee_of"}], "exclude": [{"source_name": "외 2인", "relationship_type": "transferor_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20260119000577",
+      "tags": ["notice", "proposed-allottee", "shareholder"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260119000577.html",
+        "external_fixture": "sources/20260119000577/external.html",
+        "external_sha256": "163f8679c383e83cdaef2480240a6783f5eb98c2f478716090551a749ad873d8",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260119000577.html",
+        "internal_fixture": "sources/20260119000577/internal.html",
+        "internal_sha256": "77126b3e46c8a2497cccc28d91748db46114ded774a54c3a2546843708c84f03"
+      },
+      "canonical_output_sha256": "9d1b2ef70df00df1de901c25e77238540b59d73b33dc237afea5c28ab879e253",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "제3자배정"}],
+        "entities": {"include": [{"name": "헤일로 마이크로일렉트로닉스 인터내셔널 코퍼레이션", "entity_type": "organization"}], "exclude": [{"name": "배정대상자", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "헤일로 마이크로일렉트로닉스 인터내셔널 코퍼레이션", "target_ref": "@reporting_company", "relationship_type": "proposed_allottee_of"}, {"source_name": "헤일로 마이크로일렉트로닉스 인터내셔널 코퍼레이션", "target_ref": "@reporting_company", "relationship_type": "shareholder_of", "attributes_subset": {"maximum": true}}], "exclude": [{"relationship_type": "transferee_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20260407001104",
+      "tags": ["notice", "agenda-merger", "named-target"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260407001104.html",
+        "external_fixture": "sources/20260407001104/external.html",
+        "external_sha256": "a5e5af39a3d53f01fc7c2bb6f4481b338d5a3744fac3727c2801953299fee5ac",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260407001104.html",
+        "internal_fixture": "sources/20260407001104/internal.html",
+        "internal_sha256": "aab9310e87016ecc833b37a30d64c5bd57fa399b92ca94f79edf0590cafdf4a3"
+      },
+      "canonical_output_sha256": "c448219374383ea46ab944b3cbc8cca3e68826e73bcbdb2eb7ce0a60a2b8cffb",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"number": "1", "title_contains": "합병 승인"}],
+        "entities": {"include": [{"name": "파라택시스코리아", "entity_type": "organization"}], "exclude": [{"name": "당사", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "파라택시스코리아", "target_ref": "@reporting_company", "relationship_type": "merger_target_of"}], "exclude": [{"source_name": "당사", "relationship_type": "merger_target_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20260311001268",
+      "tags": ["notice", "business-purpose-merger", "named-target"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260311001268.html",
+        "external_fixture": "sources/20260311001268/external.html",
+        "external_sha256": "eccec136824400fae97be5bb03d4674702100eaf1b6980b293652e664e7cb0ce",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260311001268.html",
+        "internal_fixture": "sources/20260311001268/internal.html",
+        "internal_sha256": "83ea5fd3e702fdd6840a1622ae621c036adefd48660a15b366063117962913d8"
+      },
+      "canonical_output_sha256": "451585eced1a0c2ca365124ac78d73481db897de2248ad18938770b78713e09c",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "정관 변경"}],
+        "entities": {"include": [{"name": "(주)제니스월드", "entity_type": "organization"}], "exclude": [{"name": "종속회사", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "(주)제니스월드", "target_ref": "@reporting_company", "relationship_type": "merger_target_of"}], "exclude": [{"source_name": "종속회사", "relationship_type": "merger_target_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20110318000850",
+      "tags": ["result", "business-purpose-merger-negative", "generic-party"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2011/20110318000850.html",
+        "external_fixture": "sources/20110318000850/external.html",
+        "external_sha256": "019831575d79797b4b0fcc458f33ddc9d66cf782b6531bd6e9ae49e5d2146a7a",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2011/20110318000850.html",
+        "internal_fixture": "sources/20110318000850/internal.html",
+        "internal_sha256": "a48027da3714dcc6ae249b759411d26e86d9205d8ec438b478b9f4d74967f6f1"
+      },
+      "canonical_output_sha256": "7976a036c29476d2b8a3d91f672313e30fa8fb9d9971f980328a9e8df1b51e0c",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result", "agendas_include": [],
+        "entities": {"include": [{"name": "이윤상", "entity_type": "person"}], "exclude": [{"name": "계열회사", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "이윤상", "target_ref": "@reporting_company", "relationship_type": "candidate_for", "attributes_subset": {"office_type": "outside_director"}}], "exclude": [{"relationship_type": "merger_target_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20251209000323",
+      "tags": ["result", "acquisition", "divestment", "agenda-target"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2025/20251209000323.html",
+        "external_fixture": "sources/20251209000323/external.html",
+        "external_sha256": "0201ebf67ca2aad6178942d87c8e164bd7478e3eb867f0f5f805753932950fe1",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2025/20251209000323.html",
+        "internal_fixture": "sources/20251209000323/internal.html",
+        "internal_sha256": "bb8c72a4ad11b4c681c8548f498a02f82890ae80540c3db41f6acf38d82a837c"
+      },
+      "canonical_output_sha256": "336fa5afa05b25953b6b015e38535263093fa1292cdddea91956adc78608336a",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result", "agendas_include": [{"number": "1", "status": "passed", "title_contains": "지분 양도"}, {"number": "2", "status": "passed", "title_contains": "지분 100% 인수"}],
+        "entities": {"include": [{"name": "핑장소재기술유한공사", "entity_type": "organization"}, {"name": "GeneVision AI Technology Holdings Ltd.", "entity_type": "organization"}], "exclude": [{"name": "자회사", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "핑장소재기술유한공사", "relationship_type": "divestment_target_of", "target_title_contains": "지분 양도", "attributes_subset": {"outcome": "passed"}}, {"source_name": "GeneVision AI Technology Holdings Ltd.", "relationship_type": "acquisition_target_of", "target_title_contains": "지분 100% 인수", "attributes_subset": {"outcome": "passed"}}], "exclude": [{"relationship_type": "merger_target_of"}]}
+      }
+    },
+    {
+      "acpt_no": "20260311001748",
+      "tags": ["notice", "shareholder-proposer", "multi-person", "multi-agenda"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260311001748.html",
+        "external_fixture": "sources/20260311001748/external.html",
+        "external_sha256": "7fc169fd6f29a51638d42ea31d0dd4c499f9bf05fd52d2884a8c2854c79e423a",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260311001748.html",
+        "internal_fixture": "sources/20260311001748/internal.html",
+        "internal_sha256": "3a008cbd786599e54430cf8467f17f2a1593bc8ae82c92267513905c4554c2d3"
+      },
+      "canonical_output_sha256": "8b3080d6e1bf5e72aa610e3f888786c8d9f04d2ed9da18fd7a8cfcf653e4a0da",
+      "assertions": {
+        "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"number": "제1-2-2호", "title_contains": "주주제안_강태범,장정석,박종원"}, {"number": "제2-2호", "title_contains": "주주제안_강태범,장정석,박종원"}],
+        "entities": {"include": [{"name": "강태범", "entity_type": "person"}, {"name": "장정석", "entity_type": "person"}, {"name": "박종원", "entity_type": "person"}], "exclude": [{"name": "강태범,장정석,박종원", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "강태범", "relationship_type": "proposed", "min_count": 2, "attributes_subset": {"disclosure_phase": "notice"}}, {"source_name": "장정석", "relationship_type": "proposed", "min_count": 2}, {"source_name": "박종원", "relationship_type": "proposed", "min_count": 2}], "exclude": [{"source_name": "강태범", "relationship_type": "candidate_for"}, {"relationship_type": "elected_as"}]}
+      }
+    },
+    {
+      "acpt_no": "20260330001464",
+      "tags": ["result", "shareholder-proposer", "rejected-proposal", "multi-person"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260330001464.html",
+        "external_fixture": "sources/20260330001464/external.html",
+        "external_sha256": "f6bf85253ca71fa796117ec7203a3e09e4553a46a0806bb7d44206347b96ebb3",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260330001464.html",
+        "internal_fixture": "sources/20260330001464/internal.html",
+        "internal_sha256": "c0ec24df87cfab053672c8b3aa8fd4d2fe926cfff12f43cf11e243195a0b3904"
+      },
+      "canonical_output_sha256": "cb23e29c18e941557ec059ef09f3c6674b308af9bba4a11d46418d1470086cd8",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result", "agendas_include": [{"number": "제1-2-2호", "status": "rejected", "title_contains": "주주제안_강태범,장정석,박종원"}, {"number": "제2-2호", "status": "rejected", "title_contains": "주주제안_강태범,장정석,박종원"}],
+        "entities": {"include": [{"name": "강태범", "entity_type": "person"}, {"name": "장정석", "entity_type": "person"}, {"name": "박종원", "entity_type": "person"}], "exclude": [{"name": "주주제안", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "강태범", "relationship_type": "proposed", "min_count": 2, "attributes_subset": {"disclosure_phase": "result"}}, {"source_name": "장정석", "relationship_type": "proposed", "min_count": 2}, {"source_name": "박종원", "relationship_type": "proposed", "min_count": 2}], "exclude": [{"source_name": "강태범", "relationship_type": "elected_as"}, {"source_name": "장정석", "relationship_type": "candidate_for"}]}
+      }
+    },
+    {
+      "acpt_no": "20260326001553",
+      "tags": ["result", "stock-option", "passed-only", "multi-beneficiary"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260326001553.html",
+        "external_fixture": "sources/20260326001553/external.html",
+        "external_sha256": "5099de14f3cac71f700573b78da35d628d141d4e3beb572fb25f3f0456c63b5d",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260326001553.html",
+        "internal_fixture": "sources/20260326001553/internal.html",
+        "internal_sha256": "3afb8aa02903017099fc66e857d5e22270eb9aced30874a0eda674fdcacd2aa7"
+      },
+      "canonical_output_sha256": "4197c83b88d9d5aff22d9aec0f1804066aafe5aaf232d2abb4b9589ad0d8bb4c",
+      "assertions": {
+        "mode": "RESULT", "disclosure_phase": "result", "agendas_include": [{"number": "4-1", "status": "passed", "title_contains": "부여대상자:김광연"}, {"number": "4-3", "status": "passed", "title_contains": "부여대상자:최경환"}],
+        "entities": {"include": [{"name": "김광연", "entity_type": "person"}, {"name": "이수민", "entity_type": "person"}, {"name": "최경환", "entity_type": "person"}], "exclude": [{"name": "부여대상자", "entity_type": "person"}]},
+        "relationships": {"include": [{"source_name": "김광연", "target_ref": "@reporting_company", "relationship_type": "option_granted_by", "attributes_subset": {"outcome": "passed"}}, {"source_name": "이수민", "target_ref": "@reporting_company", "relationship_type": "option_granted_by", "attributes_subset": {"outcome": "passed"}}, {"source_name": "최경환", "target_ref": "@reporting_company", "relationship_type": "option_granted_by", "attributes_subset": {"outcome": "passed"}}], "exclude": [{"source_name": "김정훈", "relationship_type": "option_granted_by"}, {"relationship_type": "proposed"}]}
+      }
+    },
+    {
+      "acpt_no": "20260109000278",
+      "tags": ["notice", "major-career", "serves-at", "role-boundaries"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260109000278.html",
+        "external_fixture": "sources/20260109000278/external.html",
+        "external_sha256": "dab9b39695dce3d01ff523f2fd23937ec2fa5b924d933a8645cab1734583fe60",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260109000278.html",
+        "internal_fixture": "sources/20260109000278/internal.html",
+        "internal_sha256": "f0f41a1e5dff60cc0967c6b05dfb392b552aeeb1314d0c703355ce0cc55116a5"
+      },
+      "canonical_output_sha256": "1e7d3432d207373c5d231793c287edd63a429aad9124c436b1294b4f02871389",
+      "assertions": {
+        "mode": "NOTICE",
+        "disclosure_phase": "notice",
+        "agendas_include": [{"number": "2-1", "title_contains": "성영철 선임"}, {"number": "2-3", "title_contains": "이재호 선임"}],
+        "entities": {
+          "include": [{"name": "성영철", "entity_type": "person"}, {"name": "㈜알엔투테크놀로지", "entity_type": "organization"}, {"name": "이재호", "entity_type": "person"}, {"name": "대한감정평가법인", "entity_type": "organization"}],
+          "exclude": [{"name": "㈜알엔투테크놀로지 재직", "entity_type": "organization"}, {"name": "회계법인 베율 딜 본부", "entity_type": "organization"}]
+        },
+        "relationships": {
+          "include": [{"source_name": "성영철", "source_type": "person", "target_name": "㈜알엔투테크놀로지", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "대표이사", "is_current": true}, "evidence_subset": {"field": "주요경력(현직포함)"}}, {"source_name": "이재호", "source_type": "person", "target_name": "대한감정평가법인", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "이사", "is_current": true}, "evidence_subset": {"field": "주요경력(현직포함)"}}],
+          "exclude": [{"source_name": "김성환", "relationship_type": "serves_at"}, {"source_name": "김지성", "relationship_type": "serves_at"}]
+        }
+      }
+    },
+    {
+      "acpt_no": "20260105000566",
+      "tags": ["notice", "major-career", "serves-at", "professional-role-negatives"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260105000566.html",
+        "external_fixture": "sources/20260105000566/external.html",
+        "external_sha256": "3156d5f872ad7322c19d613e7d01b41a93f11cf2dfc4a2793e2b3dd1035b424f",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260105000566.html",
+        "internal_fixture": "sources/20260105000566/internal.html",
+        "internal_sha256": "c6c3ef21ecb1b757da00684e7620f28ff2ef97dc81926f14007de391c8507a7b"
+      },
+      "canonical_output_sha256": "ce22bce206922a2e1644d24f0b6163f95bd1ee2b4aa1d43e863b9d328fda9467",
+      "assertions": {
+        "mode": "NOTICE",
+        "disclosure_phase": "notice",
+        "agendas_include": [{"number": "3", "title_contains": "김한민 선임"}],
+        "entities": {
+          "include": [{"name": "김한민", "entity_type": "person"}, {"name": "인덕회계법인", "entity_type": "organization"}],
+          "exclude": [{"name": "평택대학교 지능형반도체과", "entity_type": "organization"}, {"name": "법무법인 김장리", "entity_type": "organization"}]
+        },
+        "relationships": {
+          "include": [{"source_name": "김한민", "source_type": "person", "target_name": "인덕회계법인", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "이사", "is_current": true}, "evidence_subset": {"field": "주요경력(현직포함)"}}],
+          "exclude": [{"source_name": "왕현철", "relationship_type": "serves_at"}, {"source_name": "최호석", "relationship_type": "serves_at"}]
+        }
+      }
+    },
+    {
+      "acpt_no": "20260106000409",
+      "tags": ["notice", "major-career", "multi-serves-at", "evidence-field"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260106000409.html",
+        "external_fixture": "sources/20260106000409/external.html",
+        "external_sha256": "4016e482f15245956057fd24169520f2d12d2d2b884304240e31257395da3b95",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2026/20260106000409.html",
+        "internal_fixture": "sources/20260106000409/internal.html",
+        "internal_sha256": "3a1f5f5122f0afcf4c9b92f0249d6f90ca375bda416767b0eb0c086b448e614c"
+      },
+      "canonical_output_sha256": "e57f98b25877229ab8a1b170189535d7a90d5de23b83fc1fcf735caec85d61e6",
+      "assertions": {
+        "mode": "NOTICE",
+        "disclosure_phase": "notice",
+        "agendas_include": [{"number": "2-2", "title_contains": "한정수 선임"}],
+        "entities": {
+          "include": [{"name": "한정수", "entity_type": "person"}, {"name": "주식회사 비츠조명", "entity_type": "organization"}, {"name": "마케팅회사 위드잇", "entity_type": "organization"}, {"name": "대한시니어 치과 학회", "entity_type": "organization"}],
+          "exclude": [{"name": "주식회사 비츠조명 대표이사", "entity_type": "organization"}, {"name": "카톨릭대학교 임상치과대학원 임플란트학과", "entity_type": "organization"}]
+        },
+        "relationships": {
+          "include": [{"source_name": "한정수", "source_type": "person", "target_name": "주식회사 비츠조명", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "대표이사", "is_current": true}, "evidence_subset": {"field": "주요경력(현직포함)"}}, {"source_name": "한정수", "source_type": "person", "target_name": "마케팅회사 위드잇", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "사외이사", "is_current": true}, "evidence_subset": {"field": "주요경력(현직포함)"}}, {"source_name": "하석민", "source_type": "person", "target_name": "대한시니어 치과 학회", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "부회장", "is_current": true}, "evidence_subset": {"field": "주요경력(현직포함)"}}],
+          "exclude": [{"source_name": "하석민", "target_name": "카톨릭대학교 임상치과대학원 임플란트학과", "relationship_type": "serves_at"}]
+        }
+      }
+    },
+    {
+      "acpt_no": "20160808000455",
+      "tags": ["notice", "agenda-merger", "legal-modifier-trim"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2016/20160808000455.html",
+        "external_fixture": "sources/20160808000455/external.html",
+        "external_sha256": "d7208f214bb79906cbe8c9532b8c194e3fc0da186de84df3d352ed184ffb70c9",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2016/20160808000455.html",
+        "internal_fixture": "sources/20160808000455/internal.html",
+        "internal_sha256": "24c998495eb91fa8bc20bdb2caaf8ae34ca0ff1e2aa02d9d2349cc2efb2788f6"
+      },
+      "canonical_output_sha256": "96f4b5a370f2d12f21a8b8d9a38873a3a3967cdb82603554820670a733598917",
+      "assertions": {
+        "mode": "NOTICE",
+        "disclosure_phase": "notice",
+        "agendas_include": [{"title_contains": "비상장법인인 에이피우주항공 주식회사를 흡수합병"}],
+        "entities": {
+          "include": [{"name": "에이피우주항공 주식회사", "entity_type": "organization"}],
+          "exclude": [{"name": "비상장법인인 에이피우주항공 주식회사", "entity_type": "organization"}, {"name": "당사", "entity_type": "organization"}]
+        },
+        "relationships": {
+          "include": [{"source_name": "에이피우주항공 주식회사", "source_type": "organization", "target_ref": "@reporting_company", "relationship_type": "merger_target_of", "attributes_subset": {"disclosure_phase": "notice"}}],
+          "exclude": [{"source_name": "비상장법인인 에이피우주항공 주식회사", "relationship_type": "merger_target_of"}]
+        }
+      }
+    },
+    {
+      "acpt_no": "20100210000221",
+      "tags": ["legacy-notice", "correction-after", "named-proposer", "election-details"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2010/20100210000221.html",
+        "external_fixture": "sources/20100210000221/external.html",
+        "external_sha256": "4d803b603187ff05539b7f3e515da953c8d9b89e338bc3a26cf7ee6065d73eff",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2010/20100210000221.html",
+        "internal_fixture": "sources/20100210000221/internal.html",
+        "internal_sha256": "c42058c1c97a59bc7dbd8b36d4f7d00440aa2e5892f967d7b29cca5123c4dd47"
+      },
+      "canonical_output_sha256": "978ea2ec4e9397752c5178435528d5eeb88431bd362c4d6f90ec435ac26d7723",
+      "assertions": {
+        "mode": "NOTICE",
+        "disclosure_phase": "notice",
+        "agendas_include": [{"number": "4", "title_contains": "이사 선임"}, {"number": "5", "title_contains": "감사 선임"}],
+        "entities": {
+          "include": [{"name": "조규관", "entity_type": "person"}, {"name": "김민성", "entity_type": "person"}, {"name": "장원환", "entity_type": "person"}, {"name": "문혜강", "entity_type": "person"}, {"name": "김봉갑", "entity_type": "person"}],
+          "exclude": [{"name": "구제안자", "entity_type": "person"}]
+        },
+        "relationships": {
+          "include": [{"source_name": "조규관", "source_type": "person", "target_ref": "agenda:3", "relationship_type": "proposed", "attributes_subset": {"disclosure_phase": "notice"}, "evidence_subset": {"field": "정정후"}}, {"source_name": "조규관", "source_type": "person", "target_ref": "agenda:4", "relationship_type": "proposed", "attributes_subset": {"disclosure_phase": "notice"}, "evidence_subset": {"field": "정정후"}}],
+          "exclude": [{"source_name": "구제안자", "relationship_type": "proposed"}]
+        }
+      }
+    },
+    {
+      "acpt_no": "20081126000092",
+      "tags": ["result", "agenda-merger", "two-party-metadata-side"],
+      "source": {
+        "external_origin": "database/04-external-html-download/shareholder_meeting/2008/20081126000092.html",
+        "external_fixture": "sources/20081126000092/external.html",
+        "external_sha256": "bb381b78ad2c5a2956afe06441a9311faf5b06c5dab406ffe8acaf64a6ce450f",
+        "internal_origin": "database/05-internal-html-download/shareholder_meeting/2008/20081126000092.html",
+        "internal_fixture": "sources/20081126000092/internal.html",
+        "internal_sha256": "56d823f3e721b29ee159c8bd3148211d0a5730041f38f4d1a746b936fc829b91"
+      },
+      "canonical_output_sha256": "d4407222bbbb7375fdd6f79d431f132ec0587a912b9b4342ff6d86e4aef2845e",
+      "assertions": {
+        "mode": "RESULT",
+        "disclosure_phase": "result",
+        "agendas_include": [{"number": "1", "status": "passed", "title_contains": "동화기업(주)와 동화케미칼(주)의 합병계약"}],
+        "entities": {
+          "include": [{"name": "동화케미칼(주)", "entity_type": "organization"}],
+          "exclude": [{"name": "동화기업(주)", "entity_type": "organization"}, {"name": "동화기업(주)와 동화케미칼(주)", "entity_type": "organization"}]
+        },
+        "relationships": {
+          "include": [{"source_name": "동화케미칼(주)", "source_type": "organization", "target_ref": "@reporting_company", "relationship_type": "merger_target_of", "attributes_subset": {"disclosure_phase": "result"}, "evidence_subset": {"field": "결의사항"}}],
+          "exclude": [{"source_name": "동화기업(주)", "relationship_type": "merger_target_of"}]
+        }
+      }
+    }
+  ]
+}

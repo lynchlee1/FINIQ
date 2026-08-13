@@ -130,7 +130,7 @@ def normalize_entity_name(name: str) -> str:
     n = name.strip().upper()
     # Remove corporate patterns
     patterns = [
-        r"\(주\)", r"주식회사",
+        r"\(주\)", r"㈜", r"주식회사",
         r"\(유\)", r"유한회사",
         r"\(합\)", r"합자회사",
         r"\(재\)", r"재단법인",
@@ -174,21 +174,29 @@ def build_ontology_graph(
     # This enables Entity Resolution to merge corporate investors with company nodes!
     company_name_to_id: Dict[str, str] = {}
     
-    def index_companies(f_path: str | Path | None) -> None:
+    def index_companies(
+        f_path: str | Path | None,
+        *,
+        current_schema_only: bool = False,
+    ) -> None:
         if not f_path:
             return
         data = _load_json_object(f_path, source_name="ontology filtered source")
         for disclosure in data.get("disclosures", []):
-            raw_id = disclosure.get("company_id") or disclosure.get("company_key")
+            raw_id = disclosure.get("company_id")
+            if not current_schema_only and not raw_id:
+                raw_id = disclosure.get("company_key")
             code = normalize_company_id(raw_id)
-            name = disclosure.get("company_name") or disclosure.get("submitter")
+            name = disclosure.get("company_name")
+            if not current_schema_only and not name:
+                name = disclosure.get("submitter")
             if code and name:
                 norm_name = normalize_entity_name(name)
                 company_name_to_id[norm_name] = f"company_{code}"
 
     index_companies(rights_filtered_path)
     index_companies(bond_filtered_path)
-    index_companies(shareholder_meeting_filtered_path)
+    index_companies(shareholder_meeting_filtered_path, current_schema_only=True)
 
     # Compile Graph Manifest & Freshness Metadata
     metadata = {
@@ -231,7 +239,12 @@ def build_ontology_graph(
 
     # 3. Process Shareholder Meetings (주주총회)
     _process_shareholder_meetings(
-        nodes, edges, shareholder_meeting_filtered_path, shareholder_meeting_parsed_path, metadata
+        nodes,
+        edges,
+        shareholder_meeting_filtered_path,
+        shareholder_meeting_parsed_path,
+        company_name_to_id,
+        metadata,
     )
 
     # Record total counts
@@ -788,12 +801,420 @@ def _process_bond_issuance(
             )
 
 
+_SHAREHOLDER_RELATION_EDGE_TYPES = {
+    "includes": EdgeTypes.INCLUDES,
+    "candidate_for": EdgeTypes.CANDIDATE_FOR,
+    "elected_as": EdgeTypes.ELECTED_AS,
+    "removed_from": EdgeTypes.REMOVED_FROM,
+    "resigned_from": EdgeTypes.RESIGNED_FROM,
+    "subject_of": EdgeTypes.SUBJECT_OF,
+    "proposed": EdgeTypes.PROPOSED,
+    "serves_at": EdgeTypes.SERVES_AT,
+    "option_granted_by": EdgeTypes.OPTION_GRANTED_BY,
+    "external_auditor_of": EdgeTypes.EXTERNAL_AUDITOR_OF,
+    "electronic_voting_manager_for": EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR,
+    "electronic_voting_system_provider_for": EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR,
+    "transferor_of": EdgeTypes.TRANSFEROR_OF,
+    "transferee_of": EdgeTypes.TRANSFEREE_OF,
+    "proposed_allottee_of": EdgeTypes.PROPOSED_ALLOTTEE_OF,
+    "merger_target_of": EdgeTypes.MERGER_TARGET_OF,
+    "acquisition_target_of": EdgeTypes.ACQUISITION_TARGET_OF,
+    "divestment_target_of": EdgeTypes.DIVESTMENT_TARGET_OF,
+    "shareholder_of": EdgeTypes.SHAREHOLDER_OF,
+}
+
+_SHAREHOLDER_RELATION_ENDPOINT_KINDS = {
+    "includes": ({"meeting"}, {"agenda"}),
+    "candidate_for": ({"person"}, {"company"}),
+    "elected_as": ({"person"}, {"company"}),
+    "removed_from": ({"person"}, {"company"}),
+    "resigned_from": ({"person"}, {"company"}),
+    "subject_of": ({"person", "organization"}, {"agenda"}),
+    "proposed": ({"person", "organization"}, {"agenda"}),
+    "serves_at": ({"person"}, {"organization", "company"}),
+    "option_granted_by": ({"person"}, {"company"}),
+    "external_auditor_of": ({"organization"}, {"company"}),
+    "electronic_voting_manager_for": ({"organization"}, {"meeting"}),
+    "electronic_voting_system_provider_for": ({"organization"}, {"meeting"}),
+    "transferor_of": ({"person", "organization"}, {"company"}),
+    "transferee_of": ({"person", "organization"}, {"company"}),
+    "proposed_allottee_of": ({"person", "organization"}, {"company"}),
+    "merger_target_of": ({"organization"}, {"company", "agenda"}),
+    "acquisition_target_of": ({"organization"}, {"company", "agenda"}),
+    "divestment_target_of": ({"organization"}, {"company", "agenda"}),
+    "shareholder_of": ({"person", "organization"}, {"company"}),
+}
+
+
+def _has_shareholder_source_evidence(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    raw_text = value.get("raw_text")
+    return isinstance(raw_text, str) and bool(raw_text.strip())
+
+
+def _is_truthy_correction_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    return False
+
+
+def _shareholder_disclosure_phase(parsed_rec: dict[str, Any]) -> str:
+    phase = str(parsed_rec.get("disclosure_phase") or "").strip().lower()
+    return phase if phase in {"notice", "result"} else ""
+
+
+def _shareholder_person_id(stock_code: str, name: str, birth_month: str = "") -> str:
+    normalized_name = normalize_entity_name(name)
+    birth_key = re.sub(r"\D", "", str(birth_month))
+    suffix = f"_{birth_key}" if birth_key else ""
+    return f"person_{stock_code}_{normalized_name}{suffix}"
+
+
+def _shareholder_evidence(
+    *,
+    document_title: str,
+    acpt_no: str,
+    disclosed_date: str,
+    source_file: str,
+    details: dict[str, Any],
+    extraction: Any = None,
+) -> dict[str, Any]:
+    merged_details = dict(extraction) if isinstance(extraction, dict) else {}
+    merged_details.update(details)
+    evidence = {
+        "document_title": document_title,
+        "acpt_no": acpt_no,
+        "disclosed_date": disclosed_date,
+        "source_file": source_file,
+        "details": merged_details,
+    }
+    return evidence
+
+
+def _create_shareholder_entities(
+    *,
+    raw_entities: list[Any],
+    nodes: Dict[str, GraphNode],
+    stock_code: str,
+    company_name_to_id: Dict[str, str],
+    invalid_local_refs: set[str],
+    metadata: Dict[str, Any] | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    entity_ref_to_node_id: dict[str, str] = {}
+    entity_ref_to_kind: dict[str, str] = {}
+    for raw_entity in raw_entities:
+        if not isinstance(raw_entity, dict):
+            continue
+        entity_ref = str(raw_entity.get("entity_ref") or "").strip()
+        entity_type = str(raw_entity.get("entity_type") or "").strip().lower()
+        name = str(raw_entity.get("name") or "").strip()
+        if (
+            not entity_ref
+            or entity_ref in invalid_local_refs
+            or entity_type not in {"person", "organization"}
+            or not name
+        ):
+            continue
+
+        attributes = raw_entity.get("attributes")
+        attributes = dict(attributes) if isinstance(attributes, dict) else {}
+        mentions = raw_entity.get("mentions")
+        if isinstance(mentions, list):
+            attributes["mentions"] = mentions
+        normalized_name = normalize_entity_name(name)
+
+        if entity_type == "person":
+            birth_month = str(attributes.get("birth_month") or "").strip()
+            node_id = _shareholder_person_id(stock_code, name, birth_month)
+            node_properties = {
+                **attributes,
+                "normalized_name": normalized_name,
+                "scoped_company": stock_code,
+            }
+            if node_id not in nodes:
+                nodes[node_id] = Person(id=node_id, name=name, properties=node_properties)
+            elif metadata:
+                metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
+        else:
+            node_id = company_name_to_id.get(normalized_name, f"org_{normalized_name}")
+            if node_id not in nodes:
+                if node_id.startswith("company_"):
+                    nodes[node_id] = Company(
+                        id=node_id,
+                        name=name,
+                        stock_code=node_id.removeprefix("company_"),
+                        properties={**attributes, "normalized_name": normalized_name},
+                    )
+                else:
+                    nodes[node_id] = Organization(
+                        id=node_id,
+                        name=name,
+                        properties={**attributes, "normalized_name": normalized_name},
+                    )
+            elif metadata:
+                metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
+
+        entity_ref_to_node_id[entity_ref] = node_id
+        entity_ref_to_kind[entity_ref] = entity_type
+    return entity_ref_to_node_id, entity_ref_to_kind
+
+
+def _process_shareholder_parsed_details(
+    *,
+    nodes: Dict[str, GraphNode],
+    edges: List[GraphEdge],
+    parsed_rec: dict[str, Any],
+    company_name_to_id: Dict[str, str],
+    company_node_id: str,
+    stock_code: str,
+    event_id: str,
+    event_date: date,
+    parsed_meeting_date: date | None,
+    disclosure_phase: str,
+    acpt_no: str,
+    document_title: str,
+    disclosed_date: str,
+    source_file: str,
+    metadata: Dict[str, Any] | None,
+) -> None:
+    agenda_records = parsed_rec.get("agenda_records")
+    raw_entities = parsed_rec.get("entities")
+    relationships = parsed_rec.get("relationships")
+    if not all(
+        isinstance(value, list)
+        for value in (agenda_records, raw_entities, relationships)
+    ):
+        return
+
+    local_ref_counts: dict[str, int] = {}
+    for agenda_record in agenda_records:
+        if not isinstance(agenda_record, dict):
+            continue
+        agenda_ref = str(agenda_record.get("agenda_ref") or "").strip()
+        if agenda_ref:
+            local_ref_counts[agenda_ref] = local_ref_counts.get(agenda_ref, 0) + 1
+    for raw_entity in raw_entities:
+        if not isinstance(raw_entity, dict):
+            continue
+        entity_ref = str(raw_entity.get("entity_ref") or "").strip()
+        if entity_ref:
+            local_ref_counts[entity_ref] = local_ref_counts.get(entity_ref, 0) + 1
+    invalid_local_refs = {
+        local_ref
+        for local_ref, count in local_ref_counts.items()
+        if count > 1 or local_ref.startswith("@")
+    }
+
+    agenda_ref_to_node_id: dict[str, str] = {}
+    for idx, agenda_record in enumerate(agenda_records):
+        if not isinstance(agenda_record, dict):
+            continue
+        agenda_title = str(agenda_record.get("title") or "").strip()
+        if not agenda_title:
+            continue
+        agenda_id = f"agenda_{acpt_no}_{idx}"
+        agenda_status = agenda_record.get("status")
+        agenda_properties = {
+            key: value
+            for key, value in agenda_record.items()
+            if key not in {"title", "status"}
+        }
+        agenda_properties["index"] = idx
+        if agenda_id not in nodes:
+            nodes[agenda_id] = Agenda(
+                id=agenda_id,
+                title=agenda_title,
+                status=str(agenda_status) if agenda_status else None,
+                properties=agenda_properties,
+            )
+        elif metadata:
+            metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
+
+        agenda_ref = str(agenda_record.get("agenda_ref") or "").strip()
+        if agenda_ref and agenda_ref not in invalid_local_refs:
+            agenda_ref_to_node_id[agenda_ref] = agenda_id
+
+    entity_ref_to_node_id, entity_ref_to_kind = _create_shareholder_entities(
+        raw_entities=raw_entities,
+        nodes=nodes,
+        stock_code=stock_code,
+        company_name_to_id=company_name_to_id,
+        invalid_local_refs=invalid_local_refs,
+        metadata=metadata,
+    )
+    local_refs = {
+        **agenda_ref_to_node_id,
+        **entity_ref_to_node_id,
+        "@reporting_company": company_node_id,
+        "@meeting": event_id,
+    }
+    local_ref_kinds = {
+        **{agenda_ref: "agenda" for agenda_ref in agenda_ref_to_node_id},
+        **entity_ref_to_kind,
+        "@reporting_company": "company",
+        "@meeting": "meeting",
+    }
+    for relationship in relationships:
+        if not isinstance(relationship, dict):
+            continue
+        relationship_type = str(relationship.get("relationship_type") or "").strip().lower()
+        edge_type = _SHAREHOLDER_RELATION_EDGE_TYPES.get(relationship_type)
+        source_ref = str(relationship.get("source_ref") or "").strip()
+        target_ref = str(relationship.get("target_ref") or "").strip()
+        source_id = local_refs.get(source_ref)
+        target_id = local_refs.get(target_ref)
+        endpoint_kinds = _SHAREHOLDER_RELATION_ENDPOINT_KINDS.get(relationship_type)
+        evidence = relationship.get("evidence")
+        if (
+            not edge_type
+            or not source_id
+            or not target_id
+            or not endpoint_kinds
+            or local_ref_kinds.get(source_ref) not in endpoint_kinds[0]
+            or local_ref_kinds.get(target_ref) not in endpoint_kinds[1]
+            or not _has_shareholder_source_evidence(evidence)
+        ):
+            continue
+
+        attributes = relationship.get("attributes")
+        attributes = dict(attributes) if isinstance(attributes, dict) else {}
+        outcome = str(attributes.get("outcome") or "").strip()
+        if relationship_type in {
+            "elected_as",
+            "removed_from",
+            "resigned_from",
+            "option_granted_by",
+        }:
+            if disclosure_phase != "result":
+                continue
+            if outcome != "passed":
+                continue
+
+        is_active = None
+        if relationship_type == "elected_as":
+            is_active = True
+        elif relationship_type in {"removed_from", "resigned_from"}:
+            is_active = False
+        elif relationship_type == "serves_at" and isinstance(
+            attributes.get("is_current"), bool
+        ):
+            is_active = attributes["is_current"]
+        elif relationship_type == "external_auditor_of":
+            state = str(attributes.get("state") or "").strip().lower()
+            is_active = (
+                True if state == "current" else False if state == "former" else None
+            )
+        elif relationship_type == "shareholder_of" and isinstance(
+            attributes.get("is_current"), bool
+        ):
+            is_active = attributes["is_current"]
+
+        has_unknown_start = relationship_type in {
+            "serves_at",
+            "external_auditor_of",
+            "removed_from",
+            "resigned_from",
+            "transferor_of",
+            "transferee_of",
+            "proposed_allottee_of",
+            "merger_target_of",
+            "acquisition_target_of",
+            "divestment_target_of",
+            "shareholder_of",
+        }
+        if has_unknown_start:
+            relationship_start_date = None
+        elif relationship_type in {
+            "electronic_voting_manager_for",
+            "electronic_voting_system_provider_for",
+        }:
+            relationship_start_date = parsed_meeting_date
+        else:
+            relationship_start_date = event_date
+
+        edges.append(
+            GraphEdge(
+                source_id=source_id,
+                target_id=target_id,
+                edge_type=edge_type,
+                start_date=relationship_start_date,
+                end_date=(
+                    parsed_meeting_date
+                    if relationship_type in {"removed_from", "resigned_from"}
+                    else None
+                ),
+                is_active=is_active,
+                document_type="주주총회공시",
+                properties={
+                    **attributes,
+                    "acpt_no": acpt_no,
+                    "disclosure_phase": disclosure_phase,
+                    "evidence": _shareholder_evidence(
+                        document_title=document_title,
+                        acpt_no=acpt_no,
+                        disclosed_date=disclosed_date,
+                        source_file=source_file,
+                        details={
+                            "relationship_type": relationship_type,
+                            "source_ref": relationship.get("source_ref"),
+                            "target_ref": relationship.get("target_ref"),
+                        },
+                        extraction=evidence,
+                    ),
+                },
+            )
+        )
+
+
+def _shareholder_edge_office_type(edge: GraphEdge) -> str:
+    return str(edge.properties.get("office_type") or "").strip().lower()
+
+
+def _reconcile_shareholder_terminations(
+    nodes: Dict[str, GraphNode],
+    edges: List[GraphEdge],
+) -> None:
+    termination_edges = sorted(
+        (
+            edge
+            for edge in edges
+            if edge.edge_type in {EdgeTypes.REMOVED_FROM, EdgeTypes.RESIGNED_FROM}
+            and edge.end_date is not None
+        ),
+        key=lambda edge: edge.end_date,
+    )
+    for termination in termination_edges:
+        termination_office = _shareholder_edge_office_type(termination)
+        source_node = nodes.get(termination.source_id)
+        if not termination_office or not isinstance(source_node, Person):
+            continue
+        for appointment in edges:
+            if (
+                appointment.edge_type != EdgeTypes.ELECTED_AS
+                or appointment.source_id != termination.source_id
+                or appointment.target_id != termination.target_id
+                or appointment.is_active is not True
+                or appointment.start_date is None
+                or appointment.start_date >= termination.end_date
+                or _shareholder_edge_office_type(appointment) != termination_office
+            ):
+                continue
+            appointment.end_date = termination.end_date
+            appointment.is_active = False
+
+
 def _process_shareholder_meetings(
     nodes: Dict[str, GraphNode],
     edges: List[GraphEdge],
     filtered_path: str | Path | None,
-    parsed_path: str | Path | None = None,
-    metadata: Dict[str, Any] = None,
+    parsed_path: str | Path | None,
+    company_name_to_id: Dict[str, str],
+    metadata: Dict[str, Any] | None = None,
 ) -> None:
     if filtered_path is None:
         return
@@ -817,15 +1238,36 @@ def _process_shareholder_meetings(
                 metadata["source_coverage"]["shareholder_meeting"]["skipped_count"] += 1
             continue
 
-        raw_company_id = disc.get("company_id") or disc.get("company_key")
-        stock_code = normalize_company_id(raw_company_id)
-        company_name = disc.get("company_name") or disc.get("submitter") or "\uc54c\uc218\uc5c6\uc74c"
+        if _is_truthy_correction_flag(disc.get("has_later_correction")):
+            if metadata:
+                metadata["source_coverage"]["shareholder_meeting"]["skipped_count"] += 1
+            continue
 
-        if not stock_code:
+        raw_company_id = disc.get("company_id")
+        stock_code = normalize_company_id(raw_company_id)
+        company_name = str(disc.get("company_name") or "").strip()
+
+        if not stock_code or not company_name:
             if metadata:
                 metadata["source_coverage"]["shareholder_meeting"]["skipped_count"] += 1
                 metadata["validation_summary"]["missing_company_ids"] += 1
             continue
+
+        parsed_rec = parsed_map.get(acpt_no)
+        if not isinstance(parsed_rec, dict):
+            if metadata:
+                metadata["source_coverage"]["shareholder_meeting"]["skipped_count"] += 1
+            continue
+
+        raw_disclosed_date = disc.get("disclosed_date")
+        raw_meeting_date = parsed_rec.get("meeting_date")
+        title = str(disc.get("title") or "").strip()
+        if not raw_disclosed_date or not raw_meeting_date or not title:
+            if metadata:
+                metadata["source_coverage"]["shareholder_meeting"]["skipped_count"] += 1
+            continue
+        disclosed_date = parse_date_safe(raw_disclosed_date)
+        parsed_meeting_date = parse_date_safe(raw_meeting_date)
 
         if metadata:
             metadata["source_coverage"]["shareholder_meeting"]["processed_count"] += 1
@@ -845,15 +1287,11 @@ def _process_shareholder_meetings(
             if metadata:
                 metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
 
-        # Create Shareholder Meeting Event
-        event_date = parse_date_safe(disc.get("disclosed_date") or disc.get("disclosed_at"))
+        event_date = parsed_meeting_date
         event_id = f"shareholder_meeting_{acpt_no}"
-        
-        parsed_rec = parsed_map.get(acpt_no)
 
-        # Inferred type
-        title = disc.get("title") or (parsed_rec.get("title") if parsed_rec else "") or ""
         meeting_type = "\uc815\uae30\uc8fc\uc8fc\ucd1d\ud68c" if "\uc815\uae30" in title else ("\uc784\uc2dc\uc8fc\uc8fc\ucd1d\ud68c" if "\uc784\uc2dc" in title else "\uc8fc\uc8fc\ucd1d\ud68c")
+        disclosure_phase = _shareholder_disclosure_phase(parsed_rec)
 
         if event_id not in nodes:
             nodes[event_id] = ShareholderMeeting(
@@ -863,14 +1301,15 @@ def _process_shareholder_meetings(
                 properties={
                     "title": title,
                     "acpt_no": acpt_no,
+                    "disclosure_phase": disclosure_phase,
                 }
             )
         else:
             if metadata:
                 metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
 
-        doc_title = title or "\uc8fc\uc8fc\ucd1d\ud68c\uacf5\uc2dc"
-        disclosed_str = event_date.isoformat() if event_date else ""
+        doc_title = title
+        disclosed_str = disclosed_date.isoformat()
         rel_src_file = make_relative_path(disc.get("source_file"))
 
         # Edge: Company -[HELD]-> ShareholderMeeting
@@ -895,92 +1334,26 @@ def _process_shareholder_meetings(
             )
         )
 
-        # Process parsed details if available
         if parsed_rec:
-            # 1. Extract Agendas (의안)
-            agendas = parsed_rec.get("agendas", [])
-            for idx, agenda_title in enumerate(agendas):
-                agenda_title = agenda_title.strip()
-                if not agenda_title:
-                    continue
-                agenda_id = f"agenda_{acpt_no}_{idx}"
-                if agenda_id not in nodes:
-                    nodes[agenda_id] = Agenda(
-                        id=agenda_id,
-                        title=agenda_title,
-                        properties={"index": idx}
-                    )
-                else:
-                    if metadata:
-                        metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
+            _process_shareholder_parsed_details(
+                nodes=nodes,
+                edges=edges,
+                parsed_rec=parsed_rec,
+                company_name_to_id=company_name_to_id,
+                company_node_id=company_node_id,
+                stock_code=stock_code,
+                event_id=event_id,
+                event_date=event_date,
+                parsed_meeting_date=parsed_meeting_date,
+                disclosure_phase=disclosure_phase,
+                acpt_no=acpt_no,
+                document_title=doc_title,
+                disclosed_date=disclosed_str,
+                source_file=rel_src_file,
+                metadata=metadata,
+            )
 
-                # Edge: ShareholderMeeting -[INCLUDES]-> Agenda
-                edges.append(
-                    GraphEdge(
-                        source_id=event_id,
-                        target_id=agenda_id,
-                        edge_type=EdgeTypes.INCLUDES,
-                        start_date=event_date,
-                        properties={
-                            "evidence": {
-                                "document_title": doc_title,
-                                "acpt_no": acpt_no,
-                                "disclosed_date": disclosed_str,
-                                "source_file": rel_src_file,
-                                "details": {
-                                    "\uc758\uc548\uc81c\ubaa9": agenda_title,
-                                    "\uc758\uc548\uc778\ub371\uc2a4": idx
-                                }
-                            }
-                        }
-                    )
-                )
-                
-            # 2. Extract Nominated/Elected Directors & Auditors
-            elections = parsed_rec.get("elections", [])
-            for elec in elections:
-                name = elec.get("name") or elec.get("candidate_name")
-                if not name:
-                    continue
-                name = name.strip()
-                norm_name = normalize_entity_name(name)
-                person_id = f"person_{stock_code}_{norm_name}"
-                
-                if person_id not in nodes:
-                    nodes[person_id] = Person(
-                        id=person_id,
-                        name=name,
-                        properties={"normalized_name": norm_name, "scoped_company": stock_code}
-                    )
-                else:
-                    if metadata:
-                        metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
-                
-                # Edge: Person -[DIRECTOR_OF]-> Company
-                edges.append(
-                    GraphEdge(
-                        source_id=person_id,
-                        target_id=company_node_id,
-                        edge_type=EdgeTypes.DIRECTOR_OF,
-                        start_date=event_date,
-                        properties={
-                            "role": elec.get("role", "\uc774\uc0ac"),
-                            "is_outside": elec.get("is_outside", False),
-                            "acpt_no": acpt_no,
-                            "evidence": {
-                                "document_title": doc_title,
-                                "acpt_no": acpt_no,
-                                "disclosed_date": disclosed_str,
-                                "source_file": rel_src_file,
-                                "details": {
-                                    "\uc120\uc784\ub300\uc0c1\uc790": name,
-                                    "\uc9c1\ucc45": elec.get("role", "\uc774\uc0ac"),
-                                    "\uc0ac\uc678\uc774\uc0ac\uc5ec\ubd80": elec.get("is_outside", False)
-                                }
-                            }
-                        }
-                    )
-                )
+    _reconcile_shareholder_terminations(nodes, edges)
 
 
 def export_ontology_to_web_json(
