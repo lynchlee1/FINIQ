@@ -179,35 +179,6 @@ _TERMINATION_GRAMMAR_SURFACE_RE = re.compile(
 _TERMINATION_CAUSAL_SURFACE_RE = re.compile(
     r"(?:에|로|으로)\s*(?:따른|인한)$"
 )
-_PROPOSER_DESCRIPTION_RE = re.compile(
-    r"(?:^|\s)(?:후보자?|선임|재선임|해임|사임|취득|매입|매수|처분|"
-    r"금액|예정|승인|의안|안건|보수|한도|건)(?:\s|$)"
-)
-_PROPOSER_ROLE_PREFIX_RE = re.compile(
-    r"^(?:(?:사내|사외|독립|기타비상무|비상무|비상임)?이사|"
-    r"(?:상근|비상근|비상임)?감사|감사위원(?:회)?|선임)"
-    r"(?:후보(?:자)?)?(?:\s|$)"
-)
-_PROPOSER_COMPACT_DESCRIPTION_RE = re.compile(
-    r"^(?:(?:취득|매입|매수|처분|승인|선임|재선임|해임|사임|"
-    r"후보자?|예정|금액|보수|한도|의안|안건|건)){2,}$"
-)
-_PROPOSER_COMPACT_ROLE_RE = re.compile(
-    r"^(?:후보(?:자)?[가-힣]{2,5}|[가-힣]{2,5}후보(?:자)?|"
-    r"(?:선임|감사|이사)[가-힣]{2,5})$"
-)
-_CORRECTION_PROPOSER_RE = re.compile(
-    r"^\s*(?:[-*ㆍ·]\s*[.]?\s*)?"
-    r"(?P<office>이사|사내이사|사외이사|독립이사|기타\s*비상무이사|"
-    r"비상무이사|비상임이사|감사|감사위원)\s*선임\s*후보자\s*중\s*"
-    r"(?P<candidates>[^():：]+?)\s*"
-    r"(?:이상\s*(?P<count>\d+)\s*명)?\s*(?:은|는)\s*"
-    r"주주\s*제안\s*\(\s*(?:제안자|제안인)\s*[:：]\s*"
-    r"(?P<proposer>[^():：]+?)\s*\)\s*에\s*의한\s*"
-    r"후보자(?:임|입니다)?\s*[.]?\s*$"
-)
-
-
 def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").replace("\xa0", " ")).strip()
 
@@ -947,151 +918,12 @@ def _is_composite_major_career_org(name: str) -> bool:
     return False
 
 
-def _proposer_entity(raw_name: str) -> tuple[str, str] | None:
-    name = re.sub(
-        r"\s*외\s*\d+\s*(?:인|명)\s*$",
-        "",
-        _clean_text(raw_name),
-    )
-    name = name.strip("-_:： ")
-    if re.match(r"^후보자?(?:\s|$)", name) or _is_empty_name(name):
-        return None
-    proposer_core = re.sub(r"^(?:\(주\)|㈜|주식회사)\s*", "", name)
-    proposer_core = re.sub(r"\s*\(주\)$", "", proposer_core)
-    compact_core = re.sub(r"\s+", "", proposer_core)
-    if (
-        _PROPOSER_DESCRIPTION_RE.search(name) is not None
-        or _PROPOSER_ROLE_PREFIX_RE.match(name) is not None
-        or _PROPOSER_DESCRIPTION_RE.search(proposer_core) is not None
-        or _PROPOSER_ROLE_PREFIX_RE.match(proposer_core) is not None
-        or _PROPOSER_COMPACT_DESCRIPTION_RE.fullmatch(compact_core) is not None
-        or _PROPOSER_COMPACT_ROLE_RE.fullmatch(compact_core) is not None
-    ):
-        return None
-    if _CORPORATE_MARKERS.search(name):
-        return "organization", name
-    if (
-        _candidate_surface(name) == name
-        and _PERSON_NAME_RE.fullmatch(name)
-        and _is_candidate_name(name)
-    ):
-        return "person", name
-    return None
-
-
-def _proposers(record: dict[str, Any]) -> list[tuple[str, str]]:
-    text = _clean_text(record.get("title"))
-    proposers: list[tuple[str, str]] = []
-
-    def add(raw_name: str) -> None:
-        proposer = _proposer_entity(raw_name)
-        if proposer is not None and proposer not in proposers:
-            proposers.append(proposer)
-
-    for match in re.finditer(
-        r"\(\s*주주\s*제안\s*[-_:：]\s*"
-        r"(?P<names>(?:(?:\(주\))|[^)])+)\)",
-        text,
-    ):
-        for name in re.split(
-            r"\s*(?:,|·|ㆍ|/|\s+및\s+)\s*",
-            match.group("names"),
-        ):
-            add(name)
-
-    patterns = (
-        re.compile(
-            rf"\(\s*(?P<name>{_PERSON_NAME_RE.pattern})"
-            r"(?:\s*외\s*\d+\s*(?:인|명))?\s+주주\s+제안\s*\)"
-        ),
-        re.compile(
-            rf"\(\s*(?P<name>{_PERSON_NAME_RE.pattern})"
-            r"\s*외\s*\d+\s*(?:인|명)\s*주주\s*제안\s*\)"
-        ),
-    )
-    for pattern in patterns:
-        for match in pattern.finditer(text):
-            add(match.group("name"))
-    return proposers
-
-
-def _correction_proposer_statements(
-    source: dict[str, Any],
-) -> list[tuple[tuple[str, str], str, list[str]]]:
-    if source.get("source_type") != "correction_after_reference_note":
-        return []
-    lines = source.get("lines")
-    if not isinstance(lines, list):
-        return []
-    statements: list[tuple[tuple[str, str], str, list[str]]] = []
-    for raw_line in lines:
-        match = _CORRECTION_PROPOSER_RE.fullmatch(_clean_text(raw_line))
-        if match is None:
-            continue
-        proposer = _proposer_entity(match.group("proposer"))
-        office_type = _office_type(match.group("office"))
-        if proposer is None or office_type is None:
-            continue
-        candidate_names = [
-            _clean_text(name)
-            for name in re.split(
-                r"\s*(?:,|·|ㆍ|/|\s+및\s+)\s*",
-                match.group("candidates"),
-            )
-            if _clean_text(name)
-        ]
-        if (
-            not candidate_names
-            or any(
-                _PERSON_NAME_RE.fullmatch(name) is None
-                or not _is_candidate_name(name)
-                for name in candidate_names
-            )
-            or (
-                match.group("count") is not None
-                and int(match.group("count")) != len(candidate_names)
-            )
-        ):
-            continue
-        statements.append(
-            (proposer, office_type, list(dict.fromkeys(candidate_names)))
-        )
-    return statements
-
-
-def _stock_option_names(record: dict[str, Any]) -> list[str]:
-    title = _clean_text(record.get("title"))
-    if "주식매수선택권" not in title or "부여" not in title:
-        return []
-    names: list[str] = []
-
-    def append_name(value: str) -> None:
-        name = _clean_text(value)
-        if (
-            _PERSON_NAME_RE.fullmatch(name)
-            and not _is_empty_name(name)
-            and not any(_person_key(existing) == _person_key(name) for existing in names)
-        ):
-            names.append(name)
-
-    explicit = _clean_text(record.get("candidate"))
-    for part in re.split(r"\s*(?:,|·|ㆍ|/| 및 )\s*", explicit):
-        append_name(part)
-    for match in re.finditer(
-        rf"(?:부여\s*대상자|대상자)\s*[:：\-]?\s*(?P<name>{_PERSON_NAME_RE.pattern})",
-        title,
-    ):
-        append_name(match.group("name"))
-    return names
-
-
 def extract_semantic_contract(
     *,
     agenda_records: list[dict[str, Any]],
     elections: list[dict[str, Any]],
     disclosure_phase: str,
     explicit_mentions: list[dict[str, Any]] | None = None,
-    correction_sources: list[dict[str, Any]] | None = None,
     reporting_company_name: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build document-local semantic records without assigning global graph IDs."""
@@ -1191,24 +1023,6 @@ def extract_semantic_contract(
         if election_name and election_name not in agenda_names:
             agenda_names.append(election_name)
 
-    elections_by_name_and_office: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for election in elections:
-        key = (
-            _person_key(_clean_text(election.get("name"))),
-            _clean_text(election.get("section_type")),
-        )
-        if all(key):
-            elections_by_name_and_office.setdefault(key, []).append(election)
-    appointment_agendas_by_office: dict[str, list[dict[str, Any]]] = {}
-    for office_type in {key[1] for key in elections_by_name_and_office}:
-        appointment_agendas_by_office[office_type] = [
-            agenda
-            for agenda in agenda_records
-            if _office_types(_clean_text(agenda.get("title"))) == [office_type]
-            and re.search(r"선임|재선임", _clean_text(agenda.get("title")))
-            and "해임" not in _clean_text(agenda.get("title"))
-        ]
-
     for agenda in agenda_records:
         agenda_ref = _clean_text(agenda.get("agenda_ref"))
         if not agenda_ref:
@@ -1259,8 +1073,15 @@ def extract_semantic_contract(
                     agenda_evidence,
                 )
         is_termination_agenda = re.search(r"(?:해임|사임)(?:의)?\s*건", title) is not None
+        is_stock_option_grant_agenda = (
+            "주식매수선택권" in title and "부여" in title
+        )
         candidate_names = (
-            [] if termination_subjects or is_termination_agenda else _candidate_names(agenda)
+            []
+            if termination_subjects
+            or is_termination_agenda
+            or is_stock_option_grant_agenda
+            else _candidate_names(agenda)
         )
         candidate_context = list(candidate_names)
         for election_name in election_names_by_agenda_id.get(id(agenda), []):
@@ -1356,46 +1177,6 @@ def extract_semantic_contract(
                         },
                         agenda_evidence,
                     )
-
-        for proposer in _proposers(agenda):
-            entity_type, name = proposer
-            proposer_ref = (
-                registry.organization(name, _record_evidence(agenda, field="제안자"))
-                if entity_type == "organization"
-                else registry.person(name, "", _record_evidence(agenda, field="제안자"))
-            )
-            if proposer_ref is not None:
-                registry.relation(
-                    proposer_ref,
-                    agenda_ref,
-                    "proposed",
-                    {"disclosure_phase": disclosure_phase},
-                    agenda_evidence,
-                )
-
-        for name in _stock_option_names(agenda):
-            person_ref = registry.person(name, "", _record_evidence(agenda, field="부여대상자"))
-            if person_ref is None:
-                continue
-            registry.relation(
-                person_ref,
-                agenda_ref,
-                "subject_of",
-                {
-                    "action": "stock_option_grant",
-                    "disclosure_phase": disclosure_phase,
-                    "outcome": outcome,
-                },
-                agenda_evidence,
-            )
-            if disclosure_phase == "result" and outcome == "passed":
-                registry.relation(
-                    person_ref,
-                    "@reporting_company",
-                    "option_granted_by",
-                    {"outcome": outcome},
-                    agenda_evidence,
-                )
 
     for election in elections:
         evidence = _record_evidence(election, field="성명")
@@ -1529,61 +1310,8 @@ def extract_semantic_contract(
                 evidence,
             )
 
-    for source in correction_sources or []:
-        evidence = _evidence(source.get("evidence"), field="정정후")
-        for proposer, office_type, candidate_names in _correction_proposer_statements(
-            source
-        ):
-            target_agendas: list[dict[str, Any]] = []
-            for candidate_name in candidate_names:
-                candidate_elections = elections_by_name_and_office.get(
-                    (_person_key(candidate_name), office_type),
-                    [],
-                )
-                if not candidate_elections:
-                    continue
-                compatible_agendas = [
-                    agenda
-                    for agenda in appointment_agendas_by_office.get(office_type, [])
-                    if (
-                        not _candidate_names(agenda)
-                        or _person_key(candidate_name)
-                        in {
-                            _person_key(name)
-                            for name in _candidate_names(agenda)
-                        }
-                    )
-                ]
-                if (
-                    len(compatible_agendas) == 1
-                    and compatible_agendas[0] not in target_agendas
-                ):
-                    target_agendas.append(compatible_agendas[0])
-            if not target_agendas:
-                continue
-            entity_type, proposer_name = proposer
-            proposer_ref = (
-                registry.organization(proposer_name, evidence)
-                if entity_type == "organization"
-                else registry.person(proposer_name, "", evidence)
-            )
-            if proposer_ref is None:
-                continue
-            for agenda in target_agendas:
-                agenda_ref = _clean_text(agenda.get("agenda_ref"))
-                if agenda_ref:
-                    registry.relation(
-                        proposer_ref,
-                        agenda_ref,
-                        "proposed",
-                        {"disclosure_phase": disclosure_phase},
-                        evidence,
-                    )
-
     fixed_mention_targets = {
         "external_auditor_of": "@reporting_company",
-        "electronic_voting_manager_for": "@meeting",
-        "electronic_voting_system_provider_for": "@meeting",
         "transferor_of": "@reporting_company",
         "transferee_of": "@reporting_company",
         "proposed_allottee_of": "@reporting_company",

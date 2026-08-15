@@ -44,12 +44,13 @@
 - `@reporting_company`, `@meeting`, `agenda_ref`는 각각 필터 결과의 발행사 node, 해당 공시의 ShareholderMeeting node, 해당 공시 안의 Agenda node로 해석한다.
 - ShareholderMeeting은 필터 결과의 canonical `company_id`, `company_name`, `disclosed_date`, `title`과 같은 `acpt_no`의 current 07단계 record 및 유효한 `meeting_date`가 모두 있을 때만 만든다. 누락 field를 legacy alias, parsed metadata, 기본 문자열 또는 공시일로 대체하지 않는다.
 - ShareholderMeeting의 event 날짜는 07단계 `meeting_date`다.
-- `includes`, `candidate_for`, `elected_as`, `removed_from`, `resigned_from`, `subject_of`, `proposed`, `serves_at`, `option_granted_by`, `external_auditor_of`, `electronic_voting_manager_for`, `electronic_voting_system_provider_for`, `shareholder_of`, `transferor_of`, `transferee_of`, `proposed_allottee_of`, `merger_target_of`, `acquisition_target_of`, `divestment_target_of`는 각각 같은 이름의 대문자 edge로 저장한다.
+- `includes`, `candidate_for`, `elected_as`, `removed_from`, `resigned_from`, `subject_of`, `serves_at`, `external_auditor_of`, `shareholder_of`, `transferor_of`, `transferee_of`, `proposed_allottee_of`, `merger_target_of`, `acquisition_target_of`, `divestment_target_of`는 각각 같은 이름의 대문자 edge로 저장한다.
+- 주주총회 경로는 `PROPOSED`와 `OPTION_GRANTED_BY`를 지원하지 않는다. 주주제안 안건과 주식매수선택권 부여 안건은 Agenda node로 남지만, 제안자나 개인별 부여 대상자를 graph node·edge로 확장하지 않는다.
 - 역할은 edge의 `properties.office_type`, 정규화한 안건 결과는 `properties`의 결과·상태 속성에 저장한다.
 - NOTICE 후보 관계는 `CANDIDATE_FOR`이며 현재 재직 관계나 active 관계로 저장하지 않는다. `ELECTED_AS`와 `OPTION_GRANTED_BY`는 RESULT에서 명시적으로 가결된 관계이며 `ELECTED_AS`는 active 선임 관계다.
 - `REMOVED_FROM`과 `RESIGNED_FROM`은 RESULT에서 명시적으로 가결된 종료 사실이며 `is_active=false`다. `meeting_date`를 `end_date`로 저장하고, 같은 Company·동일 person ID·동일 `office_type`의 더 이른 active `ELECTED_AS`만 같은 날짜에 종료한다. 동일일·미래 선임, 다른 직책, legacy 임원 edge는 종료하지 않는다.
 - 출생년월 없는 종료 인물은 별도 신원으로 유지하며 이름만 같은 출생년월 보유 선임 인물로 재연결하지 않는다.
-- `EXTERNAL_AUDITOR_OF`는 `state=current`이면 active, `state=former`이면 inactive다. 명시적 시작일이 없으므로 `start_date`는 비워 둔다. `ELECTRONIC_VOTING_MANAGER_FOR`와 `ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR`는 해당 ShareholderMeeting에 연결하고 파싱된 회의일이 있을 때만 이를 `start_date`로 사용한다.
+- `EXTERNAL_AUDITOR_OF`는 `state=current`이면 active, `state=former`이면 inactive다. 명시적 시작일이 없으므로 `start_date`는 비워 둔다. 전자투표 관리기관과 시스템 제공기관은 graph 대상에서 제외한다.
 - `SHAREHOLDER_OF`는 `is_current=true`이면 active다. 거래 당사자·배정 대상·합병 대상·지분 인수 또는 양도 대상 edge는 거래 효력일을 별도로 추출하지 않았으면 `start_date`를 비워 둔다.
 - 필터 record의 `has_later_correction`이 참이면 후속 정정 전 record는 node와 edge로 만들지 않는다.
 - 사람 node는 발행사, 정규화 이름, 출생년월을 식별 범위로 사용한다. 출생년월이 없을 때는 발행사와 정규화 이름까지만 사용한다.

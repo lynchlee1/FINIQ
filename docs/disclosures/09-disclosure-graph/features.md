@@ -46,7 +46,7 @@
 - 07단계 `shareholder_meeting` record의 문서-local 참조를 graph node로 해석한다. `@reporting_company`는 필터 결과의 발행사, `@meeting`은 해당 공시의 주주총회 event, `agenda_ref`는 해당 공시의 안건 node에 연결한다.
 - 필터 결과의 각 주주총회 공시를 기본 ShareholderMeeting node로 만들고, 같은 `acpt_no`의 07단계 record에 current schema의 `agenda_records`, `entities`, `relationships`가 모두 배열로 있을 때만 안건·주체·관계로 보강한다.
 - `agenda_records`의 제목과 상태를 Agenda node에 저장하고 `includes`를 `INCLUDES` edge로 바꾼다.
-- `candidate_for`, `elected_as`, `removed_from`, `resigned_from`, `subject_of`, `proposed`, `serves_at`, `option_granted_by`, `external_auditor_of`, `electronic_voting_manager_for`, `electronic_voting_system_provider_for`, `shareholder_of`, `transferor_of`, `transferee_of`, `proposed_allottee_of`, `merger_target_of`, `acquisition_target_of`, `divestment_target_of`는 각각 같은 이름의 대문자 graph edge로 바꾸며 07단계의 역할·결과·상태 속성과 source evidence를 보존한다.
+- `candidate_for`, `elected_as`, `removed_from`, `resigned_from`, `subject_of`, `serves_at`, `external_auditor_of`, `shareholder_of`, `transferor_of`, `transferee_of`, `proposed_allottee_of`, `merger_target_of`, `acquisition_target_of`, `divestment_target_of`는 각각 같은 이름의 대문자 graph edge로 바꾸며 07단계의 역할·결과·상태 속성과 source evidence를 보존한다.
 - 후보자 node는 발행사 범위의 정규화한 이름과 출생년월로 식별한다. 출생년월이 없는 사람은 발행사 범위의 정규화한 이름으로만 합친다.
 - 문서-local 기관명이 수집한 상장회사 이름과 일치하면 기존 Company node에 연결하고, 그렇지 않으면 Organization node로 만든다.
 - `serves_at`은 사람에서 외부 Organization 또는 Company 방향이다. 현직 기관이 보고 회사 자체로 명시되면 target은 `@reporting_company`가 가리키는 Company다.
@@ -55,7 +55,9 @@
 
 #### Defaults and Exceptions
 
-- NOTICE의 `candidate_for`는 재직 관계로 바꾸거나 active로 표시하지 않는다. `elected_as`와 `option_granted_by`는 07단계가 RESULT의 명시적 가결로 만든 관계만 수용하고 `elected_as`는 active 선임 관계로 저장한다.
+- NOTICE의 `candidate_for`는 재직 관계로 바꾸거나 active로 표시하지 않는다. `elected_as`는 07단계가 RESULT의 명시적 가결로 만든 관계만 수용하고 active 선임 관계로 저장한다.
+- 주주제안자와 주식매수선택권 부여 대상자는 07단계 추출 범위가 아니므로, 주주총회 graph도 `PROPOSED`와 `OPTION_GRANTED_BY` edge를 만들지 않는다. `PROPOSED_ALLOTTEE_OF`는 제3자배정 대상 관계이므로 이 제외 항목과 다르다.
+- 전자투표 관리기관과 시스템 제공기관도 07단계 추출 범위가 아니므로 `ELECTRONIC_VOTING_MANAGER_FOR`와 `ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR` edge를 만들지 않는다. 외부감사인 `EXTERNAL_AUDITOR_OF`는 유지한다.
 - `removed_from`과 `resigned_from`도 07단계가 RESULT의 명시적 가결로 만든 관계만 수용한다. 종료 edge 자체는 inactive이고 회의일을 `end_date`로 사용한다. 같은 회사·동일 person ID·동일 `office_type`의 더 이른 active `ELECTED_AS`만 그 날짜에 종료하며 동일일 또는 미래 선임은 닫지 않는다.
 - 출생년월 없는 종료 인물은 별도 신원을 유지한다. 이름이 같다는 이유로 출생년월 보유 선임 인물이나 legacy 임원 edge에 다시 연결하지 않는다.
 - `external_auditor_of`의 `state=current`와 `state=former`는 각각 active와 inactive로 저장하되, 원문이 감사계약 시작일을 말하지 않으면 회의일을 관계 시작일로 넣지 않는다. 전자투표 관리기관과 시스템 제공기관 관계의 시점은 07단계에서 읽은 회의일만 사용한다.

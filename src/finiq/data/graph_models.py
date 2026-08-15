@@ -124,7 +124,6 @@ class EdgeTypes:
     ELECTED_AS = "ELECTED_AS"   # Person -> Company
     REMOVED_FROM = "REMOVED_FROM" # Person -> Company
     RESIGNED_FROM = "RESIGNED_FROM" # Person -> Company
-    OPTION_GRANTED_BY = "OPTION_GRANTED_BY" # Person -> Company
     EXTERNAL_AUDITOR_OF = "EXTERNAL_AUDITOR_OF" # Organization -> Company
     TRANSFEROR_OF = "TRANSFEROR_OF" # Person/Organization -> Company
     TRANSFEREE_OF = "TRANSFEREE_OF" # Person/Organization -> Company
@@ -134,9 +133,6 @@ class EdgeTypes:
 
     # Persons/Orgs <-> Agendas/Organizations
     SUBJECT_OF = "SUBJECT_OF"   # Person/Org -> Agenda
-    PROPOSED = "PROPOSED"       # Person/Org -> Agenda
     SERVES_AT = "SERVES_AT"     # Person -> Organization/Company
     ACQUISITION_TARGET_OF = "ACQUISITION_TARGET_OF" # Organization -> Agenda
     DIVESTMENT_TARGET_OF = "DIVESTMENT_TARGET_OF" # Organization -> Agenda
-    ELECTRONIC_VOTING_MANAGER_FOR = "ELECTRONIC_VOTING_MANAGER_FOR" # Organization -> Meeting
-    ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR = "ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR" # Organization -> Meeting
