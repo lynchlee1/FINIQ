@@ -808,13 +808,11 @@ def test_shareholder_meeting_semantic_entities_and_relationships(tmp_path: Path)
         EdgeTypes.CANDIDATE_FOR,
         EdgeTypes.ELECTED_AS,
         EdgeTypes.SUBJECT_OF,
-        EdgeTypes.PROPOSED,
         EdgeTypes.SERVES_AT,
-        EdgeTypes.OPTION_GRANTED_BY,
         EdgeTypes.EXTERNAL_AUDITOR_OF,
-        EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR,
-        EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR,
     } <= semantic_types
+    assert "ELECTRONIC_VOTING_MANAGER_FOR" not in semantic_types
+    assert "ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR" not in semantic_types
     includes = [
         edge
         for edge in edges
@@ -844,21 +842,6 @@ def test_shareholder_meeting_semantic_entities_and_relationships(tmp_path: Path)
         "former": False,
     }
     assert all(edge.start_date is None for edge in external_auditors)
-    voting_manager = next(
-        edge
-        for edge in edges
-        if edge.edge_type == EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR
-    )
-    assert voting_manager.target_id == "shareholder_meeting_20260327002490"
-    assert voting_manager.start_date == date(2026, 3, 26)
-    voting_system_provider = next(
-        edge
-        for edge in edges
-        if edge.edge_type == EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR
-    )
-    assert voting_system_provider.target_id == "shareholder_meeting_20260327002490"
-    assert voting_system_provider.start_date == date(2026, 3, 26)
-    assert voting_system_provider.is_active is None
 
 
 def test_shareholder_meeting_notice_never_creates_active_office_relation(tmp_path: Path):
@@ -1453,12 +1436,8 @@ def test_shareholder_semantic_boundary_enforces_endpoint_kinds(tmp_path: Path) -
         relationship("person:p", "@reporting_company", "removed_from", approved),
         relationship("person:p", "@reporting_company", "resigned_from", approved),
         relationship("person:p", "agenda:0", "subject_of"),
-        relationship("org:o", "agenda:0", "proposed"),
         relationship("person:p", "org:o", "serves_at"),
-        relationship("person:p", "@reporting_company", "option_granted_by", approved),
         relationship("org:o", "@reporting_company", "external_auditor_of"),
-        relationship("org:o", "@meeting", "electronic_voting_manager_for"),
-        relationship("org:o", "@meeting", "electronic_voting_system_provider_for"),
         relationship("person:p", "@reporting_company", "transferor_of"),
         relationship("org:o", "@reporting_company", "transferee_of"),
         relationship("org:o", "@reporting_company", "proposed_allottee_of"),
@@ -1478,6 +1457,8 @@ def test_shareholder_semantic_boundary_enforces_endpoint_kinds(tmp_path: Path) -
         relationship("org:o", "org:o", "serves_at"),
         relationship("org:o", "@reporting_company", "option_granted_by", approved),
         relationship("person:p", "@reporting_company", "external_auditor_of"),
+        relationship("org:o", "@meeting", "electronic_voting_manager_for"),
+        relationship("org:o", "@meeting", "electronic_voting_system_provider_for"),
         relationship("person:p", "@meeting", "electronic_voting_manager_for"),
         relationship("person:p", "@meeting", "electronic_voting_system_provider_for"),
         relationship("@meeting", "@reporting_company", "transferor_of"),
@@ -1557,12 +1538,8 @@ def test_shareholder_semantic_boundary_enforces_endpoint_kinds(tmp_path: Path) -
         EdgeTypes.REMOVED_FROM,
         EdgeTypes.RESIGNED_FROM,
         EdgeTypes.SUBJECT_OF,
-        EdgeTypes.PROPOSED,
         EdgeTypes.SERVES_AT,
-        EdgeTypes.OPTION_GRANTED_BY,
         EdgeTypes.EXTERNAL_AUDITOR_OF,
-        EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR,
-        EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR,
         EdgeTypes.TRANSFEROR_OF,
         EdgeTypes.TRANSFEREE_OF,
         EdgeTypes.PROPOSED_ALLOTTEE_OF,

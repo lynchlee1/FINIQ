@@ -976,7 +976,7 @@ def test_legacy_single_cell_fallback_normalizes_passed_rejected_and_withdrawn() 
     assert len(_relations(result, "subject_of", source_ref=hong["entity_ref"])) == 1
 
 
-def test_legacy_named_chair_candidates_and_proposers_remain_distinct() -> None:
+def test_legacy_named_chair_candidates_ignore_shareholder_proposers() -> None:
     result = _parse(
         """
         <table>
@@ -1000,15 +1000,13 @@ def test_legacy_named_chair_candidates_and_proposers_remain_distinct() -> None:
     assert {entity["name"] for entity in result["entities"]} == {
         "최윤근",
         "김만환",
-        "정영숙",
-        "이희철",
     }
-    assert len(_relations(result, "proposed")) == 2
     assert len(_relations(result, "subject_of")) == 2
+    assert not _relations(result, "proposed")
     assert not any(entity["name"] == "외 3인" for entity in result["entities"])
 
 
-def test_stock_option_beneficiaries_require_passed_result_for_active_relation() -> None:
+def test_stock_option_beneficiaries_are_not_extracted() -> None:
     result = _parse(
         """
         <table>
@@ -1027,12 +1025,15 @@ def test_stock_option_beneficiaries_require_passed_result_for_active_relation() 
         title="정기주주총회결과",
     )
 
-    sumin = _entity(result, "이수민")
-    gyeonghwan = _entity(result, "최경환")
-    assert len(_relations(result, "option_granted_by", source_ref=sumin["entity_ref"])) == 1
-    assert not _relations(result, "option_granted_by", source_ref=gyeonghwan["entity_ref"])
-    assert len(_relations(result, "subject_of", source_ref=sumin["entity_ref"])) == 1
-    assert len(_relations(result, "subject_of", source_ref=gyeonghwan["entity_ref"])) == 1
+    assert not any(
+        entity["name"] in {"이수민", "최경환"}
+        for entity in result["entities"]
+    )
+    assert not _relations(result, "option_granted_by")
+    assert not any(
+        relation["attributes"].get("action") == "stock_option_grant"
+        for relation in result["relationships"]
+    )
 
 
 def test_same_name_people_are_matched_by_office_and_birth_month() -> None:
@@ -1393,7 +1394,7 @@ def test_automatic_disposal_is_not_treated_as_a_passed_result() -> None:
     assert not _relations(result, "elected_as", source_ref=person["entity_ref"])
 
 
-def test_explicit_auditor_and_voting_manager_join_the_semantic_contract() -> None:
+def test_external_auditor_is_kept_while_voting_manager_is_excluded() -> None:
     result = _parse(
         """
         <table>
@@ -1409,21 +1410,16 @@ def test_explicit_auditor_and_voting_manager_join_the_semantic_contract() -> Non
     )
 
     auditor = _entity(result, "삼일회계법인")
-    voting_manager = _entity(result, "KB국민은행")
     assert auditor["entity_type"] == "organization"
-    assert voting_manager["entity_type"] == "organization"
+    assert not any(entity["name"] == "KB국민은행" for entity in result["entities"])
     assert _relations(
         result, "external_auditor_of", source_ref=auditor["entity_ref"]
     )[0]["target_ref"] == "@reporting_company"
-    assert _relations(
-        result,
-        "electronic_voting_manager_for",
-        source_ref=voting_manager["entity_ref"],
-    )[0]["target_ref"] == "@meeting"
+    assert not _relations(result, "electronic_voting_manager_for")
     _assert_semantic_shapes(result)
 
 
-def test_named_voting_system_provider_joins_the_semantic_contract() -> None:
+def test_named_voting_system_provider_is_excluded() -> None:
     """Reduced from 20260316002584."""
     result = _parse(
         """
@@ -1440,18 +1436,8 @@ def test_named_voting_system_provider_joins_the_semantic_contract() -> None:
         title="정기주주총회소집결의",
     )
 
-    provider = _entity(result, "삼성증권")
-    relation = _relations(
-        result,
-        "electronic_voting_system_provider_for",
-        source_ref=provider["entity_ref"],
-    )
-    assert len(relation) == 1
-    assert relation[0]["target_ref"] == "@meeting"
-    assert relation[0]["attributes"] == {
-        "usage_status": "active",
-        "services": ["electronic_voting", "electronic_proxy"],
-    }
+    assert not any(entity["name"] == "삼성증권" for entity in result["entities"])
+    assert not _relations(result, "electronic_voting_system_provider_for")
     _assert_semantic_shapes(result)
 
 
@@ -1698,7 +1684,7 @@ def test_shareholder_proposal_candidate_is_a_candidate_not_the_proposer() -> Non
     assert not _relations(result, "elected_as", source_ref=person["entity_ref"])
 
 
-def test_explicit_shareholder_proposer_list_creates_one_relation_per_person() -> None:
+def test_explicit_shareholder_proposer_list_is_not_extracted() -> None:
     """Reduced from KIND disclosures 20260311001748 and 20260330001464."""
     result = _parse(
         """
@@ -1714,22 +1700,14 @@ def test_explicit_shareholder_proposer_list_creates_one_relation_per_person() ->
         title="정기주주총회결과",
     )
 
-    assert {entity["name"] for entity in result["entities"]} == {
-        "강태범",
-        "장정석",
-        "박종원",
-    }
-    assert {
-        result["entities"][int(relation["source_ref"].split(":", 1)[1])]["name"]
-        for relation in _relations(result, "proposed")
-    } == {"강태범", "장정석", "박종원"}
-    assert all(
-        relation["target_ref"] == "agenda:0"
-        for relation in _relations(result, "proposed")
+    assert not any(
+        entity["name"] in {"강태범", "장정석", "박종원"}
+        for entity in result["entities"]
     )
+    assert not _relations(result, "proposed")
 
 
-def test_correction_after_reference_note_relates_proposer_to_named_candidate_agendas() -> None:
+def test_correction_after_reference_note_does_not_extract_proposer() -> None:
     """Reduced from KIND disclosure 20100210000221."""
     result = _parse(
         """
@@ -1765,28 +1743,20 @@ def test_correction_after_reference_note_relates_proposer_to_named_candidate_age
         title="정기주주총회소집결의(정정)",
     )
 
-    proposer = _entity(result, "조규관")
-    proposed = _relations(result, "proposed", source_ref=proposer["entity_ref"])
-    assert {relation["target_ref"] for relation in proposed} == {
-        "agenda:0",
-        "agenda:1",
+    assert {entity["name"] for entity in result["entities"]} >= {
+        "김민성",
+        "장원환",
+        "문혜강",
+        "김봉갑",
     }
-    assert all(
-        relation["attributes"] == {"disclosure_phase": "notice"}
-        for relation in proposed
+    assert not any(
+        entity["name"] in {"조규관", "구제안자"}
+        for entity in result["entities"]
     )
-    assert all(
-        relation["evidence"]["table_index"] == 0
-        and relation["evidence"]["row_index"] == 1
-        and relation["evidence"]["field"] == "정정후"
-        and "김민성, 장원환, 문혜강" in relation["evidence"]["raw_text"]
-        and "김봉갑" in relation["evidence"]["raw_text"]
-        for relation in proposed
-    )
-    assert not any(entity["name"] == "구제안자" for entity in result["entities"])
+    assert not _relations(result, "proposed")
 
 
-def test_correction_proposer_requires_exact_source_grammar_and_matching_agenda() -> None:
+def test_correction_proposer_surfaces_are_not_extracted() -> None:
     result = _parse(
         """
         <table>
@@ -1836,7 +1806,7 @@ def test_correction_proposer_requires_exact_source_grammar_and_matching_agenda()
     )
 
 
-def test_explicit_proposer_surface_rejects_role_and_action_descriptions() -> None:
+def test_explicit_proposer_surfaces_are_not_extracted() -> None:
     result = _parse(
         """
         <table>
@@ -1857,19 +1827,8 @@ def test_explicit_proposer_surface_rejects_role_and_action_descriptions() -> Non
         title="정기주주총회소집결의",
     )
 
-    entities_by_ref = {
-        entity["entity_ref"]: (entity["entity_type"], entity["name"])
-        for entity in result["entities"]
-    }
-    assert {
-        entities_by_ref[relation["source_ref"]]
-        for relation in _relations(result, "proposed")
-    } == {
-        ("person", "리우 쥬 호우"),
-        ("person", "John Smith"),
-        ("organization", "(주)알파"),
-        ("person", "박주현"),
-    }
+    assert not result["entities"]
+    assert not _relations(result, "proposed")
 
 
 def test_candidate_grammar_excludes_role_and_cause_clauses() -> None:
@@ -2027,7 +1986,7 @@ def test_canonical_candidate_rejects_title_backtracking_prefix() -> None:
     }
 
 
-def test_stock_option_sources_union_dedupe_and_ignore_attribute_alias() -> None:
+def test_stock_option_sources_are_not_semantic_entities() -> None:
     from finiq.data_scraper.parse.domain.shareholder_meeting_semantics import (
         extract_semantic_contract,
     )
@@ -2049,14 +2008,10 @@ def test_stock_option_sources_union_dedupe_and_ignore_attribute_alias() -> None:
         disclosure_phase="result",
     )
 
-    assert {entity["name"] for entity in entities} == {"김중복", "이정규"}
-    assert len(
-        [
-            relation
-            for relation in relationships
-            if relation["relationship_type"] == "option_granted_by"
-        ]
-    ) == 2
+    assert not entities
+    assert [relation["relationship_type"] for relation in relationships] == [
+        "includes"
+    ]
 
 
 def test_named_election_requires_one_compatible_name_evidenced_agenda() -> None:

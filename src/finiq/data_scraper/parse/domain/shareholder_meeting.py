@@ -163,62 +163,6 @@ def _inside_correction_table(tag: Tag) -> bool:
     return any(_is_correction_table(parent) for parent in tag.find_parents("table"))
 
 
-def _correction_after_reference_sources(soup: Any) -> list[dict[str, Any]]:
-    """Return authoritative reference-note cells from exact correction tables."""
-    sources: list[dict[str, Any]] = []
-    expected_headers = ["정정항목", "정정전", "정정후"]
-    for table in soup.find_all("table"):
-        table_index = _table_index(soup, table)
-        direct_rows = [
-            (row_index, row)
-            for row_index, row in enumerate(table.find_all("tr"))
-            if row.find_parent("table") is table
-        ]
-        header_position = next(
-            (
-                position
-                for position, (_, row) in enumerate(direct_rows)
-                if [
-                    _clean_text(cell.get_text(" ", strip=True))
-                    for cell in row.find_all(["th", "td"], recursive=False)
-                ]
-                == expected_headers
-            ),
-            None,
-        )
-        if header_position is None:
-            continue
-        for row_index, row in direct_rows[header_position + 1 :]:
-            cells = row.find_all(["th", "td"], recursive=False)
-            if len(cells) != 3 or any(cell.find("table") is not None for cell in cells):
-                continue
-            if (
-                _normalized_row_label(cells[0].get_text(" ", strip=True))
-                != "기타투자판단에참고할사항"
-            ):
-                continue
-            after = _cell_value(cells[2])
-            text = str(after.get("text") or "")
-            lines = [str(line) for line in after.get("lines", []) if str(line)]
-            if not text or not lines:
-                continue
-            sources.append(
-                {
-                    "source_type": "correction_after_reference_note",
-                    "text": text,
-                    "lines": lines,
-                    "evidence": {
-                        "section_title": "정정사항",
-                        "table_index": table_index,
-                        "row_index": row_index,
-                        "column_index": 2,
-                        "field": "정정후",
-                        "raw_text": text,
-                    },
-                }
-            )
-    return sources
-
 
 def _heading_text(span: Tag) -> str:
     return _clean_text(span.get_text(" ", strip=True))
@@ -1009,7 +953,6 @@ def extract_shareholder_meeting_details(
         *elections_by_type["audit_committee_member"],
     ]
     business_purpose_changes = _extract_business_purpose_changes(soup)
-    correction_sources = _correction_after_reference_sources(soup)
     explicit_mentions = extract_stakeholder_mentions(soup)
     explicit_mentions.extend(
         extract_transaction_mentions(
@@ -1025,7 +968,6 @@ def extract_shareholder_meeting_details(
         elections=elections,
         disclosure_phase=disclosure_phase,
         explicit_mentions=explicit_mentions,
-        correction_sources=correction_sources,
         reporting_company_name=reporting_company_name,
     )
     agendas = [str(record["title"]) for record in agenda_records]

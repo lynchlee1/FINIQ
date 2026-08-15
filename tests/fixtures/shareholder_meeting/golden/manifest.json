@@ -4,7 +4,7 @@
   "canonicalization": "UTF-8 JSON, ensure_ascii=false, sort_keys=true, separators=(',', ':')",
   "adjudication_prompt": "adjudication_prompt.md",
   "adjudication_artifact": "adjudication.json",
-  "adjudication_artifact_sha256": "c96f82b78ebe1a9b9518772cff45054e35c105d0396a9171d6167e2198b428c9",
+  "adjudication_artifact_sha256": "20112b8202ddc385277f28fe893d8fdca44543abc67f76ea316a9c1962243597",
   "cases": [
     {
       "acpt_no": "20180102000452",
@@ -318,7 +318,7 @@
     },
     {
       "acpt_no": "20260304000686",
-      "tags": ["notice", "voting-manager", "manager-provider-precedence"],
+      "tags": ["notice", "electronic-voting-institution-excluded"],
       "source": {
         "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260304000686.html",
         "external_fixture": "sources/20260304000686/external.html",
@@ -327,16 +327,16 @@
         "internal_fixture": "sources/20260304000686/internal.html",
         "internal_sha256": "d88c4a3e62b6304a335217cb0c6ed5cc67a49439e1549b0b304dced4163ba4dc"
       },
-      "canonical_output_sha256": "a4fa0ce68e78eb7fe5d04b8f67d2c8c9194f2d9d97f0c6c35e3096034316e3c4",
+      "canonical_output_sha256": "3f24d43ae8e920a86afb4952459b30e4cf35947e9ebd8ad96ee211f4a89d1328",
       "assertions": {
         "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "이사 보수한도"}],
-        "entities": {"include": [{"name": "한국예탁결제원", "entity_type": "organization"}], "exclude": [{"name": "전자투표시스템", "entity_type": "organization"}]},
-        "relationships": {"include": [{"source_name": "한국예탁결제원", "target_ref": "@meeting", "relationship_type": "electronic_voting_manager_for", "attributes_subset": {"delegation_status": "active"}}], "exclude": [{"source_name": "한국예탁결제원", "relationship_type": "electronic_voting_system_provider_for"}]}
+        "entities": {"include": [], "exclude": [{"name": "한국예탁결제원", "entity_type": "organization"}, {"name": "전자투표시스템", "entity_type": "organization"}]},
+        "relationships": {"include": [], "exclude": [{"relationship_type": "electronic_voting_manager_for"}, {"relationship_type": "electronic_voting_system_provider_for"}]}
       }
     },
     {
       "acpt_no": "20260305000989",
-      "tags": ["notice", "voting-manager", "unrelated-delegation-negative", "serves-at"],
+      "tags": ["notice", "electronic-voting-institution-excluded", "serves-at"],
       "source": {
         "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260305000989.html",
         "external_fixture": "sources/20260305000989/external.html",
@@ -345,16 +345,16 @@
         "internal_fixture": "sources/20260305000989/internal.html",
         "internal_sha256": "db56fbb7fc8320add56f25d7de466873574218e5c868244b15ce59b915eb1dda"
       },
-      "canonical_output_sha256": "ef0e04334c31832e42c7df70b60858877456d6ae4841250363fe46b902faee05",
+      "canonical_output_sha256": "24d020223b49290dc6747fc27ab365e6a000be406ef4025d2523810a1d02b674",
       "assertions": {
         "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "정관 일부 변경"}],
-        "entities": {"include": [{"name": "한국예탁결제원", "entity_type": "organization"}, {"name": "㈜동승", "entity_type": "organization"}], "exclude": [{"name": "대표이사", "entity_type": "organization"}]},
-        "relationships": {"include": [{"source_name": "한국예탁결제원", "target_ref": "@meeting", "relationship_type": "electronic_voting_manager_for", "attributes_subset": {"delegation_status": "planned"}}, {"source_name": "전동진", "target_name": "㈜동승", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "사외이사"}}], "exclude": [{"source_name": "한국예탁결제원", "relationship_type": "electronic_voting_system_provider_for"}]}
+        "entities": {"include": [{"name": "㈜동승", "entity_type": "organization"}], "exclude": [{"name": "한국예탁결제원", "entity_type": "organization"}, {"name": "대표이사", "entity_type": "organization"}]},
+        "relationships": {"include": [{"source_name": "전동진", "target_name": "㈜동승", "target_type": "organization", "relationship_type": "serves_at", "attributes_subset": {"position": "사외이사"}}], "exclude": [{"relationship_type": "electronic_voting_manager_for"}, {"relationship_type": "electronic_voting_system_provider_for"}]}
       }
     },
     {
       "acpt_no": "20260316002584",
-      "tags": ["notice", "voting-system-provider", "electronic-proxy"],
+      "tags": ["notice", "electronic-voting-institution-excluded", "electronic-proxy"],
       "source": {
         "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260316002584.html",
         "external_fixture": "sources/20260316002584/external.html",
@@ -363,11 +363,11 @@
         "internal_fixture": "sources/20260316002584/internal.html",
         "internal_sha256": "a9352d18b15869e0624b460baa4fc50f8de176e4d3fdfb95fbe72dd65bc9fef8"
       },
-      "canonical_output_sha256": "739122e22ac00903f217d094bcf324c42cd0c2299d6e863266a7c7afeadb0bf4",
+      "canonical_output_sha256": "14d8fc1335f47ce2f23ae9257523c21978e2b3ce58cda318e6955dda105a1e48",
       "assertions": {
         "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"title_contains": "이태규"}],
-        "entities": {"include": [{"name": "삼성증권", "entity_type": "organization"}, {"name": "이태규", "entity_type": "person"}], "exclude": [{"name": "전자위임장권유시스템", "entity_type": "organization"}]},
-        "relationships": {"include": [{"source_name": "삼성증권", "target_ref": "@meeting", "relationship_type": "electronic_voting_system_provider_for", "attributes_subset": {"usage_status": "active", "services": ["electronic_voting", "electronic_proxy"]}}], "exclude": [{"source_name": "삼성증권", "relationship_type": "electronic_voting_manager_for"}]}
+        "entities": {"include": [{"name": "이태규", "entity_type": "person"}], "exclude": [{"name": "삼성증권", "entity_type": "organization"}, {"name": "전자위임장권유시스템", "entity_type": "organization"}]},
+        "relationships": {"include": [], "exclude": [{"relationship_type": "electronic_voting_manager_for"}, {"relationship_type": "electronic_voting_system_provider_for"}]}
       }
     },
     {
@@ -480,7 +480,7 @@
     },
     {
       "acpt_no": "20260311001748",
-      "tags": ["notice", "shareholder-proposer", "multi-person", "multi-agenda"],
+      "tags": ["notice", "shareholder-proposer-excluded", "multi-person", "multi-agenda"],
       "source": {
         "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260311001748.html",
         "external_fixture": "sources/20260311001748/external.html",
@@ -489,16 +489,16 @@
         "internal_fixture": "sources/20260311001748/internal.html",
         "internal_sha256": "3a008cbd786599e54430cf8467f17f2a1593bc8ae82c92267513905c4554c2d3"
       },
-      "canonical_output_sha256": "8b3080d6e1bf5e72aa610e3f888786c8d9f04d2ed9da18fd7a8cfcf653e4a0da",
+      "canonical_output_sha256": "7aa6660f282a94a708654fa439d9a7aac641818a3d3b90fc99d2b231e07db0b1",
       "assertions": {
         "mode": "NOTICE", "disclosure_phase": "notice", "agendas_include": [{"number": "제1-2-2호", "title_contains": "주주제안_강태범,장정석,박종원"}, {"number": "제2-2호", "title_contains": "주주제안_강태범,장정석,박종원"}],
-        "entities": {"include": [{"name": "강태범", "entity_type": "person"}, {"name": "장정석", "entity_type": "person"}, {"name": "박종원", "entity_type": "person"}], "exclude": [{"name": "강태범,장정석,박종원", "entity_type": "person"}]},
-        "relationships": {"include": [{"source_name": "강태범", "relationship_type": "proposed", "min_count": 2, "attributes_subset": {"disclosure_phase": "notice"}}, {"source_name": "장정석", "relationship_type": "proposed", "min_count": 2}, {"source_name": "박종원", "relationship_type": "proposed", "min_count": 2}], "exclude": [{"source_name": "강태범", "relationship_type": "candidate_for"}, {"relationship_type": "elected_as"}]}
+        "entities": {"include": [], "exclude": [{"name": "강태범", "entity_type": "person"}, {"name": "장정석", "entity_type": "person"}, {"name": "박종원", "entity_type": "person"}, {"name": "강태범,장정석,박종원", "entity_type": "person"}]},
+        "relationships": {"include": [], "exclude": [{"relationship_type": "proposed"}, {"source_name": "강태범", "relationship_type": "candidate_for"}, {"relationship_type": "elected_as"}]}
       }
     },
     {
       "acpt_no": "20260330001464",
-      "tags": ["result", "shareholder-proposer", "rejected-proposal", "multi-person"],
+      "tags": ["result", "shareholder-proposer-excluded", "rejected-proposal", "multi-person"],
       "source": {
         "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260330001464.html",
         "external_fixture": "sources/20260330001464/external.html",
@@ -507,16 +507,16 @@
         "internal_fixture": "sources/20260330001464/internal.html",
         "internal_sha256": "c0ec24df87cfab053672c8b3aa8fd4d2fe926cfff12f43cf11e243195a0b3904"
       },
-      "canonical_output_sha256": "cb23e29c18e941557ec059ef09f3c6674b308af9bba4a11d46418d1470086cd8",
+      "canonical_output_sha256": "48094dba1f41ad294dc067adf8958c9dcd12bbb7eda6d7ab4cc34ea1d3a877dd",
       "assertions": {
         "mode": "RESULT", "disclosure_phase": "result", "agendas_include": [{"number": "제1-2-2호", "status": "rejected", "title_contains": "주주제안_강태범,장정석,박종원"}, {"number": "제2-2호", "status": "rejected", "title_contains": "주주제안_강태범,장정석,박종원"}],
-        "entities": {"include": [{"name": "강태범", "entity_type": "person"}, {"name": "장정석", "entity_type": "person"}, {"name": "박종원", "entity_type": "person"}], "exclude": [{"name": "주주제안", "entity_type": "person"}]},
-        "relationships": {"include": [{"source_name": "강태범", "relationship_type": "proposed", "min_count": 2, "attributes_subset": {"disclosure_phase": "result"}}, {"source_name": "장정석", "relationship_type": "proposed", "min_count": 2}, {"source_name": "박종원", "relationship_type": "proposed", "min_count": 2}], "exclude": [{"source_name": "강태범", "relationship_type": "elected_as"}, {"source_name": "장정석", "relationship_type": "candidate_for"}]}
+        "entities": {"include": [], "exclude": [{"name": "강태범", "entity_type": "person"}, {"name": "장정석", "entity_type": "person"}, {"name": "박종원", "entity_type": "person"}, {"name": "주주제안", "entity_type": "person"}]},
+        "relationships": {"include": [], "exclude": [{"relationship_type": "proposed"}, {"source_name": "강태범", "relationship_type": "elected_as"}, {"source_name": "장정석", "relationship_type": "candidate_for"}]}
       }
     },
     {
       "acpt_no": "20260326001553",
-      "tags": ["result", "stock-option", "passed-only", "multi-beneficiary"],
+      "tags": ["result", "stock-option-beneficiary-excluded", "passed-only", "multi-beneficiary"],
       "source": {
         "external_origin": "database/04-external-html-download/shareholder_meeting/2026/20260326001553.html",
         "external_fixture": "sources/20260326001553/external.html",
@@ -525,11 +525,11 @@
         "internal_fixture": "sources/20260326001553/internal.html",
         "internal_sha256": "3afb8aa02903017099fc66e857d5e22270eb9aced30874a0eda674fdcacd2aa7"
       },
-      "canonical_output_sha256": "4197c83b88d9d5aff22d9aec0f1804066aafe5aaf232d2abb4b9589ad0d8bb4c",
+      "canonical_output_sha256": "fb8ae53fb3fe86dca44e2f2f640026301caf0e1f8e8eb37fd76a25e3d4d59c92",
       "assertions": {
         "mode": "RESULT", "disclosure_phase": "result", "agendas_include": [{"number": "4-1", "status": "passed", "title_contains": "부여대상자:김광연"}, {"number": "4-3", "status": "passed", "title_contains": "부여대상자:최경환"}],
-        "entities": {"include": [{"name": "김광연", "entity_type": "person"}, {"name": "이수민", "entity_type": "person"}, {"name": "최경환", "entity_type": "person"}], "exclude": [{"name": "부여대상자", "entity_type": "person"}]},
-        "relationships": {"include": [{"source_name": "김광연", "target_ref": "@reporting_company", "relationship_type": "option_granted_by", "attributes_subset": {"outcome": "passed"}}, {"source_name": "이수민", "target_ref": "@reporting_company", "relationship_type": "option_granted_by", "attributes_subset": {"outcome": "passed"}}, {"source_name": "최경환", "target_ref": "@reporting_company", "relationship_type": "option_granted_by", "attributes_subset": {"outcome": "passed"}}], "exclude": [{"source_name": "김정훈", "relationship_type": "option_granted_by"}, {"relationship_type": "proposed"}]}
+        "entities": {"include": [], "exclude": [{"name": "김광연", "entity_type": "person"}, {"name": "이수민", "entity_type": "person"}, {"name": "최경환", "entity_type": "person"}, {"name": "부여대상자", "entity_type": "person"}]},
+        "relationships": {"include": [], "exclude": [{"relationship_type": "option_granted_by"}, {"relationship_type": "subject_of", "attributes_subset": {"action": "stock_option_grant"}}, {"relationship_type": "proposed"}]}
       }
     },
     {
@@ -638,7 +638,7 @@
     },
     {
       "acpt_no": "20100210000221",
-      "tags": ["legacy-notice", "correction-after", "named-proposer", "election-details"],
+      "tags": ["legacy-notice", "correction-after", "proposer-excluded", "election-details"],
       "source": {
         "external_origin": "database/04-external-html-download/shareholder_meeting/2010/20100210000221.html",
         "external_fixture": "sources/20100210000221/external.html",
@@ -647,18 +647,18 @@
         "internal_fixture": "sources/20100210000221/internal.html",
         "internal_sha256": "c42058c1c97a59bc7dbd8b36d4f7d00440aa2e5892f967d7b29cca5123c4dd47"
       },
-      "canonical_output_sha256": "978ea2ec4e9397752c5178435528d5eeb88431bd362c4d6f90ec435ac26d7723",
+      "canonical_output_sha256": "8c8bc60169acebc81249d2a35ba19f1e0a921c67ffb07e306d0c7b3006212326",
       "assertions": {
         "mode": "NOTICE",
         "disclosure_phase": "notice",
         "agendas_include": [{"number": "4", "title_contains": "이사 선임"}, {"number": "5", "title_contains": "감사 선임"}],
         "entities": {
-          "include": [{"name": "조규관", "entity_type": "person"}, {"name": "김민성", "entity_type": "person"}, {"name": "장원환", "entity_type": "person"}, {"name": "문혜강", "entity_type": "person"}, {"name": "김봉갑", "entity_type": "person"}],
-          "exclude": [{"name": "구제안자", "entity_type": "person"}]
+          "include": [{"name": "김민성", "entity_type": "person"}, {"name": "장원환", "entity_type": "person"}, {"name": "문혜강", "entity_type": "person"}, {"name": "김봉갑", "entity_type": "person"}],
+          "exclude": [{"name": "조규관", "entity_type": "person"}, {"name": "구제안자", "entity_type": "person"}]
         },
         "relationships": {
-          "include": [{"source_name": "조규관", "source_type": "person", "target_ref": "agenda:3", "relationship_type": "proposed", "attributes_subset": {"disclosure_phase": "notice"}, "evidence_subset": {"field": "정정후"}}, {"source_name": "조규관", "source_type": "person", "target_ref": "agenda:4", "relationship_type": "proposed", "attributes_subset": {"disclosure_phase": "notice"}, "evidence_subset": {"field": "정정후"}}],
-          "exclude": [{"source_name": "구제안자", "relationship_type": "proposed"}]
+          "include": [],
+          "exclude": [{"relationship_type": "proposed"}]
         }
       }
     },

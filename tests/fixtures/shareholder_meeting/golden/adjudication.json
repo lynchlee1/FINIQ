@@ -6,7 +6,7 @@
   "model_identity_note": "The repository records the Codex multi-agent workflow but the exact hosted model identity and snapshot are not exposed as repository-verifiable metadata; no identity was guessed.",
   "runtime_llm_dependency": false,
   "prompt_path": "adjudication_prompt.md",
-  "prompt_sha256": "a462f040c91a2c8344f6a956ab65a9148eac1ffa161343bbef0b52dc68a675ce",
+  "prompt_sha256": "26d084dd1ab5e5bfcfe3733170bc15263d988e5088e6c6b4408dba728da4f26d",
   "reviewers": [
     {
       "agent_path": "/root/candidate_2026_audit",
@@ -14,15 +14,15 @@
     },
     {
       "agent_path": "/root/candidate_2026_audit/positive_candidates",
-      "role": "independent proposed and option-grant candidate review"
+      "role": "independent review of excluded proposer and option-beneficiary scope"
     },
     {
       "agent_path": "/root",
-      "role": "semantic grammar owner and final resolution of the named-proposer disagreement"
+      "role": "semantic contract owner and final resolution of excluded-scope boundaries"
     },
     {
       "agent_path": "/root/completion_ai_scope",
-      "role": "independent completion audit and correction-after proposer adjudication"
+      "role": "independent completion audit of correction-after proposer exclusion"
     }
   ],
   "cases": [
@@ -156,27 +156,27 @@
     },
     {
       "acpt_no": "20260304000686",
-      "positive_labels": ["한국예탁결제원 is the active electronic-voting manager"],
-      "negative_boundaries": ["the same assertion must not also create a provider edge", "전자투표시스템 is not an organization"],
-      "rationale": "The source explicitly entrusts management work to 한국예탁결제원, so manager semantics take precedence over its system mention.",
-      "disagreements": [],
-      "resolution": "Accepted as the manager-versus-provider precedence case."
+      "positive_labels": ["the shareholder-meeting agenda remains parsed"],
+      "negative_boundaries": ["한국예탁결제원 is not extracted as a voting institution", "no manager or provider relationship is created"],
+      "rationale": "Electronic-voting institutions are outside the extraction scope because they are not important downstream facts.",
+      "disagreements": ["An earlier contract extracted 한국예탁결제원 as the active voting manager."],
+      "resolution": "Preserve the source text and agenda, but suppress the institution entity and both voting relationships."
     },
     {
       "acpt_no": "20260305000989",
-      "positive_labels": ["한국예탁결제원 is the planned electronic-voting manager", "전동진 serves at ㈜동승 as outside director"],
-      "negative_boundaries": ["the following representative-director delegation is unrelated", "한국예탁결제원 is not duplicated as a provider"],
-      "rationale": "The current-meeting clause explicitly delegates voting management; a later unrelated delegation must not extend that capture.",
-      "disagreements": [],
-      "resolution": "Accepted with the completed-clause boundary."
+      "positive_labels": ["전동진 serves at ㈜동승 as outside director"],
+      "negative_boundaries": ["한국예탁결제원 is not extracted from the voting-management clause", "no voting manager or provider relationship is created"],
+      "rationale": "The current affiliation remains important, while the electronic-voting institution is outside the extraction scope.",
+      "disagreements": ["An earlier contract also extracted 한국예탁결제원 as a planned voting manager."],
+      "resolution": "Keep the serves_at fact and suppress all electronic-voting institution semantics."
     },
     {
       "acpt_no": "20260316002584",
-      "positive_labels": ["삼성증권 is the active electronic-voting and proxy system provider"],
-      "negative_boundaries": ["삼성증권 is not asserted as the voting manager", "전자위임장권유시스템 is not an organization"],
-      "rationale": "The source identifies the provider in a current-meeting system line and lists both electronic services without delegating management.",
-      "disagreements": [],
-      "resolution": "Accepted as a named system-provider case."
+      "positive_labels": ["the named-director agenda remains parsed"],
+      "negative_boundaries": ["삼성증권 is not extracted as a voting-system provider", "전자위임장권유시스템 is not an organization"],
+      "rationale": "The voting instructions remain in the source text, but their provider is not an important downstream entity.",
+      "disagreements": ["An earlier contract extracted 삼성증권 as the active voting and proxy-system provider."],
+      "resolution": "Preserve the agenda and source text only; suppress the provider entity and relationship."
     },
     {
       "acpt_no": "20260316000503",
@@ -228,27 +228,27 @@
     },
     {
       "acpt_no": "20260311001748",
-      "positive_labels": ["강태범, 장정석, and 박종원 each proposed the 2,000-won dividend agenda", "the same three people each proposed the stock-split agenda"],
-      "negative_boundaries": ["the comma-separated roster is three people rather than one entity", "named proposers are not director candidates"],
-      "rationale": "Both notice agendas contain the explicit structured surface 주주제안_강태범,장정석,박종원.",
-      "disagreements": ["The parser initially emitted no proposed edges because the existing grammar did not split an underscore-led comma roster; source adjudication identified six explicit proposer facts."],
-      "resolution": "The semantic grammar owner added the structural roster grammar; the golden expects six proposed edges and no candidate edge for the three proposers."
+      "positive_labels": ["the 2,000-won dividend proposal remains an agenda", "the stock-split proposal remains an agenda"],
+      "negative_boundaries": ["강태범, 장정석, and 박종원 are not extracted as entities", "no proposed or candidate relationship is created for the named proposers"],
+      "rationale": "The proposal agendas matter for downstream analysis, while the identities of the people who proposed them are outside the extraction scope.",
+      "disagreements": ["An earlier contract extracted six proposed relationships from the explicit roster."],
+      "resolution": "The scope was narrowed: preserve both agendas and suppress proposer entities and relationships."
     },
     {
       "acpt_no": "20260330001464",
-      "positive_labels": ["강태범, 장정석, and 박종원 remain proposers of both rejected shareholder proposals"],
-      "negative_boundaries": ["rejection does not erase the descriptive proposed relationship", "rejected proposals create no active election for the proposers"],
-      "rationale": "The result repeats the explicit three-person proposer roster on two agendas and marks both agendas rejected.",
-      "disagreements": ["The parser initially emitted no proposed edges before the structural underscore/comma proposer grammar was added."],
-      "resolution": "The golden preserves six descriptive proposed edges while keeping both proposal outcomes rejected."
+      "positive_labels": ["both shareholder-proposal agendas remain present with rejected status"],
+      "negative_boundaries": ["the three named proposers create no entities", "the result creates no proposed, candidate, or elected relationship for them"],
+      "rationale": "The rejected agenda content and outcome are retained, while proposer identities are outside the extraction scope.",
+      "disagreements": ["An earlier contract retained six descriptive proposed relationships."],
+      "resolution": "The golden now preserves only the proposal agendas and their rejected outcomes."
     },
     {
       "acpt_no": "20260326001553",
-      "positive_labels": ["김광연, 이수민, and 최경환 each receive a passed option_granted_by relationship", "each beneficiary is also a stock-option agenda subject"],
-      "negative_boundaries": ["김정훈 is a director candidate and not an option beneficiary", "부여대상자 is a label rather than a person"],
-      "rationale": "Three separate passed result rows explicitly bracket each named stock-option beneficiary.",
-      "disagreements": [],
-      "resolution": "Two Codex agents independently confirmed the three positive option grants; accepted as the real option-grant golden case."
+      "positive_labels": ["the three passed stock-option-grant agendas remain parsed with their outcomes"],
+      "negative_boundaries": ["김광연, 이수민, and 최경환 are not extracted as beneficiary entities", "no stock_option_grant subject or option_granted_by relationship is created"],
+      "rationale": "The grant agendas matter for downstream analysis, while individual beneficiaries are outside the extraction scope.",
+      "disagreements": ["An earlier contract extracted three beneficiary entities and active grant relationships."],
+      "resolution": "The golden now preserves the agendas and passed outcomes only."
     },
     {
       "acpt_no": "20260109000278",
@@ -284,11 +284,11 @@
     },
     {
       "acpt_no": "20100210000221",
-      "positive_labels": ["조규관 explicitly proposes the three named director candidates", "조규관 explicitly proposes the named auditor candidate", "the two proposed relationships target the corresponding director and auditor agendas"],
-      "negative_boundaries": ["정정전의 구제안자는 not authoritative and creates no entity", "arbitrary correction prose and non-reference-note correction rows are not proposer sources"],
-      "rationale": "The exact correction comparison table identifies a reference-note row and gives authoritative 정정후 sentences that name 조규관 as 제안자/제안인 for candidate rosters also present in the election-detail tables.",
-      "disagreements": ["The initial title-only proposer grammar omitted this explicit correction-after source; independent completion audit classified it as a deterministic P2 recall gap."],
-      "resolution": "Accepted as a typed correction-after source with exact direct-cell headers, full-line grammar, matching election identities, unique office-compatible agenda linkage, and original table/row/column evidence."
+      "positive_labels": ["the named director and auditor candidates remain extracted from the election-detail tables", "the director and auditor appointment agendas remain present"],
+      "negative_boundaries": ["정정후의 조규관 and 정정전의 구제안자 create no entities", "the correction table creates no proposed relationship"],
+      "rationale": "The candidate and agenda facts remain relevant, but the identity of the shareholder proposer is outside the extraction scope even when stated in the correction table.",
+      "disagreements": ["An earlier contract treated the exact correction-after sentence as an authoritative proposer source."],
+      "resolution": "The correction source is no longer parsed for proposer identity; candidate and agenda extraction remain unchanged."
     },
     {
       "acpt_no": "20081126000092",

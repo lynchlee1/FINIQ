@@ -808,12 +808,8 @@ _SHAREHOLDER_RELATION_EDGE_TYPES = {
     "removed_from": EdgeTypes.REMOVED_FROM,
     "resigned_from": EdgeTypes.RESIGNED_FROM,
     "subject_of": EdgeTypes.SUBJECT_OF,
-    "proposed": EdgeTypes.PROPOSED,
     "serves_at": EdgeTypes.SERVES_AT,
-    "option_granted_by": EdgeTypes.OPTION_GRANTED_BY,
     "external_auditor_of": EdgeTypes.EXTERNAL_AUDITOR_OF,
-    "electronic_voting_manager_for": EdgeTypes.ELECTRONIC_VOTING_MANAGER_FOR,
-    "electronic_voting_system_provider_for": EdgeTypes.ELECTRONIC_VOTING_SYSTEM_PROVIDER_FOR,
     "transferor_of": EdgeTypes.TRANSFEROR_OF,
     "transferee_of": EdgeTypes.TRANSFEREE_OF,
     "proposed_allottee_of": EdgeTypes.PROPOSED_ALLOTTEE_OF,
@@ -830,12 +826,8 @@ _SHAREHOLDER_RELATION_ENDPOINT_KINDS = {
     "removed_from": ({"person"}, {"company"}),
     "resigned_from": ({"person"}, {"company"}),
     "subject_of": ({"person", "organization"}, {"agenda"}),
-    "proposed": ({"person", "organization"}, {"agenda"}),
     "serves_at": ({"person"}, {"organization", "company"}),
-    "option_granted_by": ({"person"}, {"company"}),
     "external_auditor_of": ({"organization"}, {"company"}),
-    "electronic_voting_manager_for": ({"organization"}, {"meeting"}),
-    "electronic_voting_system_provider_for": ({"organization"}, {"meeting"}),
     "transferor_of": ({"person", "organization"}, {"company"}),
     "transferee_of": ({"person", "organization"}, {"company"}),
     "proposed_allottee_of": ({"person", "organization"}, {"company"}),
@@ -1088,7 +1080,6 @@ def _process_shareholder_parsed_details(
             "elected_as",
             "removed_from",
             "resigned_from",
-            "option_granted_by",
         }:
             if disclosure_phase != "result":
                 continue
@@ -1130,8 +1121,6 @@ def _process_shareholder_parsed_details(
         if has_unknown_start:
             relationship_start_date = None
         elif relationship_type in {
-            "electronic_voting_manager_for",
-            "electronic_voting_system_provider_for",
         }:
             relationship_start_date = parsed_meeting_date
         else:
