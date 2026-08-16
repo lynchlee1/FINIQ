@@ -17,11 +17,10 @@ import {
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
-import { DataIntegrityInspectionCard } from "@/components/data-integrity/DataIntegrityInspectionCard";
-import type {
-  DataIntegrityInspectionStep,
-  DataIntegrityInspectionVerdict,
-} from "@/components/data-integrity/DataIntegrityInspectionPanel";
+import {
+  SingleCheckDataIntegrityInspectionCard,
+  type SingleCheckDataIntegrityInspectionState,
+} from "@/components/data-integrity/DataIntegrityInspectionCard";
 import type { WorkflowModeOption } from "@/components/layout/WorkflowModeSwitch";
 
 type DownloadVariant = "external" | "internal";
@@ -671,98 +670,45 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       + Number(existingData.hash_unverified_target_html_count || 0)
       + Number(existingData.deletion_candidate_count || 0)
     : 0;
-  let inspectionVerdict: DataIntegrityInspectionVerdict;
-  if (!hasInspectionInput) {
-    inspectionVerdict = {
-      label: "대기",
-      title: "데이터 경로를 선택하세요",
-      description: "입력 경로와 결과 경로를 선택한 다음 검사하기를 누르세요.",
-      tone: "neutral",
-    };
-  } else if (inspectRunning) {
-    inspectionVerdict = {
-      label: "검사 중",
-      title: "기존 원문 데이터를 확인하고 있습니다",
-      description: "현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다.",
-      tone: "neutral",
-    };
-  } else if (existingCheckError || integrityProblemCount > 0) {
-    inspectionVerdict = {
-      label: "사용 불가",
-      title: "기존 원문 데이터에 문제가 있습니다",
-      description: existingCheckError || "아래 실패 단계의 원인과 조치를 확인해 주세요.",
-      tone: "error",
-    };
-  } else if (existingCheckCompleted) {
-    inspectionVerdict = {
-      label: "정상",
-      title: existingData ? "기존 원문 데이터를 그대로 사용해도 됩니다" : "기존 원문 데이터가 없습니다",
-      description: existingData
-        ? existingSummary
-        : "현재 대상과 충돌하는 기존 원문 파일이 없습니다.",
-      tone: "success",
-    };
-  } else {
-    inspectionVerdict = {
-      label: "대기",
-      title: "검사를 시작하지 않았습니다",
-      description: "검사하기를 누르면 현재 경로의 저장 파일과 해시 구성을 확인합니다.",
-      tone: "neutral",
-    };
-  }
-  const inspectionSteps: DataIntegrityInspectionStep[] = [
-    {
-      key: "target-files",
-      title: "현재 대상과 저장 파일 비교",
-      summary: existingData
-        ? `대상 ${formatInteger(existingData.requested_count)}건 중 ${formatInteger(existingData.existing_target_html_count)}건은 저장되어 있고 ${formatInteger(existingData.download_required_target_html_count ?? existingData.missing_target_html_count)}건은 새로 저장해야 합니다.`
+  const integrityProblems = existingData ? ([
+    [existingData.invalid_target_html_count, "깨진 파일", "건"],
+    [existingData.hash_mismatch_target_html_count, "해시 불일치", "건"],
+    [existingData.hash_unverified_target_html_count, "기준 해시 없음", "건"],
+    [existingData.deletion_candidate_count, "대상 외 파일", "개"],
+  ] as const)
+    .filter(([count]) => Number(count || 0) > 0)
+    .map(([count, label, unit]) => `${label} ${formatInteger(count)}${unit}`) : [];
+  const inspectionState: SingleCheckDataIntegrityInspectionState = !hasInspectionInput
+    ? "waiting"
+    : inspectRunning
+      ? "running"
+      : existingCheckError || integrityProblemCount > 0
+        ? "failed"
         : existingCheckCompleted
-          ? "현재 대상과 충돌하는 기존 저장 파일이 없습니다."
-          : "데이터 경로를 선택하면 현재 대상과 저장 파일을 비교합니다.",
-      status: inspectRunning
-        ? "running"
-        : existingCheckError
-          ? "failed"
-          : existingCheckCompleted
-            ? "complete"
-            : "waiting",
-      statusLabel: inspectRunning
-        ? "검사 중"
-        : existingCheckError
-          ? "사용 불가"
-          : existingCheckCompleted
-            ? "정상"
-            : "대기",
-    },
-    {
-      key: "integrity",
-      title: "해시와 폴더 구성 검사",
-      summary: existingData
-        ? `해시 불일치 ${formatInteger(existingData.hash_mismatch_target_html_count)}건, 기준 없음 ${formatInteger(existingData.hash_unverified_target_html_count)}건, 대상 외 파일 ${formatInteger(existingData.deletion_candidate_count)}개입니다.`
-        : "저장 파일의 기준 해시와 대상 외 파일을 확인합니다.",
-      status: inspectRunning
-        ? "running"
-        : integrityProblemCount > 0 || !!existingCheckError
-          ? "failed"
-          : existingCheckCompleted
-            ? "complete"
-            : "waiting",
-      statusLabel: inspectRunning
-        ? "검사 중"
-        : integrityProblemCount > 0 || existingCheckError
-          ? "사용 불가"
-          : existingCheckCompleted
-            ? "정상"
-            : "대기",
-      action: hasInspectionInput ? {
-        label: inspectRunning ? "검사 중..." : "검사하기",
-        onClick: handleInspectFolder,
-        disabled: inspectRunning || isJobActive,
-        loading: inspectRunning,
-        showResultStatus: true,
-      } : undefined,
-    },
-  ];
+          ? "success"
+          : "waiting";
+  const inspectionCopy = {
+    waiting: hasInspectionInput
+      ? ["검사를 시작하지 않았습니다", "검사하기를 누르면 현재 경로의 저장 파일과 해시 구성을 확인합니다."]
+      : ["데이터 경로를 선택하세요", "입력 경로와 결과 경로를 선택한 다음 검사하기를 누르세요."],
+    ready: ["기존 원문 데이터 검사가 필요합니다", "현재 경로의 저장 파일과 해시 구성을 확인하세요."],
+    running: ["기존 원문 데이터를 확인하고 있습니다", "현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."],
+    success: existingData
+      ? ["기존 원문 데이터를 그대로 사용해도 됩니다", existingSummary]
+      : ["기존 원문 데이터가 없습니다", "현재 대상과 충돌하는 기존 원문 파일이 없습니다."],
+    failed: [
+      "기존 원문 데이터에 문제가 있습니다",
+      existingCheckError
+        || (integrityProblems.length
+          ? `${integrityProblems.join(" · ")} 때문에 기존 원문을 그대로 재사용할 수 없습니다.`
+          : "검사 결과를 확인해 주세요."),
+    ],
+  }[inspectionState];
+  const inspectionStepSummary = existingData
+    ? `대상 ${formatInteger(existingData.requested_count)}건 중 ${formatInteger(existingData.existing_target_html_count)}건은 저장되어 있고 ${formatInteger(existingData.download_required_target_html_count ?? existingData.missing_target_html_count)}건은 새로 저장해야 합니다. 해시 불일치 ${formatInteger(existingData.hash_mismatch_target_html_count)}건, 기준 없음 ${formatInteger(existingData.hash_unverified_target_html_count)}건, 대상 외 파일 ${formatInteger(existingData.deletion_candidate_count)}개입니다.`
+    : existingCheckCompleted
+      ? "현재 대상과 충돌하는 기존 저장 파일이 없습니다."
+      : "현재 대상과 저장 파일을 비교하고, 저장 파일의 기준 해시와 대상 외 파일을 함께 확인합니다.";
 
   return (
     <HtmlWorkflowPage
@@ -783,10 +729,20 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           {showSaveWorkflow && (
-            <DataIntegrityInspectionCard
+            <SingleCheckDataIntegrityInspectionCard
               description="실행 전에 현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."
-              verdict={inspectionVerdict}
-              steps={inspectionSteps}
+              state={inspectionState}
+              verdictTitle={inspectionCopy[0]}
+              verdictDescription={inspectionCopy[1]}
+              stepTitle="기존 원문 데이터 검사"
+              stepSummary={inspectionStepSummary}
+              action={hasInspectionInput ? {
+                label: inspectRunning ? "검사 중..." : "검사하기",
+                onClick: handleInspectFolder,
+                disabled: inspectRunning || isJobActive,
+                loading: inspectRunning,
+                showResultStatus: true,
+              } : undefined}
             />
           )}
 
