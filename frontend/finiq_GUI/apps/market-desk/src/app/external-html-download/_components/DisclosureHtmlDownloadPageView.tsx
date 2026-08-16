@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { AlertTriangle, FileJson, FolderOpen, Info, Play, ShieldCheck, Square, Trash2 } from "lucide-react";
+import { FileJson, FolderOpen, Play, Square, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -11,7 +11,6 @@ import {
   HtmlWorkflowCard,
   HtmlWorkflowPage,
   htmlControlClassName,
-  htmlInsetPanelClassName,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { UI_TEXT } from "@/config/uiText";
@@ -21,6 +20,7 @@ import {
   SingleCheckDataIntegrityInspectionCard,
   type SingleCheckDataIntegrityInspectionState,
 } from "@/components/data-integrity/DataIntegrityInspectionCard";
+import type { DataIntegrityInspectionStep } from "@/components/data-integrity/DataIntegrityInspectionPanel";
 import type { WorkflowModeOption } from "@/components/layout/WorkflowModeSwitch";
 
 type DownloadVariant = "external" | "internal";
@@ -42,9 +42,6 @@ const DOWNLOAD_VARIANTS = {
     cancelEndpoint: "/api/disclosures/external-html-download/cancel",
     inspectEndpoint: "/api/disclosures/external-html-download/inspect-folder",
     checkExistingEndpoint: "/api/disclosures/external-html-download/check-existing",
-    trustExistingEndpoint: "/api/disclosures/external-html-download/trust-existing/start",
-    trustExistingLabel: "현재 외부 HTML 신뢰",
-    htmlKindLabel: "외부",
     stopMessage: "공시원문 외부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
   internal: {
@@ -57,9 +54,6 @@ const DOWNLOAD_VARIANTS = {
     cancelEndpoint: "/api/disclosures/internal-html-download/cancel",
     inspectEndpoint: "/api/disclosures/internal-html-download/inspect-folder",
     checkExistingEndpoint: "/api/disclosures/internal-html-download/check-existing",
-    trustExistingEndpoint: "/api/disclosures/internal-html-download/trust-existing/start",
-    trustExistingLabel: "현재 내부 HTML 신뢰",
-    htmlKindLabel: "내부",
     stopMessage: "공시원문 내부 저장 중지를 요청했습니다. 진행 중인 요청이 끝나면 멈춥니다.",
   },
 } as const;
@@ -139,7 +133,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [existingData, setExistingData] = useState<any>(null);
   const [existingCheckError, setExistingCheckError] = useState("");
   const [existingCheckCompleted, setExistingCheckCompleted] = useState(false);
-  const [trustExistingConfirmed, setTrustExistingConfirmed] = useState(false);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
   // Form State
@@ -155,12 +148,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [limit, setLimit] = useState("");
   const [skipExisting, setSkipExisting] = useState(true);
   const [progressInterval, setProgressInterval] = useState("10");
-
-  const existingAllSaved = !!existingData
-    && (existingData.requested_count || 0) > 0
-    && (existingData.missing_target_html_count || 0) === 0
-    && (existingData.hash_unverified_target_html_count || 0) === 0
-    && (existingData.hash_mismatch_target_html_count || 0) === 0;
 
   const {
     status,
@@ -389,25 +376,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     }
   };
 
-  const handleTrustExistingFiles = async () => {
-    if (!trustExistingConfirmed) {
-      setStatus(`${variantConfig.trustExistingLabel} 확인이 필요합니다.`);
-      setIsErrorStatus(true);
-      return;
-    }
-    setIsErrorStatus(false);
-    const payload = {
-      data_root: dataRoot,
-      mode: htmlParseMode,
-      output_directory: useSeparateOutputDirectory ? outputDirectory : "",
-      ...sourcePayload(),
-      limit: limit ? Number(limit) : null,
-      trust_existing_files: true,
-    };
-    setTrustExistingConfirmed(false);
-    startJob(variantConfig.trustExistingEndpoint, payload);
-  };
-
   const handleDeleteUnexpectedFiles = async () => {
     if (!deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다.") {
       setStatus('삭제하려면 삭제 허가를 체크하고 "확인했습니다."를 입력하세요.');
@@ -614,46 +582,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     return `기존 원문 저장 ${formatInteger(existingCount)}건 감지됨.`;
   })() : "";
 
-  const existingDetail = existingData ? (() => {
-    const deletionCount = existingData.deletion_candidate_count || 0;
-    if (deletionCount > 0) {
-      return `대상 외 파일 ${formatInteger(deletionCount)}개가 있어 실행 전 폴더 검사가 필요합니다.`;
-    }
-    if (skipExisting) {
-      return "기존 파일 건너뛰기 옵션이 켜져 있습니다.";
-    }
-    return "기존 파일 건너뛰기 옵션이 꺼져 있어 실행 시 다시 저장합니다.";
-  })() : "";
-  const existingStatus = existingData ? (() => {
-    if ((existingData.deletion_candidate_count || 0) > 0) {
-      return {
-        className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
-        label: "폴더 검사 필요",
-      };
-    }
-    if ((existingData.hash_mismatch_target_html_count || 0) > 0) {
-      return {
-        className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
-        label: "해시 불일치",
-      };
-    }
-    if ((existingData.hash_unverified_target_html_count || 0) > 0) {
-      return {
-        className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
-        label: "기준 해시 필요",
-      };
-    }
-    if (existingAllSaved) {
-      return {
-        className: "border-[color:var(--tv-up)] bg-[var(--tv-up-soft)] text-[var(--tv-up)]",
-        label: "모두 저장됨",
-      };
-    }
-    return {
-      className: "border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] text-[var(--tv-warning)]",
-      label: "신규 저장 대상 있음",
-    };
-  })() : null;
 
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
@@ -669,6 +597,15 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       + Number(existingData.hash_mismatch_target_html_count || 0)
       + Number(existingData.hash_unverified_target_html_count || 0)
       + Number(existingData.deletion_candidate_count || 0)
+    : 0;
+  // Files still to download are normal work, not an integrity problem, so they
+  // are kept out of integrityProblemCount and only change the success wording.
+  const pendingDownloadCount = existingData
+    ? Number(
+        existingData.download_required_target_html_count
+          ?? existingData.missing_target_html_count
+          ?? 0,
+      )
     : 0;
   const integrityProblems = existingData ? ([
     [existingData.invalid_target_html_count, "깨진 파일", "건"],
@@ -705,10 +642,48 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     ],
   }[inspectionState];
   const inspectionStepSummary = existingData
-    ? `대상 ${formatInteger(existingData.requested_count)}건 중 ${formatInteger(existingData.existing_target_html_count)}건은 저장되어 있고 ${formatInteger(existingData.download_required_target_html_count ?? existingData.missing_target_html_count)}건은 새로 저장해야 합니다. 해시 불일치 ${formatInteger(existingData.hash_mismatch_target_html_count)}건, 기준 없음 ${formatInteger(existingData.hash_unverified_target_html_count)}건, 대상 외 파일 ${formatInteger(existingData.deletion_candidate_count)}개입니다.`
+    ? `${existingData.output_directory} · 대상 ${formatInteger(existingData.requested_count)}건 중 ${formatInteger(existingData.existing_target_html_count)}건은 저장되어 있고 ${formatInteger(existingData.download_required_target_html_count ?? existingData.missing_target_html_count)}건은 새로 저장해야 합니다. 해시 불일치 ${formatInteger(existingData.hash_mismatch_target_html_count)}건, 기준 없음 ${formatInteger(existingData.hash_unverified_target_html_count)}건, 대상 외 파일 ${formatInteger(existingData.deletion_candidate_count)}개입니다.`
     : existingCheckCompleted
       ? "현재 대상과 충돌하는 기존 저장 파일이 없습니다."
       : "현재 대상과 저장 파일을 비교하고, 저장 파일의 기준 해시와 대상 외 파일을 함께 확인합니다.";
+
+  // Completeness is reported as its own step: it is filled in by the same
+  // inspection run above and never changes the card verdict.
+  const inspectionRan = !!existingData || existingCheckCompleted;
+  const pendingStepStatus = inspectRunning
+    ? "running"
+    : !inspectionRan
+      ? "waiting"
+      : pendingDownloadCount > 0
+        ? "ready"
+        : "complete";
+  const pendingStepSummary = inspectRunning
+    ? "새로 저장해야 할 원문 건수를 확인하고 있습니다."
+    : !inspectionRan
+      ? "위에서 검사하면 새로 저장해야 할 원문 건수를 함께 확인합니다."
+      : pendingDownloadCount > 0
+        ? `대상 ${formatInteger(existingData?.requested_count || 0)}건 중 ${formatInteger(pendingDownloadCount)}건이 아직 저장되지 않았습니다. 재다운로드를 누르면 확인된 기존 파일은 건너뛰고 미저장분만 내려받습니다.`
+        : "이번 대상이 모두 저장되어 있어 새로 받을 원문이 없습니다.";
+  const pendingStepLabel = inspectRunning
+    ? "확인 중"
+    : !inspectionRan
+      ? "대기"
+      : pendingDownloadCount > 0
+        ? "다운로드 필요"
+        : "정상";
+  const inspectionExtraSteps: DataIntegrityInspectionStep[] = showSaveWorkflow ? [{
+    key: "pending-download",
+    title: "미저장 원문 다운로드",
+    summary: pendingStepSummary,
+    status: pendingStepStatus,
+    statusLabel: pendingStepLabel,
+    action: pendingDownloadCount > 0 ? {
+      label: "재다운로드",
+      onClick: handleRun,
+      disabled: isJobActive
+        || (skipExisting && (existingData?.hash_unverified_target_html_count || 0) > 0),
+    } : undefined,
+  }] : [];
 
   return (
     <HtmlWorkflowPage
@@ -736,6 +711,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
               verdictDescription={inspectionCopy[1]}
               stepTitle="기존 원문 데이터 검사"
               stepSummary={inspectionStepSummary}
+              extraSteps={inspectionExtraSteps}
               action={hasInspectionInput ? {
                 label: inspectRunning ? "검사 중..." : "검사하기",
                 onClick: handleInspectFolder,
@@ -751,91 +727,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
               title="데이터 경로"
             >
               <HtmlWorkflowForm fields={basePathFields} />
-            {existingCheckError && !existingData && (
-              <div className="text-body rounded-lg border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-4 text-[var(--tv-warning)]">
-                <p className="font-semibold">기존 원문 데이터 검사 실패</p>
-                <p className="text-caption mt-1 break-words">{existingCheckError}</p>
-              </div>
-            )}
-            {existingData && (
-              <div className={`${htmlInsetPanelClassName} text-body space-y-3 animate-fade-in transition-all`}>
-                <div className="space-y-1 border-b border-[color:var(--tv-border)] pb-3">
-                  <div className="space-y-1">
-                    <p className="text-body flex items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-100">
-                      <FolderOpen className="h-4 w-4 text-[var(--tv-accent)]" />
-                      기존 원문 저장 범위 감지됨
-                    </p>
-                    <p className="text-caption text-slate-500 dark:text-slate-400">
-                      저장됨: <span className="font-semibold">{formatInteger(existingData.existing_target_html_count || 0)}</span>건
-                      {" "} / 대상: <span className="font-semibold">{formatInteger(existingData.requested_count || 0)}</span>건
-                      {" "} / 신규 저장: <span className="font-semibold">{formatInteger(existingData.missing_target_html_count || 0)}</span>건
-                      {" "} / 해시 확인: <span className="font-semibold">{formatInteger(existingData.hash_verified_target_html_count || 0)}</span>건
-                      {" "} / 기준 없음: <span className="font-semibold">{formatInteger(existingData.hash_unverified_target_html_count || 0)}</span>건
-                      {" "} / 불일치: <span className="font-semibold">{formatInteger(existingData.hash_mismatch_target_html_count || 0)}</span>건
-                      {" "} / 대상 외 파일: <span className="font-semibold">{formatInteger(existingData.deletion_candidate_count || 0)}</span>개
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-caption flex flex-col justify-between gap-2 rounded border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-2 sm:flex-row sm:items-center">
-                    <div className="space-y-0.5">
-                      <p className="font-medium text-slate-800 dark:text-slate-200">{existingSummary}</p>
-                      <p className="text-caption break-all text-slate-500 dark:text-slate-400">{existingData.output_directory}</p>
-                    </div>
-                    {existingStatus && (
-                      <span className={`text-caption rounded-full border px-2 py-0.5 font-semibold ${existingStatus.className}`}>
-                        {existingStatus.label}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {(existingData.deletion_candidate_count || 0) > 0 && (
-                  <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
-                    <Info className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-                    <strong>알림:</strong> {existingDetail}
-                  </div>
-                )}
-
-                {(existingData.hash_unverified_target_html_count || 0) > 0 && (
-                  <div className="text-caption space-y-3 rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
-                    <p>
-                      기준 해시가 없는 기존 {variantConfig.htmlKindLabel} HTML {formatInteger(existingData.hash_unverified_target_html_count)}건은 자동으로 재사용하지 않습니다.
-                      외부 자료를 맞다고 가정할 때만 현재 파일의 기준 해시를 생성하세요.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id={`trustExisting-${variant}-html`}
-                        checked={trustExistingConfirmed}
-                        onCheckedChange={(value) => setTrustExistingConfirmed(!!value)}
-                        className="border-[color:var(--tv-border)]"
-                      />
-                      <Label htmlFor={`trustExisting-${variant}-html`} className="text-body cursor-pointer">
-                        {variantConfig.trustExistingLabel}
-                      </Label>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleTrustExistingFiles}
-                      disabled={isJobActive || !trustExistingConfirmed}
-                    >
-                      <ShieldCheck className="mr-2 h-4 w-4" />
-                      기준 해시 생성
-                    </Button>
-                  </div>
-                )}
-
-                {existingCheckError && (
-                  <div className="text-caption rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning)]">
-                    <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-                    <strong>재확인 실패:</strong> {existingCheckError}
-                  </div>
-                )}
-              </div>
-            )}
             </HtmlWorkflowCard>
           )}
 

@@ -2500,7 +2500,8 @@ def test_write_disclosure_html_manifest_payload_from_workspace_filtered_json(
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert payload["requested_count"] == 2
     assert "source_json_path" not in manifest
-    assert len(manifest["source_fingerprint"]) == 64
+    assert manifest["format"] == "finiq_disclosure_html_manifest_v2"
+    assert "source_fingerprint" not in manifest
     assert [item["acpt_no"] for item in manifest["disclosures"]] == [
         "20250101000001",
         "20250101000002",
@@ -2541,7 +2542,8 @@ def test_write_disclosure_html_manifest_payload_uses_selected_mode_filter_folder
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert payload["requested_count"] == 1
     assert "source_json_path" not in manifest
-    assert len(manifest["source_fingerprint"]) == 64
+    assert manifest["format"] == "finiq_disclosure_html_manifest_v2"
+    assert "source_fingerprint" not in manifest
     assert [record["acpt_no"] for record in manifest["disclosures"]] == [
         "20250101000001",
     ]
@@ -8156,7 +8158,9 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "분할저장 구조 전환" in utility_ui_html
     assert "move: false" in utility_ui_html
     assert "기존 파일 덮어쓰기" not in download_component_html
-    assert "기존 원문 저장 범위 감지됨" in download_component_html
+    # The inspection verdict lives only in the integrity card; the data-path
+    # card must not repeat it.
+    assert "기존 원문 저장 범위 감지됨" not in download_component_html
     assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
     assert "기존 메타데이터 기준으로 설정 맞추기" not in download_component_html
     assert "기존 데이터 경로가 현재 필수 연도별 구조와 다릅니다" not in download_component_html

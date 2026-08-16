@@ -35,6 +35,11 @@ from finiq.market_desk.web.features.disclosures.external_compact import (
 )
 
 HTML_MANIFEST_FILENAME = "kind_disclosure_html_manifest.json"
+# v1 gates reuse on a fingerprint of the whole source JSON; v2 drops that gate and
+# relies on the per-acpt_no hashes, which stay valid across filter re-runs.
+HTML_MANIFEST_FORMAT_V1 = "finiq_disclosure_html_manifest_v1"
+HTML_MANIFEST_FORMAT_V2 = "finiq_disclosure_html_manifest_v2"
+HTML_MANIFEST_FORMATS = {HTML_MANIFEST_FORMAT_V1, HTML_MANIFEST_FORMAT_V2}
 COMPRESSED_EXTERNAL_HTML_FILENAME = "compressed-external-html.json"
 HTML_DOWNLOAD_AUXILIARY_FILENAMES = {
     HTML_MANIFEST_FILENAME,
@@ -201,7 +206,7 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
     payload_format = value.get("format")
     if payload_format in {
         "kind_disclosure_filter_v1",
-        "finiq_disclosure_html_manifest_v1",
+        *HTML_MANIFEST_FORMATS,
     }:
         disclosures = value.get("disclosures")
         if not isinstance(disclosures, list):
@@ -381,8 +386,7 @@ def _write_html_manifest(
     atomic_write_json(
         manifest_path,
         {
-            "format": "finiq_disclosure_html_manifest_v1",
-            "source_fingerprint": _source_json_fingerprint(source_json),
+            "format": HTML_MANIFEST_FORMAT_V2,
             "disclosures": disclosures,
         },
     )
@@ -401,13 +405,14 @@ def _source_json_fingerprint(source_json: Any) -> str:
 
 def _load_html_manifest_integrity(
     output_directory: Path,
-) -> tuple[str, dict[str, dict[str, Any]]]:
+) -> tuple[str, str, dict[str, dict[str, Any]]]:
     manifest_path = output_directory / HTML_MANIFEST_FILENAME
     if not manifest_path.is_file():
-        return "", {}
+        return "", "", {}
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("format") != "finiq_disclosure_html_manifest_v1":
+    if not isinstance(payload, dict) or payload.get("format") not in HTML_MANIFEST_FORMATS:
         raise ValueError(f"invalid HTML manifest format: {manifest_path}")
+    manifest_format = str(payload["format"])
     disclosures = payload.get("disclosures")
     if not isinstance(disclosures, list):
         raise ValueError(f"HTML manifest disclosures must be a list: {manifest_path}")
@@ -441,7 +446,11 @@ def _load_html_manifest_integrity(
             "source_sha256": sha256,
             "source_size_bytes": size,
         }
-    return str(payload.get("source_fingerprint") or ""), integrity_by_acpt_no
+    return (
+        manifest_format,
+        str(payload.get("source_fingerprint") or ""),
+        integrity_by_acpt_no,
+    )
 
 
 def _inspect_html_integrity(
@@ -452,13 +461,18 @@ def _inspect_html_integrity(
     structurally_valid_acpt_numbers: list[str],
     actual_integrity_by_acpt_no: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    manifest_source_fingerprint, expected_integrity = _load_html_manifest_integrity(
-        output_directory
+    manifest_format, manifest_source_fingerprint, expected_integrity = (
+        _load_html_manifest_integrity(output_directory)
     )
-    source_matches = (
-        bool(manifest_source_fingerprint)
-        and manifest_source_fingerprint == _source_json_fingerprint(source_json)
-    )
+    if manifest_format == HTML_MANIFEST_FORMAT_V2:
+        # Per-acpt_no hashes are keyed by receipt number, so they survive filter
+        # re-runs that only change the target list. No whole-payload gate needed.
+        source_matches = True
+    else:
+        source_matches = (
+            bool(manifest_source_fingerprint)
+            and manifest_source_fingerprint == _source_json_fingerprint(source_json)
+        )
     structurally_valid = set(structurally_valid_acpt_numbers)
     reusable_acpt_numbers: list[str] = []
     reusable_integrity: dict[str, dict[str, Any]] = {}

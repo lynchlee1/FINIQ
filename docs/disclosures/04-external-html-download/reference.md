@@ -25,7 +25,8 @@
 
 - 외부 HTML을 원본 공시 metadata와 연결하는 출력 파일이다.
 - 파일마다 `source_size_bytes`와 `source_sha256`을 기록한다.
-- 입력 JSON의 절대 경로 대신 내용으로 계산한 `source_fingerprint`를 기록한다.
+- `format`은 `finiq_disclosure_html_manifest_v2`이며 입력 JSON 전체를 대상으로 한 `source_fingerprint`는 기록하지 않는다. 재사용 판정은 접수번호별 `source_sha256`만으로 하므로 필터를 다시 실행해도 기존 HTML이 무효화되지 않는다.
+- 구버전 `finiq_disclosure_html_manifest_v1`은 읽기만 지원하며, 이 경우에만 `source_fingerprint` 비교를 유지한다.
 
 ### `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`
 
