@@ -11,7 +11,7 @@
 - Purpose: align the legacy `database/04-external-html-download/bond_issuance` data with the current year-partitioned external HTML layout.
 - Implementation: moved 15,176 HTML files from `kind_html/` into `2008/` through `2026/`, moved `kind_disclosure_html_manifest.json` to the mode root, and removed the empty legacy directory.
 - Verification: confirmed a one-to-one match between manifest records and HTML files with no duplicate, missing, extra, invalid-date, or year-mismatched entries; confirmed the current yearly HTML collector finds all 15,176 files; `pytest -q tests/market_desk/test_partition_utility.py` passes (7 tests).
-- Unresolved finding: the stage-04 manifest remains in the legacy provenance format without `source_fingerprint`, `source_sha256`, or `source_size_bytes`. The current resume path therefore treats all existing files as hash-unverified. Database-linked regeneration is intentionally deferred.
+- Resolved 2026-08-16: every stage-04 and stage-05 manifest was regenerated in `finiq_disclosure_html_manifest_v2`, which records `source_sha256` and `source_size_bytes` per acpt_no and drops the whole-payload `source_fingerprint` gate. All six mode directories now report zero hash-unverified files.
 
 ## 2026-08-13: three-mode external/internal HTML data alignment
 

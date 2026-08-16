@@ -1559,7 +1559,7 @@ def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
         if not html_files_valid:
             return False
         if stage == 5:
-            _manifest_source_path, expected_integrity = (
+            _manifest_format, _manifest_fingerprint, expected_integrity = (
                 _load_html_manifest_integrity(current)
             )
             expected_acpt_numbers = {

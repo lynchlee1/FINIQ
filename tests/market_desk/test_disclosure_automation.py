@@ -1501,7 +1501,11 @@ def test_stage_five_checkpoint_validates_html_files_in_parallel(
     monkeypatch.setattr(
         automation,
         "_load_html_manifest_integrity",
-        lambda _current: (current / "manifest.json", expected_integrity),
+        lambda _current: (
+            "finiq_disclosure_html_manifest_v2",
+            "",
+            expected_integrity,
+        ),
     )
     monkeypatch.setattr(
         automation,

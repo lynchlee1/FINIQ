@@ -22,6 +22,11 @@ export type SingleCheckDataIntegrityInspectionState =
 type SingleCheckDataIntegrityInspectionCardProps = {
   action?: DataIntegrityInspectionStep["action"];
   description: string;
+  /**
+   * Follow-up steps listed under the main check. They carry their own status and
+   * action but never change the card verdict, which stays driven by `state`.
+   */
+  extraSteps?: DataIntegrityInspectionStep[];
   state: SingleCheckDataIntegrityInspectionState;
   stepSummary: string;
   stepTitle: string;
@@ -63,6 +68,7 @@ export function DataIntegrityInspectionCard({
 export function SingleCheckDataIntegrityInspectionCard({
   action,
   description,
+  extraSteps,
   state,
   stepSummary,
   stepTitle,
@@ -79,14 +85,17 @@ export function SingleCheckDataIntegrityInspectionCard({
         description: verdictDescription,
         tone: display.tone,
       }}
-      steps={[{
-        key: "integrity",
-        title: stepTitle,
-        summary: stepSummary,
-        status: display.stepStatus,
-        statusLabel: display.stepLabel,
-        action,
-      }]}
+      steps={[
+        {
+          key: "integrity",
+          title: stepTitle,
+          summary: stepSummary,
+          status: display.stepStatus,
+          statusLabel: display.stepLabel,
+          action,
+        },
+        ...(extraSteps ?? []),
+      ]}
     />
   );
 }

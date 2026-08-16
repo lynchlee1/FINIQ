@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from finiq.market_desk.web.features.disclosures.html_common import (
+    _source_json_fingerprint,
+)
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     create_external_html_integrity_baseline_payload,
@@ -195,6 +199,83 @@ def test_external_html_hash_mismatch_redownloads_only_changed_file(
     verified = check_disclosure_html_output_directory_payload(body)
     assert verified["hash_verified_target_html_count"] == 2
     assert verified["hash_mismatch_target_html_count"] == 0
+
+
+def test_external_html_baseline_survives_filtered_json_rerun(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "external"
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    target.write_text(_valid_html(), encoding="utf-8")
+    saved = {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+    create_external_html_integrity_baseline_payload(
+        {
+            **_external_workspace_body(
+                tmp_path,
+                {"disclosures": [saved]},
+                output_directory=str(output_directory),
+            ),
+            "trust_existing_files": True,
+        }
+    )
+
+    # Re-running the filter adds a target and rewrites unrelated summary fields.
+    rerun_body = _external_workspace_body(
+        tmp_path,
+        {
+            "summary": {"total": 2},
+            "disclosures": [
+                saved,
+                {"acpt_no": "20250201000002", "disclosed_at": "2025-02-01"},
+            ],
+        },
+        output_directory=str(output_directory),
+    )
+    inspection = check_disclosure_html_output_directory_payload(rerun_body)
+
+    assert inspection["hash_unverified_target_html_count"] == 0
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert inspection["missing_target_html_count"] == 1
+
+
+def test_external_html_legacy_v1_manifest_still_verifies(tmp_path: Path) -> None:
+    output_directory = tmp_path / "external"
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    content = _valid_html().encode("utf-8")
+    target.write_bytes(content)
+    source_json = {
+        "format": "kind_disclosure_filter_v1",
+        "disclosures": [{"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}],
+    }
+    body = _external_workspace_body(
+        tmp_path,
+        {"disclosures": source_json["disclosures"]},
+        output_directory=str(output_directory),
+    )
+    (output_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v1",
+                "source_fingerprint": _source_json_fingerprint(source_json),
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "disclosed_at": "2025-01-01",
+                        "source_sha256": hashlib.sha256(content).hexdigest(),
+                        "source_size_bytes": len(content),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inspection = check_disclosure_html_output_directory_payload(body)
+
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert inspection["hash_unverified_target_html_count"] == 0
 
 
 def test_external_html_resume_rejects_existing_file_without_hash_baseline(
