@@ -9,10 +9,10 @@ import { Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
+import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { UI_TEXT } from "@/config/uiText";
-import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import {
   SingleCheckDataIntegrityInspectionCard,
   type SingleCheckDataIntegrityInspectionState,
@@ -232,6 +232,25 @@ export default function TablePage() {
     setIsErrorStatus(!result.confirmed);
   };
 
+  const pathFields: DataPathField[] = [
+    {
+      id: "workspace",
+      label: DATA_PATH_LABELS.workspace,
+      value: dataRoot,
+      onChange: handleWorkspaceDirectoryChange,
+    },
+    {
+      id: "output",
+      label: `${DATA_PATH_LABELS.output} (SQLite)`,
+      value: outputPath,
+      onChange: (val) => {
+        setOutputPath(val);
+        saveSetting("sqlite_output_directory", val);
+      },
+      separateOutputOnly: true,
+    },
+  ];
+
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
@@ -279,27 +298,8 @@ export default function TablePage() {
             } : undefined}
           />
 
-          <DataPathCard
-            onError={handlePathError}
-            fields={[
-              {
-                id: "workspace",
-                label: DATA_PATH_LABELS.workspace,
-                value: dataRoot,
-                onChange: handleWorkspaceDirectoryChange,
-              },
-              {
-                id: "output",
-                label: `${DATA_PATH_LABELS.output} (SQLite)`,
-                value: outputPath,
-                onChange: (val) => {
-                  setOutputPath(val);
-                  saveSetting("sqlite_output_directory", val);
-                },
-                separateOutputOnly: true,
-              },
-            ]}
-          />
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={pathFields} /> */}
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
@@ -337,7 +337,7 @@ export default function TablePage() {
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">
-              <DisclosureSeparateOutputDirectorySetting id="table-separate-output-directory" />
+              <WorkflowPathSettings id="table-separate-output-directory" fields={pathFields} onError={handlePathError} />
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>

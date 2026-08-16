@@ -13,7 +13,6 @@ import {
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
-  DataPathCard,
   DATA_PATH_LABELS,
   type DataPathField,
 } from "@/components/data-path/DataPathCard";
@@ -732,7 +731,8 @@ export default function HtmlSectionSplitPage() {
             } : undefined}
           />
 
-          <DataPathCard onError={handlePathError} fields={folderPathFields} />
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={folderPathFields} /> */}
 
           <HtmlSectionSplitResults
             inputDirectory={reviewedInputDirectory}
@@ -783,6 +783,8 @@ export default function HtmlSectionSplitPage() {
           isErrorStatus={isErrorStatus}
           problemFileCount={problemFiles.length}
           settingsFields={splitOptionFields}
+          pathFields={folderPathFields}
+          onPathError={handlePathError}
           onCancel={cancelInspectFolder}
         />
       </div>

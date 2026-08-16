@@ -11,7 +11,7 @@ import { Checkbox } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
+import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, useActionDockFollow } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
@@ -22,7 +22,7 @@ import {
   DisclosureSearchConditionCard,
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
-import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import {
   type DataIntegrityInspectionStep,
   type DataIntegrityInspectionVerdict,
@@ -277,6 +277,22 @@ export default function DownloadPage() {
     setExistingInspectionResult(null);
     setExistingMetadataError(null);
   }, []);
+  const pathFields: DataPathField[] = [
+    {
+      id: "workspace",
+      label: DATA_PATH_LABELS.workspace,
+      value: dataRoot,
+      onChange: (val) => saveSetting("output_root", val),
+    },
+    {
+      id: "output",
+      label: DATA_PATH_LABELS.output,
+      value: separateOutputDirectory,
+      onChange: (val) => saveSetting("download_output_directory", val),
+      separateOutputOnly: true,
+    },
+  ];
+
   const handlePathError = useCallback((message: string) => {
     setStatus(message);
     setIsErrorStatus(true);
@@ -950,24 +966,8 @@ export default function DownloadPage() {
             steps={inspectionSteps}
           />
 
-          <DataPathCard
-            onError={handlePathError}
-            fields={[
-              {
-                id: "workspace",
-                label: DATA_PATH_LABELS.workspace,
-                value: dataRoot,
-                onChange: (val) => saveSetting("output_root", val),
-              },
-              {
-                id: "output",
-                label: DATA_PATH_LABELS.output,
-                value: separateOutputDirectory,
-                onChange: (val) => saveSetting("download_output_directory", val),
-                separateOutputOnly: true,
-              },
-            ]}
-          />
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={pathFields} /> */}
 
           <DisclosureSearchConditionCard
             options={options}
@@ -1180,7 +1180,7 @@ export default function DownloadPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
-                <DisclosureSeparateOutputDirectorySetting id="download-separate-output-directory" />
+                <WorkflowPathSettings id="download-separate-output-directory" fields={pathFields} onError={handlePathError} />
                 <div className="space-y-3">
                   <div className="border-b border-[color:var(--tv-border)] pb-2">
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>

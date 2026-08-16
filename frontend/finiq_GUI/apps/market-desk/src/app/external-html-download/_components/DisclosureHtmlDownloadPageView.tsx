@@ -13,19 +13,21 @@ import {
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
-  DataPathCard,
   DATA_PATH_LABELS,
   type DataPathField,
 } from "@/components/data-path/DataPathCard";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
-import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import {
   SingleCheckDataIntegrityInspectionCard,
   type SingleCheckDataIntegrityInspectionState,
 } from "@/components/data-integrity/DataIntegrityInspectionCard";
 import type { DataIntegrityInspectionStep } from "@/components/data-integrity/DataIntegrityInspectionPanel";
-import type { WorkflowModeOption } from "@/components/layout/WorkflowModeSwitch";
+import {
+  WorkflowModeSwitch,
+  type WorkflowModeOption,
+} from "@/components/layout/WorkflowModeSwitch";
 
 type DownloadVariant = "external" | "internal";
 type ExternalTaskMode = "download" | "compress";
@@ -683,6 +685,27 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     } : undefined,
   }] : [];
 
+  const activePathFields = isExternalCompressMode ? compressionFields : basePathFields;
+
+  const existingDataInspectionCard = showSaveWorkflow ? (
+    <SingleCheckDataIntegrityInspectionCard
+      description="실행 전에 현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."
+      state={inspectionState}
+      verdictTitle={inspectionCopy[0]}
+      verdictDescription={inspectionCopy[1]}
+      stepTitle="기존 원문 데이터 검사"
+      stepSummary={inspectionStepSummary}
+      extraSteps={inspectionExtraSteps}
+      action={hasInspectionInput ? {
+        label: inspectRunning ? "검사 중..." : "검사하기",
+        onClick: handleInspectFolder,
+        disabled: inspectRunning || isJobActive,
+        loading: inspectRunning,
+        showResultStatus: true,
+      } : undefined}
+    />
+  ) : null;
+
   return (
     <HtmlWorkflowPage
       eyebrow={variant === "external" ? "External HTML Save" : "Internal HTML Save"}
@@ -692,46 +715,25 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       description={isExternalCompressMode
         ? "저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
         : variantConfig.description}
-      modeSwitch={variant === "external" ? {
-        ariaLabel: "외부 HTML 작업 모드",
-        value: externalTaskMode,
-        options: EXTERNAL_TASK_MODE_OPTIONS,
-        onValueChange: setExternalTaskMode,
-      } : undefined}
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          {showSaveWorkflow && (
-            <SingleCheckDataIntegrityInspectionCard
-              description="실행 전에 현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."
-              state={inspectionState}
-              verdictTitle={inspectionCopy[0]}
-              verdictDescription={inspectionCopy[1]}
-              stepTitle="기존 원문 데이터 검사"
-              stepSummary={inspectionStepSummary}
-              extraSteps={inspectionExtraSteps}
-              action={hasInspectionInput ? {
-                label: inspectRunning ? "검사 중..." : "검사하기",
-                onClick: handleInspectFolder,
-                disabled: inspectRunning || isJobActive,
-                loading: inspectRunning,
-                showResultStatus: true,
-              } : undefined}
+          {variant === "internal" && existingDataInspectionCard}
+
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={activePathFields} /> */}
+
+          {variant === "external" && (
+            <WorkflowModeSwitch
+              ariaLabel="외부 HTML 작업 모드"
+              value={externalTaskMode}
+              options={EXTERNAL_TASK_MODE_OPTIONS}
+              onValueChange={setExternalTaskMode}
+              testId="external-html-mode-control"
             />
           )}
 
-          {showSaveWorkflow && (
-            <DataPathCard onError={handlePathError} fields={basePathFields} />
-          )}
-
-          {isExternalCompressMode && (
-            <DataPathCard
-              title="외부 HTML 압축"
-              description="저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
-              onError={handlePathError}
-              fields={compressionFields}
-            />
-          )}
+          {variant === "external" && existingDataInspectionCard}
 
           {isExternalCompressMode && (
             <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
@@ -837,7 +839,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">
-              <DisclosureSeparateOutputDirectorySetting id={`${variant}-separate-output-directory`} />
+              <WorkflowPathSettings id={`${variant}-separate-output-directory`} fields={activePathFields} onError={handlePathError} />
               {isExternalCompressMode ? (
                 <div className="space-y-3">
                   <div className="border-b border-[color:var(--tv-border)] pb-2">

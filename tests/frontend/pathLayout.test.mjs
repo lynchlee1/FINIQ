@@ -19,6 +19,7 @@ const graphNodePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/Ontolog
 const chartWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/OntologyChartWorkspace.tsx";
 const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/DisclosureAnalysisWorkspace.tsx";
 const dataPathCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-path/DataPathCard.tsx";
+const pathSettingsPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-path/WorkflowPathSettings.tsx";
 const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
 const marketDeskGlobalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
@@ -46,7 +47,7 @@ test("html section split uses shared data path and execution cards", async () =>
   );
   const combinedSource = `${source}\n${resultsSource}`;
 
-  assert.match(source, /<DataPathCard onError=\{handlePathError\} fields=\{folderPathFields\} \/>/);
+  assert.match(source, /pathFields=\{folderPathFields\}/);
   assert.match(source, /title="작업 실행"/);
   assert.match(combinedSource, /소스 불러오기/);
   assert.match(combinedSource, /FolderOpen/);
@@ -117,7 +118,7 @@ test("html section split keeps workspace paths directly editable", async () => {
   assert.match(pageSource, /data_root: dataRoot/);
   assert.match(pageSource, /html_parse_mode: htmlParseMode/);
   assert.match(pageSource, /mode: htmlParseMode/);
-  assert.match(resultsSource, /DisclosureSeparateOutputDirectorySetting id="section-split-separate-output-directory"/);
+  assert.match(resultsSource, /WorkflowPathSettings id="section-split-separate-output-directory"/);
 });
 
 test("disclosure detail pages share one workspace and hide separate outputs by default", async () => {
@@ -160,7 +161,7 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
     assert.doesNotMatch(source, /disabled: true/);
     assert.match(source, /작업공간 디렉토리|DATA_PATH_LABELS\.workspace/);
-    assert.match(source, /DisclosureSeparateOutputDirectorySetting/);
+    assert.match(source, /WorkflowPathSettings/);
   }
   for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
     assert.match(source, /data_root:/);
@@ -201,11 +202,11 @@ test("data path cards omit descriptions and keep compact title spacing", async (
     "utf8",
   );
 
-  const tableDataPathCard = tableSource.match(/<DataPathCard[\s\S]*?\n {10}\/>/)?.[0] ?? "";
+  const tableDataPathCard = tableSource.match(/<WorkflowPathSettings[^>]*\/>/)?.[0] ?? "";
   const sectionDataPathCard = sectionSplitSource.match(/<HtmlWorkflowCard[\s\S]*?title="데이터 경로"[\s\S]*?>/)?.[0] ?? "";
   const downloadDataPathCard = downloadSource.match(/<HtmlWorkflowCard[\s\S]*?title="데이터 경로"[\s\S]*?>/)?.[0] ?? "";
 
-  assert.ok(tableDataPathCard, "표 변환 페이지는 공용 데이터 경로 카드를 써야 합니다.");
+  assert.ok(tableDataPathCard, "표 변환 페이지는 공용 경로 설정을 써야 합니다.");
   assert.doesNotMatch(tableDataPathCard, /description=/);
   assert.doesNotMatch(sectionDataPathCard, /description=/);
   assert.doesNotMatch(downloadDataPathCard, /description=/);
@@ -228,7 +229,6 @@ test("data path cards keep the same vertical field rhythm across workflow pages"
     readFile(assetsExcelViewPath, "utf8"),
     readFile(htmlParsePagePath, "utf8"),
     readFile(htmlSectionSplitPath, "utf8"),
-    readFile(disclosureAutomationPagePath, "utf8"),
     readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),
     readFile(
       "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
@@ -236,15 +236,18 @@ test("data path cards keep the same vertical field rhythm across workflow pages"
     ),
   ]);
   const dataPathCardSource = await readFile(dataPathCardPath, "utf8");
+  const pathSettingsSource = await readFile(pathSettingsPath, "utf8");
 
   for (const source of sources) {
-    assert.match(source, /import \{[^}]*DataPathCard[^}]*\} from "@\/components\/data-path\/DataPathCard"/);
+    assert.match(source, /import \{[^}]*DataPathField[^}]*\} from "@\/components\/data-path\/DataPathCard"/);
     assert.doesNotMatch(source, /<PathPickerInput/);
+    assert.match(source, /LEGACY: 본문 데이터 경로 카드/);
+    assert.doesNotMatch(source.replace(/\{\/\*[\s\S]*?\*\/\}/g, ""), /<DataPathCard/);
   }
-  assert.match(dataPathCardSource, /<HtmlWorkflowCard title=\{title\} description=\{description\}>/);
-  assert.match(dataPathCardSource, /<HtmlFieldGrid>/);
-  assert.doesNotMatch(dataPathCardSource, /md:grid-cols-2/);
-  assert.doesNotMatch(dataPathCardSource, /#161b22|#30363d/);
+  assert.match(dataPathCardSource, /LEGACY: 본문에 놓던 데이터 경로 카드/);
+  assert.match(pathSettingsSource, /const inputFields = fields\.filter\(\(field\) => !field\.separateOutputOnly\)/);
+  assert.match(pathSettingsSource, /저장 디렉토리 별도 설정하기/);
+  assert.match(pathSettingsSource, /useSeparateOutputDirectory && outputFields\.map/);
 });
 
 test("disclosure filter workspace picker selects a folder", async () => {
@@ -322,7 +325,7 @@ test("disclosure filter page combines title search and recorded filtering", asyn
       < source.indexOf("<WorkflowModeSwitch")
       && source.indexOf("<WorkflowModeSwitch")
         < source.indexOf('<CardTitle className="dark:text-white">작업 실행</CardTitle>'),
-    "동작 전환은 공통 카드 아래, 작업 실행 위의 모드 컨트롤에 있어야 합니다.",
+    "동작 전환은 공통 카드 아래, 작업 실행 카드 바로 위의 독립 행이어야 합니다.",
   );
   assert.match(source, /ariaLabel="공시 작업 모드"/);
   assert.match(source, /options=\{FILTER_TASK_MODE_OPTIONS\}/);
@@ -367,8 +370,13 @@ test("disclosure mode controls use a transparent compact row near the workflow c
   assert.match(modeSwitchSource, /className="h-8 flex-1 gap-1 px-2 duration-150 sm:flex-none"/);
   assert.match(templateSource, /return <WorkflowModeSwitch \{\.\.\.modeSwitch\}>\{children\}<\/WorkflowModeSwitch>/);
   assert.match(filterSource, /<WorkflowModeSwitch[\s\S]*?options=\{FILTER_TASK_MODE_OPTIONS\}/);
-  assert.match(htmlDownloadSource, /modeSwitch=\{variant === "external" \? \{/);
-  assert.match(htmlDownloadSource, /options: EXTERNAL_TASK_MODE_OPTIONS/);
+  assert.match(htmlDownloadSource, /\{variant === "external" && \(\s*<WorkflowModeSwitch/);
+  assert.match(htmlDownloadSource, /options=\{EXTERNAL_TASK_MODE_OPTIONS\}/);
+  assert.ok(
+    htmlDownloadSource.indexOf("<WorkflowModeSwitch")
+      < htmlDownloadSource.indexOf('<CardTitle className="dark:text-white">작업 실행</CardTitle>'),
+    "외부 HTML 모드 전환도 작업 실행 카드 바로 위의 독립 행이어야 합니다.",
+  );
   for (const source of [filterSource, htmlDownloadSource]) {
     assert.doesNotMatch(source, /inline-flex .*border-\[color:var\(--tv-border\)\].*p-1/);
   }
