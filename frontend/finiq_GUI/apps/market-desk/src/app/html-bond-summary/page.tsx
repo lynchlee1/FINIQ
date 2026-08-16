@@ -13,6 +13,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { formatInteger } from "@/lib/format";
 
 const optionalNonnegativeInteger = (value: any) => {
@@ -188,7 +189,7 @@ export default function HtmlBondSummaryPage() {
     {
       id: "inputPath",
       kind: "path",
-      label: "입력 데이터 경로",
+      label: DATA_PATH_LABELS.input,
       mode: "folder",
       value: inputPath || "",
       onChange: (val) => saveSetting("html_section_split_output_directory", val),
@@ -198,7 +199,7 @@ export default function HtmlBondSummaryPage() {
     {
       id: "outputPath",
       kind: "path",
-      label: "파싱 결과 데이터 경로",
+      label: `파싱 ${DATA_PATH_LABELS.output}`,
       mode: "folder",
       value: outputPath || "",
       onChange: (val) => saveSetting("html_parse_output_directory", val),

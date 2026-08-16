@@ -18,6 +18,7 @@ const graphWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/On
 const graphNodePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/OntologyNodeGraph.tsx";
 const chartWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/OntologyChartWorkspace.tsx";
 const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/DisclosureAnalysisWorkspace.tsx";
+const dataPathCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-path/DataPathCard.tsx";
 const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
 const marketDeskGlobalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
@@ -31,9 +32,10 @@ test("streamed disclosure filtering reports ten-second progress silence", async 
 
 test("html section split path fields stack vertically", async () => {
   const source = await readFile(htmlSectionSplitPath, "utf8");
-  const pathFieldsBlock = source.match(/const folderPathFields:[\s\S]*?const splitOptionFields:/)?.[0] ?? "";
+  const pathFieldsBlock = source.match(/const folderPathFields: DataPathField\[\][\s\S]*?\n  \];/)?.[0] ?? "";
 
-  assert.match(pathFieldsBlock, /id: "inputDirectory"[\s\S]*?span: 4/);
+  assert.match(pathFieldsBlock, /id: "inputDirectory"/);
+  assert.match(pathFieldsBlock, /id: "outputDirectory"[\s\S]*?separateOutputOnly: true/);
 });
 
 test("html section split uses shared data path and execution cards", async () => {
@@ -44,7 +46,7 @@ test("html section split uses shared data path and execution cards", async () =>
   );
   const combinedSource = `${source}\n${resultsSource}`;
 
-  assert.match(source, /title="데이터 경로"/);
+  assert.match(source, /<DataPathCard onError=\{handlePathError\} fields=\{folderPathFields\} \/>/);
   assert.match(source, /title="작업 실행"/);
   assert.match(combinedSource, /소스 불러오기/);
   assert.match(combinedSource, /FolderOpen/);
@@ -106,11 +108,11 @@ test("html section split keeps workspace paths directly editable", async () => {
   assert.match(pageSource, /disclosure_separate_output_directory: useSeparateOutputDirectory/);
   assert.match(pageSource, /setOutputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
   assert.doesNotMatch(pageSource, /`\$\{defaultInput\}_sections`/);
-  const pathFields = pageSource.match(/const folderPathFields:[\s\S]*?const splitOptionFields:/)?.[0] ?? "";
+  const pathFields = pageSource.match(/const folderPathFields: DataPathField\[\][\s\S]*?\n  \];/)?.[0] ?? "";
   assert.doesNotMatch(pathFields, /disabled:/);
-  assert.match(pathFields, /label: "작업공간 디렉토리"/);
+  assert.match(pathFields, /label: DATA_PATH_LABELS\.workspace/);
   assert.match(pathFields, /onChange: handleWorkspaceDirectoryChange/);
-  assert.match(pathFields, /\.\.\.\(useSeparateOutputDirectory \? \[\{/);
+  assert.match(pathFields, /separateOutputOnly: true/);
   assert.match(pathFields, /onChange: handleOutputDirectoryChange/);
   assert.match(pageSource, /data_root: dataRoot/);
   assert.match(pageSource, /html_parse_mode: htmlParseMode/);
@@ -138,12 +140,12 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
     "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureSeparateOutputDirectorySetting.tsx",
     "utf8",
   );
-  assert.match(downloadSource, /value=\{dataRoot\}[\s\S]*?onChange=\{\(val\) => saveSetting\("output_root", val\)\}/);
+  assert.match(downloadSource, /value: dataRoot,\s*onChange: \(val\) => saveSetting\("output_root", val\)/);
   assert.match(separateSettingSource, /저장 디렉토리 별도 설정하기/);
   assert.match(separateSettingSource, /saveSetting\("disclosure_separate_output_directory", !!value\)/);
   assert.doesNotMatch(templateSource, /disabled=\{field\.disabled\}/);
-  assert.match(tableSource, /value=\{dataRoot\}/);
-  assert.match(tableSource, /useSeparateOutputDirectory && <div/);
+  assert.match(tableSource, /value: dataRoot/);
+  assert.match(tableSource, /separateOutputOnly: true/);
   assert.match(tableSource, /root_directory: useSeparateOutputDirectory/);
   assert.match(tableSource, /saveSetting\("sqlite_output_directory", val\)/);
   assert.doesNotMatch(filterSource, /classification_path:/);
@@ -157,7 +159,7 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   assert.match(parseSource, /input_directory: useSeparateOutputDirectory \? inputDirectory : ""/);
   for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
     assert.doesNotMatch(source, /disabled: true/);
-    assert.match(source, /작업공간 디렉토리/);
+    assert.match(source, /작업공간 디렉토리|DATA_PATH_LABELS\.workspace/);
     assert.match(source, /DisclosureSeparateOutputDirectorySetting/);
   }
   for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
@@ -180,9 +182,11 @@ test("html section split keeps job status only in the action dock", async () => 
 
 test("disclosure table conversion path fields stack vertically", async () => {
   const source = await readFile(tablePagePath, "utf8");
+  const dataPathCardSource = await readFile(dataPathCardPath, "utf8");
 
-  assert.match(source, /<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>/);
+  assert.match(source, /<DataPathCard/);
   assert.doesNotMatch(source, /<div className="grid gap-4 md:grid-cols-2">/);
+  assert.match(dataPathCardSource, /span=\{4\}/);
 });
 
 test("data path cards omit descriptions and keep compact title spacing", async () => {
@@ -197,11 +201,12 @@ test("data path cards omit descriptions and keep compact title spacing", async (
     "utf8",
   );
 
-  const tableDataPathCard = tableSource.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
+  const tableDataPathCard = tableSource.match(/<DataPathCard[\s\S]*?\n {10}\/>/)?.[0] ?? "";
   const sectionDataPathCard = sectionSplitSource.match(/<HtmlWorkflowCard[\s\S]*?title="데이터 경로"[\s\S]*?>/)?.[0] ?? "";
   const downloadDataPathCard = downloadSource.match(/<HtmlWorkflowCard[\s\S]*?title="데이터 경로"[\s\S]*?>/)?.[0] ?? "";
 
-  assert.doesNotMatch(tableDataPathCard, /CardDescription/);
+  assert.ok(tableDataPathCard, "표 변환 페이지는 공용 데이터 경로 카드를 써야 합니다.");
+  assert.doesNotMatch(tableDataPathCard, /description=/);
   assert.doesNotMatch(sectionDataPathCard, /description=/);
   assert.doesNotMatch(downloadDataPathCard, /description=/);
   assert.match(templateSource, /description \? "gap-3 pb-4" : "gap-0"/);
@@ -216,33 +221,47 @@ test("workflow form typography matches standard card fields", async () => {
 });
 
 test("data path cards keep the same vertical field rhythm across workflow pages", async () => {
-  const filterSource = await readFile(filterPagePath, "utf8");
-  const utilitySource = await readFile(utilityPagePath, "utf8");
-  const assetsSource = await readFile(assetsExcelViewPath, "utf8");
+  const sources = await Promise.all([
+    readFile(filterPagePath, "utf8"),
+    readFile(tablePagePath, "utf8"),
+    readFile(utilityPagePath, "utf8"),
+    readFile(assetsExcelViewPath, "utf8"),
+    readFile(htmlParsePagePath, "utf8"),
+    readFile(htmlSectionSplitPath, "utf8"),
+    readFile(disclosureAutomationPagePath, "utf8"),
+    readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),
+    readFile(
+      "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
+      "utf8",
+    ),
+  ]);
+  const dataPathCardSource = await readFile(dataPathCardPath, "utf8");
 
-  const filterDataPathCard = filterSource.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
-  const utilityPathCard = utilitySource.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">분할저장 구조 전환<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
-  const assetsDataPathCard = assetsSource.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
-
-  assert.match(filterDataPathCard, /<CardContent className="grid gap-4">/);
-  assert.match(utilityPathCard, /<CardContent className="space-y-4">/);
-  assert.doesNotMatch(utilityPathCard, /md:grid-cols-2/);
-  assert.match(assetsDataPathCard, /<CardContent className="space-y-4">/);
-  assert.doesNotMatch(assetsDataPathCard, /pt-6 space-y-5/);
+  for (const source of sources) {
+    assert.match(source, /import \{[^}]*DataPathCard[^}]*\} from "@\/components\/data-path\/DataPathCard"/);
+    assert.doesNotMatch(source, /<PathPickerInput/);
+  }
+  assert.match(dataPathCardSource, /<HtmlWorkflowCard title=\{title\} description=\{description\}>/);
+  assert.match(dataPathCardSource, /<HtmlFieldGrid>/);
+  assert.doesNotMatch(dataPathCardSource, /md:grid-cols-2/);
+  assert.doesNotMatch(dataPathCardSource, /#161b22|#30363d/);
 });
 
 test("disclosure filter workspace picker selects a folder", async () => {
   const source = await readFile(filterPagePath, "utf8");
-  const workspacePicker = source.match(/<Label[^>]*>작업공간 디렉토리<\/Label>[\s\S]*?<PathPickerInput[\s\S]*?\/>/)?.[0] ?? "";
+  const dataPathCardSource = await readFile(dataPathCardPath, "utf8");
+  const workspaceField = source.match(/id: "workspace",[\s\S]*?\},/)?.[0] ?? "";
 
-  assert.match(workspacePicker, /mode="folder"/);
-  assert.doesNotMatch(workspacePicker, /mode="save"/);
+  assert.match(workspaceField, /label: DATA_PATH_LABELS\.workspace/);
+  assert.doesNotMatch(workspaceField, /mode:/);
+  assert.match(dataPathCardSource, /mode=\{field\.mode \|\| "folder"\}/);
 });
 
 test("disclosure filter removes the parser mode from the data path card", async () => {
   const source = await readFile(filterPagePath, "utf8");
-  const dataPathCard = source.match(/<Card[\s\S]*?<CardTitle className="dark:text-white">데이터 경로<\/CardTitle>[\s\S]*?<\/Card>/)?.[0] ?? "";
+  const dataPathCard = source.match(/<DataPathCard[\s\S]*?\n {10}\/>/)?.[0] ?? "";
 
+  assert.ok(dataPathCard, "필터 페이지는 공용 데이터 경로 카드를 써야 합니다.");
   assert.match(source, /const \[mode, setMode\] = useState\(""\)/);
   assert.match(source, /data_root: rootDirectory,\s*mode,\s*\.\.\.\(useSeparateOutputDirectory/);
   assert.doesNotMatch(source, /workflow_name/);
@@ -299,9 +318,11 @@ test("disclosure filter page combines title search and recorded filtering", asyn
   assert.match(source, /\{ value: "title-search", label: "공시내역 제목 검색", icon: Search \}/);
   assert.match(source, /\{ value: "filter", label: "공시내역 필터링", icon: Filter \}/);
   assert.ok(
-    source.indexOf("<WorkflowModeSwitch")
-      < source.indexOf('className="relative action-dock-host'),
-    "동작 전환은 본문 위의 모드 컨트롤에 있어야 합니다.",
+    source.indexOf("<DisclosureConditionFilterCard")
+      < source.indexOf("<WorkflowModeSwitch")
+      && source.indexOf("<WorkflowModeSwitch")
+        < source.indexOf('<CardTitle className="dark:text-white">작업 실행</CardTitle>'),
+    "동작 전환은 공통 카드 아래, 작업 실행 위의 모드 컨트롤에 있어야 합니다.",
   );
   assert.match(source, /ariaLabel="공시 작업 모드"/);
   assert.match(source, /options=\{FILTER_TASK_MODE_OPTIONS\}/);

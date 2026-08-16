@@ -16,6 +16,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { formatInteger } from "@/lib/format";
 
 const PARSE_MODES = [
@@ -174,7 +175,7 @@ export default function HtmlChangeLogPage() {
     {
       id: "outputPath",
       kind: "path",
-      label: "파싱 결과 데이터 경로",
+      label: `파싱 ${DATA_PATH_LABELS.output}`,
       mode: "folder",
       value: outputPath || "",
       onChange: (val) => saveSetting("html_parse_output_directory", val),

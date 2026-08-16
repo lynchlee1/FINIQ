@@ -15,7 +15,7 @@ export type WorkflowModeSwitchProps<T extends string> = {
   value: T;
   options: readonly WorkflowModeOption<T>[];
   onValueChange: (value: T) => void;
-  children: ReactNode;
+  children?: ReactNode;
   testId?: string;
 };
 

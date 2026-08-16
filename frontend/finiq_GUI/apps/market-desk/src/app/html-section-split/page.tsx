@@ -9,10 +9,14 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { UI_TEXT } from "@/config/uiText";
 import {
   HtmlWorkflowCard,
-  HtmlWorkflowForm,
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import {
+  DataPathCard,
+  DATA_PATH_LABELS,
+  type DataPathField,
+} from "@/components/data-path/DataPathCard";
 import { formatInteger } from "@/lib/format";
 import {
   HtmlSectionSplitActionDock,
@@ -273,29 +277,25 @@ export default function HtmlSectionSplitPage() {
     saveSetting("html_section_split_output_directory", value);
   };
 
-  const folderPathFields: HtmlWorkflowField[] = [
+  const handlePathError = (message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  };
+
+  const folderPathFields: DataPathField[] = [
     {
       id: "inputDirectory",
-      kind: "path",
-      label: "작업공간 디렉토리",
-      mode: "folder",
+      label: DATA_PATH_LABELS.workspace,
       value: dataRoot,
       onChange: handleWorkspaceDirectoryChange,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      placeholder: "/path/to/html-folder",
-      span: 4,
     },
-    ...(useSeparateOutputDirectory ? [{
+    {
       id: "outputDirectory",
-      kind: "path",
-      label: "결과 데이터 경로",
-      mode: "folder",
+      label: DATA_PATH_LABELS.output,
       value: outputDirectory,
       onChange: handleOutputDirectoryChange,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      placeholder: "/path/to/output-folder",
-      span: 4,
-    } satisfies HtmlWorkflowField] : []),
+      separateOutputOnly: true,
+    },
   ];
 
   const splitOptionFields: HtmlWorkflowField[] = [
@@ -732,11 +732,7 @@ export default function HtmlSectionSplitPage() {
             } : undefined}
           />
 
-          <HtmlWorkflowCard
-            title="데이터 경로"
-          >
-            <HtmlWorkflowForm fields={folderPathFields} />
-          </HtmlWorkflowCard>
+          <DataPathCard onError={handlePathError} fields={folderPathFields} />
 
           <HtmlSectionSplitResults
             inputDirectory={reviewedInputDirectory}

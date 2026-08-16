@@ -1,11 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { FolderTree, Loader2, Play } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger, ActionDock } from "@finiq/web-app/status";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
+import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -60,6 +60,11 @@ export default function UtilityPage() {
     [mode],
   );
 
+  const handlePathError = useCallback((message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus, setStatus]);
+
   const handleStart = async () => {
     if (activeJobId) return;
     if (!sourceDirectory.trim()) {
@@ -104,23 +109,23 @@ export default function UtilityPage() {
     <WorkflowPageShell workflowId="utility">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">분할저장 구조 전환</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">입력 데이터 경로</Label>
-                  <PathPickerInput mode="folder" value={sourceDirectory} onChange={setSourceDirectory} placeholder="/path/to/source" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">결과 데이터 경로</Label>
-                  <PathPickerInput mode="folder" value={outputDirectory} onChange={setOutputDirectory} placeholder="/path/to/output" onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <DataPathCard
+            onError={handlePathError}
+            fields={[
+              {
+                id: "source",
+                label: DATA_PATH_LABELS.input,
+                value: sourceDirectory,
+                onChange: setSourceDirectory,
+              },
+              {
+                id: "output",
+                label: DATA_PATH_LABELS.output,
+                value: outputDirectory,
+                onChange: setOutputDirectory,
+              },
+            ]}
+          />
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
