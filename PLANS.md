@@ -1,5 +1,11 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-16: shareholder-meeting failure-history formatting
+
+- Purpose: make the remaining failure cases in the shareholder-meeting handoff match the concise structure established by the edited two-row-header example.
+- Implementation: rewrote the remaining cases in section 6 as `시도`, `문제`, and `현재` bullets without changing their technical conclusions or adding fallback behavior.
+- Verification: confirmed all nine cases in section 6 use the same three-part structure. `git diff --check` reports the pre-existing trailing whitespace at README line 12, outside this edit; no whitespace error appears in section 6. This was a documentation-only change, so production tests were not rerun.
+
 ## 2026-08-13: bond issuance external HTML storage migration
 
 - Purpose: align the legacy `database/04-external-html-download/bond_issuance` data with the current year-partitioned external HTML layout.

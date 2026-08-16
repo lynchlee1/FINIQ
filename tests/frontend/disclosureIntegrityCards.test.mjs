@@ -27,7 +27,7 @@ test("numbered disclosure pages reuse the shared integrity card", async () => {
   assert.match(card, /ready: \{ label: "대기"[\s\S]*stepStatus: "waiting"[\s\S]*stepLabel: "대기"/);
 
   assert.match(sources[0], /listDisclosureConditionPresets\(rootDirectory\)/);
-  assert.match(sources[1], /title: "해시와 폴더 구성 검사"/);
+  assert.match(sources[1], /stepTitle="기존 원문 데이터 검사"/);
   assert.match(sources[2], /stepTitle="입력 HTML과 목차 구성 검사"/);
   assert.match(sources[3], /"\/api\/disclosures\/html\/parse\/inspect"/);
 });
@@ -59,7 +59,7 @@ test("HTML inspection uses the workspace output when separate output is disabled
     /const hasInspectionInput = !!currentSourcePath && \(!useSeparateOutputDirectory \|\| !!outputDirectory\)/,
   );
   assert.doesNotMatch(htmlDownload, /if \(!outputDirectory\) \{/);
-  assert.match(htmlDownload, /action: hasInspectionInput \? \{/);
+  assert.match(htmlDownload, /action=\{hasInspectionInput \? \{/);
   assert.equal(htmlDownload.match(/onClick: handleInspectFolder/g)?.length, 1);
   assert.doesNotMatch(htmlDownload, /폴더 검사하기/);
   assert.match(
@@ -83,7 +83,7 @@ test("completed disclosure inspections reuse their result control for another in
 
   assert.match(download, /action: outputDirectory \? \{/);
   assert.match(filter, /action: rootDirectory\?\.trim\(\) \? \{/);
-  assert.match(htmlDownload, /action: hasInspectionInput \? \{/);
+  assert.match(htmlDownload, /action=\{hasInspectionInput \? \{/);
   assert.match(table, /action=\{hasInspectionInput \? \{/);
   assert.match(sectionSplit, /action=\{inputDirectory \? \{/);
   assert.match(htmlParse, /action=\{hasInspectionInput \? \{/);
