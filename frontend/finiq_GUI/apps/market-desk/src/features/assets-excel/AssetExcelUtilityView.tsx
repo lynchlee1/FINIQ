@@ -1,11 +1,11 @@
 "use client"
 
-import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Eye, Loader2, Pencil, Play, Plus, Search, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger, ActionDock } from "@finiq/web-app/status";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
+import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { htmlTableFrameClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
@@ -234,6 +234,10 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       setSelectedParquetFile(firstOutput?.output_file || "");
     },
   });
+  const handlePathError = useCallback((message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     fetchSettings().then((config) => {
@@ -1020,70 +1024,38 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     <WorkflowPageShell workflowId="price-data">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">데이터 경로</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {!isMergeMode && !isParquetPreviewMode ? (
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">원본 데이터 경로</Label>
-                  <PathPickerInput
-                    mode="folder"
-                    value={sourceDirectory}
-                    onChange={handleSourceDirectoryChange}
-                    placeholder="/path/to/resources/Quantiwise"
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
-                  {isConvertMode ? (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">이 경로 아래의 Excel 파일 중 선택한 파일만 실행 대상으로 사용합니다. 대상 파일: {formatInteger(selectedConvertFileCount)} / {formatInteger(excelFiles.length)}개</p>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {isConvertMode || isParquetPreviewMode ? (
-                <>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">데이터 경로</Label>
-                    <PathPickerInput
-                      mode="folder"
-                      value={outputDirectory}
-                      onChange={handleConvertOutputDirectoryChange}
-                      placeholder="/path/to/resources/assets_merged"
-                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                    />
-                  </div>
-
-                </>
-              ) : null}
-
-              {isMergeMode ? (
-                <>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">병합 대상 데이터 경로</Label>
-                    <PathPickerInput
-                      mode="folder"
-                      value={mergeBaseDirectory}
-                      onChange={handleMergeBaseDirectoryChange}
-                      placeholder="/path/to/existing/assets_parquet"
-                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">병합 결과 데이터 경로</Label>
-                    <PathPickerInput
-                      mode="folder"
-                      value={outputDirectory}
-                      onChange={handleMergeOutputDirectoryChange}
-                      placeholder="/path/to/resources/assets_merged"
-                      disabled={mergeSameDirectory}
-                      onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                    />
-                  </div>
-                </>
-              ) : null}
-            </CardContent>
-          </Card>
+          <DataPathCard
+            onError={handlePathError}
+            fields={[
+              ...(!isMergeMode && !isParquetPreviewMode ? [{
+                id: "source",
+                label: "원본 데이터 경로",
+                value: sourceDirectory,
+                onChange: handleSourceDirectoryChange,
+                help: isConvertMode
+                  ? `이 경로 아래의 Excel 파일 중 선택한 파일만 실행 대상으로 사용합니다. 대상 파일: ${formatInteger(selectedConvertFileCount)} / ${formatInteger(excelFiles.length)}개`
+                  : undefined,
+              }] : []),
+              ...(isConvertMode || isParquetPreviewMode ? [{
+                id: "convertOutput",
+                label: DATA_PATH_LABELS.output,
+                value: outputDirectory,
+                onChange: handleConvertOutputDirectoryChange,
+              }] : []),
+              ...(isMergeMode ? [{
+                id: "mergeBase",
+                label: "병합 대상 데이터 경로",
+                value: mergeBaseDirectory,
+                onChange: handleMergeBaseDirectoryChange,
+              }, {
+                id: "mergeOutput",
+                label: "병합 결과 데이터 경로",
+                value: outputDirectory,
+                onChange: handleMergeOutputDirectoryChange,
+                disabled: mergeSameDirectory,
+              }] : []),
+            ]}
+          />
 
           {isConvertMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">

@@ -14,7 +14,7 @@ test("market desk proxy allows the table integrity inspection to finish", async 
 test("table page puts the shared existing-data review before path and execution settings", async () => {
   const source = await readFile(tablePagePath, "utf8");
   const reviewStart = source.indexOf("<SingleCheckDataIntegrityInspectionCard");
-  const pathCardStart = source.indexOf(">데이터 경로</CardTitle>");
+  const pathCardStart = source.indexOf("<DataPathCard");
   const executionCardStart = source.indexOf(">작업 실행</CardTitle>");
 
   assert.ok(reviewStart >= 0);

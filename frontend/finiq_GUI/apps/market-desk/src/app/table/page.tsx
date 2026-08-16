@@ -9,7 +9,7 @@ import { Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
+import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { UI_TEXT } from "@/config/uiText";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
@@ -100,7 +100,11 @@ export default function TablePage() {
       }
     },
   });
-  
+  const handlePathError = useCallback((message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus, setStatus]);
+
   // Form State
   const [outputPath, setOutputPath] = useState("");
   const [tableWorkers, setTableWorkers] = useState("1");
@@ -275,38 +279,27 @@ export default function TablePage() {
             } : undefined}
           />
 
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-              <CardTitle className="dark:text-white">데이터 경로</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4">
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">작업공간 디렉토리</Label>
-                  <PathPickerInput
-                    value={dataRoot}
-                    onChange={handleWorkspaceDirectoryChange}
-                    mode="folder"
-                    placeholder="작업공간 디렉토리를 선택하세요"
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
-                </div>
-                {useSeparateOutputDirectory && <div className="space-y-2">
-                  <Label className="dark:text-slate-300">결과 데이터 경로 (SQLite)</Label>
-                  <PathPickerInput 
-                    value={outputPath} 
-                    onChange={(val) => {
-                      setOutputPath(val);
-                      saveSetting("sqlite_output_directory", val);
-                    }}
-                    mode="folder"
-                    placeholder="데이터 경로를 선택하세요"
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
-                </div>}
-              </div>
-            </CardContent>
-          </Card>
+          <DataPathCard
+            onError={handlePathError}
+            fields={[
+              {
+                id: "workspace",
+                label: DATA_PATH_LABELS.workspace,
+                value: dataRoot,
+                onChange: handleWorkspaceDirectoryChange,
+              },
+              {
+                id: "output",
+                label: `${DATA_PATH_LABELS.output} (SQLite)`,
+                value: outputPath,
+                onChange: (val) => {
+                  setOutputPath(val);
+                  saveSetting("sqlite_output_directory", val);
+                },
+                separateOutputOnly: true,
+              },
+            ]}
+          />
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>

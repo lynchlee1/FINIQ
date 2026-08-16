@@ -8,11 +8,15 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import {
   HtmlWorkflowForm,
-  HtmlWorkflowCard,
   HtmlWorkflowPage,
   htmlControlClassName,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import {
+  DataPathCard,
+  DATA_PATH_LABELS,
+  type DataPathField,
+} from "@/components/data-path/DataPathCard";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
@@ -189,6 +193,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       }
     }
   }, [setStatus, setIsErrorStatus, startPolling, setActiveCancelToken]);
+
+  const handlePathError = useCallback((message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus, setStatus]);
 
   useEffect(() => {
     fetchSettings().then((config) => {
@@ -489,28 +498,26 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     }
   };
 
-  const baseFields: HtmlWorkflowField[] = [
+  const basePathFields: DataPathField[] = [
     {
       id: "sourcePath",
-      kind: "path",
-      label: variant === "internal" && useSeparateOutputDirectory ? "입력 데이터 경로 (외부 HTML 압축 JSON)" : "작업공간 디렉토리",
-      help: undefined,
+      label: variant === "internal" && useSeparateOutputDirectory
+        ? `${DATA_PATH_LABELS.input} (외부 HTML 압축 JSON)`
+        : DATA_PATH_LABELS.workspace,
       mode: variant === "internal" && useSeparateOutputDirectory ? "file" : variantConfig.sourcePickMode,
       value: currentSourcePath,
       onChange: variant === "internal" && useSeparateOutputDirectory ? saveInternalSourceFilePath : saveWorkspaceDirectory,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
     },
-    ...(useSeparateOutputDirectory ? [{
+    {
       id: "outputDirectory",
-      kind: "path",
-      label: "데이터 경로",
-      mode: "folder",
+      label: DATA_PATH_LABELS.output,
       value: outputDirectory,
       onChange: saveOutputDirectory,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
-    } satisfies HtmlWorkflowField] : []),
+      separateOutputOnly: true,
+    },
+  ];
+
+  const baseFields: HtmlWorkflowField[] = [
     { id: "timeout", kind: "input", type: "number", label: "타임아웃 (초)", value: timeout, onChange: setTimeoutVal },
     { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", help: "KIND에 인터넷 요청을 보내는 저장 실행에만 적용됩니다.", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
     { id: "waitSeconds", kind: "input", type: "number", label: "요청 간격 (초)", value: waitSeconds, onChange: setWaitSeconds },
@@ -518,28 +525,20 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     { id: "progressInterval", kind: "input", type: "number", label: "진행 확인 간격 (건)", value: progressInterval, onChange: setProgressInterval, span: 2 },
     { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
   ];
-  const basePathFields = baseFields.filter((field) => field.id === "sourcePath" || field.id === "outputDirectory");
   const requestOptionFields = baseFields.filter((field) => ["timeout", "maxRequestsPerMinute", "waitSeconds"].includes(field.id));
   const executionOptionFields = baseFields.filter((field) => field.id === "progressInterval" || field.id === "skipExisting");
   const testOptionFields = baseFields.filter((field) => field.id === "limit");
 
-  const compressionFields: HtmlWorkflowField[] = [
+  const compressionFields: DataPathField[] = [
     {
       id: "compressInputDirectory",
-      kind: "path",
-      label: "작업공간 디렉토리",
-      help: undefined,
-      mode: "folder",
+      label: DATA_PATH_LABELS.workspace,
       value: dataRoot,
       onChange: saveWorkspaceDirectory,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
     },
-    ...(useSeparateOutputDirectory ? [{
+    {
       id: "compressOutputDirectory",
-      kind: "path",
       label: "압축 JSON 데이터 경로",
-      mode: "folder",
       value: compressOutputDirectory,
       onChange: (val) => {
         setCompressOutputDirectory(val);
@@ -549,9 +548,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           val ? `${val.replace(/\/$/, "")}/compressed-external-html.json` : "",
         );
       },
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
-    } satisfies HtmlWorkflowField] : []),
+      separateOutputOnly: true,
+    },
   ];
   const compressionSettingFields: HtmlWorkflowField[] = [
     {
@@ -723,20 +721,16 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           )}
 
           {showSaveWorkflow && (
-            <HtmlWorkflowCard
-              title="데이터 경로"
-            >
-              <HtmlWorkflowForm fields={basePathFields} />
-            </HtmlWorkflowCard>
+            <DataPathCard onError={handlePathError} fields={basePathFields} />
           )}
 
           {isExternalCompressMode && (
-            <HtmlWorkflowCard
+            <DataPathCard
               title="외부 HTML 압축"
               description="저장된 KIND 뷰어 HTML에서 핵심 정보만 추출해 작은 JSON으로 저장합니다."
-            >
-                <HtmlWorkflowForm fields={compressionFields} />
-            </HtmlWorkflowCard>
+              onError={handlePathError}
+              fields={compressionFields}
+            />
           )}
 
           {isExternalCompressMode && (

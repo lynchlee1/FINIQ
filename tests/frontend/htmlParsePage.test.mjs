@@ -20,25 +20,25 @@ test("html parse page does not render warning or step guide boxes", async () => 
 
 test("html parse page uses standard two-row data path card", async () => {
   const source = await readFile(pagePath, "utf8");
-  const pathFieldsBlock = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
-  const dataPathCard = source.match(/<HtmlWorkflowCard[\s\S]*?title="데이터 경로"[\s\S]*?>/)?.[0] ?? "";
+  const pathFieldsBlock = source.match(/const parsePathFields: DataPathField\[\][\s\S]*?\n  \];/)?.[0] ?? "";
+  const dataPathCard = source.match(/<DataPathCard[\s\S]*?\/>/)?.[0] ?? "";
 
-  assert.match(pathFieldsBlock, /id: "inputDirectory"[\s\S]*?span: 4/);
-  assert.match(pathFieldsBlock, /id: "outputDirectory"[\s\S]*?span: 4/);
-  assert.match(source, /title="데이터 경로"/);
+  assert.match(pathFieldsBlock, /id: "inputDirectory"/);
+  assert.match(pathFieldsBlock, /id: "outputDirectory"[\s\S]*?separateOutputOnly: true/);
+  assert.match(source, /<DataPathCard onError=\{handlePathError\} fields=\{parsePathFields\} \/>/);
   assert.doesNotMatch(source, /title="공시원문 변환 경로"/);
   assert.doesNotMatch(dataPathCard, /description=/);
 });
 
 test("html parse page keeps workspace directories directly editable", async () => {
   const source = await readFile(pagePath, "utf8");
-  const pathFields = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
+  const pathFields = source.match(/const parsePathFields: DataPathField\[\][\s\S]*?\n  \];/)?.[0] ?? "";
   const modeHandler = source.match(/const handleParseModeChange =[\s\S]*?};/)?.[0] ?? "";
 
   assert.doesNotMatch(pathFields, /disabled:/);
-  assert.match(pathFields, /label: "작업공간 디렉토리"/);
+  assert.match(pathFields, /label: DATA_PATH_LABELS\.workspace/);
   assert.match(pathFields, /onChange: handleWorkspaceDirectoryChange/);
-  assert.match(pathFields, /\.\.\.\(useSeparateOutputDirectory \? \[\{/);
+  assert.match(pathFields, /separateOutputOnly: true/);
   assert.match(pathFields, /onChange: handleOutputDirectoryChange/);
   assert.match(source, /data_root: dataRoot/);
   assert.match(source, /setInputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
@@ -134,7 +134,7 @@ test("html parse page removes resume and excel export controls", async () => {
 test("html parse page sends parallel worker count", async () => {
   const source = await readFile(pagePath, "utf8");
   const inspectionPayload = source.match(/const buildParseInspectionPayload = \(\) => \(\{[\s\S]*?\}\);/)?.[0] ?? "";
-  const settingsBlock = source.match(/const parseSettingFields:[\s\S]*?const parsePathFields =/)?.[0] ?? "";
+  const settingsBlock = source.match(/const parseOptionFields: HtmlWorkflowField\[\][\s\S]*?\n  \];/)?.[0] ?? "";
 
   assert.match(source, /const \[parallelWorkers, setParallelWorkers\] = useState\(""\)/);
   assert.match(source, /const \[progressInterval, setProgressInterval\] = useState\("1000"\)/);

@@ -11,7 +11,7 @@ import { Checkbox } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
+import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, useActionDockFollow } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
@@ -277,6 +277,10 @@ export default function DownloadPage() {
     setExistingInspectionResult(null);
     setExistingMetadataError(null);
   }, []);
+  const handlePathError = useCallback((message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus, setStatus]);
   const existingData = existingInspectionResult?.has_existing
     ? existingInspectionResult
     : null;
@@ -946,6 +950,25 @@ export default function DownloadPage() {
             steps={inspectionSteps}
           />
 
+          <DataPathCard
+            onError={handlePathError}
+            fields={[
+              {
+                id: "workspace",
+                label: DATA_PATH_LABELS.workspace,
+                value: dataRoot,
+                onChange: (val) => saveSetting("output_root", val),
+              },
+              {
+                id: "output",
+                label: DATA_PATH_LABELS.output,
+                value: separateOutputDirectory,
+                onChange: (val) => saveSetting("download_output_directory", val),
+                separateOutputOnly: true,
+              },
+            ]}
+          />
+
           <DisclosureSearchConditionCard
             options={options}
             startDate={startDate}
@@ -960,33 +983,6 @@ export default function DownloadPage() {
             onSubmitterNameChange={setSubmitterName}
             onMarketLabelChange={setMarketLabel}
             onSecuritiesLabelChange={setSecuritiesLabel}
-            beforeFields={
-              <>
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">작업공간 디렉토리</Label>
-                <PathPickerInput
-                  value={dataRoot}
-                  onChange={(val) => saveSetting("output_root", val)}
-                  placeholder="데이터 경로를 선택하세요"
-                  mode="folder"
-                  onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                />
-              </div>
-
-              {useSeparateOutputDirectory && (
-                <div className="space-y-2">
-                  <Label className="dark:text-slate-300">결과 데이터 경로</Label>
-                  <PathPickerInput
-                    value={separateOutputDirectory}
-                    onChange={(val) => saveSetting("download_output_directory", val)}
-                    placeholder="결과 데이터 경로를 선택하세요"
-                    mode="folder"
-                    onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-                  />
-                </div>
-              )}
-              </>
-            }
           />
 
           <DisclosureTypeSelectionCard

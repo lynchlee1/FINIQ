@@ -8,7 +8,7 @@ import {
   WorkflowModeSwitch,
   type WorkflowModeOption,
 } from "@/components/layout/WorkflowModeSwitch";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
+import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { apiPost } from "@/api/client";
@@ -155,6 +155,10 @@ export default function FilterPage() {
     setIsFilterErrorStatus(isError);
     setIsTitleErrorStatus(isError);
   }, [setIsFilterErrorStatus, setIsTitleErrorStatus]);
+  const handlePathError = useCallback((message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus, setStatus]);
   const activeStatusMode: FilterTaskMode = titleJobId
     ? "title-search"
     : isStreaming
@@ -611,13 +615,6 @@ export default function FilterPage() {
 
   return (
     <WorkflowPageShell workflowId="disclosure-build">
-      <WorkflowModeSwitch
-        ariaLabel="공시 작업 모드"
-        value={taskMode}
-        options={FILTER_TASK_MODE_OPTIONS}
-        onValueChange={setTaskMode}
-        testId="filter-mode-control"
-      >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
           <DataIntegrityInspectionCard
@@ -626,31 +623,24 @@ export default function FilterPage() {
             steps={inspectionSteps}
           />
 
-          <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
-            <CardHeader>
-          <CardTitle className="dark:text-white">데이터 경로</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid gap-2">
-            <Label className="dark:text-slate-300">작업공간 디렉토리</Label>
-            <PathPickerInput 
-              mode="folder"
-              value={rootDirectory || ""}
-              onChange={(val) => saveSetting("output_root", val)}
-              onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-            />
-          </div>
-          {taskMode === "filter" && useSeparateOutputDirectory && <div className="grid gap-2">
-            <Label className="dark:text-slate-300">결과 데이터 경로</Label>
-            <PathPickerInput 
-              mode="folder"
-              value={htmlTransferPath || ""}
-              onChange={(val) => saveSetting("external_html_transfer_directory", val)}
-              onError={(err) => { setStatus(err.message); setIsErrorStatus(true); }}
-            />
-          </div>}
-        </CardContent>
-          </Card>
+          <DataPathCard
+            onError={handlePathError}
+            fields={[
+              {
+                id: "workspace",
+                label: DATA_PATH_LABELS.workspace,
+                value: rootDirectory || "",
+                onChange: (val) => saveSetting("output_root", val),
+              },
+              ...(taskMode === "filter" ? [{
+                id: "output",
+                label: DATA_PATH_LABELS.output,
+                value: htmlTransferPath || "",
+                onChange: (val: string) => saveSetting("external_html_transfer_directory", val),
+                separateOutputOnly: true,
+              }] : []),
+            ]}
+          />
 
           <DisclosureConditionFilterCard
             conditions={conditions}
@@ -661,6 +651,14 @@ export default function FilterPage() {
             onLoadPreset={loadPreset}
             onSavePreset={savePreset}
             onDeletePreset={deletePreset}
+          />
+
+          <WorkflowModeSwitch
+            ariaLabel="공시 작업 모드"
+            value={taskMode}
+            options={FILTER_TASK_MODE_OPTIONS}
+            onValueChange={setTaskMode}
+            testId="filter-mode-control"
           />
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
@@ -834,7 +832,6 @@ export default function FilterPage() {
           }
         />
       </div>
-      </WorkflowModeSwitch>
     </WorkflowPageShell>
   );
 }

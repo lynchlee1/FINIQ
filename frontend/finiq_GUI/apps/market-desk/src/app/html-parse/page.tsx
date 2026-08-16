@@ -22,10 +22,14 @@ import {
 import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
 import {
   HtmlWorkflowForm,
-  HtmlWorkflowCard,
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import {
+  DataPathCard,
+  DATA_PATH_LABELS,
+  type DataPathField,
+} from "@/components/data-path/DataPathCard";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { apiPost } from "@/api/client";
@@ -394,6 +398,11 @@ export default function HtmlParsePage() {
     });
   }, [fetchSettings, setStatus, setIsErrorStatus]);
 
+  const handlePathError = useCallback((message: string) => {
+    setStatus(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus, setStatus]);
+
   useEffect(() => {
     if (!dataRoot?.trim()) {
       setPresets([]);
@@ -760,27 +769,23 @@ export default function HtmlParsePage() {
     setIsErrorStatus(!result.confirmed);
   };
 
-  const parseSettingFields: HtmlWorkflowField[] = [
+  const parsePathFields: DataPathField[] = [
     {
       id: "inputDirectory",
-      kind: "path",
-      label: "작업공간 디렉토리",
-      mode: "folder",
+      label: DATA_PATH_LABELS.workspace,
       value: dataRoot,
       onChange: handleWorkspaceDirectoryChange,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
     },
-    ...(useSeparateOutputDirectory ? [{
+    {
       id: "outputDirectory",
-      kind: "path",
-      label: "결과 데이터 경로",
-      mode: "folder",
+      label: DATA_PATH_LABELS.output,
       value: outputDirectory,
       onChange: handleOutputDirectoryChange,
-      onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
-      span: 4,
-    } satisfies HtmlWorkflowField] : []),
+      separateOutputOnly: true,
+    },
+  ];
+
+  const parseOptionFields: HtmlWorkflowField[] = [
     {
       id: "limit",
       kind: "input",
@@ -820,8 +825,6 @@ export default function HtmlParsePage() {
       span: 2,
     },
   ];
-  const parsePathFields = parseSettingFields.filter((field) => field.id === "inputDirectory" || field.id === "outputDirectory");
-  const parseOptionFields = parseSettingFields.filter((field) => field.id !== "inputDirectory" && field.id !== "outputDirectory");
   const warningReports = buildWarningReports(Array.isArray(latestParseResult?.warnings) ? latestParseResult.warnings : []);
   const warningGroups = WARNING_LEVELS.flatMap((level) => {
     const groupMap = new Map<string, { key: string; level: WarningLevel; warningCode: string; warningCount: number; acptNumbers: string[] }>();
@@ -1036,11 +1039,7 @@ export default function HtmlParsePage() {
             } : undefined}
           />
 
-          <HtmlWorkflowCard
-            title="데이터 경로"
-          >
-            <HtmlWorkflowForm fields={parsePathFields} />
-          </HtmlWorkflowCard>
+          <DataPathCard onError={handlePathError} fields={parsePathFields} />
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]" data-related-routes={HTML_PARSE_RELATED_ROUTES}>
             <CardHeader className="gap-3 pb-4">

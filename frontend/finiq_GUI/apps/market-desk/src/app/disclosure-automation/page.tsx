@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Check, Loader2, Play, RefreshCw, Save, Square } from "lucide-react";
 import {
   Button,
@@ -31,7 +31,7 @@ import {
   type SectionPattern,
 } from "@/components/disclosures/HtmlSectionPatternCard";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
-import { PathPickerInput } from "@/components/ui/PathPickerInput";
+import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { formatInteger } from "@/lib/format";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -366,6 +366,11 @@ export default function DisclosureAutomationPage() {
       setIsErrorStatus(true);
     });
   }, [dataRoot, setIsErrorStatus]);
+
+  const handlePathError = useCallback((message: string) => {
+    setNotification(message);
+    setIsErrorStatus(true);
+  }, [setIsErrorStatus]);
 
   useEffect(() => {
     setWorkspaceInspections({});
@@ -851,6 +856,17 @@ export default function DisclosureAutomationPage() {
 
           <div ref={searchSettingsRef} className="scroll-mt-6 space-y-6">
             {searchSettingsSelected ? <>
+              <DataPathCard
+                onError={handlePathError}
+                fields={[
+                  {
+                    id: "workspace",
+                    label: DATA_PATH_LABELS.workspace,
+                    value: dataRoot,
+                    onChange: (value) => { setDataRoot(value); setPlan(null); },
+                  },
+                ]}
+              />
               <DisclosureSearchConditionCard
               options={downloadOptions}
               startDate={startDate}
@@ -865,17 +881,6 @@ export default function DisclosureAutomationPage() {
               onSubmitterNameChange={(value) => { setSubmitterName(value); setPlan(null); }}
               onMarketLabelChange={(value) => { setMarketLabel(value); setPlan(null); }}
               onSecuritiesLabelChange={(value) => { setSecuritiesLabel(value); setPlan(null); }}
-              beforeFields={(
-                <div className="grid gap-2">
-                  <Label className="dark:text-slate-300">데이터 경로</Label>
-                  <PathPickerInput
-                    mode="folder"
-                    value={dataRoot}
-                    onChange={(value) => { setDataRoot(value); setPlan(null); }}
-                    onError={(error) => { setNotification(error.message); setIsErrorStatus(true); }}
-                  />
-                </div>
-              )}
               />
               <DisclosureTypeSelectionCard
                 options={downloadOptions}
