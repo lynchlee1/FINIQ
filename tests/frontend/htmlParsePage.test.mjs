@@ -25,7 +25,7 @@ test("html parse page uses standard two-row data path card", async () => {
 
   assert.match(pathFieldsBlock, /id: "inputDirectory"/);
   assert.match(pathFieldsBlock, /id: "outputDirectory"[\s\S]*?separateOutputOnly: true/);
-  assert.match(source, /<DataPathCard onError=\{handlePathError\} fields=\{parsePathFields\} \/>/);
+  assert.match(source, /WorkflowPathSettings id="parse-separate-output-directory"/);
   assert.doesNotMatch(source, /title="공시원문 변환 경로"/);
   assert.doesNotMatch(dataPathCard, /description=/);
 });
@@ -44,7 +44,7 @@ test("html parse page keeps workspace directories directly editable", async () =
   assert.match(source, /setInputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
   assert.match(source, /setOutputDirectory\(config\.html_parse_output_directory \|\| ""\)/);
   assert.match(modeHandler, /saveSetting\("html_parse_mode", val\)/);
-  assert.match(source, /DisclosureSeparateOutputDirectorySetting id="parse-separate-output-directory"/);
+  assert.match(source, /WorkflowPathSettings id="parse-separate-output-directory" fields=\{parsePathFields\}/);
 });
 
 test("html parse mode cards render as full-width rows", async () => {

@@ -5,7 +5,8 @@ import { FolderTree, Loader2, Play } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger, ActionDock } from "@finiq/web-app/status";
-import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
+import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -105,27 +106,27 @@ export default function UtilityPage() {
     }
   };
 
+  const pathFields: DataPathField[] = [
+    {
+      id: "source",
+      label: DATA_PATH_LABELS.input,
+      value: sourceDirectory,
+      onChange: setSourceDirectory,
+    },
+    {
+      id: "output",
+      label: DATA_PATH_LABELS.output,
+      value: outputDirectory,
+      onChange: setOutputDirectory,
+    },
+  ];
+
   return (
     <WorkflowPageShell workflowId="utility">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          <DataPathCard
-            onError={handlePathError}
-            fields={[
-              {
-                id: "source",
-                label: DATA_PATH_LABELS.input,
-                value: sourceDirectory,
-                onChange: setSourceDirectory,
-              },
-              {
-                id: "output",
-                label: DATA_PATH_LABELS.output,
-                value: outputDirectory,
-                onChange: setOutputDirectory,
-              },
-            ]}
-          />
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={pathFields} /> */}
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
               <CardTitle className="dark:text-white">작업 실행</CardTitle>
@@ -170,7 +171,8 @@ export default function UtilityPage() {
           notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>{isErrorStatus ? status : "알림 없음"}</div>}
           settingsTitle="시스템 설정"
           settingsContent={
-            <>
+            <div className="space-y-5">
+              <WorkflowPathSettings id="utility-partition-paths" fields={pathFields} onError={handlePathError} />
               <div className="space-y-2">
                 <Label className="dark:text-slate-300">변환 방향</Label>
                 <Select value={mode} onValueChange={(value) => setMode(value as PartitionMode)}>
@@ -181,7 +183,7 @@ export default function UtilityPage() {
                   </SelectContent>
                 </Select>
               </div>
-            </>
+            </div>
           }
         />
       </div>

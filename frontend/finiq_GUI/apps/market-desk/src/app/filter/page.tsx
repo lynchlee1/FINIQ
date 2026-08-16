@@ -8,7 +8,7 @@ import {
   WorkflowModeSwitch,
   type WorkflowModeOption,
 } from "@/components/layout/WorkflowModeSwitch";
-import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
+import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { apiPost } from "@/api/client";
@@ -23,7 +23,7 @@ import {
   type DisclosureConditionBlock,
   type DisclosureConditionPreset,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
-import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import {
   deleteDisclosureConditionPreset,
   listDisclosureConditionPresets,
@@ -535,6 +535,22 @@ export default function FilterPage() {
     }
   };
 
+  const pathFields: DataPathField[] = [
+    {
+      id: "workspace",
+      label: DATA_PATH_LABELS.workspace,
+      value: rootDirectory || "",
+      onChange: (val) => saveSetting("output_root", val),
+    },
+    ...(taskMode === "filter" ? [{
+      id: "output",
+      label: DATA_PATH_LABELS.output,
+      value: htmlTransferPath || "",
+      onChange: (val: string) => saveSetting("external_html_transfer_directory", val),
+      separateOutputOnly: true,
+    }] : []),
+  ];
+
   if (loading) {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
@@ -623,24 +639,8 @@ export default function FilterPage() {
             steps={inspectionSteps}
           />
 
-          <DataPathCard
-            onError={handlePathError}
-            fields={[
-              {
-                id: "workspace",
-                label: DATA_PATH_LABELS.workspace,
-                value: rootDirectory || "",
-                onChange: (val) => saveSetting("output_root", val),
-              },
-              ...(taskMode === "filter" ? [{
-                id: "output",
-                label: DATA_PATH_LABELS.output,
-                value: htmlTransferPath || "",
-                onChange: (val: string) => saveSetting("external_html_transfer_directory", val),
-                separateOutputOnly: true,
-              }] : []),
-            ]}
-          />
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={pathFields} /> */}
 
           <DisclosureConditionFilterCard
             conditions={conditions}
@@ -801,7 +801,7 @@ export default function FilterPage() {
           settingsTitle="시스템 설정"
           settingsContent={
             <div className="space-y-5">
-              {taskMode === "filter" && <DisclosureSeparateOutputDirectorySetting id="filter-separate-output-directory" />}
+              <WorkflowPathSettings id="filter-separate-output-directory" fields={pathFields} onError={handlePathError} />
               {taskMode === "filter" && <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>

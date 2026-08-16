@@ -19,14 +19,13 @@ import {
   type DisclosureConditionPreset,
   type DisclosureConditionPresetPayload,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
-import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import {
   HtmlWorkflowForm,
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
-  DataPathCard,
   DATA_PATH_LABELS,
   type DataPathField,
 } from "@/components/data-path/DataPathCard";
@@ -1039,7 +1038,8 @@ export default function HtmlParsePage() {
             } : undefined}
           />
 
-          <DataPathCard onError={handlePathError} fields={parsePathFields} />
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={parsePathFields} /> */}
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]" data-related-routes={HTML_PARSE_RELATED_ROUTES}>
             <CardHeader className="gap-3 pb-4">
@@ -1294,7 +1294,7 @@ export default function HtmlParsePage() {
           settingsContent={
             <>
               <div className="space-y-5">
-                <DisclosureSeparateOutputDirectorySetting id="parse-separate-output-directory" />
+                <WorkflowPathSettings id="parse-separate-output-directory" fields={parsePathFields} onError={handlePathError} />
                 <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>

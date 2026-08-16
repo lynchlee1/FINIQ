@@ -4,6 +4,10 @@ import { HtmlField, HtmlFieldGrid, HtmlWorkflowCard } from "@/components/html-wo
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 import { useSettingsStore } from "@/store/useSettingsStore";
 
+/**
+ * LEGACY: 본문에 놓던 데이터 경로 카드. 경로 입력은 WorkflowPathSettings(우측 설정 패널)로 옮겼다.
+ * 지우지 말 것 — 본문 배치가 다시 필요할 때 쓴다. DataPathField와 DATA_PATH_LABELS는 계속 사용 중이다.
+ */
 export const DATA_PATH_LABELS = {
   workspace: "작업공간 디렉토리",
   input: "입력 데이터 경로",

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { ActionDock, JobStatusLogger } from "@finiq/web-app/status";
-import { DisclosureSeparateOutputDirectorySetting } from "@/components/disclosures/DisclosureSeparateOutputDirectorySetting";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import type { DataPathField } from "@/components/data-path/DataPathCard";
 import {
   HtmlWorkflowCard,
   HtmlWorkflowForm,
@@ -104,6 +105,8 @@ type HtmlSectionSplitActionDockProps = {
   isErrorStatus: boolean;
   problemFileCount: number;
   settingsFields: HtmlWorkflowField[];
+  pathFields: DataPathField[];
+  onPathError: (message: string) => void;
   onCancel: () => void;
 };
 
@@ -425,6 +428,8 @@ export function HtmlSectionSplitActionDock({
   isErrorStatus,
   problemFileCount,
   settingsFields,
+  pathFields,
+  onPathError,
   onCancel,
 }: HtmlSectionSplitActionDockProps) {
   let notificationContent: ReactNode;
@@ -461,7 +466,7 @@ export function HtmlSectionSplitActionDock({
       settingsTitle="설정"
       settingsContent={
         <div className="space-y-5">
-          <DisclosureSeparateOutputDirectorySetting id="section-split-separate-output-directory" />
+          <WorkflowPathSettings id="section-split-separate-output-directory" fields={pathFields} onError={onPathError} />
           <div className="space-y-3">
             <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>

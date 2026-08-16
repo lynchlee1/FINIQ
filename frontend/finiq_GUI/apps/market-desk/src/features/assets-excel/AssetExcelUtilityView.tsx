@@ -5,7 +5,8 @@ import { AlertTriangle, Check, Eye, Loader2, Pencil, Play, Plus, Search, Trash2 
 import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger, ActionDock } from "@finiq/web-app/status";
-import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
+import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
+import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { htmlTableFrameClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
@@ -1020,42 +1021,42 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     }
   };
 
+  const pathFields: DataPathField[] = [
+    ...(!isMergeMode && !isParquetPreviewMode ? [{
+      id: "source",
+      label: "원본 데이터 경로",
+      value: sourceDirectory,
+      onChange: handleSourceDirectoryChange,
+      help: isConvertMode
+        ? `이 경로 아래의 Excel 파일 중 선택한 파일만 실행 대상으로 사용합니다. 대상 파일: ${formatInteger(selectedConvertFileCount)} / ${formatInteger(excelFiles.length)}개`
+        : undefined,
+    }] : []),
+    ...(isConvertMode || isParquetPreviewMode ? [{
+      id: "convertOutput",
+      label: DATA_PATH_LABELS.output,
+      value: outputDirectory,
+      onChange: handleConvertOutputDirectoryChange,
+    }] : []),
+    ...(isMergeMode ? [{
+      id: "mergeBase",
+      label: "병합 대상 데이터 경로",
+      value: mergeBaseDirectory,
+      onChange: handleMergeBaseDirectoryChange,
+    }, {
+      id: "mergeOutput",
+      label: "병합 결과 데이터 경로",
+      value: outputDirectory,
+      onChange: handleMergeOutputDirectoryChange,
+      disabled: mergeSameDirectory,
+    }] : []),
+  ];
+
   return (
     <WorkflowPageShell workflowId="price-data">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          <DataPathCard
-            onError={handlePathError}
-            fields={[
-              ...(!isMergeMode && !isParquetPreviewMode ? [{
-                id: "source",
-                label: "원본 데이터 경로",
-                value: sourceDirectory,
-                onChange: handleSourceDirectoryChange,
-                help: isConvertMode
-                  ? `이 경로 아래의 Excel 파일 중 선택한 파일만 실행 대상으로 사용합니다. 대상 파일: ${formatInteger(selectedConvertFileCount)} / ${formatInteger(excelFiles.length)}개`
-                  : undefined,
-              }] : []),
-              ...(isConvertMode || isParquetPreviewMode ? [{
-                id: "convertOutput",
-                label: DATA_PATH_LABELS.output,
-                value: outputDirectory,
-                onChange: handleConvertOutputDirectoryChange,
-              }] : []),
-              ...(isMergeMode ? [{
-                id: "mergeBase",
-                label: "병합 대상 데이터 경로",
-                value: mergeBaseDirectory,
-                onChange: handleMergeBaseDirectoryChange,
-              }, {
-                id: "mergeOutput",
-                label: "병합 결과 데이터 경로",
-                value: outputDirectory,
-                onChange: handleMergeOutputDirectoryChange,
-                disabled: mergeSameDirectory,
-              }] : []),
-            ]}
-          />
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={pathFields} /> */}
 
           {isConvertMode ? (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
@@ -1672,6 +1673,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           settingsContent={
             isMergeMode ? (
               <div className="space-y-4">
+                <WorkflowPathSettings id="assets-excel-paths" fields={pathFields} onError={handlePathError} />
                 <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
                   <Checkbox
                     checked={mergeSameDirectory}
@@ -1697,7 +1699,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                   내부까지 검사
                 </label>
               </div>
-            ) : <div />
+            ) : (
+              <div className="space-y-4">
+                <WorkflowPathSettings id="assets-excel-paths" fields={pathFields} onError={handlePathError} />
+              </div>
+            )
           }
         />
         ) : null}
