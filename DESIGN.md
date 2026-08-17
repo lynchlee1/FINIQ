@@ -370,12 +370,12 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Notification clear action | 지우기 | Button in the right-side `알림` panel that clears the currently accumulated notification display. |
 | Settings panel | 설정 | Use as the generic right dock settings title unless a page-specific settings title is already established. |
 | Download parallel strategy setting | 병렬 처리 방식 | Selects whether workers are distributed across yearly ranges or pages within one year. |
-| Parallel yearly ranges option | 여러 연도 병렬 처리 | Runs multiple yearly download folders concurrently. |
-| Parallel pages within one year option | 한 연도 내 페이지 병렬 처리 | Runs yearly folders in sequence and downloads pages within the active year concurrently. |
+| Parallel yearly ranges option | 연도별 병렬 | Runs multiple yearly download folders concurrently. Shown as a right-side inspector select under `병렬 처리 방식`. |
+| Parallel pages within one year option | 한 연도 내 병렬 | Runs yearly folders in sequence and downloads pages within the active year concurrently. Shown as a right-side inspector select under `병렬 처리 방식`. |
 | Background job retention setting | 작업 기록 보관 시간 (분) | Retains terminal in-memory job status for the configured number of minutes. It never removes saved files or workflow metadata. |
 | Active job elapsed time | 작업 경과 | Show server-reported elapsed time while a right-dock background job is queued or running. |
 | Active job progress freshness | 진행 확인 | Pair `상태 조회 정상` with either the age of the latest log or `새 로그 N초째 없음` after 10 seconds. This reports observed API/log freshness and does not claim that silent work has stopped. |
-| Disclosure separate output directory setting | 저장 디렉토리 별도 설정하기 | Shared setting across all disclosure detail pages. Default is off. When off, hide the result-directory input and use the canonical stage directory under the workspace. |
+| Disclosure separate output directory setting | (not shown in UI) | Code/config only. The right-dock settings panel never exposes a separate save-directory toggle. Jobs use the canonical stage directory under the workspace unless a payload or saved setting overrides the path. |
 | Disclosure workspace root path | 작업공간 디렉토리 | Shared root directory shown on every disclosure detail page. All canonical stage paths are resolved below this directory. |
 
 Right dock panels align exactly with the workflow content at the top of the page. On desktop, they begin following only after scrolling past a `24px` viewport inset, using the shared bounded spring motion; reduced-motion mode moves directly to the same bounded position. Do not use a sticky top offset, because it shifts the dock out of alignment before scrolling begins.

@@ -6,14 +6,14 @@ import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { Input } from "@finiq/ui";
 import { Label } from "@finiq/ui";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
+
 import { Checkbox } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, useActionDockFollow } from "@finiq/web-app/status";
-import { htmlControlClassName, htmlSelectContentClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { htmlControlClassName, htmlInspectorControlClassName, HtmlInspectorField, HtmlInspectorSelect, HtmlInspectorToggle } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
 import type { DownloadExistingPayload, DownloadExistingResponse, DownloadOptions, DownloadPayload, DownloadSavedFilters } from "@/features/download/types";
 import { UI_TEXT } from "@/config/uiText";
@@ -1186,16 +1186,15 @@ export default function DownloadPage() {
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
                   </div>
                   <div className="space-y-2">
-                    <Label className="dark:text-slate-300">페이지 크기</Label>
-                    <Input type="number" value={pageSize} onChange={(e) => setPageSize(e.target.value)} className={htmlControlClassName} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">대기 시간 (초)</Label>
-                    <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className={htmlControlClassName} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">타임아웃 (초)</Label>
-                    <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className={htmlControlClassName} />
+                    <HtmlInspectorField label="페이지 크기">
+                      <Input type="number" value={pageSize} onChange={(e) => setPageSize(e.target.value)} className={htmlInspectorControlClassName} />
+                    </HtmlInspectorField>
+                    <HtmlInspectorField label="대기 시간 (초)">
+                      <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className={htmlInspectorControlClassName} />
+                    </HtmlInspectorField>
+                    <HtmlInspectorField label="타임아웃 (초)">
+                      <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className={htmlInspectorControlClassName} />
+                    </HtmlInspectorField>
                   </div>
                 </div>
 
@@ -1203,19 +1202,16 @@ export default function DownloadPage() {
                   <div className="border-b border-[color:var(--tv-border)] pb-2">
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">작업 범위</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label className="dark:text-slate-300">시작 페이지</Label>
-                      <Input type="number" value={startPage} onChange={(e) => setStartPage(e.target.value)} className={htmlControlClassName} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="dark:text-slate-300">종료 페이지</Label>
-                      <Input type="number" placeholder="전체" value={endPage} onChange={(e) => setEndPage(e.target.value)} className={htmlControlClassName} />
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="lastReportOnly" checked={lastReportOnly} onCheckedChange={(v) => setLastReportOnly(!!v)} className="border-[color:var(--tv-border)]" />
-                    <Label htmlFor="lastReportOnly" className="cursor-pointer dark:text-slate-300">최종보고서만</Label>
+                  <div className="space-y-2">
+                    <HtmlInspectorField label="시작 페이지">
+                      <Input type="number" value={startPage} onChange={(e) => setStartPage(e.target.value)} className={htmlInspectorControlClassName} />
+                    </HtmlInspectorField>
+                    <HtmlInspectorField label="종료 페이지">
+                      <Input type="number" placeholder="전체" value={endPage} onChange={(e) => setEndPage(e.target.value)} className={htmlInspectorControlClassName} />
+                    </HtmlInspectorField>
+                    <HtmlInspectorField label="최종보고서만">
+                      <HtmlInspectorToggle checked={lastReportOnly} onCheckedChange={setLastReportOnly} />
+                    </HtmlInspectorField>
                   </div>
                 </div>
 
@@ -1224,39 +1220,32 @@ export default function DownloadPage() {
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                   </div>
                   <div className="space-y-2">
-                    <Label className="dark:text-slate-300">병렬 처리 방식</Label>
-                    <Select value={parallelStrategy} onValueChange={(value) => setParallelStrategy(value as "years" | "pages")}>
-                      <SelectTrigger className={htmlControlClassName}><SelectValue /></SelectTrigger>
-                      <SelectContent className={htmlSelectContentClassName}>
-                        <SelectItem value="years">여러 연도 병렬 처리</SelectItem>
-                        <SelectItem value="pages">한 연도 내 페이지 병렬 처리</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-caption text-slate-500 dark:text-slate-400">
-                      같은 워커 수를 연도 간 분산하거나 한 연도의 페이지 처리에 집중합니다.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">워커 수</Label>
-                    <Input type="number" min="1" max={parallelWorkerCount} value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className={htmlControlClassName} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">로그 줄 수</Label>
-                    <Input type="number" value={logLimit} onChange={(e) => setLogLimit(e.target.value)} className={htmlControlClassName} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">작업 기록 보관 시간 (분)</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={jobRetentionInput}
-                      onChange={(e) => setJobRetentionInput(e.target.value)}
-                      onBlur={saveJobRetentionMinutes}
-                      className={htmlControlClassName}
-                    />
-                    <p className="text-caption text-slate-500 dark:text-slate-400">
-                      완료·실패·중단된 작업 상태만 정리하며 저장 파일과 메타데이터는 유지합니다.
-                    </p>
+                    <HtmlInspectorField label="병렬 처리 방식">
+                      <HtmlInspectorSelect
+                        value={parallelStrategy}
+                        onValueChange={(value) => setParallelStrategy(value as "years" | "pages")}
+                        options={[
+                          { value: "years", label: "연도별 병렬" },
+                          { value: "pages", label: "한 연도 내 병렬" },
+                        ]}
+                      />
+                    </HtmlInspectorField>
+                    <HtmlInspectorField label="워커 수">
+                      <Input type="number" min="1" max={parallelWorkerCount} value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className={htmlInspectorControlClassName} />
+                    </HtmlInspectorField>
+                    <HtmlInspectorField label="로그 줄 수">
+                      <Input type="number" value={logLimit} onChange={(e) => setLogLimit(e.target.value)} className={htmlInspectorControlClassName} />
+                    </HtmlInspectorField>
+                    <HtmlInspectorField label="작업 기록 보관 시간 (분)">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={jobRetentionInput}
+                        onChange={(e) => setJobRetentionInput(e.target.value)}
+                        onBlur={saveJobRetentionMinutes}
+                        className={htmlInspectorControlClassName}
+                      />
+                    </HtmlInspectorField>
                   </div>
                 </div>
               </CardContent>

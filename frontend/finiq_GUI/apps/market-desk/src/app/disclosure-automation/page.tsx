@@ -26,6 +26,7 @@ import {
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
 import { DisclosureLockedSettingsCard } from "@/components/disclosures/DisclosureLockedSettingsCard";
+import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
   HtmlSectionPatternCard,
   type SectionPattern,
@@ -982,9 +983,17 @@ export default function DisclosureAutomationPage() {
                   <option value="shareholder_meeting">shareholder_meeting</option>
                 </select>
               </Label>
-              <Label className="grid gap-2 text-[var(--tv-text)]">페이지당 공시 수<Input type="number" min="1" max="100" value={pageSize} onChange={(event) => { setPageSize(event.target.value); setPlan(null); }} /></Label>
-              <Label className="grid gap-2 text-[var(--tv-text)]">로컬 worker 수<Input type="number" min="1" max={parallelWorkerCount} value={localWorkers} onChange={(event) => { setLocalWorkers(event.target.value); setPlan(null); }} /></Label>
-              <Label className="grid gap-2 text-[var(--tv-text)]">요청 timeout(초)<Input type="number" min="1" max="120" value={timeout} onChange={(event) => { setTimeoutValue(event.target.value); setPlan(null); }} /></Label>
+              <div className="space-y-2">
+                <HtmlInspectorField label="페이지당 공시 수">
+                  <Input type="number" min="1" max="100" value={pageSize} onChange={(event) => { setPageSize(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
+                </HtmlInspectorField>
+                <HtmlInspectorField label="로컬 worker 수">
+                  <Input type="number" min="1" max={parallelWorkerCount} value={localWorkers} onChange={(event) => { setLocalWorkers(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
+                </HtmlInspectorField>
+                <HtmlInspectorField label="요청 timeout(초)">
+                  <Input type="number" min="1" max="120" value={timeout} onChange={(event) => { setTimeoutValue(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
+                </HtmlInspectorField>
+              </div>
               <div className="rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-xs leading-5 text-[var(--tv-muted)]">
                 KIND 검색·외부 HTML은 분당 최대 45회, 내부 HTML의 실제 HTTP 요청은 분당 최대 30회, 동시 요청은 1개로 고정합니다.
               </div>

@@ -2,7 +2,6 @@
 
 import { HtmlField, HtmlFieldGrid, HtmlWorkflowCard } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
-import { useSettingsStore } from "@/store/useSettingsStore";
 
 /**
  * LEGACY: 본문에 놓던 데이터 경로 카드. 경로 입력은 WorkflowPathSettings(우측 설정 패널)로 옮겼다.
@@ -39,12 +38,7 @@ export function DataPathCard({
   fields,
   onError,
 }: DataPathCardProps) {
-  const useSeparateOutputDirectory = useSettingsStore(
-    (state) => state.disclosure_separate_output_directory,
-  );
-  const visibleFields = fields.filter(
-    (field) => !field.separateOutputOnly || useSeparateOutputDirectory,
-  );
+  const visibleFields = fields.filter((field) => !field.separateOutputOnly);
 
   return (
     <HtmlWorkflowCard title={title} description={description}>

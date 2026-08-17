@@ -137,13 +137,10 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
     "utf8",
   );
   const templateSource = await readFile(htmlWorkflowTemplatePath, "utf8");
-  const separateSettingSource = await readFile(
-    "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureSeparateOutputDirectorySetting.tsx",
-    "utf8",
-  );
+  const pathSettingsSource = await readFile(pathSettingsPath, "utf8");
   assert.match(downloadSource, /value: dataRoot,\s*onChange: \(val\) => saveSetting\("output_root", val\)/);
-  assert.match(separateSettingSource, /저장 디렉토리 별도 설정하기/);
-  assert.match(separateSettingSource, /saveSetting\("disclosure_separate_output_directory", !!value\)/);
+  assert.doesNotMatch(pathSettingsSource, /저장 디렉토리 별도 설정하기/);
+  assert.doesNotMatch(pathSettingsSource, /saveSetting\("disclosure_separate_output_directory"/);
   assert.doesNotMatch(templateSource, /disabled=\{field\.disabled\}/);
   assert.match(tableSource, /value: dataRoot/);
   assert.match(tableSource, /separateOutputOnly: true/);
@@ -221,6 +218,46 @@ test("workflow form typography matches standard card fields", async () => {
   assert.doesNotMatch(templateSource, /<Label className="text-xs font-semibold text-slate-600 dark:text-slate-300">/);
 });
 
+test("right-dock number settings use compact inspector rows", async () => {
+  const templateSource = await readFile(htmlWorkflowTemplatePath, "utf8");
+  const downloadSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx",
+    "utf8",
+  );
+  const htmlDownloadSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
+    "utf8",
+  );
+  const parseSource = await readFile(htmlParsePagePath, "utf8");
+  const sectionResultsSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx",
+    "utf8",
+  );
+
+  assert.match(templateSource, /htmlSelectValueClassName = "min-w-0 flex-1 truncate text-left"/);
+  assert.match(templateSource, /htmlSelectItemClassName = "whitespace-nowrap"/);
+  assert.match(templateSource, /export function HtmlInspectorField/);
+  assert.match(templateSource, /export function HtmlInspectorToggle/);
+  assert.match(templateSource, /layout === "inspector" && field\.kind === "input" && field\.type === "number"/);
+  assert.match(templateSource, /htmlInspectorControlClassName/);
+  assert.match(templateSource, /variant=\{checked \? "default" : "outline"\}/);
+  assert.match(templateSource, /justify-start px-3/);
+  assert.match(templateSource, /text-\[var\(--tv-accent-foreground\)\]/);
+  assert.match(templateSource, /\{checked \? "On" : "Off"\}/);
+  assert.match(templateSource, /HtmlInspectorField label=\{field\.checkboxLabel\}/);
+  assert.match(downloadSource, /<HtmlInspectorField label="페이지 크기">/);
+  assert.match(downloadSource, /<HtmlInspectorField label="타임아웃 \(초\)">/);
+  assert.match(downloadSource, /<HtmlInspectorField label="병렬 처리 방식">/);
+  assert.match(downloadSource, /label: "한 연도 내 병렬"/);
+  assert.match(downloadSource, /label: "연도별 병렬"/);
+  assert.match(templateSource, /htmlInspectorSelectClassName/);
+  assert.match(templateSource, /if \(field\.kind === "select"\) \{[\s\S]*?if \(layout === "inspector"\)/);
+  assert.doesNotMatch(downloadSource, /같은 워커 수를 연도 간/);
+  assert.match(htmlDownloadSource, /HtmlWorkflowForm layout="inspector" fields=\{requestOptionFields\}/);
+  assert.match(parseSource, /HtmlWorkflowForm layout="inspector" fields=\{parseOptionFields\}/);
+  assert.match(sectionResultsSource, /HtmlWorkflowForm layout="inspector" fields=\{settingsFields\}/);
+});
+
 test("data path cards keep the same vertical field rhythm across workflow pages", async () => {
   const sources = await Promise.all([
     readFile(filterPagePath, "utf8"),
@@ -246,8 +283,9 @@ test("data path cards keep the same vertical field rhythm across workflow pages"
   }
   assert.match(dataPathCardSource, /LEGACY: 본문에 놓던 데이터 경로 카드/);
   assert.match(pathSettingsSource, /const inputFields = fields\.filter\(\(field\) => !field\.separateOutputOnly\)/);
-  assert.match(pathSettingsSource, /저장 디렉토리 별도 설정하기/);
-  assert.match(pathSettingsSource, /useSeparateOutputDirectory && outputFields\.map/);
+  assert.doesNotMatch(pathSettingsSource, /저장 디렉토리 별도 설정하기/);
+  assert.doesNotMatch(pathSettingsSource, /useSeparateOutputDirectory && outputFields\.map/);
+  assert.doesNotMatch(dataPathCardSource, /disclosure_separate_output_directory/);
 });
 
 test("disclosure filter workspace picker selects a folder", async () => {

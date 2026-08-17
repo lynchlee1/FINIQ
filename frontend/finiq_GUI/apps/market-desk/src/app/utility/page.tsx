@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { FolderTree, Loader2, Play } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
+import { HtmlInspectorField, HtmlInspectorSelect } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { JobStatusLogger, ActionDock } from "@finiq/web-app/status";
 import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
@@ -173,16 +174,16 @@ export default function UtilityPage() {
           settingsContent={
             <div className="space-y-5">
               <WorkflowPathSettings id="utility-partition-paths" fields={pathFields} onError={handlePathError} />
-              <div className="space-y-2">
-                <Label className="dark:text-slate-300">변환 방향</Label>
-                <Select value={mode} onValueChange={(value) => setMode(value as PartitionMode)}>
-                  <SelectTrigger className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"><SelectValue /></SelectTrigger>
-                  <SelectContent className="dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-200">
-                    <SelectItem value="split">일반 폴더 → 연도별 폴더</SelectItem>
-                    <SelectItem value="flatten">연도별 폴더 → 일반 폴더</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <HtmlInspectorField label="변환 방향">
+                <HtmlInspectorSelect
+                  value={mode}
+                  onValueChange={(value) => setMode(value as PartitionMode)}
+                  options={[
+                    { value: "split", label: "일반 → 연도별" },
+                    { value: "flatten", label: "연도별 → 일반" },
+                  ]}
+                />
+              </HtmlInspectorField>
             </div>
           }
         />

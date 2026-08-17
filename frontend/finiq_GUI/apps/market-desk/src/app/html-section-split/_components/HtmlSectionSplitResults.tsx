@@ -471,7 +471,7 @@ export function HtmlSectionSplitActionDock({
             <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>
             </div>
-            <HtmlWorkflowForm fields={settingsFields} />
+            <HtmlWorkflowForm layout="inspector" fields={settingsFields} />
           </div>
         </div>
       }

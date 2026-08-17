@@ -521,9 +521,9 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   const baseFields: HtmlWorkflowField[] = [
     { id: "timeout", kind: "input", type: "number", label: "타임아웃 (초)", value: timeout, onChange: setTimeoutVal },
-    { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", help: "KIND에 인터넷 요청을 보내는 저장 실행에만 적용됩니다.", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
+    { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
     { id: "waitSeconds", kind: "input", type: "number", label: "요청 간격 (초)", value: waitSeconds, onChange: setWaitSeconds },
-    { id: "limit", kind: "input", type: "number", label: "최대 처리 건수", help: "테스트 실행이나 샘플 JSON 생성 때만 입력하세요. 비워 두면 전체 대상을 처리합니다.", placeholder: "전체", value: limit, onChange: setLimit },
+    { id: "limit", kind: "input", type: "number", label: "최대 처리 건수", placeholder: "전체", value: limit, onChange: setLimit },
     { id: "progressInterval", kind: "input", type: "number", label: "진행 확인 간격 (건)", value: progressInterval, onChange: setProgressInterval, span: 2 },
     { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
   ];
@@ -559,7 +559,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       kind: "input",
       type: "number",
       label: "병렬 워커 수",
-      help: "비워 두면 파일 수와 CPU 수를 기준으로 자동 선택합니다.",
       placeholder: "자동",
       value: compressWorkers,
       onChange: setCompressWorkers,
@@ -845,7 +844,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                   <div className="border-b border-[color:var(--tv-border)] pb-2">
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">압축 처리</p>
                   </div>
-                  <HtmlWorkflowForm fields={compressionSettingFields} />
+                  <HtmlWorkflowForm layout="inspector" fields={compressionSettingFields} />
                 </div>
               ) : (
                 <div className="space-y-5">
@@ -853,19 +852,19 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                     <div className="border-b border-[color:var(--tv-border)] pb-2">
                       <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
                     </div>
-                    <HtmlWorkflowForm fields={requestOptionFields} />
+                    <HtmlWorkflowForm layout="inspector" fields={requestOptionFields} />
                   </div>
                   <div className="space-y-3">
                     <div className="border-b border-[color:var(--tv-border)] pb-2">
                       <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                     </div>
-                    <HtmlWorkflowForm fields={executionOptionFields} />
+                    <HtmlWorkflowForm layout="inspector" fields={executionOptionFields} />
                   </div>
                   <div className="space-y-3">
                     <div className="border-b border-[color:var(--tv-border)] pb-2">
                       <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
                     </div>
-                    <HtmlWorkflowForm fields={testOptionFields} />
+                    <HtmlWorkflowForm layout="inspector" fields={testOptionFields} />
                   </div>
                 </div>
               )}
