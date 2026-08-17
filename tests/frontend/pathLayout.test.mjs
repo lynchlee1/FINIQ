@@ -357,6 +357,18 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /mixed condition block connectors must be separated by parentheses/);
 });
 
+test("disclosure condition card places an undoable clear button between undo and redo", async () => {
+  const source = await readFile(disclosureConditionCardPath, "utf8");
+  const undoIndex = source.indexOf('aria-label="실행 취소"');
+  const clearIndex = source.indexOf('aria-label="지우기"');
+  const redoIndex = source.indexOf('aria-label="다시 실행"');
+
+  assert.ok(undoIndex >= 0, "실행 취소 버튼이 있어야 합니다.");
+  assert.ok(clearIndex > undoIndex && redoIndex > clearIndex, "지우기 버튼은 실행 취소와 다시 실행 사이에 있어야 합니다.");
+  assert.match(source, /const clear = \(\) => \{[\s\S]*?applyConditionsChange\(\[makeEmptyDisclosureCondition\(\)\]\)/);
+  assert.match(source, /disabled=\{isEmptyDisclosureConditionBlocks\(conditions\)\}/);
+});
+
 test("disclosure filter page combines title search and recorded filtering", async () => {
   const [source, webAppFrameSource, globalsSource, modeSwitchSource] = await Promise.all([
     readFile(filterPagePath, "utf8"),

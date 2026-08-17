@@ -247,6 +247,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |
+| Disclosure condition clear action | 지우기 | Icon button between `실행 취소` and `다시 실행` on `공시 조건`. Clears condition blocks to one empty row and records that change in the same undo history. |
 | Disclosure title search action | 실행 | Starts the restorable background title-search job in `공시내역 제목 검색` mode. Use the same execution label as the filtering mode. |
 | Disclosure title search result | 제목 검색 결과 | Lists distinct database titles and the matching disclosure count for each title. |
 | Shared worker count setting | 워커 수 | Shared right-dock label for the parallel worker count on every disclosure page. Do not invent page-specific names such as `검색 worker 수` or `병렬 워커 수`. |

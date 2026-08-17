@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Save, Trash2, Upload } from "lucide-react";
+import { Eraser, ListPlus, Plus, Redo2, Save, Trash2, Undo2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 
@@ -95,6 +95,13 @@ export function makeEmptyDisclosureCondition(connector: DisclosureFilterConnecto
   };
 }
 
+function isEmptyDisclosureConditionBlocks(conditions: DisclosureConditionBlock[]) {
+  if (conditions.length !== 1) return false;
+  const [row] = conditions;
+  const empty = makeEmptyDisclosureCondition();
+  return (Object.keys(empty) as (keyof DisclosureConditionBlock)[]).every((key) => row[key] === empty[key]);
+}
+
 export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureConditionBlock[] {
   if (!Array.isArray(value)) throw new Error("condition_blocks must be an array");
   const blocks = value.map((item, index) => {
@@ -161,6 +168,25 @@ export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureCo
 
 function countParens(value: string, paren: "(" | ")") {
   return [...String(value || "")].filter((char) => char === paren).length;
+}
+
+function mergeConditionsWithPreset(
+  conditions: DisclosureConditionBlock[],
+  preset: DisclosureConditionPreset,
+): DisclosureConditionBlock[] {
+  const incoming = normalizeDisclosureConditionBlocks(preset.condition_blocks).map((block) => ({ ...block }));
+  if (!incoming.length) return conditions;
+  const hasExisting = conditions.some((row) => row.value.trim() || row.operator === "exists" || row.operator === "empty");
+  if (!hasExisting) {
+    incoming[0].connector = "";
+    return incoming;
+  }
+  incoming[0] = { ...incoming[0], connector: "AND", open_count: incoming[0].open_count + 1 };
+  incoming[incoming.length - 1] = {
+    ...incoming[incoming.length - 1],
+    close_count: incoming[incoming.length - 1].close_count + 1,
+  };
+  return [...conditions, ...incoming];
 }
 
 function fieldLabel(field: DisclosureFilterFieldKey) {
@@ -264,6 +290,76 @@ function ConditionOptionsPopover({
   );
 }
 
+function AddFilterPopover({
+  presets,
+  onSelect,
+}: {
+  presets: DisclosureConditionPreset[];
+  onSelect: (preset: DisclosureConditionPreset) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const handleScrollOrResize = () => setOpen(false);
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative inline-block">
+      <Button ref={buttonRef} variant="outline" onClick={() => setOpen((value) => !value)} disabled={!presets.length}>
+        <ListPlus className="mr-2 h-4 w-4" />
+        필터 추가
+      </Button>
+      {open && coords && createPortal(
+        <div
+          ref={panelRef}
+          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-50 max-h-64 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-[#30363d] dark:bg-[#161b22]"
+        >
+          {presets.length ? presets.map((preset) => (
+            <button
+              key={preset.name}
+              type="button"
+              onClick={() => {
+                onSelect(preset);
+                setOpen(false);
+              }}
+              className="block w-full truncate rounded-md px-2 py-1.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-[#21262d]"
+            >
+              {preset.name}
+            </button>
+          )) : (
+            <p className="px-2 py-1.5 text-xs font-medium text-slate-400 dark:text-slate-500">저장된 필터가 없습니다.</p>
+          )}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 export function DisclosureConditionFilterCard({
   conditions,
   onConditionsChange,
@@ -276,22 +372,71 @@ export function DisclosureConditionFilterCard({
   onDeletePreset,
 }: DisclosureConditionFilterCardProps) {
   const [openOptionsIndex, setOpenOptionsIndex] = useState<number | null>(null);
+  const [, setHistoryTick] = useState(0);
+  const history = useRef<{ past: DisclosureConditionBlock[][]; future: DisclosureConditionBlock[][] }>({
+    past: [],
+    future: [],
+  });
+  const lastSelfSetRef = useRef<DisclosureConditionBlock[] | null>(null);
+  const isFirstConditionsEffect = useRef(true);
+
+  const applyConditionsChange = (next: DisclosureConditionBlock[]) => {
+    history.current.past.push(conditions);
+    history.current.future = [];
+    lastSelfSetRef.current = next;
+    setHistoryTick((tick) => tick + 1);
+    onConditionsChange(next);
+  };
+
+  const undo = () => {
+    if (!history.current.past.length) return;
+    const previous = history.current.past.pop()!;
+    history.current.future.push(conditions);
+    lastSelfSetRef.current = previous;
+    setHistoryTick((tick) => tick + 1);
+    onConditionsChange(previous);
+  };
+
+  const redo = () => {
+    if (!history.current.future.length) return;
+    const next = history.current.future.pop()!;
+    history.current.past.push(conditions);
+    lastSelfSetRef.current = next;
+    setHistoryTick((tick) => tick + 1);
+    onConditionsChange(next);
+  };
+
+  const clear = () => {
+    if (isEmptyDisclosureConditionBlocks(conditions)) return;
+    setOpenOptionsIndex(null);
+    applyConditionsChange([makeEmptyDisclosureCondition()]);
+  };
+
+  useEffect(() => {
+    if (isFirstConditionsEffect.current) {
+      isFirstConditionsEffect.current = false;
+      return;
+    }
+    if (conditions === lastSelfSetRef.current) return;
+    history.current = { past: [], future: [] };
+    setHistoryTick((tick) => tick + 1);
+  }, [conditions]);
 
   const updateCondition = (index: number, patch: Partial<DisclosureConditionBlock>) => {
     const next = conditions.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row);
     if (next[0]) next[0].connector = "";
-    onConditionsChange(next);
+    applyConditionsChange(next);
   };
 
   const removeCondition = (index: number) => {
     const next = conditions.filter((_, rowIndex) => rowIndex !== index);
     setOpenOptionsIndex(null);
     if (!next.length) {
-      onConditionsChange([makeEmptyDisclosureCondition()]);
+      applyConditionsChange([makeEmptyDisclosureCondition()]);
       return;
     }
     next[0].connector = "";
-    onConditionsChange(next);
+    applyConditionsChange(next);
   };
 
   const conditionPreview = conditions.filter((row) => row.value.trim() || row.operator === "exists" || row.operator === "empty");
@@ -336,6 +481,47 @@ export function DisclosureConditionFilterCard({
 
         <div className="grid gap-2">
           <Label className="dark:text-slate-300">조건 블록</Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => applyConditionsChange([...conditions, makeEmptyDisclosureCondition(conditions.length ? "AND" : "")])}>
+                <Plus className="mr-2 h-4 w-4" />
+                조건 추가
+              </Button>
+              <AddFilterPopover
+                presets={presets}
+                onSelect={(preset) => applyConditionsChange(mergeConditionsWithPreset(conditions, preset))}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="실행 취소"
+                onClick={undo}
+                disabled={!history.current.past.length}
+              >
+                <Undo2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="지우기"
+                onClick={clear}
+                disabled={isEmptyDisclosureConditionBlocks(conditions)}
+              >
+                <Eraser className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="다시 실행"
+                onClick={redo}
+                disabled={!history.current.future.length}
+              >
+                <Redo2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
           <div className="flex min-h-[52px] flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
             {conditionPreview.length ? conditionPreview.map((condition, index) => (
               <div key={`${condition.field}-${index}`} className="flex flex-wrap items-center gap-2">
@@ -389,27 +575,6 @@ export function DisclosureConditionFilterCard({
                 <Button variant="ghost" onClick={() => removeCondition(index)} className="h-8 px-2 text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-300">삭제</Button>
               </div>
             ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => onConditionsChange([...conditions, makeEmptyDisclosureCondition(conditions.length ? "AND" : "")])}>
-              <Plus className="mr-2 h-4 w-4" />
-              조건 추가
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => onConditionsChange([
-                ...conditions,
-                {
-                  ...makeEmptyDisclosureCondition(conditions.length ? "OR" : ""),
-                  open_count: 1,
-                  close_count: 1,
-                },
-              ])}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              그룹 조건 추가
-            </Button>
           </div>
         </div>
       </CardContent>
