@@ -12,6 +12,7 @@ import {
   HtmlWorkflowPage,
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { formatInteger } from "@/lib/format";
 import type { OntologyNodeGraphProps } from "../graph/OntologyNodeGraph";
@@ -142,7 +143,7 @@ export default function DisclosureGraphPage() {
     {
       id: "dataRoot",
       kind: "path",
-      label: "작업공간 디렉토리",
+      label: DATA_PATH_LABELS.workspace,
       mode: "folder",
       value: dataRoot,
       onChange: (value) => saveSetting("output_root", value),
@@ -186,7 +187,7 @@ export default function DisclosureGraphPage() {
             <p>{status}</p>
             {buildResult ? (
               <p className="mt-1 break-all text-xs">
-                결과 데이터 경로: {buildResult.output_path}
+                {DATA_PATH_LABELS.workspace}: {buildResult.output_path}
               </p>
             ) : null}
           </div>

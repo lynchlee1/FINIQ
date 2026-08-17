@@ -12,7 +12,7 @@ test("09 disclosure graph page builds, reloads, and renders the saved graph", as
   ]);
 
   assert.match(pageSource, /title="공시 관계 그래프"/);
-  assert.match(pageSource, /label: "작업공간 디렉토리"/);
+  assert.match(pageSource, /label: DATA_PATH_LABELS\.workspace/);
   assert.match(pageSource, /\/api\/disclosures\/graph\/build/);
   assert.match(pageSource, /\/api\/disclosures\/graph\/load/);
   assert.match(pageSource, /그래프 생성/);

@@ -57,7 +57,7 @@ function jobStatusLines(data: any): string[] {
         `중복 묶음: ${formatInteger(data.result.duplicate_group_count)}개`,
         `삭제 후보: ${formatInteger(data.result.deletion_candidate_count)}개`,
         `삭제 파일: ${formatInteger(data.result.deleted_count)}개`,
-        `병합 대상 데이터 경로: ${data.result.target_directory || ""}`,
+        `${DATA_PATH_LABELS.input}: ${data.result.target_directory || ""}`,
       );
       return lines;
     }
@@ -67,7 +67,7 @@ function jobStatusLines(data: any): string[] {
         "병합 완료",
         `계정: ${formatInteger(data.result.accounts_processed)}개`,
         `선택 파일: ${formatInteger((data.result.selected_files || []).length)}개`,
-        `병합 결과 데이터 경로: ${data.result.output_directory || ""}`,
+        `${DATA_PATH_LABELS.output}: ${data.result.output_directory || ""}`,
       );
       return lines;
     }
@@ -850,7 +850,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const handleInspectDuplicates = async () => {
     if (activeJobId) return;
     if (!mergeBaseDirectory.trim()) {
-      setStatus("병합 대상 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.input}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -944,17 +944,17 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     if (activeJobId) return;
     if (isMergeMode) {
       if (!mergeBaseDirectory.trim()) {
-        setStatus("병합 대상 데이터 경로를 선택하세요.");
+        setStatus(`${DATA_PATH_LABELS.input}를 선택하세요.`);
         setIsErrorStatus(true);
         return;
       }
       if (!mergeSameDirectory && !outputDirectory.trim()) {
-        setStatus("병합 결과 데이터 경로를 선택하세요.");
+        setStatus(`${DATA_PATH_LABELS.output}를 선택하세요.`);
         setIsErrorStatus(true);
         return;
       }
       if (!mergeSelectionReady) {
-        setStatus("병합 대상 데이터 경로에서 같은 계정 Parquet 파일을 2개씩 선택하세요.");
+        setStatus(`${DATA_PATH_LABELS.input}에서 같은 계정 Parquet 파일을 2개씩 선택하세요.`);
         setIsErrorStatus(true);
         return;
       }
@@ -1024,7 +1024,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const pathFields: DataPathField[] = [
     ...(!isMergeMode && !isParquetPreviewMode ? [{
       id: "source",
-      label: "원본 데이터 경로",
+      label: DATA_PATH_LABELS.input,
       value: sourceDirectory,
       onChange: handleSourceDirectoryChange,
     }] : []),
@@ -1036,12 +1036,12 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
     }] : []),
     ...(isMergeMode ? [{
       id: "mergeBase",
-      label: "병합 대상 데이터 경로",
+      label: DATA_PATH_LABELS.input,
       value: mergeBaseDirectory,
       onChange: handleMergeBaseDirectoryChange,
     }, {
       id: "mergeOutput",
-      label: "병합 결과 데이터 경로",
+      label: DATA_PATH_LABELS.output,
       value: outputDirectory,
       onChange: handleMergeOutputDirectoryChange,
       disabled: mergeSameDirectory,
@@ -1517,7 +1517,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
                 {formatMergeSelectionSummary(formatInteger(mergeSelectedCount), formatInteger(mergePairCount), incompleteMergeAccountNames)}
               </p>
               <div className="space-y-2">
-                {renderOutputRowsTable(sortedMergeBaseOutputRows, "병합 대상 데이터 경로에 표시할 병합 대상이 없습니다.", true)}
+                {renderOutputRowsTable(sortedMergeBaseOutputRows, `${DATA_PATH_LABELS.input}에 표시할 병합 대상이 없습니다.`, true)}
               </div>
             </CardContent>
           </Card>

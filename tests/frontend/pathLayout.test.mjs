@@ -72,7 +72,7 @@ test("html section split exposes worker count setting and background section kin
   assert.match(source, /const workerCount = Number\(config\.parallel_worker_count\)/);
   assert.match(source, /setWorkers\(String\(workerCount\)\)/);
   assert.doesNotMatch(source, /config\.parallel_worker_count \|\| 1/);
-  assert.match(source, /label: "병렬 처리 개수"/);
+  assert.match(source, /label: SETTINGS_LABELS\.workerCount/);
   assert.match(source, /\/api\/disclosures\/html\/sections\/kinds\/start/);
   assert.match(source, /workers: parseOptionalNumber\(workers\)/);
   assert.match(source, /\/api\/disclosures\/html\/cancel/);
@@ -234,6 +234,13 @@ test("right-dock number settings use compact inspector rows", async () => {
     "utf8",
   );
 
+  const settingsLabelsSource = await readFile(
+    "frontend/finiq_GUI/apps/market-desk/src/config/uiText.ts",
+    "utf8",
+  );
+  assert.match(settingsLabelsSource, /workerCount: "워커 수"/);
+  assert.match(settingsLabelsSource, /timeoutSeconds: "타임아웃 \(초\)"/);
+  assert.match(settingsLabelsSource, /requestIntervalSeconds: "요청 간격 \(초\)"/);
   assert.match(templateSource, /htmlSelectValueClassName = "min-w-0 flex-1 truncate text-left"/);
   assert.match(templateSource, /htmlSelectItemClassName = "whitespace-nowrap"/);
   assert.match(templateSource, /export function HtmlInspectorField/);
@@ -245,9 +252,9 @@ test("right-dock number settings use compact inspector rows", async () => {
   assert.match(templateSource, /text-\[var\(--tv-accent-foreground\)\]/);
   assert.match(templateSource, /\{checked \? "On" : "Off"\}/);
   assert.match(templateSource, /HtmlInspectorField label=\{field\.checkboxLabel\}/);
-  assert.match(downloadSource, /<HtmlInspectorField label="페이지 크기">/);
-  assert.match(downloadSource, /<HtmlInspectorField label="타임아웃 \(초\)">/);
-  assert.match(downloadSource, /<HtmlInspectorField label="병렬 처리 방식">/);
+  assert.match(downloadSource, /<HtmlInspectorField label=\{SETTINGS_LABELS\.pageSize\}>/);
+  assert.match(downloadSource, /<HtmlInspectorField label=\{SETTINGS_LABELS\.timeoutSeconds\}>/);
+  assert.match(downloadSource, /<HtmlInspectorField label=\{SETTINGS_LABELS\.parallelStrategy\}>/);
   assert.match(downloadSource, /label: "한 연도 내 병렬"/);
   assert.match(downloadSource, /label: "연도별 병렬"/);
   assert.match(templateSource, /htmlInspectorSelectClassName/);
@@ -281,6 +288,12 @@ test("data path cards keep the same vertical field rhythm across workflow pages"
     assert.match(source, /LEGACY: 본문 데이터 경로 카드/);
     assert.doesNotMatch(source.replace(/\{\/\*[\s\S]*?\*\/\}/g, ""), /<DataPathCard/);
   }
+  assert.match(dataPathCardSource, /export const DATA_PATH_LABEL = "작업공간 디렉토리"/);
+  assert.match(dataPathCardSource, /workspace: DATA_PATH_LABEL/);
+  assert.match(dataPathCardSource, /input: DATA_PATH_LABEL/);
+  assert.match(dataPathCardSource, /output: DATA_PATH_LABEL/);
+  assert.doesNotMatch(dataPathCardSource, /입력 데이터 경로/);
+  assert.doesNotMatch(dataPathCardSource, /결과 데이터 경로/);
   assert.match(dataPathCardSource, /LEGACY: 본문에 놓던 데이터 경로 카드/);
   assert.match(pathSettingsSource, /const inputFields = fields\.filter\(\(field\) => !field\.separateOutputOnly\)/);
   assert.doesNotMatch(pathSettingsSource, /저장 디렉토리 별도 설정하기/);

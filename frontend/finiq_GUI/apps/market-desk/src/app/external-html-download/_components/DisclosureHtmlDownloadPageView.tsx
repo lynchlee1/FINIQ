@@ -16,7 +16,7 @@ import {
   DATA_PATH_LABELS,
   type DataPathField,
 } from "@/components/data-path/DataPathCard";
-import { UI_TEXT } from "@/config/uiText";
+import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import {
@@ -464,7 +464,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       return;
     }
     if (useSeparateOutputDirectory && !compressOutputDirectory) {
-      setStatus("압축 JSON 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -503,9 +503,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const basePathFields: DataPathField[] = [
     {
       id: "sourcePath",
-      label: variant === "internal" && useSeparateOutputDirectory
-        ? `${DATA_PATH_LABELS.input} (외부 HTML 압축 JSON)`
-        : DATA_PATH_LABELS.workspace,
+      label: DATA_PATH_LABELS.workspace,
       mode: variant === "internal" && useSeparateOutputDirectory ? "file" : variantConfig.sourcePickMode,
       value: currentSourcePath,
       onChange: variant === "internal" && useSeparateOutputDirectory ? saveInternalSourceFilePath : saveWorkspaceDirectory,
@@ -520,11 +518,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   ];
 
   const baseFields: HtmlWorkflowField[] = [
-    { id: "timeout", kind: "input", type: "number", label: "타임아웃 (초)", value: timeout, onChange: setTimeoutVal },
-    { id: "maxRequestsPerMinute", kind: "input", type: "number", label: "최대 요청/분", value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
-    { id: "waitSeconds", kind: "input", type: "number", label: "요청 간격 (초)", value: waitSeconds, onChange: setWaitSeconds },
-    { id: "limit", kind: "input", type: "number", label: "최대 처리 건수", placeholder: "전체", value: limit, onChange: setLimit },
-    { id: "progressInterval", kind: "input", type: "number", label: "진행 확인 간격 (건)", value: progressInterval, onChange: setProgressInterval, span: 2 },
+    { id: "timeout", kind: "input", type: "number", label: SETTINGS_LABELS.timeoutSeconds, value: timeout, onChange: setTimeoutVal },
+    { id: "maxRequestsPerMinute", kind: "input", type: "number", label: SETTINGS_LABELS.maxRequestsPerMinute, value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
+    { id: "waitSeconds", kind: "input", type: "number", label: SETTINGS_LABELS.requestIntervalSeconds, value: waitSeconds, onChange: setWaitSeconds },
+    { id: "limit", kind: "input", type: "number", label: SETTINGS_LABELS.maxItems, placeholder: "전체", value: limit, onChange: setLimit },
+    { id: "progressInterval", kind: "input", type: "number", label: SETTINGS_LABELS.progressInterval, value: progressInterval, onChange: setProgressInterval, span: 2 },
     { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
   ];
   const requestOptionFields = baseFields.filter((field) => ["timeout", "maxRequestsPerMinute", "waitSeconds"].includes(field.id));
@@ -540,7 +538,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     },
     {
       id: "compressOutputDirectory",
-      label: "압축 JSON 데이터 경로",
+      label: DATA_PATH_LABELS.output,
       value: compressOutputDirectory,
       onChange: (val) => {
         setCompressOutputDirectory(val);
@@ -558,7 +556,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       id: "compressWorkers",
       kind: "input",
       type: "number",
-      label: "병렬 워커 수",
+      label: SETTINGS_LABELS.workerCount,
       placeholder: "자동",
       value: compressWorkers,
       onChange: setCompressWorkers,

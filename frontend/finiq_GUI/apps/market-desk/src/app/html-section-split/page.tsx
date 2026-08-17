@@ -6,7 +6,7 @@ import { Button } from "@finiq/ui";
 import { PageLoadingSpinner } from "@finiq/web-app/status";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { UI_TEXT } from "@/config/uiText";
+import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import {
   HtmlWorkflowCard,
   HtmlWorkflowPage,
@@ -118,7 +118,7 @@ export default function HtmlSectionSplitPage() {
         lines.push(`저장 완료: ${formatInteger(summary.saved_files)}`);
         lines.push(`누락 파일: ${formatInteger(summary.missing_files)}`);
         lines.push(`건너뜀: ${formatInteger(summary.skipped_files)}`);
-        lines.push(`결과 데이터 경로: ${res.output_directory || ""}`);
+        lines.push(`${DATA_PATH_LABELS.workspace}: ${res.output_directory || ""}`);
       }
     }
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
@@ -319,7 +319,7 @@ export default function HtmlSectionSplitPage() {
       id: "workers",
       kind: "input",
       type: "number",
-      label: "병렬 처리 개수",
+      label: SETTINGS_LABELS.workerCount,
       value: workers,
       onChange: setWorkers,
       span: 2,
@@ -418,7 +418,7 @@ export default function HtmlSectionSplitPage() {
 
   const loadSourcePage = async (targetPage: number, options: { refreshSectionPatterns?: boolean } = {}) => {
     if (!inputDirectory) {
-      setStatus("입력 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -488,7 +488,7 @@ export default function HtmlSectionSplitPage() {
 
   const inspectExistingData = async () => {
     if (!inputDirectory) {
-      setStatus("입력 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -638,7 +638,7 @@ export default function HtmlSectionSplitPage() {
 
   const startSave = async () => {
     if (!dataRoot || (useSeparateOutputDirectory && !outputDirectory)) {
-      setStatus("작업공간 디렉토리와 결과 데이터 경로를 확인하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 확인하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -692,7 +692,7 @@ export default function HtmlSectionSplitPage() {
         ? integrityProblemFiles.length > 0 ? "failed" : "success"
         : "ready";
   const inspectionCopy = {
-    waiting: ["입력 데이터 경로를 선택하세요", "내부 HTML 데이터 경로를 선택한 다음 기존 원문의 목차 구성을 검사하세요."],
+    waiting: [`${DATA_PATH_LABELS.workspace}를 선택하세요`, "작업공간 디렉토리를 선택한 다음 기존 원문의 목차 구성을 검사하세요."],
     ready: ["기존 원문 데이터 검사가 필요합니다", "목차 분리 전에 입력 HTML 전체의 구성을 확인하세요."],
     running: ["기존 원문 데이터를 확인하고 있습니다", "입력 HTML을 읽어 목차 구성과 문제 파일을 확인합니다."],
     success: ["기존 원문 데이터를 그대로 사용해도 됩니다", `목차가 있는 공시 ${formatInteger(integrityInspectionResult?.summary?.documents_with_sections || 0)}개를 확인했습니다.`],

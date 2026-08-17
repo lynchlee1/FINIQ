@@ -34,6 +34,7 @@ import {
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { useJobPolling } from "@/hooks/useJobPolling";
+import { SETTINGS_LABELS } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import type { DownloadOptions } from "@/features/download/types";
@@ -984,13 +985,13 @@ export default function DisclosureAutomationPage() {
                 </select>
               </Label>
               <div className="space-y-2">
-                <HtmlInspectorField label="페이지당 공시 수">
+                <HtmlInspectorField label={SETTINGS_LABELS.pageSize}>
                   <Input type="number" min="1" max="100" value={pageSize} onChange={(event) => { setPageSize(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
                 </HtmlInspectorField>
-                <HtmlInspectorField label="로컬 worker 수">
+                <HtmlInspectorField label={SETTINGS_LABELS.workerCount}>
                   <Input type="number" min="1" max={parallelWorkerCount} value={localWorkers} onChange={(event) => { setLocalWorkers(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
                 </HtmlInspectorField>
-                <HtmlInspectorField label="요청 timeout(초)">
+                <HtmlInspectorField label={SETTINGS_LABELS.timeoutSeconds}>
                   <Input type="number" min="1" max="120" value={timeout} onChange={(event) => { setTimeoutValue(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
                 </HtmlInspectorField>
               </div>

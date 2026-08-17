@@ -16,7 +16,7 @@ import { JobStatusLogger, PageLoadingSpinner, useActionDockFollow } from "@finiq
 import { htmlControlClassName, htmlInspectorControlClassName, HtmlInspectorField, HtmlInspectorSelect, HtmlInspectorToggle } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
 import type { DownloadExistingPayload, DownloadExistingResponse, DownloadOptions, DownloadPayload, DownloadSavedFilters } from "@/features/download/types";
-import { UI_TEXT } from "@/config/uiText";
+import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import {
   DisclosureSearchConditionCard,
@@ -1186,13 +1186,13 @@ export default function DownloadPage() {
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>
                   </div>
                   <div className="space-y-2">
-                    <HtmlInspectorField label="페이지 크기">
+                    <HtmlInspectorField label={SETTINGS_LABELS.pageSize}>
                       <Input type="number" value={pageSize} onChange={(e) => setPageSize(e.target.value)} className={htmlInspectorControlClassName} />
                     </HtmlInspectorField>
-                    <HtmlInspectorField label="대기 시간 (초)">
+                    <HtmlInspectorField label={SETTINGS_LABELS.requestIntervalSeconds}>
                       <Input type="number" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className={htmlInspectorControlClassName} />
                     </HtmlInspectorField>
-                    <HtmlInspectorField label="타임아웃 (초)">
+                    <HtmlInspectorField label={SETTINGS_LABELS.timeoutSeconds}>
                       <Input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className={htmlInspectorControlClassName} />
                     </HtmlInspectorField>
                   </div>
@@ -1220,7 +1220,7 @@ export default function DownloadPage() {
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                   </div>
                   <div className="space-y-2">
-                    <HtmlInspectorField label="병렬 처리 방식">
+                    <HtmlInspectorField label={SETTINGS_LABELS.parallelStrategy}>
                       <HtmlInspectorSelect
                         value={parallelStrategy}
                         onValueChange={(value) => setParallelStrategy(value as "years" | "pages")}
@@ -1230,7 +1230,7 @@ export default function DownloadPage() {
                         ]}
                       />
                     </HtmlInspectorField>
-                    <HtmlInspectorField label="워커 수">
+                    <HtmlInspectorField label={SETTINGS_LABELS.workerCount}>
                       <Input type="number" min="1" max={parallelWorkerCount} value={workerCount} onChange={(e) => setWorkerCount(e.target.value)} className={htmlInspectorControlClassName} />
                     </HtmlInspectorField>
                     <HtmlInspectorField label="로그 줄 수">

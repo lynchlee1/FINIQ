@@ -29,7 +29,7 @@ import {
   DATA_PATH_LABELS,
   type DataPathField,
 } from "@/components/data-path/DataPathCard";
-import { UI_TEXT } from "@/config/uiText";
+import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { apiPost } from "@/api/client";
 import { pickPath } from "@/lib/fileDialog";
@@ -587,7 +587,7 @@ export default function HtmlParsePage() {
       return;
     }
     if (useSeparateOutputDirectory && !outputDirectory) {
-      setStatus("결과 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -656,7 +656,7 @@ export default function HtmlParsePage() {
   const handleLoadExecutionOptionCandidates = async () => {
     if (!executionOptionConfig) return;
     if (!inputDirectory) {
-      setStatus("입력 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -706,7 +706,7 @@ export default function HtmlParsePage() {
 
   const handleLoadPreview = async () => {
     if (!inputDirectory) {
-      setStatus("입력 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -750,12 +750,12 @@ export default function HtmlParsePage() {
 
   const handleInspectExistingParse = async () => {
     if (!dataRoot || !inputDirectory) {
-      setStatus("입력 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
     if (useSeparateOutputDirectory && !outputDirectory) {
-      setStatus("결과 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -789,7 +789,7 @@ export default function HtmlParsePage() {
       id: "limit",
       kind: "input",
       type: "number",
-      label: "최대 처리 건수",
+      label: SETTINGS_LABELS.maxItems,
       placeholder: "전체",
       value: limit,
       onChange: setLimit,
@@ -799,7 +799,7 @@ export default function HtmlParsePage() {
       id: "progressInterval",
       kind: "input",
       type: "number",
-      label: "진행 확인 간격 (건)",
+      label: SETTINGS_LABELS.progressInterval,
       value: progressInterval,
       onChange: setProgressInterval,
       span: 2,
@@ -808,7 +808,7 @@ export default function HtmlParsePage() {
       id: "parallelWorkers",
       kind: "input",
       type: "number",
-      label: "병렬 워커 수",
+      label: SETTINGS_LABELS.workerCount,
       placeholder: String(defaultParallelWorkers),
       value: parallelWorkers,
       onChange: setParallelWorkers,

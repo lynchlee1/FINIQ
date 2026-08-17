@@ -249,7 +249,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |
 | Disclosure title search action | 실행 | Starts the restorable background title-search job in `공시내역 제목 검색` mode. Use the same execution label as the filtering mode. |
 | Disclosure title search result | 제목 검색 결과 | Lists distinct database titles and the matching disclosure count for each title. |
-| Disclosure title search worker count | 검색 worker 수 | Worker count for querying the stage 02 SQLite shards in `공시내역 제목 검색` mode. |
+| Shared worker count setting | 워커 수 | Shared right-dock label for the parallel worker count on every disclosure page. Do not invent page-specific names such as `검색 worker 수` or `병렬 워커 수`. |
 | Disclosure workflow stage index | 00–09 | Show the zero-padded stage number only in the disclosure sidebar. Keep page titles unnumbered. |
 | HTML parse report preview | 리포트 미리보기 | Separate box below `모드별 기능` that shows a few parsed report results as HTML tables for the selected parse mode. |
 | HTML parse warning files page open action | 현재 페이지 열기 | Button in the right-side `알림` panel on `공시원문 변환` that opens the current page of source HTML files with parse warnings. Pages contain 20 files. |
@@ -298,13 +298,13 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Price data Parquet preview workflow | Parquet 미리보기 | Use for the `/utility/assets-excel/parquet` navigation label and page title. |
 | Price data Parquet merge workflow | Parquet 병합하기 | Use for the `/utility/assets-excel/merge` navigation label and page title. |
 | Output or saved data path | 데이터 경로 | Use instead of `저장 경로` or `저장 폴더` for reusable path inputs. |
-| Source data path | 입력 데이터 경로 | Use for folder/file path inputs that feed a workflow. Add the source type in parentheses only when needed, e.g. `(Raw JSON)`. |
-| Result data path | 결과 데이터 경로 | Use for folder/file path inputs that receive workflow output when the page also has an input path. Add the output type in parentheses only when needed, e.g. `(SQLite)`. |
+| Source data path | 작업공간 디렉토리 | Use the same path label for every folder/file picker in the right-dock settings. Do not invent input/output/source variants. |
+| Result data path | 작업공간 디렉토리 | Same as the workspace path label. Right-dock settings never distinguish input and output with different names. |
 | Quantiwise Parquet grouped result table | Parquet 모아보기 | Use for the table that lists generated Parquet outputs on `Parquet 미리보기`. |
 | Quantiwise merge candidate table | 병합대상 모아보기 | Use for the selectable merge-candidate table on `Parquet 병합하기`. |
-| Quantiwise merge target path | 병합 대상 데이터 경로 | Use for the single input path on `Parquet 병합하기`. |
-| Quantiwise merge output path | 병합 결과 데이터 경로 | Use for the path where `Parquet 병합하기` writes the merged Parquet result. |
-| Quantiwise same-folder merge setting | 동일 폴더에서 작업하기 | System setting for forcing merge output work into `병합 대상 데이터 경로`. |
+| Quantiwise merge target path | 작업공간 디렉토리 | Same shared path label as every other right-dock folder picker. |
+| Quantiwise merge output path | 작업공간 디렉토리 | Same shared path label as every other right-dock folder picker. |
+| Quantiwise same-folder merge setting | 동일 폴더에서 작업하기 | System setting for forcing merge output work into the selected workspace directory. |
 | Quantiwise cleanup merged items setting | 병합된 요소 정리하기 | System setting for moving successfully merged input Parquet files into `merged`. |
 | Quantiwise duplicate recursive scan setting | 내부까지 검사 | System setting for including subfolders recursively in `중복 검사하기`; default is off. |
 | Quantiwise duplicate Parquet cleanup action | 중복 검사하기 | Button/action on `Parquet 병합하기` that finds same-account Parquet files fully covered by a more complete same-account file before deletion. |
@@ -369,6 +369,12 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Notification panel | 알림 | Use for errors, warnings, confirmations, user action required, or passive completion feedback. New content changes the dock icon tone but never opens the panel automatically. |
 | Notification clear action | 지우기 | Button in the right-side `알림` panel that clears the currently accumulated notification display. |
 | Settings panel | 설정 | Use as the generic right dock settings title unless a page-specific settings title is already established. |
+| Shared worker count setting | 워커 수 | Shared right-dock worker-count label. Same wording on download, table, filter, HTML, and automation pages. |
+| Shared request timeout setting | 타임아웃 (초) | Shared right-dock timeout label. |
+| Shared request interval setting | 요청 간격 (초) | Shared right-dock wait/interval label. Do not use `대기 시간 (초)` or `요청 timeout(초)`. |
+| Shared progress interval setting | 진행 확인 간격 (건) | Shared right-dock progress-interval label. Do not use `진행 표시 간격`. |
+| Shared max-item setting | 최대 처리 건수 | Shared right-dock limit label. Do not use `최대 반환`. |
+| Shared page-size setting | 페이지 크기 | Shared right-dock KIND page-size label. Do not use `페이지당 공시 수`. |
 | Download parallel strategy setting | 병렬 처리 방식 | Selects whether workers are distributed across yearly ranges or pages within one year. |
 | Parallel yearly ranges option | 연도별 병렬 | Runs multiple yearly download folders concurrently. Shown as a right-side inspector select under `병렬 처리 방식`. |
 | Parallel pages within one year option | 한 연도 내 병렬 | Runs yearly folders in sequence and downloads pages within the active year concurrently. Shown as a right-side inspector select under `병렬 처리 방식`. |

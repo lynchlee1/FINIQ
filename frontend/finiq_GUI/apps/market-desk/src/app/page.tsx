@@ -10,6 +10,7 @@ import { Label } from "@finiq/ui";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { pickPath, type PathDialogMode } from "@/lib/fileDialog";
+import { DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { ActionDock, JobStatusLogger } from "@finiq/web-app/status";
 
@@ -219,7 +220,7 @@ export default function Home() {
               <div className="space-y-4">
                 <h3 className="font-semibold text-slate-900 dark:text-white border-b dark:border-[#30363d] pb-2">주가 소스</h3>
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">입력 데이터 경로</Label>
+                  <Label className="dark:text-slate-300">{DATA_PATH_LABELS.input}</Label>
                   <div className="flex gap-2">
                     <Input 
                       placeholder="/path/to/price/folder" 
@@ -273,7 +274,7 @@ export default function Home() {
               <div className="space-y-4">
                 <h3 className="font-semibold text-slate-900 dark:text-white border-b dark:border-[#30363d] pb-2">공시 소스</h3>
                 <div className="space-y-2">
-                  <Label className="dark:text-slate-300">입력 데이터 경로</Label>
+                  <Label className="dark:text-slate-300">{DATA_PATH_LABELS.input}</Label>
                   <div className="flex gap-2">
                     <Input 
                       placeholder="/path/to/disclosure/folder" 
