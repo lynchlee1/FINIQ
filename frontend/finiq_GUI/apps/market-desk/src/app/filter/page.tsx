@@ -226,18 +226,12 @@ export default function FilterPage() {
 
   const applyPreset = useCallback((preset: DisclosureConditionPreset, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
-    if (FILTER_MODE_KEYS.some((item) => item === preset.mode)) {
-      setMode(preset.mode);
-    }
+    setMode(preset.mode);
     setStatus(statusMessage);
     setIsErrorStatus(false);
   }, [setIsErrorStatus, setStatus]);
 
   const pageCount = Math.max(1, Math.ceil((result?.disclosures?.length || 0) / FILTER_PAGE_SIZE));
-  const selectedWorkflow = useMemo(
-    () => presets.find((preset) => preset.name === selectedPreset) || null,
-    [presets, selectedPreset],
-  );
   const pageRows = useMemo(() => {
     const rows = result?.disclosures || [];
     const safeIndex = Math.min(Math.max(pageIndex, 0), pageCount - 1);
@@ -266,7 +260,7 @@ export default function FilterPage() {
     }
     return {
       data_root: rootDirectory,
-      mode,
+      mode: selectedPreset.trim() || mode,
       ...(useSeparateOutputDirectory ? {
         external_html_transfer_path: htmlTransferPath,
       } : {}),
@@ -348,18 +342,9 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
-    if (!mode) {
+    const filterMode = selectedPreset.trim() || mode;
+    if (!filterMode) {
       setStatus("조건검색 필터를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!selectedPreset) {
-      setStatus("조건검색 필터를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
-    if (!selectedWorkflow) {
-      setStatus("선택한 필터를 찾을 수 없습니다.");
       setIsErrorStatus(true);
       return;
     }
@@ -376,18 +361,20 @@ export default function FilterPage() {
     let streamOutcome: "completed" | "aborted" | "failed" | null = null;
 
     try {
-      const filterPayload = buildPayload();
+      const filterPayload = { ...buildPayload(), mode: filterMode };
       const saved = await saveDisclosureConditionPreset(dataRoot, {
-        mode,
+        mode: filterMode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
+      setMode(filterMode);
+      setSelectedPreset(filterMode);
       setPresets(saved.presets);
       inspectionRequestIdRef.current += 1;
       setInspectionRunning(false);
       setInspectionError("");
       setInspectionSummary(null);
-      setPresets((items) => items.map((preset) => preset.name === selectedPreset ? {
+      setPresets((items) => items.map((preset) => preset.name === filterMode ? {
         ...preset,
         status: "running",
         steps: {
@@ -410,7 +397,7 @@ export default function FilterPage() {
       try {
         await refreshPresetsAfterRun(
           dataRoot,
-          selectedPreset,
+          filterMode,
           requestId,
           streamOutcome === "aborted",
         );
@@ -423,8 +410,9 @@ export default function FilterPage() {
   };
 
   const savePreset = async () => {
-    if (!rootDirectory?.trim() || !mode) {
-      setStatus(!rootDirectory?.trim() ? "작업공간 디렉토리를 선택하세요." : "저장할 필터 모드를 선택하세요.");
+    const filterMode = selectedPreset.trim() || mode;
+    if (!rootDirectory?.trim() || !filterMode) {
+      setStatus(!rootDirectory?.trim() ? "작업공간 디렉토리를 선택하세요." : "조건검색 필터 이름을 입력하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -432,7 +420,7 @@ export default function FilterPage() {
     const requestId = presetListRequestIdRef.current;
     try {
       const response = await saveDisclosureConditionPreset(dataRoot, {
-        mode,
+        mode: filterMode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
@@ -441,8 +429,9 @@ export default function FilterPage() {
       setInspectionRunning(false);
       setInspectionError("");
       setInspectionSummary(null);
-      setSelectedPreset(mode);
-      setStatus(`조건검색 필터를 저장했습니다: ${mode}`);
+      setMode(filterMode);
+      setSelectedPreset(filterMode);
+      setStatus(`조건검색 필터를 저장했습니다: ${filterMode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -765,7 +754,7 @@ export default function FilterPage() {
                       <td className="px-3 py-2 whitespace-nowrap">{row.market || ""}</td>
                       <td className="px-3 py-2 min-w-[320px]">
                         {acptNo ? (
-                          <a className="font-bold text-teal-700 hover:underline dark:text-teal-300" href={getKindDisclosureUrl(acptNo)} target="_blank" rel="noreferrer">{title}</a>
+                          <a className="font-bold text-teal-700 hover:underline dark:text-[#2f81f7]" href={getKindDisclosureUrl(acptNo)} target="_blank" rel="noreferrer">{title}</a>
                         ) : title}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">{row.submitter || ""}</td>

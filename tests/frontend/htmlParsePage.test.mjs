@@ -198,6 +198,7 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.doesNotMatch(candidateCardSource, /후보를 선택하세요/);
   assert.match(candidateCardSource, /max-h-44/);
   assert.match(candidateCardSource, /border-teal-200 bg-teal-50\/60/);
+  assert.doesNotMatch(candidateCardSource, /dark:text-teal-/);
   assert.match(candidateCardSource, /불러오기/);
   assert.match(candidateCardSource, /예시/);
   assert.match(candidateCardSource, /onToggleValue\(candidate\.value, !!value\)/);

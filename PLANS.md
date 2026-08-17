@@ -1,5 +1,11 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-18: dark-mode neon text on legacy filter UI
+
+- Purpose: replace leftover neon teal/cyan text on the old `공시 조건` filter UI with the dark-mode slate palette.
+- Implementation: changed dark-mode text, selected chips, option counts, field-help labels, START/AND/NOT markers, and parenthesis fills in `DisclosureConditionFilterCard` to slate/`#21262d`/`#30363d`; applied the same selected-state change to `DisclosureFilterCandidateCard`; changed the filter-result title link to the design accent `#2f81f7`. Light-mode teal was left unchanged.
+- Verification: `node --test tests/frontend/pathLayout.test.mjs tests/frontend/htmlParsePage.test.mjs` passed (37 tests). Browser tools were not available, so the dark-mode palette change was not exercised in a live UI.
+
 ## 2026-08-16: shareholder-meeting failure-history formatting
 
 - Purpose: make the remaining failure cases in the shareholder-meeting handoff match the concise structure established by the edited two-row-header example.

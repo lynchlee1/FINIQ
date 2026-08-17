@@ -240,7 +240,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Internal HTML folder summary row | 폴더 요약 | Row box showing selected-folder file and section counts. |
 | Internal HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | Disclosure filter mode folder | 파싱 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. |
-| Disclosure filter selector | 조건검색 필터 | Automatically lists mode-owned `filter.json` files; selecting one immediately applies its conditions. Do not add a separate name input, rename action, or manual load action on `공시내역 필터링`. |
+| Disclosure filter selector | 조건검색 필터 | Typeable dropdown of mode-owned `filter.json` files. Selecting an existing name immediately applies its conditions. Typing a new valid mode name and saving creates that filter. Do not add a separate name field, rename action, or manual load action on `공시내역 필터링`. |
 | Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. The page opens in `공시내역 제목 검색`. |
 | Disclosure filter existing-data inspection scope | 조건검색 폴더 전체 검사 | Manual inspection on stage 03 checks every mode-owned `03-filter/<mode>/filter.json` independently; it does not require a selected `조건검색 필터`. |
@@ -248,6 +248,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |
 | Disclosure condition clear action | 지우기 | Icon button between `실행 취소` and `다시 실행` on `공시 조건`. Clears condition blocks to one empty row and records that change in the same undo history. |
+| Disclosure condition field help action | 필드 설명 | Circle-help button next to `조건 블록`. Lists each filter field with a short definition and `ex)` examples. Market values stored in stage 02 are `유가증권`, `코스닥`, and `코넥스`. Badge values include `상장폐지`, `관리종목`, and `KOSPI200`. |
 | Disclosure title search action | 실행 | Starts the restorable background title-search job in `공시내역 제목 검색` mode. Use the same execution label as the filtering mode. |
 | Disclosure title search result | 제목 검색 결과 | Lists distinct database titles and the matching disclosure count for each title. |
 | Shared worker count setting | 워커 수 | Shared right-dock label for the parallel worker count on every disclosure page. Do not invent page-specific names such as `검색 worker 수` or `병렬 워커 수`. |

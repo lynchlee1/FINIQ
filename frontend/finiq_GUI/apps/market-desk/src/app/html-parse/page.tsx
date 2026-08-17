@@ -484,13 +484,14 @@ export default function HtmlParsePage() {
       return;
     }
     try {
+      const filterMode = selectedPreset.trim() || parseMode;
       const response = await saveDisclosureConditionPreset(dataRoot, {
-        mode: parseMode,
+        mode: filterMode,
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       setPresets(response.presets);
-      setSelectedPreset(parseMode);
-      setStatus(`조건검색 필터를 저장했습니다: ${parseMode}`);
+      setSelectedPreset(filterMode);
+      setStatus(`조건검색 필터를 저장했습니다: ${filterMode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
