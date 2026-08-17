@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { Eraser, ListPlus, Plus, Redo2, Save, Trash2, Undo2, Upload } from "lucide-react";
+import { ChevronDown, CircleHelp, Eraser, ListPlus, Plus, Redo2, Save, Trash2, Undo2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 
@@ -11,9 +11,77 @@ export const DISCLOSURE_FILTER_FIELD_OPTIONS = [
   ["company_name", "회사명"],
   ["submitter", "제출인"],
   ["market", "시장"],
+  ["badges", "배지"],
   ["disclosed_date", "공시일"],
   ["acpt_no", "접수번호"],
   ["company_id", "회사코드"],
+] as const;
+
+export const DISCLOSURE_FILTER_MARKET_VALUES = ["유가증권", "코스닥", "코넥스"] as const;
+
+export const DISCLOSURE_FILTER_BADGE_VALUES = [
+  "상장폐지",
+  "KRX300",
+  "관리종목",
+  "KOSPI200",
+  "V100",
+  "투자주의환기종목",
+  "KTOP30",
+  "KOSDAQ150",
+  "불성실공시",
+  "투자주의종목",
+  "투자경고종목",
+] as const;
+
+export const DISCLOSURE_FILTER_FIELD_HELP = [
+  {
+    key: "title",
+    label: "제목",
+    description: "공시 제목입니다.",
+    examples: ["주주총회소집결의", "[정정]단일판매ㆍ공급계약체결"],
+  },
+  {
+    key: "company_name",
+    label: "회사명",
+    description: "기업명입니다.",
+    examples: ["삼성전자", "SK하이닉스", "알테오젠"],
+  },
+  {
+    key: "submitter",
+    label: "제출인",
+    description: "제출인 이름입니다.",
+    examples: ["삼성전자", "SK하이닉스", "알테오젠"],
+  },
+  {
+    key: "market",
+    label: "시장",
+    description: "상장된 시장입니다.",
+    examples: ["유가증권", "코스닥", "코넥스"],
+  },
+  {
+    key: "badges",
+    label: "배지",
+    description: "KIND 회사 아이콘 배지입니다.",
+    examples: ["상장폐지", "관리종목", "KOSPI200"],
+  },
+  {
+    key: "disclosed_date",
+    label: "공시일",
+    description: "공시된 날짜입니다. (YYYY-MM-DD 형식)",
+    examples: ["2026-01-02"],
+  },
+  {
+    key: "acpt_no",
+    label: "접수번호",
+    description: "공시의 접수번호입니다. (YYYYMMDDXXXXXX 형식)",
+    examples: ["20251231000708", "19960103M00001"],
+  },
+  {
+    key: "company_id",
+    label: "회사코드",
+    description: "KIND 내부 회사 분류 코드입니다.",
+    examples: ["00593", "0126Z", "USA12"],
+  },
 ] as const;
 
 export const DISCLOSURE_FILTER_OPERATOR_OPTIONS = [
@@ -257,13 +325,13 @@ function ConditionOptionsPopover({
         className={cn(
           "flex h-9 w-full items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-bold",
           activeCount > 0
-            ? "border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-900/50 dark:bg-teal-900/30 dark:text-teal-300"
+            ? "border-teal-200 bg-teal-50 text-teal-800 dark:border-[#30363d] dark:bg-[#21262d] dark:text-slate-200"
             : "border-slate-200 bg-white text-slate-500 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300",
         )}
       >
         옵션
         {activeCount > 0 && (
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-bold text-white dark:bg-teal-500">
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-bold text-white dark:bg-slate-500">
             {activeCount}
           </span>
         )}
@@ -283,6 +351,247 @@ function ConditionOptionsPopover({
               {label}
             </label>
           ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+function FieldHelpPopover() {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const handleScrollOrResize = () => setOpen(false);
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="필드 설명"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-[#21262d] dark:hover:text-slate-200"
+      >
+        <CircleHelp className="h-4 w-4" />
+      </button>
+      {open && coords && createPortal(
+        <div
+          ref={panelRef}
+          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-50 w-96 max-w-[calc(100vw-24px)] rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-[#30363d] dark:bg-[#161b22]"
+        >
+          <p className="mb-2 text-xs font-bold text-slate-700 dark:text-slate-200">필드 설명</p>
+          <dl className="space-y-2.5">
+            {DISCLOSURE_FILTER_FIELD_HELP.map((field) => (
+              <div key={field.key}>
+                <dt className="text-xs font-bold text-teal-700 dark:text-slate-200">{field.label}</dt>
+                <dd className="text-xs leading-5 text-slate-600 dark:text-slate-300">
+                  {field.description}
+                  <span className="mt-0.5 block text-slate-500 dark:text-slate-400">ex) {field.examples.join(", ")}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+function FilterPresetCombobox({
+  value,
+  presets,
+  onValueChange,
+  onSelectExisting,
+}: {
+  value: string;
+  presets: DisclosureConditionPreset[];
+  onValueChange: (value: string) => void;
+  onSelectExisting: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
+  const query = value.trim().toLowerCase();
+  const matches = query
+    ? presets.filter((preset) => preset.name.toLowerCase().includes(query))
+    : presets;
+  const exactMatch = presets.some((preset) => preset.name === value.trim());
+  const canCreate = Boolean(value.trim()) && !exactMatch;
+
+  useEffect(() => {
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    setHighlight(0);
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const handleScrollOrResize = () => setOpen(false);
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open]);
+
+  const chooseExisting = (name: string) => {
+    onValueChange(name);
+    onSelectExisting(name);
+    setOpen(false);
+  };
+
+  const optionCount = matches.length + (canCreate ? 1 : 0);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      setOpen(false);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      setHighlight((index) => Math.min(index + 1, Math.max(optionCount - 1, 0)));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      setHighlight((index) => Math.max(index - 1, 0));
+      return;
+    }
+    if (event.key === "Enter") {
+      if (!open || !optionCount) return;
+      event.preventDefault();
+      if (highlight < matches.length) {
+        chooseExisting(matches[highlight].name);
+        return;
+      }
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <Input
+        value={value}
+        onChange={(event) => {
+          onValueChange(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
+        onKeyDown={handleKeyDown}
+        placeholder="필터 선택"
+        autoComplete="off"
+        spellCheck={false}
+        role="combobox"
+        aria-label="조건검색 필터 선택"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        className="h-9 pr-9 font-semibold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="필터 목록"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          setOpen((current) => !current);
+        }}
+        className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+      >
+        <ChevronDown className="h-4 w-4" />
+      </button>
+      {open && coords && createPortal(
+        <div
+          ref={panelRef}
+          role="listbox"
+          style={{ top: coords.top, left: coords.left, width: coords.width }}
+          className="fixed z-50 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-[#30363d] dark:bg-[#161b22]"
+        >
+          {matches.map((preset, index) => (
+            <button
+              key={preset.name}
+              type="button"
+              role="option"
+              aria-selected={preset.name === value}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                chooseExisting(preset.name);
+              }}
+              className={cn(
+                "block w-full truncate rounded-md px-2 py-1.5 text-left text-xs font-bold text-slate-600 dark:text-slate-300",
+                highlight === index
+                  ? "bg-slate-100 dark:bg-[#21262d]"
+                  : "hover:bg-slate-50 dark:hover:bg-[#21262d]",
+              )}
+            >
+              {preset.name}
+            </button>
+          ))}
+          {canCreate && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={false}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onValueChange(value.trim());
+                setOpen(false);
+              }}
+              className={cn(
+                "block w-full truncate rounded-md px-2 py-1.5 text-left text-xs font-bold text-teal-700 dark:text-slate-200",
+                highlight === matches.length
+                  ? "bg-teal-50 dark:bg-[#21262d]"
+                  : "hover:bg-teal-50 dark:hover:bg-[#21262d]",
+              )}
+            >
+              {value.trim()} 새 필터
+            </button>
+          )}
+          {!matches.length && !canCreate && (
+            <p className="px-2 py-1.5 text-xs font-medium text-slate-400 dark:text-slate-500">저장된 필터가 없습니다.</p>
+          )}
         </div>,
         document.body,
       )}
@@ -456,31 +765,23 @@ export function DisclosureConditionFilterCard({
               ? "md:grid-cols-[minmax(150px,1fr)_auto_auto_auto]"
               : "md:grid-cols-[minmax(150px,1fr)_auto_auto]",
           )}>
-            <select
+            <FilterPresetCombobox
               value={selectedPreset}
-              onChange={(event) => {
-                const nextPreset = event.target.value;
-                onSelectedPresetChange(nextPreset);
-                if (nextPreset) onLoadPreset(nextPreset);
-              }}
-              className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
-              aria-label="조건검색 필터 선택"
-            >
-              <option value="">필터 선택</option>
-              {presets.map((preset) => (
-                <option key={preset.name} value={preset.name}>
-                  {preset.name}
-                </option>
-              ))}
-            </select>
+              presets={presets}
+              onValueChange={onSelectedPresetChange}
+              onSelectExisting={onLoadPreset}
+            />
             {onLoadPresetFromJson && <Button variant="outline" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>}
             <Button onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
-            <Button variant="outline" onClick={onDeletePreset} disabled={!selectedPreset}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
+            <Button variant="outline" onClick={onDeletePreset} disabled={!presets.some((preset) => preset.name === selectedPreset)}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
           </div>
         </div>
 
         <div className="grid gap-2">
-          <Label className="dark:text-slate-300">조건 블록</Label>
+          <div className="flex items-center gap-1.5">
+            <Label className="dark:text-slate-300">조건 블록</Label>
+            <FieldHelpPopover />
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => applyConditionsChange([...conditions, makeEmptyDisclosureCondition(conditions.length ? "AND" : "")])}>
@@ -525,11 +826,11 @@ export function DisclosureConditionFilterCard({
           <div className="flex min-h-[52px] flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
             {conditionPreview.length ? conditionPreview.map((condition, index) => (
               <div key={`${condition.field}-${index}`} className="flex flex-wrap items-center gap-2">
-                {index > 0 && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-teal-900/30 dark:border-teal-900/50 dark:text-teal-300">{condition.connector || "AND"}</span>}
+                {index > 0 && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-200">{condition.connector || "AND"}</span>}
                 {condition.open_count > 0 && <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-bold dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-300">{"(".repeat(condition.open_count)}</span>}
-                {condition.not && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-teal-900/30 dark:border-teal-900/50 dark:text-teal-300">NOT</span>}
+                {condition.not && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-200">NOT</span>}
                 <span className="inline-flex min-h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-100">
-                  <span className="text-teal-700 dark:text-teal-300">{fieldLabel(condition.field)}</span>
+                  <span className="text-teal-700 dark:text-slate-200">{fieldLabel(condition.field)}</span>
                   <em className="not-italic text-slate-500 dark:text-slate-400">{operatorLabel(condition.operator)}</em>
                   {condition.operator !== "exists" && condition.operator !== "empty" && <strong>{condition.value}</strong>}
                   {condition.ignore_spaces && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-[#21262d] dark:text-slate-300">공백무시</span>}
@@ -547,7 +848,7 @@ export function DisclosureConditionFilterCard({
                   value={condition.connector}
                   disabled={index === 0}
                   onChange={(event) => updateCondition(index, { connector: event.target.value as DisclosureFilterConnector })}
-                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 disabled:text-teal-700 disabled:opacity-100 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300 dark:disabled:text-teal-300"
+                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 disabled:text-teal-700 disabled:opacity-100 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300 dark:disabled:text-slate-400"
                   aria-label="연결 조건"
                 >
                   <option value="">START</option>
@@ -556,7 +857,7 @@ export function DisclosureConditionFilterCard({
                   <option value="OR">OR</option>
                 </select>
                 <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[36px_100px_minmax(84px,.45fr)_minmax(112px,.55fr)_minmax(240px,3fr)_36px]">
-                  <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-cyan-50 border-cyan-300 dark:bg-cyan-900/20" : "")} />
+                  <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-cyan-50 border-cyan-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
                   <ConditionOptionsPopover
                     condition={condition}
                     open={openOptionsIndex === index}
@@ -570,7 +871,7 @@ export function DisclosureConditionFilterCard({
                     {DISCLOSURE_FILTER_OPERATOR_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
                   <Input value={condition.value} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="값" className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                  <Input value={")".repeat(condition.close_count)} onChange={(event) => updateCondition(index, { close_count: countParens(event.target.value, ")") })} aria-label="그룹 끝" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.close_count ? "bg-cyan-50 border-cyan-300 dark:bg-cyan-900/20" : "")} />
+                  <Input value={")".repeat(condition.close_count)} onChange={(event) => updateCondition(index, { close_count: countParens(event.target.value, ")") })} aria-label="그룹 끝" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.close_count ? "bg-cyan-50 border-cyan-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
                 </div>
                 <Button variant="ghost" onClick={() => removeCondition(index)} className="h-8 px-2 text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-300">삭제</Button>
               </div>

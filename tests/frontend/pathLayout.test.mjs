@@ -317,10 +317,10 @@ test("disclosure filter removes the parser mode from the data path card", async 
 
   assert.ok(dataPathCard, "필터 페이지는 공용 데이터 경로 카드를 써야 합니다.");
   assert.match(source, /const \[mode, setMode\] = useState\(""\)/);
-  assert.match(source, /data_root: rootDirectory,\s*mode,\s*\.\.\.\(useSeparateOutputDirectory/);
+  assert.match(source, /data_root: rootDirectory,\s*mode: selectedPreset\.trim\(\) \|\| mode,/);
   assert.doesNotMatch(source, /workflow_name/);
-  assert.match(source, /if \(!mode\) \{[\s\S]*?조건검색 필터를 선택하세요/);
-  assert.match(source, /if \(!selectedPreset\) \{[\s\S]*?조건검색 필터를 선택하세요/);
+  assert.match(source, /const filterMode = selectedPreset\.trim\(\) \|\| mode;/);
+  assert.match(source, /if \(!filterMode\) \{[\s\S]*?조건검색 필터를 선택하세요/);
   assert.doesNotMatch(dataPathCard, /파싱 모드/);
   assert.doesNotMatch(dataPathCard, /<select/);
 });
@@ -344,17 +344,57 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.doesNotMatch(source, /onLoadPresetFromJson/);
   assert.match(conditionCardSource, /onLoadPresetFromJson\?: \(\) => void/);
   assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" onClick=\{onLoadPresetFromJson\}>/);
-  assert.match(conditionCardSource, /<option value="">필터 선택<\/option>/);
-  assert.match(conditionCardSource, /<option key=\{preset\.name\} value=\{preset\.name\}>\s*\{preset\.name\}\s*<\/option>/);
+  assert.match(conditionCardSource, /role="combobox"/);
+  assert.match(conditionCardSource, /placeholder="필터 선택"/);
+  assert.match(conditionCardSource, /onSelectExisting=\{onLoadPreset\}/);
+  assert.match(conditionCardSource, /\{value\.trim\(\)\} 새 필터/);
   assert.doesNotMatch(conditionCardSource, /workflowStatusLabel/);
   assert.doesNotMatch(conditionCardSource, /placeholder="프리셋 이름"/);
   assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
   assert.doesNotMatch(conditionCardSource, /onRenamePreset/);
-  assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!selectedPreset\}/);
-  assert.match(conditionCardSource, /if \(nextPreset\) onLoadPreset\(nextPreset\)/);
+  assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!presets\.some\(\(preset\) => preset\.name === selectedPreset\)\}/);
   assert.match(conditionCardSource, /DisclosureFilterConnector = "" \| "AND" \| "XOR" \| "OR"/);
   assert.match(conditionCardSource, /<option value="XOR">XOR<\/option>/);
   assert.match(conditionCardSource, /mixed condition block connectors must be separated by parentheses/);
+});
+
+test("disclosure condition card documents each filter field with a stored example", async () => {
+  const source = await readFile(disclosureConditionCardPath, "utf8");
+
+  assert.match(source, /aria-label="필드 설명"/);
+  assert.match(source, /<CircleHelp className="h-4 w-4" \/>/);
+  assert.match(source, /DISCLOSURE_FILTER_MARKET_VALUES = \["유가증권", "코스닥", "코넥스"\]/);
+  assert.match(source, /\["badges", "배지"\]/);
+  assert.match(source, /공시 제목입니다\./);
+  assert.match(source, /기업명입니다\./);
+  assert.match(source, /제출인 이름입니다\./);
+  assert.match(source, /상장된 시장입니다\./);
+  assert.match(source, /KIND 회사 아이콘 배지입니다\./);
+  assert.match(source, /공시된 날짜입니다\. \(YYYY-MM-DD 형식\)/);
+  assert.match(source, /공시의 접수번호입니다\. \(YYYYMMDDXXXXXX 형식\)/);
+  assert.match(source, /KIND 내부 회사 분류 코드입니다\./);
+  assert.doesNotMatch(source, /아니라/);
+  for (const example of [
+    "주주총회소집결의",
+    "[정정]단일판매ㆍ공급계약체결",
+    "삼성전자",
+    "SK하이닉스",
+    "알테오젠",
+    "유가증권",
+    "코스닥",
+    "코넥스",
+    "상장폐지",
+    "관리종목",
+    "KOSPI200",
+    "2026-01-02",
+    "20251231000708",
+    "19960103M00001",
+    "00593",
+    "0126Z",
+    "USA12",
+  ]) {
+    assert.match(source, new RegExp(example.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
 });
 
 test("disclosure condition card places an undoable clear button between undo and redo", async () => {
@@ -367,6 +407,19 @@ test("disclosure condition card places an undoable clear button between undo and
   assert.ok(clearIndex > undoIndex && redoIndex > clearIndex, "지우기 버튼은 실행 취소와 다시 실행 사이에 있어야 합니다.");
   assert.match(source, /const clear = \(\) => \{[\s\S]*?applyConditionsChange\(\[makeEmptyDisclosureCondition\(\)\]\)/);
   assert.match(source, /disabled=\{isEmptyDisclosureConditionBlocks\(conditions\)\}/);
+});
+
+test("disclosure condition card uses slate text in dark mode", async () => {
+  const [conditionCardSource, filterPageSource, candidateCardSource] = await Promise.all([
+    readFile(disclosureConditionCardPath, "utf8"),
+    readFile(filterPagePath, "utf8"),
+    readFile("frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureFilterCandidateCard.tsx", "utf8"),
+  ]);
+
+  assert.doesNotMatch(conditionCardSource, /dark:(?:text|bg|border)-(?:teal|cyan)-/);
+  assert.doesNotMatch(filterPageSource, /dark:text-teal-/);
+  assert.doesNotMatch(candidateCardSource, /dark:(?:text|bg|border)-teal-/);
+  assert.match(conditionCardSource, /dark:text-slate-200/);
 });
 
 test("disclosure filter page combines title search and recorded filtering", async () => {
@@ -480,7 +533,7 @@ test("disclosure filter keeps workflow status scoped to the active workspace", a
     (source.match(/if \(!isCurrentPresetWorkspace\(dataRoot, requestId\)\) return;/g) || []).length >= 6,
     "모든 비동기 프리셋 응답은 현재 작업공간에만 적용해야 합니다.",
   );
-  assert.match(source, /const selectedWorkflow = useMemo\([\s\S]*?presets\.find\(\(preset\) => preset\.name === selectedPreset\)/);
+  assert.match(source, /const filterMode = selectedPreset\.trim\(\) \|\| mode;/);
   assert.match(source, /status: "running"/);
   assert.match(source, /streamOutcome === "aborted"/);
   assert.match(source, /workflow\?\.status !== "running"/);

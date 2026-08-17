@@ -1559,6 +1559,108 @@ def test_disclosure_filters_reject_mixed_connectors_without_grouping(
         )
 
 
+def _badge_filter_fixture_payload() -> dict[str, object]:
+    return {
+        "summary": {"companies": 3, "disclosures": 3},
+        "companies": [
+            {
+                "company_name": "폐지전자",
+                "company_id": "11111",
+                "market": "코스닥",
+                "badges": ["상장폐지", "관리종목"],
+                "disclosures": [
+                    {
+                        "disclosed_at": "2025-01-02 09:00:00",
+                        "title": "최대주주변경",
+                        "submitter": "폐지전자",
+                        "acpt_no": "d1",
+                    }
+                ],
+            },
+            {
+                "company_name": "삼성전자",
+                "company_id": "00593",
+                "market": "유가증권",
+                "badges": ["V100", "KOSPI200", "KRX300"],
+                "disclosures": [
+                    {
+                        "disclosed_at": "2025-01-03 09:00:00",
+                        "title": "현금ㆍ현물배당결정",
+                        "submitter": "삼성전자",
+                        "acpt_no": "d2",
+                    }
+                ],
+            },
+            {
+                "company_name": "한국투자증권",
+                "company_id": "03049",
+                "market": None,
+                "badges": [],
+                "disclosures": [
+                    {
+                        "disclosed_at": "2025-01-04 09:00:00",
+                        "title": "ETF 추가 ㆍ 변경상장신청서",
+                        "submitter": "한국투자증권",
+                        "acpt_no": "d3",
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def test_filter_disclosures_payload_matches_any_badge(tmp_path: Path) -> None:
+    _write_filter_manifest_fixture(tmp_path, _badge_filter_fixture_payload())
+
+    contains_delisted = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [
+                _filter_block(field="badges", operator="contains", value="상장폐지"),
+            ],
+        }
+    )
+    equals_one_of_many = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [
+                _filter_block(field="badges", operator="equals", value="KOSPI200"),
+            ],
+        }
+    )
+    empty_badges = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [
+                _filter_block(field="badges", operator="empty", value=""),
+            ],
+        }
+    )
+    any_of = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [
+                _filter_block(field="badges", operator="in", value="관리종목, KOSPI200"),
+            ],
+        }
+    )
+    searched = search_disclosure_titles_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [
+                _filter_block(field="badges", operator="contains", value="상장폐지"),
+            ],
+        }
+    )
+
+    assert [row["acpt_no"] for row in contains_delisted["disclosures"]] == ["d1"]
+    assert contains_delisted["disclosures"][0]["badges"] == ["상장폐지", "관리종목"]
+    assert [row["acpt_no"] for row in equals_one_of_many["disclosures"]] == ["d2"]
+    assert [row["acpt_no"] for row in empty_badges["disclosures"]] == ["d3"]
+    assert [row["acpt_no"] for row in any_of["disclosures"]] == ["d2", "d1"]
+    assert searched["titles"] == [{"title": "최대주주변경", "disclosures": 1}]
+
+
 def test_filter_disclosures_payload_can_ignore_spaces_in_block_values(tmp_path: Path) -> None:
     _write_filter_manifest_fixture(tmp_path)
 

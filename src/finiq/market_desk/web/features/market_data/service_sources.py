@@ -259,6 +259,7 @@ def _iter_sqlite_manifest_disclosure_records(
                     "company_id",
                     "company_cell_text",
                     "market",
+                    "badges_json",
                     "disclosed_at",
                     "disclosed_date",
                     "title",
@@ -291,9 +292,90 @@ def _iter_sqlite_manifest_disclosure_records(
                 record["title_flags"] = list(
                     json.loads(str(record.get("title_flags_json") or "[]"))
                 )
+                parsed_badges = json.loads(str(record.get("badges_json") or "[]"))
+                record["badges"] = (
+                    [str(item) for item in parsed_badges]
+                    if isinstance(parsed_badges, list)
+                    else []
+                )
                 yield _prepare_filter_record(record)
         finally:
             connection.close()
+
+
+def _sqlite_badges_predicate(
+    quoted_column: str,
+    *,
+    operator: str,
+    expected: str,
+    folded_expected: str,
+    clean_search: bool,
+    ignore_spaces: bool,
+) -> tuple[str, list[str]]:
+    badge_text = "TRIM(COALESCE(CAST(badge_row.value AS TEXT), ''))"
+    if clean_search:
+        badge_text = f"finiq_clean_search({badge_text})"
+    if ignore_spaces:
+        badge_text = f"finiq_remove_spaces({badge_text})"
+    folded_badge = f"finiq_casefold({badge_text})"
+    json_source = f"COALESCE({quoted_column}, '[]')"
+
+    def exists_badge(inner_sql: str, parameters: list[str]) -> tuple[str, list[str]]:
+        return (
+            f"EXISTS (SELECT 1 FROM json_each({json_source}) AS badge_row WHERE {inner_sql})",
+            parameters,
+        )
+
+    if operator == "contains":
+        return exists_badge(f"INSTR({folded_badge}, ?) > 0", [folded_expected])
+    if operator == "not_contains":
+        sql, parameters = exists_badge(f"INSTR({folded_badge}, ?) > 0", [folded_expected])
+        return f"NOT {sql}", parameters
+    if operator == "exact_match":
+        return exists_badge(f"{badge_text} = ?", [expected])
+    if operator == "equals":
+        return exists_badge(f"{folded_badge} = ?", [folded_expected])
+    if operator == "not_equals":
+        sql, parameters = exists_badge(f"{folded_badge} = ?", [folded_expected])
+        return f"NOT {sql}", parameters
+    if operator == "starts_with":
+        return exists_badge(
+            f"SUBSTR({folded_badge}, 1, LENGTH(?)) = ?",
+            [folded_expected, folded_expected],
+        )
+    if operator == "ends_with":
+        return exists_badge(
+            f"SUBSTR({folded_badge}, -LENGTH(?)) = ?",
+            [folded_expected, folded_expected],
+        )
+    if operator == "in":
+        values = [item.casefold() for item in _split_operator_values(expected)]
+        if not values:
+            return "0 = 1", []
+        placeholders = ", ".join("?" for _ in values)
+        return exists_badge(f"{folded_badge} IN ({placeholders})", values)
+    if operator in {"before", "after", "on_or_before", "on_or_after"}:
+        comparison = {
+            "before": "<",
+            "after": ">",
+            "on_or_before": "<=",
+            "on_or_after": ">=",
+        }[operator]
+        return exists_badge(f"({badge_text} != '' AND {badge_text} {comparison} ?)", [expected])
+    if operator == "between":
+        values = _split_operator_values(expected)
+        if len(values) < 2:
+            raise ValueError("between operator requires two values")
+        return exists_badge(
+            f"({badge_text} != '' AND {badge_text} BETWEEN ? AND ?)",
+            values[:2],
+        )
+    if operator == "exists":
+        return exists_badge(f"{badge_text} != ''", [])
+    if operator == "empty":
+        sql, parameters = exists_badge(f"{badge_text} != ''", [])
+        return f"NOT {sql}", parameters
+    raise ValueError(f"Unsupported filter operator: {operator}")
 
 
 def _sqlite_title_filter_expression(
@@ -313,7 +395,7 @@ def _sqlite_title_filter_expression(
             tokens.append("(")
 
         field = str(block["field"])
-        quoted_field = _quoted_sqlite_identifier(field)
+        quoted_field = _quoted_sqlite_identifier(_filter_sql_column(field))
         actual = f"TRIM(COALESCE(CAST({quoted_field} AS TEXT), ''))"
         expected = str(block["value"]).strip()
         if block["clean_search"]:
@@ -326,7 +408,16 @@ def _sqlite_title_filter_expression(
         folded_actual = f"finiq_casefold({actual})"
         folded_expected = expected.casefold()
         operator = str(block["operator"])
-        if operator == "contains":
+        if field == "badges":
+            predicate, parameters = _sqlite_badges_predicate(
+                quoted_field,
+                operator=operator,
+                expected=expected,
+                folded_expected=folded_expected,
+                clean_search=bool(block["clean_search"]),
+                ignore_spaces=bool(block["ignore_spaces"]),
+            )
+        elif operator == "contains":
             predicate = f"INSTR({folded_actual}, ?) > 0"
             parameters.append(folded_expected)
         elif operator == "not_contains":
@@ -474,7 +565,7 @@ def _query_sqlite_shard_titles(
     connection = sqlite3.connect(shard_path)
     try:
         columns = _sqlite_table_columns(connection, table_name)
-        for column_name in _FILTER_FIELDS | {"id"}:
+        for column_name in {_filter_sql_column(field) for field in _FILTER_FIELDS} | {"id"}:
             _sqlite_select_column(columns, column_name)
         connection.create_function(
             "finiq_casefold", 1, lambda value: str(value or "").casefold()

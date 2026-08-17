@@ -361,11 +361,36 @@ def _parse_boolean_tokens(tokens: list[object]) -> bool:
     return result
 
 
+def _record_badges(record: dict[str, Any]) -> list[str]:
+    raw = record.get("badges")
+    if raw is None:
+        raw = record.get("badges_json")
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if not stripped or stripped == "[]":
+            return []
+        try:
+            raw = json.loads(stripped)
+        except json.JSONDecodeError:
+            return [stripped]
+    if not isinstance(raw, list):
+        text = str(raw or "").strip()
+        return [text] if text else []
+    badges: list[str] = []
+    for item in raw:
+        text = str(item or "").strip()
+        if text:
+            badges.append(text)
+    return badges
+
+
 def _record_field_value(record: dict[str, Any], field: str) -> object:
     if field == "disclosed_date":
         return record["__filter_disclosed_date"]
     if field == "acpt_no":
         return record["__filter_acpt_no"]
+    if field == "badges":
+        return _record_badges(record)
     return record.get(field)
 
 
@@ -374,10 +399,18 @@ _FILTER_FIELDS = {
     "company_name",
     "submitter",
     "market",
+    "badges",
     "disclosed_date",
     "acpt_no",
     "company_id",
 }
+_FILTER_FIELD_COLUMNS = {
+    "badges": "badges_json",
+}
+
+
+def _filter_sql_column(field: str) -> str:
+    return _FILTER_FIELD_COLUMNS.get(field, field)
 _FILTER_OPERATORS = {
     "contains",
     "not_contains",
@@ -505,57 +538,77 @@ def _clean_search_text(value: str) -> str:
     return "".join(cleaned)
 
 
+def _field_compare_texts(
+    raw_value: object,
+    *,
+    clean_search: bool,
+    ignore_spaces: bool,
+) -> list[str]:
+    items = raw_value if isinstance(raw_value, list) else [raw_value]
+    texts: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if clean_search:
+            text = _clean_search_text(text)
+        if ignore_spaces:
+            text = _remove_whitespace(text)
+        texts.append(text)
+    return texts
+
+
 def _condition_block_matches(record: dict[str, Any], block: dict[str, Any]) -> bool:
     field = str(block["field"])
     operator = str(block["operator"])
     expected = str(block["value"]).strip()
-    raw_value = _record_field_value(record, field)
-    actual = str(raw_value or "").strip()
+    texts = _field_compare_texts(
+        _record_field_value(record, field),
+        clean_search=bool(block["clean_search"]),
+        ignore_spaces=bool(block["ignore_spaces"]),
+    )
     if block["clean_search"]:
-        actual = _clean_search_text(actual)
         expected = _clean_search_text(expected)
     if block["ignore_spaces"]:
-        actual = _remove_whitespace(actual)
         expected = _remove_whitespace(expected)
-    actual_folded = actual.casefold()
     expected_folded = expected.casefold()
+    folded_texts = [text.casefold() for text in texts]
+    nonempty_texts = [text for text in texts if text]
 
     if operator == "contains":
-        return expected_folded in actual_folded
+        return any(expected_folded in folded for folded in folded_texts)
     if operator == "not_contains":
-        return expected_folded not in actual_folded
+        return all(expected_folded not in folded for folded in folded_texts)
     if operator == "exact_match":
-        return actual == expected
+        return any(text == expected for text in texts)
     if operator == "equals":
-        return actual_folded == expected_folded
+        return expected_folded in folded_texts
     if operator == "not_equals":
-        return actual_folded != expected_folded
+        return expected_folded not in folded_texts
     if operator == "starts_with":
-        return actual_folded.startswith(expected_folded)
+        return any(folded.startswith(expected_folded) for folded in folded_texts)
     if operator == "ends_with":
-        return actual_folded.endswith(expected_folded)
+        return any(folded.endswith(expected_folded) for folded in folded_texts)
     if operator == "in":
         values = {item.casefold() for item in _split_operator_values(expected)}
-        return actual_folded in values
+        return any(folded in values for folded in folded_texts)
     if operator == "before":
-        return bool(actual and expected and actual < expected)
+        return any(text < expected for text in nonempty_texts if expected)
     if operator == "after":
-        return bool(actual and expected and actual > expected)
+        return any(text > expected for text in nonempty_texts if expected)
     if operator == "on_or_before":
-        return bool(actual and expected and actual <= expected)
+        return any(text <= expected for text in nonempty_texts if expected)
     if operator == "on_or_after":
-        return bool(actual and expected and actual >= expected)
+        return any(text >= expected for text in nonempty_texts if expected)
     if operator == "between":
         values = _split_operator_values(expected)
         if len(values) < 2:
             msg = "between operator requires two values"
             raise ValueError(msg)
         start, end = values[0], values[1]
-        return bool(actual and start <= actual <= end)
+        return any(start <= text <= end for text in nonempty_texts)
     if operator == "exists":
-        return bool(actual)
+        return bool(nonempty_texts)
     if operator == "empty":
-        return not actual
+        return not nonempty_texts
 
     msg = f"Unsupported filter operator: {operator}"
     raise ValueError(msg)

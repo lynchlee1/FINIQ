@@ -641,13 +641,14 @@ export default function DisclosureAutomationPage() {
       return;
     }
     try {
+      const filterMode = selectedPreset.trim() || parserMode;
       const response = await saveDisclosureConditionPreset(dataRoot, {
-        mode: parserMode,
+        mode: filterMode,
         condition_blocks: validatedConditions(),
       });
       setPresets(response.presets);
-      setSelectedPreset(parserMode);
-      setNotification(`조건검색 필터를 저장했습니다: ${parserMode}`);
+      setSelectedPreset(filterMode);
+      setNotification(`조건검색 필터를 저장했습니다: ${filterMode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setNotification(error instanceof Error ? error.message : String(error));
