@@ -493,7 +493,7 @@ export default function HtmlBondSummaryPage() {
               <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">필터</p>
               </div>
-              <HtmlWorkflowForm fields={optionFields} />
+              <HtmlWorkflowForm layout="inspector" fields={optionFields} />
             </div>
           }
         />

@@ -17,8 +17,11 @@ const store = fs.readFileSync(
 
 test("download settings expose both bounded parallel strategies", () => {
   assert.match(page, /병렬 처리 방식/);
-  assert.match(page, /여러 연도 병렬 처리/);
-  assert.match(page, /한 연도 내 페이지 병렬 처리/);
+  assert.match(page, /label: "연도별 병렬"/);
+  assert.match(page, /label: "한 연도 내 병렬"/);
+  assert.match(page, /<HtmlInspectorField label="병렬 처리 방식">/);
+  assert.doesNotMatch(page, /여러 연도 병렬 처리/);
+  assert.doesNotMatch(page, /한 연도 내 페이지 병렬 처리/);
   assert.match(page, /parallel_strategy: parallelStrategy/);
   assert.match(types, /parallel_strategy: "years" \| "pages"/);
 });

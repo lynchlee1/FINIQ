@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Filter, Play, Loader2, Search } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Input } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import {
   WorkflowModeSwitch,
@@ -24,6 +24,7 @@ import {
   type DisclosureConditionPreset,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { HtmlInspectorField, HtmlInspectorToggle, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
   deleteDisclosureConditionPreset,
   listDisclosureConditionPresets,
@@ -807,26 +808,26 @@ export default function FilterPage() {
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>
                 </div>
               <div className="space-y-2">
-                <Label className="dark:text-slate-300">최대 반환</Label>
-                <label className="flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                  <input type="checkbox" checked={limitUnlimited} onChange={(event) => setLimitUnlimited(event.target.checked)} />
-                  제한 없음
-                </label>
-                <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200 disabled:opacity-50" />
+                <HtmlInspectorField label="제한 없음">
+                  <HtmlInspectorToggle checked={limitUnlimited} onCheckedChange={setLimitUnlimited} />
+                </HtmlInspectorField>
+                <HtmlInspectorField label="최대 반환">
+                  <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className={`${htmlInspectorControlClassName} disabled:opacity-50`} />
+                </HtmlInspectorField>
               </div>
               </div>}
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
-              <Label className="grid gap-2 dark:text-slate-300">
-                {taskMode === "title-search" ? "검색 worker 수" : "파싱 worker 수"}
-                <Input type="number" min="1" max={parallelWorkerCount} step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-              </Label>
-              {taskMode === "filter" && <Label className="grid gap-2 dark:text-slate-300">
-                진행 표시 간격
-                <Input type="number" min="1" max="10000" step="1" value={progressInterval} onChange={(event) => setProgressInterval(event.target.value)} className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-              </Label>}
+              <div className="space-y-2">
+              <HtmlInspectorField label={taskMode === "title-search" ? "검색 worker 수" : "파싱 worker 수"}>
+                <Input type="number" min="1" max={parallelWorkerCount} step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className={htmlInspectorControlClassName} />
+              </HtmlInspectorField>
+              {taskMode === "filter" && <HtmlInspectorField label="진행 표시 간격">
+                <Input type="number" min="1" max="10000" step="1" value={progressInterval} onChange={(event) => setProgressInterval(event.target.value)} className={htmlInspectorControlClassName} />
+              </HtmlInspectorField>}
+              </div>
               </div>
             </div>
           }

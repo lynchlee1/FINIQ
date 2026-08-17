@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import {
   WorkflowModeSwitch,
@@ -12,7 +12,11 @@ import {
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
 
 export const htmlControlClassName = "text-body h-10 border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)] placeholder:text-[var(--tv-subtle)]";
-export const htmlSelectTriggerClassName = htmlControlClassName;
+export const htmlInspectorControlClassName = "text-body h-8 w-[5.75rem] border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)] placeholder:text-[var(--tv-subtle)]";
+export const htmlInspectorSelectClassName = "text-body h-8 w-[10rem] min-w-0 overflow-hidden border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-text)]";
+export const htmlSelectTriggerClassName = `${htmlControlClassName} min-w-0 overflow-hidden`;
+export const htmlSelectValueClassName = "min-w-0 flex-1 truncate text-left";
+export const htmlSelectItemClassName = "whitespace-nowrap";
 export const htmlSelectContentClassName = "border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)]";
 export const htmlPageNoticeClassName = "rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4";
 export const htmlInsetPanelClassName = "rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-surface)] p-4";
@@ -117,9 +121,12 @@ export type HtmlWorkflowField =
   | HtmlCheckboxField
   | HtmlCustomField;
 
+type HtmlWorkflowFormLayout = "stack" | "inspector";
+
 type HtmlWorkflowFormProps = {
   fields: HtmlWorkflowField[];
   className?: string;
+  layout?: HtmlWorkflowFormLayout;
 };
 
 export function HtmlWorkflowPage<TMode extends string>({
@@ -205,6 +212,80 @@ export function HtmlField({
   );
 }
 
+export function HtmlInspectorField({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex min-h-8 min-w-0 items-center justify-between gap-3", className)}>
+      <Label className="min-w-0 flex-1 text-body text-[var(--tv-text)]">{label}</Label>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+export function HtmlInspectorSelect({
+  value,
+  onValueChange,
+  options,
+  className,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  className?: string;
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger className={cn(htmlInspectorSelectClassName, className)}>
+        <SelectValue className={htmlSelectValueClassName} />
+      </SelectTrigger>
+      <SelectContent position="popper" className={htmlSelectContentClassName}>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value} className={htmlSelectItemClassName}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+export function HtmlInspectorToggle({
+  checked,
+  onCheckedChange,
+  className,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  className?: string;
+}) {
+  return (
+    <Button
+      type="button"
+      variant={checked ? "default" : "outline"}
+      size="sm"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onCheckedChange(!checked)}
+      className={cn(
+        "h-8 w-[5.75rem] justify-start px-3 text-body",
+        checked
+          ? "bg-[var(--tv-accent)] text-[var(--tv-accent-foreground)] hover:bg-[var(--tv-accent-hover)] hover:text-[var(--tv-accent-foreground)]"
+          : "bg-[var(--tv-control)] text-[var(--tv-muted)]",
+        className,
+      )}
+    >
+      {checked ? "On" : "Off"}
+    </Button>
+  );
+}
+
 export function HtmlStepGuide({ items }: HtmlStepGuideProps) {
   return (
     <section className="grid gap-4 md:grid-cols-3">
@@ -243,18 +324,56 @@ export function HtmlSearchInput({
   );
 }
 
-export function HtmlWorkflowForm({ fields, className }: HtmlWorkflowFormProps) {
+export function HtmlWorkflowForm({ fields, className, layout = "stack" }: HtmlWorkflowFormProps) {
+  if (layout === "inspector") {
+    return (
+      <div className={cn("space-y-2", className)}>
+        {fields.map((field) => (
+          <HtmlWorkflowFieldControl key={field.id} field={field} layout="inspector" />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <HtmlFieldGrid className={className}>
       {fields.map((field) => (
-        <HtmlWorkflowFieldControl key={field.id} field={field} />
+        <HtmlWorkflowFieldControl key={field.id} field={field} layout="stack" />
       ))}
     </HtmlFieldGrid>
   );
 }
 
-function HtmlWorkflowFieldControl({ field }: { field: HtmlWorkflowField }) {
+function HtmlWorkflowFieldControl({
+  field,
+  layout,
+}: {
+  field: HtmlWorkflowField;
+  layout: HtmlWorkflowFormLayout;
+}) {
+  if (layout === "inspector" && field.kind === "input" && field.type === "number" && !field.trailing) {
+    return (
+      <HtmlInspectorField label={field.label} className={field.className}>
+        <Input
+          type="number"
+          value={field.value}
+          onChange={(event) => field.onChange(event.target.value)}
+          placeholder={field.placeholder}
+          className={htmlInspectorControlClassName}
+        />
+      </HtmlInspectorField>
+    );
+  }
+
   if (field.kind === "checkbox") {
+    if (layout === "inspector") {
+      return (
+        <HtmlInspectorField label={field.checkboxLabel} className={field.className}>
+          <HtmlInspectorToggle checked={field.checked} onCheckedChange={field.onChange} />
+        </HtmlInspectorField>
+      );
+    }
+
     return (
       <div
         className={cn(
@@ -314,15 +433,23 @@ function HtmlWorkflowFieldControl({ field }: { field: HtmlWorkflowField }) {
   }
 
   if (field.kind === "select") {
+    if (layout === "inspector") {
+      return (
+        <HtmlInspectorField label={field.label} className={field.className}>
+          <HtmlInspectorSelect value={field.value} onValueChange={field.onChange} options={field.options} />
+        </HtmlInspectorField>
+      );
+    }
+
     return (
       <HtmlField label={field.label} help={field.help} span={field.span} className={field.className}>
         <Select value={field.value} onValueChange={field.onChange}>
           <SelectTrigger className={htmlSelectTriggerClassName}>
-            <SelectValue />
+            <SelectValue className={htmlSelectValueClassName} />
           </SelectTrigger>
-          <SelectContent className={htmlSelectContentClassName}>
+          <SelectContent position="popper" className={htmlSelectContentClassName}>
             {field.options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              <SelectItem key={option.value} value={option.value} className={htmlSelectItemClassName}>{option.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>

@@ -284,19 +284,19 @@ export default function HtmlChangeLogPage() {
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>
                 </div>
-                <HtmlWorkflowForm fields={optionFields} />
+                <HtmlWorkflowForm layout="inspector" fields={optionFields} />
               </div>
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">필터</p>
                 </div>
-                <HtmlWorkflowForm fields={filterOnlyFields} />
+                <HtmlWorkflowForm layout="inspector" fields={filterOnlyFields} />
               </div>
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">내보내기</p>
                 </div>
-                <HtmlWorkflowForm fields={exportFields} />
+                <HtmlWorkflowForm layout="inspector" fields={exportFields} />
               </div>
             </div>
           }

@@ -9,7 +9,7 @@ import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/Dat
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { htmlTableFrameClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { htmlTableFrameClassName, HtmlInspectorField, HtmlInspectorToggle } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import {
@@ -1027,9 +1027,6 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
       label: "원본 데이터 경로",
       value: sourceDirectory,
       onChange: handleSourceDirectoryChange,
-      help: isConvertMode
-        ? `이 경로 아래의 Excel 파일 중 선택한 파일만 실행 대상으로 사용합니다. 대상 파일: ${formatInteger(selectedConvertFileCount)} / ${formatInteger(excelFiles.length)}개`
-        : undefined,
     }] : []),
     ...(isConvertMode || isParquetPreviewMode ? [{
       id: "convertOutput",
@@ -1674,30 +1671,17 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
             isMergeMode ? (
               <div className="space-y-4">
                 <WorkflowPathSettings id="assets-excel-paths" fields={pathFields} onError={handlePathError} />
-                <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
-                  <Checkbox
-                    checked={mergeSameDirectory}
-                    onCheckedChange={(value) => handleMergeSameDirectoryChange(!!value)}
-                    className="dark:border-[#30363d]"
-                  />
-                  동일 폴더에서 작업하기
-                </label>
-                <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
-                  <Checkbox
-                    checked={cleanupMergedItems}
-                    onCheckedChange={(value) => handleCleanupMergedItemsChange(!!value)}
-                    className="dark:border-[#30363d]"
-                  />
-                  병합된 요소 정리하기
-                </label>
-                <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
-                  <Checkbox
-                    checked={duplicateScanRecursive}
-                    onCheckedChange={(value) => handleDuplicateScanRecursiveChange(!!value)}
-                    className="dark:border-[#30363d]"
-                  />
-                  내부까지 검사
-                </label>
+                <div className="space-y-2">
+                  <HtmlInspectorField label="동일 폴더에서 작업하기">
+                    <HtmlInspectorToggle checked={mergeSameDirectory} onCheckedChange={handleMergeSameDirectoryChange} />
+                  </HtmlInspectorField>
+                  <HtmlInspectorField label="병합된 요소 정리하기">
+                    <HtmlInspectorToggle checked={cleanupMergedItems} onCheckedChange={handleCleanupMergedItemsChange} />
+                  </HtmlInspectorField>
+                  <HtmlInspectorField label="내부까지 검사">
+                    <HtmlInspectorToggle checked={duplicateScanRecursive} onCheckedChange={handleDuplicateScanRecursiveChange} />
+                  </HtmlInspectorField>
+                </div>
               </div>
             ) : (
               <div className="space-y-4">

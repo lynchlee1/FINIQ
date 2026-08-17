@@ -5,7 +5,6 @@ import { Play, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { Input } from "@finiq/ui";
-import { Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
@@ -13,6 +12,7 @@ import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/Dat
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { UI_TEXT } from "@/config/uiText";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
   SingleCheckDataIntegrityInspectionCard,
   type SingleCheckDataIntegrityInspectionState,
@@ -342,8 +342,7 @@ export default function TablePage() {
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
-                <Label className="grid gap-2 dark:text-slate-300">
-                  연도별 SQLite 파일 생성 worker 수
+                <HtmlInspectorField label="연도별 SQLite 파일 생성 worker 수">
                   <Input
                     type="number"
                     min="1"
@@ -351,12 +350,9 @@ export default function TablePage() {
                     step="1"
                     value={tableWorkers}
                     onChange={(event) => setTableWorkers(event.target.value)}
-                    className="dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+                    className={htmlInspectorControlClassName}
                   />
-                </Label>
-                <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
-                  최대 {maxTableWorkers}개까지 사용합니다. 실제 worker 수는 CPU 코어 수와 연도별 SQLite 파일 수 중 작은 값으로 제한됩니다.
-                </p>
+                </HtmlInspectorField>
               </div>
             </div>
           }

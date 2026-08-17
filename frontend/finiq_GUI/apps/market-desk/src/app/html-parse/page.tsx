@@ -809,7 +809,6 @@ export default function HtmlParsePage() {
       kind: "input",
       type: "number",
       label: "병렬 워커 수",
-      help: "앱 최초 접속 시 확인한 CPU 기준 기본값을 사용합니다.",
       placeholder: String(defaultParallelWorkers),
       value: parallelWorkers,
       onChange: setParallelWorkers,
@@ -1299,7 +1298,7 @@ export default function HtmlParsePage() {
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
-                <HtmlWorkflowForm fields={parseOptionFields} />
+                <HtmlWorkflowForm layout="inspector" fields={parseOptionFields} />
                 </div>
               </div>
             </>
