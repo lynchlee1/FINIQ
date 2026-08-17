@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Plus, Save, Trash2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
@@ -169,6 +171,99 @@ function operatorLabel(operator: DisclosureFilterOperatorKey) {
   return DISCLOSURE_FILTER_OPERATOR_OPTIONS.find(([key]) => key === operator)?.[1] || operator;
 }
 
+const CONDITION_OPTION_TOGGLES = [
+  ["not", "NOT"],
+  ["ignore_spaces", "공백무시"],
+  ["clean_search", "Clean"],
+] as const;
+
+type ConditionOptionKey = (typeof CONDITION_OPTION_TOGGLES)[number][0];
+
+function ConditionOptionsPopover({
+  condition,
+  open,
+  onOpenChange,
+  onToggle,
+}: {
+  condition: DisclosureConditionBlock;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onToggle: (key: ConditionOptionKey, value: boolean) => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const activeCount = CONDITION_OPTION_TOGGLES.filter(([key]) => condition[key]).length;
+
+  useEffect(() => {
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      onOpenChange(false);
+    };
+    const handleScrollOrResize = () => onOpenChange(false);
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open, onOpenChange]);
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="조건 옵션"
+        className={cn(
+          "flex h-9 w-full items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-bold",
+          activeCount > 0
+            ? "border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-900/50 dark:bg-teal-900/30 dark:text-teal-300"
+            : "border-slate-200 bg-white text-slate-500 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300",
+        )}
+      >
+        옵션
+        {activeCount > 0 && (
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-bold text-white dark:bg-teal-500">
+            {activeCount}
+          </span>
+        )}
+      </button>
+      {open && coords && createPortal(
+        <div
+          ref={panelRef}
+          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-50 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-[#30363d] dark:bg-[#161b22]"
+        >
+          {CONDITION_OPTION_TOGGLES.map(([key, label]) => (
+            <label
+              key={key}
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-[#21262d]"
+            >
+              <input type="checkbox" checked={condition[key]} onChange={(event) => onToggle(key, event.target.checked)} />
+              {label}
+            </label>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 export function DisclosureConditionFilterCard({
   conditions,
   onConditionsChange,
@@ -180,6 +275,8 @@ export function DisclosureConditionFilterCard({
   onSavePreset,
   onDeletePreset,
 }: DisclosureConditionFilterCardProps) {
+  const [openOptionsIndex, setOpenOptionsIndex] = useState<number | null>(null);
+
   const updateCondition = (index: number, patch: Partial<DisclosureConditionBlock>) => {
     const next = conditions.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row);
     if (next[0]) next[0].connector = "";
@@ -188,6 +285,7 @@ export function DisclosureConditionFilterCard({
 
   const removeCondition = (index: number) => {
     const next = conditions.filter((_, rowIndex) => rowIndex !== index);
+    setOpenOptionsIndex(null);
     if (!next.length) {
       onConditionsChange([makeEmptyDisclosureCondition()]);
       return;
@@ -258,7 +356,7 @@ export function DisclosureConditionFilterCard({
 
           <div className="grid gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50/80 p-2 dark:bg-[#0d1117] dark:border-[#30363d]">
             {conditions.map((condition, index) => (
-              <div key={index} className="grid min-w-[980px] items-center gap-2 rounded-lg border border-slate-200 bg-white/80 p-2 dark:bg-[#161b22] dark:border-[#30363d] lg:grid-cols-[96px_minmax(0,1fr)_58px]">
+              <div key={index} className="grid min-w-[860px] items-center gap-2 rounded-lg border border-slate-200 bg-white/80 p-2 dark:bg-[#161b22] dark:border-[#30363d] lg:grid-cols-[96px_minmax(0,1fr)_58px]">
                 <select
                   value={condition.connector}
                   disabled={index === 0}
@@ -271,20 +369,14 @@ export function DisclosureConditionFilterCard({
                   <option value="XOR">XOR</option>
                   <option value="OR">OR</option>
                 </select>
-                <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[36px_68px_86px_72px_minmax(84px,.45fr)_minmax(112px,.55fr)_minmax(240px,3fr)_36px]">
+                <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[36px_100px_minmax(84px,.45fr)_minmax(112px,.55fr)_minmax(240px,3fr)_36px]">
                   <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-cyan-50 border-cyan-300 dark:bg-cyan-900/20" : "")} />
-                  <label className="flex h-9 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                    <input type="checkbox" checked={condition.not} onChange={(event) => updateCondition(index, { not: event.target.checked })} />
-                    NOT
-                  </label>
-                  <label className="flex h-9 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                    <input type="checkbox" checked={condition.ignore_spaces} onChange={(event) => updateCondition(index, { ignore_spaces: event.target.checked })} />
-                    공백무시
-                  </label>
-                  <label className="flex h-9 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                    <input type="checkbox" checked={condition.clean_search} onChange={(event) => updateCondition(index, { clean_search: event.target.checked })} />
-                    Clean
-                  </label>
+                  <ConditionOptionsPopover
+                    condition={condition}
+                    open={openOptionsIndex === index}
+                    onOpenChange={(nextOpen) => setOpenOptionsIndex(nextOpen ? index : null)}
+                    onToggle={(key, value) => updateCondition(index, { [key]: value })}
+                  />
                   <select value={condition.field} onChange={(event) => updateCondition(index, { field: event.target.value as DisclosureFilterFieldKey })} aria-label="필드" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
                     {DISCLOSURE_FILTER_FIELD_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
