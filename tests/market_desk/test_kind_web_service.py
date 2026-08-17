@@ -8133,10 +8133,10 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "내부 HTML 병합" not in download_component_html
     assert "/api/disclosures/internal-html-download/merge/start" not in download_component_html
     assert "작업공간 디렉토리" in download_component_html
-    assert "압축 JSON 데이터 경로" in download_component_html
+    assert "DATA_PATH_LABELS.output" in download_component_html
     assert "압축 설정" not in download_component_html
     assert "압축 처리" in download_component_html
-    assert "병렬 워커 수" in download_component_html
+    assert "SETTINGS_LABELS.workerCount" in download_component_html
     assert "parallel_workers" in download_component_html
     assert "외부 HTML 압축 JSON 파일" in download_component_html
     assert "외부 저장 화면의 외부 HTML 압축으로 만든 compressed-external-html.json 파일을 선택하세요." not in download_component_html

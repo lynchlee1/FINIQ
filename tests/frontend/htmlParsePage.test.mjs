@@ -139,7 +139,7 @@ test("html parse page sends parallel worker count", async () => {
   assert.match(source, /const \[parallelWorkers, setParallelWorkers\] = useState\(""\)/);
   assert.match(source, /const \[progressInterval, setProgressInterval\] = useState\("1000"\)/);
   assert.match(inspectionPayload, /parallel_workers: parallelWorkers \? Number\(parallelWorkers\) : null/);
-  assert.match(settingsBlock, /id: "parallelWorkers"[\s\S]*?label: "병렬 워커 수"/);
+  assert.match(settingsBlock, /id: "parallelWorkers"[\s\S]*?label: SETTINGS_LABELS\.workerCount/);
   assert.doesNotMatch(settingsBlock, /help:/);
   assert.match(source, /parallel_worker_count: defaultParallelWorkers/);
 });

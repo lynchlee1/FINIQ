@@ -14,7 +14,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { apiPost } from "@/api/client";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useJobStreaming } from "@/hooks/useJobStreaming";
-import { UI_TEXT } from "@/config/uiText";
+import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import {
   DisclosureConditionFilterCard,
@@ -344,7 +344,7 @@ export default function FilterPage() {
   const handleFilter = async () => {
     setTaskMode("filter");
     if (!rootDirectory?.trim()) {
-      setStatus("입력 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -364,7 +364,7 @@ export default function FilterPage() {
       return;
     }
     if (useSeparateOutputDirectory && !htmlTransferPath.trim()) {
-      setStatus("필터 결과 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -811,7 +811,7 @@ export default function FilterPage() {
                 <HtmlInspectorField label="제한 없음">
                   <HtmlInspectorToggle checked={limitUnlimited} onCheckedChange={setLimitUnlimited} />
                 </HtmlInspectorField>
-                <HtmlInspectorField label="최대 반환">
+                <HtmlInspectorField label={SETTINGS_LABELS.maxItems}>
                   <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className={`${htmlInspectorControlClassName} disabled:opacity-50`} />
                 </HtmlInspectorField>
               </div>
@@ -821,10 +821,10 @@ export default function FilterPage() {
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
               <div className="space-y-2">
-              <HtmlInspectorField label={taskMode === "title-search" ? "검색 worker 수" : "파싱 worker 수"}>
+              <HtmlInspectorField label={SETTINGS_LABELS.workerCount}>
                 <Input type="number" min="1" max={parallelWorkerCount} step="1" value={filterWorkers} onChange={(event) => setFilterWorkers(event.target.value)} className={htmlInspectorControlClassName} />
               </HtmlInspectorField>
-              {taskMode === "filter" && <HtmlInspectorField label="진행 표시 간격">
+              {taskMode === "filter" && <HtmlInspectorField label={SETTINGS_LABELS.progressInterval}>
                 <Input type="number" min="1" max="10000" step="1" value={progressInterval} onChange={(event) => setProgressInterval(event.target.value)} className={htmlInspectorControlClassName} />
               </HtmlInspectorField>}
               </div>

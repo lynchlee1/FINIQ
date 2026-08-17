@@ -49,7 +49,7 @@ export default function HtmlChangeLogPage() {
 
   const loadChangeLog = async () => {
     if (!outputPath) {
-      setStatus("파싱 결과 데이터 경로가 필요합니다.");
+      setStatus(`${DATA_PATH_LABELS.workspace}가 필요합니다.`);
       setIsErrorStatus(true);
       return;
     }
@@ -116,7 +116,7 @@ export default function HtmlChangeLogPage() {
 
   const handleExport = () => {
     if (!outputPath) {
-      setStatus("파싱 결과 데이터 경로가 필요합니다.");
+      setStatus(`${DATA_PATH_LABELS.workspace}가 필요합니다.`);
       setIsErrorStatus(true);
       return;
     }
@@ -175,7 +175,7 @@ export default function HtmlChangeLogPage() {
     {
       id: "outputPath",
       kind: "path",
-      label: `파싱 ${DATA_PATH_LABELS.output}`,
+      label: DATA_PATH_LABELS.output,
       mode: "folder",
       value: outputPath || "",
       onChange: (val) => saveSetting("html_parse_output_directory", val),

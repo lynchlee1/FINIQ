@@ -10,7 +10,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
-import { UI_TEXT } from "@/config/uiText";
+import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
@@ -169,7 +169,7 @@ export default function TablePage() {
       return;
     }
     if (useSeparateOutputDirectory && !outputPath.trim()) {
-      setStatus("결과 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -213,7 +213,7 @@ export default function TablePage() {
       return;
     }
     if (useSeparateOutputDirectory && (!downloadOutputDirectory.trim() || !outputPath.trim())) {
-      setStatus("입력 및 결과 데이터 경로를 선택하세요.");
+      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
     }
@@ -241,7 +241,7 @@ export default function TablePage() {
     },
     {
       id: "output",
-      label: `${DATA_PATH_LABELS.output} (SQLite)`,
+      label: DATA_PATH_LABELS.output,
       value: outputPath,
       onChange: (val) => {
         setOutputPath(val);
@@ -342,7 +342,7 @@ export default function TablePage() {
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                 </div>
-                <HtmlInspectorField label="연도별 SQLite 파일 생성 worker 수">
+                <HtmlInspectorField label={SETTINGS_LABELS.workerCount}>
                   <Input
                     type="number"
                     min="1"
