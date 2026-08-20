@@ -1180,7 +1180,7 @@ export default function HtmlParsePage() {
             />
           }
           notificationActive={isErrorStatus || !!executionOptionExampleNotice || warningReports.length > 0}
-          notificationTone={isErrorStatus ? "error" : warningReports.length > 0 ? "warning" : "neutral"}
+          notificationTone={isErrorStatus ? "error" : warningReports.length > 0 || executionOptionExampleNotice ? "warning" : "neutral"}
           notificationResetKey={notificationResetKey}
           notificationContent={
             <div className="space-y-3">

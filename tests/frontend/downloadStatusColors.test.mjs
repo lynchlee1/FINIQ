@@ -166,6 +166,10 @@ test("manual inspection opens the activity panel and keeps progress visible", as
   assert.match(source, /setIsErrorStatus\(hasInspectionFailure\)/);
   assert.match(source, /failed \? "사용 불가" : deleted \? "파일 삭제 완료" : EXISTING_DATA_SUCCESS_LABEL/);
   assert.match(source, /const dockToneStyle = [\s\S]{0,500}tv-warning[\s\S]{0,500}tv-up/);
+  assert.match(source, /style=\{activeJobId \? dockToneStyle\("warning", downloadPanelOpen\) : undefined\}/);
+  assert.match(source, /activeJobId && \(\s*<span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-\[var\(--tv-warning\)\]" \/>/);
+  assert.doesNotMatch(source, /rounded-full bg-\[var\(--tv-muted\)\]/);
+  assert.match(source, /currentInspectionCandidateCount > 0 \|\| hasInspectionFailureNotification \|\| !!previewResult/);
   assert.match(source, /style=\{hasWarningNotification \|\| hasSuccessfulInspectionNotification[\s\S]{0,150}dockToneStyle\(notificationTone, notificationPanelOpen\)/);
   assert.match(source, /const actionDockRef = useActionDockFollow<HTMLDivElement>\(\)/);
   assert.match(source, /<div ref=\{actionDockRef\} className="action-dock-root/);

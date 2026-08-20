@@ -653,7 +653,7 @@ export default function DownloadPage() {
     || !!previewResult;
   const notificationTone = isErrorStatus || !!existingMetadataError
     ? "error"
-    : currentInspectionCandidateCount > 0 || hasInspectionFailureNotification
+    : currentInspectionCandidateCount > 0 || hasInspectionFailureNotification || !!previewResult
       ? "warning"
       : hasSuccessfulInspectionNotification
         ? "success"
@@ -677,9 +677,7 @@ export default function DownloadPage() {
     ? "bg-[var(--tv-down)]"
     : notificationTone === "warning"
       ? "bg-[var(--tv-warning)]"
-      : notificationTone === "success"
-        ? "bg-[var(--tv-up)]"
-        : "bg-[var(--tv-muted)]";
+      : "bg-[var(--tv-up)]";
   const inspectionCandidates = hasCompletedCurrentInspection
     && result?.format === "kind_download_folder_cleanup_v1"
     && result?.dry_run === true
@@ -1025,12 +1023,17 @@ export default function DownloadPage() {
                 setSettingsPanelOpen(false);
               }}
               aria-pressed={downloadPanelOpen}
-              className="relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"
+              className={
+                activeJobId
+                  ? "relative h-10 w-10 rounded-lg"
+                  : "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"
+              }
+              style={activeJobId ? dockToneStyle("warning", downloadPanelOpen) : undefined}
               title={downloadPanelOpen ? "실행 현황 닫기" : "실행 현황 열기"}
             >
               <Activity className="h-5 w-5" />
               {activeJobId && (
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-muted)]" />
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-warning)]" />
               )}
             </Button>
 

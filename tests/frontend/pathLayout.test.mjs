@@ -358,6 +358,27 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /mixed condition block connectors must be separated by parentheses/);
 });
 
+test("disclosure condition card keeps operators scoped to each field type", async () => {
+  const source = await readFile(disclosureConditionCardPath, "utf8");
+  const operatorBlock = (name) => {
+    const match = source.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\] as const`));
+    assert.ok(match, `${name} 목록이 있어야 합니다.`);
+    return match[1];
+  };
+
+  assert.match(source, /export const DISCLOSURE_FILTER_FIELD_OPERATORS/);
+  assert.match(source, /operatorsForField\(condition\.field\)/);
+  assert.match(source, /defaultOperatorForField\(field\)/);
+  assert.match(source, /badges: DISCLOSURE_FILTER_SET_OPERATORS/);
+  assert.match(source, /disclosed_date: DISCLOSURE_FILTER_DATE_OPERATORS/);
+  assert.match(source, /market: DISCLOSURE_FILTER_ENUM_OPERATORS/);
+  assert.match(operatorBlock("DISCLOSURE_FILTER_SET_OPERATORS"), /"contains"/);
+  assert.doesNotMatch(operatorBlock("DISCLOSURE_FILTER_SET_OPERATORS"), /on_or_before/);
+  assert.doesNotMatch(operatorBlock("DISCLOSURE_FILTER_ENUM_OPERATORS"), /on_or_before/);
+  assert.doesNotMatch(operatorBlock("DISCLOSURE_FILTER_TEXT_OPERATORS"), /on_or_before/);
+  assert.match(operatorBlock("DISCLOSURE_FILTER_DATE_OPERATORS"), /on_or_before/);
+});
+
 test("disclosure condition card documents each filter field with a stored example", async () => {
   const source = await readFile(disclosureConditionCardPath, "utf8");
 
@@ -416,9 +437,9 @@ test("disclosure condition card uses slate text in dark mode", async () => {
     readFile("frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureFilterCandidateCard.tsx", "utf8"),
   ]);
 
-  assert.doesNotMatch(conditionCardSource, /dark:(?:text|bg|border)-(?:teal|cyan)-/);
-  assert.doesNotMatch(filterPageSource, /dark:text-teal-/);
-  assert.doesNotMatch(candidateCardSource, /dark:(?:text|bg|border)-teal-/);
+  assert.doesNotMatch(conditionCardSource, /(?:text|bg|border)-(?:teal|cyan)-/);
+  assert.doesNotMatch(filterPageSource, /(?:text|bg|border)-(?:teal|cyan)-/);
+  assert.doesNotMatch(candidateCardSource, /(?:text|bg|border)-(?:teal|cyan)-/);
   assert.match(conditionCardSource, /dark:text-slate-200/);
 });
 

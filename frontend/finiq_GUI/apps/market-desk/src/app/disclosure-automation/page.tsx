@@ -726,7 +726,7 @@ export default function DisclosureAutomationPage() {
     ? "error"
     : downloadConflicts.length || reviewPatterns.length
       ? "warning"
-      : runResult?.workflow_status === "completed" && notification === "공시 자동화가 완료되었습니다."
+      : notification
         ? "success"
         : "neutral";
 

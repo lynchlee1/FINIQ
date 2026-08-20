@@ -197,8 +197,8 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.doesNotMatch(candidateCardSource, /선택한 후보/);
   assert.doesNotMatch(candidateCardSource, /후보를 선택하세요/);
   assert.match(candidateCardSource, /max-h-44/);
-  assert.match(candidateCardSource, /border-teal-200 bg-teal-50\/60/);
-  assert.doesNotMatch(candidateCardSource, /dark:text-teal-/);
+  assert.match(candidateCardSource, /border-slate-300 bg-slate-100\/80/);
+  assert.doesNotMatch(candidateCardSource, /(?:text|bg|border)-teal-/);
   assert.match(candidateCardSource, /불러오기/);
   assert.match(candidateCardSource, /예시/);
   assert.match(candidateCardSource, /onToggleValue\(candidate\.value, !!value\)/);
@@ -213,6 +213,7 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /filterCandidatesRequestIdRef\.current \+= 1/);
   assert.match(source, /if \(filterCandidatesRequestIdRef\.current !== requestId\) return/);
   assert.match(source, /notificationActive=\{isErrorStatus \|\| !!executionOptionExampleNotice \|\| warningReports\.length > 0\}/);
+  assert.match(source, /notificationTone=\{isErrorStatus \? "error" : warningReports\.length > 0 \|\| executionOptionExampleNotice \? "warning" : "neutral"\}/);
   assert.match(source, /notificationResetKey=\{notificationResetKey\}/);
   assert.match(source, /setNotificationResetKey\(\(current\) => current \+ 1\)/);
   assert.match(source, /executionOptionExampleNotice \? \(/);

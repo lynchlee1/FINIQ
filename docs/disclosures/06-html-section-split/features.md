@@ -13,6 +13,7 @@ KIND 본문에서 목차를 골라 해당 범위의 문서 구조를 보존한 H
 - `disclosures/html_sections.py`는 `body` 바로 아래에서 `SECTION-N` class를 가진 heading(`h1`~`h6`)만 목차 경계로 사용한다.
 - 원문 heading level과 `SECTION-N`, `id="toc_N"`의 숫자는 목차 번호로 사용하지 않고 본문 순서대로 내부 `toc_1`, `toc_2`, ...를 부여한다.
 - 각 목차 heading부터 다음 목차 heading 직전까지를 같은 section으로 저장한다.
+- 첫 목차 heading보다 앞에 있는 정정신고·정정 전후 비교 내용은 section에 포함하지 않고 저장하지 않는다.
 - HTML parser가 heading 안의 제목 `p`를 heading 바로 다음 형제 `p`로 옮기면 해당 `p`를 제목 요소로 사용한다.
 
 #### Defaults and Exceptions
@@ -28,6 +29,8 @@ KIND 본문에서 목차를 골라 해당 범위의 문서 구조를 보존한 H
 #### Behavior
 
 사용자가 체크박스, 전체 선택 또는 전체 해제로 저장할 목차를 직접 고른다.
+
+- 정정 공시도 실제 업무 본문 목차만 선택하고 정정 이력이나 표지 목차는 저장 대상에서 제외한다.
 
 #### Defaults and Exceptions
 

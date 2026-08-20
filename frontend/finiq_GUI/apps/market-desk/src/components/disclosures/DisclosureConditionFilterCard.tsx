@@ -102,8 +102,77 @@ export const DISCLOSURE_FILTER_OPERATOR_OPTIONS = [
   ["empty", "is empty"],
 ] as const;
 
+const DISCLOSURE_FILTER_TEXT_OPERATORS = [
+  "contains",
+  "not_contains",
+  "exact_match",
+  "equals",
+  "not_equals",
+  "starts_with",
+  "ends_with",
+  "in",
+  "exists",
+  "empty",
+] as const;
+
+const DISCLOSURE_FILTER_ENUM_OPERATORS = [
+  "equals",
+  "not_equals",
+  "in",
+  "exists",
+  "empty",
+] as const;
+
+const DISCLOSURE_FILTER_SET_OPERATORS = [
+  "contains",
+  "not_contains",
+  "equals",
+  "not_equals",
+  "in",
+  "exists",
+  "empty",
+] as const;
+
+const DISCLOSURE_FILTER_DATE_OPERATORS = [
+  "equals",
+  "not_equals",
+  "before",
+  "after",
+  "on_or_before",
+  "on_or_after",
+  "between",
+  "in",
+  "exists",
+  "empty",
+] as const;
+
+export const DISCLOSURE_FILTER_FIELD_OPERATORS = {
+  title: DISCLOSURE_FILTER_TEXT_OPERATORS,
+  company_name: DISCLOSURE_FILTER_TEXT_OPERATORS,
+  submitter: DISCLOSURE_FILTER_TEXT_OPERATORS,
+  market: DISCLOSURE_FILTER_ENUM_OPERATORS,
+  badges: DISCLOSURE_FILTER_SET_OPERATORS,
+  disclosed_date: DISCLOSURE_FILTER_DATE_OPERATORS,
+  acpt_no: DISCLOSURE_FILTER_TEXT_OPERATORS,
+  company_id: DISCLOSURE_FILTER_TEXT_OPERATORS,
+} as const;
+
 export type DisclosureFilterFieldKey = (typeof DISCLOSURE_FILTER_FIELD_OPTIONS)[number][0];
 export type DisclosureFilterOperatorKey = (typeof DISCLOSURE_FILTER_OPERATOR_OPTIONS)[number][0];
+
+export function operatorsForField(field: DisclosureFilterFieldKey) {
+  const allowed = new Set<string>(DISCLOSURE_FILTER_FIELD_OPERATORS[field]);
+  return DISCLOSURE_FILTER_OPERATOR_OPTIONS.filter(([key]) => allowed.has(key));
+}
+
+export function defaultOperatorForField(field: DisclosureFilterFieldKey): DisclosureFilterOperatorKey {
+  return DISCLOSURE_FILTER_FIELD_OPERATORS[field][0];
+}
+
+export function isOperatorAllowedForField(field: DisclosureFilterFieldKey, operator: string) {
+  return (DISCLOSURE_FILTER_FIELD_OPERATORS[field] as readonly string[]).includes(operator);
+}
+
 export type DisclosureFilterConnector = "" | "AND" | "XOR" | "OR";
 
 export type DisclosureConditionBlock = {
@@ -184,7 +253,7 @@ export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureCo
     if (!DISCLOSURE_FILTER_FIELD_OPTIONS.some(([key]) => key === row.field)) {
       throw new Error(`condition_blocks[${index}].field is invalid`);
     }
-    if (!DISCLOSURE_FILTER_OPERATOR_OPTIONS.some(([key]) => key === row.operator)) {
+    if (!isOperatorAllowedForField(row.field as DisclosureFilterFieldKey, String(row.operator))) {
       throw new Error(`condition_blocks[${index}].operator is invalid`);
     }
     for (const key of ["open_count", "close_count"] as const) {
@@ -236,6 +305,21 @@ export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureCo
 
 function countParens(value: string, paren: "(" | ")") {
   return [...String(value || "")].filter((char) => char === paren).length;
+}
+
+export function nextValueAfterModifierBackspace(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  deleteToLineStart: boolean,
+) {
+  if (selectionStart !== selectionEnd) {
+    return `${value.slice(0, selectionStart)}${value.slice(selectionEnd)}`;
+  }
+  if (deleteToLineStart) {
+    return value.slice(selectionEnd);
+  }
+  return `${value.slice(0, selectionStart).replace(/(?:\s+|[^\s]+)$/u, "")}${value.slice(selectionEnd)}`;
 }
 
 function mergeConditionsWithPreset(
@@ -325,13 +409,13 @@ function ConditionOptionsPopover({
         className={cn(
           "flex h-9 w-full items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-bold",
           activeCount > 0
-            ? "border-teal-200 bg-teal-50 text-teal-800 dark:border-[#30363d] dark:bg-[#21262d] dark:text-slate-200"
+            ? "border-slate-300 bg-slate-100 text-slate-700 dark:border-[#30363d] dark:bg-[#21262d] dark:text-slate-200"
             : "border-slate-200 bg-white text-slate-500 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300",
         )}
       >
         옵션
         {activeCount > 0 && (
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-bold text-white dark:bg-slate-500">
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-500 px-1 text-[10px] font-bold text-white dark:bg-slate-500">
             {activeCount}
           </span>
         )}
@@ -411,7 +495,7 @@ function FieldHelpPopover() {
           <dl className="space-y-2.5">
             {DISCLOSURE_FILTER_FIELD_HELP.map((field) => (
               <div key={field.key}>
-                <dt className="text-xs font-bold text-teal-700 dark:text-slate-200">{field.label}</dt>
+                <dt className="text-xs font-bold text-slate-700 dark:text-slate-200">{field.label}</dt>
                 <dd className="text-xs leading-5 text-slate-600 dark:text-slate-300">
                   {field.description}
                   <span className="mt-0.5 block text-slate-500 dark:text-slate-400">ex) {field.examples.join(", ")}</span>
@@ -483,6 +567,18 @@ function FilterPresetCombobox({
   const optionCount = matches.length + (canCreate ? 1 : 0);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Backspace") {
+      event.preventDefault();
+      const input = event.currentTarget;
+      onValueChange(nextValueAfterModifierBackspace(
+        input.value,
+        input.selectionStart ?? 0,
+        input.selectionEnd ?? 0,
+        event.metaKey,
+      ));
+      setOpen(true);
+      return;
+    }
     if (event.key === "Escape") {
       setOpen(false);
       return;
@@ -580,10 +676,10 @@ function FilterPresetCombobox({
                 setOpen(false);
               }}
               className={cn(
-                "block w-full truncate rounded-md px-2 py-1.5 text-left text-xs font-bold text-teal-700 dark:text-slate-200",
+                "block w-full truncate rounded-md px-2 py-1.5 text-left text-xs font-bold text-slate-700 dark:text-slate-200",
                 highlight === matches.length
-                  ? "bg-teal-50 dark:bg-[#21262d]"
-                  : "hover:bg-teal-50 dark:hover:bg-[#21262d]",
+                  ? "bg-slate-100 dark:bg-[#21262d]"
+                  : "hover:bg-slate-50 dark:hover:bg-[#21262d]",
               )}
             >
               {value.trim()} 새 필터
@@ -826,11 +922,11 @@ export function DisclosureConditionFilterCard({
           <div className="flex min-h-[52px] flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:bg-[#0d1117] dark:border-[#30363d]">
             {conditionPreview.length ? conditionPreview.map((condition, index) => (
               <div key={`${condition.field}-${index}`} className="flex flex-wrap items-center gap-2">
-                {index > 0 && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-200">{condition.connector || "AND"}</span>}
+                {index > 0 && <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700 dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-200">{condition.connector || "AND"}</span>}
                 {condition.open_count > 0 && <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-bold dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-300">{"(".repeat(condition.open_count)}</span>}
-                {condition.not && <span className="rounded-lg border border-slate-200 bg-teal-50 px-2 py-1 text-xs font-bold text-teal-800 dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-200">NOT</span>}
+                {condition.not && <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700 dark:bg-[#21262d] dark:border-[#30363d] dark:text-slate-200">NOT</span>}
                 <span className="inline-flex min-h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 dark:bg-[#161b22] dark:border-[#30363d] dark:text-slate-100">
-                  <span className="text-teal-700 dark:text-slate-200">{fieldLabel(condition.field)}</span>
+                  <span className="text-slate-700 dark:text-slate-200">{fieldLabel(condition.field)}</span>
                   <em className="not-italic text-slate-500 dark:text-slate-400">{operatorLabel(condition.operator)}</em>
                   {condition.operator !== "exists" && condition.operator !== "empty" && <strong>{condition.value}</strong>}
                   {condition.ignore_spaces && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-[#21262d] dark:text-slate-300">공백무시</span>}
@@ -848,7 +944,7 @@ export function DisclosureConditionFilterCard({
                   value={condition.connector}
                   disabled={index === 0}
                   onChange={(event) => updateCondition(index, { connector: event.target.value as DisclosureFilterConnector })}
-                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 disabled:text-teal-700 disabled:opacity-100 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300 dark:disabled:text-slate-400"
+                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 disabled:text-slate-500 disabled:opacity-100 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300 dark:disabled:text-slate-400"
                   aria-label="연결 조건"
                 >
                   <option value="">START</option>
@@ -857,21 +953,29 @@ export function DisclosureConditionFilterCard({
                   <option value="OR">OR</option>
                 </select>
                 <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[36px_100px_minmax(84px,.45fr)_minmax(112px,.55fr)_minmax(240px,3fr)_36px]">
-                  <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-cyan-50 border-cyan-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
+                  <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
                   <ConditionOptionsPopover
                     condition={condition}
                     open={openOptionsIndex === index}
                     onOpenChange={(nextOpen) => setOpenOptionsIndex(nextOpen ? index : null)}
                     onToggle={(key, value) => updateCondition(index, { [key]: value })}
                   />
-                  <select value={condition.field} onChange={(event) => updateCondition(index, { field: event.target.value as DisclosureFilterFieldKey })} aria-label="필드" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
+                  <select value={condition.field} onChange={(event) => {
+                    const field = event.target.value as DisclosureFilterFieldKey;
+                    updateCondition(index, {
+                      field,
+                      operator: isOperatorAllowedForField(field, condition.operator)
+                        ? condition.operator
+                        : defaultOperatorForField(field),
+                    });
+                  }} aria-label="필드" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
                     {DISCLOSURE_FILTER_FIELD_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
                   <select value={condition.operator} onChange={(event) => updateCondition(index, { operator: event.target.value as DisclosureFilterOperatorKey })} aria-label="연산자" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
-                    {DISCLOSURE_FILTER_OPERATOR_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                    {operatorsForField(condition.field).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
                   <Input value={condition.value} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="값" className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                  <Input value={")".repeat(condition.close_count)} onChange={(event) => updateCondition(index, { close_count: countParens(event.target.value, ")") })} aria-label="그룹 끝" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.close_count ? "bg-cyan-50 border-cyan-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
+                  <Input value={")".repeat(condition.close_count)} onChange={(event) => updateCondition(index, { close_count: countParens(event.target.value, ")") })} aria-label="그룹 끝" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.close_count ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
                 </div>
                 <Button variant="ghost" onClick={() => removeCondition(index)} className="h-8 px-2 text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-300">삭제</Button>
               </div>

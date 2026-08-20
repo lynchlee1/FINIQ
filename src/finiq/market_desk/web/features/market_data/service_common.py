@@ -411,7 +411,7 @@ _FILTER_FIELD_COLUMNS = {
 
 def _filter_sql_column(field: str) -> str:
     return _FILTER_FIELD_COLUMNS.get(field, field)
-_FILTER_OPERATORS = {
+_TEXT_OPERATORS = {
     "contains",
     "not_contains",
     "exact_match",
@@ -420,13 +420,46 @@ _FILTER_OPERATORS = {
     "starts_with",
     "ends_with",
     "in",
+    "exists",
+    "empty",
+}
+_ENUM_OPERATORS = {
+    "equals",
+    "not_equals",
+    "in",
+    "exists",
+    "empty",
+}
+_SET_OPERATORS = {
+    "contains",
+    "not_contains",
+    "equals",
+    "not_equals",
+    "in",
+    "exists",
+    "empty",
+}
+_DATE_OPERATORS = {
+    "equals",
+    "not_equals",
     "before",
     "after",
     "on_or_before",
     "on_or_after",
     "between",
+    "in",
     "exists",
     "empty",
+}
+_FILTER_FIELD_OPERATORS = {
+    "title": _TEXT_OPERATORS,
+    "company_name": _TEXT_OPERATORS,
+    "submitter": _TEXT_OPERATORS,
+    "market": _ENUM_OPERATORS,
+    "badges": _SET_OPERATORS,
+    "disclosed_date": _DATE_OPERATORS,
+    "acpt_no": _TEXT_OPERATORS,
+    "company_id": _TEXT_OPERATORS,
 }
 
 
@@ -446,7 +479,7 @@ def _validate_filter_blocks(blocks: object) -> list[dict[str, Any]]:
         operator = block.get("operator")
         if field not in _FILTER_FIELDS:
             raise ValueError(f"filter_blocks[{index}].field is invalid")
-        if operator not in _FILTER_OPERATORS:
+        if operator not in _FILTER_FIELD_OPERATORS[field]:
             raise ValueError(f"filter_blocks[{index}].operator is invalid")
         for count_key in ("open_count", "close_count"):
             count = block.get(count_key)
