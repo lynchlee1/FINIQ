@@ -1661,6 +1661,39 @@ def test_filter_disclosures_payload_matches_any_badge(tmp_path: Path) -> None:
     assert searched["titles"] == [{"title": "최대주주변경", "disclosures": 1}]
 
 
+def test_filter_disclosures_payload_rejects_operators_outside_field_type(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path, _badge_filter_fixture_payload())
+
+    with pytest.raises(ValueError, match="operator is invalid"):
+        filter_disclosures_payload(
+            {
+                "data_root": str(tmp_path),
+                "filter_blocks": [
+                    _filter_block(
+                        field="badges",
+                        operator="on_or_before",
+                        value="2026-01-02",
+                    )
+                ],
+            }
+        )
+    with pytest.raises(ValueError, match="operator is invalid"):
+        search_disclosure_titles_payload(
+            {
+                "data_root": str(tmp_path),
+                "filter_blocks": [
+                    _filter_block(
+                        field="market",
+                        operator="contains",
+                        value="유가",
+                    )
+                ],
+            }
+        )
+
+
 def test_filter_disclosures_payload_can_ignore_spaces_in_block_values(tmp_path: Path) -> None:
     _write_filter_manifest_fixture(tmp_path)
 
@@ -5355,6 +5388,77 @@ def test_section_save_ignores_automation_cache_below_standard_input(
     assert result["summary"]["found_files"] == 1
     assert (output_directory / "2026" / visible.name).is_file()
     assert not (output_directory / ".automation-current" / hidden.name).exists()
+
+
+def test_section_save_discards_correction_preamble_before_bond_parse(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "05-internal-html-download"
+    output_directory = tmp_path / "06-sections"
+    source_directory = input_directory / "2013"
+    source_directory.mkdir(parents=True)
+    source_file = source_directory / "20130416000360.html"
+    source_file.write_text(
+        """
+        <html><head></head><body>
+          <p class="CORRECTION">정정신고(보고)</p>
+          <table>
+            <tr><td>1. 사채의 종류</td><td>회차</td><td>15</td><td>종류</td><td>신주인수권부사채</td></tr>
+            <tr><td>2. 사채의 권면총액 (원)</td><td>10,000,000,000</td></tr>
+            <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>10,000,000,000</td></tr>
+          </table>
+          <table>
+            <tr><th>발행 대상자명</th><th>발행권면총액 (원)</th></tr>
+            <tr><td>정정 전 투자자</td><td>10,000,000,000</td></tr>
+          </table>
+          <h2 class="SECTION-1"><p>주요사항보고서</p></h2>
+          <p>표지</p>
+          <h2 class="SECTION-1"><p>신주인수권부사채권 발행결정</p></h2>
+          <table>
+            <tr><td>1. 사채의 종류</td><td>회차</td><td>16</td><td>종류</td><td>신주인수권부사채</td></tr>
+            <tr><td>2. 사채의 권면총액 (원)</td><td>7,500,000,000</td></tr>
+            <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>7,500,000,000</td></tr>
+          </table>
+          <table>
+            <tr><th>발행 대상자명</th><th>발행권면총액 (원)</th></tr>
+            <tr><td>이용복</td><td>5,500,000,000</td></tr>
+            <tr><td>김태현</td><td>2,000,000,000</td></tr>
+          </table>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {
+                "toc_1 주요사항보고서 toc_2 신주인수권부사채권 발행결정": [
+                    "toc_2"
+                ]
+            },
+        }
+    )
+    section_file = output_directory / "2013" / source_file.name
+    section_html = section_file.read_text(encoding="utf-8")
+
+    assert "정정신고" not in section_html
+    assert "정정 전 투자자" not in section_html
+    assert "표지" not in section_html
+    assert section_html.count("사채의 종류") == 1
+    assert section_html.count("발행 대상자명") == 1
+    parsed = parse_bond_issuance(
+        section_html,
+        file_path=section_file,
+        title="[정정]신주인수권부사채권 발행결정",
+    )
+    assert parsed["회차"] == "16"
+    assert parsed["발행금액"] == 7_500_000_000
+    assert parsed["투자자"] == [
+        ["이용복", 5_500_000_000],
+        ["김태현", 2_000_000_000],
+    ]
 
 
 def test_save_disclosure_html_sections_payload_preserves_multiple_selected_sections(tmp_path: Path) -> None:
@@ -9547,6 +9651,42 @@ def test_parse_bond_issuance_collects_multiple_issue_targets() -> None:
         ["송 준", 1_500_000_000],
     ]
     assert "발행대상자세부엔티티" not in parsed
+
+
+def test_parse_bond_issuance_excludes_whitespace_separated_total_investor_row(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20220114000448.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>6,034,378,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>6,034,378,000</td></tr>
+      </table>
+      <table>
+        <tr><th>발행 대상자명</th><th>발행권면(전자등록) 총액(원)</th></tr>
+        <tr><td>망토미 빌딩 주식회사</td><td>5,202,050,000</td></tr>
+        <tr><td>주식회사 dodo</td><td>832,328,000</td></tr>
+        <tr><td>합 계</td><td>6,034,378,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="전환사채권발행결정",
+    )
+
+    assert parsed["투자자"] == [
+        ["망토미 빌딩 주식회사", 5_202_050_000],
+        ["주식회사 dodo", 832_328_000],
+    ]
+    assert not any(
+        "발행권면총액 합계" in warning
+        for warning in parsed.get("parse_warnings", [])
+    )
 
 
 def test_parse_bond_issuance_reads_legacy_warrant_price_label(tmp_path: Path) -> None:

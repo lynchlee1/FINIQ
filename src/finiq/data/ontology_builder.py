@@ -58,6 +58,24 @@ ORG_COMPANY_PATTERNS = [
     r"공제회",
 ]
 
+COMPANY_LEGAL_MARKERS = (
+    "(주)",
+    "㈜",
+    "주식회사",
+    "(유)",
+    "유한회사",
+    "(합)",
+    "합자회사",
+)
+ORGANIZATION_IDENTITY_PATTERN = re.compile(
+    r"조합|펀드|\bFUND\b|투자신탁|사모투자|기금|공단|협회|재단|공제회|협동조합|컨소시엄|\bL\.?P\.?$",
+    re.IGNORECASE,
+)
+FOREIGN_COMPANY_SUFFIX_PATTERN = re.compile(
+    r"(?:^|[\s,.])(?:CO\.?[,]?\s*LTD\.?|LTD\.?|LIMITED|L\.?L\.?C\.?|INC\.?|CORP\.?|CORPORATION|PLC)$",
+    re.IGNORECASE,
+)
+
 
 def normalize_company_id(company_id: str | None) -> str:
     """Normalize a textual KIND company identifier without discarding letters."""
@@ -107,19 +125,36 @@ def classify_investor_type(name: str) -> str:
     name_clean = name.strip()
     if not name_clean:
         return "Organization"
-        
-    # Check if matches any corporate/organizational keywords
+
+    company_marker_positions = [
+        name_clean.index(marker)
+        for marker in COMPANY_LEGAL_MARKERS
+        if marker in name_clean
+    ]
+    foreign_company_match = FOREIGN_COMPANY_SUFFIX_PATTERN.search(name_clean)
+    if foreign_company_match:
+        company_marker_positions.append(foreign_company_match.start())
+    company_marker_position = (
+        min(company_marker_positions) if company_marker_positions else None
+    )
+    organization_match = ORGANIZATION_IDENTITY_PATTERN.search(name_clean)
+    if organization_match and (
+        company_marker_position is None
+        or organization_match.start() < company_marker_position
+    ):
+        return "Organization"
+    if company_marker_position is not None:
+        return "Company"
+
+    # Check remaining organization keywords that do not prove a legal company form.
     for pattern in ORG_COMPANY_PATTERNS:
         if re.search(pattern, name_clean):
-            # If it explicitly says 주식회사 or (주), classify as Company, otherwise Organization
-            if "주식회사" in name_clean or "(주)" in name_clean or "회사" in name_clean:
-                return "Company"
             return "Organization"
-            
-    # Fallback to Person if name is short (usually 2-4 chars for Korean names)
-    if 2 <= len(name_clean) <= 4:
+
+    compact_name = name_clean.replace(" ", "")
+    if re.fullmatch(r"[가-힣]{2,4}", compact_name):
         return "Person"
-        
+
     return "Organization"
 
 

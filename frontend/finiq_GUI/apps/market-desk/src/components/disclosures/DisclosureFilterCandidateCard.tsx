@@ -59,13 +59,13 @@ export function DisclosureFilterCandidateCard<TCandidate extends DisclosureFilte
                   return (
                     <div key={candidate.value} className={cn(
                       "grid items-center gap-2 rounded-lg border border-slate-200 bg-white/80 p-2 dark:bg-[#161b22] dark:border-[#30363d] lg:grid-cols-[minmax(0,1fr)_auto]",
-                      checked ? "border-teal-200 bg-teal-50/60 dark:border-[#30363d] dark:bg-[#21262d]" : ""
+                      checked ? "border-slate-300 bg-slate-100/80 dark:border-[#30363d] dark:bg-[#21262d]" : ""
                     )}>
                       <label className="flex min-w-0 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 dark:bg-[#0d1117] dark:border-[#30363d]">
                         <Checkbox checked={checked} onCheckedChange={(value) => onToggleValue(candidate.value, !!value)} className="dark:border-[#30363d]" />
                         <span className={cn(
                           "truncate text-sm font-bold",
-                          checked ? "text-teal-800 dark:text-slate-100" : "text-slate-700 dark:text-slate-200"
+                          checked ? "text-slate-900 dark:text-slate-100" : "text-slate-700 dark:text-slate-200"
                         )}>{candidate.value}</span>
                       </label>
                       <span className="flex shrink-0 items-center gap-2">

@@ -754,7 +754,7 @@ export default function FilterPage() {
                       <td className="px-3 py-2 whitespace-nowrap">{row.market || ""}</td>
                       <td className="px-3 py-2 min-w-[320px]">
                         {acptNo ? (
-                          <a className="font-bold text-teal-700 hover:underline dark:text-[#2f81f7]" href={getKindDisclosureUrl(acptNo)} target="_blank" rel="noreferrer">{title}</a>
+                          <a className="font-bold text-[var(--tv-accent)] hover:underline" href={getKindDisclosureUrl(acptNo)} target="_blank" rel="noreferrer">{title}</a>
                         ) : title}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">{row.submitter || ""}</td>

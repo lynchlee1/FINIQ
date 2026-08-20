@@ -25,7 +25,7 @@ FINIQ MarketDesk is a quiet analyst cockpit: dense, exact, and calm under noisy 
 ### Rules
 
 - Blue is reserved for active controls, focus, and primary execution. Do not use it as ambient decoration.
-- Right-dock semantic colors are limited to green for successful completion, amber for attention or user action, and red for errors. Running, informational, inactive, and empty states retain the default control styling with no semantic tone.
+- Right-dock semantic colors are limited to green for successful completion, amber for running work, attention, or user action, and red for errors. An active `실행 현황` or `알림` control always uses one of those tones. There is no gray notification state. Inactive controls and `알림 없음` retain the default control styling with no semantic tone.
 - Tables and metrics use tonal shift first, borders second, and shadows never.
 - Raw hex values should stay in `globals.css` tokens or legacy compatibility classes; new UI should prefer token-backed Tailwind colors already used in the app.
 
@@ -249,6 +249,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |
 | Disclosure condition clear action | 지우기 | Icon button between `실행 취소` and `다시 실행` on `공시 조건`. Clears condition blocks to one empty row and records that change in the same undo history. |
 | Disclosure condition field help action | 필드 설명 | Circle-help button next to `조건 블록`. Lists each filter field with a short definition and `ex)` examples. Market values stored in stage 02 are `유가증권`, `코스닥`, and `코넥스`. Badge values include `상장폐지`, `관리종목`, and `KOSPI200`. |
+| Disclosure condition operators | 연산자 | Show only operators that apply to the selected field type. Date comparisons such as `<=` stay on `공시일`. Text fields keep contains/equals. `시장` and `배지` keep membership operators. |
 | Disclosure title search action | 실행 | Starts the restorable background title-search job in `공시내역 제목 검색` mode. Use the same execution label as the filtering mode. |
 | Disclosure title search result | 제목 검색 결과 | Lists distinct database titles and the matching disclosure count for each title. |
 | Shared worker count setting | 워커 수 | Shared right-dock label for the parallel worker count on every disclosure page. Do not invent page-specific names such as `검색 worker 수` or `병렬 워커 수`. |
@@ -388,4 +389,4 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 
 Right dock panels align exactly with the workflow content at the top of the page. On desktop, they begin following only after scrolling past a `24px` viewport inset, using the shared bounded spring motion; reduced-motion mode moves directly to the same bounded position. Do not use a sticky top offset, because it shifts the dock out of alignment before scrolling begins.
 
-Right dock buttons and notices use only three semantic tones: green for successful completion; amber for warnings or required decisions; red for errors. Running and informational states use the unchanged default control styling, as do inactive controls and `알림 없음`. Opening a panel keeps its semantic tone only while that state is active.
+Right dock buttons and notices use only three semantic tones: green for successful completion; amber for running work, warnings, or required decisions; red for errors. An active `실행 현황` or `알림` button always uses one of these tones, including a running job. There is no gray notification badge. Inactive controls and `알림 없음` keep the default control styling. Opening a panel keeps its semantic tone only while that state is active.

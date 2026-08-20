@@ -58,13 +58,21 @@ export function ActionDock({
     setOpenPanel((current) => current === panel ? null : panel);
   };
 
+  const resolveTone = (active: boolean, tone: ActionDockNotificationTone): ActionDockNotificationTone => {
+    if (!active) return "neutral";
+    return tone === "neutral" ? "warning" : tone;
+  };
+
+  const activityTone = resolveTone(activityActive, "warning");
+  const visibleNotificationTone = resolveTone(visibleNotificationActive, notificationTone);
+
   const iconClass = (active: boolean) => {
     if (active) return "relative h-10 w-10 rounded-lg";
     return "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)] hover:text-[var(--tv-text)]";
   };
 
-  const iconStyle = (active: boolean, selected: boolean, tone: ActionDockNotificationTone): CSSProperties | undefined => {
-    if (!active || tone === "neutral") return undefined;
+  const iconStyle = (tone: ActionDockNotificationTone, selected: boolean): CSSProperties | undefined => {
+    if (tone === "neutral") return undefined;
     const tokens = tone === "error"
       ? ["--tv-down", "--tv-down-soft", "--tv-down-text"]
       : tone === "warning"
@@ -79,22 +87,25 @@ export function ActionDock({
     };
   };
 
-  const notificationDotClass = notificationTone === "error"
-    ? "bg-[var(--tv-down)]"
-    : notificationTone === "warning"
-      ? "bg-[var(--tv-warning)]"
-      : notificationTone === "success"
-        ? "bg-[var(--tv-up)]"
-        : "bg-[var(--tv-muted)]";
+  const toneDotClass = (tone: ActionDockNotificationTone) => {
+    if (tone === "error") return "bg-[var(--tv-down)]";
+    if (tone === "warning") return "bg-[var(--tv-warning)]";
+    if (tone === "success") return "bg-[var(--tv-up)]";
+    return "";
+  };
 
   const renderPanel = (panel: DockPanel, title: string, content: ReactNode) => {
     if (openPanel !== panel) return null;
     const isNotificationPanel = panel === "notification";
+    const panelTone = isNotificationPanel ? visibleNotificationTone : panel === "activity" ? activityTone : "neutral";
     const panelContent = isNotificationPanel && notificationDismissed
       ? <div className="text-body text-[var(--tv-muted)]">알림 없음</div>
       : content;
     return (
-      <Card className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-md md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]">
+      <Card
+        className="fixed inset-x-4 bottom-20 max-h-[calc(100vh-7rem)] overflow-auto border-[color:var(--tv-border)] bg-[var(--tv-surface)] shadow-md md:absolute md:inset-x-auto md:bottom-auto md:right-full md:top-0 md:mr-3 md:w-[min(420px,calc(100vw-2rem))] md:max-h-[calc(100vh-8rem)]"
+        style={panelTone === "neutral" ? undefined : { borderColor: iconStyle(panelTone, false)?.borderColor }}
+      >
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-[var(--tv-text)]">{title}</CardTitle>
@@ -136,11 +147,12 @@ export function ActionDock({
           size="icon"
           onClick={() => togglePanel("activity")}
           aria-pressed={openPanel === "activity"}
-          className={iconClass(false)}
+          className={iconClass(activityTone !== "neutral")}
+          style={iconStyle(activityTone, openPanel === "activity")}
           title={openPanel === "activity" ? `${activityTitle} 닫기` : `${activityTitle} 열기`}
         >
           <Activity className="h-5 w-5" />
-          {activityActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--tv-muted)]" />}
+          {activityTone !== "neutral" && <span className={`absolute right-2 top-2 h-2 w-2 rounded-full ${toneDotClass(activityTone)}`} />}
         </Button>
 
         <Button
@@ -148,12 +160,12 @@ export function ActionDock({
           size="icon"
           onClick={() => togglePanel("notification")}
           aria-pressed={openPanel === "notification"}
-          className={iconClass(visibleNotificationActive && notificationTone !== "neutral")}
-          style={iconStyle(visibleNotificationActive, openPanel === "notification", notificationTone)}
+          className={iconClass(visibleNotificationTone !== "neutral")}
+          style={iconStyle(visibleNotificationTone, openPanel === "notification")}
           title={openPanel === "notification" ? `${notificationTitle} 닫기` : `${notificationTitle} 열기`}
         >
           <Bell className="h-5 w-5" />
-          {visibleNotificationActive && <span className={`absolute right-2 top-2 h-2 w-2 rounded-full ${notificationDotClass}`} />}
+          {visibleNotificationTone !== "neutral" && <span className={`absolute right-2 top-2 h-2 w-2 rounded-full ${toneDotClass(visibleNotificationTone)}`} />}
         </Button>
 
         {hasSettingsContent && (

@@ -7,6 +7,7 @@ from typing import Any
 
 from ..common import (
     clean_text,
+    normalize_label,
     parse_int,
     row_contains,
 )
@@ -274,7 +275,15 @@ class BondIssuanceExtractor:
             for row in rows[1:]:
                 target_name = row[name_index] if name_index < len(row) else ""
                 target_name = clean_text(target_name)
-                if not row or target_name in {"", "-", "합계", "총계", "계"}:
+                normalized_target_name = normalize_label(target_name)
+                if not row or normalized_target_name in {
+                    "",
+                    "-",
+                    "합계",
+                    "총계",
+                    "소계",
+                    "계",
+                }:
                     continue
                 amount_cell = row[amount_index] if amount_index < len(row) else ""
                 amount = parse_int(amount_cell, dash_as_zero=True)

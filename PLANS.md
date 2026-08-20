@@ -1,10 +1,34 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-20: bond-issuance section boundary and investor entity accuracy
+
+- Purpose: prevent correction history and total rows from creating stale or false bond-acquisition relationships, while keeping correction handling in the existing HTML section stage and classifying disclosed investor legal forms more accurately.
+- Implementation: kept the bond parser on its original first matching condition-table and investor-table paths; documented and regression-tested that stage 06 discards content before the first canonical TOC and saves only the selected bond-decision section before stage 07 parsing. Excluded whitespace-separated total labels after normalization and added ordered company, organization, and Korean personal-name rules for Korean and common foreign legal forms without splitting compound investor cells or adding another extraction fallback. The edge cases come from receipts `20130416000360`, `20230306000052`, `20230704000617`, and `20220114000448`, plus the local investor corpus.
+- Verification: the stage 05→06→07 correction-boundary regression and focused parser tests pass; bond parser tests pass (31 passed, 9 skipped), and ontology builder tests pass (22 passed). The service suite passes with 360 passed and 166 skipped when one unrelated dirty-worktree UI contract failure is excluded. All 14,428 local bond documents supported by the canonical stage-06 section contract parsed successfully after section splitting: 13,294 contain investors, 1,134 remain `source_not_found`, and no whitespace-separated total entity remains. The other 747 stage-05 documents are outside that contract (746 legacy files without a canonical `SECTION-N` heading and one public offering without a bond-decision TOC). Targeted corrected replacements, withdrawals, and later historical-table examples produce the expected current-section values.
+
+## 2026-08-20: shareholder-meeting Markdown consolidation
+
+- Purpose: remove duplication across the three shareholder-meeting Markdown documents and leave one authoritative document.
+- Implementation: merged the unique I/O, output-field, agenda, election-detail, and business-purpose contracts from `features.md` and `reference.md` into `docs/disclosures/07-html-parse/modes/shareholder-meeting/README.md`; removed the two superseded documents; updated the mode index to point to the consolidated README.
+- Verification: confirmed the mode directory contains exactly one Markdown file; confirmed both superseded files are absent; confirmed live documentation has no stale links to them; checked the consolidated README for the retained I/O, schema, relationship, business-purpose, verification, and follow-up contracts; confirmed every local README link exists; `git diff --check` passes. This was a documentation-only change, so production tests were not rerun.
+
+## 2026-08-20: condition search filter Command+Backspace restore
+
+- Purpose: make `조건검색 필터` stay empty after Command+Backspace (Windows: Cmd+Backspace) instead of restoring the previous name until a second delete.
+- Implementation: `FilterPresetCombobox` now handles Command/Ctrl+Backspace in `keydown`, prevents the native delete that React's controlled input would restore, and writes the next value through `onValueChange`. Command deletes to the line start; Ctrl deletes the previous word; a selection is deleted as a selection.
+- Verification: `node --test tests/frontend/disclosureConditionFilterInput.test.mjs` passed (1 test). Browser tools were not available, so the live combobox was not rechecked.
+
+## 2026-08-19: right-dock notification colors
+
+- Purpose: restore semantic color on the right-dock `실행 현황` and `알림` buttons so an active notice is never gray.
+- Implementation: `ActionDock` now maps a running job to amber and coerces an active `neutral` notice to amber; success/warning/error keep green/amber/red. Removed muted badges. Download, `공시원문 변환`, and `공시 자동화` pass a real tone whenever a notice is visible. `DESIGN.md` now forbids a gray notification state.
+- Verification: `node --test tests/frontend/actionDock.test.mjs tests/frontend/downloadStatusColors.test.mjs tests/frontend/htmlParsePage.test.mjs tests/frontend/disclosureAutomationPage.test.mjs` passed (28 tests). Browser tools were not available, so the live hover buttons were not rechecked.
+
 ## 2026-08-18: dark-mode neon text on legacy filter UI
 
 - Purpose: replace leftover neon teal/cyan text on the old `공시 조건` filter UI with the dark-mode slate palette.
-- Implementation: changed dark-mode text, selected chips, option counts, field-help labels, START/AND/NOT markers, and parenthesis fills in `DisclosureConditionFilterCard` to slate/`#21262d`/`#30363d`; applied the same selected-state change to `DisclosureFilterCandidateCard`; changed the filter-result title link to the design accent `#2f81f7`. Light-mode teal was left unchanged.
-- Verification: `node --test tests/frontend/pathLayout.test.mjs tests/frontend/htmlParsePage.test.mjs` passed (37 tests). Browser tools were not available, so the dark-mode palette change was not exercised in a live UI.
+- Implementation: removed competing `text-teal-*` / `bg-teal-*` / `bg-cyan-*` utilities from `DisclosureConditionFilterCard`, `DisclosureFilterCandidateCard`, and the filter-result title link. Those light-mode classes share specificity with `dark:` overrides, so the green tone still won in dark mode. Text and chips now use slate; the title link uses `var(--tv-accent)`.
+- Verification: `node --test tests/frontend/pathLayout.test.mjs tests/frontend/htmlParsePage.test.mjs` passed (37 tests). Browser tools were not available, so the live dark-mode screen was not rechecked.
 
 ## 2026-08-16: shareholder-meeting failure-history formatting
 

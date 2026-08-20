@@ -78,6 +78,22 @@ def test_classify_investor_type():
     assert classify_investor_type("주식회사 에스에이치홀딩스") == "Company"
     assert classify_investor_type("(주)썬메이트홀딩스") == "Company"
     assert classify_investor_type("더블엠인베스트먼트(주)") == "Company"
+    assert classify_investor_type("㈜한투오") == "Company"
+    assert classify_investor_type("라아인베스트먼트㈜") == "Company"
+    assert classify_investor_type("아이티씨홀딩스(유)") == "Company"
+    assert classify_investor_type("MANY MERIT ENTERPRISES LTD.") == "Company"
+    assert classify_investor_type("Thiel Crescendo Investments LLC") == "Company"
+    assert classify_investor_type("D.E Shaw Valence Portfolios, L.L.C.") == "Company"
+    assert classify_investor_type("GE CAPITAL EQUITY HOLDINGS, INC.") == "Company"
+    assert classify_investor_type("CAI Global Master Fund, L.P.") == "Organization"
+    assert classify_investor_type(
+        "아주 좋은 벤처펀드 2.0 (업무집행조합원 아주아이비투자 주식회사)"
+    ) == "Organization"
+    assert classify_investor_type(
+        "삼성증권 주식회사 (본건 펀드 1의 신탁업자 지위에서)"
+    ) == "Company"
+    assert classify_investor_type("김 철 순") == "Person"
+    assert classify_investor_type("PAG") == "Organization"
     assert classify_investor_type("신기술투자조합 1호") == "Organization"
     assert classify_investor_type("국민연금공단") == "Organization"
 
