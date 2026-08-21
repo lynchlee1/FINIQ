@@ -268,7 +268,7 @@ export default function FilterPage() {
       return presets.filter((preset) => !preset.parent_mode);
     }
     return presets.filter((preset) => (
-      preset.parent_mode && (!parentMode || preset.parent_mode === parentMode)
+      preset.parent_mode && parentMode && preset.parent_mode === parentMode
     ));
   }, [filterLevel, parentMode, presets]);
   const currentFilterMode = selectedPresetEntry?.mode || selectedPreset.trim() || mode;

@@ -12,14 +12,21 @@ const endpoint = "/api/disclosures/filter/presets";
 type PresetCacheEntry = {
   value?: PresetStoreResponse;
   promise?: Promise<PresetStoreResponse>;
+  generation?: number;
 };
 
 const presetCache = new Map<string, PresetCacheEntry>();
+let presetMutationId = 0;
 
 const cacheKey = (dataRoot: string) => dataRoot.trim();
 
-const storePresetResponse = (dataRoot: string, value: PresetStoreResponse) => {
-  presetCache.set(cacheKey(dataRoot), { value });
+const storePresetResponse = (dataRoot: string, value: PresetStoreResponse, generation = ++presetMutationId) => {
+  const key = cacheKey(dataRoot);
+  const current = presetCache.get(key);
+  if ((current?.generation ?? 0) > generation) {
+    return current?.value ?? value;
+  }
+  presetCache.set(key, { value, generation });
   return value;
 };
 
@@ -29,17 +36,18 @@ export const listDisclosureConditionPresets = (
 ) => {
   const key = cacheKey(dataRoot);
   const cached = presetCache.get(key);
-  if (cached?.promise) return cached.promise;
+  if (!options.force && cached?.promise) return cached.promise;
   if (!options.force && cached?.value) return Promise.resolve(cached.value);
 
+  const generation = presetMutationId;
   let promise: Promise<PresetStoreResponse>;
-  promise = apiPost<PresetStoreResponse>(endpoint, { data_root: dataRoot, action: "list" }).then((response) => storePresetResponse(dataRoot, response)).finally(() => {
+  promise = apiPost<PresetStoreResponse>(endpoint, { data_root: dataRoot, action: "list" }).then((response) => storePresetResponse(dataRoot, response, generation)).finally(() => {
     const current = presetCache.get(key);
     if (current?.promise === promise) {
-      presetCache.set(key, current.value ? { value: current.value } : {});
+      presetCache.set(key, current.value ? { value: current.value, generation: current.generation } : { generation: current.generation });
     }
   });
-  presetCache.set(key, { ...cached, promise });
+  presetCache.set(key, { ...cached, promise, generation: cached?.generation });
   return promise;
 };
 

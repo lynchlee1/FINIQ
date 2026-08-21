@@ -40,6 +40,7 @@ export default function HtmlBondSummaryPage() {
   const {
     html_section_split_output_directory: inputPath,
     html_parse_output_directory: outputPath,
+    html_parse_mode: parseMode,
     fetchSettings,
     saveSetting,
   } = useSettingsStore();
@@ -62,6 +63,11 @@ export default function HtmlBondSummaryPage() {
       setIsErrorStatus(true);
       return;
     }
+    if (!parseMode) {
+      setStatus("모드를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
 
     setIsFetching(true);
     setStatus("채권 요약을 불러오는 중...");
@@ -74,6 +80,7 @@ export default function HtmlBondSummaryPage() {
         body: JSON.stringify({
           input_directory: inputPath,
           output_path: outputPath,
+          mode: parseMode,
           limit: bondLimit === "all" ? null : Number(bondLimit),
         }),
       });

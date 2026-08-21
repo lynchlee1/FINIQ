@@ -657,8 +657,7 @@ def _require_current_parent_metadata(
         raise ValueError(f"Parent filter workflow is not completed: {parent}")
     fingerprint = parent_workflow.get("result_fingerprint")
     if not fingerprint:
-        _document, parent_workflow = _read_workflow(parent_path)
-        fingerprint = parent_workflow.get("result_fingerprint")
+        raise ValueError(f"Parent filter workflow result fingerprint is missing: {parent}")
     if fingerprint != workflow.get("parent_result_fingerprint"):
         raise ValueError(
             "Derived filter workflow is stale because parent result changed: "

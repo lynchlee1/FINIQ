@@ -733,6 +733,37 @@ def _record_matches_filter_blocks(
     return _record_filter_blocks_match(record, filter_blocks)
 
 
+def _require_payload_parser_method(payload: dict[str, Any]) -> str:
+    parser_method = str(payload.get("parser_method") or "").strip()
+    if not parser_method:
+        raise ValueError("parser_method is required")
+    return parser_method
+
+
+def _derived_allowed_acpt_numbers(
+    body: dict[str, Any],
+    *,
+    mode: str,
+    filtered_metadata_path: Path | None,
+) -> set[str] | None:
+    if body.get("parent_mode") in (None, ""):
+        return None
+    if filtered_metadata_path is None:
+        raise ValueError("filtered_metadata_path is required for a derived filter")
+    filtered_payload, validated_filtered_path = _load_workspace_filtered_payload(
+        {
+            "data_root": body.get("data_root"),
+            "mode": mode,
+            "parent_mode": body.get("parent_mode"),
+        }
+    )
+    if Path(validated_filtered_path) != filtered_metadata_path:
+        raise ValueError(
+            "derived filter filtered_metadata_path does not match its workspace path"
+        )
+    return set(collect_acpt_numbers_from_json(filtered_payload))
+
+
 def _build_parse_request(
     body: dict[str, Any],
     cancel_check: Callable[[], bool] | None = None,
@@ -776,25 +807,11 @@ def _build_parse_request(
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
     filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
-    derived_filter = body.get("parent_mode") not in (None, "")
-    if derived_filter and filtered_metadata_path is None:
-        raise ValueError("filtered_metadata_path is required for a derived filter")
-    allowed_acpt_numbers = None
-    if derived_filter:
-        filtered_payload, validated_filtered_path = _load_workspace_filtered_payload(
-            {
-                "data_root": body.get("data_root"),
-                "mode": mode,
-                "parent_mode": body.get("parent_mode"),
-            }
-        )
-        if Path(validated_filtered_path) != filtered_metadata_path:
-            raise ValueError(
-                "derived filter filtered_metadata_path does not match its workspace path"
-            )
-        allowed_acpt_numbers = set(
-            collect_acpt_numbers_from_json(filtered_payload)
-        )
+    allowed_acpt_numbers = _derived_allowed_acpt_numbers(
+        body,
+        mode=mode,
+        filtered_metadata_path=filtered_metadata_path,
+    )
     html_files = _collect_html_files(
         input_directory,
         limit,

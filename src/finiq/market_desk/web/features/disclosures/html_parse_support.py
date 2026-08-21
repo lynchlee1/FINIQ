@@ -135,7 +135,7 @@ def _sequence_sort_key(record: dict[str, Any]) -> tuple[int, str]:
 
 def _build_record_change(
     *,
-    mode: str,
+    parser_method: str,
     before_record: dict[str, Any],
     after_record: dict[str, Any],
     before_index: int,
@@ -143,10 +143,10 @@ def _build_record_change(
     fields: list[str] | None = None,
 ) -> dict[str, Any] | None:
     if not fields:
-        fields = list(CHANGE_LOG_COMPARISON_FIELDS.get(mode, ()))
+        fields = list(CHANGE_LOG_COMPARISON_FIELDS.get(parser_method, ()))
 
     changes: list[dict[str, Any]] = []
-    major_fields = MAJOR_CHANGE_FIELDS.get(mode, set())
+    major_fields = MAJOR_CHANGE_FIELDS.get(parser_method, set())
 
     for field in fields:
         before_value = before_record.get(field)

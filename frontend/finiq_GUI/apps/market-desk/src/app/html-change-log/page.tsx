@@ -18,11 +18,16 @@ import {
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { formatInteger } from "@/lib/format";
+import type { DisclosureConditionPreset } from "@/components/disclosures/DisclosureConditionFilterCard";
+import { listDisclosureConditionPresets } from "@/lib/disclosureConditionPresets";
 
-const PARSE_MODES = [
-  { key: "bond_issuance", label: "사채발행파싱" },
-  { key: "rights_issuance", label: "유무상증자파싱" },
-];
+const presetIdentity = (preset: DisclosureConditionPreset) => (
+  preset.id || (preset.parent_mode ? `${preset.parent_mode}/${preset.mode}` : preset.mode)
+);
+
+const presetLabel = (preset: DisclosureConditionPreset) => (
+  preset.parent_mode ? `${preset.parent_mode} › ${preset.mode}` : preset.mode
+);
 
 const HTML_CHANGE_LOG_RELATED_ROUTE = "/html-bond-summary";
 
@@ -36,20 +41,58 @@ export default function HtmlChangeLogPage() {
   const [selectedFamilyId, setSelectedFamilyId] = useState<string>("");
   const [familyDetails, setFamilyDetails] = useState<Record<string, any>>({});
 
-  const { html_parse_output_directory: outputPath, html_parse_mode: changeMode, fetchSettings, saveSetting } = useSettingsStore();
+  const {
+    html_parse_output_directory: outputPath,
+    html_parse_mode: storedMode,
+    output_root: dataRoot,
+    fetchSettings,
+    saveSetting,
+  } = useSettingsStore();
+  const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState("");
   const [changeSearch, setChangeSearch] = useState("");
   const [showOnlyChanges, setShowOnlyChanges] = useState(false);
   const [changeLimit, setChangeLimit] = useState("50");
   const [exportLatestOnly, setExportLatestOnly] = useState(false);
-
+  const selectedPresetEntry = useMemo(
+    () => presets.find((preset) => presetIdentity(preset) === selectedPreset),
+    [presets, selectedPreset],
+  );
+  const currentFilterMode = selectedPresetEntry?.mode || "";
+  const currentParentMode = selectedPresetEntry?.parent_mode || "";
 
   useEffect(() => {
     fetchSettings().finally(() => setLoading(false));
   }, [fetchSettings]);
 
+  useEffect(() => {
+    if (!dataRoot?.trim()) {
+      setPresets([]);
+      return;
+    }
+    listDisclosureConditionPresets(dataRoot).then((response) => {
+      setPresets(response.presets);
+    }).catch((error) => {
+      setPresets([]);
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    });
+  }, [dataRoot]);
+
+  useEffect(() => {
+    if (selectedPreset || !storedMode) return;
+    const match = presets.find((preset) => !preset.parent_mode && preset.mode === storedMode);
+    if (match) setSelectedPreset(presetIdentity(match));
+  }, [presets, selectedPreset, storedMode]);
+
   const loadChangeLog = async () => {
     if (!outputPath) {
       setStatus(`${DATA_PATH_LABELS.workspace}가 필요합니다.`);
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!currentFilterMode) {
+      setStatus("모드를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -67,7 +110,8 @@ export default function HtmlChangeLogPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           output_path: outputPath,
-          mode: changeMode || "bond_issuance",
+          mode: currentFilterMode,
+          ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
           summary_only: true,
           limit: changeLimit === "" ? null : Number(changeLimit),
         }),
@@ -99,7 +143,8 @@ export default function HtmlChangeLogPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           output_path: outputPath,
-          mode: changeMode || "bond_issuance",
+          mode: currentFilterMode,
+          ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
           family_id: familyId,
         }),
       });
@@ -120,9 +165,14 @@ export default function HtmlChangeLogPage() {
       setIsErrorStatus(true);
       return;
     }
+    if (!currentFilterMode) {
+      setStatus("모드를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
     const params = new URLSearchParams({
       output_path: outputPath,
-      mode: changeMode || "bond_issuance",
+      mode: currentFilterMode,
       latest_only: String(exportLatestOnly),
     });
     window.location.href = `/api/disclosures/html/parse/export.xlsx?${params.toString()}`;
@@ -167,10 +217,15 @@ export default function HtmlChangeLogPage() {
     {
       id: "changeMode",
       kind: "select",
-      label: "파싱 모드",
-      value: changeMode || "bond_issuance",
-      onChange: (val) => saveSetting("html_parse_mode", val),
-      options: PARSE_MODES.map((mode) => ({ value: mode.key, label: mode.label })),
+      label: "모드",
+      value: selectedPreset,
+      onChange: (val) => {
+        setSelectedPreset(val);
+        const preset = presets.find((item) => presetIdentity(item) === val);
+        if (!preset || preset.parent_mode) return;
+        void saveSetting("html_parse_mode", preset.mode);
+      },
+      options: presets.map((preset) => ({ value: presetIdentity(preset), label: presetLabel(preset) })),
     },
     {
       id: "outputPath",

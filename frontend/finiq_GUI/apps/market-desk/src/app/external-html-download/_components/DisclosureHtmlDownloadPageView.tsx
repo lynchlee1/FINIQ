@@ -236,7 +236,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     () => filterPresets.find((preset) => presetIdentity(preset) === selectedFilterId),
     [filterPresets, selectedFilterId],
   );
-  const selectedFilterMode = selectedFilterPreset?.mode || selectedFilterId || htmlParseMode;
+  const selectedFilterMode = selectedFilterPreset?.mode || "";
   const selectedFilterParentMode = selectedFilterPreset?.parent_mode || "";
 
   useEffect(() => {
@@ -247,6 +247,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   const currentSourcePath = dataRoot;
   const currentSourceRequiredMessage = variantConfig.sourceRequiredMessage;
+
+  const parsedProblemFileLimit = (() => {
+    const parsed = Number(problemFileLimit);
+    return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
+  })();
 
   const buildRunPayload = useCallback((cancelToken: string) => ({
       data_root: dataRoot,
@@ -259,7 +264,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       limit: limit ? Number(limit) : null,
       skip_existing: skipExisting,
       progress_interval: Number(progressInterval),
-      problem_file_limit: Number(problemFileLimit),
+      ...(parsedProblemFileLimit != null ? { problem_file_limit: parsedProblemFileLimit } : {}),
       cancel_token: cancelToken,
   }), [
     dataRoot,
@@ -271,12 +276,17 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     limit,
     skipExisting,
     progressInterval,
-    problemFileLimit,
+    parsedProblemFileLimit,
   ]);
 
   const handleRun = async () => {
     if (!currentSourcePath) {
       setStatus(currentSourceRequiredMessage);
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!selectedFilterPreset) {
+      setStatus("조건검색 필터를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -294,7 +304,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
     output_directory: "",
     limit: limit ? Number(limit) : null,
-    problem_file_limit: Number(problemFileLimit),
+    ...(parsedProblemFileLimit != null ? { problem_file_limit: parsedProblemFileLimit } : {}),
     dry_run: dryRun,
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
@@ -303,7 +313,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     selectedFilterMode,
     selectedFilterParentMode,
     limit,
-    problemFileLimit,
+    parsedProblemFileLimit,
     deleteConfirmed,
     deleteConfirmationText,
   ]);
@@ -332,6 +342,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const handleInspectFolder = async () => {
     if (!currentSourcePath) {
       setStatus(currentSourceRequiredMessage);
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!selectedFilterPreset) {
+      setStatus("조건검색 필터를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -563,8 +578,14 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const visibleProblemFiles = Array.isArray(lastInspectionResult?.deletion_candidates)
     ? lastInspectionResult.deletion_candidates
     : [];
+  const problemFileTotal = Number(
+    lastInspectionResult?.deleted_file_count
+    ?? lastInspectionResult?.deletion_candidate_count
+    ?? lastInspectionCandidateCount
+    ?? 0,
+  );
   const omittedProblemFileCount = Math.max(
-    lastInspectionCandidateCount - visibleProblemFiles.length,
+    problemFileTotal - visibleProblemFiles.length,
     0,
   );
   // Files still to download are normal work, not an integrity problem, so they
@@ -712,11 +733,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                 id={`${variant}-filter-preset`}
                 value={selectedFilterId}
                 onChange={(event) => setSelectedFilterId(event.target.value)}
-                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
+                className={`${htmlControlClassName} w-full font-semibold`}
               >
-                {selectedFilterId && !filterPresets.some((preset) => presetIdentity(preset) === selectedFilterId) && (
-                  <option value={selectedFilterId}>{selectedFilterId}</option>
-                )}
                 {filterPresets.map((preset) => (
                   <option key={presetIdentity(preset)} value={presetIdentity(preset)}>
                     {presetLabel(preset)}

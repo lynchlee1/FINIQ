@@ -6953,6 +6953,7 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "parser_method": "bond_issuance",
                 "families": {
                     "20250102000002": {
                         "members": [
@@ -6990,7 +6991,11 @@ def test_build_bond_parse_summary_payload_loads_ui_rows(tmp_path: Path) -> None:
     )
 
     payload = build_bond_parse_summary_payload(
-        {"input_directory": str(tmp_path / "06-sections"), "output_path": str(output_directory)}
+        {
+            "input_directory": str(tmp_path / "06-sections"),
+            "output_path": str(output_directory),
+            "mode": "bond_issuance",
+        }
     )
 
     assert payload["format"] == "finiq_bond_parse_summary_v1"
@@ -7019,6 +7024,7 @@ def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Pat
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "parser_method": "bond_issuance",
                 "records": [
                     {
                         "title": "전환사채권발행결정",
@@ -7032,7 +7038,11 @@ def test_build_bond_parse_summary_payload_accepts_result_directory(tmp_path: Pat
     )
 
     payload = build_bond_parse_summary_payload(
-        {"input_directory": str(input_directory), "output_path": str(output_directory)}
+        {
+            "input_directory": str(input_directory),
+            "output_path": str(output_directory),
+            "mode": "bond_issuance",
+        }
     )
 
     assert payload["source_path"] == str(parse_path)
@@ -7046,7 +7056,9 @@ def test_build_bond_parse_summary_payload_rejects_missing_result_file_path(
     result_path = tmp_path / f"parsed-bond_issuance{suffix}"
 
     with pytest.raises(ValueError, match="output_path must be a directory path"):
-        build_bond_parse_summary_payload({"output_path": str(result_path)})
+        build_bond_parse_summary_payload(
+            {"output_path": str(result_path), "mode": "bond_issuance"}
+        )
 
     assert not result_path.exists()
 
@@ -7079,6 +7091,7 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "parser_method": "bond_issuance",
                 "records": [
                     {
                         "title": "전환사채권발행결정",
@@ -7096,7 +7109,11 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
     )
 
     payload = build_bond_parse_summary_payload(
-        {"input_directory": str(input_directory), "output_path": str(output_directory)}
+        {
+            "input_directory": str(input_directory),
+            "output_path": str(output_directory),
+            "mode": "bond_issuance",
+        }
     )
 
     summary_record = payload["records"][0]
@@ -7106,6 +7123,65 @@ def test_build_bond_parse_summary_payload_includes_source_preview(tmp_path: Path
     assert "source_file" not in preview
     assert preview["tables"][0]["rows"][0] == ["1. 사채의 종류", "전환사채"]
     assert preview["tables"][0]["rows"][1] == ["2. 사채의 권면(전자등록)총액", "1,000,000,000"]
+
+
+def test_build_bond_parse_summary_payload_uses_workspace_mode_and_parser_method(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "06-sections"
+    input_directory.mkdir()
+    output_directory = tmp_path / "07-converted" / "saved_filter"
+    output_directory.mkdir(parents=True)
+    parse_path = output_directory / "parsed-saved_filter.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "saved_filter",
+                "parser_method": "bond_issuance",
+                "records": [
+                    {
+                        "title": "전환사채권발행결정",
+                        "acpt_no": "20250102000002",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_bond_parse_summary_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_path": str(output_directory),
+            "mode": "saved_filter",
+        }
+    )
+
+    assert payload["source_path"] == str(parse_path)
+    assert payload["summary"]["records"] == 1
+
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "saved_filter",
+                "parser_method": "rights_issuance",
+                "records": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="parser_method must be bond_issuance"):
+        build_bond_parse_summary_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_path": str(output_directory),
+                "mode": "saved_filter",
+            }
+        )
 
 
 def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> None:
@@ -7258,6 +7334,7 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "rights_issuance",
+                "parser_method": "rights_issuance",
                 "families": {
                     "20240829000001": {
                         "members": [
@@ -7309,6 +7386,87 @@ def test_build_parse_change_log_payload_classifies_major_changes(tmp_path: Path,
     assert [change["field"] for change in payload["families"][0]["changes"][0]["changes"]] == ["발행목적", "납입일"]
 
 
+def test_build_parse_change_log_payload_uses_parser_method_not_workspace_mode(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from finiq.market_desk.web.app import config as app_config
+
+    monkeypatch.setattr(app_config, "change_log_date_thresholds", {"납입일": 0})
+    monkeypatch.setattr(app_config, "change_log_numeric_thresholds", {})
+
+    parse_path = tmp_path / "parsed-saved_filter.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "saved_filter",
+                "parser_method": "rights_issuance",
+                "families": {
+                    "20240829000001": {
+                        "members": [
+                            {"sequence": 0, "acpt_no": "20240822000001"},
+                            {"sequence": 1, "acpt_no": "20240829000001"},
+                        ],
+                    }
+                },
+                "records": [
+                    {
+                        "title": "유상증자결정",
+                        "acpt_no": "20240822000001",
+                        "family_id": "20240829000001",
+                        "current_sequence": 0,
+                        "family_member_count": 2,
+                        "신주의 종류와 수": [["보통주식", 100]],
+                        "발행목적": [["운영자금", 1000]],
+                        "발행가액": [["보통주식", 1000]],
+                        "납입일": "2024년 08월 30일",
+                    },
+                    {
+                        "title": "[정정]유상증자결정",
+                        "acpt_no": "20240829000001",
+                        "family_id": "20240829000001",
+                        "current_sequence": 1,
+                        "family_member_count": 2,
+                        "신주의 종류와 수": [["보통주식", 100]],
+                        "발행목적": [["운영자금", 2000]],
+                        "발행가액": [["보통주식", 1000]],
+                        "납입일": "2024년 09월 02일",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_change_log_payload(
+        {"output_path": str(tmp_path), "mode": "saved_filter"}
+    )
+
+    assert payload["mode"] == "saved_filter"
+    assert payload["summary"]["major_changes"] == 1
+    assert [change["field"] for change in payload["families"][0]["changes"][0]["changes"]] == [
+        "발행목적",
+        "납입일",
+    ]
+
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "saved_filter",
+                "records": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="parser_method is required"):
+        build_parse_change_log_payload(
+            {"output_path": str(tmp_path), "mode": "saved_filter"}
+        )
+
+
 def test_build_parse_change_log_payload_applies_default_threshold_to_nested_numeric_fields(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -7322,6 +7480,7 @@ def test_build_parse_change_log_payload_applies_default_threshold_to_nested_nume
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "rights_issuance",
+                "parser_method": "rights_issuance",
                 "records": [
                     {
                         "title": "유상증자결정",
@@ -7369,6 +7528,7 @@ def test_build_parse_change_log_payload_accepts_result_folder(tmp_path: Path) ->
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "rights_issuance",
+                "parser_method": "rights_issuance",
                 "records": [],
             },
             ensure_ascii=False,
@@ -7388,6 +7548,7 @@ def test_build_parse_change_log_payload_requires_mode_for_result_folder(tmp_path
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "bond_issuance",
+                "parser_method": "bond_issuance",
                 "records": [],
             },
             ensure_ascii=False,
@@ -7440,6 +7601,7 @@ def test_build_parse_export_xlsx_latest_only_uses_family_reference_fields(
             {
                 "format": "finiq_disclosure_html_parse_v1",
                 "mode": "rights_issuance",
+                "parser_method": "rights_issuance",
                 "families": {
                     "20240829000001": {
                         "members": [

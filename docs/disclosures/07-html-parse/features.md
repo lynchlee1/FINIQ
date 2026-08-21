@@ -2,7 +2,7 @@
 
 ## Purpose
 
-목차 HTML과 외부 metadata를 읽어 선택한 mode의 구조화 결과를 저장하고 preview와 진단 정보를 제공한다.
+목차 HTML과 외부 metadata를 읽어 선택한 파싱 방법의 구조화 결과를 저장하고 preview와 진단 정보를 제공한다.
 
 ## Features
 
@@ -12,7 +12,7 @@
 
 - `<data_root>/06-sections` 바로 아래의 4자리 연도 폴더와 그 바로 아래의 `*.html`만 읽는다.
 - 입력 루트, 이름이 다른 폴더와 더 깊은 하위 HTML은 제외한다.
-- `parse_disclosure_html_payload()`가 필수 경로, mode, 필터와 실행 옵션을 검증하고 mode parser를 선택한다.
+- `parse_disclosure_html_payload()`가 필수 경로, 작업공간 `mode`, 선택적인 `parent_mode`, `parser_method`, 필터와 실행 옵션을 검증하고 registry parser를 선택한다.
 
 #### Defaults and Exceptions
 
@@ -42,8 +42,8 @@
 
 #### Behavior
 
-- `features/disclosures/html_parse_common.py`의 `PARSER_REGISTRY`에서 선택한 mode parser를 찾는다.
-- 공통 식별값, 값별 상태와 warning 규칙에 mode별 업무값을 추가한다.
+- `features/disclosures/html_parse_common.py`의 `PARSER_REGISTRY`에서 선택한 `parser_method`를 찾는다.
+- 공통 식별값, 값별 상태와 warning 규칙에 parser별 업무값을 추가한다.
 - 외부 title은 함수 선언에 `title` 인자가 있는 parser에만 전달한다.
 
 #### Defaults and Exceptions
@@ -133,9 +133,9 @@
 - `cancel_disclosure_html_parse()`가 실행 중인 변환에 취소 요청을 전달한다.
 - `기존 데이터 검토`는 현재 설정과 입력 HTML로 임시 결과를 다시 계산하고 저장된 `parsed-<mode>.json` 전체와 비교한다.
 - 조회 함수는 Excel 결과를 만들며, 08단계는 이 단계가 저장한 correction family를 사용해 정정 내역을 만든다.
-- 수동 실행, 미리보기, 기존 데이터 검사와 실행 옵션 후보 조회는 같은 `filter_mode`와 선택적인 `parent_mode`를 사용한다.
-- 파생 필터를 선택하면 `mode`에는 상위 필터가 사용하는 parser mode를, `filter_mode`에는 자식 mode를, `parent_mode`에는 상위 mode를 전달한다. 변환 대상은 자식의 한 단계 파생 멤버십으로 제한한다.
-- 기본 필터 결과는 `07-converted/<mode>`에, 파생 필터 결과는 `07-converted/<parent_mode>/subfilters/<filter_mode>`에 저장해 같은 자식 이름을 사용하는 서로 다른 상위 필터의 결과가 충돌하지 않게 한다.
+- 수동 실행, 미리보기, 기존 데이터 검사와 실행 옵션 후보 조회는 같은 자식 `mode`와 선택적인 `parent_mode`를 사용하고, parser는 `parser_method`로만 고른다.
+- 파생 필터를 선택하면 `mode`에는 자식 이름을, `parent_mode`에는 상위 기본 필터 이름을 전달한다. 변환 대상은 자식의 한 단계 파생 멤버십으로 제한한 뒤 `limit`을 적용한다.
+- 기본 필터 결과는 `07-converted/<mode>`에, 파생 필터 결과는 `07-converted/<parent_mode>/subfilters/<mode>`에 저장해 같은 자식 이름을 사용하는 서로 다른 상위 필터의 결과가 충돌하지 않게 한다.
 
 #### Defaults and Exceptions
 
@@ -149,6 +149,6 @@
 
 1. 제보받은 mode와 접수번호를 확인하고 같은 입력으로 변환을 다시 실행한다.
 2. 저장 결과와 안내를 찾고 해당 06단계 HTML을 연다.
-3. 기대값의 표와 칸을 현재 mode parser의 추출 규칙과 비교한다.
+3. 기대값의 표와 칸을 현재 parser의 추출 규칙과 비교한다.
 4. 해당 parser의 함수 책임을 확인해 규칙을 고치고 실제 원본, test fixture와 합성 HTML로 검증한다.
 5. 변환을 다시 실행해 제보된 오류가 사라지고 다른 결과가 바뀌지 않았는지 확인한다.
