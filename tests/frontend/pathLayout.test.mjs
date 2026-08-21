@@ -567,7 +567,8 @@ test("disclosure automation exposes filter presets for every dependent stage ran
   const source = await readFile(disclosureAutomationPagePath, "utf8");
 
   assert.match(source, /const filterSettingsSelected = executionMask\.some\(\(stage\) => stage >= 3\)/);
-  assert.match(source, /executionMask\.some\(\(stage\) => stage >= 3\) && !selectedPreset/);
+  assert.match(source, /if \(!selectedPreset\) \{/);
+  assert.match(source, /if \(!parserMethod\) throw new Error\("파싱 방법을 선택하세요\."\)/);
 });
 
 test("disclosure filter keeps workflow status scoped to the active workspace", async () => {

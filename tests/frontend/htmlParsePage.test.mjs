@@ -33,7 +33,7 @@ test("html parse page uses standard two-row data path card", async () => {
 test("html parse page keeps workspace directories directly editable", async () => {
   const source = await readFile(pagePath, "utf8");
   const pathFields = source.match(/const parsePathFields: DataPathField\[\][\s\S]*?\n  \];/)?.[0] ?? "";
-  const modeHandler = source.match(/const handleParseModeChange =[\s\S]*?};/)?.[0] ?? "";
+  const modeHandler = source.match(/const handleModeChange =[\s\S]*?\n  };/)?.[0] ?? "";
 
   assert.doesNotMatch(pathFields, /disabled:/);
   assert.match(pathFields, /label: DATA_PATH_LABELS\.workspace/);
@@ -43,39 +43,37 @@ test("html parse page keeps workspace directories directly editable", async () =
   assert.match(source, /data_root: dataRoot/);
   assert.match(source, /setInputDirectory\(config\.html_section_split_output_directory \|\| ""\)/);
   assert.match(source, /setOutputDirectory\(config\.html_parse_output_directory \|\| ""\)/);
-  assert.match(modeHandler, /saveSetting\("html_parse_mode", val\)/);
+  assert.match(modeHandler, /saveSetting\("html_parse_mode", preset\.mode\)/);
+  assert.match(source, /saveSetting\("html_parser_method", val\)/);
   assert.match(source, /WorkflowPathSettings id="parse-separate-output-directory" fields=\{parsePathFields\}/);
 });
 
-test("html parse mode cards render as full-width rows", async () => {
+test("html parse page loads modes and parsing methods from their own sources", async () => {
   const source = await readFile(pagePath, "utf8");
-  const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?{DISCLOSURE_PARSE_MODES\.map/)?.[0] ?? "";
 
-  assert.match(modeCardContent, /className="grid gap-3"/);
-  assert.doesNotMatch(modeCardContent, /md:grid-cols-2/);
+  assert.match(source, /listDisclosureConditionPresets\(dataRoot\)/);
+  assert.match(source, /apiGet<\{ methods: ParserMethodConfig\[\] \}>\("\/api\/disclosures\/html\/parse\/methods"\)/);
+  assert.match(source, /<span>모드<\/span>[\s\S]*?presets\.map/);
+  assert.match(source, /<span>파싱 방법<\/span>[\s\S]*?parserMethods\.map/);
+  assert.doesNotMatch(source, /const DISCLOSURE_PARSE_MODES/);
+  assert.doesNotMatch(source, /const PARSE_MODE_CONFIGS/);
 });
 
-test("html parse mode cards use readable list row spacing", async () => {
+test("html parse conversion settings describe the selected parser method", async () => {
   const source = await readFile(pagePath, "utf8");
-  const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?{DISCLOSURE_PARSE_MODES\.map[\s\S]*?<\/CardContent>/)?.[0] ?? "";
 
-  assert.match(source, /<CardHeader className="gap-3 pb-4">[\s\S]*?<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>/);
-  assert.match(source, /<CardContent className="space-y-4">[\s\S]*?<div className="grid gap-3">/);
-  assert.match(modeCardContent, /rounded-md border px-4 py-3/);
-  assert.match(modeCardContent, /transition-shadow/);
-  assert.doesNotMatch(modeCardContent, /transition-all/);
-  assert.match(modeCardContent, /shadow-sm/);
-  assert.match(modeCardContent, /<div className="flex items-center gap-2">/);
-  assert.match(modeCardContent, /<p className="mt-2 text-xs leading-6 opacity-85">/);
-  assert.doesNotMatch(modeCardContent, /p-4 rounded-xl/);
-  assert.doesNotMatch(modeCardContent, /leading-relaxed/);
+  assert.match(source, /<CardTitle className="dark:text-white">변환 설정<\/CardTitle>/);
+  assert.match(source, /const selectedParserMethod = parserMethods\.find/);
+  assert.match(source, /selectedParserMethod\.description/);
+  assert.match(source, /selectedParserMethod\.status/);
 });
 
 test("html parse page renders report preview box for selected mode", async () => {
   const source = await readFile(pagePath, "utf8");
   const previewCardContent = source.match(/<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>[\s\S]*?<CardTitle className="dark:text-white">작업 실행<\/CardTitle>/)?.[0] ?? "";
 
-  assert.match(source, /const selectedParseMode = PARSE_MODE_CONFIGS\[parseMode\] \|\| DISCLOSURE_PARSE_MODES\[0\]/);
+  assert.match(source, /const selectedParserMethod = parserMethods\.find/);
+  assert.match(source, /parser_method: parserMethod/);
   assert.match(source, /const \[previewLoading, setPreviewLoading\] = useState\(false\)/);
   assert.match(source, /const \[previewData, setPreviewData\] = useState<any>\(null\)/);
   assert.match(source, /\/api\/disclosures\/html\/parse\/preview/);
@@ -144,19 +142,18 @@ test("html parse page sends parallel worker count", async () => {
   assert.match(source, /parallel_worker_count: defaultParallelWorkers/);
 });
 
-test("html parse page renders parse-mode specific filters in separate options card", async () => {
+test("html parse page renders parser-method filters in a separate options card", async () => {
   const source = await readFile(pagePath, "utf8");
   const candidateCardSource = await readFile(candidateCardPath, "utf8");
-  const modeCardContent = source.match(/<CardTitle className="dark:text-white">모드별 기능<\/CardTitle>[\s\S]*?<\/CardContent>\s*<\/Card>/)?.[0] ?? "";
+  const settingsCardContent = source.match(/<CardTitle className="dark:text-white">변환 설정<\/CardTitle>[\s\S]*?<\/CardContent>\s*<\/Card>/)?.[0] ?? "";
   const optionsCardContent = source.match(/<CardTitle className="dark:text-white">실행 옵션<\/CardTitle>[\s\S]*?<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>/)?.[0] ?? "";
   const inspectionPayload = source.match(/const buildParseInspectionPayload = \(\) => \(\{[\s\S]*?\}\);/)?.[0] ?? "";
-  const modeHandler = source.match(/const handleParseModeChange = \(val: string\) => \{[\s\S]*?\};/)?.[0] ?? "";
+  const methodHandler = source.match(/const handleParserMethodChange = \(val: string\) => \{[\s\S]*?\};/)?.[0] ?? "";
 
-  assert.match(source, /type ParseModeConfig =/);
-  assert.match(source, /const DISCLOSURE_PARSE_MODES: ParseModeConfig\[\] = \[/);
-  assert.match(source, /key: "bond_issuance"[\s\S]*?executionOptions: \[\{ field: "사채발행방법", statusLabel: "사채발행방법" \}\]/);
-  assert.match(source, /key: "rights_issuance"[\s\S]*?executionOptions: \[\{ field: "증자방식", statusLabel: "증자방식" \}\]/);
-  assert.match(source, /const PARSE_MODE_CONFIGS = Object\.fromEntries\(DISCLOSURE_PARSE_MODES\.map/);
+  assert.match(source, /type ParserMethodConfig =/);
+  assert.match(source, /\/api\/disclosures\/html\/parse\/methods/);
+  assert.doesNotMatch(source, /key: "bond_issuance"/);
+  assert.doesNotMatch(source, /key: "rights_issuance"/);
   assert.match(source, /const \[selectedExecutionOptionValues, setSelectedExecutionOptionValues\] = useState<string\[\]>\(\[\]\)/);
   assert.match(source, /const \[executionOptionInputDirectory, setExecutionOptionInputDirectory\] = useState\(""\)/);
   assert.match(source, /const filterCandidatesRequestIdRef = useRef\(0\)/);
@@ -168,9 +165,9 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /acpt_no: acptNo/);
   assert.doesNotMatch(source, /String\(item\.acpt_no \|\| ""\)\.trim\(\)/);
   assert.doesNotMatch(source, /String\(example\.acpt_no \|\| ""\)\.trim\(\)/);
-  assert.match(source, /const selectedParseMode = PARSE_MODE_CONFIGS\[parseMode\] \|\| DISCLOSURE_PARSE_MODES\[0\]/);
-  assert.match(source, /const executionOptionConfig = selectedParseMode\.executionOptions\[0\] \|\| null/);
-  assert.doesNotMatch(modeCardContent, /실행 옵션/);
+  assert.match(source, /const selectedParserMethod = parserMethods\.find/);
+  assert.match(source, /const executionOptionConfig = selectedParserMethod\?\.filters\[0\] \|\| null/);
+  assert.doesNotMatch(settingsCardContent, /실행 옵션/);
   assert.match(source, /DisclosureFilterCandidateCard/);
   assert.match(source, /title="실행 옵션"/);
   assert.match(source, /fieldLabel=\{executionOptionConfig\.field\}/);
@@ -206,10 +203,10 @@ test("html parse page renders parse-mode specific filters in separate options ca
   assert.match(source, /\/api\/disclosures\/html\/parse\/filter-candidates/);
   assert.match(source, /DisclosureConditionFilterCard/);
   assert.match(source, /filter_blocks: normalizeDisclosureConditionBlocks\(conditions\)/);
-  assert.match(modeHandler, /setSelectedExecutionOptionValues\(\[\]\)/);
-  assert.match(modeHandler, /setExecutionOptionCandidates\(\[\]\)/);
-  assert.match(modeHandler, /setExecutionOptionExampleNotice\(null\)/);
-  assert.match(modeHandler, /setFilterCandidatesLoading\(false\)/);
+  assert.match(methodHandler, /setSelectedExecutionOptionValues\(\[\]\)/);
+  assert.match(methodHandler, /setExecutionOptionCandidates\(\[\]\)/);
+  assert.match(methodHandler, /setExecutionOptionExampleNotice\(null\)/);
+  assert.match(methodHandler, /setFilterCandidatesLoading\(false\)/);
   assert.match(source, /filterCandidatesRequestIdRef\.current \+= 1/);
   assert.match(source, /if \(filterCandidatesRequestIdRef\.current !== requestId\) return/);
   assert.match(source, /notificationActive=\{isErrorStatus \|\| !!executionOptionExampleNotice \|\| warningReports\.length > 0\}/);

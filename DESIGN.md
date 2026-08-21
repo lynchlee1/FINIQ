@@ -242,7 +242,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure HTML delete authorization | 삭제 허가 | Checkbox shown with the confirmation input. Do not expose the destructive delete button until both safeguards are satisfied. |
 | Internal HTML folder summary row | 폴더 요약 | Row box showing selected-folder file and section counts. |
 | Internal HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
-| Disclosure filter mode folder | 파싱 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. |
+| Disclosure filter mode folder | 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. The selector uses workspace-saved filters and never a hardcoded parser list. |
 | Disclosure filter selector | 조건검색 필터 | Typeable dropdown of mode-owned `filter.json` files. Selecting an existing name immediately applies its conditions. Typing a new valid mode name and saving creates that filter. Do not add a separate name field, rename action, or manual load action on `공시내역 필터링`. |
 | Disclosure top-level filter | 기본 필터 | A filter that reads stage 02 directly and owns its stage 04 and 05 raw HTML. Choose it inside `공시 조건` when creating a `조건검색 필터`. The selector lists workspace-saved filters, not a hardcoded parse-mode list. |
 | Disclosure derived filter | 파생 필터 | A one-level child filter that applies additional conditions to a completed `기본 필터`. Display it as `<상위> › <자식>` when the parent is not already visible. On the derived-filter page, where `상위 필터` is shown directly above the child selector, display only the child name. Send the child `mode` and `parent_mode` separately. Choose it inside `공시 조건`. |
@@ -261,14 +261,17 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure title search result | 제목 검색 결과 | Lists distinct database titles and the matching disclosure count for each title. |
 | Shared worker count setting | 워커 수 | Shared right-dock label for the parallel worker count on every disclosure page. Do not invent page-specific names such as `검색 worker 수` or `병렬 워커 수`. |
 | Disclosure workflow stage index | 00–09 | Show the zero-padded stage number only in the disclosure sidebar. Keep page titles unnumbered. |
-| HTML parse report preview | 리포트 미리보기 | Separate box below `모드별 기능` that shows a few parsed report results as HTML tables for the selected parse mode. |
+| HTML parse conversion settings | 변환 설정 | Box on `공시원문 변환` that keeps `모드` and `파싱 방법` as independent selectors. |
+| HTML parse workspace mode selector | 모드 | Selects a workspace-saved `조건검색 필터`; send its `mode` and optional `parent_mode` independently of the parser. |
+| HTML parser method selector | 파싱 방법 | Selects a server-registry parser implementation. The frontend must load this list from the parser-method API and must not enumerate parser keys. |
+| HTML parse report preview | 리포트 미리보기 | Separate box below `변환 설정` that shows a few parsed report results as HTML tables for the selected mode and parsing method. |
 | HTML parse warning files page open action | 현재 페이지 열기 | Button in the right-side `알림` panel on `공시원문 변환` that opens the current page of source HTML files with parse warnings. Pages contain 20 files. |
 | HTML parse warning code label | 오류코드 | Label in the right-side `알림` panel on `공시원문 변환` for grouping parse warnings by stable warning code. |
 | HTML parse weak warning level | 약한 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
 | HTML parse medium warning level | 일반 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
 | HTML parse strong warning level | 강한 에러 | Warning level label in the right-side `알림` panel on `공시원문 변환`. |
-| HTML parse issue method filter option | 사채발행방법 | Execution option in a separate `실행 옵션` box below `모드별 기능` for filtering `사채발행파싱` results by issue method. |
-| HTML parse rights issue method filter option | 증자방식 | Execution option in a separate `실행 옵션` box below `모드별 기능` for filtering `유무상증자파싱` results by issue method. |
+| HTML parse issue method filter option | 사채발행방법 | Registry-provided execution option in a separate `실행 옵션` box below `변환 설정`. |
+| HTML parse rights issue method filter option | 증자방식 | Registry-provided execution option in a separate `실행 옵션` box below `변환 설정`. |
 | HTML parse execution option examples action | 예시 | Row action next to an execution option candidate count that shows sample matching `acpt_no` values in `알림`. |
 | HTML parse execution option example source open action | 열기 | Button in `알림` for opening one sample source HTML from an execution option candidate example. |
 | Disclosure correction history workflow | 공시 정정내역 한눈에 | Stage 08 sidebar item and `/html-change-log` page title. This view reads stage 07 results and does not create an `08-*` data directory. |

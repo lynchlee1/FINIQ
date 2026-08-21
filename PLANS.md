@@ -1,5 +1,11 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-21: independent disclosure mode and parser-method selection
+
+- Purpose: prevent workflow code from treating a workspace mode such as `bond_issuance` as both a condition-search identity and a parser implementation key.
+- Implementation: `공시원문 변환` now selects `모드` only from workspace-saved condition filters and loads `파싱 방법` from a new parser-registry API. Parse, preview, candidate, inspection, and automation requests send `mode`, optional `parent_mode`, and `parser_method` independently; workspace paths and result filenames use only `mode`, while parser lookup and parser-specific metadata behavior use only `parser_method`. Removed hardcoded parser options and defaults from the conversion and automation frontends, persisted the parser method separately as `html_parser_method`, and updated the automation profile contract to store `execution.mode` and `execution.parser_method`.
+- Verification: all 178 frontend tests pass. The focused backend suites pass 456 tests with 166 skips, including dynamic-mode parsing, derived-filter routing, parser metadata, automation, workspace, and resilience coverage; the automation suite also passes all 40 tests independently. Python compilation and `git diff --check` pass. TypeScript reaches only the two pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`. The existing combined backend UI-contract test still has its unrelated pre-existing failure because the utility page lacks the expected `분할저장 구조 전환` label.
+
 ## 2026-08-21: disclosure HTML workspace routing and safe problem-file review
 
 - Purpose: ensure stage 04 and 05 always derive mode-owned storage from the visible workspace root, prevent stale hidden per-mode settings from sending `bond_issuance` work into `rights_issuance`, and make large problem-file cleanup notices safe and readable.

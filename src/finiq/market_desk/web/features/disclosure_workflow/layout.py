@@ -302,14 +302,13 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         _set_default(payload, "output_directory", str(workspace.sections))
     elif normalized_kind == "parse":
         mode = validate_workspace_mode(payload.get("mode"))
-        filter_mode = validate_workspace_mode(payload.get("filter_mode") or mode)
         _set_default(payload, "input_directory", str(workspace.sections))
         _set_default(
             payload,
             "output_directory",
             str(
                 workspace.converted_filter_mode(
-                    filter_mode,
+                    mode,
                     parent_mode=parent_mode,
                 )
             ),
@@ -318,7 +317,7 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
             payload,
             "filtered_metadata_path",
             str(
-                workspace.filter_mode(filter_mode, parent_mode=parent_mode)
+                workspace.filter_mode(mode, parent_mode=parent_mode)
                 / "filtered.json"
             ),
         )

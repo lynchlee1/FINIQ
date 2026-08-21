@@ -13,7 +13,10 @@ from threading import Lock
 from typing import Any, Callable
 
 from finiq.concurrency import resolve_worker_count
-from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    atomic_write_json,
+    validate_workspace_mode,
+)
 from finiq.market_desk.web.features.disclosures.html_common import (
     _load_workspace_filtered_payload,
     collect_acpt_numbers_from_json,
@@ -50,8 +53,8 @@ class ParseFilterConfig:
 
 
 @dataclass(frozen=True)
-class ParseModeConfig:
-    """Mode metadata shared by parse, preview, filters, and UI-facing payloads."""
+class ParserMethodConfig:
+    """Parser metadata shared by parse, preview, filters, and UI payloads."""
 
     key: str
     label: str
@@ -59,40 +62,43 @@ class ParseModeConfig:
     description: str
     parser: ParseFunction
     filters: tuple[ParseFilterConfig, ...] = ()
+    reporting_company_field: str | None = None
 
 
-PARSE_MODE_CONFIGS = {
-    "bond_issuance": ParseModeConfig(
+PARSER_METHOD_CONFIGS = {
+    "bond_issuance": ParserMethodConfig(
         key="bond_issuance",
         label="사채발행파싱",
         status="상세 필드 지원",
         description="메자닌 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
         parser=parse_bond_issuance,
         filters=(ParseFilterConfig(field="사채발행방법", status_label="사채발행방법"),),
+        reporting_company_field="corp_name",
     ),
-    "rights_issuance": ParseModeConfig(
+    "rights_issuance": ParserMethodConfig(
         key="rights_issuance",
         label="유무상증자파싱",
         status="상세 필드 지원",
         description="유상증자 및 무상증자 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
         parser=parse_rights_issuance,
         filters=(ParseFilterConfig(field="증자방식", status_label="증자방식"),),
+        reporting_company_field="corp_name",
     ),
-    "shareholder_meeting": ParseModeConfig(
+    "shareholder_meeting": ParserMethodConfig(
         key="shareholder_meeting",
         label="주주총회파싱",
         status="원본 테이블 구조 지원",
         description="주주총회 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
         parser=parse_shareholder_meeting,
     ),
-    "asset_transaction": ParseModeConfig(
+    "asset_transaction": ParserMethodConfig(
         key="asset_transaction",
         label="유무형자산거래파싱",
         status="원본 테이블 구조 지원",
         description="유형자산 및 무형자산 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
         parser=parse_asset_transaction,
     ),
-    "security_transaction": ParseModeConfig(
+    "security_transaction": ParserMethodConfig(
         key="security_transaction",
         label="발행증권거래파싱",
         status="원본 테이블 구조 지원",
@@ -102,8 +108,27 @@ PARSE_MODE_CONFIGS = {
 }
 
 PARSER_REGISTRY = {
-    key: config.parser for key, config in PARSE_MODE_CONFIGS.items()
+    key: config.parser for key, config in PARSER_METHOD_CONFIGS.items()
 }
+
+
+def list_parser_methods_payload() -> dict[str, Any]:
+    return {
+        "format": "finiq_disclosure_parser_methods_v1",
+        "methods": [
+            {
+                "key": config.key,
+                "label": config.label,
+                "status": config.status,
+                "description": config.description,
+                "filters": [
+                    {"field": item.field, "status_label": item.status_label}
+                    for item in config.filters
+                ],
+            }
+            for config in PARSER_METHOD_CONFIGS.values()
+        ],
+    }
 
 
 @dataclass(frozen=True)
@@ -111,7 +136,9 @@ class ParseRequest:
     """Validated options for one HTML parse run."""
 
     mode: str
+    parser_method: str
     parser: ParseFunction
+    reporting_company_field: str | None
     input_directory: Path
     output_path: Path
     html_files: list[Path]
@@ -454,7 +481,7 @@ def _apply_parse_metadata(
     record: dict[str, Any],
     metadata_index: dict[str, dict[str, Any]],
     *,
-    mode: str,
+    reporting_company_field: str | None,
 ) -> dict[str, Any]:
     acpt_no = str(record.get("acpt_no") or "")
     metadata = metadata_index.get(acpt_no) or {}
@@ -488,8 +515,8 @@ def _apply_parse_metadata(
         updated_record["family_member_count"] = family_member_count
     if market:
         updated_record["상장구분"] = market
-    if mode in {"bond_issuance", "rights_issuance"} and company_name:
-        updated_record["corp_name"] = company_name
+    if reporting_company_field and company_name:
+        updated_record[reporting_company_field] = company_name
     return updated_record
 
 
@@ -710,15 +737,22 @@ def _build_parse_request(
     body: dict[str, Any],
     cancel_check: Callable[[], bool] | None = None,
 ) -> ParseRequest:
-    mode = str(body.get("mode") or "").strip()
-    if not mode:
-        msg = "mode is required"
-        raise ValueError(msg)
-    parser = PARSER_REGISTRY.get(mode)
+    mode_value = str(body.get("mode") or "").strip()
+    if not mode_value:
+        raise ValueError("mode is required")
+    mode = validate_workspace_mode(mode_value)
+    parser_method = str(body.get("parser_method") or "").strip()
+    if not parser_method:
+        raise ValueError("parser_method is required")
+    parser = PARSER_REGISTRY.get(parser_method)
     if parser is None:
-        supported_modes = ", ".join(sorted(PARSER_REGISTRY))
-        msg = f"unsupported mode: {mode!r}. supported modes: {supported_modes}"
+        supported_methods = ", ".join(sorted(PARSER_REGISTRY))
+        msg = (
+            f"unsupported parser_method: {parser_method!r}. "
+            f"supported methods: {supported_methods}"
+        )
         raise ValueError(msg)
+    parser_config = PARSER_METHOD_CONFIGS[parser_method]
 
     input_directory_raw = str(body.get("input_directory") or "").strip()
     if not input_directory_raw:
@@ -742,18 +776,15 @@ def _build_parse_request(
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
     filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
-    filter_mode = str(body.get("filter_mode") or "").strip()
     derived_filter = body.get("parent_mode") not in (None, "")
     if derived_filter and filtered_metadata_path is None:
         raise ValueError("filtered_metadata_path is required for a derived filter")
     allowed_acpt_numbers = None
     if derived_filter:
-        if not filter_mode:
-            raise ValueError("filter_mode is required for a derived filter")
         filtered_payload, validated_filtered_path = _load_workspace_filtered_payload(
             {
                 "data_root": body.get("data_root"),
-                "mode": filter_mode,
+                "mode": mode,
                 "parent_mode": body.get("parent_mode"),
             }
         )
@@ -783,7 +814,9 @@ def _build_parse_request(
 
     return ParseRequest(
         mode=mode,
+        parser_method=parser_method,
         parser=parser,
+        reporting_company_field=parser_config.reporting_company_field,
         input_directory=input_directory,
         output_path=output_path,
         html_files=html_files,
@@ -850,6 +883,7 @@ def _build_warning_report_counts(warnings: list[dict[str, Any]]) -> dict[str, An
 def _build_payload(
     *,
     mode: str,
+    parser_method: str,
     cancelled: bool,
     html_files: list[Path],
     records: list[dict[str, Any]],
@@ -862,6 +896,7 @@ def _build_payload(
     return {
         "format": "finiq_disclosure_html_parse_v1",
         "mode": mode,
+        "parser_method": parser_method,
         "cancelled": cancelled,
         "filter_settings": {
             "filter_blocks": filter_blocks,
@@ -892,6 +927,7 @@ def _payload_from_state(
 ) -> dict[str, Any]:
     return _build_payload(
         mode=request.mode,
+        parser_method=request.parser_method,
         cancelled=cancelled,
         html_files=request.html_files,
         records=state.records,
@@ -919,13 +955,9 @@ def _load_parse_payload(path: Path) -> dict[str, Any]:
 
 
 def _resolve_parse_result_path(output_directory: Path, mode: str) -> Path:
-    if not mode:
-        msg = "mode is required"
-        raise ValueError(msg)
-    if mode not in PARSER_REGISTRY:
-        supported_modes = ", ".join(sorted(PARSER_REGISTRY))
-        msg = f"unsupported mode: {mode!r}. supported modes: {supported_modes}"
-        raise ValueError(msg)
+    if not str(mode or "").strip():
+        raise ValueError("mode is required")
+    mode = validate_workspace_mode(mode)
     if output_directory.is_file() or (
         not output_directory.exists() and output_directory.suffix
     ):
@@ -1072,7 +1104,8 @@ def _parse_html_file_record(request: ParseRequest, html_file: Path) -> dict[str,
 
 def _emit_run_header(request: ParseRequest, state: ParseRunState) -> None:
     state.emit(f"파싱 대상 HTML {len(request.html_files)}건을 찾았습니다.")
-    state.emit(f"파싱 모드: {request.mode}")
+    state.emit(f"모드: {request.mode}")
+    state.emit(f"파싱 방법: {request.parser_method}")
     if request.filter_blocks:
         state.emit(f"공시 조건: {len(request.filter_blocks)}개 조건 적용")
     if request.record_filters:
@@ -1172,7 +1205,7 @@ def _parse_one_html_file(
         record = _apply_parse_metadata(
             parsed_record,
             request.metadata_index,
-            mode=request.mode,
+            reporting_company_field=request.reporting_company_field,
         )
         warning_items = _record_parse_warning_items(parsed_record)
         matches_filters = _record_matches_filters(
@@ -1231,7 +1264,7 @@ def _parse_html_file_for_worker(
         record = _apply_parse_metadata(
             parsed_record,
             request.metadata_index,
-            mode=request.mode,
+            reporting_company_field=request.reporting_company_field,
         )
         warning_items = _record_parse_warning_items(parsed_record)
         matches_filters = _record_matches_filters(

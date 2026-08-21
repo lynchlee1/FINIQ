@@ -23,17 +23,19 @@ def _parse_with_metadata_title(
 
 def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Return a few reports with source-table preview and parsed JSON for the UI."""
-    requested_mode = str(body.get("mode") or "").strip()
-    if not requested_mode:
-        msg = "mode is required"
-        raise ValueError(msg)
-    parser = PARSER_REGISTRY.get(requested_mode)
+    mode = validate_workspace_mode(body.get("mode"))
+    parser_method = str(body.get("parser_method") or "").strip()
+    if not parser_method:
+        raise ValueError("parser_method is required")
+    parser = PARSER_REGISTRY.get(parser_method)
     if parser is None:
-        supported_modes = ", ".join(sorted(PARSER_REGISTRY))
+        supported_methods = ", ".join(sorted(PARSER_REGISTRY))
         msg = (
-            f"unsupported mode: {requested_mode!r}. supported modes: {supported_modes}"
+            f"unsupported parser_method: {parser_method!r}. "
+            f"supported methods: {supported_methods}"
         )
         raise ValueError(msg)
+    parser_config = PARSER_METHOD_CONFIGS[parser_method]
 
     limit = _parse_limit(body.get("limit")) or 3
     filter_blocks = _parse_filter_blocks(body.get("filter_blocks"))
@@ -71,7 +73,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
                 )
             ),
             metadata_index,
-            mode=requested_mode,
+            reporting_company_field=parser_config.reporting_company_field,
         )
         if _record_matches_filter_blocks(record, filter_blocks):
             records.append(record)
@@ -80,7 +82,8 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "format": "finiq_parse_preview_v1",
-        "mode": requested_mode,
+        "mode": mode,
+        "parser_method": parser_method,
         "source_kind": "input_directory",
         "input_directory": str(input_directory),
         "summary": {
@@ -92,7 +95,7 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
             _build_preview_record(
                 record,
                 index=index,
-                mode=requested_mode,
+                mode=parser_method,
                 input_directory=input_directory,
             )
             for index, record in enumerate(records, start=1)
@@ -113,7 +116,7 @@ def _extract_filter_candidate_from_file(
     *,
     html_file: Path,
     parser: ParseFunction,
-    requested_mode: str,
+    reporting_company_field: str | None,
     field: str,
     metadata_index: dict[str, dict[str, Any]],
 ) -> str | list[Any] | None:
@@ -128,23 +131,26 @@ def _extract_filter_candidate_from_file(
             )
         ),
         metadata_index,
-        mode=requested_mode,
+        reporting_company_field=reporting_company_field,
     )
     return record.get(field)
 
 
 def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Return available parsed field values from every HTML file in a folder."""
-    requested_mode = str(body.get("mode") or "").strip()
-    if not requested_mode:
-        raise ValueError("mode is required")
-    parser = PARSER_REGISTRY.get(requested_mode)
+    mode = validate_workspace_mode(body.get("mode"))
+    parser_method = str(body.get("parser_method") or "").strip()
+    if not parser_method:
+        raise ValueError("parser_method is required")
+    parser = PARSER_REGISTRY.get(parser_method)
     if parser is None:
-        supported_modes = ", ".join(sorted(PARSER_REGISTRY))
+        supported_methods = ", ".join(sorted(PARSER_REGISTRY))
         msg = (
-            f"unsupported mode: {requested_mode!r}. supported modes: {supported_modes}"
+            f"unsupported parser_method: {parser_method!r}. "
+            f"supported methods: {supported_methods}"
         )
         raise ValueError(msg)
+    parser_config = PARSER_METHOD_CONFIGS[parser_method]
 
     field = str(body.get("field") or "").strip()
     if not field:
@@ -202,7 +208,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                     _extract_filter_candidate_from_file,
                     html_file=item[1],
                     parser=parser,
-                    requested_mode=requested_mode,
+                    reporting_company_field=parser_config.reporting_company_field,
                     field=field,
                     metadata_index=metadata_index,
                 ),
@@ -216,7 +222,7 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
                 _extract_filter_candidate_from_file(
                     html_file=html_file,
                     parser=parser,
-                    requested_mode=requested_mode,
+                    reporting_company_field=parser_config.reporting_company_field,
                     field=field,
                     metadata_index=metadata_index,
                 ),
@@ -231,7 +237,8 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
     ]
     return {
         "format": "finiq_parse_filter_candidates_v1",
-        "mode": requested_mode,
+        "mode": mode,
+        "parser_method": parser_method,
         "field": field,
         "input_directory": str(input_directory),
         "summary": {

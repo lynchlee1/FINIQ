@@ -310,9 +310,9 @@ def test_derived_parse_selects_child_membership_before_limit(tmp_path: Path) -> 
     request = _build_parse_request(
         {
             "data_root": str(data_root),
-            "mode": "bond_issuance",
-            "filter_mode": "child",
+            "mode": "child",
             "parent_mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "input_directory": str(input_directory),
             "output_directory": str(tmp_path / "parsed"),
             "filtered_metadata_path": str(filtered_path),
@@ -322,7 +322,8 @@ def test_derived_parse_selects_child_membership_before_limit(tmp_path: Path) -> 
         }
     )
 
-    assert request.mode == "bond_issuance"
+    assert request.mode == "child"
+    assert request.parser_method == "bond_issuance"
     assert request.html_files == [child.resolve()]
     assert parent_only.resolve() not in request.html_files
 
