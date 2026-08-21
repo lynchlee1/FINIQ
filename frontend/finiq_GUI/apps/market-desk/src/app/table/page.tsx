@@ -307,11 +307,11 @@ export default function TablePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <Button className="w-full" onClick={handleBuild} disabled={!!activeJobId}>
+                <Button className="h-10 w-full" onClick={handleBuild} disabled={!!activeJobId}>
                   {!!activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
-                <Button variant="outline" onClick={cancelJob} disabled={!activeJobId} className="w-full">
+                <Button variant="outline" onClick={cancelJob} disabled={!activeJobId} className="h-10 w-full">
                   {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>

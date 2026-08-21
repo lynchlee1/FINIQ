@@ -50,15 +50,13 @@ test("existing-data inspections start only from explicit actions", async () => {
   assert.match(htmlDownload, /onClick: handleInspectFolder/);
 });
 
-test("HTML inspection uses the workspace output when separate output is disabled", async () => {
+test("HTML inspection always derives its mode-owned paths from the workspace", async () => {
   const htmlDownload = await readFile(paths.htmlDownload, "utf8");
 
-  assert.match(htmlDownload, /if \(useSeparateOutputDirectory && !outputDirectory\)/);
-  assert.match(
-    htmlDownload,
-    /const hasInspectionInput = !!currentSourcePath && \(!useSeparateOutputDirectory \|\| !!outputDirectory\)/,
-  );
-  assert.doesNotMatch(htmlDownload, /if \(!outputDirectory\) \{/);
+  assert.match(htmlDownload, /const currentSourcePath = dataRoot/);
+  assert.match(htmlDownload, /output_directory: ""/);
+  assert.match(htmlDownload, /const hasInspectionInput = !!currentSourcePath/);
+  assert.doesNotMatch(htmlDownload, /useSeparateOutputDirectory/);
   assert.match(htmlDownload, /action=\{hasInspectionInput \? \{/);
   assert.equal(htmlDownload.match(/onClick: handleInspectFolder/g)?.length, 1);
   assert.doesNotMatch(htmlDownload, /폴더 검사하기/);
@@ -68,6 +66,20 @@ test("HTML inspection uses the workspace output when separate output is disabled
   );
   assert.doesNotMatch(htmlDownload, /description: existingCheckError \|\| existingDetail/);
   assert.match(htmlDownload, /\{existingData\.output_directory\}/);
+});
+
+test("HTML problem-file notices require visible confirmation and limit details", async () => {
+  const htmlDownload = await readFile(paths.htmlDownload, "utf8");
+
+  assert.match(htmlDownload, /useState\("20"\)/);
+  assert.match(htmlDownload, /label: "문제 파일 표시 수"/);
+  assert.match(htmlDownload, /problem_file_limit: Number\(problemFileLimit\)/);
+  assert.match(htmlDownload, /notificationDismissible=\{false\}/);
+  assert.match(htmlDownload, /Label htmlFor="deleteConfirmationText"[\s\S]*확인 문구/);
+  assert.match(htmlDownload, /확인했습니다\.&quot;를 정확히 입력하고 삭제 허가를 선택하세요/);
+  assert.match(htmlDownload, /deleteConfirmed && deleteConfirmationText\.trim\(\) === "확인했습니다\." && \(/);
+  assert.doesNotMatch(htmlDownload, /JSON\.stringify\(lastInspectionResult/);
+  assert.match(htmlDownload, /나머지 \{formatInteger\(omittedProblemFileCount\)\}개는 표시하지 않았습니다/);
 });
 
 test("completed disclosure inspections reuse their result control for another inspection", async () => {

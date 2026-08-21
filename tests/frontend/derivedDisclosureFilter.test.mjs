@@ -18,6 +18,11 @@ test("derived disclosure filters keep parent and child identities separate", asy
 
   assert.match(page, /type FilterLevel = "top-level" \| "derived"/);
   assert.match(page, /preset\.parent_mode \? `\$\{preset\.parent_mode\} › \$\{preset\.mode\}` : preset\.mode/);
+  assert.match(page, /const filterPagePresetLabel = \(preset: DisclosureConditionPreset\) => preset\.mode/);
+  assert.match(page, /getPresetLabel=\{filterPagePresetLabel\}/);
+  assert.match(page, /getLibraryPresetLabel=\{presetLabel\}/);
+  assert.match(page, /presetSelectorLabel=\{filterLevel === "derived" \? "파생 필터" : "조건검색 필터"\}/);
+  assert.match(page, /presetSelectorHelpDescription=\{filterLevel === "derived"/);
   assert.match(page, /const describeFilterInspectionIssue = \(preset: DisclosureConditionPreset\)/);
   assert.match(page, /조건만 저장되어 있고 검색은 아직 실행하지 않았습니다/);
   assert.doesNotMatch(page, /FILTER_WORKFLOW_STATUS_LABELS/);
@@ -27,7 +32,7 @@ test("derived disclosure filters keep parent and child identities separate", asy
   assert.match(page, /deleteDisclosureConditionPreset\([\s\S]*?selectedPresetEntry\.mode,[\s\S]*?selectedPresetEntry\.parent_mode/);
   assert.match(page, /identityControls=\{/);
   assert.match(page, /libraryPresets=\{presets\}/);
-  assert.match(page, /기본 필터는 02단계 전체를 검색하고 이후 HTML을 이 필터가 소유합니다/);
+  assert.doesNotMatch(page, /기본 필터는 02단계 전체를 검색하고 이후 HTML을 이 필터가 소유합니다/);
   assert.match(page, /파생 필터는 완료된 상위 필터 결과에만 조건을 추가하며, 한 단계까지만 만들 수 있습니다/);
   assert.doesNotMatch(page, /필터 구조/);
   assert.doesNotMatch(page, /필터 유형/);
@@ -42,10 +47,24 @@ test("derived disclosure filters keep parent and child identities separate", asy
   assert.match(card, /parent_mode\?: string/);
   assert.match(card, /getPresetIdentity\?:/);
   assert.match(card, /getPresetLabel\?:/);
+  assert.match(card, /getLibraryPresetLabel\?:/);
   assert.match(card, /identityControls\?: ReactNode/);
+  assert.match(card, /presetSelectorHelpDescription\?: string/);
   assert.match(card, /libraryPresets\?: DisclosureConditionPreset\[\]/);
-  assert.match(card, /\{identityControls\}/);
+  assert.match(card, /presetSelectorLabel\?: string/);
+  assert.match(card, /showPresetActions\?: boolean/);
+  assert.match(card, /allowCreate=\{showPresetActions\}/);
+  assert.match(card, /<FieldHelpPopover \/>/);
+  assert.match(card, /ariaLabel="파생 필터 설명" title="파생 필터 설명"/);
+  assert.match(card, /presetSelectorHelpDescription \? <DerivedFilterHelpPopover description=\{presetSelectorHelpDescription\} \/>/);
+  assert.match(card, /className="flex items-center gap-1\.5"/);
+  assert.match(card, /className="inline-flex h-5 items-center leading-none dark:text-slate-300"/);
+  assert.match(card, /<div className="relative flex h-5 items-center">/);
+  assert.match(card, /className="inline-flex h-5 w-5 shrink-0 items-center justify-center/);
+  assert.match(card, /<CardContent className="space-y-4">/);
+  assert.doesNotMatch(card, /className="h-9/);
   assert.match(card, /const mergePresets = libraryPresets \?\? presets/);
+  assert.match(card, /getPresetLabel=\{getLibraryPresetLabel \?\? getPresetLabel\}/);
 });
 
 test("manual HTML workflows preserve derived filter identity", async () => {
@@ -60,6 +79,7 @@ test("manual HTML workflows preserve derived filter identity", async () => {
   assert.match(downloadPage, /selectedFilterParentMode \? \{ parent_mode: selectedFilterParentMode \} : \{\}/);
   assert.match(downloadPage, /if \(selectedFilterParentMode\) \{[\s\S]*?상위 필터가 소유한 파일을 삭제할 수 없습니다/);
   assert.match(downloadPage, /파생 필터는 상위 필터의 HTML을 공유하므로 이 화면에서 파일을 삭제할 수 없습니다/);
+  assert.doesNotMatch(downloadPage, /상위 필터 .*HTML에서 파생 필터 .* 대상만 사용합니다/);
 
   assert.match(parsePage, /presetIdentity\(preset\) === selectedPreset/);
   assert.match(parsePage, /const ownerMode = preset\.parent_mode \|\| preset\.mode/);

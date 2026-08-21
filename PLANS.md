@@ -1,5 +1,29 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-21: disclosure HTML workspace routing and safe problem-file review
+
+- Purpose: ensure stage 04 and 05 always derive mode-owned storage from the visible workspace root, prevent stale hidden per-mode settings from sending `bond_issuance` work into `rights_issuance`, and make large problem-file cleanup notices safe and readable.
+- Implementation: the shared external/internal HTML page now sends only `data_root`, `mode`, and an empty path override, so backend workspace defaults own the mode directory. Added the right-side `문제 파일 표시 수` setting with a default of 20; validation errors, inspection candidates, and deletion results preserve full counts while returning and rendering only the configured number of file details. This page no longer exposes the notification panel's generic `지우기` action, shows a labeled `확인 문구` input and `삭제 허가` checkbox first, and renders the destructive delete button only after both safeguards match.
+- Verification: all 178 frontend tests pass. The full `test_kind_web_service.py` run has 364 passes and 166 skips, with one unrelated existing failure because the unchanged utility page lacks the separately expected `분할저장 구조 전환` label; the focused cleanup tests pass (5), and all 23 disclosure pipeline resilience tests pass. Python compilation and `git diff --check` pass. Live light/dark checks show the right-side path as `/Users/wonwoolee/Documents/GitHub/FINIQ/database`, the problem-file limit as 20, no console warnings/errors, and a `bond_issuance` inspection resolving to `/database/04-external-html-download/bond_issuance` with zero target-external files. TypeScript reaches only the two pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
+
+## 2026-08-21: derived-filter HTML selector copy cleanup
+
+- Purpose: stop repeating the selected parent/child relationship below the `조건검색 필터` selector on the external HTML workflow.
+- Implementation: removed the derived-filter-only sentence `상위 필터 ...의 HTML에서 파생 필터 ... 대상만 사용합니다`; the selector continues to display the full `<상위> › <자식>` identity.
+- Verification: `node --test tests/frontend/derivedDisclosureFilter.test.mjs` passes, and `git diff --check` passes on the touched files.
+
+## 2026-08-21: derived-filter help and disclosure form rhythm
+
+- Purpose: remove the redundant top-level filter explanation, give `파생 필터` its own help action, and make box sizes and spacing consistent across disclosure pages 01-07.
+- Implementation: moved the one-level derived-filter constraint into a new `파생 필터 설명` popover immediately beside the derived selector label, leaving `필드 설명` field-only. Standardized primary workflow controls and execution actions at 40px, label-to-control gaps at 8px, card content groups at 16px, and retained the intentional 32px compact right-dock controls. Fixed both help-button wrappers to eliminate inline-baseline drift and documented the shared metrics and terminology in `DESIGN.md`.
+- Verification: all 177 frontend tests pass and `git diff --check` passes. Live browser checks confirm the derived help action is absent for `기본 필터`, appears beside `파생 필터`, opens a separate `파생 필터 설명` popover, and remains distinct from `필드 설명`; the selector is 40px high with an 8px label gap and zero label/icon center drift. Across pages 01-07, every top-level card uses 16px gap and horizontal inset and every `작업 실행` button is 40px high. Light and dark modes have no page overflow; the 390px view has no horizontal overflow and keeps both selectors at equal width. TypeScript reaches only the two pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
+
+## 2026-08-21: disclosure filter page hierarchy cleanup
+
+- Purpose: make the stage-03 page start with its two primary modes, let both modes load the same saved conditions, keep filtering-only actions out of title search, and stop repeating a derived filter's parent inside the child selector.
+- Implementation: moved the `공시내역 제목 검색` / `공시내역 필터링` switch to the top of the page; made `기존 데이터 검토` visible only in filtering mode; kept the same level, parent, and saved-filter selectors in both modes; and limited new-filter creation, save, and delete actions to filtering mode. Reordered filter identity controls as level, parent, child, explanation; displayed only the child name when its parent is already visible while retaining `<상위> › <자식>` in cross-parent library and status contexts; and removed redundant English eyebrow labels. Kept `작업 실행` on the existing shared card, header, content, and button assets used by the other workflow pages. Updated the shared condition card with explicit presentation props and aligned the title-search and derived-filter terminology contracts in `DESIGN.md`.
+- Verification: all 176 frontend tests pass and `git diff --check` passes. In the live page, title-search mode hides inspection and mutation actions while retaining saved-filter loading; derived mode renders `상위 필터: bond_issuance` with the child option `bond_issuance_kosdaq` and no repeated breadcrumb. Desktop dark-mode and 390px responsive checks show no page-level horizontal overflow, and the browser console has no warnings or errors. TypeScript reaches only the two pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
+
 ## 2026-08-21: filter inspection issue text uses a plain Korean sentence
 
 - Purpose: replace the mechanical step-name list `데이터베이스 검색, 결과 기록이 완료되지 않았습니다` with a sentence that says what is actually left to do.

@@ -91,6 +91,7 @@ All spacing derives from a base of 4px.
 - **States**: loading skeleton/spinner, empty copy, inline error copy.
 - **Accessibility**: labels on every input/select; buttons disable while running.
 - **Motion**: no layout motion; hover/focus only.
+- **Disclosure workflow form rhythm (01-07)**: primary inputs, selects, and action buttons are 40px high; labels sit 8px above their controls; peer fields and card content groups use 16px gaps; top-level cards use the shared 16px header/content inset and 24px page gap. Right-dock inspector controls remain the documented compact 32px variant.
 
 ### Data Integrity Inspection Panel
 
@@ -236,18 +237,21 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Internal HTML individual disclosure table | 개별 공시 | Table listing per-file section lists and source-open actions. |
 | Internal HTML individual disclosure section count | 목차 수 | Column showing the number of sections in each listed disclosure. |
 | Internal HTML problem file table | 문제 파일 | Table listing files without TOC sections and files that failed to read. |
-| Internal HTML problem file setting | 문제 파일 표시 수 | Setting for the maximum combined problem-file rows returned by scan. |
+| Disclosure HTML problem file setting | 문제 파일 표시 수 | Right-side setting for the maximum problem-file rows returned by an HTML inspection or validation error. Default to 20. |
+| Disclosure HTML delete confirmation input | 확인 문구 | Labeled input shown before the destructive action. Require the exact text `확인했습니다.`. |
+| Disclosure HTML delete authorization | 삭제 허가 | Checkbox shown with the confirmation input. Do not expose the destructive delete button until both safeguards are satisfied. |
 | Internal HTML folder summary row | 폴더 요약 | Row box showing selected-folder file and section counts. |
 | Internal HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | Disclosure filter mode folder | 파싱 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. |
 | Disclosure filter selector | 조건검색 필터 | Typeable dropdown of mode-owned `filter.json` files. Selecting an existing name immediately applies its conditions. Typing a new valid mode name and saving creates that filter. Do not add a separate name field, rename action, or manual load action on `공시내역 필터링`. |
 | Disclosure top-level filter | 기본 필터 | A filter that reads stage 02 directly and owns its stage 04 and 05 raw HTML. Choose it inside `공시 조건` when creating a `조건검색 필터`. The selector lists workspace-saved filters, not a hardcoded parse-mode list. |
-| Disclosure derived filter | 파생 필터 | A one-level child filter that applies additional conditions to a completed `기본 필터`. Display it as `<상위> › <자식>` while sending the child `mode` and `parent_mode` separately. Choose it inside `공시 조건`. |
+| Disclosure derived filter | 파생 필터 | A one-level child filter that applies additional conditions to a completed `기본 필터`. Display it as `<상위> › <자식>` when the parent is not already visible. On the derived-filter page, where `상위 필터` is shown directly above the child selector, display only the child name. Send the child `mode` and `parent_mode` separately. Choose it inside `공시 조건`. |
+| Disclosure derived-filter help action | 파생 필터 설명 | Circle-help button immediately to the right of the `파생 필터` selector label. Explain that a derived filter adds conditions only to a completed parent result and supports one child level. Do not place this copy in `필드 설명`. |
 | Disclosure derived-filter parent | 상위 필터 | A completed `기본 필터` selected as the input of a `파생 필터`. Do not offer another derived filter as a parent. |
 | Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. The page opens in `공시내역 제목 검색`. |
 | Disclosure filter existing-data inspection scope | 조건검색 폴더 전체 검사 | Manual inspection on stage 03 checks every mode-owned `03-filter/<mode>/filter.json` independently; it does not require a selected `조건검색 필터`. |
-| Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. |
+| Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. Show the same filter level, parent, and `조건검색 필터` selectors as filtering mode. Selecting a saved filter immediately loads its conditions, while create, save, and delete actions remain available only in `공시내역 필터링`. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |
 | Disclosure condition clear action | 지우기 | Icon button between `실행 취소` and `다시 실행` on `공시 조건`. Clears condition blocks to one empty row and records that change in the same undo history. |

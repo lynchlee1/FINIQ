@@ -75,6 +75,8 @@ const presetLabel = (preset: DisclosureConditionPreset) => (
   preset.parent_mode ? `${preset.parent_mode} › ${preset.mode}` : preset.mode
 );
 
+const filterPagePresetLabel = (preset: DisclosureConditionPreset) => preset.mode;
+
 const FILTER_TASK_MODE_OPTIONS: readonly WorkflowModeOption<FilterTaskMode>[] = [
   { value: "title-search", label: "공시내역 제목 검색", icon: Search },
   { value: "filter", label: "공시내역 필터링", icon: Filter },
@@ -712,11 +714,21 @@ export default function FilterPage() {
     <WorkflowPageShell workflowId="disclosure-build">
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          <DataIntegrityInspectionCard
-            description="실행 전에 저장된 조건검색 설정과 처리 단계를 확인하고 결과에 문제가 없는지 검사합니다."
-            verdict={inspectionVerdict}
-            steps={inspectionSteps}
+          <WorkflowModeSwitch
+            ariaLabel="공시 작업 모드"
+            value={taskMode}
+            options={FILTER_TASK_MODE_OPTIONS}
+            onValueChange={setTaskMode}
+            testId="filter-mode-control"
           />
+
+          {taskMode === "filter" && (
+            <DataIntegrityInspectionCard
+              description="실행 전에 저장된 조건검색 설정과 처리 단계를 확인하고 결과에 문제가 없는지 검사합니다."
+              verdict={inspectionVerdict}
+              steps={inspectionSteps}
+            />
+          )}
 
           {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
               <DataPathCard onError={handlePathError} fields={pathFields} /> */}
@@ -732,9 +744,16 @@ export default function FilterPage() {
             onSavePreset={savePreset}
             onDeletePreset={deletePreset}
             getPresetIdentity={presetIdentity}
-            getPresetLabel={presetLabel}
+            getPresetLabel={filterPagePresetLabel}
+            getLibraryPresetLabel={presetLabel}
+            presetSelectorLabel={filterLevel === "derived" ? "파생 필터" : "조건검색 필터"}
+            showPresetActions={taskMode === "filter"}
+            showEyebrow={false}
+            presetSelectorHelpDescription={filterLevel === "derived"
+              ? "파생 필터는 완료된 상위 필터 결과에만 조건을 추가하며, 한 단계까지만 만들 수 있습니다."
+              : undefined}
             identityControls={(
-              <div className="grid gap-2">
+              <div className="grid gap-4">
                 <div className="flex w-fit gap-1 rounded-lg border border-slate-200 p-1 dark:border-[#30363d]">
                   {([
                     ["top-level", "기본 필터"],
@@ -768,7 +787,7 @@ export default function FilterPage() {
                           setMode("");
                         }
                       }}
-                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
+                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
                     >
                       <option value="">완료된 상위 필터 선택</option>
                       {completedTopLevelPresets.map((preset) => (
@@ -777,21 +796,8 @@ export default function FilterPage() {
                     </select>
                   </div>
                 )}
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {filterLevel === "derived"
-                    ? "파생 필터는 완료된 상위 필터 결과에만 조건을 추가하며, 한 단계까지만 만들 수 있습니다."
-                    : "기본 필터는 02단계 전체를 검색하고 이후 HTML을 이 필터가 소유합니다."}
-                </p>
               </div>
             )}
-          />
-
-          <WorkflowModeSwitch
-            ariaLabel="공시 작업 모드"
-            value={taskMode}
-            options={FILTER_TASK_MODE_OPTIONS}
-            onValueChange={setTaskMode}
-            testId="filter-mode-control"
           />
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
@@ -803,7 +809,7 @@ export default function FilterPage() {
                 <Button
                   onClick={taskMode === "title-search" ? handleTitleSearch : handleFilter}
                   disabled={isJobActive}
-                  className="w-full"
+                  className="h-10 w-full"
                 >
                   {isJobActive ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -814,7 +820,7 @@ export default function FilterPage() {
                   )}
                   실행
                 </Button>
-                <Button variant="outline" onClick={handleCancel} disabled={!isJobActive} className="w-full">
+                <Button variant="outline" onClick={handleCancel} disabled={!isJobActive} className="h-10 w-full">
                   {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>
@@ -824,7 +830,6 @@ export default function FilterPage() {
           {taskMode === "title-search" ? (
             <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
               <CardHeader>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Result</p>
                 <CardTitle className="dark:text-white">제목 검색 결과</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -865,7 +870,6 @@ export default function FilterPage() {
           ) : (
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Result</p>
           <CardTitle className="dark:text-white">필터 결과</CardTitle>
         </CardHeader>
         <CardContent>

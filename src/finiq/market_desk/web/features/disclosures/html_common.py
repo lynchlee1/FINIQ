@@ -615,6 +615,16 @@ def _parse_progress_interval(value: Any) -> int:
     return parsed
 
 
+def _parse_problem_file_limit(value: Any) -> int:
+    if value in (None, ""):
+        return 20
+    parsed = int(value)
+    if parsed < 1:
+        msg = "problem_file_limit must be >= 1"
+        raise ValueError(msg)
+    return parsed
+
+
 def _describe_unexpected_html_output_file(filename: str) -> str:
     if filename.startswith("parsed-") and filename.endswith(".json"):
         return "파싱 결과 JSON"
@@ -632,6 +642,7 @@ def _validate_html_output_directory_files(
     target_years: dict[str, str],
     allow_unexpected: bool = False,
     collect_integrity: bool = False,
+    problem_file_limit: Any = None,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -750,10 +761,21 @@ def _validate_html_output_directory_files(
         for path in files
         if path not in allowed_paths
     )
+    parsed_problem_file_limit = _parse_problem_file_limit(problem_file_limit)
+    visible_unexpected_files = unexpected_files[:parsed_problem_file_limit]
+    omitted_unexpected_file_count = max(
+        len(unexpected_files) - len(visible_unexpected_files),
+        0,
+    )
     if unexpected_files and not allow_unexpected:
         unexpected_summary = "\n".join(
             f"- {filename} ({_describe_unexpected_html_output_file(filename)})"
-            for filename in unexpected_files
+            for filename in visible_unexpected_files
+        )
+        omitted_summary = (
+            f"\n- 나머지 {omitted_unexpected_file_count}개는 표시하지 않았습니다."
+            if omitted_unexpected_file_count
+            else ""
         )
         msg = (
             "HTML 저장 디렉토리에 대상 접수번호 HTML이 아닌 파일이 있습니다.\n"
@@ -764,8 +786,8 @@ def _validate_html_output_directory_files(
             f"- 손상된 대상 HTML: {len(invalid_target_acpt_numbers)}개\n"
             f"- 허용 보조 파일: {auxiliary_file_count}개\n"
             f"- 문제 파일: {len(unexpected_files)}개\n"
-            "문제 파일 전체:\n"
-            f"{unexpected_summary}\n"
+            f"문제 파일 (최대 {parsed_problem_file_limit}개 표시):\n"
+            f"{unexpected_summary}{omitted_summary}\n"
             "저장 경로를 비우거나, 대상 HTML만 있는 별도 폴더를 선택하세요."
         )
         raise ValueError(msg)
@@ -779,7 +801,8 @@ def _validate_html_output_directory_files(
         "auxiliary_file_count": auxiliary_file_count,
         "total_file_count": len(files),
         "unexpected_file_count": len(unexpected_files),
-        "unexpected_files": unexpected_files,
+        "unexpected_files": visible_unexpected_files,
+        "unexpected_file_omitted_count": omitted_unexpected_file_count,
     }
     if collect_integrity:
         summary["_target_integrity_by_acpt_no"] = {
@@ -797,6 +820,7 @@ def _delete_unexpected_html_output_directory_files(
     target_years: dict[str, str],
     dry_run: bool = False,
     collect_integrity: bool = False,
+    problem_file_limit: Any = None,
 ) -> dict[str, Any]:
     if not output_directory.exists():
         summary = {
@@ -809,6 +833,8 @@ def _delete_unexpected_html_output_directory_files(
             "auxiliary_file_count": 0,
             "total_file_count": 0,
             "deleted_files": [],
+            "deleted_file_count": 0,
+            "deleted_file_omitted_count": 0,
         }
         if collect_integrity:
             summary["_target_integrity_by_acpt_no"] = {}
@@ -855,8 +881,15 @@ def _delete_unexpected_html_output_directory_files(
         target_years=target_years,
         allow_unexpected=dry_run,
         collect_integrity=collect_integrity,
+        problem_file_limit=problem_file_limit,
     )
-    summary["deleted_files"] = deleted_files
+    parsed_problem_file_limit = _parse_problem_file_limit(problem_file_limit)
+    summary["deleted_files"] = deleted_files[:parsed_problem_file_limit]
+    summary["deleted_file_count"] = len(deleted_files)
+    summary["deleted_file_omitted_count"] = max(
+        len(deleted_files) - parsed_problem_file_limit,
+        0,
+    )
     return summary
 
 

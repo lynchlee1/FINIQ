@@ -125,6 +125,7 @@ def _clean_disclosure_html_output_directory_payload(
             acpt_numbers,
             target_years=target_years,
             dry_run=True,
+            problem_file_limit=body.get("problem_file_limit"),
         )
         if planned_summary["deleted_files"]:
             msg = f'파일 삭제 전 "{HTML_DELETE_CONFIRMATION_TEXT}" 입력과 삭제 허가가 필요합니다.'
@@ -136,7 +137,9 @@ def _clean_disclosure_html_output_directory_payload(
         target_years=target_years,
         dry_run=dry_run,
         collect_integrity=collect_integrity,
+        problem_file_limit=body.get("problem_file_limit"),
     )
+    deletion_candidate_count = int(summary.get("deleted_file_count") or 0)
     return {
         "format": "kind_disclosure_html_folder_cleanup_v1",
         "source_type": source_type,
@@ -144,8 +147,8 @@ def _clean_disclosure_html_output_directory_payload(
         "output_directory": str(resolved_output_directory),
         "dry_run": dry_run,
         "requested_count": len(acpt_numbers),
-        "deleted_count": 0 if dry_run else len(summary["deleted_files"]),
-        "deletion_candidate_count": len(summary["deleted_files"]),
+        "deleted_count": 0 if dry_run else deletion_candidate_count,
+        "deletion_candidate_count": deletion_candidate_count,
         "deletion_candidates": summary["deleted_files"],
         **summary,
     }

@@ -53,7 +53,6 @@ const DOWNLOAD_VARIANTS = {
     description: "다운로드된 공시 결과 JSON을 바탕으로 KIND 공시 뷰어 HTML을 대량 저장합니다.",
     sourcePickMode: "folder",
     sourceRequiredMessage: "작업공간 디렉토리를 선택하세요.",
-    defaultDirectoryKey: "external_html_output_directory",
     startEndpoint: "/api/disclosures/external-html-download/start",
     cancelEndpoint: "/api/disclosures/external-html-download/cancel",
     inspectEndpoint: "/api/disclosures/external-html-download/inspect-folder",
@@ -64,8 +63,7 @@ const DOWNLOAD_VARIANTS = {
     settingsTitle: "공시원문 내부 저장 설정",
     description: "공시원문 외부 데이터 경로를 바탕으로 KIND 공시 본문 HTML을 대량 저장합니다.",
     sourcePickMode: "folder",
-    sourceRequiredMessage: "공시원문 외부 데이터 경로를 선택하세요.",
-    defaultDirectoryKey: "internal_html_output_directory",
+    sourceRequiredMessage: "작업공간 디렉토리를 선택하세요.",
     startEndpoint: "/api/disclosures/internal-html-download/start",
     cancelEndpoint: "/api/disclosures/internal-html-download/cancel",
     inspectEndpoint: "/api/disclosures/internal-html-download/inspect-folder",
@@ -93,7 +91,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const {
     output_root: dataRoot,
     html_parse_mode: htmlParseMode,
-    disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
     saveSetting,
   } = useSettingsStore();
@@ -154,11 +151,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
   // Form State
-  const [outputDirectory, setOutputDirectory] = useState("");
   const [externalTaskMode, setExternalTaskMode] = useState<ExternalTaskMode>("download");
-  const [internalSourceFilePath, setInternalSourceFilePath] = useState("");
-  const [compressInputDirectory, setCompressInputDirectory] = useState("");
-  const [compressOutputDirectory, setCompressOutputDirectory] = useState("");
   const [compressWorkers, setCompressWorkers] = useState("");
   const [timeout, setTimeoutVal] = useState("20");
   const [maxRequestsPerMinute, setMaxRequestsPerMinute] = useState("90");
@@ -166,6 +159,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [limit, setLimit] = useState("");
   const [skipExisting, setSkipExisting] = useState(true);
   const [progressInterval, setProgressInterval] = useState("10");
+  const [problemFileLimit, setProblemFileLimit] = useState("20");
 
   const {
     status,
@@ -215,22 +209,14 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   useEffect(() => {
     fetchSettings().then((config) => {
-      const nextOutputDirectory = config[variantConfig.defaultDirectoryKey] || "";
-      setOutputDirectory(nextOutputDirectory);
-      setCompressInputDirectory(config.external_html_output_directory || nextOutputDirectory);
-      setCompressOutputDirectory(config.external_html_compress_output_directory || nextOutputDirectory);
       setSelectedFilterId(config.html_parse_mode || "");
-
-      if (variant === "internal") {
-        setInternalSourceFilePath(config.external_html_compressed_json_path || "");
-      }
     }).catch(err => {
       setStatus(err.message);
       setIsErrorStatus(true);
     }).finally(() => {
       setLoading(false);
     });
-  }, [fetchSettings, variant, variantConfig.defaultDirectoryKey, setStatus, setIsErrorStatus]);
+  }, [fetchSettings, setStatus, setIsErrorStatus]);
 
   useEffect(() => {
     if (!dataRoot?.trim()) {
@@ -259,48 +245,33 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     }
   }, [isJobActive]);
 
-  const sourcePayload = useCallback(() => {
-    if (variant === "external") {
-      return {};
-    }
-    if (variant === "internal" && useSeparateOutputDirectory) {
-      return { source_compressed_json_path: internalSourceFilePath };
-    }
-    return {};
-  }, [internalSourceFilePath, useSeparateOutputDirectory, variant]);
-
-  const currentSourcePath = variant === "internal" && useSeparateOutputDirectory ? internalSourceFilePath : dataRoot;
-  const currentSourceRequiredMessage = variant === "internal" && useSeparateOutputDirectory
-    ? "외부 HTML 압축 JSON 파일을 선택하세요."
-    : variantConfig.sourceRequiredMessage;
+  const currentSourcePath = dataRoot;
+  const currentSourceRequiredMessage = variantConfig.sourceRequiredMessage;
 
   const buildRunPayload = useCallback((cancelToken: string) => ({
       data_root: dataRoot,
       mode: selectedFilterMode,
       ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
-      output_directory: useSeparateOutputDirectory ? outputDirectory : "",
-      ...sourcePayload(),
+      output_directory: "",
       timeout: Number(timeout),
       max_requests_per_minute: Number(maxRequestsPerMinute),
       wait_seconds: Number(waitSeconds),
       limit: limit ? Number(limit) : null,
       skip_existing: skipExisting,
       progress_interval: Number(progressInterval),
+      problem_file_limit: Number(problemFileLimit),
       cancel_token: cancelToken,
   }), [
     dataRoot,
     selectedFilterMode,
     selectedFilterParentMode,
-    outputDirectory,
-    useSeparateOutputDirectory,
-    sourcePayload,
     timeout,
     maxRequestsPerMinute,
     waitSeconds,
     limit,
     skipExisting,
     progressInterval,
-    variant,
+    problemFileLimit,
   ]);
 
   const handleRun = async () => {
@@ -321,9 +292,9 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     data_root: dataRoot,
     mode: selectedFilterMode,
     ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
-    output_directory: useSeparateOutputDirectory ? outputDirectory : "",
-    ...sourcePayload(),
+    output_directory: "",
     limit: limit ? Number(limit) : null,
+    problem_file_limit: Number(problemFileLimit),
     dry_run: dryRun,
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
@@ -331,13 +302,10 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     dataRoot,
     selectedFilterMode,
     selectedFilterParentMode,
-    outputDirectory,
-    useSeparateOutputDirectory,
-    sourcePayload,
     limit,
+    problemFileLimit,
     deleteConfirmed,
     deleteConfirmationText,
-    variant,
   ]);
 
   useEffect(() => {
@@ -351,7 +319,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     setLastInspectionResult(null);
     setDeleteConfirmed(false);
     setDeleteConfirmationText("");
-  }, [currentSourcePath, dataRoot, selectedFilterId, limit, outputDirectory, useSeparateOutputDirectory]);
+  }, [currentSourcePath, dataRoot, selectedFilterId, limit, problemFileLimit]);
 
   useEffect(() => {
     return () => {
@@ -364,11 +332,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const handleInspectFolder = async () => {
     if (!currentSourcePath) {
       setStatus(currentSourceRequiredMessage);
-      setIsErrorStatus(true);
-      return;
-    }
-    if (useSeparateOutputDirectory && !outputDirectory) {
-      setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -506,58 +469,28 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setIsErrorStatus(true);
       return;
     }
-    if (useSeparateOutputDirectory && !compressOutputDirectory) {
-      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
-      setIsErrorStatus(true);
-      return;
-    }
     const payload = {
       data_root: dataRoot,
       mode: selectedFilterMode,
       ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
-      input_directory: useSeparateOutputDirectory ? compressInputDirectory : "",
-      output_directory: useSeparateOutputDirectory ? compressOutputDirectory : "",
+      input_directory: "",
+      output_directory: "",
       parallel_workers: compressWorkers ? Number(compressWorkers) : null,
     };
     startJob("/api/disclosures/external-html-download/compress/start", payload);
   };
 
-  const saveOutputDirectory = (val: string) => {
-    setOutputDirectory(val);
-    saveSetting(variantConfig.defaultDirectoryKey, val);
-  };
-
-  const saveInternalSourceFilePath = (val: string) => {
-    setInternalSourceFilePath(val);
-    saveSetting("external_html_compressed_json_path", val);
-  };
-
   const saveWorkspaceDirectory = async (val: string) => {
-    if (!(await saveSetting("output_root", val))) return;
-    const settings = useSettingsStore.getState();
-    const nextOutputDirectory = settings[variantConfig.defaultDirectoryKey] || "";
-    setOutputDirectory(nextOutputDirectory);
-    setCompressInputDirectory(settings.external_html_output_directory || "");
-    setCompressOutputDirectory(settings.external_html_compress_output_directory || "");
-    if (variant === "internal") {
-      setInternalSourceFilePath(settings.external_html_compressed_json_path || "");
-    }
+    await saveSetting("output_root", val);
   };
 
   const basePathFields: DataPathField[] = [
     {
       id: "sourcePath",
       label: DATA_PATH_LABELS.workspace,
-      mode: variant === "internal" && useSeparateOutputDirectory ? "file" : variantConfig.sourcePickMode,
+      mode: variantConfig.sourcePickMode,
       value: currentSourcePath,
-      onChange: variant === "internal" && useSeparateOutputDirectory ? saveInternalSourceFilePath : saveWorkspaceDirectory,
-    },
-    {
-      id: "outputDirectory",
-      label: DATA_PATH_LABELS.output,
-      value: outputDirectory,
-      onChange: saveOutputDirectory,
-      separateOutputOnly: true,
+      onChange: saveWorkspaceDirectory,
     },
   ];
 
@@ -568,10 +501,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     { id: "limit", kind: "input", type: "number", label: SETTINGS_LABELS.maxItems, placeholder: "전체", value: limit, onChange: setLimit },
     { id: "progressInterval", kind: "input", type: "number", label: SETTINGS_LABELS.progressInterval, value: progressInterval, onChange: setProgressInterval, span: 2 },
     { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
+    { id: "problemFileLimit", kind: "input", type: "number", label: "문제 파일 표시 수", value: problemFileLimit, onChange: setProblemFileLimit, span: 2 },
   ];
   const requestOptionFields = baseFields.filter((field) => ["timeout", "maxRequestsPerMinute", "waitSeconds"].includes(field.id));
   const executionOptionFields = baseFields.filter((field) => field.id === "progressInterval" || field.id === "skipExisting");
   const testOptionFields = baseFields.filter((field) => field.id === "limit");
+  const displayOptionFields = baseFields.filter((field) => field.id === "problemFileLimit");
 
   const compressionFields: DataPathField[] = [
     {
@@ -579,20 +514,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       label: DATA_PATH_LABELS.workspace,
       value: dataRoot,
       onChange: saveWorkspaceDirectory,
-    },
-    {
-      id: "compressOutputDirectory",
-      label: DATA_PATH_LABELS.output,
-      value: compressOutputDirectory,
-      onChange: (val) => {
-        setCompressOutputDirectory(val);
-        saveSetting("external_html_compress_output_directory", val);
-        saveSetting(
-          "external_html_compressed_json_path",
-          val ? `${val.replace(/\/$/, "")}/compressed-external-html.json` : "",
-        );
-      },
-      separateOutputOnly: true,
     },
   ];
   const compressionSettingFields: HtmlWorkflowField[] = [
@@ -632,13 +553,20 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const showSaveWorkflow =
     (variant === "external" && externalTaskMode === "download") ||
     variant === "internal";
-  const hasInspectionInput = !!currentSourcePath && (!useSeparateOutputDirectory || !!outputDirectory);
+  const hasInspectionInput = !!currentSourcePath;
   const integrityProblemCount = existingData
     ? Number(existingData.invalid_target_html_count || 0)
       + Number(existingData.hash_mismatch_target_html_count || 0)
       + Number(existingData.hash_unverified_target_html_count || 0)
       + Number(existingData.deletion_candidate_count || 0)
     : 0;
+  const visibleProblemFiles = Array.isArray(lastInspectionResult?.deletion_candidates)
+    ? lastInspectionResult.deletion_candidates
+    : [];
+  const omittedProblemFileCount = Math.max(
+    lastInspectionCandidateCount - visibleProblemFiles.length,
+    0,
+  );
   // Files still to download are normal work, not an integrity problem, so they
   // are kept out of integrityProblemCount and only change the success wording.
   const pendingDownloadCount = existingData
@@ -795,11 +723,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                   </option>
                 ))}
               </select>
-              {selectedFilterParentMode && (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  상위 필터 {selectedFilterParentMode}의 HTML에서 파생 필터 {selectedFilterMode} 대상만 사용합니다.
-                </p>
-              )}
             </CardContent>
           </Card>
 
@@ -862,6 +785,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           }
           notificationActive={isErrorStatus || !!existingCheckError || lastInspectionCandidateCount > 0 || !!lastInspectionResult}
           notificationTone={isErrorStatus ? "error" : existingCheckError || integrityProblemCount > 0 ? "warning" : "success"}
+          notificationDismissible={false}
           notificationContent={
             <>
               {lastInspectionCandidateCount > 0 && (
@@ -875,30 +799,57 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                     </p>
                   ) : (
                     <>
+                      <p className="text-body text-[var(--tv-warning-text)]">
+                        삭제하려면 아래 입력란에 &quot;확인했습니다.&quot;를 정확히 입력하고 삭제 허가를 선택하세요.
+                      </p>
+                      <div className="space-y-2">
+                        <Label htmlFor="deleteConfirmationText" className="dark:text-slate-300">확인 문구</Label>
+                        <Input
+                          id="deleteConfirmationText"
+                          value={deleteConfirmationText}
+                          onChange={(event) => setDeleteConfirmationText(event.target.value)}
+                          placeholder="확인했습니다."
+                          className={htmlControlClassName}
+                        />
+                      </div>
                       <div className="flex items-center space-x-2">
                         <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="border-[color:var(--tv-border)]" />
                         <Label htmlFor="deleteConfirmed" className="text-body cursor-pointer dark:text-slate-300">삭제 허가</Label>
                       </div>
-                      <Input value={deleteConfirmationText} onChange={(e) => setDeleteConfirmationText(e.target.value)} placeholder="확인했습니다." className={htmlControlClassName} />
-                      <Button
-                        variant="outline"
-                        className="h-10 w-full"
-                        onClick={handleDeleteUnexpectedFiles}
-                        disabled={isJobActive || inspectRunning || !deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다."}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개 삭제
-                      </Button>
+                      {deleteConfirmed && deleteConfirmationText.trim() === "확인했습니다." && (
+                        <Button
+                          variant="outline"
+                          className="h-10 w-full"
+                          onClick={handleDeleteUnexpectedFiles}
+                          disabled={isJobActive || inspectRunning}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개 삭제
+                        </Button>
+                      )}
                     </>
                   )}
                 </div>
               )}
               {lastInspectionResult && (
                 <div className="space-y-2 border-t border-[color:var(--tv-border)] pt-4">
-                  <Label className="dark:text-slate-300">폴더 검사 결과</Label>
-                  <pre className="text-caption max-h-72 overflow-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-[var(--tv-text)]">
-                    {JSON.stringify(lastInspectionResult, null, 2)}
-                  </pre>
+                  <Label className="dark:text-slate-300">문제 파일</Label>
+                  {visibleProblemFiles.length ? (
+                    <div className="max-h-72 space-y-2 overflow-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3">
+                      {visibleProblemFiles.map((file: any) => (
+                        <div key={file.path || file.name} className="text-caption break-all text-[var(--tv-text)]">
+                          {file.name} ({file.reason})
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-body text-[var(--tv-muted)]">표시할 문제 파일이 없습니다.</p>
+                  )}
+                  {omittedProblemFileCount > 0 && (
+                    <p className="text-caption text-[var(--tv-muted)]">
+                      나머지 {formatInteger(omittedProblemFileCount)}개는 표시하지 않았습니다.
+                    </p>
+                  )}
                 </div>
               )}
               {!lastInspectionCandidateCount && !lastInspectionResult && isErrorStatus && (
@@ -938,6 +889,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                       <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>
                     </div>
                     <HtmlWorkflowForm layout="inspector" fields={executionOptionFields} />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="border-b border-[color:var(--tv-border)] pb-2">
+                      <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>
+                    </div>
+                    <HtmlWorkflowForm layout="inspector" fields={displayOptionFields} />
                   </div>
                   <div className="space-y-3">
                     <div className="border-b border-[color:var(--tv-border)] pb-2">
