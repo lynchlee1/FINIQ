@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, CircleHelp, Eraser, ListPlus, Plus, Redo2, Save, Trash2, Undo2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
@@ -188,20 +188,32 @@ export type DisclosureConditionBlock = {
 };
 
 export type DisclosureConditionPreset = {
+  id?: string;
   name: string;
   mode: string;
+  parent_mode?: string;
+  parent_result_fingerprint?: string;
   condition_blocks: DisclosureConditionBlock[];
   status: "ready" | "running" | "interrupted" | "completed" | "failed";
   steps: {
-    condition_input: { status: "completed" };
-    database_query: { status: "pending" | "running" | "interrupted" | "completed" | "failed" };
-    record: { status: "pending" | "running" | "interrupted" | "completed" | "failed" };
+    condition_input: { status: "completed"; error?: string };
+    database_query: {
+      status: "pending" | "running" | "interrupted" | "completed" | "failed";
+      error?: string;
+    };
+    record: {
+      status: "pending" | "running" | "interrupted" | "completed" | "failed";
+      error?: string;
+    };
   };
 };
 
 export type DisclosureConditionPresetPayload = {
+  id?: string;
   name?: string;
   mode?: string;
+  parent_mode?: string;
+  parent_result_fingerprint?: string;
   condition_blocks?: unknown;
   source_json_path?: string;
 };
@@ -216,6 +228,10 @@ type DisclosureConditionFilterCardProps = {
   onLoadPresetFromJson?: () => void;
   onSavePreset: () => void;
   onDeletePreset: () => void;
+  getPresetIdentity?: (preset: DisclosureConditionPreset) => string;
+  getPresetLabel?: (preset: DisclosureConditionPreset) => string;
+  identityControls?: ReactNode;
+  libraryPresets?: DisclosureConditionPreset[];
 };
 
 export function makeEmptyDisclosureCondition(connector: DisclosureFilterConnector = ""): DisclosureConditionBlock {
@@ -515,23 +531,29 @@ function FilterPresetCombobox({
   presets,
   onValueChange,
   onSelectExisting,
+  getPresetIdentity = (preset) => preset.name,
+  getPresetLabel = (preset) => preset.name,
 }: {
   value: string;
   presets: DisclosureConditionPreset[];
   onValueChange: (value: string) => void;
   onSelectExisting: (name: string) => void;
+  getPresetIdentity?: (preset: DisclosureConditionPreset) => string;
+  getPresetLabel?: (preset: DisclosureConditionPreset) => string;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
-  const query = value.trim().toLowerCase();
+  const selectedPreset = presets.find((preset) => getPresetIdentity(preset) === value);
+  const inputValue = selectedPreset ? getPresetLabel(selectedPreset) : value;
+  const query = inputValue.trim().toLowerCase();
   const matches = query
-    ? presets.filter((preset) => preset.name.toLowerCase().includes(query))
+    ? presets.filter((preset) => getPresetLabel(preset).toLowerCase().includes(query))
     : presets;
-  const exactMatch = presets.some((preset) => preset.name === value.trim());
-  const canCreate = Boolean(value.trim()) && !exactMatch;
+  const exactMatch = presets.some((preset) => getPresetLabel(preset) === inputValue.trim());
+  const canCreate = Boolean(inputValue.trim()) && !exactMatch;
 
   useEffect(() => {
     if (!open) {
@@ -599,7 +621,7 @@ function FilterPresetCombobox({
       if (!open || !optionCount) return;
       event.preventDefault();
       if (highlight < matches.length) {
-        chooseExisting(matches[highlight].name);
+        chooseExisting(getPresetIdentity(matches[highlight]));
         return;
       }
       setOpen(false);
@@ -609,7 +631,7 @@ function FilterPresetCombobox({
   return (
     <div ref={rootRef} className="relative">
       <Input
-        value={value}
+        value={inputValue}
         onChange={(event) => {
           onValueChange(event.target.value);
           setOpen(true);
@@ -647,13 +669,13 @@ function FilterPresetCombobox({
         >
           {matches.map((preset, index) => (
             <button
-              key={preset.name}
+              key={getPresetIdentity(preset)}
               type="button"
               role="option"
-              aria-selected={preset.name === value}
+              aria-selected={getPresetIdentity(preset) === value}
               onMouseDown={(event) => {
                 event.preventDefault();
-                chooseExisting(preset.name);
+                chooseExisting(getPresetIdentity(preset));
               }}
               className={cn(
                 "block w-full truncate rounded-md px-2 py-1.5 text-left text-xs font-bold text-slate-600 dark:text-slate-300",
@@ -662,7 +684,7 @@ function FilterPresetCombobox({
                   : "hover:bg-slate-50 dark:hover:bg-[#21262d]",
               )}
             >
-              {preset.name}
+              {getPresetLabel(preset)}
             </button>
           ))}
           {canCreate && (
@@ -698,9 +720,13 @@ function FilterPresetCombobox({
 function AddFilterPopover({
   presets,
   onSelect,
+  getPresetIdentity = (preset) => preset.name,
+  getPresetLabel = (preset) => preset.name,
 }: {
   presets: DisclosureConditionPreset[];
   onSelect: (preset: DisclosureConditionPreset) => void;
+  getPresetIdentity?: (preset: DisclosureConditionPreset) => string;
+  getPresetLabel?: (preset: DisclosureConditionPreset) => string;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -745,7 +771,7 @@ function AddFilterPopover({
         >
           {presets.length ? presets.map((preset) => (
             <button
-              key={preset.name}
+              key={getPresetIdentity(preset)}
               type="button"
               onClick={() => {
                 onSelect(preset);
@@ -753,7 +779,7 @@ function AddFilterPopover({
               }}
               className="block w-full truncate rounded-md px-2 py-1.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-[#21262d]"
             >
-              {preset.name}
+              {getPresetLabel(preset)}
             </button>
           )) : (
             <p className="px-2 py-1.5 text-xs font-medium text-slate-400 dark:text-slate-500">저장된 필터가 없습니다.</p>
@@ -775,7 +801,12 @@ export function DisclosureConditionFilterCard({
   onLoadPresetFromJson,
   onSavePreset,
   onDeletePreset,
+  getPresetIdentity,
+  getPresetLabel,
+  identityControls,
+  libraryPresets,
 }: DisclosureConditionFilterCardProps) {
+  const mergePresets = libraryPresets ?? presets;
   const [openOptionsIndex, setOpenOptionsIndex] = useState<number | null>(null);
   const [, setHistoryTick] = useState(0);
   const history = useRef<{ past: DisclosureConditionBlock[][]; future: DisclosureConditionBlock[][] }>({
@@ -855,6 +886,7 @@ export function DisclosureConditionFilterCard({
       <CardContent className="space-y-5">
         <div className="grid gap-2">
           <Label className="dark:text-slate-300">조건검색 필터</Label>
+          {identityControls}
           <div className={cn(
             "grid gap-2",
             onLoadPresetFromJson
@@ -866,10 +898,12 @@ export function DisclosureConditionFilterCard({
               presets={presets}
               onValueChange={onSelectedPresetChange}
               onSelectExisting={onLoadPreset}
+              getPresetIdentity={getPresetIdentity}
+              getPresetLabel={getPresetLabel}
             />
             {onLoadPresetFromJson && <Button variant="outline" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>}
             <Button onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
-            <Button variant="outline" onClick={onDeletePreset} disabled={!presets.some((preset) => preset.name === selectedPreset)}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
+            <Button variant="outline" onClick={onDeletePreset} disabled={!presets.some((preset) => (getPresetIdentity?.(preset) ?? preset.name) === selectedPreset)}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
           </div>
         </div>
 
@@ -885,8 +919,10 @@ export function DisclosureConditionFilterCard({
                 조건 추가
               </Button>
               <AddFilterPopover
-                presets={presets}
+                presets={mergePresets}
                 onSelect={(preset) => applyConditionsChange(mergeConditionsWithPreset(conditions, preset))}
+                getPresetIdentity={getPresetIdentity}
+                getPresetLabel={getPresetLabel}
               />
             </div>
             <div className="flex gap-2">

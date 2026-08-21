@@ -21,7 +21,8 @@ def download_disclosure_external_html_payload(
     source_json, _source_json_path = _load_workspace_filtered_payload(body)
 
     acpt_numbers = collect_acpt_numbers_from_json(source_json)
-    if not acpt_numbers:
+    parent_mode_raw = body.get("parent_mode")
+    if not acpt_numbers and parent_mode_raw in (None, ""):
         msg = "No acpt_no values found in JSON"
         raise ValueError(msg)
 
@@ -32,6 +33,45 @@ def download_disclosure_external_html_payload(
     _clear_cancel_token(cancel_token)
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
+    if parent_mode_raw not in (None, ""):
+        workspace = resolve_disclosure_workspace(body.get("data_root") or "")
+        mode = validate_workspace_mode(body.get("mode"))
+        parent_mode = validate_workspace_mode(parent_mode_raw)
+        expected_output_directory = workspace.external_owner_mode(
+            mode, parent_mode=parent_mode
+        ).resolve()
+        if resolved_output_directory != expected_output_directory:
+            raise ValueError(
+                "derived filter external HTML must use its parent-owned directory: "
+                f"{expected_output_directory}"
+            )
+        saved_paths, verification = _strictly_reuse_parent_html(
+            output_directory=resolved_output_directory,
+            acpt_numbers=acpt_numbers,
+            source_json=source_json,
+        )
+        return {
+            "format": "kind_disclosure_external_html_download_v1",
+            "mode": mode,
+            "parent_mode": parent_mode,
+            "reused_parent_html": True,
+            "network_fetch_count": 0,
+            "output_directory": str(resolved_output_directory),
+            "requested_count": len(acpt_numbers),
+            "saved_count": len(saved_paths),
+            "cancelled": False,
+            "acpt_numbers": acpt_numbers,
+            "missing_acpt_numbers": [],
+            "saved_files": [str(path) for path in saved_paths],
+            "manifest_path": str(
+                resolved_output_directory / HTML_MANIFEST_FILENAME
+            ),
+            "verification": verification,
+            "progress_log": [
+                f"부모 필터 {parent_mode}의 외부 HTML "
+                f"{len(saved_paths)}건을 재사용했습니다."
+            ],
+        }
     progress_interval = _parse_progress_interval(body.get("progress_interval"))
     max_workers = resolve_worker_count(
         body.get("max_workers"),

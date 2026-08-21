@@ -14,6 +14,10 @@ from typing import Any, Callable
 
 from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
+from finiq.market_desk.web.features.disclosures.html_common import (
+    _load_workspace_filtered_payload,
+    collect_acpt_numbers_from_json,
+)
 from finiq.market_desk.web.features.market_data.service_common import (
     _record_filter_blocks_match,
     _validate_filter_blocks,
@@ -256,6 +260,7 @@ def _load_html_parse_metadata(
     *,
     filtered_metadata_path: Path | None = None,
     compressed_metadata_path: Path | None = None,
+    allowed_acpt_numbers: set[str] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     metadata_index: dict[str, dict[str, Any]] = {}
     families: dict[str, dict[str, Any]] = {}
@@ -267,7 +272,10 @@ def _load_html_parse_metadata(
         (
             compressed_metadata_index,
             compressed_families,
-        ) = _load_compressed_external_html_metadata_index(compressed_metadata_path)
+        ) = _load_compressed_external_html_metadata_index(
+            compressed_metadata_path,
+            allowed_acpt_numbers=allowed_acpt_numbers,
+        )
         families.update(compressed_families)
     for acpt_no in sorted(set(filtered_metadata_index) | set(compressed_metadata_index)):
         metadata = filtered_metadata_index.pop(acpt_no, {})
@@ -325,6 +333,8 @@ def _load_filtered_metadata_index(filtered_path: Path) -> dict[str, dict[str, An
 
 def _load_compressed_external_html_metadata_index(
     compressed_path: Path,
+    *,
+    allowed_acpt_numbers: set[str] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     try:
         payload = json.loads(compressed_path.read_text(encoding="utf-8"))
@@ -341,9 +351,13 @@ def _load_compressed_external_html_metadata_index(
     if not isinstance(records, list):
         raise ValueError(f"외부 HTML 압축 records가 배열이 아닙니다: {compressed_path}")
     selected_doc_to_record: dict[str, dict[str, Any]] = {}
+    selected_records: list[dict[str, Any]] = []
     for index, item in enumerate(records):
         if not isinstance(item, dict):
             raise ValueError(f"compressed records[{index}] must be an object")
+        acpt_no = str(item.get("acpt_no") or "").strip()
+        if allowed_acpt_numbers is not None and acpt_no not in allowed_acpt_numbers:
+            continue
         if not isinstance(item.get("metadata"), dict):
             raise ValueError(f"compressed records[{index}].metadata must be an object")
         selected_doc_no = str(item.get("selected_main_doc_no") or "").strip()
@@ -354,9 +368,10 @@ def _load_compressed_external_html_metadata_index(
                 f"duplicate external metadata selected_main_doc_no: {selected_doc_no}"
             )
         selected_doc_to_record[selected_doc_no] = item
+        selected_records.append(item)
     metadata_index: dict[str, dict[str, Any]] = {}
     families: dict[str, dict[str, Any]] = {}
-    for item in records:
+    for item in selected_records:
         parsed = _compressed_external_html_metadata_item(item)
         acpt_no, metadata = parsed
         if acpt_no in metadata_index:
@@ -536,7 +551,12 @@ def _parse_parallel_workers(value: Any, total_files: int) -> int:
     )
 
 
-def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
+def _collect_html_files(
+    input_directory: Path,
+    limit: int | None,
+    *,
+    allowed_acpt_numbers: set[str] | None = None,
+) -> list[Path]:
     resolved_root = input_directory.resolve()
     year_directories = sorted(
         path
@@ -561,6 +581,10 @@ def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
             and relative_path.parts[0].isdigit()
             and resolved_path.suffix.lower() == ".html"
             and resolved_path.is_file()
+            and (
+                allowed_acpt_numbers is None
+                or resolved_path.stem in allowed_acpt_numbers
+            )
         ):
             resolved_files.add(resolved_path)
 
@@ -717,12 +741,39 @@ def _build_parse_request(
     limit = _parse_limit(body.get("limit"))
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
-    html_files = _collect_html_files(input_directory, limit)
     filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
+    filter_mode = str(body.get("filter_mode") or "").strip()
+    derived_filter = body.get("parent_mode") not in (None, "")
+    if derived_filter and filtered_metadata_path is None:
+        raise ValueError("filtered_metadata_path is required for a derived filter")
+    allowed_acpt_numbers = None
+    if derived_filter:
+        if not filter_mode:
+            raise ValueError("filter_mode is required for a derived filter")
+        filtered_payload, validated_filtered_path = _load_workspace_filtered_payload(
+            {
+                "data_root": body.get("data_root"),
+                "mode": filter_mode,
+                "parent_mode": body.get("parent_mode"),
+            }
+        )
+        if Path(validated_filtered_path) != filtered_metadata_path:
+            raise ValueError(
+                "derived filter filtered_metadata_path does not match its workspace path"
+            )
+        allowed_acpt_numbers = set(
+            collect_acpt_numbers_from_json(filtered_payload)
+        )
+    html_files = _collect_html_files(
+        input_directory,
+        limit,
+        allowed_acpt_numbers=allowed_acpt_numbers,
+    )
     metadata_index, families = _load_html_parse_metadata(
         input_directory,
         filtered_metadata_path=filtered_metadata_path,
         compressed_metadata_path=compressed_metadata_path,
+        allowed_acpt_numbers=allowed_acpt_numbers,
     )
     _validate_explicit_kind_disclosed_at_metadata(
         html_files,

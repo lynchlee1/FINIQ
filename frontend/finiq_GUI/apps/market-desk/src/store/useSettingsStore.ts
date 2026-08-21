@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { apiGet, apiPost } from "@/api/client";
 
+let cachedSettings: Record<string, any> | null = null;
+let settingsRequest: Promise<Record<string, any>> | null = null;
+
 interface SettingsState {
   parallel_worker_count: number;
   runtime_info_loaded: boolean;
@@ -88,7 +91,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   updateSettings: (newSettings) => set((state) => ({ ...state, ...newSettings })),
 
   fetchSettings: async () => {
-    const config = await apiGet<any>("/api/config");
+    let config = cachedSettings;
+    if (!config) {
+      settingsRequest ||= apiGet<Record<string, any>>("/api/config")
+        .then((config) => {
+          cachedSettings = config;
+          return config;
+        })
+        .finally(() => {
+          settingsRequest = null;
+        });
+      config = await settingsRequest;
+    }
     const workerCount = Number(config.parallel_worker_count);
     if (!Number.isInteger(workerCount) || workerCount < 1) {
       throw new Error("parallel_worker_count must be a positive integer");
@@ -120,6 +134,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSetting: async (key, value) => {
     try {
       const config = await apiPost<any>("/api/settings", { [key]: value });
+      cachedSettings = config;
       set((state) => ({ ...state, ...config }));
       return true;
     } catch (err) {
@@ -131,6 +146,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSettings: async (payload) => {
     try {
       const config = await apiPost<any>("/api/settings", payload);
+      cachedSettings = config;
       set((state) => ({ ...state, ...config }));
       return true;
     } catch (err) {

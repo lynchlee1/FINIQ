@@ -31,6 +31,104 @@ def compress_disclosure_external_html_payload(
         else input_directory
     )
 
+    if body.get("parent_mode") not in (None, ""):
+        workspace = resolve_disclosure_workspace(body.get("data_root") or "")
+        mode = validate_workspace_mode(body.get("mode"))
+        parent_mode = validate_workspace_mode(body.get("parent_mode"))
+        expected_directory = workspace.external_owner_mode(
+            mode, parent_mode=parent_mode
+        ).resolve()
+        if (
+            input_directory != expected_directory
+            or output_directory != expected_directory
+        ):
+            raise ValueError(
+                "derived filter compression must reuse its parent-owned directory: "
+                f"{expected_directory}"
+            )
+        source_json, _source_path = _load_workspace_filtered_payload(body)
+        acpt_numbers = collect_acpt_numbers_from_json(source_json)
+        _paths, integrity = _strictly_reuse_parent_html(
+            output_directory=expected_directory,
+            acpt_numbers=acpt_numbers,
+            source_json=source_json,
+        )
+        compressed_path = expected_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+        if not compressed_path.is_file():
+            raise ValueError(
+                "parent compressed external HTML does not exist: "
+                f"{compressed_path}"
+            )
+        compressed_payload = json.loads(compressed_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(compressed_payload, dict)
+            or compressed_payload.get("format")
+            != "finiq_disclosure_external_html_docs_v1"
+            or not isinstance(compressed_payload.get("records"), list)
+        ):
+            raise ValueError(
+                "parent compressed external HTML has an invalid format: "
+                f"{compressed_path}"
+            )
+        target_records: dict[str, dict[str, Any]] = {}
+        target_set = set(acpt_numbers)
+        for index, record in enumerate(compressed_payload["records"]):
+            if not isinstance(record, dict):
+                continue
+            acpt_no = str(record.get("acpt_no") or "").strip()
+            if acpt_no not in target_set:
+                continue
+            if acpt_no in target_records:
+                raise ValueError(
+                    "parent compressed external HTML has duplicate derived target: "
+                    f"{acpt_no}"
+                )
+            target_records[acpt_no] = record
+        missing = [acpt_no for acpt_no in acpt_numbers if acpt_no not in target_records]
+        if missing:
+            raise ValueError(
+                "parent compressed external HTML is missing derived targets: "
+                + ", ".join(missing[:10])
+            )
+        verified_integrity = integrity["_verified_integrity_by_acpt_no"]
+        mismatched = [
+            acpt_no
+            for acpt_no, record in target_records.items()
+            if record.get("source_sha256")
+            != verified_integrity[acpt_no]["source_sha256"]
+            or record.get("source_size_bytes")
+            != verified_integrity[acpt_no]["source_size_bytes"]
+        ]
+        if mismatched:
+            raise ValueError(
+                "parent compressed external HTML is stale for derived targets: "
+                + ", ".join(mismatched[:10])
+            )
+        return {
+            "format": "finiq_disclosure_external_html_compress_result_v1",
+            "mode": mode,
+            "parent_mode": parent_mode,
+            "reused_parent_compressed_html": True,
+            "input_directory": str(expected_directory),
+            "output_directory": str(expected_directory),
+            "summary": {
+                "found_files": len(acpt_numbers),
+                "compressed_files": len(acpt_numbers),
+                "written_files": 0,
+            },
+            "written_files": [],
+            "verification": {
+                "passed": True,
+                "expected_records": len(acpt_numbers),
+                "verified_records": len(acpt_numbers),
+                "missing_records": 0,
+            },
+            "progress_log": [
+                f"부모 필터 {parent_mode}의 외부 HTML 압축 결과 "
+                f"{len(acpt_numbers)}건을 재사용했습니다."
+            ],
+        }
+
     progress_log: deque[str] = deque(maxlen=100)
 
     def emit(message: str) -> None:

@@ -35,6 +35,19 @@ KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
 
 - 새로 내려받은 본문이 HTML 판별 검사를 통과하지 못하면 방금 저장한 본문 파일을 삭제하고 실패 처리한다.
 
+### Reuse the Parent Filter's Internal HTML
+
+#### Behavior
+
+파생 필터는 상위 기본 필터가 소유한 내부 HTML과 manifest를 그대로 사용한다. 파생 필터의 접수번호 부분집합만 검증하며 본문을 다시 내려받거나 별도 출력 폴더를 만들지 않는다.
+
+#### Defaults and Exceptions
+
+- 현재 상위 결과와 파생 필터의 `parent_result_fingerprint`가 일치해야 한다.
+- 파생 대상마다 상위 04단계 record의 `selected_main_doc_no`, 상위 05단계 manifest와 내부 HTML의 해시가 모두 일치해야 한다.
+- 상위 산출물이 없거나 미완료·손상 상태이거나 파생 필터가 stale이면 실패 처리한다.
+- 누락된 본문을 KIND에서 다시 받거나 파생 필터 전용 05단계 산출물을 만드는 fallback은 사용하지 않는다.
+
 ### Reuse Existing Internal HTML
 
 #### Behavior

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "predev": "node ../../../scripts/check-market-desk-api.mjs",
+    "predev": "node ../../../scripts/check-market-desk-api.mjs && node ../../../scripts/prepare-market-desk-dev.mjs",
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",

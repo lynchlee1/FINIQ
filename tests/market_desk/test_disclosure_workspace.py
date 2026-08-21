@@ -153,6 +153,65 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     )
 
 
+def test_workspace_defaults_use_parent_html_for_derived_filter(tmp_path: Path) -> None:
+    workspace = resolve_disclosure_workspace(tmp_path / "workspace", create=True)
+    identity = {
+        "data_root": str(workspace.root),
+        "mode": "child",
+        "parent_mode": "parent",
+    }
+
+    external = apply_workspace_defaults("external_html_download", identity)
+    internal = apply_workspace_defaults("internal_html_download", identity)
+    parsed = apply_workspace_defaults("parse", identity)
+    parsed_with_parent_parser = apply_workspace_defaults(
+        "parse",
+        {
+            "data_root": str(workspace.root),
+            "mode": "parent",
+            "filter_mode": "child",
+            "parent_mode": "parent",
+        },
+    )
+
+    assert external["output_directory"] == str(workspace.external / "parent")
+    assert internal["output_directory"] == str(workspace.internal / "parent")
+    assert internal["source_compressed_json_path"] == str(
+        workspace.external / "parent" / "compressed-external-html.json"
+    )
+    assert parsed["filtered_metadata_path"] == str(
+        workspace.filtered / "parent" / "subfilters" / "child" / "filtered.json"
+    )
+    assert parsed["compressed_metadata_path"] == str(
+        workspace.external / "parent" / "compressed-external-html.json"
+    )
+    assert parsed_with_parent_parser["output_directory"] == str(
+        workspace.converted / "parent" / "subfilters" / "child"
+    )
+    assert parsed_with_parent_parser["filtered_metadata_path"] == str(
+        workspace.filtered / "parent" / "subfilters" / "child" / "filtered.json"
+    )
+    assert parsed_with_parent_parser["compressed_metadata_path"] == str(
+        workspace.external / "parent" / "compressed-external-html.json"
+    )
+
+    other_parent = apply_workspace_defaults(
+        "parse",
+        {
+            "data_root": str(workspace.root),
+            "mode": "other-parent",
+            "filter_mode": "child",
+            "parent_mode": "other-parent",
+        },
+    )
+    assert other_parent["output_directory"] == str(
+        workspace.converted / "other-parent" / "subfilters" / "child"
+    )
+    assert other_parent["output_directory"] != parsed_with_parent_parser[
+        "output_directory"
+    ]
+
+
 def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> None:
     workspace = resolve_disclosure_workspace(tmp_path / "workspace")
     explicit = tmp_path / "explicit"

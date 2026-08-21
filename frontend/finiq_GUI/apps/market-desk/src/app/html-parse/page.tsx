@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ExternalLink, Eye, Loader2, Play, Square } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
@@ -110,6 +110,14 @@ const DISCLOSURE_PARSE_MODES: ParseModeConfig[] = [
 const HTML_PARSE_RELATED_ROUTES = "/internal-html-download /html-parse /html-change-log";
 const PARSE_MODE_CONFIGS = Object.fromEntries(DISCLOSURE_PARSE_MODES.map((mode) => [mode.key, mode])) as Record<string, ParseModeConfig>;
 const WARNING_OPEN_PAGE_SIZE = 20;
+
+const presetIdentity = (preset: DisclosureConditionPreset) => (
+  preset.id || (preset.parent_mode ? `${preset.parent_mode}/${preset.mode}` : preset.mode)
+);
+
+const presetLabel = (preset: DisclosureConditionPreset) => (
+  preset.parent_mode ? `${preset.parent_mode} › ${preset.mode}` : preset.mode
+);
 type FilterCandidate = DisclosureFilterCandidate & {
   examples: FilterCandidateExample[];
 };
@@ -343,6 +351,15 @@ export default function HtmlParsePage() {
   const [filterPresetPath, setFilterPresetPath] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
+  const selectedPresetEntry = useMemo(
+    () => presets.find((preset) => presetIdentity(preset) === selectedPreset),
+    [presets, selectedPreset],
+  );
+  const currentFilterMode = selectedPresetEntry?.mode || selectedPreset.trim() || parseMode;
+  const currentParentMode = selectedPresetEntry?.parent_mode || "";
+  const filterIdentityPayload = currentParentMode
+    ? { filter_mode: currentFilterMode, parent_mode: currentParentMode }
+    : { filter_mode: currentFilterMode };
   const selectedParseMode = PARSE_MODE_CONFIGS[parseMode] || DISCLOSURE_PARSE_MODES[0];
   const executionOptionConfig = selectedParseMode.executionOptions[0] || null;
   const activeRecordFilters = executionOptionConfig && selectedExecutionOptionValues.length ? [
@@ -428,6 +445,7 @@ export default function HtmlParsePage() {
     parallelWorkers,
     parseMode,
     progressInterval,
+    selectedPreset,
     selectedExecutionOptionValues,
     skipErrors,
     useSeparateOutputDirectory,
@@ -469,9 +487,10 @@ export default function HtmlParsePage() {
 
   const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
-    if (preset.mode && PARSE_MODE_CONFIGS[preset.mode]) {
-      setParseMode(preset.mode);
-      void saveSetting("html_parse_mode", preset.mode);
+    const ownerMode = preset.parent_mode || preset.mode;
+    if (ownerMode && PARSE_MODE_CONFIGS[ownerMode]) {
+      setParseMode(ownerMode);
+      void saveSetting("html_parse_mode", ownerMode);
     }
     setStatus(statusMessage);
     setIsErrorStatus(false);
@@ -484,14 +503,18 @@ export default function HtmlParsePage() {
       return;
     }
     try {
-      const filterMode = selectedPreset.trim() || parseMode;
+      const filterMode = currentFilterMode;
       const response = await saveDisclosureConditionPreset(dataRoot, {
         mode: filterMode,
+        ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       setPresets(response.presets);
-      setSelectedPreset(filterMode);
-      setStatus(`조건검색 필터를 저장했습니다: ${filterMode}`);
+      const savedPreset = response.presets.find((preset) => (
+        preset.mode === filterMode && (preset.parent_mode || "") === currentParentMode
+      ));
+      setSelectedPreset(savedPreset ? presetIdentity(savedPreset) : filterMode);
+      setStatus(`조건검색 필터를 저장했습니다: ${currentParentMode ? `${currentParentMode} › ` : ""}${filterMode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -500,13 +523,13 @@ export default function HtmlParsePage() {
   };
 
   const loadPreset = (name: string) => {
-    const preset = (presets || []).find((item: any) => item.name === name);
+    const preset = (presets || []).find((item) => presetIdentity(item) === name);
     if (!preset) {
       setStatus("선택한 프리셋을 찾을 수 없습니다.");
       setIsErrorStatus(true);
       return;
     }
-    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${preset.name}`);
+    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${presetLabel(preset)}`);
   };
 
   const loadFilterPresetFromJson = async () => {
@@ -537,10 +560,19 @@ export default function HtmlParsePage() {
       return;
     }
     try {
-      const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
+      if (!selectedPresetEntry) {
+        setStatus("선택한 프리셋을 찾을 수 없습니다.");
+        setIsErrorStatus(true);
+        return;
+      }
+      const response = await deleteDisclosureConditionPreset(
+        dataRoot,
+        selectedPresetEntry.mode,
+        selectedPresetEntry.parent_mode,
+      );
       setPresets(response.presets);
       setSelectedPreset("");
-      setStatus(`조건검색 필터를 삭제했습니다: ${selectedPreset}`);
+      setStatus(`조건검색 필터를 삭제했습니다: ${presetLabel(selectedPresetEntry)}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -559,6 +591,7 @@ export default function HtmlParsePage() {
     input_directory: useSeparateOutputDirectory ? inputDirectory : "",
     output_directory: useSeparateOutputDirectory ? outputDirectory : "",
     mode: parseMode,
+    ...filterIdentityPayload,
     limit: limit ? Number(limit) : null,
     skip_errors: skipErrors,
     progress_interval: Number(progressInterval),
@@ -572,6 +605,8 @@ export default function HtmlParsePage() {
     outputDirectory,
     useSeparateOutputDirectory,
     parseMode,
+    currentFilterMode,
+    currentParentMode,
     limit,
     skipErrors,
     progressInterval,
@@ -673,6 +708,7 @@ export default function HtmlParsePage() {
           data_root: dataRoot,
           input_directory: inputDirectory,
           mode: parseMode,
+          ...filterIdentityPayload,
           field: executionOptionConfig.field,
           parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
         }),
@@ -723,6 +759,7 @@ export default function HtmlParsePage() {
           data_root: dataRoot,
           input_directory: inputDirectory,
           mode: parseMode,
+          ...filterIdentityPayload,
           limit: 3,
           filter_blocks: normalizeDisclosureConditionBlocks(conditions),
         }),
@@ -1106,6 +1143,8 @@ export default function HtmlParsePage() {
             onLoadPresetFromJson={loadFilterPresetFromJson}
             onSavePreset={savePreset}
             onDeletePreset={deletePreset}
+            getPresetIdentity={presetIdentity}
+            getPresetLabel={presetLabel}
           />
 
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">

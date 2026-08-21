@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { FileJson, FolderOpen, Play, Square, Trash2 } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Checkbox } from "@finiq/ui";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
@@ -28,9 +28,19 @@ import {
   WorkflowModeSwitch,
   type WorkflowModeOption,
 } from "@/components/layout/WorkflowModeSwitch";
+import type { DisclosureConditionPreset } from "@/components/disclosures/DisclosureConditionFilterCard";
+import { listDisclosureConditionPresets } from "@/lib/disclosureConditionPresets";
 
 type DownloadVariant = "external" | "internal";
 type ExternalTaskMode = "download" | "compress";
+
+const presetIdentity = (preset: DisclosureConditionPreset) => (
+  preset.id || (preset.parent_mode ? `${preset.parent_mode}/${preset.mode}` : preset.mode)
+);
+
+const presetLabel = (preset: DisclosureConditionPreset) => (
+  preset.parent_mode ? `${preset.parent_mode} › ${preset.mode}` : preset.mode
+);
 
 const EXTERNAL_TASK_MODE_OPTIONS: readonly WorkflowModeOption<ExternalTaskMode>[] = [
   { value: "download", label: "외부 HTML 저장", icon: FolderOpen },
@@ -90,6 +100,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   const [loading, setLoading] = useState(true);
   const [, setResult] = useState<any>(null);
+  const [filterPresets, setFilterPresets] = useState<DisclosureConditionPreset[]>([]);
+  const [selectedFilterId, setSelectedFilterId] = useState("");
 
   const formatStatus = useCallback((data: any) => {
     const statusLbl = (s: string) => {
@@ -207,6 +219,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setOutputDirectory(nextOutputDirectory);
       setCompressInputDirectory(config.external_html_output_directory || nextOutputDirectory);
       setCompressOutputDirectory(config.external_html_compress_output_directory || nextOutputDirectory);
+      setSelectedFilterId(config.html_parse_mode || "");
 
       if (variant === "internal") {
         setInternalSourceFilePath(config.external_html_compressed_json_path || "");
@@ -218,6 +231,27 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setLoading(false);
     });
   }, [fetchSettings, variant, variantConfig.defaultDirectoryKey, setStatus, setIsErrorStatus]);
+
+  useEffect(() => {
+    if (!dataRoot?.trim()) {
+      setFilterPresets([]);
+      return;
+    }
+    listDisclosureConditionPresets(dataRoot).then((response) => {
+      setFilterPresets(response.presets);
+    }).catch((error) => {
+      setFilterPresets([]);
+      setStatus(error instanceof Error ? error.message : String(error));
+      setIsErrorStatus(true);
+    });
+  }, [dataRoot, setIsErrorStatus, setStatus]);
+
+  const selectedFilterPreset = useMemo(
+    () => filterPresets.find((preset) => presetIdentity(preset) === selectedFilterId),
+    [filterPresets, selectedFilterId],
+  );
+  const selectedFilterMode = selectedFilterPreset?.mode || selectedFilterId || htmlParseMode;
+  const selectedFilterParentMode = selectedFilterPreset?.parent_mode || "";
 
   useEffect(() => {
     if (!isJobActive) {
@@ -242,7 +276,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   const buildRunPayload = useCallback((cancelToken: string) => ({
       data_root: dataRoot,
-      mode: htmlParseMode,
+      mode: selectedFilterMode,
+      ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
       output_directory: useSeparateOutputDirectory ? outputDirectory : "",
       ...sourcePayload(),
       timeout: Number(timeout),
@@ -254,7 +289,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       cancel_token: cancelToken,
   }), [
     dataRoot,
-    htmlParseMode,
+    selectedFilterMode,
+    selectedFilterParentMode,
     outputDirectory,
     useSeparateOutputDirectory,
     sourcePayload,
@@ -283,7 +319,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   const buildCleanupPayload = useCallback((dryRun: boolean) => ({
     data_root: dataRoot,
-    mode: htmlParseMode,
+    mode: selectedFilterMode,
+    ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
     output_directory: useSeparateOutputDirectory ? outputDirectory : "",
     ...sourcePayload(),
     limit: limit ? Number(limit) : null,
@@ -292,7 +329,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     delete_confirmation_text: deleteConfirmationText,
   }), [
     dataRoot,
-    htmlParseMode,
+    selectedFilterMode,
+    selectedFilterParentMode,
     outputDirectory,
     useSeparateOutputDirectory,
     sourcePayload,
@@ -313,7 +351,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     setLastInspectionResult(null);
     setDeleteConfirmed(false);
     setDeleteConfirmationText("");
-  }, [currentSourcePath, dataRoot, htmlParseMode, limit, outputDirectory, useSeparateOutputDirectory]);
+  }, [currentSourcePath, dataRoot, selectedFilterId, limit, outputDirectory, useSeparateOutputDirectory]);
 
   useEffect(() => {
     return () => {
@@ -388,6 +426,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   };
 
   const handleDeleteUnexpectedFiles = async () => {
+    if (selectedFilterParentMode) {
+      setStatus("파생 필터에서는 상위 필터가 소유한 파일을 삭제할 수 없습니다.");
+      setIsErrorStatus(true);
+      return;
+    }
     if (!deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다.") {
       setStatus('삭제하려면 삭제 허가를 체크하고 "확인했습니다."를 입력하세요.');
       setIsErrorStatus(true);
@@ -470,7 +513,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     }
     const payload = {
       data_root: dataRoot,
-      mode: htmlParseMode,
+      mode: selectedFilterMode,
+      ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
       input_directory: useSeparateOutputDirectory ? compressInputDirectory : "",
       output_directory: useSeparateOutputDirectory ? compressOutputDirectory : "",
       parallel_workers: compressWorkers ? Number(compressWorkers) : null,
@@ -730,6 +774,35 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
             />
           )}
 
+          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
+            <CardHeader>
+              <CardTitle className="dark:text-white">조건검색 필터</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2">
+              <Label htmlFor={`${variant}-filter-preset`} className="dark:text-slate-300">조건검색 필터</Label>
+              <select
+                id={`${variant}-filter-preset`}
+                value={selectedFilterId}
+                onChange={(event) => setSelectedFilterId(event.target.value)}
+                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
+              >
+                {selectedFilterId && !filterPresets.some((preset) => presetIdentity(preset) === selectedFilterId) && (
+                  <option value={selectedFilterId}>{selectedFilterId}</option>
+                )}
+                {filterPresets.map((preset) => (
+                  <option key={presetIdentity(preset)} value={presetIdentity(preset)}>
+                    {presetLabel(preset)}
+                  </option>
+                ))}
+              </select>
+              {selectedFilterParentMode && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  상위 필터 {selectedFilterParentMode}의 HTML에서 파생 필터 {selectedFilterMode} 대상만 사용합니다.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {variant === "external" && existingDataInspectionCard}
 
           {isExternalCompressMode && (
@@ -796,20 +869,28 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                   <div className="text-body rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                     삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="border-[color:var(--tv-border)]" />
-                    <Label htmlFor="deleteConfirmed" className="text-body cursor-pointer dark:text-slate-300">삭제 허가</Label>
-                  </div>
-                  <Input value={deleteConfirmationText} onChange={(e) => setDeleteConfirmationText(e.target.value)} placeholder="확인했습니다." className={htmlControlClassName} />
-                  <Button
-                    variant="outline"
-                    className="h-10 w-full"
-                    onClick={handleDeleteUnexpectedFiles}
-                    disabled={isJobActive || inspectRunning || !deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다."}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개 삭제
-                  </Button>
+                  {selectedFilterParentMode ? (
+                    <p className="text-body text-[var(--tv-warning-text)]">
+                      파생 필터는 상위 필터의 HTML을 공유하므로 이 화면에서 파일을 삭제할 수 없습니다.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox id="deleteConfirmed" checked={deleteConfirmed} onCheckedChange={(v) => setDeleteConfirmed(!!v)} className="border-[color:var(--tv-border)]" />
+                        <Label htmlFor="deleteConfirmed" className="text-body cursor-pointer dark:text-slate-300">삭제 허가</Label>
+                      </div>
+                      <Input value={deleteConfirmationText} onChange={(e) => setDeleteConfirmationText(e.target.value)} placeholder="확인했습니다." className={htmlControlClassName} />
+                      <Button
+                        variant="outline"
+                        className="h-10 w-full"
+                        onClick={handleDeleteUnexpectedFiles}
+                        disabled={isJobActive || inspectRunning || !deleteConfirmed || deleteConfirmationText.trim() !== "확인했습니다."}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        삭제 예정 파일 {formatInteger(lastInspectionCandidateCount)}개 삭제
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
               {lastInspectionResult && (

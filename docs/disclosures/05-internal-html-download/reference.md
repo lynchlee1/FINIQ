@@ -3,6 +3,7 @@
 ## Paths
 
 - `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`을 입력으로 받아 `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`에 본문 HTML을, `<data_root>/05-internal-html-download/<mode>/kind_disclosure_html_manifest.json`에 원본 연결 정보를 저장한다.
+- 파생 필터 `<parent_mode>/<mode>`는 상위 `<data_root>/04-external-html-download/<parent_mode>/compressed-external-html.json`과 `<data_root>/05-internal-html-download/<parent_mode>` 산출물을 사용한다. 자식 `mode`나 `subfilters/<mode>`의 05단계 출력 폴더는 만들지 않는다.
 
 ### `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`
 
@@ -29,3 +30,4 @@
 - 파일마다 `source_size_bytes`와 `source_sha256`을 기록한다.
 - `format`은 `finiq_disclosure_html_manifest_v2`이며 입력 JSON 전체를 대상으로 한 `source_fingerprint`는 기록하지 않는다. 재사용 판정은 접수번호별 `source_sha256`만으로 하므로 필터를 다시 실행해도 기존 HTML이 무효화되지 않는다.
 - 구버전 `finiq_disclosure_html_manifest_v1`은 읽기만 지원하며, 이 경우에만 `source_fingerprint` 비교를 유지한다.
+- 파생 필터 작업은 상위 manifest와 HTML 중 자식 `filtered.json`의 `acpt_no` 부분집합만 검증해 사용하며 `selected_main_doc_no`도 상위 04단계 record와 일치해야 한다.

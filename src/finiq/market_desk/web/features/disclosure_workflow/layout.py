@@ -38,6 +38,32 @@ class DisclosureWorkspace:
     def converted_mode(self, mode: str) -> Path:
         return self.converted / validate_workspace_mode(mode)
 
+    def converted_filter_mode(self, mode: str, *, parent_mode: object = None) -> Path:
+        normalized_mode = validate_workspace_mode(mode)
+        if parent_mode in (None, ""):
+            return self.converted / normalized_mode
+        normalized_parent_mode = validate_workspace_mode(parent_mode)
+        if normalized_parent_mode == normalized_mode:
+            raise ValueError("parent_mode must differ from mode")
+        return self.converted / normalized_parent_mode / "subfilters" / normalized_mode
+
+    def filter_mode(self, mode: str, *, parent_mode: object = None) -> Path:
+        normalized_mode = validate_workspace_mode(mode)
+        if parent_mode in (None, ""):
+            return self.filtered / normalized_mode
+        normalized_parent_mode = validate_workspace_mode(parent_mode)
+        if normalized_parent_mode == normalized_mode:
+            raise ValueError("parent_mode must differ from mode")
+        return self.filtered / normalized_parent_mode / "subfilters" / normalized_mode
+
+    def external_owner_mode(self, mode: str, *, parent_mode: object = None) -> Path:
+        owner_mode = mode if parent_mode in (None, "") else parent_mode
+        return self.external_mode(validate_workspace_mode(owner_mode))
+
+    def internal_owner_mode(self, mode: str, *, parent_mode: object = None) -> Path:
+        owner_mode = mode if parent_mode in (None, "") else parent_mode
+        return self.internal_mode(validate_workspace_mode(owner_mode))
+
     def paths_payload(self, modes: list[str] | None = None) -> dict[str, Any]:
         normalized_modes = sorted({validate_workspace_mode(mode) for mode in modes or []})
         return {
@@ -209,6 +235,7 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         return payload
     workspace = resolve_disclosure_workspace(data_root, create=True)
     normalized_kind = str(kind or "").strip()
+    parent_mode = body.get("parent_mode")
 
     if normalized_kind == "kind_download":
         # The download detail page accepts the workspace root. Raw KIND files
@@ -232,45 +259,76 @@ def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
         "external_html_integrity_baseline",
     }:
         mode = validate_workspace_mode(payload.get("mode"))
-        _set_default(payload, "output_directory", str(workspace.external_mode(mode)))
+        _set_default(
+            payload,
+            "output_directory",
+            str(workspace.external_owner_mode(mode, parent_mode=parent_mode)),
+        )
     elif normalized_kind == "external_html_compress":
         mode = validate_workspace_mode(payload.get("mode"))
-        _set_default(payload, "input_directory", str(workspace.external_mode(mode)))
-        _set_default(payload, "output_directory", str(workspace.external_mode(mode)))
+        owner_directory = workspace.external_owner_mode(mode, parent_mode=parent_mode)
+        _set_default(payload, "input_directory", str(owner_directory))
+        _set_default(payload, "output_directory", str(owner_directory))
     elif normalized_kind in {
         "internal_html_download",
         "internal_html_integrity_baseline",
     }:
         mode = validate_workspace_mode(payload.get("mode"))
+        external_owner = workspace.external_owner_mode(mode, parent_mode=parent_mode)
+        internal_owner = workspace.internal_owner_mode(mode, parent_mode=parent_mode)
         if not str(payload.get("source_compressed_json_path") or "").strip():
             _set_default(
                 payload,
                 "source_compressed_json_path",
-                str(workspace.external_mode(mode) / "compressed-external-html.json"),
+                str(external_owner / "compressed-external-html.json"),
             )
-        _set_default(payload, "output_directory", str(workspace.internal_mode(mode)))
+        _set_default(payload, "output_directory", str(internal_owner))
     elif normalized_kind in {"section_inspect", "section_kinds", "section_list"}:
         if not str(payload.get("input_directory") or "").strip():
             mode = validate_workspace_mode(payload.get("mode"))
-            _set_default(payload, "input_directory", str(workspace.internal_mode(mode)))
+            _set_default(
+                payload,
+                "input_directory",
+                str(workspace.internal_owner_mode(mode, parent_mode=parent_mode)),
+            )
     elif normalized_kind == "section_save":
         if not str(payload.get("input_directory") or "").strip():
             mode = validate_workspace_mode(payload.get("mode"))
-            _set_default(payload, "input_directory", str(workspace.internal_mode(mode)))
+            _set_default(
+                payload,
+                "input_directory",
+                str(workspace.internal_owner_mode(mode, parent_mode=parent_mode)),
+            )
         _set_default(payload, "output_directory", str(workspace.sections))
     elif normalized_kind == "parse":
         mode = validate_workspace_mode(payload.get("mode"))
+        filter_mode = validate_workspace_mode(payload.get("filter_mode") or mode)
         _set_default(payload, "input_directory", str(workspace.sections))
-        _set_default(payload, "output_directory", str(workspace.converted_mode(mode)))
+        _set_default(
+            payload,
+            "output_directory",
+            str(
+                workspace.converted_filter_mode(
+                    filter_mode,
+                    parent_mode=parent_mode,
+                )
+            ),
+        )
         _set_default(
             payload,
             "filtered_metadata_path",
-            str(workspace.filtered / mode / "filtered.json"),
+            str(
+                workspace.filter_mode(filter_mode, parent_mode=parent_mode)
+                / "filtered.json"
+            ),
         )
         _set_default(
             payload,
             "compressed_metadata_path",
-            str(workspace.external_mode(mode) / "compressed-external-html.json"),
+            str(
+                workspace.external_owner_mode(mode, parent_mode=parent_mode)
+                / "compressed-external-html.json"
+            ),
         )
     return payload
 

@@ -11,8 +11,12 @@ from finiq.market_desk.web.features.disclosures.html_common import (
 )
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
+    clean_disclosure_html_output_directory_payload,
     create_external_html_integrity_baseline_payload,
     create_internal_html_integrity_baseline_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_parse_common import (
+    _build_parse_request,
 )
 from finiq.market_desk.web.features.disclosures.internal_html_download import (
     download_disclosure_internal_htmls,
@@ -68,6 +72,372 @@ def _internal_html_body(
         "output_directory": str(tmp_path / "internal"),
         **body,
     }
+
+
+def _write_derived_filter(
+    data_root: Path,
+    *,
+    parent_mode: str = "parent",
+    mode: str = "child",
+    parent_disclosures: list[dict[str, str]],
+    child_disclosures: list[dict[str, str]],
+) -> None:
+    parent_payload = {
+        "format": "kind_disclosure_filter_v1",
+        "disclosures": parent_disclosures,
+    }
+    parent_path = data_root / "03-filter" / parent_mode / "filtered.json"
+    parent_path.parent.mkdir(parents=True, exist_ok=True)
+    parent_path.write_text(json.dumps(parent_payload), encoding="utf-8")
+    child_path = (
+        data_root
+        / "03-filter"
+        / parent_mode
+        / "subfilters"
+        / mode
+        / "filtered.json"
+    )
+    child_path.parent.mkdir(parents=True, exist_ok=True)
+    child_path.write_text(
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "parent_mode": parent_mode,
+                "parent_result_fingerprint": _source_json_fingerprint(parent_payload),
+                "disclosures": child_disclosures,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_derived_external_html_strictly_reuses_parent_without_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "workspace"
+    parent_disclosures = [
+        {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
+        {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
+    ]
+    _write_derived_filter(
+        data_root,
+        parent_disclosures=parent_disclosures,
+        child_disclosures=[parent_disclosures[1]],
+    )
+    parent_output = data_root / "04-external-html-download" / "parent"
+    for disclosure in parent_disclosures:
+        target = parent_output / "2025" / f"{disclosure['acpt_no']}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_valid_html(disclosure["acpt_no"]), encoding="utf-8")
+    create_external_html_integrity_baseline_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "parent",
+            "output_directory": str(parent_output),
+            "trust_existing_files": True,
+        }
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
+        lambda **_kwargs: pytest.fail("derived external HTML must not download"),
+    )
+
+    result = download_disclosure_external_html_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "child",
+            "parent_mode": "parent",
+            "output_directory": str(parent_output),
+        }
+    )
+
+    assert result["reused_parent_html"] is True
+    assert result["network_fetch_count"] == 0
+    assert result["acpt_numbers"] == ["20250101000002"]
+    assert not (data_root / "04-external-html-download" / "child").exists()
+
+    checked = check_disclosure_html_output_directory_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "child",
+            "parent_mode": "parent",
+            "output_directory": str(parent_output),
+        }
+    )
+    cleaned = clean_disclosure_html_output_directory_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "child",
+            "parent_mode": "parent",
+            "output_directory": str(parent_output),
+            "delete_confirmed": True,
+            "delete_confirmation_text": "확인했습니다.",
+        }
+    )
+    assert checked["unexpected_file_count"] == 0
+    assert checked["deletion_candidate_count"] == 0
+    assert cleaned["deleted_count"] == 0
+    assert cleaned["deletion_candidates"] == []
+    assert (parent_output / "2025" / "20250101000001.html").is_file()
+
+
+def test_derived_external_html_compression_reuses_parent_file_without_rewrite(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    parent_disclosures = [
+        {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
+        {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
+    ]
+    _write_derived_filter(
+        data_root,
+        parent_disclosures=parent_disclosures,
+        child_disclosures=[parent_disclosures[1]],
+    )
+    parent_output = data_root / "04-external-html-download" / "parent"
+    for disclosure in parent_disclosures:
+        target = parent_output / "2025" / f"{disclosure['acpt_no']}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_valid_html(disclosure["acpt_no"]), encoding="utf-8")
+    create_external_html_integrity_baseline_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "parent",
+            "output_directory": str(parent_output),
+            "trust_existing_files": True,
+        }
+    )
+    compressed_path = parent_output / "compressed-external-html.json"
+    integrity_by_acpt_no = {
+        item["acpt_no"]: {
+            "source_sha256": item["source_sha256"],
+            "source_size_bytes": item["source_size_bytes"],
+        }
+        for item in json.loads(
+            (parent_output / "kind_disclosure_html_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )["disclosures"]
+    }
+    compressed_payload = {
+        "format": "finiq_disclosure_external_html_docs_v1",
+        "records": [
+            {
+                "acpt_no": disclosure["acpt_no"],
+                "selected_main_doc_no": f"{disclosure['acpt_no']}99",
+                "metadata": disclosure,
+                **integrity_by_acpt_no[disclosure["acpt_no"]],
+            }
+            for disclosure in parent_disclosures
+        ],
+    }
+    compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+    original_bytes = compressed_path.read_bytes()
+
+    result = compress_disclosure_external_html_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "child",
+            "parent_mode": "parent",
+            "input_directory": str(parent_output),
+            "output_directory": str(parent_output),
+        }
+    )
+
+    assert result["reused_parent_compressed_html"] is True
+    assert result["summary"] == {
+        "found_files": 1,
+        "compressed_files": 1,
+        "written_files": 0,
+    }
+    assert compressed_path.read_bytes() == original_bytes
+
+
+def test_derived_parse_selects_child_membership_before_limit(tmp_path: Path) -> None:
+    input_directory = tmp_path / "sections"
+    year_directory = input_directory / "2025"
+    year_directory.mkdir(parents=True)
+    parent_only = year_directory / "20250101000001.html"
+    child = year_directory / "20250101000002.html"
+    parent_only.write_text(_valid_html("parent"), encoding="utf-8")
+    child.write_text(_valid_html("child"), encoding="utf-8")
+    data_root = tmp_path / "workspace"
+    parent_disclosure = {
+        "acpt_no": parent_only.stem,
+        "disclosed_at": "2025-01-01 09:00",
+    }
+    child_disclosure = {
+        "acpt_no": child.stem,
+        "disclosed_at": "2025-01-02 09:00",
+    }
+    _write_derived_filter(
+        data_root,
+        parent_mode="bond_issuance",
+        mode="child",
+        parent_disclosures=[parent_disclosure, child_disclosure],
+        child_disclosures=[child_disclosure],
+    )
+    filtered_path = (
+        data_root
+        / "03-filter"
+        / "bond_issuance"
+        / "subfilters"
+        / "child"
+        / "filtered.json"
+    )
+    compressed_path = tmp_path / "workspace" / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": parent_only.stem,
+                        "selected_main_doc_no": "",
+                        "metadata": None,
+                    },
+                    {
+                        "acpt_no": child.stem,
+                        "selected_main_doc_no": "doc-child",
+                        "metadata": {"disclosed_at": "2025-01-02 09:00"},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    request = _build_parse_request(
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "filter_mode": "child",
+            "parent_mode": "bond_issuance",
+            "input_directory": str(input_directory),
+            "output_directory": str(tmp_path / "parsed"),
+            "filtered_metadata_path": str(filtered_path),
+            "compressed_metadata_path": str(compressed_path),
+            "limit": 1,
+            "skip_errors": False,
+        }
+    )
+
+    assert request.mode == "bond_issuance"
+    assert request.html_files == [child.resolve()]
+    assert parent_only.resolve() not in request.html_files
+
+
+def test_derived_external_html_rejects_corrupt_parent_file(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    disclosure = {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+    _write_derived_filter(
+        data_root,
+        parent_disclosures=[disclosure],
+        child_disclosures=[disclosure],
+    )
+    parent_output = data_root / "04-external-html-download" / "parent"
+    target = parent_output / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_valid_html(), encoding="utf-8")
+    create_external_html_integrity_baseline_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "parent",
+            "output_directory": str(parent_output),
+            "trust_existing_files": True,
+        }
+    )
+    target.write_text(_valid_html("changed"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cannot be reused"):
+        download_disclosure_external_html_payload(
+            {
+                "data_root": str(data_root),
+                "mode": "child",
+                "parent_mode": "parent",
+                "output_directory": str(parent_output),
+            }
+        )
+
+
+def test_derived_internal_html_strictly_reuses_parent_without_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "workspace"
+    parent_disclosures = [
+        {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
+        {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
+    ]
+    _write_derived_filter(
+        data_root,
+        parent_disclosures=parent_disclosures,
+        child_disclosures=[parent_disclosures[1]],
+    )
+    compressed_path = (
+        data_root
+        / "04-external-html-download"
+        / "parent"
+        / "compressed-external-html.json"
+    )
+    compressed_path.parent.mkdir(parents=True, exist_ok=True)
+    compressed_payload = {
+        "format": "finiq_disclosure_external_html_docs_v1",
+        "records": [
+            {
+                "acpt_no": disclosure["acpt_no"],
+                "selected_main_doc_no": f"doc-{index}",
+                "metadata": {"disclosed_at": disclosure["disclosed_at"]},
+            }
+            for index, disclosure in enumerate(parent_disclosures)
+        ],
+    }
+    compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+    parent_output = data_root / "05-internal-html-download" / "parent"
+    for disclosure in parent_disclosures:
+        target = parent_output / "2025" / f"{disclosure['acpt_no']}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_valid_html(disclosure["acpt_no"]), encoding="utf-8")
+    create_internal_html_integrity_baseline_payload(
+        {
+            "source_compressed_json_path": str(compressed_path),
+            "output_directory": str(parent_output),
+            "trust_existing_files": True,
+        }
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        lambda **_kwargs: pytest.fail("derived internal HTML must not download"),
+    )
+
+    compressed_payload["records"][1]["selected_main_doc_no"] = ""
+    compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="selected main docNo"):
+        download_disclosure_internal_html_payload(
+            {
+                "data_root": str(data_root),
+                "mode": "child",
+                "parent_mode": "parent",
+                "source_compressed_json_path": str(compressed_path),
+                "output_directory": str(parent_output),
+            }
+        )
+    compressed_payload["records"][1]["selected_main_doc_no"] = "doc-1"
+    compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+
+    result = download_disclosure_internal_html_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "child",
+            "parent_mode": "parent",
+            "source_compressed_json_path": str(compressed_path),
+            "output_directory": str(parent_output),
+        }
+    )
+
+    assert result["reused_parent_html"] is True
+    assert result["network_fetch_count"] == 0
+    assert result["acpt_numbers"] == ["20250101000002"]
+    assert not (data_root / "05-internal-html-download" / "child").exists()
 
 
 def test_external_html_resume_redownloads_invalid_existing_target(

@@ -3,6 +3,7 @@
 ## Paths
 
 - `<data_root>/03-filter/<mode>/filtered.json`을 입력으로 받아 `<data_root>/04-external-html-download/<mode>/<YYYY>/<acpt_no>.html`에 외부 HTML을, `<data_root>/04-external-html-download/<mode>/kind_disclosure_html_manifest.json`에 원본 연결 정보를, `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`에 압축한 문서 선택 정보를 저장한다.
+- 파생 필터 `<parent_mode>/<mode>`는 `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`의 멤버십을 사용하되 04단계 산출물 전체는 `<data_root>/04-external-html-download/<parent_mode>`에서 읽는다. `<data_root>/04-external-html-download/<parent_mode>/subfilters/<mode>`나 자식 `mode`의 별도 출력 폴더는 만들지 않는다.
 
 ### `<data_root>/03-filter/<mode>/filtered.json`
 
@@ -36,3 +37,4 @@
 - `records[].selected_main_doc_no`에 선택한 본문 문서 번호를 기록한다.
 - `records[].metadata`에는 입력 공시 metadata를 보존하며 `records[].metadata.disclosed_at`은 입력 항목의 `disclosed_at`과 같다.
 - 각 record와 manifest에 외부 HTML의 `source_size_bytes`와 `source_sha256`을 기록한다.
+- 파생 필터 작업은 상위 기본 필터 파일의 `records` 중 자식 `filtered.json`의 `acpt_no` 부분집합만 검증해 사용한다.

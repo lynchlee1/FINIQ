@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Filter, Play, Loader2, Search } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Input } from "@finiq/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import {
   WorkflowModeSwitch,
@@ -38,13 +38,6 @@ import type {
 
 const FILTER_PAGE_SIZE = 20;
 const TITLE_PAGE_SIZE = 50;
-const FILTER_MODE_KEYS = [
-  "bond_issuance",
-  "rights_issuance",
-  "shareholder_meeting",
-  "asset_transaction",
-  "security_transaction",
-] as const;
 
 type FilterResult = {
   summary?: {
@@ -72,18 +65,42 @@ type TitleSearchResult = {
 };
 
 type FilterTaskMode = "title-search" | "filter";
+type FilterLevel = "top-level" | "derived";
+
+const presetIdentity = (preset: DisclosureConditionPreset) => (
+  preset.id || (preset.parent_mode ? `${preset.parent_mode}/${preset.mode}` : preset.mode)
+);
+
+const presetLabel = (preset: DisclosureConditionPreset) => (
+  preset.parent_mode ? `${preset.parent_mode} › ${preset.mode}` : preset.mode
+);
 
 const FILTER_TASK_MODE_OPTIONS: readonly WorkflowModeOption<FilterTaskMode>[] = [
   { value: "title-search", label: "공시내역 제목 검색", icon: Search },
   { value: "filter", label: "공시내역 필터링", icon: Filter },
 ];
 
-const FILTER_WORKFLOW_STATUS_LABELS: Record<string, string> = {
-  ready: "입력 완료",
-  running: "실행 중",
-  interrupted: "중단됨",
-  completed: "완료",
-  failed: "실패",
+const describeFilterInspectionIssue = (preset: DisclosureConditionPreset) => {
+  const folder = presetLabel(preset);
+  const query = preset.steps.database_query;
+  const record = preset.steps.record;
+  if (preset.status === "failed") {
+    const failedStep = query.status === "failed" ? query : record;
+    const error = failedStep.error?.trim();
+    const reason = query.status === "failed"
+      ? "검색에 실패했습니다"
+      : "검색 결과를 저장하지 못했습니다";
+    return error ? `${folder}: ${reason}. ${error}` : `${folder}: ${reason}.`;
+  }
+  if (preset.status === "interrupted") {
+    return query.status === "interrupted"
+      ? `${folder}: 검색이 중단되었습니다.`
+      : `${folder}: 검색 결과를 저장하지 못하고 중단되었습니다.`;
+  }
+  if (preset.status === "running") {
+    return `${folder}: 검색을 실행하는 중입니다.`;
+  }
+  return `${folder}: 조건만 저장되어 있고 검색은 아직 실행하지 않았습니다.`;
 };
 
 
@@ -107,6 +124,8 @@ export default function FilterPage() {
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
+  const [filterLevel, setFilterLevel] = useState<FilterLevel>("top-level");
+  const [parentMode, setParentMode] = useState("");
   const [limitUnlimited, setLimitUnlimited] = useState(true);
   const [limit, setLimit] = useState("1000");
   const [filterWorkers, setFilterWorkers] = useState("1");
@@ -188,8 +207,6 @@ export default function FilterPage() {
         throw new Error("parallel_worker_count must be a positive integer");
       }
       setFilterWorkers(String(workerCount));
-      const configuredMode = String(config?.html_parse_mode || "");
-      setMode(FILTER_MODE_KEYS.some((item) => item === configuredMode) ? configuredMode : "");
       setStatus("공시 소스 폴더를 불러왔습니다.");
     }).catch((error) => {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -227,9 +244,45 @@ export default function FilterPage() {
   const applyPreset = useCallback((preset: DisclosureConditionPreset, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
     setMode(preset.mode);
+    setFilterLevel(preset.parent_mode ? "derived" : "top-level");
+    setParentMode(preset.parent_mode || "");
     setStatus(statusMessage);
     setIsErrorStatus(false);
   }, [setIsErrorStatus, setStatus]);
+
+  const selectedPresetEntry = useMemo(
+    () => presets.find((preset) => {
+      if (presetIdentity(preset) !== selectedPreset) return false;
+      return filterLevel === "derived" ? Boolean(preset.parent_mode) : !preset.parent_mode;
+    }),
+    [filterLevel, presets, selectedPreset],
+  );
+  const completedTopLevelPresets = useMemo(
+    () => presets.filter((preset) => !preset.parent_mode && preset.status === "completed"),
+    [presets],
+  );
+  const identityPresets = useMemo(() => {
+    if (filterLevel !== "derived") {
+      return presets.filter((preset) => !preset.parent_mode);
+    }
+    return presets.filter((preset) => (
+      preset.parent_mode && (!parentMode || preset.parent_mode === parentMode)
+    ));
+  }, [filterLevel, parentMode, presets]);
+  const currentFilterMode = selectedPresetEntry?.mode || selectedPreset.trim() || mode;
+  const currentParentMode = selectedPresetEntry?.parent_mode
+    || (filterLevel === "derived" ? parentMode : "");
+  const hasCompletedParent = completedTopLevelPresets.some(
+    (preset) => preset.mode === currentParentMode,
+  );
+  const beginNewFilter = (nextLevel: FilterLevel) => {
+    setFilterLevel(nextLevel);
+    setParentMode("");
+    if (selectedPresetEntry) {
+      setSelectedPreset("");
+      setMode("");
+    }
+  };
 
   const pageCount = Math.max(1, Math.ceil((result?.disclosures?.length || 0) / FILTER_PAGE_SIZE));
   const pageRows = useMemo(() => {
@@ -260,7 +313,8 @@ export default function FilterPage() {
     }
     return {
       data_root: rootDirectory,
-      mode: selectedPreset.trim() || mode,
+      mode: currentFilterMode,
+      ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
       ...(useSeparateOutputDirectory ? {
         external_html_transfer_path: htmlTransferPath,
       } : {}),
@@ -319,16 +373,19 @@ export default function FilterPage() {
   const refreshPresetsAfterRun = async (
     dataRoot: string,
     filterMode: string,
+    filterParentMode: string,
     requestId: number,
     waitForTerminalStatus: boolean,
   ) => {
     let retryDelay = 100;
     for (;;) {
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
-      const response = await listDisclosureConditionPresets(dataRoot);
+      const response = await listDisclosureConditionPresets(dataRoot, { force: true });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
-      const workflow = response.presets.find((preset) => preset.mode === filterMode);
+      const workflow = response.presets.find((preset) => (
+        preset.mode === filterMode && (preset.parent_mode || "") === filterParentMode
+      ));
       if (!waitForTerminalStatus || workflow?.status !== "running") return;
       await new Promise((resolve) => setTimeout(resolve, retryDelay));
       retryDelay = Math.min(retryDelay * 2, 1000);
@@ -342,9 +399,15 @@ export default function FilterPage() {
       setIsErrorStatus(true);
       return;
     }
-    const filterMode = selectedPreset.trim() || mode;
+    const filterMode = currentFilterMode;
+    const filterParentMode = currentParentMode;
     if (!filterMode) {
       setStatus("조건검색 필터를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (filterLevel === "derived" && (!filterParentMode || !hasCompletedParent)) {
+      setStatus("완료된 상위 필터를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -364,17 +427,23 @@ export default function FilterPage() {
       const filterPayload = { ...buildPayload(), mode: filterMode };
       const saved = await saveDisclosureConditionPreset(dataRoot, {
         mode: filterMode,
+        ...(filterParentMode ? { parent_mode: filterParentMode } : {}),
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setMode(filterMode);
-      setSelectedPreset(filterMode);
+      const savedPreset = saved.presets.find((preset) => (
+        preset.mode === filterMode && (preset.parent_mode || "") === filterParentMode
+      ));
+      setSelectedPreset(savedPreset ? presetIdentity(savedPreset) : filterMode);
       setPresets(saved.presets);
       inspectionRequestIdRef.current += 1;
       setInspectionRunning(false);
       setInspectionError("");
       setInspectionSummary(null);
-      setPresets((items) => items.map((preset) => preset.name === filterMode ? {
+      setPresets((items) => items.map((preset) => (
+        preset.mode === filterMode && (preset.parent_mode || "") === filterParentMode
+      ) ? {
         ...preset,
         status: "running",
         steps: {
@@ -398,6 +467,7 @@ export default function FilterPage() {
         await refreshPresetsAfterRun(
           dataRoot,
           filterMode,
+          filterParentMode,
           requestId,
           streamOutcome === "aborted",
         );
@@ -410,9 +480,15 @@ export default function FilterPage() {
   };
 
   const savePreset = async () => {
-    const filterMode = selectedPreset.trim() || mode;
+    const filterMode = currentFilterMode;
+    const filterParentMode = currentParentMode;
     if (!rootDirectory?.trim() || !filterMode) {
       setStatus(!rootDirectory?.trim() ? "작업공간 디렉토리를 선택하세요." : "조건검색 필터 이름을 입력하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (filterLevel === "derived" && (!filterParentMode || !hasCompletedParent)) {
+      setStatus("완료된 상위 필터를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -421,6 +497,7 @@ export default function FilterPage() {
     try {
       const response = await saveDisclosureConditionPreset(dataRoot, {
         mode: filterMode,
+        ...(filterParentMode ? { parent_mode: filterParentMode } : {}),
         condition_blocks: normalizeDisclosureConditionBlocks(conditions),
       });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
@@ -430,8 +507,11 @@ export default function FilterPage() {
       setInspectionError("");
       setInspectionSummary(null);
       setMode(filterMode);
-      setSelectedPreset(filterMode);
-      setStatus(`조건검색 필터를 저장했습니다: ${filterMode}`);
+      const savedPreset = response.presets.find((preset) => (
+        preset.mode === filterMode && (preset.parent_mode || "") === filterParentMode
+      ));
+      setSelectedPreset(savedPreset ? presetIdentity(savedPreset) : filterMode);
+      setStatus(`조건검색 필터를 저장했습니다: ${filterParentMode ? `${filterParentMode} › ` : ""}${filterMode}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -440,13 +520,13 @@ export default function FilterPage() {
   };
 
   const loadPreset = (name: string) => {
-    const preset = (presets || []).find((item: any) => item.name === name);
+    const preset = (presets || []).find((item) => presetIdentity(item) === name);
     if (!preset) {
       setStatus("선택한 필터를 찾을 수 없습니다.");
       setIsErrorStatus(true);
       return;
     }
-    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${preset.name}`);
+    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${presetLabel(preset)}`);
   };
 
   const deletePreset = async () => {
@@ -459,7 +539,16 @@ export default function FilterPage() {
     const dataRoot = rootDirectory;
     const requestId = presetListRequestIdRef.current;
     try {
-      const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
+      if (!selectedPresetEntry) {
+        setStatus("선택한 필터를 찾을 수 없습니다.");
+        setIsErrorStatus(true);
+        return;
+      }
+      const response = await deleteDisclosureConditionPreset(
+        dataRoot,
+        selectedPresetEntry.mode,
+        selectedPresetEntry.parent_mode,
+      );
       if (!isCurrentPresetWorkspace(dataRoot, requestId)) return;
       setPresets(response.presets);
       inspectionRequestIdRef.current += 1;
@@ -467,7 +556,7 @@ export default function FilterPage() {
       setInspectionError("");
       setInspectionSummary(null);
       setSelectedPreset("");
-      setStatus(`조건검색 필터를 삭제했습니다: ${selectedPreset}`);
+      setStatus(`조건검색 필터를 삭제했습니다: ${presetLabel(selectedPresetEntry)}`);
       setIsErrorStatus(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -499,7 +588,7 @@ export default function FilterPage() {
       setPresets(response.presets);
       const issues = response.presets
         .filter((preset) => preset.status !== "completed")
-        .map((preset) => `${preset.name}: ${FILTER_WORKFLOW_STATUS_LABELS[preset.status]}`);
+        .map(describeFilterInspectionIssue);
       const summary = {
         total: response.presets.length,
         completed: response.presets.length - issues.length,
@@ -635,12 +724,66 @@ export default function FilterPage() {
           <DisclosureConditionFilterCard
             conditions={conditions}
             onConditionsChange={setConditions}
-            presets={presets || []}
+            presets={identityPresets}
+            libraryPresets={presets}
             selectedPreset={selectedPreset}
             onSelectedPresetChange={setSelectedPreset}
             onLoadPreset={loadPreset}
             onSavePreset={savePreset}
             onDeletePreset={deletePreset}
+            getPresetIdentity={presetIdentity}
+            getPresetLabel={presetLabel}
+            identityControls={(
+              <div className="grid gap-2">
+                <div className="flex w-fit gap-1 rounded-lg border border-slate-200 p-1 dark:border-[#30363d]">
+                  {([
+                    ["top-level", "기본 필터"],
+                    ["derived", "파생 필터"],
+                  ] as const).map(([value, label]) => (
+                    <Button
+                      key={value}
+                      type="button"
+                      size="sm"
+                      variant={filterLevel === value ? "default" : "ghost"}
+                      aria-pressed={filterLevel === value}
+                      onClick={() => {
+                        if (filterLevel !== value) beginNewFilter(value);
+                      }}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+                {filterLevel === "derived" && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="parent-filter" className="dark:text-slate-300">상위 필터</Label>
+                    <select
+                      id="parent-filter"
+                      value={parentMode}
+                      onChange={(event) => {
+                        const nextParent = event.target.value;
+                        setParentMode(nextParent);
+                        if (selectedPresetEntry?.parent_mode && selectedPresetEntry.parent_mode !== nextParent) {
+                          setSelectedPreset("");
+                          setMode("");
+                        }
+                      }}
+                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-200"
+                    >
+                      <option value="">완료된 상위 필터 선택</option>
+                      {completedTopLevelPresets.map((preset) => (
+                        <option key={presetIdentity(preset)} value={preset.mode}>{preset.mode}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {filterLevel === "derived"
+                    ? "파생 필터는 완료된 상위 필터 결과에만 조건을 추가하며, 한 단계까지만 만들 수 있습니다."
+                    : "기본 필터는 02단계 전체를 검색하고 이후 HTML을 이 필터가 소유합니다."}
+                </p>
+              </div>
+            )}
           />
 
           <WorkflowModeSwitch

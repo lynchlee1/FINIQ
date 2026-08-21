@@ -133,11 +133,15 @@
 - `cancel_disclosure_html_parse()`가 실행 중인 변환에 취소 요청을 전달한다.
 - `기존 데이터 검토`는 현재 설정과 입력 HTML로 임시 결과를 다시 계산하고 저장된 `parsed-<mode>.json` 전체와 비교한다.
 - 조회 함수는 Excel 결과를 만들며, 08단계는 이 단계가 저장한 correction family를 사용해 정정 내역을 만든다.
+- 수동 실행, 미리보기, 기존 데이터 검사와 실행 옵션 후보 조회는 같은 `filter_mode`와 선택적인 `parent_mode`를 사용한다.
+- 파생 필터를 선택하면 `mode`에는 상위 필터가 사용하는 parser mode를, `filter_mode`에는 자식 mode를, `parent_mode`에는 상위 mode를 전달한다. 변환 대상은 자식의 한 단계 파생 멤버십으로 제한한다.
+- 기본 필터 결과는 `07-converted/<mode>`에, 파생 필터 결과는 `07-converted/<parent_mode>/subfilters/<filter_mode>`에 저장해 같은 자식 이름을 사용하는 서로 다른 상위 필터의 결과가 충돌하지 않게 한다.
 
 #### Defaults and Exceptions
 
 - 진행 알림 간격이 정수가 아니거나 1보다 작으면 실패 처리한다.
 - 안내 수준, code, 접수번호나 예시 형식이 잘못되면 실패 처리한다.
+- 파생 필터가 stale이거나 상위 HTML·metadata가 불완전하면 실패하며 다른 멤버십이나 HTML로 보완하지 않는다.
 
 ### Investigate Parser Problems
 

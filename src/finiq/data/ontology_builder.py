@@ -121,30 +121,24 @@ def _load_json_object(path: str | Path, *, source_name: str) -> dict[str, Any]:
 
 
 def classify_investor_type(name: str) -> str:
-    """Classify investor as 'Company', 'Organization', or 'Person'."""
+    """Classify one complete investor table cell without parsing inner mentions."""
     name_clean = name.strip()
     if not name_clean:
         return "Organization"
 
-    company_marker_positions = [
-        name_clean.index(marker)
+    has_boundary_company_marker = any(
+        len(name_clean) > len(marker)
+        and (name_clean.startswith(marker) or name_clean.endswith(marker))
         for marker in COMPANY_LEGAL_MARKERS
-        if marker in name_clean
-    ]
-    foreign_company_match = FOREIGN_COMPANY_SUFFIX_PATTERN.search(name_clean)
-    if foreign_company_match:
-        company_marker_positions.append(foreign_company_match.start())
-    company_marker_position = (
-        min(company_marker_positions) if company_marker_positions else None
     )
-    organization_match = ORGANIZATION_IDENTITY_PATTERN.search(name_clean)
-    if organization_match and (
-        company_marker_position is None
-        or organization_match.start() < company_marker_position
+    if (
+        has_boundary_company_marker
+        or FOREIGN_COMPANY_SUFFIX_PATTERN.search(name_clean)
     ):
-        return "Organization"
-    if company_marker_position is not None:
         return "Company"
+
+    if ORGANIZATION_IDENTITY_PATTERN.search(name_clean):
+        return "Organization"
 
     # Check remaining organization keywords that do not prove a legal company form.
     for pattern in ORG_COMPANY_PATTERNS:

@@ -91,7 +91,11 @@ def test_classify_investor_type():
     ) == "Organization"
     assert classify_investor_type(
         "삼성증권 주식회사 (본건 펀드 1의 신탁업자 지위에서)"
-    ) == "Company"
+    ) == "Organization"
+    assert (
+        classify_investor_type("인수자는 삼성전자 주식회사입니다")
+        == "Organization"
+    )
     assert classify_investor_type("김 철 순") == "Person"
     assert classify_investor_type("PAG") == "Organization"
     assert classify_investor_type("신기술투자조합 1호") == "Organization"

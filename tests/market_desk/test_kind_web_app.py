@@ -79,6 +79,44 @@ def _filter_result(
     }
 
 
+def _complete_filter_workflow(
+    data_root: Path,
+    *,
+    mode: str,
+    disclosures: list[dict[str, object]],
+    condition_blocks: list[dict[str, object]] | None = None,
+    parent_mode: str | None = None,
+) -> dict[str, object]:
+    run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "mode": mode,
+            "parent_mode": parent_mode,
+            "filter_blocks": condition_blocks or [],
+        }
+    )
+    result = _filter_result(
+        source_disclosures=len(disclosures),
+        source_offset=0,
+        disclosures=disclosures,
+        condition_blocks=condition_blocks,
+    )
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=str(data_root),
+        mode=mode,
+        parent_mode=parent_mode,
+        run_id=str(run["run_id"]),
+        summary=result["summary"],
+    )
+    return filter_presets.complete_filter_workflow_payload(
+        data_root=str(data_root),
+        mode=mode,
+        parent_mode=parent_mode,
+        run_id=str(run["run_id"]),
+        result=result,
+    )
+
+
 def _external_workspace_body(
     tmp_path: Path, source_json: dict, **body: object
 ) -> dict[str, object]:
@@ -469,22 +507,85 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
     ).resolve()
     assert result["mode"] == "bond_issuance"
     assert result["filter_workflow"]["status"] == "completed"
-    workflow = json.loads(
-        (data_root / "03-filter" / "bond_issuance" / "filter.json").read_text(encoding="utf-8")
-    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert workflow["result_file"] == "filtered.json"
     assert workflow["steps"]["database_query"]["status"] == "completed"
     assert workflow["steps"]["record"]["status"] == "completed"
     assert "source_path" not in workflow["steps"]["database_query"]
     assert "path" not in workflow["steps"]["record"]
-    assert "source_sqlite_manifest_path" not in workflow["result"]
-    assert workflow["result"]["summary"]["source_disclosures"] == 2
-    assert workflow["result"]["integrity"] == {
+    workflow_result = json.loads(
+        (workflow_path.parent / workflow["result_file"]).read_text(encoding="utf-8")
+    )
+    assert "source_sqlite_manifest_path" not in workflow_result
+    assert workflow_result["summary"]["source_disclosures"] == 2
+    assert workflow_result["integrity"] == {
         "complete": True,
         "passed": True,
         "search_target_disclosures": 2,
         "search_result_disclosures": 2,
         "inspected_disclosures": 2,
     }
+
+
+def test_filter_disclosures_runs_derived_filter_with_parent_membership(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_root = tmp_path / "workspace"
+    parent_disclosures = [
+        {"acpt_no": "20260101000001", "title": "A"},
+        {"acpt_no": "20260101000002", "title": "B"},
+    ]
+    _save_filter_workflow(data_root, mode="parent")
+    _complete_filter_workflow(
+        data_root, mode="parent", disclosures=parent_disclosures
+    )
+    filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": "child",
+                "parent_mode": "parent",
+                "condition_blocks": [],
+            },
+        }
+    )
+
+    def fake_filter(body, **_kwargs):
+        assert body["acpt_numbers"] == [
+            "20260101000002",
+            "20260101000001",
+        ]
+        assert body["restrict_acpt_numbers"] is True
+        return _filter_result(
+            source_disclosures=1,
+            source_offset=int(body["source_offset"]),
+            disclosures=[parent_disclosures[0]],
+        )
+
+    monkeypatch.setattr(web_app, "filter_disclosures_payload", fake_filter)
+    transfer_dir = tmp_path / "filtered"
+    response = TestClient(app).post(
+        "/api/disclosures/filter",
+        json={
+            "data_root": str(data_root),
+            "mode": "child",
+            "parent_mode": "parent",
+            "filter_blocks": [],
+            "external_html_transfer_path": str(transfer_dir),
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    transfer_path = Path(result["external_html_download_transfer"]["path"])
+    assert transfer_path == (
+        transfer_dir / "parent" / "subfilters" / "child" / "filtered.json"
+    ).resolve()
+    transferred = json.loads(transfer_path.read_text(encoding="utf-8"))
+    assert transferred["parent_mode"] == "parent"
+    assert len(transferred["parent_result_fingerprint"]) == 64
 
 
 def test_filter_disclosures_stream_reports_long_progress_silence(
@@ -872,10 +973,14 @@ def test_interrupted_filter_retry_drops_saved_result_after_source_count_change(
     document = json.loads(
         (data_root / "03-filter" / "bond_issuance" / "filter.json").read_text()
     )
-    assert document["result"] is None
-    assert document["pending"]["result"]["summary"]["source_offset"] == 0
+    assert "result_file" not in document
+    assert document["pending_file"] == "filter.pending.json"
+    pending = json.loads(
+        (data_root / "03-filter" / "bond_issuance" / document["pending_file"]).read_text()
+    )
+    assert pending["result"]["summary"]["source_offset"] == 0
     assert [
-        row["acpt_no"] for row in document["pending"]["result"]["disclosures"]
+        row["acpt_no"] for row in pending["result"]["disclosures"]
     ] == ["2"]
 
 
@@ -1193,6 +1298,136 @@ def test_disclosure_filter_is_saved_inside_its_mode_folder(tmp_path: Path) -> No
     assert document["steps"]["record"] == {"status": "pending"}
 
 
+def test_completed_filter_result_is_split_from_workflow_metadata(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    disclosures = [{"acpt_no": "20260101000001", "title": "A"}]
+
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=disclosures,
+    )
+
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert "result" not in document
+    assert document["result_file"] == "filtered.json"
+    assert document["result_summary"]["returned_disclosures"] == 1
+    result_path = workflow_path.with_name(document["result_file"])
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["disclosures"] == disclosures
+    assert document["result_fingerprint"] == filter_presets._canonical_result_sha256(
+        result
+    )
+
+
+def test_filter_list_does_not_read_split_result_sidecar(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+    )
+    original_read = filter_presets._read_json_object
+
+    def reject_result_read(path: Path) -> dict[str, object]:
+        if path.name == "filtered.json":
+            raise AssertionError("list must not read result sidecars")
+        return original_read(path)
+
+    monkeypatch.setattr(filter_presets, "_read_json_object", reject_result_read)
+
+    listed = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "list"}
+    )
+
+    assert listed["presets"][0]["result_summary"]["returned_disclosures"] == 1
+
+
+def test_legacy_embedded_filter_result_migrates_to_split_storage(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    disclosures = [{"acpt_no": "20260101000001", "title": "A"}]
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=disclosures,
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    result_path = workflow_path.with_name(document["result_file"])
+    legacy_result = json.loads(result_path.read_text(encoding="utf-8"))
+    legacy_document = {
+        key: value
+        for key, value in document.items()
+        if key not in {"result_file", "result_fingerprint", "result_summary"}
+    }
+    legacy_document["result"] = legacy_result
+    legacy_document["pending"] = None
+    workflow_path.write_text(json.dumps(legacy_document), encoding="utf-8")
+    result_path.unlink()
+
+    migrated = filter_presets.migrate_filter_workflow_storage(str(data_root))
+
+    assert migrated["migrated"] == [str(workflow_path)]
+    split_document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert "result" not in split_document
+    loaded = filter_presets.load_filter_workflow_result_payload(
+        data_root=str(data_root),
+        mode="bond_issuance",
+        condition_blocks=[],
+    )
+    assert loaded["disclosures"] == disclosures
+
+
+def test_hashed_filter_result_migrates_to_canonical_filename(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    disclosures = [{"acpt_no": "20260101000001", "title": "A"}]
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=disclosures,
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    canonical_result_path = workflow_path.with_name("filtered.json")
+    hashed_result_path = workflow_path.with_name(
+        f"filter.result-{document['result_fingerprint']}.json"
+    )
+    canonical_result_path.rename(hashed_result_path)
+    document["result_file"] = hashed_result_path.name
+    workflow_path.write_text(json.dumps(document), encoding="utf-8")
+
+    migrated = filter_presets.migrate_filter_workflow_storage(str(data_root))
+
+    assert migrated["migrated"] == [str(workflow_path)]
+    migrated_document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert migrated_document["result_file"] == "filtered.json"
+    assert canonical_result_path.is_file()
+    assert not hashed_result_path.exists()
+
+
+def test_migration_removes_orphaned_result_from_ready_workflow(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    orphaned_result_path = workflow_path.with_name("filtered.json")
+    orphaned_result_path.write_text("{}", encoding="utf-8")
+
+    migrated = filter_presets.migrate_filter_workflow_storage(str(data_root))
+
+    assert migrated["migrated"] == [str(workflow_path)]
+    assert not orphaned_result_path.exists()
+
+
 def test_disclosure_filter_presets_serialize_concurrent_saves(
     tmp_path: Path,
     monkeypatch,
@@ -1204,14 +1439,14 @@ def test_disclosure_filter_presets_serialize_concurrent_saves(
     counter_lock = threading.Lock()
     start = threading.Barrier(2)
 
-    def slow_read(path: Path) -> list[dict[str, object]]:
+    def slow_read(path: Path, **kwargs: object) -> list[dict[str, object]]:
         nonlocal active_reads, maximum_active_reads
         with counter_lock:
             active_reads += 1
             maximum_active_reads = max(maximum_active_reads, active_reads)
         try:
             time.sleep(0.05)
-            return original_read(path)
+            return original_read(path, **kwargs)
         finally:
             with counter_lock:
                 active_reads -= 1
@@ -1290,6 +1525,252 @@ def test_disclosure_filter_delete_removes_mode_filter_only(
     assert delete_response.status_code == 200
     assert delete_response.json()["presets"] == []
     assert not (data_root / "03-filter" / "rights_issuance" / "filter.json").exists()
+
+
+def test_derived_filter_uses_completed_parent_and_nested_storage(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    parent_disclosures = [
+        {"acpt_no": "20260101000001", "title": "A"},
+        {"acpt_no": "20260101000002", "title": "B"},
+    ]
+    _save_filter_workflow(data_root, mode="parent")
+    _complete_filter_workflow(
+        data_root, mode="parent", disclosures=parent_disclosures
+    )
+
+    saved = filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": "child",
+                "parent_mode": "parent",
+                "condition_blocks": [],
+            },
+        }
+    )
+
+    child_path = (
+        data_root
+        / "03-filter"
+        / "parent"
+        / "subfilters"
+        / "child"
+        / "filter.json"
+    )
+    child = next(item for item in saved["presets"] if item["id"] == "parent/child")
+    assert child["mode"] == "child"
+    assert child["parent_mode"] == "parent"
+    assert len(child["parent_result_fingerprint"]) == 64
+    assert child_path.is_file()
+    assert not (data_root / "03-filter" / "child").exists()
+
+    run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "child",
+            "parent_mode": "parent",
+            "filter_blocks": [],
+        }
+    )
+    assert run["parent_acpt_numbers"] == [
+        "20260101000002",
+        "20260101000001",
+    ]
+    child_result = _filter_result(
+        source_disclosures=1,
+        source_offset=0,
+        disclosures=[parent_disclosures[0]],
+    )
+    filter_presets.mark_filter_workflow_query_completed(
+        data_root=str(data_root),
+        mode="child",
+        parent_mode="parent",
+        run_id=run["run_id"],
+        summary=child_result["summary"],
+    )
+    completed = filter_presets.complete_filter_workflow_payload(
+        data_root=str(data_root),
+        mode="child",
+        parent_mode="parent",
+        run_id=run["run_id"],
+        result=child_result,
+    )
+    assert completed["result"]["parent_mode"] == "parent"
+    assert (
+        completed["result"]["parent_result_fingerprint"]
+        == child["parent_result_fingerprint"]
+    )
+
+    deleted = filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "delete",
+            "mode": "child",
+            "parent_mode": "parent",
+        }
+    )
+    assert [item["id"] for item in deleted["presets"]] == ["parent"]
+    assert not child_path.exists()
+    assert (data_root / "03-filter" / "parent" / "filter.json").is_file()
+
+
+def test_derived_filter_rejects_missing_incomplete_and_stale_parent(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    child_preset = {
+        "mode": "child",
+        "parent_mode": "parent",
+        "condition_blocks": [],
+    }
+    with pytest.raises(ValueError, match="Parent filter workflow not found"):
+        filter_presets.manage_filter_presets_payload(
+            {
+                "data_root": str(data_root),
+                "action": "save",
+                "preset": child_preset,
+            }
+        )
+
+    _save_filter_workflow(data_root, mode="parent")
+    with pytest.raises(ValueError, match="Parent filter workflow is not completed"):
+        filter_presets.manage_filter_presets_payload(
+            {
+                "data_root": str(data_root),
+                "action": "save",
+                "preset": child_preset,
+            }
+        )
+
+    _complete_filter_workflow(
+        data_root,
+        mode="parent",
+        disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+    )
+    filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "save", "preset": child_preset}
+    )
+    changed_conditions = [
+        {"field": "title", "operator": "contains", "value": "changed"}
+    ]
+    filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": "parent",
+                "condition_blocks": changed_conditions,
+            },
+        }
+    )
+    _complete_filter_workflow(
+        data_root,
+        mode="parent",
+        disclosures=[{"acpt_no": "20260101000001", "title": "changed"}],
+        condition_blocks=changed_conditions,
+    )
+
+    with pytest.raises(ValueError, match="stale because parent result changed"):
+        filter_presets.begin_filter_workflow_payload(
+            {
+                "data_root": str(data_root),
+                "mode": "child",
+                "parent_mode": "parent",
+                "filter_blocks": [],
+            }
+        )
+    listed = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "list"}
+    )
+    stale_child = next(
+        item for item in listed["presets"] if item["id"] == "parent/child"
+    )
+    assert stale_child["status"] == "failed"
+    assert "stale because parent result changed" in stale_child["parent_error"]
+    with pytest.raises(ValueError, match="stale because parent result changed"):
+        filter_presets.manage_filter_presets_payload(
+            {"data_root": str(data_root), "action": "inspect"}
+        )
+
+
+def test_parent_filter_delete_is_blocked_while_derived_filter_exists(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root, mode="parent")
+    _complete_filter_workflow(
+        data_root,
+        mode="parent",
+        disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+    )
+    filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": "child",
+                "parent_mode": "parent",
+                "condition_blocks": [],
+            },
+        }
+    )
+    parent_path = data_root / "03-filter" / "parent" / "filter.json"
+    child_path = (
+        data_root
+        / "03-filter"
+        / "parent"
+        / "subfilters"
+        / "child"
+        / "filter.json"
+    )
+
+    with pytest.raises(ValueError, match="derived filters exist: parent"):
+        filter_presets.manage_filter_presets_payload(
+            {
+                "data_root": str(data_root),
+                "action": "delete",
+                "mode": "parent",
+            }
+        )
+
+    assert parent_path.is_file()
+    assert child_path.is_file()
+
+
+def test_filter_list_marks_orphaned_derived_filter_failed(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root, mode="parent")
+    _complete_filter_workflow(
+        data_root,
+        mode="parent",
+        disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+    )
+    filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": "child",
+                "parent_mode": "parent",
+                "condition_blocks": [],
+            },
+        }
+    )
+    (data_root / "03-filter" / "parent" / "filter.json").unlink()
+
+    listed = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "list"}
+    )
+    orphan = next(
+        item for item in listed["presets"] if item["id"] == "parent/child"
+    )
+    assert orphan["status"] == "failed"
+    assert orphan["parent_error"] == "Parent filter workflow not found: parent"
+    with pytest.raises(ValueError, match="Parent filter workflow not found: parent"):
+        filter_presets.manage_filter_presets_payload(
+            {"data_root": str(data_root), "action": "inspect"}
+        )
 
 
 def test_disclosure_filter_presets_reject_invalid_workspace_json(tmp_path: Path) -> None:
