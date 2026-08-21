@@ -3348,6 +3348,44 @@ def test_download_disclosure_external_html_payload_rejects_unexpected_resume_fil
         raise AssertionError("expected ValueError")
 
 
+def test_download_disclosure_external_html_payload_limits_problem_file_details(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_download(**kwargs):
+        raise AssertionError("download should not start with unexpected files")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
+        fake_download,
+    )
+    output_directory = tmp_path / "viewer_html"
+    output_directory.mkdir()
+    for index in range(3):
+        (output_directory / f"unexpected-{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+
+    with pytest.raises(ValueError) as exc_info:
+        download_disclosure_external_html_payload(
+            _external_workspace_body(
+                tmp_path,
+                {"disclosures": [{"acpt_no": "20250101000001"}]},
+                output_directory=str(output_directory),
+                skip_existing=True,
+                problem_file_limit=2,
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "문제 파일: 3개" in message
+    assert "문제 파일 (최대 2개 표시)" in message
+    assert "unexpected-0.html" in message
+    assert "unexpected-1.html" in message
+    assert "unexpected-2.html" not in message
+    assert "나머지 1개는 표시하지 않았습니다" in message
+
+
 def test_clean_disclosure_external_html_output_directory_deletes_unexpected_external_files(
     tmp_path: Path,
 ) -> None:
@@ -3444,6 +3482,31 @@ def test_clean_disclosure_external_html_output_directory_dry_run_reports_delete_
     assert payload["deletion_candidate_count"] == 1
     assert payload["deletion_candidates"][0]["name"] == "20240101000001.html"
     assert unexpected.exists()
+
+
+def test_clean_disclosure_external_html_output_directory_limits_reported_candidates(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "viewer_html"
+    output_directory.mkdir()
+    for index in range(3):
+        (output_directory / f"unexpected-{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+
+    payload = clean_disclosure_html_output_directory_payload(
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+            dry_run=True,
+            problem_file_limit=2,
+        )
+    )
+
+    assert payload["deletion_candidate_count"] == 3
+    assert len(payload["deletion_candidates"]) == 2
+    assert payload["deleted_file_omitted_count"] == 1
 
 
 def test_clean_disclosure_external_html_output_directory_deletes_unexpected_content_files(
@@ -8339,12 +8402,13 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert "내부 HTML 병합" not in download_component_html
     assert "/api/disclosures/internal-html-download/merge/start" not in download_component_html
     assert "작업공간 디렉토리" in download_component_html
-    assert "DATA_PATH_LABELS.output" in download_component_html
+    assert "DATA_PATH_LABELS.output" not in download_component_html
+    assert 'output_directory: ""' in download_component_html
     assert "압축 설정" not in download_component_html
     assert "압축 처리" in download_component_html
     assert "SETTINGS_LABELS.workerCount" in download_component_html
     assert "parallel_workers" in download_component_html
-    assert "외부 HTML 압축 JSON 파일" in download_component_html
+    assert "외부 HTML 압축 JSON 파일" not in download_component_html
     assert "외부 저장 화면의 외부 HTML 압축으로 만든 compressed-external-html.json 파일을 선택하세요." not in download_component_html
     assert "data.has_existing ? data : null" in download_component_html
     assert "async function readJsonResponse" in download_component_html

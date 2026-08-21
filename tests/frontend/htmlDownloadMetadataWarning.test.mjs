@@ -43,8 +43,10 @@ test("pending downloads are a separate step that never reddens the verdict", () 
   assert.match(page, /action: pendingDownloadCount > 0 \?/);
 });
 
-test("internal HTML save uses only the compressed external HTML JSON", () => {
-  assert.match(page, /source_compressed_json_path: internalSourceFilePath/);
+test("internal HTML save derives its compressed source from the workspace mode", () => {
+  assert.match(page, /const currentSourcePath = dataRoot/);
+  assert.match(page, /output_directory: ""/);
+  assert.doesNotMatch(page, /source_compressed_json_path:/);
   assert.doesNotMatch(page, /source_directory:/);
   assert.doesNotMatch(page, /폴더 입력/);
   assert.doesNotMatch(page, /JSON 파일 입력/);

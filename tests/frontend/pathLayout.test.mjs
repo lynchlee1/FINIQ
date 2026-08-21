@@ -7,6 +7,7 @@ const tablePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/table/page.ts
 const htmlWorkflowTemplatePath = "frontend/finiq_GUI/apps/market-desk/src/components/html-workflow/HtmlWorkflowTemplate.tsx";
 const workflowModeSwitchPath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/WorkflowModeSwitch.tsx";
 const filterPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/filter/page.tsx";
+const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx";
 const htmlParsePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx";
 const disclosureAutomationPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/disclosure-automation/page.tsx";
 const disclosureConditionPresetsPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureConditionPresets.ts";
@@ -149,11 +150,11 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   assert.doesNotMatch(filterSource, /classification_path:/);
   assert.match(filterSource, /saveSetting\("external_html_transfer_directory", val\)/);
   assert.doesNotMatch(filterSource, /saveSetting\("external_html_transfer_directory", transferPath\)/);
-  const sourcePayload = htmlDownloadSource.match(/const sourcePayload[\s\S]*?const currentSourcePath/)?.[0] ?? "";
-  assert.match(sourcePayload, /if \(variant === "external"\) \{[\s\S]*?return \{\};/);
-  assert.doesNotMatch(sourcePayload, /source_json_path/);
+  assert.match(htmlDownloadSource, /const currentSourcePath = dataRoot/);
+  assert.doesNotMatch(htmlDownloadSource, /source_json_path/);
   assert.doesNotMatch(htmlDownloadSource, /finiq\.kind\.filteredDisclosures/);
-  assert.match(htmlDownloadSource, /output_directory: useSeparateOutputDirectory \? outputDirectory : ""/);
+  assert.match(htmlDownloadSource, /output_directory: ""/);
+  assert.doesNotMatch(htmlDownloadSource, /useSeparateOutputDirectory/);
   assert.match(parseSource, /input_directory: useSeparateOutputDirectory \? inputDirectory : ""/);
   for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
     assert.doesNotMatch(source, /disabled: true/);
@@ -342,7 +343,7 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.doesNotMatch(source, /\/api\/disclosures\/filter\/preset(?:["/])/);
   assert.doesNotMatch(source, /onLoadPresetFromJson/);
   assert.match(conditionCardSource, /onLoadPresetFromJson\?: \(\) => void/);
-  assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" onClick=\{onLoadPresetFromJson\}>/);
+  assert.match(conditionCardSource, /\{onLoadPresetFromJson && <Button variant="outline" className="h-10" onClick=\{onLoadPresetFromJson\}>/);
   assert.match(conditionCardSource, /role="combobox"/);
   assert.match(conditionCardSource, /placeholder="필터 선택"/);
   assert.match(conditionCardSource, /onSelectExisting=\{onLoadPreset\}/);
@@ -381,7 +382,8 @@ test("disclosure condition card keeps operators scoped to each field type", asyn
 test("disclosure condition card documents each filter field with a stored example", async () => {
   const source = await readFile(disclosureConditionCardPath, "utf8");
 
-  assert.match(source, /aria-label="필드 설명"/);
+  assert.match(source, /ariaLabel="필드 설명" title="필드 설명"/);
+  assert.match(source, /ariaLabel="파생 필터 설명" title="파생 필터 설명"/);
   assert.match(source, /<CircleHelp className="h-4 w-4" \/>/);
   assert.match(source, /DISCLOSURE_FILTER_MARKET_VALUES = \["유가증권", "코스닥", "코넥스"\]/);
   assert.match(source, /\["badges", "배지"\]/);
@@ -415,6 +417,23 @@ test("disclosure condition card documents each filter field with a stored exampl
   ]) {
     assert.match(source, new RegExp(example.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+});
+
+test("disclosure pages use one primary form control rhythm", async () => {
+  const [template, downloadPage, tablePage, filterPage, conditionCard] = await Promise.all([
+    readFile(htmlWorkflowTemplatePath, "utf8"),
+    readFile(downloadPagePath, "utf8"),
+    readFile(tablePagePath, "utf8"),
+    readFile(filterPagePath, "utf8"),
+    readFile(disclosureConditionCardPath, "utf8"),
+  ]);
+
+  assert.match(template, /htmlControlClassName = "text-body h-10/);
+  assert.match(downloadPage, /className="h-10 w-full" onClick=\{handlePreview\}/);
+  assert.match(tablePage, /className="h-10 w-full" onClick=\{handleBuild\}/);
+  assert.match(filterPage, /className="h-10 w-full"/);
+  assert.match(conditionCard, /<CardContent className="space-y-4">/);
+  assert.doesNotMatch(conditionCard, /className="h-9/);
 });
 
 test("disclosure condition card places an undoable clear button between undo and redo", async () => {
@@ -457,12 +476,18 @@ test("disclosure filter page combines title search and recorded filtering", asyn
   assert.match(source, /\{ value: "title-search", label: "공시내역 제목 검색", icon: Search \}/);
   assert.match(source, /\{ value: "filter", label: "공시내역 필터링", icon: Filter \}/);
   assert.ok(
-    source.indexOf("<DisclosureConditionFilterCard")
-      < source.indexOf("<WorkflowModeSwitch")
-      && source.indexOf("<WorkflowModeSwitch")
+    source.indexOf("<WorkflowModeSwitch")
+      < source.indexOf("<DataIntegrityInspectionCard")
+      && source.indexOf("<DataIntegrityInspectionCard")
+        < source.indexOf("<DisclosureConditionFilterCard")
+      && source.indexOf("<DisclosureConditionFilterCard")
         < source.indexOf('<CardTitle className="dark:text-white">작업 실행</CardTitle>'),
-    "동작 전환은 공통 카드 아래, 작업 실행 카드 바로 위의 독립 행이어야 합니다.",
+    "동작 전환은 최상단에 있고, 필터 검사와 공시 조건, 작업 실행이 순서대로 이어져야 합니다.",
   );
+  assert.match(source, /\{taskMode === "filter" && \(\s*<DataIntegrityInspectionCard/);
+  assert.match(source, /showPresetActions=\{taskMode === "filter"\}/);
+  assert.match(source, /showEyebrow=\{false\}/);
+  assert.doesNotMatch(source, />Result<\/p>/);
   assert.match(source, /ariaLabel="공시 작업 모드"/);
   assert.match(source, /options=\{FILTER_TASK_MODE_OPTIONS\}/);
   assert.match(source, /onValueChange=\{setTaskMode\}/);

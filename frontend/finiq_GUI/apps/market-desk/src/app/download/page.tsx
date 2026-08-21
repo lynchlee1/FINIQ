@@ -995,15 +995,15 @@ export default function DownloadPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-3">
-                <Button variant="outline" className="w-full" onClick={handlePreview} disabled={!!activeJobId || runStarting}>
+                <Button variant="outline" className="h-10 w-full" onClick={handlePreview} disabled={!!activeJobId || runStarting}>
                   <Search className="mr-2 h-4 w-4" />
                   미리보기
                 </Button>
-                <Button className="w-full" onClick={handleRun} disabled={!!activeJobId || runStarting}>
+                <Button className="h-10 w-full" onClick={handleRun} disabled={!!activeJobId || runStarting}>
                   {!!activeJobId || runStarting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                   실행
                 </Button>
-                <Button variant="outline" className="w-full" onClick={handleCancelDownload} disabled={!activeJobId}>
+                <Button variant="outline" className="h-10 w-full" onClick={handleCancelDownload} disabled={!activeJobId}>
                   {UI_TEXT.actions.cancelJob}
                 </Button>
               </div>

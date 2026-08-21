@@ -120,6 +120,7 @@ def download_disclosure_external_html_payload(
             acpt_numbers,
             target_years=target_years,
             collect_integrity=True,
+            problem_file_limit=body.get("problem_file_limit"),
         )
         actual_integrity_by_acpt_no = output_summary.pop(
             "_target_integrity_by_acpt_no"

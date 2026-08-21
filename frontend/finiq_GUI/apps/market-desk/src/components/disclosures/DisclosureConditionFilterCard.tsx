@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, CircleHelp, Eraser, ListPlus, Plus, Redo2, Save, Trash2, Undo2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
+import { htmlControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 
 export const DISCLOSURE_FILTER_FIELD_OPTIONS = [
   ["title", "제목"],
@@ -230,8 +231,13 @@ type DisclosureConditionFilterCardProps = {
   onDeletePreset: () => void;
   getPresetIdentity?: (preset: DisclosureConditionPreset) => string;
   getPresetLabel?: (preset: DisclosureConditionPreset) => string;
+  getLibraryPresetLabel?: (preset: DisclosureConditionPreset) => string;
   identityControls?: ReactNode;
+  presetSelectorHelpDescription?: string;
   libraryPresets?: DisclosureConditionPreset[];
+  presetSelectorLabel?: string;
+  showPresetActions?: boolean;
+  showEyebrow?: boolean;
 };
 
 export function makeEmptyDisclosureCondition(connector: DisclosureFilterConnector = ""): DisclosureConditionBlock {
@@ -423,7 +429,7 @@ function ConditionOptionsPopover({
         aria-expanded={open}
         aria-label="조건 옵션"
         className={cn(
-          "flex h-9 w-full items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-bold",
+          "flex h-10 w-full items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-bold",
           activeCount > 0
             ? "border-slate-300 bg-slate-100 text-slate-700 dark:border-[#30363d] dark:bg-[#21262d] dark:text-slate-200"
             : "border-slate-200 bg-white text-slate-500 dark:border-[#30363d] dark:bg-[#0d1117] dark:text-slate-300",
@@ -458,7 +464,17 @@ function ConditionOptionsPopover({
   );
 }
 
-function FieldHelpPopover() {
+function FilterHelpPopover({
+  ariaLabel,
+  title,
+  children,
+  panelClassName,
+}: {
+  ariaLabel: string;
+  title: string;
+  children: ReactNode;
+  panelClassName: string;
+}) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -489,15 +505,15 @@ function FieldHelpPopover() {
   }, [open]);
 
   return (
-    <div className="relative">
+    <div className="relative flex h-5 items-center">
       <button
         ref={buttonRef}
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="true"
         aria-expanded={open}
-        aria-label="필드 설명"
-        className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-[#21262d] dark:hover:text-slate-200"
+        aria-label={ariaLabel}
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-[#21262d] dark:hover:text-slate-200"
       >
         <CircleHelp className="h-4 w-4" />
       </button>
@@ -505,24 +521,43 @@ function FieldHelpPopover() {
         <div
           ref={panelRef}
           style={{ top: coords.top, left: coords.left }}
-          className="fixed z-50 w-96 max-w-[calc(100vw-24px)] rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-[#30363d] dark:bg-[#161b22]"
+          className={cn(
+            "fixed z-50 max-w-[calc(100vw-24px)] rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-[#30363d] dark:bg-[#161b22]",
+            panelClassName,
+          )}
         >
-          <p className="mb-2 text-xs font-bold text-slate-700 dark:text-slate-200">필드 설명</p>
-          <dl className="space-y-2.5">
-            {DISCLOSURE_FILTER_FIELD_HELP.map((field) => (
-              <div key={field.key}>
-                <dt className="text-xs font-bold text-slate-700 dark:text-slate-200">{field.label}</dt>
-                <dd className="text-xs leading-5 text-slate-600 dark:text-slate-300">
-                  {field.description}
-                  <span className="mt-0.5 block text-slate-500 dark:text-slate-400">ex) {field.examples.join(", ")}</span>
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <p className="mb-2 text-xs font-bold text-slate-700 dark:text-slate-200">{title}</p>
+          {children}
         </div>,
         document.body,
       )}
     </div>
+  );
+}
+
+function FieldHelpPopover() {
+  return (
+    <FilterHelpPopover ariaLabel="필드 설명" title="필드 설명" panelClassName="w-96">
+      <dl className="space-y-2.5">
+        {DISCLOSURE_FILTER_FIELD_HELP.map((field) => (
+          <div key={field.key}>
+            <dt className="text-xs font-bold text-slate-700 dark:text-slate-200">{field.label}</dt>
+            <dd className="text-xs leading-5 text-slate-600 dark:text-slate-300">
+              {field.description}
+              <span className="mt-0.5 block text-slate-500 dark:text-slate-400">ex) {field.examples.join(", ")}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </FilterHelpPopover>
+  );
+}
+
+function DerivedFilterHelpPopover({ description }: { description: string }) {
+  return (
+    <FilterHelpPopover ariaLabel="파생 필터 설명" title="파생 필터 설명" panelClassName="w-80">
+      <p className="text-xs leading-5 text-slate-600 dark:text-slate-300">{description}</p>
+    </FilterHelpPopover>
   );
 }
 
@@ -533,6 +568,7 @@ function FilterPresetCombobox({
   onSelectExisting,
   getPresetIdentity = (preset) => preset.name,
   getPresetLabel = (preset) => preset.name,
+  allowCreate = true,
 }: {
   value: string;
   presets: DisclosureConditionPreset[];
@@ -540,6 +576,7 @@ function FilterPresetCombobox({
   onSelectExisting: (name: string) => void;
   getPresetIdentity?: (preset: DisclosureConditionPreset) => string;
   getPresetLabel?: (preset: DisclosureConditionPreset) => string;
+  allowCreate?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -553,7 +590,7 @@ function FilterPresetCombobox({
     ? presets.filter((preset) => getPresetLabel(preset).toLowerCase().includes(query))
     : presets;
   const exactMatch = presets.some((preset) => getPresetLabel(preset) === inputValue.trim());
-  const canCreate = Boolean(inputValue.trim()) && !exactMatch;
+  const canCreate = allowCreate && Boolean(inputValue.trim()) && !exactMatch;
 
   useEffect(() => {
     if (!open) {
@@ -646,7 +683,7 @@ function FilterPresetCombobox({
         aria-label="조건검색 필터 선택"
         aria-autocomplete="list"
         aria-expanded={open}
-        className="h-9 pr-9 font-semibold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200"
+        className={cn(htmlControlClassName, "pr-9 font-semibold dark:bg-[#0d1117]")}
       />
       <button
         type="button"
@@ -759,7 +796,7 @@ function AddFilterPopover({
 
   return (
     <div className="relative inline-block">
-      <Button ref={buttonRef} variant="outline" onClick={() => setOpen((value) => !value)} disabled={!presets.length}>
+      <Button ref={buttonRef} variant="outline" className="h-10" onClick={() => setOpen((value) => !value)} disabled={!presets.length}>
         <ListPlus className="mr-2 h-4 w-4" />
         필터 추가
       </Button>
@@ -803,8 +840,13 @@ export function DisclosureConditionFilterCard({
   onDeletePreset,
   getPresetIdentity,
   getPresetLabel,
+  getLibraryPresetLabel,
   identityControls,
+  presetSelectorHelpDescription,
   libraryPresets,
+  presetSelectorLabel = "조건검색 필터",
+  showPresetActions = true,
+  showEyebrow = true,
 }: DisclosureConditionFilterCardProps) {
   const mergePresets = libraryPresets ?? presets;
   const [openOptionsIndex, setOpenOptionsIndex] = useState<number | null>(null);
@@ -880,41 +922,51 @@ export function DisclosureConditionFilterCard({
   return (
     <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
       <CardHeader>
-        <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Filters</p>
+        {showEyebrow && <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Filters</p>}
         <CardTitle className="dark:text-white">공시 조건</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="grid gap-2">
-          <Label className="dark:text-slate-300">조건검색 필터</Label>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4">
           {identityControls}
-          <div className={cn(
-            "grid gap-2",
-            onLoadPresetFromJson
-              ? "md:grid-cols-[minmax(150px,1fr)_auto_auto_auto]"
-              : "md:grid-cols-[minmax(150px,1fr)_auto_auto]",
-          )}>
-            <FilterPresetCombobox
-              value={selectedPreset}
-              presets={presets}
-              onValueChange={onSelectedPresetChange}
-              onSelectExisting={onLoadPreset}
-              getPresetIdentity={getPresetIdentity}
-              getPresetLabel={getPresetLabel}
-            />
-            {onLoadPresetFromJson && <Button variant="outline" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>}
-            <Button onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>
-            <Button variant="outline" onClick={onDeletePreset} disabled={!presets.some((preset) => (getPresetIdentity?.(preset) ?? preset.name) === selectedPreset)}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>
+          <div className="grid gap-2">
+            <div className="flex h-5 items-center gap-1.5">
+              <Label className="inline-flex h-5 items-center leading-none dark:text-slate-300">{presetSelectorLabel}</Label>
+              {presetSelectorHelpDescription ? <DerivedFilterHelpPopover description={presetSelectorHelpDescription} /> : null}
+            </div>
+            <div className={cn(
+              "grid gap-2",
+              onLoadPresetFromJson && showPresetActions
+                ? "md:grid-cols-[minmax(150px,1fr)_auto_auto_auto]"
+                : onLoadPresetFromJson
+                  ? "md:grid-cols-[minmax(150px,1fr)_auto]"
+                  : showPresetActions
+                    ? "md:grid-cols-[minmax(150px,1fr)_auto_auto]"
+                    : "grid-cols-1",
+            )}>
+              <FilterPresetCombobox
+                value={selectedPreset}
+                presets={presets}
+                onValueChange={onSelectedPresetChange}
+                onSelectExisting={onLoadPreset}
+                getPresetIdentity={getPresetIdentity}
+                getPresetLabel={getPresetLabel}
+                allowCreate={showPresetActions}
+              />
+              {onLoadPresetFromJson && <Button variant="outline" className="h-10" onClick={onLoadPresetFromJson}><Upload className="mr-2 h-4 w-4" />불러오기</Button>}
+              {showPresetActions && <Button className="h-10" onClick={onSavePreset}><Save className="mr-2 h-4 w-4" />저장</Button>}
+              {showPresetActions && <Button variant="outline" className="h-10" onClick={onDeletePreset} disabled={!presets.some((preset) => (getPresetIdentity?.(preset) ?? preset.name) === selectedPreset)}><Trash2 className="mr-2 h-4 w-4" />삭제</Button>}
+            </div>
           </div>
         </div>
 
         <div className="grid gap-2">
           <div className="flex items-center gap-1.5">
-            <Label className="dark:text-slate-300">조건 블록</Label>
+            <Label className="inline-flex h-5 items-center leading-none dark:text-slate-300">조건 블록</Label>
             <FieldHelpPopover />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => applyConditionsChange([...conditions, makeEmptyDisclosureCondition(conditions.length ? "AND" : "")])}>
+              <Button variant="outline" className="h-10" onClick={() => applyConditionsChange([...conditions, makeEmptyDisclosureCondition(conditions.length ? "AND" : "")])}>
                 <Plus className="mr-2 h-4 w-4" />
                 조건 추가
               </Button>
@@ -922,13 +974,13 @@ export function DisclosureConditionFilterCard({
                 presets={mergePresets}
                 onSelect={(preset) => applyConditionsChange(mergeConditionsWithPreset(conditions, preset))}
                 getPresetIdentity={getPresetIdentity}
-                getPresetLabel={getPresetLabel}
+                getPresetLabel={getLibraryPresetLabel ?? getPresetLabel}
               />
             </div>
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                size="icon"
+                size="icon-lg"
                 aria-label="실행 취소"
                 onClick={undo}
                 disabled={!history.current.past.length}
@@ -937,7 +989,7 @@ export function DisclosureConditionFilterCard({
               </Button>
               <Button
                 variant="outline"
-                size="icon"
+                size="icon-lg"
                 aria-label="지우기"
                 onClick={clear}
                 disabled={isEmptyDisclosureConditionBlocks(conditions)}
@@ -946,7 +998,7 @@ export function DisclosureConditionFilterCard({
               </Button>
               <Button
                 variant="outline"
-                size="icon"
+                size="icon-lg"
                 aria-label="다시 실행"
                 onClick={redo}
                 disabled={!history.current.future.length}
@@ -980,7 +1032,7 @@ export function DisclosureConditionFilterCard({
                   value={condition.connector}
                   disabled={index === 0}
                   onChange={(event) => updateCondition(index, { connector: event.target.value as DisclosureFilterConnector })}
-                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 disabled:text-slate-500 disabled:opacity-100 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300 dark:disabled:text-slate-400"
+                  className="h-10 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 disabled:text-slate-500 disabled:opacity-100 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300 dark:disabled:text-slate-400"
                   aria-label="연결 조건"
                 >
                   <option value="">START</option>
@@ -989,7 +1041,7 @@ export function DisclosureConditionFilterCard({
                   <option value="OR">OR</option>
                 </select>
                 <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[36px_100px_minmax(84px,.45fr)_minmax(112px,.55fr)_minmax(240px,3fr)_36px]">
-                  <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
+                  <Input value={"(".repeat(condition.open_count)} onChange={(event) => updateCondition(index, { open_count: countParens(event.target.value, "(") })} aria-label="그룹 시작" className={cn("h-10 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.open_count ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
                   <ConditionOptionsPopover
                     condition={condition}
                     open={openOptionsIndex === index}
@@ -1004,14 +1056,14 @@ export function DisclosureConditionFilterCard({
                         ? condition.operator
                         : defaultOperatorForField(field),
                     });
-                  }} aria-label="필드" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
+                  }} aria-label="필드" className="h-10 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
                     {DISCLOSURE_FILTER_FIELD_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
-                  <select value={condition.operator} onChange={(event) => updateCondition(index, { operator: event.target.value as DisclosureFilterOperatorKey })} aria-label="연산자" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
+                  <select value={condition.operator} onChange={(event) => updateCondition(index, { operator: event.target.value as DisclosureFilterOperatorKey })} aria-label="연산자" className="h-10 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-300">
                     {operatorsForField(condition.field).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
-                  <Input value={condition.value} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="값" className="h-9 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
-                  <Input value={")".repeat(condition.close_count)} onChange={(event) => updateCondition(index, { close_count: countParens(event.target.value, ")") })} aria-label="그룹 끝" className={cn("h-9 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.close_count ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
+                  <Input value={condition.value} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="값" className="h-10 dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200" />
+                  <Input value={")".repeat(condition.close_count)} onChange={(event) => updateCondition(index, { close_count: countParens(event.target.value, ")") })} aria-label="그룹 끝" className={cn("h-10 text-center font-bold dark:bg-[#0d1117] dark:border-[#30363d] dark:text-slate-200", condition.close_count ? "bg-slate-100 border-slate-300 dark:bg-[#21262d] dark:border-[#484f58]" : "")} />
                 </div>
                 <Button variant="ghost" onClick={() => removeCondition(index)} className="h-8 px-2 text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-300">삭제</Button>
               </div>
