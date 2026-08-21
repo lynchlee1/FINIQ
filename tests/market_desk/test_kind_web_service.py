@@ -71,6 +71,7 @@ from finiq.market_desk.web.features.disclosures.html_parse_common import (
     _metadata_title_for_file,
     _record_parse_warning_items,
     cancel_disclosure_html_parse,
+    list_parser_methods_payload,
     parse_disclosure_html_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_export import (
@@ -6100,6 +6101,7 @@ def test_parse_disclosure_html_payload_rejects_invalid_record_filter(tmp_path: P
                 "input_directory": str(tmp_path),
                 "output_directory": str(tmp_path / "output"),
                 "mode": "security_transaction",
+                "parser_method": "security_transaction",
                 "skip_errors": False,
                 "record_filters": [
                     {"field": "title", "operator": "unsupported", "value": "x"}
@@ -6108,11 +6110,17 @@ def test_parse_disclosure_html_payload_rejects_invalid_record_filter(tmp_path: P
         )
 
 
-def test_parse_disclosure_html_payload_rejects_unknown_mode(tmp_path: Path) -> None:
+def test_parse_disclosure_html_payload_rejects_unknown_parser_method(tmp_path: Path) -> None:
     try:
-        parse_disclosure_html_payload({"input_directory": str(tmp_path), "mode": "unknown"})
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(tmp_path),
+                "mode": "saved_filter",
+                "parser_method": "unknown",
+            }
+        )
     except ValueError as exc:
-        assert "unsupported mode" in str(exc)
+        assert "unsupported parser_method" in str(exc)
         assert "bond_issuance" in str(exc)
     else:
         raise AssertionError("expected ValueError")
@@ -6149,13 +6157,14 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
         encoding="utf-8",
     )
     (viewer_dir / "ignore.txt").write_text("not html", encoding="utf-8")
-    output_path = tmp_path / "parsed-bond_issuance.json"
+    output_path = tmp_path / "parsed-saved_filter.json"
 
     payload = parse_disclosure_html_payload(
         {
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
-            "mode": "bond_issuance",
+            "mode": "saved_filter",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
             **_html_parse_metadata_paths(
                 compressed_path=tmp_path / "compressed-external-html.json"
@@ -6165,7 +6174,8 @@ def test_parse_disclosure_html_payload_parses_html_files_and_writes_result(tmp_p
     stored = json.loads(output_path.read_text(encoding="utf-8"))
 
     assert payload["format"] == "finiq_disclosure_html_parse_v1"
-    assert payload["mode"] == "bond_issuance"
+    assert payload["mode"] == "saved_filter"
+    assert payload["parser_method"] == "bond_issuance"
     assert payload["summary"] == {"found_files": 1, "parsed_files": 1, "failed_files": 0}
     assert payload["cancelled"] is False
     assert "input_directory" not in payload
@@ -6217,6 +6227,7 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
             **_html_parse_metadata_paths(filtered_path=tmp_path / "filtered.json"),
         }
@@ -6294,6 +6305,7 @@ def test_parse_disclosure_html_payload_uses_explicit_metadata_path(
             "input_directory": str(input_dir),
             "output_directory": str(tmp_path / "output"),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
             **_html_parse_metadata_paths(
                 filtered_path=source_dir / "filtered.json"
@@ -6348,6 +6360,7 @@ def test_parse_disclosure_html_payload_ignores_download_manifest_metadata(tmp_pa
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
         }
     )
@@ -6381,6 +6394,7 @@ def test_parse_disclosure_html_payload_does_not_infer_market_from_body(tmp_path:
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
         }
     )
@@ -6456,6 +6470,7 @@ def test_parse_disclosure_html_payload_recurses_and_uses_bond_metadata_files(tmp
             "input_directory": str(input_dir),
             "output_directory": str(bond_dir),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
             **_html_parse_metadata_paths(
                 filtered_path=bond_dir / "filtered.json",
@@ -6535,6 +6550,7 @@ def test_parse_disclosure_html_payload_does_not_fallback_to_metadata_display_tit
             "input_directory": str(input_dir),
             "output_directory": str(bond_dir),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
             **_html_parse_metadata_paths(
                 filtered_path=bond_dir / "filtered.json"
@@ -6576,6 +6592,7 @@ def test_parse_disclosure_html_payload_writes_parse_to_output_directory(
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
             "mode": "rights_issuance",
+            "parser_method": "rights_issuance",
             "skip_errors": False,
         }
     )
@@ -6610,6 +6627,7 @@ def test_parse_disclosure_html_payload_accepts_dotted_output_directory(
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
             "mode": "rights_issuance",
+            "parser_method": "rights_issuance",
             "skip_errors": False,
         }
     )
@@ -6641,6 +6659,7 @@ def test_parse_disclosure_html_payload_requires_output_directory(
             {
                 "input_directory": str(input_dir),
                 "mode": "rights_issuance",
+                "parser_method": "rights_issuance",
                 "skip_errors": False,
             }
         )
@@ -6722,6 +6741,7 @@ def test_parse_disclosure_html_payload_does_not_build_family_from_filtered_discl
             "input_directory": str(input_dir),
             "output_directory": str(tmp_path),
             "mode": "rights_issuance",
+            "parser_method": "rights_issuance",
             "skip_errors": False,
         }
     )
@@ -6884,6 +6904,7 @@ def test_parse_disclosure_html_payload_uses_external_html_main_docs_for_correcti
             "input_directory": str(input_dir),
             "output_directory": str(tmp_path),
             "mode": "rights_issuance",
+            "parser_method": "rights_issuance",
             "skip_errors": False,
             **metadata_paths,
         }
@@ -7177,6 +7198,7 @@ def test_build_parse_preview_payload_parses_input_directory(tmp_path: Path) -> N
         {
             "input_directory": str(input_dir),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "limit": 1,
             **_html_parse_metadata_paths(
                 filtered_path=bond_dir / "filtered.json",
@@ -7487,6 +7509,7 @@ def test_parse_disclosure_html_payload_stops_when_cancelled(tmp_path: Path, monk
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": False,
             "cancel_token": "parse-cancel-test",
             "parallel_workers": 1,
@@ -7519,6 +7542,7 @@ def test_parse_disclosure_html_payload_records_failed_file_details(tmp_path: Pat
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": True,
         },
         progress_callback=progress_log.append,
@@ -7563,6 +7587,7 @@ def test_parse_disclosure_html_payload_rejects_missing_bond_condition_table(
                 "input_directory": str(viewer_dir),
                 "output_directory": str(tmp_path),
                 "mode": "bond_issuance",
+                "parser_method": "bond_issuance",
                 "skip_errors": False,
             }
         )
@@ -7588,6 +7613,7 @@ def test_parse_disclosure_html_payload_rejects_missing_rights_title(tmp_path: Pa
                 "input_directory": str(viewer_dir),
                 "output_directory": str(tmp_path),
                 "mode": "rights_issuance",
+                "parser_method": "rights_issuance",
                 "skip_errors": False,
             }
         )
@@ -7616,6 +7642,7 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": True,
             "progress_interval": 2,
         },
@@ -7652,6 +7679,7 @@ def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": False,
         },
         progress_callback=progress_log.append,
@@ -7684,6 +7712,7 @@ def test_parse_disclosure_html_payload_accepts_parallel_workers(tmp_path: Path, 
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": True,
             "progress_interval": 2,
             "parallel_workers": 2,
@@ -7726,6 +7755,7 @@ def test_parse_disclosure_html_payload_reports_warning_counts_by_level(tmp_path:
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": False,
         }
     )
@@ -7810,6 +7840,7 @@ def test_parse_disclosure_html_payload_keeps_warnings_for_filtered_records(
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": False,
             "parallel_workers": parallel_workers,
             "record_filters": [
@@ -7893,6 +7924,7 @@ def test_parse_disclosure_html_payload_discards_warnings_when_filter_fails(
                 "input_directory": str(viewer_dir),
                 "output_directory": str(tmp_path),
                 "mode": "security_transaction",
+                "parser_method": "security_transaction",
                 "parallel_workers": parallel_workers,
                 "skip_errors": True,
                 "filter_blocks": [
@@ -7969,6 +8001,7 @@ def test_parse_disclosure_html_payload_applies_filter_blocks(tmp_path: Path, mon
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": False,
             "parallel_workers": 2,
             "filter_blocks": [
@@ -8016,6 +8049,7 @@ def test_parse_disclosure_html_payload_counts_serial_filter_exclusions_for_progr
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": True,
             "parallel_workers": 1,
             "progress_interval": 2,
@@ -8059,6 +8093,7 @@ def test_build_parse_filter_candidates_payload_loads_bond_issue_methods(tmp_path
         {
             "input_directory": str(viewer_dir),
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "field": "사채발행방법",
             "parallel_workers": 1,
         }
@@ -8112,6 +8147,7 @@ def test_build_parse_filter_candidates_payload_uses_parser_returned_value(
         {
             "input_directory": str(viewer_dir),
             "mode": "rights_issuance",
+            "parser_method": "rights_issuance",
             "field": "증자방식",
             "parallel_workers": 1,
         }
@@ -8173,6 +8209,7 @@ def test_build_parse_filter_candidates_payload_loads_rights_issue_methods(
         {
             "input_directory": str(viewer_dir),
             "mode": "rights_issuance",
+            "parser_method": "rights_issuance",
             "field": "증자방식",
             "parallel_workers": 1,
             **_html_parse_metadata_paths(compressed_path=compressed_path),
@@ -8238,6 +8275,7 @@ def test_parse_disclosure_html_payload_does_not_save_partial_result_when_not_ski
                 "input_directory": str(viewer_dir),
                 "output_directory": str(tmp_path),
                 "mode": "security_transaction",
+                "parser_method": "security_transaction",
                 "skip_errors": False,
                 "parallel_workers": parallel_workers,
                 "progress_interval": 1,
@@ -8263,6 +8301,7 @@ def test_parse_disclosure_html_payload_applies_limit(tmp_path: Path) -> None:
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "shareholder_meeting",
+            "parser_method": "shareholder_meeting",
             "skip_errors": False,
             "limit": 2,
         }
@@ -8295,6 +8334,7 @@ def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkey
             "input_directory": str(viewer_dir),
             "output_directory": str(tmp_path),
             "mode": "security_transaction",
+            "parser_method": "security_transaction",
             "skip_errors": False,
         }
     )
@@ -8303,7 +8343,14 @@ def test_parse_disclosure_html_payload_uses_mode_registry(tmp_path: Path, monkey
     assert payload["records"][0]["acpt_no"] == html_path.stem
 
 
-def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
+def test_html_parser_methods_payload_uses_the_parser_registry() -> None:
+    methods = list_parser_methods_payload()["methods"]
+
+    assert {method["key"] for method in methods} == EXPECTED_PARSE_MODES
+    assert all(method["label"] and method["description"] for method in methods)
+
+
+def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() -> None:
     mode_docs = HTML_PARSE_MODES_DOC.read_text(encoding="utf-8")
     download_ui_html = GUI_EXTERNAL_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     download_component_html = GUI_EXTERNAL_HTML_DOWNLOAD_COMPONENT.read_text(encoding="utf-8")
@@ -8323,7 +8370,8 @@ def test_html_parse_modes_are_registered_documented_and_listed_in_ui() -> None:
     assert set(PARSER_REGISTRY) == EXPECTED_PARSE_MODES
     for mode in EXPECTED_PARSE_MODES:
         assert mode.replace("_", "-") in mode_docs
-        assert mode in parse_ui_html
+        assert mode not in parse_ui_html
+    assert "/api/disclosures/html/parse/methods" in parse_ui_html
     assert "/html-parse" in parse_ui_html
     assert "/internal-html-download" in parse_ui_html
     assert "공시원문 목차 분리" in section_split_ui_html
@@ -8730,6 +8778,7 @@ def test_parse_disclosure_html_payload_rejects_empty_metadata_acpt_no(
                 "input_directory": str(input_directory),
                 "output_directory": str(tmp_path),
                 "mode": "bond_issuance",
+                "parser_method": "bond_issuance",
                 "skip_errors": False,
                 **_html_parse_metadata_paths(
                     filtered_path=tmp_path / "filtered.json"
@@ -8961,6 +9010,7 @@ def test_parse_disclosure_html_payload_injects_compressed_title_for_bond_parser(
     payload = parse_disclosure_html_payload(
         {
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
@@ -9035,6 +9085,7 @@ def test_parse_disclosure_html_payload_injects_company_name_for_shareholder_pars
     payload = parse_disclosure_html_payload(
         {
             "mode": "shareholder_meeting",
+            "parser_method": "shareholder_meeting",
             "skip_errors": False,
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
@@ -9094,6 +9145,7 @@ def test_parse_disclosure_html_payload_does_not_recover_title_after_parser(
     payload = parse_disclosure_html_payload(
         {
             "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "skip_errors": False,
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),
@@ -9199,6 +9251,7 @@ def test_parse_disclosure_html_payload_injects_compressed_title_for_rights_parse
     payload = parse_disclosure_html_payload(
         {
             "mode": "rights_issuance",
+            "parser_method": "rights_issuance",
             "skip_errors": False,
             "input_directory": str(input_dir),
             "output_directory": str(output_dir),

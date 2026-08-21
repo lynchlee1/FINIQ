@@ -143,7 +143,11 @@ def _parse_one(path: Path, metadata_index: dict[str, dict[str, str]]) -> dict[st
     if not title:
         raise ValueError(f"title metadata is required for acpt_no={acpt_no}")
     record = parse_bond_issuance(path.read_bytes(), file_path=path, title=title)
-    return _apply_parse_metadata(record, metadata_index, mode="bond_issuance")
+    return _apply_parse_metadata(
+        record,
+        metadata_index,
+        reporting_company_field="corp_name",
+    )
 
 
 def validate_sample(

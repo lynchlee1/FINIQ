@@ -164,15 +164,6 @@ def test_workspace_defaults_use_parent_html_for_derived_filter(tmp_path: Path) -
     external = apply_workspace_defaults("external_html_download", identity)
     internal = apply_workspace_defaults("internal_html_download", identity)
     parsed = apply_workspace_defaults("parse", identity)
-    parsed_with_parent_parser = apply_workspace_defaults(
-        "parse",
-        {
-            "data_root": str(workspace.root),
-            "mode": "parent",
-            "filter_mode": "child",
-            "parent_mode": "parent",
-        },
-    )
 
     assert external["output_directory"] == str(workspace.external / "parent")
     assert internal["output_directory"] == str(workspace.internal / "parent")
@@ -185,31 +176,9 @@ def test_workspace_defaults_use_parent_html_for_derived_filter(tmp_path: Path) -
     assert parsed["compressed_metadata_path"] == str(
         workspace.external / "parent" / "compressed-external-html.json"
     )
-    assert parsed_with_parent_parser["output_directory"] == str(
+    assert parsed["output_directory"] == str(
         workspace.converted / "parent" / "subfilters" / "child"
     )
-    assert parsed_with_parent_parser["filtered_metadata_path"] == str(
-        workspace.filtered / "parent" / "subfilters" / "child" / "filtered.json"
-    )
-    assert parsed_with_parent_parser["compressed_metadata_path"] == str(
-        workspace.external / "parent" / "compressed-external-html.json"
-    )
-
-    other_parent = apply_workspace_defaults(
-        "parse",
-        {
-            "data_root": str(workspace.root),
-            "mode": "other-parent",
-            "filter_mode": "child",
-            "parent_mode": "other-parent",
-        },
-    )
-    assert other_parent["output_directory"] == str(
-        workspace.converted / "other-parent" / "subfilters" / "child"
-    )
-    assert other_parent["output_directory"] != parsed_with_parent_parser[
-        "output_directory"
-    ]
 
 
 def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> None:
@@ -564,6 +533,7 @@ def test_init_config_preserves_saved_legacy_standard_internal_path(
             {
                 "output_root": str(data_root),
                 "html_parse_mode": "rights_issuance",
+                "html_parser_method": "rights_issuance",
                 "internal_html_output_directory": str(
                     data_root / "05-internal-html-download"
                 ),
@@ -576,6 +546,8 @@ def test_init_config_preserves_saved_legacy_standard_internal_path(
     )
 
     loaded = finiq_config.init_config()
+
+    assert loaded.html_parser_method == "rights_issuance"
 
     assert loaded.internal_html_output_directory == str(
         data_root.resolve() / "05-internal-html-download"

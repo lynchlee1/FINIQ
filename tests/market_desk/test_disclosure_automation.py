@@ -68,7 +68,8 @@ def _profile(root: Path, **overrides: object) -> dict[str, object]:
             },
         },
         "execution": {
-            "parser_mode": "bond_issuance",
+            "mode": "bond_issuance",
+            "parser_method": "bond_issuance",
             "page_size": 100,
             "local_workers": 4,
             "timeout": 20,

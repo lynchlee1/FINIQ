@@ -46,6 +46,7 @@ from finiq.market_desk.web.features.disclosures.external_html_compress import (
     compress_disclosure_external_html_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
+    PARSER_REGISTRY,
     _collect_html_files as _collect_parse_html_files,
     parse_disclosure_html_payload,
 )
@@ -244,13 +245,10 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
     execution = payload.get("execution") or {}
     if not isinstance(execution, dict):
         raise ValueError("execution must be an object")
-    parser_mode = str(execution.get("parser_mode") or "bond_issuance").strip()
-    if parser_mode not in {
-        "bond_issuance",
-        "rights_issuance",
-        "shareholder_meeting",
-    }:
-        raise ValueError("unsupported parser_mode")
+    mode = validate_workspace_mode(execution.get("mode"))
+    parser_method = str(execution.get("parser_method") or "").strip()
+    if parser_method not in PARSER_REGISTRY:
+        raise ValueError("unsupported parser_method")
     return {
         "format": AUTOMATION_PROFILE_FORMAT,
         "name": str(payload.get("name") or "공시 자동화").strip() or "공시 자동화",
@@ -281,7 +279,8 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
             },
         },
         "execution": {
-            "parser_mode": parser_mode,
+            "mode": mode,
+            "parser_method": parser_method,
             "page_size": _positive_int(
                 execution.get("page_size"), "page_size", 100, 100
             ),
@@ -306,7 +305,7 @@ def _external_mode_directory(profile: dict[str, Any]) -> Path:
     return (
         Path(profile["data_root"])
         / "04-external-html-download"
-        / validate_workspace_mode(profile["execution"]["parser_mode"])
+        / validate_workspace_mode(profile["execution"]["mode"])
     )
 
 
@@ -314,7 +313,7 @@ def _internal_mode_directory(profile: dict[str, Any]) -> Path:
     return (
         Path(profile["data_root"])
         / "05-internal-html-download"
-        / validate_workspace_mode(profile["execution"]["parser_mode"])
+        / validate_workspace_mode(profile["execution"]["mode"])
     )
 
 
@@ -333,13 +332,15 @@ def _stage_config_hash(profile: dict[str, Any], stage: int) -> str:
         semantic["s3_selection"] = decisions["s3_selection"]
     if stage >= 6:
         semantic["s6_sections"] = decisions["s6_sections"]
-        semantic["parser_mode"] = profile["execution"]["parser_mode"]
+        semantic["mode"] = profile["execution"]["mode"]
+    if stage >= 7:
+        semantic["parser_method"] = profile["execution"]["parser_method"]
     return _canonical_hash(semantic)
 
 
 def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
     root = Path(profile["data_root"])
-    mode = profile["execution"]["parser_mode"]
+    mode = profile["execution"]["mode"]
     if stage == 3:
         return [
             filter_workflow_path(root, mode),
@@ -611,7 +612,7 @@ def _filter_result_path(profile: dict[str, Any]) -> Path:
     return (
         Path(profile["data_root"])
         / "03-filter"
-        / profile["execution"]["parser_mode"]
+        / profile["execution"]["mode"]
         / "filtered.json"
     )
 
@@ -716,7 +717,7 @@ def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
     try:
         expected = load_filter_workflow_result_payload(
             data_root=root,
-            mode=profile["execution"]["parser_mode"],
+            mode=profile["execution"]["mode"],
             condition_blocks=selection["filter_blocks"],
         )
     except ValueError as error:
@@ -751,7 +752,7 @@ def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
 
 def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
-    mode = profile["execution"]["parser_mode"]
+    mode = profile["execution"]["mode"]
     output_directory = _external_mode_directory(profile)
     expected_acpt_numbers = [
         acpt_no for acpt_no, _year in _active_workspace_disclosure_targets(root, mode)
@@ -909,7 +910,7 @@ def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
 
 def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
-    mode = profile["execution"]["parser_mode"]
+    mode = profile["execution"]["mode"]
     path = root / "07-converted" / mode / f"parsed-{mode}.json"
     payload = _read_json_object(path)
     if payload is None or payload.get("format") != "finiq_disclosure_html_parse_v1":
@@ -961,6 +962,7 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
             {
                 "data_root": str(root),
                 "mode": mode,
+                "parser_method": profile["execution"]["parser_method"],
                 "input_directory": str(input_directory),
                 "output_directory": temporary,
                 "filtered_metadata_path": str(_filter_result_path(profile)),
@@ -1048,7 +1050,8 @@ def inspect_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, A
     return {
         "format": "finiq_disclosure_workspace_inspection_v1",
         "data_root": profile["data_root"],
-        "parser_mode": profile["execution"]["parser_mode"],
+        "mode": profile["execution"]["mode"],
+        "parser_method": profile["execution"]["parser_method"],
         "stage": result,
     }
 
@@ -1531,7 +1534,7 @@ def _active_workspace_disclosure_targets(
 def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
     try:
         root = Path(profile["data_root"])
-        mode = profile["execution"]["parser_mode"]
+        mode = profile["execution"]["mode"]
         expected_targets = _active_workspace_disclosure_targets(root, mode)
         expected_membership = set(expected_targets)
         current = (
@@ -1769,7 +1772,7 @@ def _run_stage(
             cancel_check=cancel_check,
         )
     if stage == 3:
-        mode = execution["parser_mode"]
+        mode = execution["mode"]
         selection = profile["decisions"]["s3_selection"]
         filter_body = {
             "data_root": str(root),
@@ -1822,7 +1825,7 @@ def _run_stage(
             )
             raise
     if stage == 4:
-        mode = execution["parser_mode"]
+        mode = execution["mode"]
         targets = _active_workspace_disclosure_targets(root, mode)
         current = _external_mode_directory(profile) / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
@@ -1933,7 +1936,7 @@ def _run_stage(
             if temporary.exists():
                 shutil.rmtree(temporary)
     if stage == 5:
-        mode = execution["parser_mode"]
+        mode = execution["mode"]
         targets = _active_workspace_disclosure_targets(root, mode)
         current = _internal_mode_directory(profile) / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
@@ -2057,11 +2060,12 @@ def _run_stage(
             if temporary.exists():
                 shutil.rmtree(temporary)
     if stage == 7:
-        mode = execution["parser_mode"]
+        mode = execution["mode"]
         result = parse_disclosure_html_payload(
             {
                 "data_root": str(root),
                 "mode": mode,
+                "parser_method": execution["parser_method"],
                 "input_directory": str(root / "06-sections" / ".automation-current"),
                 "output_directory": str(root / "07-converted" / mode),
                 "filtered_metadata_path": str(_filter_result_path(profile)),
@@ -2099,7 +2103,7 @@ def run_disclosure_automation_payload(
     prepare_disclosure_workspace_payload(
         {
             "data_root": profile["data_root"],
-            "modes": [profile["execution"]["parser_mode"]],
+            "modes": [profile["execution"]["mode"]],
         }
     )
 

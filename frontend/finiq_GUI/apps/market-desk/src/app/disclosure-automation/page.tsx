@@ -12,7 +12,7 @@ import {
   Label,
 } from "@finiq/ui";
 import { ActionDock, JobStatusLogger, PageLoadingSpinner } from "@finiq/web-app/status";
-import { apiPost } from "@/api/client";
+import { apiGet, apiPost } from "@/api/client";
 import {
   DisclosureConditionFilterCard,
   makeEmptyDisclosureCondition,
@@ -127,10 +127,15 @@ type StoredProfile = {
   sectionRules?: Record<string, string[]>;
   rangeStart?: number;
   rangeEnd?: number;
-  parserMode?: string;
+  parserMethod?: string;
   pageSize?: number;
   localWorkers?: number;
   timeout?: number;
+};
+
+type ParserMethodConfig = {
+  key: string;
+  label: string;
 };
 
 function localDateString() {
@@ -206,6 +211,7 @@ export default function DisclosureAutomationPage() {
   const {
     output_root: storedRoot,
     html_parse_mode: storedMode,
+    html_parser_method: storedParserMethod,
     parallel_worker_count: parallelWorkerCount,
     fetchSettings,
     saveSetting,
@@ -225,7 +231,8 @@ export default function DisclosureAutomationPage() {
   const [sectionRules, setSectionRules] = useState<Record<string, string[]>>({});
   const [rangeStart, setRangeStart] = useState(1);
   const [rangeEnd, setRangeEnd] = useState(7);
-  const [parserMode, setParserMode] = useState("bond_issuance");
+  const [parserMethod, setParserMethod] = useState("");
+  const [parserMethods, setParserMethods] = useState<ParserMethodConfig[]>([]);
   const [pageSize, setPageSize] = useState("100");
   const [localWorkers, setLocalWorkers] = useState("1");
   const [timeout, setTimeoutValue] = useState("20");
@@ -309,7 +316,8 @@ export default function DisclosureAutomationPage() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
       }),
-    ]).then(([config, options]) => {
+      apiGet<{ methods: ParserMethodConfig[] }>("/api/disclosures/html/parse/methods"),
+    ]).then(([config, options, methodResponse]) => {
       const stored = loadStoredProfile();
       setDownloadOptions(options);
       setDataRoot(config?.output_root || "");
@@ -326,13 +334,13 @@ export default function DisclosureAutomationPage() {
           ? [makeEmptyDisclosureCondition()]
           : normalizeDisclosureConditionBlocks(stored.conditions),
       );
-      setSelectedPreset(stored?.filterMode || "");
+      setSelectedPreset(stored?.filterMode || config?.html_parse_mode || "");
       setSectionRules(stored?.sectionRules || {});
       setRangeStart(stored?.rangeStart ?? 1);
       setRangeEnd(stored?.rangeEnd ?? 7);
-      const configuredParserMode = stored?.parserMode ?? config?.html_parse_mode;
-      if (!configuredParserMode) throw new Error("html_parse_mode is required");
-      setParserMode(configuredParserMode);
+      const configuredParserMethod = stored?.parserMethod ?? config?.html_parser_method;
+      setParserMethods(methodResponse.methods || []);
+      setParserMethod(configuredParserMethod || "");
       const configuredPageSize = stored?.pageSize ?? 100;
       if (!Number.isInteger(configuredPageSize) || configuredPageSize < 1) {
         throw new Error("pageSize must be a positive integer");
@@ -388,7 +396,8 @@ export default function DisclosureAutomationPage() {
     endDate,
     marketLabel,
     pageSize,
-    parserMode,
+    parserMethod,
+    selectedPreset,
     sectionRules,
     securitiesLabel,
     startDate,
@@ -434,9 +443,10 @@ export default function DisclosureAutomationPage() {
     confirmedDownload = "",
   ) => {
     const execution = validatedExecution();
-    if (executionMask.some((stage) => stage >= 3) && !selectedPreset) {
+    if (!selectedPreset) {
       throw new Error("조건검색 필터를 선택하세요.");
     }
+    if (!parserMethod) throw new Error("파싱 방법을 선택하세요.");
     return {
       name,
       data_root: dataRoot,
@@ -460,7 +470,8 @@ export default function DisclosureAutomationPage() {
         s6_sections: { unmatched_policy: "needs_review", section_save_rules: sectionRulesOverride },
       },
       execution: {
-        parser_mode: parserMode,
+        mode: selectedPreset,
+        parser_method: parserMethod,
         page_size: execution.pageSize,
         local_workers: execution.localWorkers,
         timeout: execution.timeout,
@@ -488,15 +499,16 @@ export default function DisclosureAutomationPage() {
       sectionRules: sectionRulesOverride,
       rangeStart,
       rangeEnd,
-      parserMode,
+      parserMethod,
       pageSize: execution.pageSize,
       localWorkers: execution.localWorkers,
       timeout: execution.timeout,
     };
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(stored));
     const rootSaved = dataRoot === storedRoot || await saveSetting("output_root", dataRoot);
-    const modeSaved = parserMode === storedMode || await saveSetting("html_parse_mode", parserMode);
-    if (!rootSaved || !modeSaved) throw new Error("공시 자동화 설정을 저장하지 못했습니다.");
+    const modeSaved = selectedPreset === storedMode || await saveSetting("html_parse_mode", selectedPreset);
+    const parserSaved = parserMethod === storedParserMethod || await saveSetting("html_parser_method", parserMethod);
+    if (!rootSaved || !modeSaved || !parserSaved) throw new Error("공시 자동화 설정을 저장하지 못했습니다.");
   };
 
   async function refreshPlan(
@@ -627,7 +639,7 @@ export default function DisclosureAutomationPage() {
       return;
     }
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
-    if (preset.mode) setParserMode(preset.mode);
+    if (preset.mode) setSelectedPreset(preset.mode);
     setNotification(message);
     setIsErrorStatus(false);
     setPlan(null);
@@ -650,7 +662,8 @@ export default function DisclosureAutomationPage() {
       return;
     }
     try {
-      const filterMode = selectedPreset.trim() || parserMode;
+      const filterMode = selectedPreset.trim();
+      if (!filterMode) throw new Error("조건검색 필터를 입력하세요.");
       const response = await saveDisclosureConditionPreset(dataRoot, {
         mode: filterMode,
         condition_blocks: validatedConditions(),
@@ -921,7 +934,7 @@ export default function DisclosureAutomationPage() {
 
           <div ref={sectionSettingsRef} className="scroll-mt-6 space-y-4">
             {sectionSettingsSelected || reviewPatterns.length ? <HtmlSectionPatternCard
-              inputDirectory={`${dataRoot}/05-internal-html-download/${parserMode}/.automation-current`}
+              inputDirectory={`${dataRoot}/05-internal-html-download/${selectedPreset}/.automation-current`}
               sectionPatterns={reviewPatterns}
               selectedPatternTocIds={reviewSelections}
               isLoading={false}
@@ -987,11 +1000,10 @@ export default function DisclosureAutomationPage() {
               <Label className="grid gap-2 text-[var(--tv-text)]">이름
                 <Input value={name} onChange={(event) => { setName(event.target.value); setPlan(null); }} />
               </Label>
-              <Label className="grid gap-2 text-[var(--tv-text)]">파싱 모드
-                <select value={parserMode} onChange={(event) => { setParserMode(event.target.value); setPlan(null); }} className="h-9 rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-3 text-sm">
-                  <option value="bond_issuance">bond_issuance</option>
-                  <option value="rights_issuance">rights_issuance</option>
-                  <option value="shareholder_meeting">shareholder_meeting</option>
+              <Label className="grid gap-2 text-[var(--tv-text)]">파싱 방법
+                <select value={parserMethod} onChange={(event) => { setParserMethod(event.target.value); setPlan(null); }} className="h-9 rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)] px-3 text-sm">
+                  <option value="">파싱 방법을 선택하세요</option>
+                  {parserMethods.map((method) => <option key={method.key} value={method.key}>{method.label}</option>)}
                 </select>
               </Label>
               <div className="space-y-2">

@@ -37,6 +37,7 @@ from finiq.market_desk.web.features.disclosures.html_parse_changes import (
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
     cancel_disclosure_html_parse,
     inspect_disclosure_html_parse_payload,
+    list_parser_methods_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_export import (
     build_parse_export_xlsx,
@@ -654,6 +655,10 @@ def create_workflows_router(
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
         )
+
+    @router.get("/api/disclosures/html/parse/methods")
+    async def list_html_parser_methods():
+        return list_parser_methods_payload()
 
     @router.post("/api/disclosures/html/sections/save/start")
     async def start_html_section_save(

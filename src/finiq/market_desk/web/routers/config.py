@@ -48,6 +48,7 @@ class SettingsUpdate(BaseModel):
     html_parse_output_directory: Optional[str] = None
     html_parse_result_path: Optional[str] = None
     html_parse_mode: Optional[str] = None
+    html_parser_method: Optional[str] = None
     integrated_merge_input_path: Optional[str] = None
     integrated_merge_output_path: Optional[str] = None
     integrated_history_item_registry_path: Optional[str] = None
@@ -189,6 +190,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 "html_parse_result_path", config.html_parse_result_path
             ),
             "html_parse_mode": config.html_parse_mode,
+            "html_parser_method": config.html_parser_method,
             "price_files": [],
             "selected_price_path": config.quanti_dir,
             "classification_files": [],
@@ -260,6 +262,10 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             payload["html_parse_mode"]
         ).strip():
             raise HTTPException(status_code=400, detail="html_parse_mode cannot be blank")
+        if "html_parser_method" in payload and not str(
+            payload["html_parser_method"]
+        ).strip():
+            raise HTTPException(status_code=400, detail="html_parser_method cannot be blank")
         if "job_retention_minutes" in payload:
             try:
                 payload["job_retention_minutes"] = normalize_job_retention_minutes(
@@ -283,7 +289,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 normalized = value
             elif key == "job_retention_minutes":
                 normalized = int(value)
-            elif key == "html_parse_mode":
+            elif key in {"html_parse_mode", "html_parser_method"}:
                 normalized = str(value).strip()
             elif key in (
                 "integrated_data_values",

@@ -82,9 +82,10 @@ test("manual HTML workflows preserve derived filter identity", async () => {
   assert.doesNotMatch(downloadPage, /상위 필터 .*HTML에서 파생 필터 .* 대상만 사용합니다/);
 
   assert.match(parsePage, /presetIdentity\(preset\) === selectedPreset/);
-  assert.match(parsePage, /const ownerMode = preset\.parent_mode \|\| preset\.mode/);
-  assert.match(parsePage, /filter_mode: currentFilterMode/);
-  assert.match(parsePage, /currentParentMode[\s\S]*?\{ filter_mode: currentFilterMode, parent_mode: currentParentMode \}/);
+  assert.match(parsePage, /mode: currentFilterMode/);
+  assert.match(parsePage, /parser_method: parserMethod/);
+  assert.match(parsePage, /currentParentMode[\s\S]*?\{ parent_mode: currentParentMode \}/);
+  assert.doesNotMatch(parsePage, /filter_mode:/);
   assert.match(parsePage, /selectedPresetEntry\.parent_mode/);
   assert.match(parsePage, /getPresetIdentity=\{presetIdentity\}/);
   assert.match(parsePage, /getPresetLabel=\{presetLabel\}/);

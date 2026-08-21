@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ExternalLink, Eye, Loader2, Play, Square } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@finiq/ui";
-import { cn } from "@finiq/ui/utils";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useJobPolling } from "@/hooks/useJobPolling";
@@ -31,7 +30,7 @@ import {
 } from "@/components/data-path/DataPathCard";
 import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
-import { apiPost } from "@/api/client";
+import { apiGet, apiPost } from "@/api/client";
 import { pickPath } from "@/lib/fileDialog";
 import {
   deleteDisclosureConditionPreset,
@@ -58,57 +57,18 @@ type ParseInspectionResult = {
 
 type ParseExecutionOptionConfig = {
   field: string;
-  statusLabel: string;
+  status_label: string;
 };
 
-type ParseModeConfig = {
+type ParserMethodConfig = {
   key: string;
   label: string;
   status: string;
   description: string;
-  executionOptions: ParseExecutionOptionConfig[];
+  filters: ParseExecutionOptionConfig[];
 };
 
-const DISCLOSURE_PARSE_MODES: ParseModeConfig[] = [
-  {
-    key: "bond_issuance",
-    label: "사채발행파싱",
-    status: "상세 필드 지원",
-    description: "메자닌 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
-    executionOptions: [{ field: "사채발행방법", statusLabel: "사채발행방법" }],
-  },
-  {
-    key: "rights_issuance",
-    label: "유무상증자파싱",
-    status: "상세 필드 지원",
-    description: "유상증자 및 무상증자 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
-    executionOptions: [{ field: "증자방식", statusLabel: "증자방식" }],
-  },
-  {
-    key: "shareholder_meeting",
-    label: "주주총회파싱",
-    status: "원본 테이블 구조 지원",
-    description: "주주총회 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
-    executionOptions: [],
-  },
-  {
-    key: "asset_transaction",
-    label: "유무형자산거래파싱",
-    status: "원본 테이블 구조 지원",
-    description: "유형자산 및 무형자산 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
-    executionOptions: [],
-  },
-  {
-    key: "security_transaction",
-    label: "발행증권거래파싱",
-    status: "원본 테이블 구조 지원",
-    description: "발행증권 거래 공시 HTML에서 주요 필드와 엔티티를 추출합니다.",
-    executionOptions: [],
-  },
-];
-
 const HTML_PARSE_RELATED_ROUTES = "/internal-html-download /html-parse /html-change-log";
-const PARSE_MODE_CONFIGS = Object.fromEntries(DISCLOSURE_PARSE_MODES.map((mode) => [mode.key, mode])) as Record<string, ParseModeConfig>;
 const WARNING_OPEN_PAGE_SIZE = 20;
 
 const presetIdentity = (preset: DisclosureConditionPreset) => (
@@ -333,7 +293,8 @@ export default function HtmlParsePage() {
   // Form State
   const [inputDirectory, setInputDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [parseMode, setParseMode] = useState("bond_issuance");
+  const [parserMethod, setParserMethod] = useState("");
+  const [parserMethods, setParserMethods] = useState<ParserMethodConfig[]>([]);
   const [limit, setLimit] = useState("");
   const [skipErrors, setSkipErrors] = useState(true);
   const [progressInterval, setProgressInterval] = useState("1000");
@@ -355,13 +316,14 @@ export default function HtmlParsePage() {
     () => presets.find((preset) => presetIdentity(preset) === selectedPreset),
     [presets, selectedPreset],
   );
-  const currentFilterMode = selectedPresetEntry?.mode || selectedPreset.trim() || parseMode;
+  const currentFilterMode = selectedPresetEntry?.mode || "";
+  const presetModeInput = selectedPresetEntry?.mode || selectedPreset.trim();
   const currentParentMode = selectedPresetEntry?.parent_mode || "";
   const filterIdentityPayload = currentParentMode
-    ? { filter_mode: currentFilterMode, parent_mode: currentParentMode }
-    : { filter_mode: currentFilterMode };
-  const selectedParseMode = PARSE_MODE_CONFIGS[parseMode] || DISCLOSURE_PARSE_MODES[0];
-  const executionOptionConfig = selectedParseMode.executionOptions[0] || null;
+    ? { parent_mode: currentParentMode }
+    : {};
+  const selectedParserMethod = parserMethods.find((method) => method.key === parserMethod) || null;
+  const executionOptionConfig = selectedParserMethod?.filters[0] || null;
   const activeRecordFilters = executionOptionConfig && selectedExecutionOptionValues.length ? [
     {
       field: executionOptionConfig.field,
@@ -397,9 +359,8 @@ export default function HtmlParsePage() {
       setInputDirectory(config.html_section_split_output_directory || "");
       setOutputDirectory(config.html_parse_output_directory || "");
 
-      if (config.html_parse_mode) {
-        setParseMode(config.html_parse_mode);
-      }
+      setSelectedPreset(config.html_parse_mode || "");
+      setParserMethod(config.html_parser_method || "");
 
       const configuredParallelWorkers = Number(config.parallel_worker_count);
       if (!Number.isInteger(configuredParallelWorkers) || configuredParallelWorkers < 1) {
@@ -413,6 +374,16 @@ export default function HtmlParsePage() {
       setLoading(false);
     });
   }, [fetchSettings, setStatus, setIsErrorStatus]);
+
+  useEffect(() => {
+    apiGet<{ methods: ParserMethodConfig[] }>("/api/disclosures/html/parse/methods")
+      .then((response) => setParserMethods(response.methods || []))
+      .catch((error) => {
+        setParserMethods([]);
+        setStatus(error instanceof Error ? error.message : String(error));
+        setIsErrorStatus(true);
+      });
+  }, [setIsErrorStatus, setStatus]);
 
   const handlePathError = useCallback((message: string) => {
     setStatus(message);
@@ -443,7 +414,7 @@ export default function HtmlParsePage() {
     limit,
     outputDirectory,
     parallelWorkers,
-    parseMode,
+    parserMethod,
     progressInterval,
     selectedPreset,
     selectedExecutionOptionValues,
@@ -470,31 +441,39 @@ export default function HtmlParsePage() {
     saveSetting("html_parse_output_directory", val);
   };
 
-  const handleParseModeChange = (val: string) => {
+  const handleParserMethodChange = (val: string) => {
     filterCandidatesRequestIdRef.current += 1;
     setFilterCandidatesLoading(false);
-    setParseMode(val);
+    setParserMethod(val);
     setSelectedExecutionOptionValues([]);
     setExecutionOptionCandidates([]);
     setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
-    void saveSetting("html_parse_mode", val).then(() => {
-      const settings = useSettingsStore.getState();
-      setParseMode(settings.html_parse_mode || "");
-      setOutputDirectory(settings.html_parse_output_directory || "");
-    });
+    if (val) void saveSetting("html_parser_method", val);
   };
 
   const applyPreset = useCallback((preset: DisclosureConditionPresetPayload, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
-    const ownerMode = preset.parent_mode || preset.mode;
-    if (ownerMode && PARSE_MODE_CONFIGS[ownerMode]) {
-      setParseMode(ownerMode);
-      void saveSetting("html_parse_mode", ownerMode);
-    }
     setStatus(statusMessage);
     setIsErrorStatus(false);
-  }, [saveSetting, setIsErrorStatus, setStatus]);
+  }, [setIsErrorStatus, setStatus]);
+
+  const handleModeChange = (val: string) => {
+    filterCandidatesRequestIdRef.current += 1;
+    setFilterCandidatesLoading(false);
+    setSelectedPreset(val);
+    setSelectedExecutionOptionValues([]);
+    setExecutionOptionCandidates([]);
+    setExecutionOptionInputDirectory("");
+    setExecutionOptionExampleNotice(null);
+    const preset = presets.find((item) => presetIdentity(item) === val);
+    if (!preset) return;
+    applyPreset(preset, `조건검색 필터를 불러왔습니다: ${presetLabel(preset)}`);
+    if (!preset.parent_mode) void saveSetting("html_parse_mode", preset.mode).then(() => {
+      const settings = useSettingsStore.getState();
+      setOutputDirectory(settings.html_parse_output_directory || "");
+    });
+  };
 
   const savePreset = async () => {
     if (!dataRoot?.trim()) {
@@ -503,7 +482,7 @@ export default function HtmlParsePage() {
       return;
     }
     try {
-      const filterMode = currentFilterMode;
+      const filterMode = presetModeInput;
       const response = await saveDisclosureConditionPreset(dataRoot, {
         mode: filterMode,
         ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
@@ -590,7 +569,8 @@ export default function HtmlParsePage() {
     data_root: dataRoot,
     input_directory: useSeparateOutputDirectory ? inputDirectory : "",
     output_directory: useSeparateOutputDirectory ? outputDirectory : "",
-    mode: parseMode,
+    mode: currentFilterMode,
+    parser_method: parserMethod,
     ...filterIdentityPayload,
     limit: limit ? Number(limit) : null,
     skip_errors: skipErrors,
@@ -604,7 +584,7 @@ export default function HtmlParsePage() {
     inputDirectory,
     outputDirectory,
     useSeparateOutputDirectory,
-    parseMode,
+    parserMethod,
     currentFilterMode,
     currentParentMode,
     limit,
@@ -619,6 +599,11 @@ export default function HtmlParsePage() {
   const handleRun = async () => {
     if (!dataRoot) {
       setStatus("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (!currentFilterMode || !parserMethod) {
+      setStatus("모드와 파싱 방법을 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -707,7 +692,8 @@ export default function HtmlParsePage() {
         body: JSON.stringify({
           data_root: dataRoot,
           input_directory: inputDirectory,
-          mode: parseMode,
+          mode: currentFilterMode,
+          parser_method: parserMethod,
           ...filterIdentityPayload,
           field: executionOptionConfig.field,
           parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
@@ -729,7 +715,7 @@ export default function HtmlParsePage() {
       setExecutionOptionCandidates(Array.isArray(data.candidates) ? data.candidates : []);
       setExecutionOptionInputDirectory(String(data.input_directory || ""));
       setExecutionOptionExampleNotice(null);
-      setStatus(`${executionOptionConfig.statusLabel} 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
+      setStatus(`${executionOptionConfig.status_label} 후보 ${formatInteger(data.summary?.candidates || 0)}개를 불러왔습니다.`);
     } catch (err: any) {
       if (filterCandidatesRequestIdRef.current !== requestId) return;
       setStatus(err.message);
@@ -758,7 +744,8 @@ export default function HtmlParsePage() {
         body: JSON.stringify({
           data_root: dataRoot,
           input_directory: inputDirectory,
-          mode: parseMode,
+          mode: currentFilterMode,
+          parser_method: parserMethod,
           ...filterIdentityPayload,
           limit: 3,
           filter_blocks: normalizeDisclosureConditionBlocks(conditions),
@@ -1055,7 +1042,7 @@ export default function HtmlParsePage() {
     <HtmlWorkflowPage
       eyebrow="HTML Parse Guide"
       title="공시원문 변환"
-      description="저장된 KIND HTML을 모드별 파서로 읽어 핵심 필드, 오류, 경고를 하나의 JSON에 남깁니다. 결과 파일은 공시 정정내역 한눈에, 발행내역 한눈에, Excel 내보내기의 기준 데이터가 됩니다."
+      description="저장된 KIND HTML을 선택한 파싱 방법으로 읽어 핵심 필드, 오류, 경고를 하나의 JSON에 남깁니다. 결과 파일은 공시 정정내역 한눈에, 발행내역 한눈에, Excel 내보내기의 기준 데이터가 됩니다."
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
@@ -1081,42 +1068,50 @@ export default function HtmlParsePage() {
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]" data-related-routes={HTML_PARSE_RELATED_ROUTES}>
             <CardHeader className="gap-3 pb-4">
               <div className="min-w-0 space-y-1">
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Parsing Modes</p>
-                <CardTitle className="dark:text-white">모드별 기능</CardTitle>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Conversion Settings</p>
+                <CardTitle className="dark:text-white">변환 설정</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3">
-                {DISCLOSURE_PARSE_MODES.map(mode => (
-                  <div
-                    key={mode.key}
-                    onClick={() => handleParseModeChange(mode.key)}
-                    className={cn(
-                      "rounded-md border px-4 py-3 transition-shadow cursor-pointer",
-                      parseMode === mode.key
-                        ? "bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100 shadow-sm"
-                        : "bg-white text-slate-600 border-slate-200 dark:bg-[#0d1117] dark:text-slate-300 dark:border-[#30363d]"
-                    )}
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                  <span>모드</span>
+                  <select
+                    value={selectedPreset}
+                    onChange={(event) => handleModeChange(event.target.value)}
+                    className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0d1117]"
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <strong className="text-sm font-semibold">{mode.label}</strong>
-                          <code className={cn(
-                            "text-[10px] font-mono opacity-60",
-                            parseMode === mode.key ? "text-white/75 dark:text-black/60" : "text-slate-400"
-                          )}>{mode.key}</code>
-                        </div>
-                        <p className="mt-2 text-xs leading-6 opacity-85">{mode.description}</p>
-                      </div>
-                      <span className={cn(
-                        "shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium",
-                        parseMode === mode.key ? "bg-white/20 text-white dark:bg-black/10 dark:text-black" : "bg-slate-100 text-slate-500 dark:bg-[#21262d] dark:text-slate-400"
-                      )}>{mode.status}</span>
-                    </div>
-                  </div>
-                ))}
+                    <option value="">모드를 선택하세요</option>
+                    {presets.map((preset) => (
+                      <option key={presetIdentity(preset)} value={presetIdentity(preset)}>
+                        {presetLabel(preset)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                  <span>파싱 방법</span>
+                  <select
+                    value={parserMethod}
+                    onChange={(event) => handleParserMethodChange(event.target.value)}
+                    className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0d1117]"
+                  >
+                    <option value="">파싱 방법을 선택하세요</option>
+                    {parserMethods.map((method) => (
+                      <option key={method.key} value={method.key}>{method.label}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
+              {selectedParserMethod ? (
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-[#30363d] dark:bg-[#0d1117]">
+                  <div className="flex items-center justify-between gap-3">
+                    <strong>{selectedParserMethod.label}</strong>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{selectedParserMethod.status}</span>
+                  </div>
+                  <p className="mt-2 text-xs leading-6 text-slate-600 dark:text-slate-300">{selectedParserMethod.description}</p>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 

@@ -48,6 +48,7 @@ SAVED_SETTINGS_KEYS = (
     "html_parse_output_directory",
     "html_parse_result_path",
     "html_parse_mode",
+    "html_parser_method",
     "integrated_merge_input_path",
     "integrated_merge_output_path",
     "integrated_history_item_registry_path",
@@ -89,6 +90,7 @@ class AppConfig:
     html_parse_output_directory: str = ""
     html_parse_result_path: str = ""
     html_parse_mode: str = ""
+    html_parser_method: str = ""
     integrated_merge_input_path: str = ""
     integrated_merge_output_path: str = ""
     integrated_history_item_registry_path: str = ""
@@ -172,7 +174,7 @@ def load_settings(settings_path: str | Path) -> dict[str, Any]:
             continue
         
         value = payload[key]
-        if key == "html_parse_mode":
+        if key in {"html_parse_mode", "html_parser_method"}:
             settings[key] = str(value)
         elif isinstance(value, dict):
             settings[key] = value
@@ -205,6 +207,7 @@ def init_config() -> AppConfig:
     output_root = str(settings.get("output_root") or "").strip()
     quanti_dir = settings.get("quanti_dir", str(QUANTI_DIR))
     html_parse_mode = str(settings.get("html_parse_mode") or "").strip()
+    html_parser_method = str(settings.get("html_parser_method") or "").strip()
     try:
         job_retention_minutes = int(settings.get("job_retention_minutes", 60))
     except (TypeError, ValueError) as exc:
@@ -243,6 +246,7 @@ def init_config() -> AppConfig:
         html_parse_output_directory=disclosure_path("html_parse_output_directory"),
         html_parse_result_path=disclosure_path("html_parse_result_path"),
         html_parse_mode=html_parse_mode,
+        html_parser_method=html_parser_method,
         integrated_merge_input_path=settings.get("integrated_merge_input_path", ""),
         integrated_merge_output_path=settings.get("integrated_merge_output_path", ""),
         integrated_history_item_registry_path=settings.get("integrated_history_item_registry_path", ""),
