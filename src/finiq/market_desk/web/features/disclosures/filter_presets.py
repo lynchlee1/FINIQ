@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import threading
 from typing import Any
@@ -59,11 +59,29 @@ def _normalize_condition_input(value: object) -> dict[str, Any]:
     ):
         raise ValueError("filter workflow condition_blocks must be a list of objects")
     mode = validate_workspace_mode(value.get("mode"))
-    return {
+    parent_value = value.get("parent_mode")
+    parent_mode = (
+        validate_workspace_mode(parent_value)
+        if parent_value is not None and str(parent_value).strip()
+        else None
+    )
+    if parent_mode == mode:
+        raise ValueError("parent_mode must be different from mode")
+    normalized = {
         "name": mode,
         "mode": mode,
         "condition_blocks": condition_blocks,
     }
+    if parent_mode is not None:
+        normalized.update(
+            {
+                "id": f"{parent_mode}/{mode}",
+                "parent_mode": parent_mode,
+            }
+        )
+    else:
+        normalized["id"] = mode
+    return normalized
 
 
 def _utc_now() -> str:
@@ -242,6 +260,7 @@ def _read_workflow(
     path: Path,
     *,
     document: dict[str, Any] | None = None,
+    load_results: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     payload = _read_json_object(path) if document is None else document
     if not isinstance(payload, dict) or payload.get("format") != FILTER_WORKFLOW_FORMAT:
@@ -267,24 +286,71 @@ def _read_workflow(
     }:
         raise ValueError(f"filter workflow step statuses are inconsistent: {path}")
     condition_blocks = condition_step.get("filter_blocks")
+    if (
+        path.parent.parent.name == "subfilters"
+        and path.parents[3].name != "03-filter"
+    ):
+        raise ValueError("derived filter workflows support only one nesting level")
+    path_parent_mode = (
+        path.parents[2].name if path.parent.parent.name == "subfilters" else None
+    )
     normalized = _normalize_condition_input(
         {
             "mode": path.parent.name,
+            "parent_mode": path_parent_mode,
             "condition_blocks": condition_blocks,
         }
     )
     if payload.get("mode") != normalized["mode"]:
         raise ValueError(f"filter workflow mode does not match its directory: {path}")
+    if payload.get("parent_mode") != normalized.get("parent_mode"):
+        raise ValueError(
+            f"filter workflow parent_mode does not match its directory: {path}"
+        )
+    if normalized.get("parent_mode") is not None:
+        fingerprint = str(payload.get("parent_result_fingerprint") or "").strip()
+        if len(fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in fingerprint
+        ):
+            raise ValueError(
+                "derived filter workflow parent result fingerprint is invalid"
+            )
+        normalized["parent_result_fingerprint"] = fingerprint
 
-    result = payload.get("result")
-    if result is not None:
+    embedded_result = payload.get("result")
+    result_file = str(payload.get("result_file") or "").strip()
+    has_result = isinstance(embedded_result, dict) or bool(result_file)
+    result = embedded_result
+    if load_results and result is None and result_file:
+        result = _read_json_object(_workflow_sidecar_path(path, result_file))
+    if load_results and result is not None:
         _validate_filter_result(
             result,
             condition_blocks=normalized["condition_blocks"],
             require_complete=True,
         )
-    pending = payload.get("pending")
-    if pending is not None:
+        result_fingerprint = _canonical_result_sha256(result)
+        stored_fingerprint = str(payload.get("result_fingerprint") or "").strip()
+        if stored_fingerprint and stored_fingerprint != result_fingerprint:
+            raise ValueError(f"filter workflow result fingerprint is invalid: {path}")
+        payload["result"] = result
+        payload["_result_file"] = result_file
+        payload["_result_fingerprint"] = result_fingerprint
+        if normalized.get("parent_mode") is not None and (
+            result.get("parent_mode") != normalized["parent_mode"]
+            or result.get("parent_result_fingerprint")
+            != normalized["parent_result_fingerprint"]
+        ):
+            raise ValueError(
+                "derived filter result provenance does not match the workflow"
+            )
+    embedded_pending = payload.get("pending")
+    pending_file = str(payload.get("pending_file") or "").strip()
+    has_pending = isinstance(embedded_pending, dict) or bool(pending_file)
+    pending = embedded_pending
+    if load_results and pending is None and pending_file:
+        pending = _read_json_object(_workflow_sidecar_path(path, pending_file))
+    if load_results and pending is not None:
         if not isinstance(pending, dict) or not isinstance(pending.get("result"), dict):
             raise ValueError("filter workflow pending result is invalid")
         _validate_filter_result(
@@ -292,11 +358,18 @@ def _read_workflow(
             condition_blocks=normalized["condition_blocks"],
             require_complete=False,
         )
-    if status == "ready" and (result is not None or pending is not None):
+        pending_fingerprint = _canonical_payload_sha256(pending)
+        stored_fingerprint = str(payload.get("pending_fingerprint") or "").strip()
+        if stored_fingerprint and stored_fingerprint != pending_fingerprint:
+            raise ValueError(f"filter workflow pending fingerprint is invalid: {path}")
+        payload["pending"] = pending
+        payload["_pending_file"] = pending_file
+        payload["_pending_fingerprint"] = pending_fingerprint
+    if status == "ready" and (has_result or has_pending):
         raise ValueError("ready filter workflow must not contain a result")
-    if status == "completed" and (result is None or pending is not None):
+    if status == "completed" and (not has_result or has_pending):
         raise ValueError("completed filter workflow must contain only a completed result")
-    if status == "interrupted" and pending is None:
+    if status == "interrupted" and not has_pending:
         raise ValueError("interrupted filter workflow must contain a pending result")
 
     workflow = {
@@ -310,36 +383,71 @@ def _read_workflow(
     }
     if isinstance(result, dict):
         workflow["result_summary"] = result.get("summary") or {}
+        workflow["result_fingerprint"] = payload.get("_result_fingerprint")
+    elif has_result:
+        workflow["result_summary"] = payload.get("result_summary") or {}
+        workflow["result_fingerprint"] = payload.get("result_fingerprint")
     if isinstance(pending, dict):
         pending_result = pending.get("result")
         workflow["pending_summary"] = (
             pending_result.get("summary") if isinstance(pending_result, dict) else {}
         )
+    elif has_pending:
+        workflow["pending_summary"] = payload.get("pending_summary") or {}
     return payload, workflow
 
 
 def _read_workflows(
-    directory: Path, *, require_workflow_format: bool = False
+    directory: Path,
+    *,
+    require_workflow_format: bool = False,
+    validate_parent_state: bool = False,
+    load_results: bool = True,
 ) -> list[dict[str, Any]]:
     if not directory.exists():
         return []
     if not directory.is_dir():
         raise ValueError(f"Invalid disclosure filter workflow directory: {directory}")
     workflows: list[dict[str, Any]] = []
-    for path in directory.glob("*/filter.json"):
+    paths = [
+        *directory.glob("*/filter.json"),
+        *directory.glob("*/subfilters/*/filter.json"),
+    ]
+    for path in paths:
         document = _read_json_object(path)
         if document.get("format") != FILTER_WORKFLOW_FORMAT:
             if require_workflow_format:
                 raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
             continue
-        _payload, workflow = _read_workflow(path, document=document)
+        _payload, workflow = _read_workflow(
+            path,
+            document=document,
+            load_results=load_results,
+        )
+        if validate_parent_state and workflow.get("parent_mode") is not None:
+            try:
+                if load_results:
+                    _require_current_parent(data_root=directory.parent, workflow=workflow)
+                else:
+                    _require_current_parent_metadata(
+                        data_root=directory.parent,
+                        workflow=workflow,
+                    )
+            except ValueError as error:
+                if require_workflow_format:
+                    raise
+                workflow = {
+                    **workflow,
+                    "status": "failed",
+                    "parent_error": str(error),
+                }
         workflows.append(workflow)
-    return sorted(workflows, key=lambda item: item["name"])
+    return sorted(workflows, key=lambda item: item["id"])
 
 
 def _new_workflow_document(workflow: dict[str, Any]) -> dict[str, Any]:
     now = _utc_now()
-    return {
+    document = {
         "format": FILTER_WORKFLOW_FORMAT,
         "mode": workflow["mode"],
         "status": "ready",
@@ -355,19 +463,207 @@ def _new_workflow_document(workflow: dict[str, Any]) -> dict[str, Any]:
         "result": None,
         "pending": None,
     }
+    if workflow.get("parent_mode") is not None:
+        document["parent_mode"] = workflow["parent_mode"]
+        document["parent_result_fingerprint"] = workflow["parent_result_fingerprint"]
+    return document
 
 
 def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
-    atomic_write_json(path, payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = dict(payload)
+
+    result = payload.get("result")
+    if isinstance(result, dict):
+        result_fingerprint = str(payload.get("_result_fingerprint") or "")
+        result_file = str(payload.get("_result_file") or "")
+        if not result_fingerprint:
+            result_fingerprint = _canonical_result_sha256(result)
+        canonical_result_file = "filtered.json"
+        result_path = path.with_name(canonical_result_file)
+        if result_file != canonical_result_file or not result_path.is_file():
+            atomic_write_json(result_path, result)
+        result_file = canonical_result_file
+        document["result_file"] = result_file
+        document["result_fingerprint"] = result_fingerprint
+        document["result_summary"] = result.get("summary") or {}
+    else:
+        document.pop("result_file", None)
+        document.pop("result_fingerprint", None)
+        document.pop("result_summary", None)
+    document.pop("result", None)
+
+    pending = payload.get("pending")
+    if isinstance(pending, dict):
+        pending_fingerprint = str(payload.get("_pending_fingerprint") or "")
+        pending_file = str(payload.get("_pending_file") or "")
+        if not pending_fingerprint:
+            pending_fingerprint = _canonical_payload_sha256(pending)
+        canonical_pending_file = "filter.pending.json"
+        pending_path = path.with_name(canonical_pending_file)
+        if pending_file != canonical_pending_file or not pending_path.is_file():
+            atomic_write_json(pending_path, pending)
+        pending_file = canonical_pending_file
+        document["pending_file"] = pending_file
+        document["pending_fingerprint"] = pending_fingerprint
+        pending_result = pending.get("result")
+        document["pending_summary"] = (
+            pending_result.get("summary") if isinstance(pending_result, dict) else {}
+        )
+    else:
+        document.pop("pending_file", None)
+        document.pop("pending_fingerprint", None)
+        document.pop("pending_summary", None)
+    document.pop("pending", None)
+
+    for key in [key for key in document if key.startswith("_")]:
+        document.pop(key, None)
+    atomic_write_json(path, document)
+    if path.name == "filter.json":
+        referenced = {
+            str(document.get("result_file") or ""),
+            str(document.get("pending_file") or ""),
+        }
+        canonical_result = path.with_name("filtered.json")
+        if canonical_result.name not in referenced:
+            canonical_result.unlink(missing_ok=True)
+        for pattern in ("filter.result-*.json", "filter.pending-*.json"):
+            for sidecar in path.parent.glob(pattern):
+                if sidecar.name not in referenced:
+                    sidecar.unlink(missing_ok=True)
+        fixed_pending = path.with_name("filter.pending.json")
+        if fixed_pending.name not in referenced:
+            fixed_pending.unlink(missing_ok=True)
 
 
-def _workflow_path(data_root: object, mode: object) -> Path:
+def _workflow_sidecar_path(path: Path, file_name: str) -> Path:
+    if not file_name or Path(file_name).name != file_name:
+        raise ValueError(f"Invalid disclosure filter workflow sidecar: {path}")
+    sidecar = path.with_name(file_name)
+    if sidecar.suffix != ".json":
+        raise ValueError(f"Invalid disclosure filter workflow sidecar: {sidecar}")
+    return sidecar
+
+
+def _canonical_payload_sha256(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _set_workflow_result(document: dict[str, Any], result: dict[str, Any] | None) -> None:
+    document["result"] = result
+    document.pop("_result_file", None)
+    document.pop("_result_fingerprint", None)
+
+
+def _set_workflow_pending(document: dict[str, Any], pending: dict[str, Any] | None) -> None:
+    document["pending"] = pending
+    document.pop("_pending_file", None)
+    document.pop("_pending_fingerprint", None)
+
+
+def _discard_working_workflow(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    for sidecar in path.parent.glob(f"{path.stem}.*.json"):
+        sidecar.unlink(missing_ok=True)
+
+
+def _workflow_path(
+    data_root: object, mode: object, parent_mode: object = None
+) -> Path:
     mode = validate_workspace_mode(mode)
-    return _workflow_directory(data_root) / mode / "filter.json"
+    if parent_mode is None or not str(parent_mode).strip():
+        return _workflow_directory(data_root) / mode / "filter.json"
+    parent = validate_workspace_mode(parent_mode)
+    if parent == mode:
+        raise ValueError("parent_mode must be different from mode")
+    return _workflow_directory(data_root) / parent / "subfilters" / mode / "filter.json"
 
 
-def filter_workflow_path(data_root: object, mode: object) -> Path:
-    return _workflow_path(data_root, mode)
+def filter_workflow_path(
+    data_root: object, mode: object, parent_mode: object = None
+) -> Path:
+    return _workflow_path(data_root, mode, parent_mode)
+
+
+def _canonical_result_sha256(result: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        result, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _completed_parent_result(
+    data_root: object, parent_mode: object
+) -> tuple[dict[str, Any], str]:
+    parent = validate_workspace_mode(parent_mode)
+    parent_path = _workflow_path(data_root, parent)
+    if not parent_path.is_file():
+        raise ValueError(f"Parent filter workflow not found: {parent}")
+    document, workflow = _read_workflow(parent_path)
+    result = document.get("result")
+    if workflow["status"] != "completed" or not isinstance(result, dict):
+        raise ValueError(f"Parent filter workflow is not completed: {parent}")
+    return result, str(workflow["result_fingerprint"])
+
+
+def _completed_parent_fingerprint(data_root: object, parent_mode: object) -> str:
+    parent = validate_workspace_mode(parent_mode)
+    parent_path = _workflow_path(data_root, parent)
+    if not parent_path.is_file():
+        raise ValueError(f"Parent filter workflow not found: {parent}")
+    _document, workflow = _read_workflow(parent_path, load_results=False)
+    if workflow["status"] != "completed":
+        raise ValueError(f"Parent filter workflow is not completed: {parent}")
+    fingerprint = str(workflow.get("result_fingerprint") or "").strip()
+    if not fingerprint:
+        _document, workflow = _read_workflow(parent_path)
+        fingerprint = str(workflow.get("result_fingerprint") or "").strip()
+    return fingerprint
+
+
+def _require_current_parent(
+    *, data_root: object, workflow: dict[str, Any]
+) -> dict[str, Any] | None:
+    parent_mode = workflow.get("parent_mode")
+    if parent_mode is None:
+        return None
+    result, fingerprint = _completed_parent_result(data_root, parent_mode)
+    if fingerprint != workflow.get("parent_result_fingerprint"):
+        raise ValueError(
+            "Derived filter workflow is stale because parent result changed: "
+            f"{workflow['id']}"
+        )
+    return result
+
+
+def _require_current_parent_metadata(
+    *, data_root: object, workflow: dict[str, Any]
+) -> None:
+    parent_mode = workflow.get("parent_mode")
+    if parent_mode is None:
+        return
+    parent = validate_workspace_mode(parent_mode)
+    parent_path = _workflow_path(data_root, parent)
+    if not parent_path.is_file():
+        raise ValueError(f"Parent filter workflow not found: {parent}")
+    _document, parent_workflow = _read_workflow(
+        parent_path,
+        load_results=False,
+    )
+    if parent_workflow["status"] != "completed":
+        raise ValueError(f"Parent filter workflow is not completed: {parent}")
+    fingerprint = parent_workflow.get("result_fingerprint")
+    if not fingerprint:
+        _document, parent_workflow = _read_workflow(parent_path)
+        fingerprint = parent_workflow.get("result_fingerprint")
+    if fingerprint != workflow.get("parent_result_fingerprint"):
+        raise ValueError(
+            "Derived filter workflow is stale because parent result changed: "
+            f"{workflow['id']}"
+        )
 
 
 def load_filter_workflow_result_payload(
@@ -375,11 +671,13 @@ def load_filter_workflow_result_payload(
     data_root: object,
     mode: object,
     condition_blocks: object,
+    parent_mode: object = None,
 ) -> dict[str, Any]:
-    path = _workflow_path(data_root, mode)
+    path = _workflow_path(data_root, mode, parent_mode)
     requested = _normalize_condition_input(
         {
             "mode": mode,
+            "parent_mode": parent_mode,
             "condition_blocks": condition_blocks,
         }
     )
@@ -387,6 +685,7 @@ def load_filter_workflow_result_payload(
         if not path.is_file():
             raise ValueError(f"Filter workflow not found: {requested['mode']}")
         document, workflow = _read_workflow(path)
+        _require_current_parent(data_root=data_root, workflow=workflow)
         if (
             workflow["mode"] != requested["mode"]
             or workflow["condition_blocks"] != requested["condition_blocks"]
@@ -520,10 +819,13 @@ def _merge_filter_results(
 
 
 def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    path = _workflow_path(payload.get("data_root"), payload.get("mode"))
+    path = _workflow_path(
+        payload.get("data_root"), payload.get("mode"), payload.get("parent_mode")
+    )
     requested = _normalize_condition_input(
         {
             "mode": payload.get("mode"),
+            "parent_mode": payload.get("parent_mode"),
             "condition_blocks": payload.get("filter_blocks"),
         }
     )
@@ -531,6 +833,9 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if not path.is_file():
             raise ValueError(f"Filter workflow not found: {requested['mode']}")
         document, workflow = _read_workflow(path)
+        parent_result = _require_current_parent(
+            data_root=payload.get("data_root"), workflow=workflow
+        )
         if _active_key(path) in _ACTIVE_RUNS:
             raise ValueError(f"Filter workflow is already running: {requested['mode']}")
         if (
@@ -564,7 +869,7 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
         working_document["steps"]["record"] = {"status": "pending"}
         _write_workflow(working_path, working_document)
         _ACTIVE_RUNS[_active_key(path)] = run_id
-    return {
+    response = {
         **workflow,
         "status": "running",
         "path": str(path),
@@ -572,12 +877,18 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "source_offset": source_offset,
         "source_expected_count": source_expected_count,
     }
+    if parent_result is not None:
+        response["parent_acpt_numbers"] = [
+            str(item["acpt_no"]) for item in parent_result["disclosures"]
+        ]
+    return response
 
 
 def mark_filter_workflow_query_completed(
-    *, data_root: object, mode: object, run_id: str, summary: object
+    *, data_root: object, mode: object, run_id: str, summary: object,
+    parent_mode: object = None,
 ) -> dict[str, Any]:
-    path = _workflow_path(data_root, mode)
+    path = _workflow_path(data_root, mode, parent_mode)
     with _WORKFLOWS_LOCK:
         working_path = _require_active_run(path, run_id)
         document, _workflow = _read_workflow(working_path)
@@ -606,11 +917,13 @@ def complete_filter_workflow_payload(
     mode: object,
     run_id: str,
     result: object,
+    parent_mode: object = None,
 ) -> dict[str, Any]:
-    path = _workflow_path(data_root, mode)
+    path = _workflow_path(data_root, mode, parent_mode)
     with _WORKFLOWS_LOCK:
         working_path = _require_active_run(path, run_id)
         document, workflow = _read_workflow(working_path)
+        parent_result = _require_current_parent(data_root=data_root, workflow=workflow)
         record_step = document["steps"]["record"]
         if document.get("status") != "running" or record_step.get("run_id") != run_id:
             raise ValueError(f"Filter workflow run is not active: {path.parent.name}")
@@ -642,10 +955,25 @@ def complete_filter_workflow_payload(
             complete=True,
         )
         merged_result["mode"] = workflow["mode"]
+        if parent_result is not None:
+            parent_acpt_numbers = {
+                str(item["acpt_no"]) for item in parent_result["disclosures"]
+            }
+            child_acpt_numbers = {
+                str(item["acpt_no"]) for item in merged_result["disclosures"]
+            }
+            if not child_acpt_numbers.issubset(parent_acpt_numbers):
+                raise _integrity_error(
+                    "derived filter result contains disclosures outside its parent"
+                )
+            merged_result["parent_mode"] = workflow["parent_mode"]
+            merged_result["parent_result_fingerprint"] = workflow[
+                "parent_result_fingerprint"
+            ]
 
         document["status"] = "completed"
-        document["result"] = merged_result
-        document["pending"] = None
+        _set_workflow_result(document, merged_result)
+        _set_workflow_pending(document, None)
         record_step.update(
             {
                 "status": "completed",
@@ -653,8 +981,8 @@ def complete_filter_workflow_payload(
                 "summary": merged_result["summary"],
             }
         )
-        _write_workflow(working_path, document)
-        os.replace(working_path, path)
+        _write_workflow(path, document)
+        _discard_working_workflow(working_path)
         _ACTIVE_RUNS.pop(_active_key(path), None)
         _document, completed_workflow = _read_workflow(path)
         return {**completed_workflow, "result": merged_result}
@@ -666,8 +994,9 @@ def interrupt_filter_workflow_payload(
     mode: object,
     run_id: str,
     partial_result: object,
+    parent_mode: object = None,
 ) -> dict[str, Any] | None:
-    path = _workflow_path(data_root, mode)
+    path = _workflow_path(data_root, mode, parent_mode)
     with _WORKFLOWS_LOCK:
         try:
             working_path = _require_active_run(path, run_id)
@@ -684,7 +1013,7 @@ def interrupt_filter_workflow_payload(
             else None
         )
         if current_partial is None or _filter_result_counts(current_partial)[3] == 0:
-            working_path.unlink(missing_ok=True)
+            _discard_working_workflow(working_path)
             _ACTIVE_RUNS.pop(_active_key(path), None)
             return None
         source_disclosures, current_source_offset, _, _ = _filter_result_counts(
@@ -705,7 +1034,7 @@ def interrupt_filter_workflow_payload(
             _result_source_count(payload) != source_disclosures
             for payload in prior_payloads
         ):
-            document["result"] = None
+            _set_workflow_result(document, None)
             committed_count = 0
             pending_payloads = []
         pending_payloads.append(current_partial)
@@ -717,10 +1046,13 @@ def interrupt_filter_workflow_payload(
             complete=False,
         )
         document["status"] = "interrupted"
-        document["pending"] = {
-            "interrupted_at": _utc_now(),
-            "result": merged_pending,
-        }
+        _set_workflow_pending(
+            document,
+            {
+                "interrupted_at": _utc_now(),
+                "result": merged_pending,
+            },
+        )
         query_step = document["steps"]["database_query"]
         record_step = document["steps"]["record"]
         if query_step.get("status") == "running":
@@ -728,16 +1060,17 @@ def interrupt_filter_workflow_payload(
             document["steps"]["record"] = {"status": "pending"}
         else:
             record_step.update({"status": "interrupted", "interrupted_at": _utc_now()})
-        _write_workflow(working_path, document)
-        os.replace(working_path, path)
+        _write_workflow(path, document)
+        _discard_working_workflow(working_path)
         _ACTIVE_RUNS.pop(_active_key(path), None)
         return _read_workflow(path)[1]
 
 
 def fail_filter_workflow_payload(
-    *, data_root: object, mode: object, run_id: str, error: object
+    *, data_root: object, mode: object, run_id: str, error: object,
+    parent_mode: object = None,
 ) -> dict[str, Any] | None:
-    path = _workflow_path(data_root, mode)
+    path = _workflow_path(data_root, mode, parent_mode)
     with _WORKFLOWS_LOCK:
         try:
             working_path = _require_active_run(path, run_id)
@@ -763,8 +1096,8 @@ def fail_filter_workflow_payload(
                 "error": str(error),
             }
         )
-        _write_workflow(working_path, document)
-        os.replace(working_path, path)
+        _write_workflow(path, document)
+        _discard_working_workflow(working_path)
         _ACTIVE_RUNS.pop(_active_key(path), None)
         return _read_workflow(path)[1]
 
@@ -773,37 +1106,85 @@ def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
     directory = _workflow_directory(payload.get("data_root"))
     action = str(payload.get("action") or "").strip()
     with _WORKFLOWS_LOCK:
-        workflows = _read_workflows(directory)
+        if action == "list":
+            workflows = _read_workflows(
+                directory,
+                validate_parent_state=True,
+                load_results=False,
+            )
+        elif action == "inspect":
+            workflows = _read_workflows(
+                directory,
+                require_workflow_format=True,
+                validate_parent_state=True,
+            )
+        else:
+            workflows = _read_workflows(directory, load_results=False)
 
         if action == "list":
             pass
         elif action == "inspect":
-            workflows = _read_workflows(directory, require_workflow_format=True)
+            pass
         elif action == "save":
             workflow = _normalize_condition_input(payload.get("preset"))
-            path = _workflow_path(payload.get("data_root"), workflow["mode"])
+            path = _workflow_path(
+                payload.get("data_root"), workflow["mode"], workflow.get("parent_mode")
+            )
+            if workflow.get("parent_mode") is not None:
+                fingerprint = _completed_parent_fingerprint(
+                    payload.get("data_root"), workflow["parent_mode"]
+                )
+                workflow["parent_result_fingerprint"] = fingerprint
             if _active_key(path) in _ACTIVE_RUNS:
                 raise ValueError(f"Filter workflow is running: {workflow['name']}")
             preserve_existing = False
             if path.is_file():
-                _existing_document, existing = _read_workflow(path)
+                _existing_document, existing = _read_workflow(
+                    path,
+                    load_results=False,
+                )
                 preserve_existing = (
                     existing["mode"] == workflow["mode"]
                     and existing["condition_blocks"] == workflow["condition_blocks"]
+                    and existing.get("parent_mode") == workflow.get("parent_mode")
+                    and existing.get("parent_result_fingerprint")
+                    == workflow.get("parent_result_fingerprint")
                 )
             if not preserve_existing:
                 _write_workflow(path, _new_workflow_document(workflow))
-            workflows = [item for item in workflows if item["name"] != workflow["name"]]
-            workflows.append(_read_workflow(path)[1])
+            workflows = [item for item in workflows if item["id"] != workflow["id"]]
+            workflows.append(_read_workflow(path, load_results=False)[1])
         elif action == "delete":
             mode = validate_workspace_mode(payload.get("mode"))
-            workflow_path = _workflow_path(payload.get("data_root"), mode)
+            parent_mode = payload.get("parent_mode")
+            workflow_path = _workflow_path(payload.get("data_root"), mode, parent_mode)
             if not workflow_path.is_file():
                 raise ValueError(f"Filter workflow not found: {mode}")
             if _active_key(workflow_path) in _ACTIVE_RUNS:
                 raise ValueError(f"Filter workflow is running: {mode}")
+            if parent_mode is None or not str(parent_mode).strip():
+                child_paths = sorted(
+                    workflow_path.parent.glob("subfilters/*/filter.json")
+                )
+                if child_paths:
+                    raise ValueError(
+                        "Cannot delete a parent filter workflow while derived filters "
+                        f"exist: {mode}"
+                    )
+            document = _read_json_object(workflow_path)
             workflow_path.unlink()
-            workflows = [item for item in workflows if item["mode"] != mode]
+            for field in ("result_file", "pending_file"):
+                file_name = str(document.get(field) or "").strip()
+                if file_name:
+                    _workflow_sidecar_path(workflow_path, file_name).unlink(
+                        missing_ok=True
+                    )
+            deleted_id = (
+                f"{validate_workspace_mode(parent_mode)}/{mode}"
+                if parent_mode is not None and str(parent_mode).strip()
+                else mode
+            )
+            workflows = [item for item in workflows if item["id"] != deleted_id]
         else:
             raise ValueError(
                 "filter workflow action must be one of: list, inspect, save, delete"
@@ -812,5 +1193,47 @@ def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "format": FILTER_WORKFLOW_DIRECTORY_FORMAT,
         "path": str(directory),
-        "presets": sorted(workflows, key=lambda item: item["name"]),
+        "presets": sorted(workflows, key=lambda item: item["id"]),
+    }
+
+
+def migrate_filter_workflow_storage(data_root: object) -> dict[str, Any]:
+    directory = _workflow_directory(data_root)
+    if not directory.exists():
+        return {"path": str(directory), "migrated": [], "unchanged": []}
+    migrated: list[str] = []
+    unchanged: list[str] = []
+    paths = sorted(
+        [
+            *directory.glob("*/filter.json"),
+            *directory.glob("*/subfilters/*/filter.json"),
+        ]
+    )
+    with _WORKFLOWS_LOCK:
+        for path in paths:
+            raw = _read_json_object(path)
+            if raw.get("format") != FILTER_WORKFLOW_FORMAT:
+                continue
+            storage_is_current = (
+                "result" not in raw
+                and "pending" not in raw
+                and raw.get("result_file") in (None, "filtered.json")
+                and raw.get("pending_file") in (None, "filter.pending.json")
+                and not (
+                    raw.get("result_file") is None
+                    and path.with_name("filtered.json").is_file()
+                )
+            )
+            if storage_is_current:
+                _read_workflow(path)
+                unchanged.append(str(path))
+                continue
+            document, _workflow = _read_workflow(path, document=raw)
+            _write_workflow(path, document)
+            _read_workflow(path)
+            migrated.append(str(path))
+    return {
+        "path": str(directory),
+        "migrated": migrated,
+        "unchanged": unchanged,
     }

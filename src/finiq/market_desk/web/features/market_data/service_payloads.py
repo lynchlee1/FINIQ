@@ -120,6 +120,7 @@ def filter_disclosures_payload(
     market = str(body.get("market") or "전체").strip() or "전체"
     start_date = str(body.get("start_date") or "").strip()
     end_date = str(body.get("end_date") or "").strip()
+    restrict_acpt_numbers = bool(body.get("restrict_acpt_numbers"))
     acpt_numbers = _normalize_acpt_numbers(body.get("acpt_numbers"))
     limit = None
     limit_unlimited = True
@@ -215,7 +216,7 @@ def filter_disclosures_payload(
         if (start_date or end_date) and not disclosed_date:
             raise ValueError("disclosed_at is required when a date filter is used")
         matched = True
-        if acpt_numbers and acpt_no not in acpt_numbers:
+        if (acpt_numbers or restrict_acpt_numbers) and acpt_no not in acpt_numbers:
             matched = False
         if matched and market != "전체" and str(record.get("market") or "") != market:
             matched = False

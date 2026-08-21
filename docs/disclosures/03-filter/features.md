@@ -77,17 +77,33 @@
 
 #### Behavior
 
-filter가 정의하는 mode 폴더의 `filter.json`에 조건, 실행 상태, 완료 결과 또는 중단 결과를 관리한다. 실행 중에는 원본을 바꾸지 않고 같은 mode 폴더의 숨김 임시 JSON에서 상태와 증분 결과를 만든다.
+filter가 정의하는 mode 폴더의 `filter.json`에는 조건, 실행 상태와 결과 요약을 관리한다. 완료 결과 본문은 기존 전달 파일인 `filtered.json`, 중단 결과 본문은 `filter.pending.json`에 저장한다. 실행 중에는 원본을 바꾸지 않고 같은 mode 폴더의 숨김 임시 JSON에서 상태와 증분 결과를 만든다.
 
 #### Defaults and Exceptions
 
 - 새 filter의 초기 상태는 `ready`이며 mode와 조건을 함께 기록한다.
 - 같은 mode의 기존 filter와 조건이 같으면 완료·중단 결과를 유지하고, 조건이 달라지면 상태와 결과를 대기로 초기화한다.
-- 완료 목록은 `result`, 중단된 증분 목록은 `pending.result`에 저장한다.
+- 완료 결과는 `result_file`이 가리키는 `filtered.json`, 중단된 증분 결과는 `pending_file`이 가리키는 `filter.pending.json`에 저장한다. 목록 조회는 이 대용량 파일을 읽지 않는다.
 - 모든 건수 검증을 통과한 완료 결과만 원본 JSON으로 원자적으로 교체한다.
-- mode 폴더 밖의 이전 형식 파일은 filter 목록에서 제외하며 자동으로 바꾸지 않는다.
+- mode 폴더 밖의 이전 형식 파일은 filter 목록에서 제외한다. 기존 `filter.json`에 내장된 `result`와 `pending`은 전용 마이그레이션 명령으로 분리한다.
 - 손상됐거나 필요한 상태가 없는 filter를 임의로 고치거나 결과 파일로 대신하지 않고 실패 처리한다.
 - mode가 폴더 이름으로 유효하지 않거나 저장된 조건과 실행 요청 조건이 다르면 실패 처리한다.
+
+### Create One-Level Derived Filters
+
+#### Behavior
+
+완료된 기본 필터의 결과에 조건을 추가하는 파생 필터를 한 단계까지 만든다. 파생 필터는 02단계 전체가 아니라 상위 필터의 완료 결과만 입력으로 사용하므로 결과가 항상 상위 결과에 포함된다.
+
+#### Defaults and Exceptions
+
+- 요청의 `mode`는 자식 이름만 담고 `parent_mode`에 상위 기본 필터 이름을 따로 지정한다.
+- 상위 필터는 `completed` 상태인 기본 필터만 허용하며 파생 필터를 다시 상위로 지정할 수 없다.
+- 파생 필터는 `<data_root>/03-filter/<parent_mode>/subfilters/<mode>`에 저장한다.
+- 파생 필터의 `filter.json`에는 `parent_mode`와 실행에 사용한 `parent_result_fingerprint`를 기록한다.
+- 상위 결과가 변경되어 fingerprint가 다르거나, 상위 결과가 없거나 완료되지 않았으면 파생 필터를 `stale`로 보고 실행과 후속 작업을 실패 처리한다.
+- 상위 결과 오류를 02단계 전체 검색이나 다른 필터 결과로 보완하지 않는다.
+- 목록 응답은 기본 필터의 `id`를 `<mode>`, 파생 필터의 `id`를 `<parent_mode>/<mode>`로 구분한다. 화면에는 파생 필터를 `<상위> › <자식>`으로 표시하며 슬래시가 포함된 `id`를 `mode`로 전송하지 않는다.
 
 ### Save Mode-Specific Results
 
@@ -133,13 +149,18 @@ filter가 정의하는 mode 폴더의 `filter.json`에 조건, 실행 상태, �
 
 #### Behavior
 
-공시내역 필터링, 공시원문 변환과 공시 자동화에서 같은 mode별 조건검색 filter 목록을 제공하고, 선택한 filter의 mode와 조건을 실행 입력으로 사용한다.
+공시내역 필터링과 공시원문 변환에서는 기본 필터와 파생 필터 목록을 제공한다. 공시 자동화는 기본 필터만 제공하고 선택한 기본 필터의 mode와 조건을 실행 입력으로 사용한다.
 
 #### Defaults and Exceptions
 
-- 선택 목록은 `03-filter/<mode>/filter.json`만 읽는다.
+- 선택 목록은 `03-filter/<mode>/filter.json`과 한 단계 아래의 `03-filter/<parent_mode>/subfilters/<mode>/filter.json`을 읽는다.
 - 화면은 처음 열 때 `공시내역 제목 검색`을 선택한다.
 - `기존 데이터 검토`는 현재 선택한 filter와 관계없이 `03-filter/<mode>/filter.json`을 각각 읽어 설정·처리 단계·결과 무결성을 검사한다.
+- 완료되지 않은 폴더는 작업 상태 이름 대신 조건만 저장됐는지, 검색이 중단·실패했는지, 결과를 저장하지 못했는지를 문장으로 표시한다.
 - 공시내역 필터링 화면에는 수동 `불러오기` 버튼을 표시하지 않는다.
 - 03단계와 후속 단계의 실행 설정에는 선택한 filter의 mode가 들어간다.
 - 저장한 mode와 조건이 화면 입력과 같을 때만 검색을 시작한다.
+- 새 필터는 `공시 조건`에서 `기본 필터` 또는 `파생 필터`로 선택한다. 파생 필터의 `상위 필터` 목록에는 완료된 기본 필터만 표시한다.
+- `조건검색 필터` 목록은 작업공간 `03-filter`에 저장된 필터만 보여 주며 파싱 모드 키를 하드코딩하지 않는다.
+- 파생 필터의 저장·실행·삭제 요청은 자식 `mode`와 `parent_mode`를 각각 전송한다.
+- 공시 자동화 프로필은 `parent_mode`를 저장하지 않으므로 파생 필터를 선택하거나 JSON에서 불러오지 않는다.

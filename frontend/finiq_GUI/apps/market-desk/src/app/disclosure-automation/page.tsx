@@ -49,6 +49,10 @@ const PROFILE_STORAGE_KEY = "finiq.disclosureAutomation.profile.v1";
 const PROFILE_FORMAT = "finiq_disclosure_automation_profile_v1";
 const REVIEW_STORAGE_KEY = "finiq.disclosureAutomation.review.v1";
 
+const automationFilterPresets = (presets: DisclosureConditionPreset[]) => (
+  presets.filter((preset) => !preset.parent_mode)
+);
+
 const STAGES = [
   { number: 1, key: "s1_download", label: "공시내역 다운로드", target: "search" },
   { number: 2, key: "s2_table", label: "공시내역 변환", target: null },
@@ -361,7 +365,7 @@ export default function DisclosureAutomationPage() {
       return;
     }
     listDisclosureConditionPresets(dataRoot).then((response) => {
-      setPresets(response.presets);
+      setPresets(automationFilterPresets(response.presets));
     }).catch((error) => {
       setPresets([]);
       setNotification(error instanceof Error ? error.message : String(error));
@@ -617,6 +621,11 @@ export default function DisclosureAutomationPage() {
   };
 
   const applyPreset = (preset: DisclosureConditionPresetPayload, message: string) => {
+    if (preset.parent_mode) {
+      setNotification("공시 자동화에서는 기본 필터만 사용할 수 있습니다.");
+      setIsErrorStatus(true);
+      return;
+    }
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
     if (preset.mode) setParserMode(preset.mode);
     setNotification(message);
@@ -646,7 +655,7 @@ export default function DisclosureAutomationPage() {
         mode: filterMode,
         condition_blocks: validatedConditions(),
       });
-      setPresets(response.presets);
+      setPresets(automationFilterPresets(response.presets));
       setSelectedPreset(filterMode);
       setNotification(`조건검색 필터를 저장했습니다: ${filterMode}`);
       setIsErrorStatus(false);
@@ -685,7 +694,7 @@ export default function DisclosureAutomationPage() {
     }
     try {
       const response = await deleteDisclosureConditionPreset(dataRoot, selectedPreset);
-      setPresets(response.presets);
+      setPresets(automationFilterPresets(response.presets));
       setSelectedPreset("");
       setNotification(`조건검색 필터를 삭제했습니다: ${selectedPreset}`);
       setIsErrorStatus(false);

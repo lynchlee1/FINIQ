@@ -94,11 +94,24 @@ def _filter_output_directory(value: object) -> str:
 
 
 def _write_transfer_file(
-    payload: dict[str, Any], *, output_directory: str, mode: object
+    payload: dict[str, Any], *, output_directory: str, mode: object,
+    parent_mode: object = None,
 ) -> dict[str, Any]:
     normalized_mode = validate_workspace_mode(mode)
     output_root = Path(_filter_output_directory(output_directory))
-    transfer_path = output_root / normalized_mode / "filtered.json"
+    if parent_mode is not None and str(parent_mode).strip():
+        normalized_parent = validate_workspace_mode(parent_mode)
+        if normalized_parent == normalized_mode:
+            raise ValueError("parent_mode must be different from mode")
+        transfer_path = (
+            output_root
+            / normalized_parent
+            / "subfilters"
+            / normalized_mode
+            / "filtered.json"
+        )
+    else:
+        transfer_path = output_root / normalized_mode / "filtered.json"
 
     payload["mode"] = normalized_mode
     acpt_numbers = payload.get("external_html_download_acpt_numbers")
@@ -115,13 +128,15 @@ def _write_transfer_file(
 
 
 def _attach_external_html_download_transfer(
-    payload: dict[str, Any], *, output_directory: str, mode: object
+    payload: dict[str, Any], *, output_directory: str, mode: object,
+    parent_mode: object = None,
 ) -> dict[str, Any]:
     if payload.get("format") == "kind_disclosure_filter_v1":
         payload["external_html_download_transfer"] = _write_transfer_file(
             payload,
             output_directory=output_directory,
             mode=mode,
+            parent_mode=parent_mode,
         )
     return payload
 
@@ -134,18 +149,21 @@ def _finish_filter_workflow(
         mode=workflow_run["mode"],
         run_id=workflow_run["run_id"],
         summary=payload.get("summary"),
+        parent_mode=workflow_run.get("parent_mode"),
     )
     completed_workflow = complete_filter_workflow_payload(
         data_root=body.get("data_root"),
         mode=workflow_run["mode"],
         run_id=workflow_run["run_id"],
         result=payload,
+        parent_mode=workflow_run.get("parent_mode"),
     )
     merged_result = completed_workflow.pop("result")
     _attach_external_html_download_transfer(
         merged_result,
         output_directory=str(body.get("external_html_transfer_path") or "").strip(),
         mode=body.get("mode"),
+        parent_mode=body.get("parent_mode"),
     )
     transfer = merged_result.get("external_html_download_transfer")
     if not isinstance(transfer, dict):
@@ -163,6 +181,7 @@ def _fail_filter_workflow(
             mode=workflow_run["mode"],
             run_id=workflow_run["run_id"],
             partial_result=error.partial_payload,
+            parent_mode=workflow_run.get("parent_mode"),
         )
         return
     fail_filter_workflow_payload(
@@ -170,6 +189,7 @@ def _fail_filter_workflow(
         mode=workflow_run["mode"],
         run_id=workflow_run["run_id"],
         error=error,
+        parent_mode=workflow_run.get("parent_mode"),
     )
 
 
@@ -180,6 +200,16 @@ def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
     if not source_path.is_file():
         raise ValueError(f"필터 JSON 파일을 찾을 수 없습니다: {source_path}")
     mode = validate_workspace_mode(source_path.parent.name)
+    if (
+        source_path.parent.parent.name == "subfilters"
+        and source_path.parents[3].name != "03-filter"
+    ):
+        raise ValueError("파생 필터는 한 단계만 지원합니다.")
+    parent_mode = (
+        validate_workspace_mode(source_path.parents[2].name)
+        if source_path.parent.parent.name == "subfilters"
+        else None
+    )
 
     payload = json.loads(source_path.read_text(encoding="utf-8"))
     if (
@@ -197,13 +227,23 @@ def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
     )
     if not isinstance(filter_blocks, list):
         raise ValueError("필터 JSON에 steps.condition_input.filter_blocks가 없습니다.")
-    return {
+    result = {
         "format": "kind_disclosure_filter_preset_v1",
         "source_json_path": str(source_path),
         "name": mode,
         "mode": mode,
         "condition_blocks": filter_blocks,
     }
+    if parent_mode is not None:
+        if payload.get("parent_mode") != parent_mode:
+            raise ValueError(
+                "필터 JSON의 parent_mode와 폴더가 일치하지 않습니다."
+            )
+        result["id"] = f"{parent_mode}/{mode}"
+        result["parent_mode"] = parent_mode
+    else:
+        result["id"] = mode
+    return result
 
 
 def _job_snapshot(job_id: str) -> dict[str, Any]:
@@ -275,6 +315,9 @@ def create_workflows_router(
                 body.get("external_html_transfer_path")
             )
             workflow_run = begin_filter_workflow_payload(body)
+            if "parent_acpt_numbers" in workflow_run:
+                body["acpt_numbers"] = workflow_run["parent_acpt_numbers"]
+                body["restrict_acpt_numbers"] = True
             body["source_offset"] = workflow_run["source_offset"]
             body["source_expected_count"] = workflow_run[
                 "source_expected_count"
@@ -373,7 +416,7 @@ def create_workflows_router(
     @router.post("/api/disclosures/filter/presets")
     async def manage_disclosure_filter_presets(payload: dict[str, Any]):
         try:
-            return manage_filter_presets_payload(payload)
+            return await run_in_threadpool(manage_filter_presets_payload, payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

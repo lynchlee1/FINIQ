@@ -22,11 +22,41 @@ def _load_internal_html_integrity_source(
     source_json = internal_html_download._load_compressed_external_html_file_payload(
         source_path
     )
-    targets, source_json = (
-        internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(
-            source_json
+    if body.get("parent_mode") not in (None, ""):
+        filtered_json, _filtered_path = _load_workspace_filtered_payload(body)
+        child_acpt_numbers = collect_acpt_numbers_from_json(filtered_json)
+        records_by_acpt_no = {
+            acpt_no: record
+            for record, acpt_no in internal_html_download._validated_compressed_records(
+                source_json
+            )
+        }
+        missing = [
+            acpt_no
+            for acpt_no in child_acpt_numbers
+            if acpt_no not in records_by_acpt_no
+        ]
+        if missing:
+            raise ValueError(
+                "parent compressed external records are missing derived targets: "
+                + ", ".join(missing[:10])
+            )
+        source_json = {
+            **source_json,
+            "records": [records_by_acpt_no[acpt_no] for acpt_no in child_acpt_numbers],
+        }
+    if body.get("parent_mode") not in (None, ""):
+        targets, source_json = (
+            internal_html_download._collect_internal_targets_from_compressed_payload(
+                source_json
+            )
         )
-    )
+    else:
+        targets, source_json = (
+            internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(
+                source_json
+            )
+        )
 
     targets = _apply_limit_to_targets(targets, body.get("limit"))
     acpt_numbers = [target["acpt_no"] for target in targets]
@@ -66,6 +96,29 @@ def _clean_disclosure_html_output_directory_payload(
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     _ensure_safe_html_cleanup_directory(resolved_output_directory)
     dry_run = bool(body.get("dry_run", False))
+    if body.get("parent_mode") not in (None, ""):
+        _saved_paths, summary = _strictly_reuse_parent_html(
+            output_directory=resolved_output_directory,
+            acpt_numbers=acpt_numbers,
+            source_json=source_json if source_type == "external" else _source_json,
+        )
+        verified_integrity = summary.pop("_verified_integrity_by_acpt_no")
+        summary["_target_integrity_by_acpt_no"] = verified_integrity
+        summary["unexpected_file_count"] = 0
+        summary["unexpected_files"] = []
+        summary["deleted_files"] = []
+        return {
+            "format": "kind_disclosure_html_folder_cleanup_v1",
+            "source_type": source_type,
+            "source_path": source_path,
+            "output_directory": str(resolved_output_directory),
+            "dry_run": dry_run,
+            "requested_count": len(acpt_numbers),
+            "deleted_count": 0,
+            "deletion_candidate_count": 0,
+            "deletion_candidates": [],
+            **summary,
+        }
     if not dry_run and not _is_delete_confirmed(body):
         planned_summary = _delete_unexpected_html_output_directory_files(
             resolved_output_directory,
@@ -186,6 +239,23 @@ def create_external_html_integrity_baseline_payload(
         raise ValueError("No acpt_no values found in JSON")
     acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
     target_years = _target_years_from_json(source_json, acpt_numbers)
+    if body.get("parent_mode") not in (None, ""):
+        saved_paths, _verification = _strictly_reuse_parent_html(
+            output_directory=resolved_output_directory,
+            acpt_numbers=acpt_numbers,
+            source_json=source_json,
+        )
+        return {
+            "format": "finiq_disclosure_external_html_integrity_baseline_v1",
+            "cancelled": False,
+            "reused_parent_html": True,
+            "output_directory": str(resolved_output_directory),
+            "requested_count": len(acpt_numbers),
+            "hashed_count": len(saved_paths),
+            "manifest_path": str(
+                resolved_output_directory / HTML_MANIFEST_FILENAME
+            ),
+        }
     try:
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,
@@ -249,6 +319,23 @@ def create_internal_html_integrity_baseline_payload(
     source_json, _source_path, acpt_numbers, target_years = (
         _load_internal_html_integrity_source(body)
     )
+    if body.get("parent_mode") not in (None, ""):
+        saved_paths, _verification = _strictly_reuse_parent_html(
+            output_directory=resolved_output_directory,
+            acpt_numbers=acpt_numbers,
+            source_json=source_json,
+        )
+        return {
+            "format": "finiq_disclosure_internal_html_integrity_baseline_v1",
+            "cancelled": False,
+            "reused_parent_html": True,
+            "output_directory": str(resolved_output_directory),
+            "requested_count": len(acpt_numbers),
+            "hashed_count": len(saved_paths),
+            "manifest_path": str(
+                resolved_output_directory / HTML_MANIFEST_FILENAME
+            ),
+        }
     try:
         output_summary = _validate_html_output_directory_files(
             resolved_output_directory,

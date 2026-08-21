@@ -2,7 +2,8 @@
 
 ## Paths
 
-- `<data_root>/02-table/sqlite_manifest.json`과 그 파일이 가리키는 `<data_root>/02-table/<YYYY>.sqlite`를 입력으로 받아 `<data_root>/03-filter/<mode>/filter.json`에 조건과 실행 상태를, 같은 mode 폴더의 `filtered.json`에 전달 결과를 저장한다.
+- 기본 필터는 `<data_root>/02-table/sqlite_manifest.json`과 그 파일이 가리키는 `<data_root>/02-table/<YYYY>.sqlite`를 입력으로 받아 `<data_root>/03-filter/<mode>/filter.json`에 조건과 실행 상태를, 같은 mode 폴더의 `filtered.json`에 전달 결과를 저장한다.
+- 파생 필터는 `<data_root>/03-filter/<parent_mode>/filtered.json`을 입력으로 받아 `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filter.json`과 `filtered.json`을 저장한다.
 
 ### `<data_root>/02-table/sqlite_manifest.json`
 
@@ -20,9 +21,10 @@
 
 #### I/O Structure
 
-- mode를 정의하는 검색 조건, 실행 상태, 실행 metadata와 완료 또는 중단 결과를 함께 관리하는 원본 출력 파일이다.
+- mode를 정의하는 검색 조건, 실행 상태, 실행 metadata와 결과 요약을 관리하는 원본 출력 파일이다.
 - 실행 상태는 `ready`, `running`, `interrupted`, `completed`, `failed`다.
-- 완료 결과는 `result`, 중단된 증분 결과는 `pending.result`에 둔다.
+- 완료 결과는 기존 표준 전달 파일인 `filtered.json`, 중단된 증분 결과는 `filter.pending.json`에 두고 `filter.json`의 `result_file` 또는 `pending_file`로 참조한다.
+- `result_fingerprint`와 `pending_fingerprint`는 각 결과 파일의 canonical JSON SHA-256이며 파일명이 아니라 metadata에만 기록한다. 명시적 검사나 실행 시 파일 내용과 대조하고, 목록 조회는 결과 파일을 열지 않는다.
 - 결과에는 적용한 조건, 원본 공시 건수, 검색 시작 위치, 검색 대상 건수, 검사 완료 건수, 검색 결과 건수와 선택한 공시의 `acpt_no`를 기록한다.
 - 데이터베이스 입력은 실행 요청의 `data_root`로 정하고 manifest 절대 경로는 저장하지 않는다.
 
@@ -39,3 +41,23 @@
 #### Defaults and Exceptions
 
 - `<data_root>/03-filter` 바로 아래에는 `filtered.json`을 만들지 않는다.
+
+### `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filter.json`
+
+#### I/O Structure
+
+- 완료된 기본 필터에 추가 조건을 적용하는 한 단계 파생 필터의 원본 출력 파일이다.
+- `mode`에는 자식 이름, `parent_mode`에는 상위 기본 필터 이름을 기록한다.
+- `parent_result_fingerprint`는 실행에 사용한 상위 `filtered.json` 결과를 식별한다.
+- 상위 결과의 현재 fingerprint와 다르면 파생 결과는 stale이며 후속 단계의 입력으로 사용할 수 없다.
+
+### `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`
+
+#### I/O Structure
+
+- 파생 필터가 선택한 공시만 담는 전달 파일이며 모든 `acpt_no`는 상위 `<parent_mode>/filtered.json`에도 존재한다.
+- 상위 필터가 변경되면 이 파일을 자동 보완하거나 다른 입력으로 대신하지 않는다.
+
+#### Defaults and Exceptions
+
+- 파생 필터 아래에 다시 `subfilters`를 만들지 않는다.

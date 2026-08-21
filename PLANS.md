@@ -1,5 +1,41 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-21: filter inspection issue text uses a plain Korean sentence
+
+- Purpose: replace the mechanical step-name list `데이터베이스 검색, 결과 기록이 완료되지 않았습니다` with a sentence that says what is actually left to do.
+- Implementation: a ready folder now reads `조건만 저장되어 있고 검색은 아직 실행하지 않았습니다`. Interrupted, failed, and running folders use matching sentences (`검색이 중단되었습니다`, `검색에 실패했습니다`, `검색을 실행하는 중입니다`). Failed steps still append the stored error when present.
+- Verification: `node --test tests/frontend/pathLayout.test.mjs tests/frontend/derivedDisclosureFilter.test.mjs tests/frontend/disclosureIntegrityCards.test.mjs` passed (40 tests). `git diff --check` passes on the touched files. Browser tools were not available, so the inspection card was not clicked in the UI.
+
+## 2026-08-21: disclosure filter type controls sit in 공시 조건
+
+- Purpose: stop `공시내역 필터링` from presenting `기본 필터` / `파생 필터` as a separate hardcoded taxonomy, and stop seeding the filter name from parse-mode keys.
+- Implementation: removed the `필터 구조` card and `FILTER_MODE_KEYS` / `html_parse_mode` seed. The workspace-saved filter list and the `기본 필터` / `파생 필터` choice now live inside `공시 조건`, with helper text that names the actual criterion: a top-level filter reads stage 02 and owns later HTML, while a derived filter adds conditions to one completed parent. The selector lists only the current level, and a typed child name no longer collides with a top-level identity.
+- Verification: `node --test` on the derived-filter, path-layout, condition-input, html-parse, automation, and integrity-card frontend tests passed 61 tests. `git diff --check` passes on the touched files. Browser tools were not available, so the live `공시 조건` card was not clicked.
+
+## 2026-08-21: filter inspection issue text names unfinished processing steps
+
+- Purpose: make `공시내역 필터링` inspection failures say which processing step is unfinished, instead of repeating the workflow status `입력 완료`.
+- Implementation: inspection still treats any non-`completed` folder as an issue, but the failed-step detail now names `조건 입력`, `데이터베이스 검색`, and `결과 기록`. A ready folder such as `bond_issuance_kosdaq` reads `데이터베이스 검색, 결과 기록이 완료되지 않았습니다`. Failed steps include the stored error when present.
+- Verification: `node --test tests/frontend/pathLayout.test.mjs tests/frontend/derivedDisclosureFilter.test.mjs tests/frontend/disclosureIntegrityCards.test.mjs` passed (40 tests). Live inspect of `database` returned the two ready folders `bond_issuance_kosdaq` and `rights_issuance_kosdaq`; the new copy for both is `데이터베이스 검색, 결과 기록이 완료되지 않았습니다`. `/filter` and `/api/config` returned 200. Browser tools were not available, so the inspection card was not clicked in the UI. `git diff --check` passes on the touched files.
+
+## 2026-08-21: disclosure page initial-load and legacy filter storage repair
+
+- Purpose: remove the 1.27-second initial-load bottleneck shared by disclosure pages 03, 04, 05, and 07, migrate the live legacy filter database without losing results, and prevent stale Turbopack chunks from leaving the loading spinner permanently visible.
+- Implementation: split embedded completed and interrupted filter payloads into the stable `filtered.json` and `filter.pending.json` files, kept only metadata, summaries, and fingerprints in `filter.json`, and made list/save/delete paths metadata-only. Hashes remain metadata and are never used as filenames. Added strict fingerprint validation for full reads, atomic result/metadata writes, migration tooling, shared frontend preset and settings request caches, and thread-pool execution for the synchronous preset service. Migrated all five live `database/03-filter` workflows directly; removed the temporary hash-named result files, one orphaned ready-state `filtered.json`, and `.DS_Store`. The three completed payloads remain in their existing canonical `filtered.json` files while each metadata file is 8 KB or smaller. Development startup now validates and removes only the exact stale `.next/dev` cache, refuses cleanup while its recorded server PID is alive, and permits `127.0.0.1` dev chunks so Next.js does not block hydration.
+- Verification: the preset list API now takes 2.07–4.85 ms over 20 calls, down from about 1.27 seconds. During a concurrent 112 MB full inspection lasting 1.87 seconds, `/api/config` responded in 1.88 ms. After warm-up, all 01–09 development route requests completed in 10–18 ms; the filter page hydrated after a clean restart with no browser warning, error, ChunkLoadError, or persistent spinner. Filter workflow tests pass (78), related backend suites pass with 447 passed and 166 skipped except one unrelated dirty-worktree utility-label contract failure, and all 176 frontend tests pass. Python compilation and `git diff --check` pass. Production compilation succeeds, then its existing type-check stage remains blocked by the two pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
+
+## 2026-08-21: one-level derived disclosure filters
+
+- Purpose: let a child filter apply additional conditions only to a completed parent filter result, while preventing the child from downloading or storing duplicate external and internal HTML.
+- Implementation: added `03-filter/<parent>/subfilters/<child>` workflow storage with canonical parent-result fingerprints, strict subset and stale-parent validation, separate child `mode` and `parent_mode` identities, and parent-delete protection. Manual stages 04–07 now validate and reuse the parent's v2 manifests, compressed metadata, and raw HTML without copies, links, child HTML folders, or network fallback; parsing selects the child membership before applying limits and stores its result under `07-converted/<parent>/subfilters/<child>` to keep the full filter identity. The filter, HTML download, and parse pages preserve the parent/child identity. Automation remains limited to top-level filters because its v1 profile does not store `parent_mode`.
+- Verification: the combined filter workflow, workspace, HTML resilience, service, and automation suites pass with 522 passed and 166 skipped; one unrelated dirty-worktree UI contract test was deselected. Frontend tests pass with 176 tests. Python compilation and `git diff --check` pass. The existing TypeScript check still reports the two pre-existing `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
+
+## 2026-08-21: issuance investor entity cell boundary
+
+- Purpose: prevent `bond_issuance` and `rights_issuance` investor classification from treating a company marker embedded in descriptive mid-text as proof of a Company entity; keep table extraction at one complete cell per entity.
+- Implementation: retained the existing parser contract that reads each investor from one designated table cell without splitting it. Restricted Korean company legal-form detection to markers at the start or end of that complete cell, retained end-anchored foreign company forms, and documented that inner descriptions or names are not separately entityized.
+- Verification: the focused bond/rights parser suites pass with 56 passed and 166 skipped, including explicit bond and rights cases that preserve one entity per table cell. All 22 ontology-builder tests pass, including negative cases for company markers embedded in descriptive mid-text. Python compilation and `git diff --check` pass; Ruff is not installed in the workspace.
+
 ## 2026-08-20: bond-issuance section boundary and investor entity accuracy
 
 - Purpose: prevent correction history and total rows from creating stale or false bond-acquisition relationships, while keeping correction handling in the existing HTML section stage and classifying disclosed investor legal forms more accurately.

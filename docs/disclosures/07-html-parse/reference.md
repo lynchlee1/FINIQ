@@ -12,6 +12,7 @@
 
 - 필수 입력: `<data_root>/06-sections/<YYYY>/<acpt_no>.html`
 - 선택 입력: `<data_root>/03-filter/<mode>/filtered.json`
+- 파생 필터 입력: `<data_root>/03-filter/<parent_mode>/subfilters/<filter_mode>/filtered.json`
 - 선택 입력: `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`
 - 출력: `<data_root>/07-converted/<mode>/parsed-<mode>.json`
 
@@ -36,6 +37,8 @@
 | --- | --- | --- |
 | `filtered_metadata_path` | 파일 경로 | 회사명, 시장, 공시시각을 연결할 `filtered.json` |
 | `compressed_metadata_path` | 파일 경로 | 제목, 본문 문서번호, 정정공시 묶음을 연결할 압축 metadata |
+| `filter_mode` | 문자열 | 03단계 멤버십을 소유한 필터 mode; 파생 필터에서는 자식 mode |
+| `parent_mode` | 문자열 | `filter_mode`가 한 단계 파생 필터일 때의 상위 기본 필터 mode |
 | `limit` | 1 이상의 정수 | 정렬된 입력 중 앞에서 몇 건을 처리할지 제한; 기본값은 제한 없음 |
 | `progress_interval` | 1 이상의 정수 | `1000`; `skip_errors=true`일 때 이 건수마다 중간 결과를 저장 |
 | `parallel_workers` | 1 이상의 정수 | 기본값은 가용 CPU 수이며 입력 파일 수를 넘지 않음 |
@@ -46,6 +49,8 @@
 ```json
 {
   "mode": "<mode>",
+  "filter_mode": "<filter_mode>",
+  "parent_mode": "<parent_mode>",
   "input_directory": "/data/06-sections",
   "output_directory": "/data/07-converted/<mode>",
   "skip_errors": true,
@@ -116,6 +121,7 @@ N=1             N=2      N=3
 - 각 `acpt_no`는 비어 있지 않고 서로 달라야 한다.
 - 선택한 모든 HTML에 `YYYY-MM-DD HH:MM` 형식의 `disclosed_at`이 있어야 한다.
 - `market`이 `유가증권`이면 결과에는 `코스피`로 저장한다.
+- 파생 필터는 `filter_mode=<자식>`, `parent_mode=<상위>`를 함께 지정한다. 작업공간 기본 경로는 자식의 중첩 `filtered.json`으로 정하고, `mode`는 상위 HTML에 맞는 parser를 선택한다.
 
 ### Compressed External HTML Metadata
 
@@ -126,6 +132,7 @@ N=1             N=2      N=3
 - 각 record에는 비어 있지 않은 `acpt_no`, `selected_main_doc_no`와 `metadata` 객체가 있어야 한다.
 - `title`은 결과 record의 `title`, `selected_main_doc_no`는 `doc_no`가 된다.
 - `mainDoc`가 둘 이상이고 모든 문서를 연결할 수 있을 때만 correction family를 만든다.
+- 파생 필터는 상위 기본 필터의 압축 metadata를 읽되 자식 `filtered.json`의 `acpt_no` 부분집합만 변환한다.
 
 ## Saved Result
 

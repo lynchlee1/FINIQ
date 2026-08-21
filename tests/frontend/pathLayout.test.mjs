@@ -317,12 +317,11 @@ test("disclosure filter removes the parser mode from the data path card", async 
 
   assert.ok(dataPathCard, "필터 페이지는 공용 데이터 경로 카드를 써야 합니다.");
   assert.match(source, /const \[mode, setMode\] = useState\(""\)/);
-  assert.match(source, /data_root: rootDirectory,\s*mode: selectedPreset\.trim\(\) \|\| mode,/);
+  assert.match(source, /data_root: rootDirectory,\s*mode: currentFilterMode,/);
   assert.doesNotMatch(source, /workflow_name/);
-  assert.match(source, /const filterMode = selectedPreset\.trim\(\) \|\| mode;/);
+  assert.match(source, /const filterMode = currentFilterMode;/);
   assert.match(source, /if \(!filterMode\) \{[\s\S]*?조건검색 필터를 선택하세요/);
   assert.doesNotMatch(dataPathCard, /파싱 모드/);
-  assert.doesNotMatch(dataPathCard, /<select/);
 });
 
 test("disclosure filter initializes counts to 1000 and submits them without fallback", async () => {
@@ -352,7 +351,7 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.doesNotMatch(conditionCardSource, /placeholder="프리셋 이름"/);
   assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
   assert.doesNotMatch(conditionCardSource, /onRenamePreset/);
-  assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!presets\.some\(\(preset\) => preset\.name === selectedPreset\)\}/);
+  assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!presets\.some\(\(preset\) => \(getPresetIdentity\?\.\(preset\) \?\? preset\.name\) === selectedPreset\)\}/);
   assert.match(conditionCardSource, /DisclosureFilterConnector = "" \| "AND" \| "XOR" \| "OR"/);
   assert.match(conditionCardSource, /<option value="XOR">XOR<\/option>/);
   assert.match(conditionCardSource, /mixed condition block connectors must be separated by parentheses/);
@@ -529,9 +528,14 @@ test("disclosure filter inspection checks every folder without a selected filter
   assert.match(handler, /action: "inspect"/);
   assert.match(handler, /data_root: dataRoot/);
   assert.match(handler, /response\.presets\s*\.filter\(\(preset\) => preset\.status !== "completed"\)/);
+  assert.match(handler, /\.map\(describeFilterInspectionIssue\)/);
   assert.match(handler, /isCurrentPresetWorkspace\(dataRoot, requestId\)/);
   assert.doesNotMatch(handler, /selectedPreset|selectedWorkflow|condition_blocks/);
+  assert.doesNotMatch(source, /FILTER_WORKFLOW_STATUS_LABELS\[preset\.status\]/);
   assert.match(source, /title: "조건검색 폴더 전체 검사"/);
+  assert.match(source, /조건만 저장되어 있고 검색은 아직 실행하지 않았습니다/);
+  assert.match(source, /검색이 중단되었습니다/);
+  assert.match(source, /검색에 실패했습니다/);
 });
 
 test("disclosure automation exposes filter presets for every dependent stage range", async () => {
@@ -554,7 +558,7 @@ test("disclosure filter keeps workflow status scoped to the active workspace", a
     (source.match(/if \(!isCurrentPresetWorkspace\(dataRoot, requestId\)\) return;/g) || []).length >= 6,
     "모든 비동기 프리셋 응답은 현재 작업공간에만 적용해야 합니다.",
   );
-  assert.match(source, /const filterMode = selectedPreset\.trim\(\) \|\| mode;/);
+  assert.match(source, /const filterMode = currentFilterMode;/);
   assert.match(source, /status: "running"/);
   assert.match(source, /streamOutcome === "aborted"/);
   assert.match(source, /workflow\?\.status !== "running"/);

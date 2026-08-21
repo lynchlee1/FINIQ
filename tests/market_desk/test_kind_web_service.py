@@ -9653,6 +9653,35 @@ def test_parse_bond_issuance_collects_multiple_issue_targets() -> None:
     assert "발행대상자세부엔티티" not in parsed
 
 
+def test_parse_bond_issuance_keeps_one_investor_per_table_cell(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "20260821000001.html"
+    body_html = """
+    <html><body>
+      <table>
+        <tr><td>1. 사채의 종류</td><td>회차</td><td>1</td><td>종류</td><td>무보증 전환사채</td></tr>
+        <tr><td>2. 사채의 권면총액 (원)</td><td>1,000</td></tr>
+        <tr><td>3. 자금조달의 목적</td><td>운영자금 (원)</td><td>1,000</td></tr>
+      </table>
+      <table>
+        <tr><th>발행 대상자명</th><th>발행권면총액(원)</th></tr>
+        <tr><td>삼성증권 주식회사<br>(본건 펀드의 신탁업자 지위에서)</td><td>1,000</td></tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_bond_issuance(
+        body_html.encode("utf-8"),
+        file_path=fixture_path,
+        title="전환사채권발행결정",
+    )
+
+    assert parsed["투자자"] == [
+        ["삼성증권 주식회사 (본건 펀드의 신탁업자 지위에서)", 1_000]
+    ]
+
+
 def test_parse_bond_issuance_excludes_whitespace_separated_total_investor_row(
     tmp_path: Path,
 ) -> None:

@@ -20,6 +20,20 @@
 - `<YYYY>`는 필터 결과의 `disclosures[].disclosed_at` 연도에서 정한다. 호환 field나 중첩된 값을 탐색하지 않으며 `acpt_no`에서 연도를 추론하지 않는다.
 - 원본 화면 전체는 압축 JSON에 복사하지 않고 연도별 HTML 파일로 보존한다.
 
+### Reuse the Parent Filter's External HTML
+
+#### Behavior
+
+파생 필터는 상위 기본 필터가 소유한 외부 HTML, manifest와 압축 문서 선택 정보를 그대로 사용한다. 파생 필터의 접수번호 부분집합만 상위 산출물과 대조하고 다시 내려받거나 별도 출력 폴더를 만들지 않는다.
+파생 필터의 압축 실행도 상위 `compressed-external-html.json`에서 자기 멤버십과 원문 hash/size를 검증만 하며 파일을 다시 쓰지 않는다.
+
+#### Defaults and Exceptions
+
+- 파생 필터의 `parent_result_fingerprint`가 현재 상위 결과와 같아야 한다.
+- 파생 필터의 모든 `acpt_no`가 상위 `filtered.json`, manifest와 `compressed-external-html.json`에 존재하고 각 해시 검증을 통과해야 한다.
+- 상위 산출물이 없거나 미완료·손상 상태이거나 파생 필터가 stale이면 실패 처리한다.
+- 누락된 항목을 KIND에서 다시 받거나 파생 필터 전용 04단계 산출물을 만드는 fallback은 사용하지 않는다.
+
 ### Retry Failed External HTML Downloads
 
 #### Behavior

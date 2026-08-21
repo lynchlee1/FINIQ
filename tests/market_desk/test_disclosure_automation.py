@@ -780,7 +780,15 @@ def test_stage_three_uses_saved_workflow_and_filters_only_new_rows(
             tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
         ).read_text(encoding="utf-8")
     )
-    assert canonical["result"] == transfer
+    stored_result = json.loads(
+        (
+            tmp_path
+            / "03-filter"
+            / "bond_issuance"
+            / canonical["result_file"]
+        ).read_text(encoding="utf-8")
+    )
+    assert stored_result == transfer
 
 
 def test_stage_three_rejects_runtime_conditions_that_differ_from_workflow(

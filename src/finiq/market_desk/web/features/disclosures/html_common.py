@@ -257,14 +257,111 @@ def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
             raise ValueError(f"{key} is not supported; use data_root and mode")
     workspace = resolve_disclosure_workspace(body.get("data_root") or "")
     mode = validate_workspace_mode(body.get("mode"))
-    source_path = workspace.filtered / mode / "filtered.json"
+    parent_mode_raw = body.get("parent_mode")
+    parent_mode = (
+        validate_workspace_mode(parent_mode_raw)
+        if parent_mode_raw not in (None, "")
+        else None
+    )
+    source_path = workspace.filter_mode(mode, parent_mode=parent_mode) / "filtered.json"
     if not source_path.is_file():
         raise ValueError(f"filtered disclosure JSON does not exist: {source_path}")
     payload = json.loads(source_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("format") != "kind_disclosure_filter_v1":
+    if (
+        not isinstance(payload, dict)
+        or payload.get("format") != "kind_disclosure_filter_v1"
+    ):
         raise ValueError(f"filtered disclosure JSON has an invalid format: {source_path}")
     collect_acpt_numbers_from_json(payload)
+    if parent_mode is not None:
+        if str(payload.get("parent_mode") or "").strip() != parent_mode:
+            raise ValueError(
+                f"derived filtered disclosure parent_mode does not match: {source_path}"
+            )
+        parent_path = workspace.filter_mode(parent_mode) / "filtered.json"
+        if not parent_path.is_file():
+            raise ValueError(
+                f"parent filtered disclosure JSON does not exist: {parent_path}"
+            )
+        parent_payload = json.loads(parent_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(parent_payload, dict)
+            or parent_payload.get("format") != "kind_disclosure_filter_v1"
+        ):
+            raise ValueError(
+                f"parent filtered disclosure JSON has an invalid format: {parent_path}"
+            )
+        parent_acpt_numbers = set(collect_acpt_numbers_from_json(parent_payload))
+        child_acpt_numbers = collect_acpt_numbers_from_json(payload)
+        unexpected = [
+            acpt_no
+            for acpt_no in child_acpt_numbers
+            if acpt_no not in parent_acpt_numbers
+        ]
+        if unexpected:
+            raise ValueError(
+                "derived filtered disclosure contains targets outside its parent: "
+                + ", ".join(unexpected[:10])
+            )
+        expected_fingerprint = _source_json_fingerprint(parent_payload)
+        actual_fingerprint = str(
+            payload.get("parent_result_fingerprint") or ""
+        ).strip()
+        if actual_fingerprint != expected_fingerprint:
+            raise ValueError(
+                f"derived filtered disclosure parent result is stale: {source_path}"
+            )
     return payload, str(source_path)
+
+
+def _strictly_reuse_parent_html(
+    *,
+    output_directory: Path,
+    acpt_numbers: list[str],
+    source_json: Any,
+) -> tuple[list[Path], dict[str, Any]]:
+    """Validate a derived filter's target subset against parent-owned HTML."""
+    target_years = _target_years_from_json(source_json, acpt_numbers)
+    output_summary = _validate_html_output_directory_files(
+        output_directory,
+        acpt_numbers,
+        target_years=target_years,
+        allow_unexpected=True,
+        collect_integrity=True,
+    )
+    actual_integrity = output_summary.pop("_target_integrity_by_acpt_no")
+    manifest_format, _source_fingerprint, _expected_integrity = (
+        _load_html_manifest_integrity(output_directory)
+    )
+    if manifest_format != HTML_MANIFEST_FORMAT_V2:
+        raise ValueError(
+            "derived filter HTML reuse requires a complete parent v2 manifest: "
+            f"{output_directory / HTML_MANIFEST_FILENAME}"
+        )
+    integrity_summary = _inspect_html_integrity(
+        output_directory,
+        acpt_numbers,
+        source_json=source_json,
+        structurally_valid_acpt_numbers=output_summary[
+            "existing_target_acpt_numbers"
+        ],
+        actual_integrity_by_acpt_no=actual_integrity,
+    )
+    missing = list(output_summary["missing_target_acpt_numbers"])
+    invalid = list(output_summary["invalid_target_acpt_numbers"])
+    unverified = list(integrity_summary["hash_unverified_target_acpt_numbers"])
+    mismatched = list(integrity_summary["hash_mismatch_target_acpt_numbers"])
+    if missing or invalid or unverified or mismatched:
+        raise ValueError(
+            "parent-owned HTML cannot be reused for the derived filter: "
+            f"missing={missing[:10]}, invalid={invalid[:10]}, "
+            f"unverified={unverified[:10]}, hash_mismatch={mismatched[:10]}"
+        )
+    paths = [
+        _target_html_path(output_directory, acpt_no, target_years=target_years)
+        for acpt_no in acpt_numbers
+    ]
+    return paths, {**output_summary, **integrity_summary}
 
 
 def _year_from_disclosure(

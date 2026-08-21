@@ -78,11 +78,13 @@
 
 #### Behavior
 
-투자자 이름이 수집한 회사와 일치하지 않으면 이름 표기를 기준으로 Person, Company 또는 Organization node를 만든다.
+- 투자자 이름이 수집한 회사와 일치하지 않으면 이름 표기를 기준으로 Person, Company 또는 Organization node를 만든다.
+- `bond_issuance`와 `rights_issuance`의 투자자는 07단계가 지정 열에서 읽은 셀 전체를 entity 하나로 사용한다. 셀 안의 설명이나 다른 이름 일부를 별도 entity로 추출하지 않는다.
 
 #### Defaults and Exceptions
 
 - 이 이름 표기 분류는 발행 공시의 투자자에 적용한다. 주주총회 주체는 07단계가 source 문맥으로 정한 `entity_type`을 유지한다.
+- Company 법적 표기는 셀 전체 이름의 시작이나 끝에 있을 때만 분류 근거로 사용한다. 셀 중간 문장에 나온 표기로 Company를 추론하지 않는다.
 
 ### Connect Acquisition Relationships
 

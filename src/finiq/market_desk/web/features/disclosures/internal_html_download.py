@@ -335,6 +335,89 @@ def download_disclosure_internal_html_payload(
         raise ValueError(msg)
     source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
     compressed_payload = _load_compressed_external_html_file_payload(source_path)
+    parent_mode_raw = body.get("parent_mode")
+    if parent_mode_raw not in (None, ""):
+        workspace = resolve_disclosure_workspace(body.get("data_root") or "")
+        mode = validate_workspace_mode(body.get("mode"))
+        parent_mode = validate_workspace_mode(parent_mode_raw)
+        expected_source_path = (
+            workspace.external_owner_mode(mode, parent_mode=parent_mode)
+            / COMPRESSED_EXTERNAL_HTML_FILENAME
+        ).resolve()
+        if source_path != expected_source_path:
+            raise ValueError(
+                "derived filter internal HTML must use its parent's compressed "
+                "external records: "
+                f"{expected_source_path}"
+            )
+        source_json, _source_json_path = _load_workspace_filtered_payload(body)
+        child_acpt_numbers = collect_acpt_numbers_from_json(source_json)
+        child_acpt_numbers = _apply_limit_to_acpt_numbers(
+            child_acpt_numbers, body.get("limit")
+        )
+        parent_records = {
+            acpt_no: record
+            for record, acpt_no in _validated_compressed_records(compressed_payload)
+        }
+        missing_records = [
+            acpt_no for acpt_no in child_acpt_numbers if acpt_no not in parent_records
+        ]
+        if missing_records:
+            raise ValueError(
+                "parent compressed external records are missing derived targets: "
+                + ", ".join(missing_records[:10])
+            )
+        derived_compressed_payload = {
+            **compressed_payload,
+            "records": [parent_records[acpt_no] for acpt_no in child_acpt_numbers],
+        }
+        if child_acpt_numbers:
+            _targets, _ = _collect_internal_targets_from_compressed_payload(
+                derived_compressed_payload
+            )
+        resolved_output_directory = Path(output_directory).expanduser().resolve()
+        expected_output_directory = workspace.internal_owner_mode(
+            mode, parent_mode=parent_mode
+        ).resolve()
+        if resolved_output_directory != expected_output_directory:
+            raise ValueError(
+                "derived filter internal HTML must use its parent-owned directory: "
+                f"{expected_output_directory}"
+            )
+        saved_paths, integrity = _strictly_reuse_parent_html(
+            output_directory=resolved_output_directory,
+            acpt_numbers=child_acpt_numbers,
+            source_json=derived_compressed_payload,
+        )
+        verification = _verify_internal_download_membership(
+            expected_acpt_numbers=child_acpt_numbers,
+            saved_paths=saved_paths,
+            allow_missing=False,
+        )
+        verification["hash_verified_target_html_count"] = integrity[
+            "hash_verified_target_html_count"
+        ]
+        return {
+            "format": "kind_disclosure_internal_html_download_v1",
+            "mode": mode,
+            "parent_mode": parent_mode,
+            "reused_parent_html": True,
+            "network_fetch_count": 0,
+            "output_directory": str(resolved_output_directory),
+            "requested_count": len(child_acpt_numbers),
+            "saved_count": len(saved_paths),
+            "cancelled": False,
+            "acpt_numbers": child_acpt_numbers,
+            "saved_files": [str(path) for path in saved_paths],
+            "manifest_path": str(
+                resolved_output_directory / HTML_MANIFEST_FILENAME
+            ),
+            "verification": verification,
+            "progress_log": [
+                f"부모 필터 {parent_mode}의 내부 HTML "
+                f"{len(saved_paths)}건을 재사용했습니다."
+            ],
+        }
     targets, source_json = _collect_internal_targets_from_compressed_payload(
         compressed_payload
     )

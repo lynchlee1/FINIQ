@@ -241,6 +241,9 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Internal HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | Disclosure filter mode folder | 파싱 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. |
 | Disclosure filter selector | 조건검색 필터 | Typeable dropdown of mode-owned `filter.json` files. Selecting an existing name immediately applies its conditions. Typing a new valid mode name and saving creates that filter. Do not add a separate name field, rename action, or manual load action on `공시내역 필터링`. |
+| Disclosure top-level filter | 기본 필터 | A filter that reads stage 02 directly and owns its stage 04 and 05 raw HTML. Choose it inside `공시 조건` when creating a `조건검색 필터`. The selector lists workspace-saved filters, not a hardcoded parse-mode list. |
+| Disclosure derived filter | 파생 필터 | A one-level child filter that applies additional conditions to a completed `기본 필터`. Display it as `<상위> › <자식>` while sending the child `mode` and `parent_mode` separately. Choose it inside `공시 조건`. |
+| Disclosure derived-filter parent | 상위 필터 | A completed `기본 필터` selected as the input of a `파생 필터`. Do not offer another derived filter as a parent. |
 | Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. The page opens in `공시내역 제목 검색`. |
 | Disclosure filter existing-data inspection scope | 조건검색 폴더 전체 검사 | Manual inspection on stage 03 checks every mode-owned `03-filter/<mode>/filter.json` independently; it does not require a selected `조건검색 필터`. |
