@@ -48,12 +48,22 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
 
-    html_files = _collect_html_files(input_directory, None)
     filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
+    allowed_acpt_numbers = _derived_allowed_acpt_numbers(
+        body,
+        mode=mode,
+        filtered_metadata_path=filtered_metadata_path,
+    )
+    html_files = _collect_html_files(
+        input_directory,
+        None,
+        allowed_acpt_numbers=allowed_acpt_numbers,
+    )
     metadata_index, _ = _load_html_parse_metadata(
         input_directory,
         filtered_metadata_path=filtered_metadata_path,
         compressed_metadata_path=compressed_metadata_path,
+        allowed_acpt_numbers=allowed_acpt_numbers,
     )
     _validate_explicit_kind_disclosed_at_metadata(
         html_files,
@@ -166,12 +176,22 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
 
-    html_files = _collect_html_files(input_directory, None)
     filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
+    allowed_acpt_numbers = _derived_allowed_acpt_numbers(
+        body,
+        mode=mode,
+        filtered_metadata_path=filtered_metadata_path,
+    )
+    html_files = _collect_html_files(
+        input_directory,
+        None,
+        allowed_acpt_numbers=allowed_acpt_numbers,
+    )
     metadata_index, _ = _load_html_parse_metadata(
         input_directory,
         filtered_metadata_path=filtered_metadata_path,
         compressed_metadata_path=compressed_metadata_path,
+        allowed_acpt_numbers=allowed_acpt_numbers,
     )
     _validate_explicit_kind_disclosed_at_metadata(
         html_files,

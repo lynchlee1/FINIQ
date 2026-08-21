@@ -3,6 +3,7 @@ import { apiGet, apiPost } from "@/api/client";
 
 let cachedSettings: Record<string, any> | null = null;
 let settingsRequest: Promise<Record<string, any>> | null = null;
+let settingsWriteId = 0;
 
 interface SettingsState {
   parallel_worker_count: number;
@@ -95,10 +96,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fetchSettings: async () => {
     let config = cachedSettings;
     if (!config) {
+      const writeId = settingsWriteId;
       settingsRequest ||= apiGet<Record<string, any>>("/api/config")
         .then((config) => {
-          cachedSettings = config;
-          return config;
+          if (writeId === settingsWriteId) {
+            cachedSettings = config;
+          }
+          return cachedSettings ?? config;
         })
         .finally(() => {
           settingsRequest = null;
@@ -136,6 +140,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSetting: async (key, value) => {
     try {
       const config = await apiPost<any>("/api/settings", { [key]: value });
+      settingsWriteId += 1;
       cachedSettings = config;
       set((state) => ({ ...state, ...config }));
       return true;
@@ -148,6 +153,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveSettings: async (payload) => {
     try {
       const config = await apiPost<any>("/api/settings", payload);
+      settingsWriteId += 1;
       cachedSettings = config;
       set((state) => ({ ...state, ...config }));
       return true;

@@ -28,6 +28,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
         raise
 
     mode = str(payload.get("mode") or "")
+    parser_method = _require_payload_parser_method(payload)
     summary_only = bool(body.get("summary_only"))
     requested_family_id = body.get("family_id")
     limit = _parse_limit(body.get("limit"))
@@ -65,7 +66,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             continue
         family_records.setdefault(family_id, []).append((index, record))
 
-    comparison_fields = list(CHANGE_LOG_COMPARISON_FIELDS.get(mode, ()))
+    comparison_fields = list(CHANGE_LOG_COMPARISON_FIELDS.get(parser_method, ()))
 
     families: list[dict[str, Any]] = []
     # Sort families by family_id descending (latest first) for better responsiveness and early exit
@@ -77,7 +78,7 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
             sorted_records, sorted_records[1:]
         ):
             change = _build_record_change(
-                mode=mode,
+                parser_method=parser_method,
                 before_record=before_record,
                 after_record=after_record,
                 before_index=before_index,

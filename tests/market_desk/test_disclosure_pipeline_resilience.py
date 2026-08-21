@@ -17,6 +17,9 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
 )
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
     _build_parse_request,
+    _collect_html_files,
+    _derived_allowed_acpt_numbers,
+    _parse_metadata_paths,
 )
 from finiq.market_desk.web.features.disclosures.internal_html_download import (
     download_disclosure_internal_htmls,
@@ -326,6 +329,62 @@ def test_derived_parse_selects_child_membership_before_limit(tmp_path: Path) -> 
     assert request.parser_method == "bond_issuance"
     assert request.html_files == [child.resolve()]
     assert parent_only.resolve() not in request.html_files
+
+
+def test_derived_preview_selects_child_membership_before_scan(tmp_path: Path) -> None:
+    input_directory = tmp_path / "sections"
+    year_directory = input_directory / "2025"
+    year_directory.mkdir(parents=True)
+    parent_only = year_directory / "20250101000001.html"
+    child = year_directory / "20250101000002.html"
+    parent_only.write_text(_valid_html("parent"), encoding="utf-8")
+    child.write_text(_valid_html("child"), encoding="utf-8")
+    data_root = tmp_path / "workspace"
+    parent_disclosure = {
+        "acpt_no": parent_only.stem,
+        "disclosed_at": "2025-01-01 09:00",
+    }
+    child_disclosure = {
+        "acpt_no": child.stem,
+        "disclosed_at": "2025-01-02 09:00",
+    }
+    _write_derived_filter(
+        data_root,
+        parent_mode="bond_issuance",
+        mode="child",
+        parent_disclosures=[parent_disclosure, child_disclosure],
+        child_disclosures=[child_disclosure],
+    )
+    body = {
+        "data_root": str(data_root),
+        "mode": "child",
+        "parent_mode": "bond_issuance",
+        "parser_method": "bond_issuance",
+        "input_directory": str(input_directory),
+        "filtered_metadata_path": str(
+            data_root
+            / "03-filter"
+            / "bond_issuance"
+            / "subfilters"
+            / "child"
+            / "filtered.json"
+        ),
+    }
+    filtered_metadata_path, _compressed = _parse_metadata_paths(body)
+    allowed_acpt_numbers = _derived_allowed_acpt_numbers(
+        body,
+        mode="child",
+        filtered_metadata_path=filtered_metadata_path,
+    )
+    html_files = _collect_html_files(
+        input_directory,
+        None,
+        allowed_acpt_numbers=allowed_acpt_numbers,
+    )
+
+    assert allowed_acpt_numbers == {child.stem}
+    assert html_files == [child.resolve()]
+    assert parent_only.resolve() not in html_files
 
 
 def test_derived_external_html_rejects_corrupt_parent_file(tmp_path: Path) -> None:

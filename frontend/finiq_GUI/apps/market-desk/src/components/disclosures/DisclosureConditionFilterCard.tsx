@@ -960,7 +960,7 @@ export function DisclosureConditionFilterCard({
         </div>
 
         <div className="grid gap-2">
-          <div className="flex items-center gap-1.5">
+          <div className="flex h-5 items-center gap-1.5">
             <Label className="inline-flex h-5 items-center leading-none dark:text-slate-300">조건 블록</Label>
             <FieldHelpPopover />
           </div>

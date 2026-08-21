@@ -54,6 +54,17 @@ test("08 correction history surfaces backend input errors", async () => {
   assert.match(source, /throw new Error\(data\.detail \|\| "상세 변동 기록을 불러오지 못했습니다\."\)/);
 });
 
+test("08 correction history selects workspace filters instead of parser keys", async () => {
+  const source = await readFile(pagePath, "utf8");
+
+  assert.match(source, /listDisclosureConditionPresets\(dataRoot\)/);
+  assert.match(source, /label: "모드"/);
+  assert.match(source, /mode: currentFilterMode/);
+  assert.doesNotMatch(source, /const PARSE_MODES/);
+  assert.doesNotMatch(source, /파싱 모드/);
+  assert.doesNotMatch(source, /changeMode \|\| "bond_issuance"/);
+});
+
 test("numbered workflow groups render zero-padded stage numbers", async () => {
   const source = await readFile(sidebarPath, "utf8");
 

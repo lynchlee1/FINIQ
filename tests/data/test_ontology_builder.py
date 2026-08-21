@@ -416,6 +416,92 @@ def test_build_ontology_graph(tmp_path: Path):
     assert query_service.search_investors_disambiguation("   ") == []
 
 
+def test_build_ontology_graph_skips_null_pair_rows(tmp_path: Path):
+    rights_parsed = tmp_path / "parsed-rights_issuance.json"
+    rights_filtered = tmp_path / "filtered-rights.json"
+    bond_parsed = tmp_path / "parsed-bond_issuance.json"
+    bond_filtered = tmp_path / "filtered-bond.json"
+    rights_parsed.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20260430001640",
+                        "title": "유상증자 결정",
+                        "증자유형": "유상증자",
+                        "신주의 종류와 수": None,
+                        "발행목적": None,
+                        "발행가액": "-",
+                        "발행대상자": None,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    rights_filtered.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260430001640",
+                        "company_id": "22180",
+                        "company_name": "지구홀딩스",
+                        "market": "코스닥",
+                        "disclosed_date": "2026-04-30",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    bond_parsed.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20260501000123",
+                        "corp_name": "액티투오",
+                        "회차": "3",
+                        "종류": "BW",
+                        "발행금액": 1000000000,
+                        "발행목적": None,
+                        "투자자": None,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    bond_filtered.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260501000123",
+                        "company_id": "005930",
+                        "company_name": "액티투오",
+                        "market": "코스피",
+                        "disclosed_date": "2026-05-01",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _metadata = build_ontology_graph(
+        rights_issuance_path=rights_parsed,
+        rights_filtered_path=rights_filtered,
+        bond_issuance_path=bond_parsed,
+        bond_filtered_path=bond_filtered,
+    )
+
+    assert "company_022180" in nodes
+    assert "company_005930" in nodes
+    assert all(edge.edge_type != EdgeTypes.ACQUIRED for edge in edges)
+    assert all(edge.edge_type != EdgeTypes.FOR_PURPOSE for edge in edges)
+
 
 def test_shareholder_meeting_rejects_alternate_filtered_fields(tmp_path):
     import json

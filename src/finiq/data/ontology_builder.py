@@ -23,6 +23,11 @@ from finiq.data.graph_models import (
     ShareholderMeeting,
 )
 
+def _record_pair_rows(record: dict[str, Any], field: str) -> list[Any]:
+    value = record.get(field)
+    return value if isinstance(value, list) else []
+
+
 # Suffixes/Keywords to distinguish Organization/Company from Person
 ORG_COMPANY_PATTERNS = [
     r"\(주\)",
@@ -388,10 +393,10 @@ def _process_rights_issuance(
         )
 
         # Extract Securities issued
-        security_prices = {sec_type: price for sec_type, price in rec.get("\ubc1c\ud589\uac00\uc561", [])}
+        security_prices = {sec_type: price for sec_type, price in _record_pair_rows(rec, "\ubc1c\ud589\uac00\uc561")}
         main_security_node_id = None
 
-        for sec_type, count in rec.get("\uc2e0\uc8fc\uc758 \uc885\ub958\uc640 \uc218", []):
+        for sec_type, count in _record_pair_rows(rec, "\uc2e0\uc8fc\uc758 \uc885\ub958\uc640 \uc218"):
             if not count or count <= 0:
                 continue
             
@@ -440,7 +445,7 @@ def _process_rights_issuance(
             )
 
         # Extract Fund Usages
-        for usage_type, amount in rec.get("\ubc1c\ud589\ubaa9\uc801", []):
+        for usage_type, amount in _record_pair_rows(rec, "\ubc1c\ud589\ubaa9\uc801"):
             if not amount or amount <= 0:
                 continue
             
@@ -481,7 +486,7 @@ def _process_rights_issuance(
             )
 
         # Extract Investors
-        for target_name, target_shares in rec.get("\ubc1c\ud589\ub300\uc0c1\uc790", []):
+        for target_name, target_shares in _record_pair_rows(rec, "\ubc1c\ud589\ub300\uc0c1\uc790"):
             target_name = target_name.strip()
             if not target_name or target_name == "-":
                 continue
@@ -711,7 +716,7 @@ def _process_bond_issuance(
         )
 
         # Extract Fund Usages
-        for usage_type, usage_amount in rec.get("\ubc1c\ud589\ubaa9\uc801", []):
+        for usage_type, usage_amount in _record_pair_rows(rec, "\ubc1c\ud589\ubaa9\uc801"):
             if not usage_amount or usage_amount <= 0:
                 continue
             
@@ -749,7 +754,7 @@ def _process_bond_issuance(
             )
 
         # Extract Investors
-        for target_name, target_amount in rec.get("\ud22c\uc790\uc790", []):
+        for target_name, target_amount in _record_pair_rows(rec, "\ud22c\uc790\uc790"):
             target_name = target_name.strip()
             if not target_name or target_name == "-":
                 continue

@@ -860,6 +860,7 @@ def _delete_unexpected_html_output_directory_files(
             output_directory / year / filename
             for filename in HTML_DOWNLOAD_AUXILIARY_FILENAMES
         )
+    parsed_problem_file_limit = _parse_problem_file_limit(problem_file_limit)
     files = _iter_html_output_files(output_directory)
     deleted_files: list[dict[str, str]] = []
     for path in files:
@@ -883,7 +884,6 @@ def _delete_unexpected_html_output_directory_files(
         collect_integrity=collect_integrity,
         problem_file_limit=problem_file_limit,
     )
-    parsed_problem_file_limit = _parse_problem_file_limit(problem_file_limit)
     summary["deleted_files"] = deleted_files[:parsed_problem_file_limit]
     summary["deleted_file_count"] = len(deleted_files)
     summary["deleted_file_omitted_count"] = max(
