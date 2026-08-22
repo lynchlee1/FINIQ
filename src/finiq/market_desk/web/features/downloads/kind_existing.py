@@ -457,10 +457,14 @@ def check_existing_downloads(
     latest_date = max(ends) if ends else None
 
     saved_filters = None
+    saved_filters_consistent = True
     for folder, _, _ in candidates:
         input_snapshot = _require_current_download_input_snapshot(folder)
-        saved_filters = _snapshot_filters_payload(input_snapshot)
-        break
+        range_saved_filters = _snapshot_filters_payload(input_snapshot)
+        if saved_filters is None:
+            saved_filters = range_saved_filters
+        elif not _filters_payloads_match(saved_filters, range_saved_filters):
+            saved_filters_consistent = False
 
     return {
         "has_existing": True,
@@ -468,6 +472,7 @@ def check_existing_downloads(
         "latest_date": latest_date,
         "ranges": sorted_ranges,
         "saved_filters": saved_filters,
+        "saved_filters_consistent": saved_filters_consistent,
     }
 
 
@@ -515,6 +520,7 @@ def detect_existing_downloads(
     )
     ranges_data: list[dict[str, Any]] = []
     saved_filters = None
+    saved_filters_consistent = True
     for folder, folder_name, folder_range in candidates:
         snapshot = _require_current_download_input_snapshot(folder)
         folder_start = date.fromisoformat(str(snapshot["start_date"]))
@@ -528,6 +534,8 @@ def detect_existing_downloads(
         )
         if saved_filters is None:
             saved_filters = range_saved_filters
+        elif not _filters_payloads_match(saved_filters, range_saved_filters):
+            saved_filters_consistent = False
 
         metadata_status = "ok" if filters_match else "mismatch"
         date_range_matches = folder_range == (folder_start, folder_end)
@@ -560,4 +568,5 @@ def detect_existing_downloads(
         "latest_date": max((r["end_date"] for r in dated_ranges), default=None),
         "ranges": sorted(ranges_data, key=lambda x: x.get("start_date") or ""),
         "saved_filters": saved_filters,
+        "saved_filters_consistent": saved_filters_consistent,
     }

@@ -8642,6 +8642,28 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     # card must not repeat it.
     assert "기존 원문 저장 범위 감지됨" not in download_component_html
     assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
+    assert "상위 필터에 없는 원문" in download_component_html
+    assert "상위 필터에서 먼저 저장해야 합니다" in download_component_html
+    assert "파생 필터에서는 다시 받을 수 없습니다." in download_component_html
+    assert "pendingDownloadCount > 0 && !selectedFilterParentMode" in download_component_html
+    assert "remainingInspection" in download_component_html
+    assert "stepState={inspectionStepState}" in download_component_html
+    inspection_card_html = (
+        REPO_ROOT
+        / "frontend"
+        / "finiq_GUI"
+        / "apps"
+        / "market-desk"
+        / "src"
+        / "components"
+        / "data-integrity"
+        / "DataIntegrityInspectionCard.tsx"
+    ).read_text(encoding="utf-8")
+    assert "stepState?: SingleCheckDataIntegrityInspectionState" in inspection_card_html
+    assert "never change the card verdict" not in inspection_card_html
+    assert "isCurrentInspectionRunning || !hasCompletedCurrentInspection" in (
+        GUI_APP_DIR / "download" / "page.tsx"
+    ).read_text(encoding="utf-8")
     assert "기존 메타데이터 기준으로 설정 맞추기" not in download_component_html
     assert "기존 데이터 경로가 현재 필수 연도별 구조와 다릅니다" not in download_component_html
     assert "분할저장 On/Off를 맞춘 뒤" not in download_component_html
@@ -12174,10 +12196,42 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
     assert res["ranges"][0]["metadata_status"] == "ok"
     assert res["ranges"][0]["filters_match"] is True
     assert res["saved_filters"]["market_label"] == "전체"
+    assert res["saved_filters_consistent"] is True
     assert res["ranges"][0]["start_date"] == "2026-01-01"
     assert res["ranges"][0]["end_date"] == "2026-05-01"
     assert res["ranges"][0]["local_count"] is None
     assert res["ranges"][0]["kind_count"] is None
+
+
+def test_detect_existing_downloads_reports_inconsistent_saved_filters(
+    tmp_path: Path,
+) -> None:
+    from finiq.market_desk.web.features.downloads.kind_existing import detect_existing_downloads
+
+    first = tmp_path / "20260101_20260501"
+    second = tmp_path / "20260502_20261231"
+    first.mkdir()
+    second.mkdir()
+    for folder in (first, second):
+        (folder / "001_post_page_00001.body").write_bytes(b"metadata-only")
+
+    first_snapshot = _trusted_download_input_snapshot()
+    second_snapshot = _trusted_download_input_snapshot(
+        start_date="2026-05-02",
+        end_date="2026-12-31",
+    )
+    second_snapshot["search_filters"] = [["searchCorpName", "다른 회사"]]
+    (first / "kind_workflow.input.json").write_text(
+        json.dumps(first_snapshot), encoding="utf-8"
+    )
+    (second / "kind_workflow.input.json").write_text(
+        json.dumps(second_snapshot, ensure_ascii=False), encoding="utf-8"
+    )
+
+    res = detect_existing_downloads(str(tmp_path))
+
+    assert res["has_existing"] is True
+    assert res["saved_filters_consistent"] is False
 
 
 def test_inspect_folder_rejects_missing_metadata_without_repair(

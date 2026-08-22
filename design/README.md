@@ -1,5 +1,7 @@
 # FINIQ MarketDesk Design System
 
+컴포넌트별 상세 계약은 [컴포넌트 디자인](./components/README.md)에 모은다. 이 문서는 공통 시각 체계와 UI 용어의 단일 기준이다.
+
 ## 1. Atmosphere & Identity
 
 FINIQ MarketDesk is a quiet analyst cockpit: dense, exact, and calm under noisy market data. The signature is a slate terminal surface with restrained blue focus states and tabular numeric rhythm, so disclosure events, price data, and model labels feel auditable rather than decorative.
@@ -80,6 +82,7 @@ All spacing derives from a base of 4px.
 
 - Use compact controls for analyst workflows; avoid empty cards that do not change decisions.
 - Summary cards must show decision-making values such as total, completed, failed, created, reused, or active parameter hash.
+- Existing-data inspection behavior and page order follow [components/inspection-block.md](./components/inspection-block.md).
 
 ## 5. Components
 
@@ -95,14 +98,7 @@ All spacing derives from a base of 4px.
 
 ### Data Integrity Inspection Panel
 
-- **Structure**: a page-level review card owns the title. Inside it, show one overall verdict, an ordered inspection-step list, and detail only below the step that failed. The pending step owns its inspection action so the reason and next action stay together. Keep the review card separate from search-condition and execution cards.
-- **Type scale**: use a 16px verdict, 15px step title, and 13px descriptions, evidence and actions so the panel fits the surrounding product UI. Do not solve readability by enlarging every label equally; use hierarchy and spacing to separate decisions from evidence.
-- **Spacing**: 16px between verdict and steps; 16px row padding so each step remains readable without turning the review into a dashboard.
-- **States**: complete, failed, ready, waiting and running. Pair every color with an icon and explicit status label.
-- **Progressive disclosure**: keep successful steps compact. Render the settings comparison, affected files or affected ranges only in the failed step, with a bounded scroll area for long problem lists.
-- **Responsive behavior**: stack step status below the summary on narrow screens and allow comparison tables to scroll within the card instead of widening the page.
-- **Reuse**: pages provide their own verdict, ordered evidence and repair action through the shared panel and request hook. Do not copy the step-list markup into page components.
-- **Motion**: no layout motion; retain only the loading indicator and existing focus/press feedback.
+- [components/inspection-block.md](./components/inspection-block.md) is the source of truth for structure, state transitions, repair behavior, page order, responsive behavior and required regression scenarios.
 
 ### Segmented Mode Control
 
@@ -110,7 +106,7 @@ All spacing derives from a base of 4px.
 - **Reuse**: page-level workflow mode controls use the shared `WorkflowModeSwitch`; the component owns track/button styling and the `--space-3` gap to its content. Pages provide only options, current value and state updates.
 - **Variants**: active tonal fill, inactive transparent.
 - **Spacing**: `--space-1` button gap, `--space-2` horizontal padding.
-- **Layout**: the containing track should hug its options on desktop and become full-width only when mobile space requires it. Do not wrap a compact mode control in an otherwise empty full-width card.
+- **Layout**: the containing track should hug its options on desktop and become full-width only when mobile space requires it. Do not wrap a compact mode control in an otherwise empty full-width card. Inspection-block placement follows [components/inspection-block.md](./components/inspection-block.md).
 - **States**: hover, active, focus visible.
 - **Accessibility**: use `aria-pressed` for active mode.
 - **Motion**: 150ms color transition.
@@ -173,13 +169,14 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
-| Existing data review card | 기존 데이터 검토 | A standalone preflight card placed first in a numbered workflow page, before search conditions or path and execution settings. |
+| Existing data review card | 기존 데이터 검토 | A standalone preflight card. Placement and behavior follow [components/inspection-block.md](./components/inspection-block.md). |
 | Existing data integrity inspection action | 검사하기 | Use one right-side control: show `검사하기` before the first run, a loading state while running, and the clickable result `정상` or `사용 불가` afterward. Clicking a result runs the same inspection again. |
-| Existing data clear verdict | 정상 | Use when no prior data blocks a new download or when every page-owned inspection step passes. |
-| Existing data blocked verdict | 사용 불가 | Use when a mismatch or integrity failure blocks reuse. Keep the failed step and repair action visible. |
+| Existing data clear verdict | 정상 | Use only when every page-owned inspection step on the card has passed. Incomplete follow-up steps, including `미저장 원문 다운로드`, keep the overall verdict at `검사 중`. Completed rows may still show `정상`. |
+| Existing data blocked verdict | 사용 불가 | Use when a mismatch or integrity failure blocks reuse. Keep the failed step and repair action visible. On HTML save pages, a 파생 필터 with 상위 필터에 없는 원문 is also 사용 불가; do not offer 재다운로드. |
 | Existing data successful step state | 정상 | Use for every completed inspection step with no issue, including metadata, settings, saved files, and KIND count checks. Keep specific evidence in the step summary. |
-| Existing data inspection-pending state | 대기 | Neutral default before the user clicks `검사하기`. Loading a page or changing an input clears prior evidence but must not start an integrity API. |
+| Existing data inspection-pending state | 대기 | Neutral default before the user clicks `검사하기`. Loading a page or changing an input must not start an integrity API. Input changes invalidate only the affected step and its dependents as defined in [components/inspection-block.md](./components/inspection-block.md). |
 | Existing data inspection-complete notification | 정상 | Passive green right-dock state after a manual inspection succeeds. Do not open a dock panel automatically. |
+| Page-level workflow mode switch | 세부 페이지 선택 | Shared `WorkflowModeSwitch` for choosing a numbered workflow subpage. It is not a card and has no visible group title. Its relationship to `기존 데이터 검토` follows [components/inspection-block.md](./components/inspection-block.md). |
 | Apply saved metadata settings | 저장된 설정 적용 | Right-side repair action in the failed settings-comparison step, aligned with the inspection action. |
 | Downloaded disclosure source data | 다운로드한 원본 데이터 | User-facing name for the downloaded page data checked before disclosure table conversion. |
 | Disclosure conversion manifest | 변환 기록 | User-facing name for the manifest that records conversion summaries and output files. Do not expose `매니페스트` in guidance text. |
@@ -243,11 +240,12 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Internal HTML folder summary row | 폴더 요약 | Row box showing selected-folder file and section counts. |
 | Internal HTML job status row | 작업 상태 | Row box showing the latest job/API status log. |
 | Disclosure filter mode folder | 모드 | Filter identity and folder key under `03-filter`; store its definition at `<data_root>/03-filter/<mode>/filter.json`. The selector uses workspace-saved filters and never a hardcoded parser list. |
-| Disclosure filter selector | 조건검색 필터 | Typeable dropdown of mode-owned `filter.json` files. Selecting an existing name immediately applies its conditions. Typing a new valid mode name and saving creates that filter. Do not add a separate name field, rename action, or manual load action on `공시내역 필터링`. |
+| Disclosure filter selector | 조건검색 필터 | Typeable dropdown of mode-owned `filter.json` files. Selecting an existing name immediately applies its conditions. Typing a new valid mode name and saving creates that filter. Do not add a separate name field, rename action, or manual load action on `공시내역 필터링`. Later numbered workflow pages that only choose a saved filter reuse this same dropdown; do not substitute a native `<select>`. Create, save, and delete stay on `공시내역 필터링`. |
 | Disclosure top-level filter | 기본 필터 | A filter that reads stage 02 directly and owns its stage 04 and 05 raw HTML. Choose it inside `공시 조건` when creating a `조건검색 필터`. The selector lists workspace-saved filters, not a hardcoded parse-mode list. |
 | Disclosure derived filter | 파생 필터 | A one-level child filter that applies additional conditions to a completed `기본 필터`. Display it as `<상위> › <자식>` when the parent is not already visible. On the derived-filter page, where `상위 필터` is shown directly above the child selector, display only the child name. Send the child `mode` and `parent_mode` separately. Choose it inside `공시 조건`. |
 | Disclosure derived-filter help action | 파생 필터 설명 | Circle-help button immediately to the right of the `파생 필터` selector label. Explain that a derived filter adds conditions only to a completed parent result and supports one child level. Do not place this copy in `필드 설명`. |
 | Disclosure derived-filter parent | 상위 필터 | A completed `기본 필터` selected as the input of a `파생 필터`. Do not offer another derived filter as a parent. |
+| Derived filter missing parent HTML | 상위 필터에 없는 원문 | Inspection evidence when a 파생 필터 target is absent from the 상위 필터 HTML. The 미저장 원문 다운로드 step is 사용 불가 and must not offer 재다운로드; complete the 상위 필터 first. |
 | Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. The page opens in `공시내역 제목 검색`. |
 | Disclosure filter existing-data inspection scope | 조건검색 폴더 전체 검사 | Manual inspection on stage 03 checks every mode-owned `03-filter/<mode>/filter.json` independently; it does not require a selected `조건검색 필터`. |

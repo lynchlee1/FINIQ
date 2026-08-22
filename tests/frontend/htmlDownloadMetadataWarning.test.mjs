@@ -27,20 +27,21 @@ test("HTML reuse without a hash baseline is blocked and reported once", () => {
   assert.doesNotMatch(page, /trust_existing_files: true/);
 });
 
-test("pending downloads are a separate step that never reddens the verdict", () => {
+test("pending downloads are an unnumbered result in the bundled inspection", () => {
   // Missing files stay out of the integrity verdict...
   const problemCountStatement = page
     .slice(page.indexOf("const integrityProblemCount"))
     .split(";")[0];
   assert.doesNotMatch(problemCountStatement, /missing_target_html_count/);
-  // ...and are reported by their own step under the main check instead.
+  // ...and are reported by their own result row under the main check instead.
   assert.match(page, /extraSteps=\{inspectionExtraSteps\}/);
-  assert.match(page, /key: "pending-download"/);
+  assert.match(page, /key: "pending-download",\s*numbered: false/);
+  assert.match(page, /<SingleCheckDataIntegrityInspectionCard[\s\S]*numbered=\{false\}/);
   assert.match(page, /statusLabel: pendingStepLabel/);
   assert.match(page, /"다운로드 필요"/);
   // That step drives the shortcut back into the normal download job.
   assert.match(page, /label: "재다운로드",\s*onClick: handleRun/);
-  assert.match(page, /action: pendingDownloadCount > 0 \?/);
+  assert.match(page, /action: pendingDownloadCount > 0 && !selectedFilterParentMode \?/);
 });
 
 test("internal HTML save derives its compressed source from the workspace mode", () => {

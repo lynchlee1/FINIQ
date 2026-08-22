@@ -56,7 +56,7 @@ test("shared integrity panel presents a verdict, ordered steps and one success l
   assert.ok(panel.indexOf("verdict.label") < panel.indexOf("<ol className="));
   assert.match(panel, /\{step\.status === "failed" && step\.detail && \(/);
   assert.doesNotMatch(panel, /\{step\.detail && \(/);
-  assert.match(panel, /step\.status === "waiting" \|\| step\.status === "ready" \? index \+ 1/);
+  assert.match(panel, /step\.status === "waiting" \|\| step\.status === "ready" \? stepNumber/);
   for (const label of ["메타데이터 읽기", "현재 설정과 비교", "저장 파일 구성 검사", "KIND 건수 비교"]) {
     assert.match(source, new RegExp(label));
   }

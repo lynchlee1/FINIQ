@@ -14,6 +14,7 @@ export type DataIntegrityInspectionVerdict = {
 
 export type DataIntegrityInspectionStep = {
   key: string;
+  numbered?: boolean;
   title: ReactNode;
   summary: ReactNode;
   status: DataIntegrityInspectionStepStatus;
@@ -63,6 +64,7 @@ function StepStatusIcon({ status }: { status: DataIntegrityInspectionStepStatus 
 }
 
 export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityInspectionPanelProps) {
+  let sequenceNumber = 0;
   return (
     <div className="space-y-4">
       <section
@@ -78,7 +80,8 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
       </section>
 
       <ol className="overflow-hidden rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
-        {steps.map((step, index) => {
+        {steps.map((step) => {
+          const stepNumber = step.numbered === false ? null : ++sequenceNumber;
           const resultStatus = step.action?.resultStatus;
           const displayedStatus = resultStatus?.status ?? step.status;
           const displayedStatusLabel = resultStatus?.label ?? step.statusLabel;
@@ -88,7 +91,7 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
               <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 gap-3">
                   <span className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold ${stepStatusClassNames[step.status]}`}>
-                    {step.status === "waiting" || step.status === "ready" ? index + 1 : <StepStatusIcon status={step.status} />}
+                    {step.status === "waiting" || step.status === "ready" ? stepNumber : <StepStatusIcon status={step.status} />}
                   </span>
                   <div className="min-w-0 space-y-1">
                     <p className="text-[15px] font-semibold leading-6 text-[var(--tv-text)]">{step.title}</p>

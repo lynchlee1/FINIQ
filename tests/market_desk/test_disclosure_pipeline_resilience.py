@@ -184,6 +184,68 @@ def test_derived_external_html_strictly_reuses_parent_without_download(
     assert (parent_output / "2025" / "20250101000001.html").is_file()
 
 
+def test_derived_external_html_inspection_reports_missing_parent_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "workspace"
+    parent_disclosures = [
+        {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
+        {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
+    ]
+    _write_derived_filter(
+        data_root,
+        parent_disclosures=parent_disclosures,
+        child_disclosures=parent_disclosures,
+    )
+    parent_output = data_root / "04-external-html-download" / "parent"
+    present = parent_output / "2025" / "20250101000001.html"
+    present.parent.mkdir(parents=True, exist_ok=True)
+    present.write_text(_valid_html("20250101000001"), encoding="utf-8")
+    create_external_html_integrity_baseline_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "parent",
+            "output_directory": str(parent_output),
+            "trust_existing_files": True,
+        }
+    )
+    body = {
+        "data_root": str(data_root),
+        "mode": "child",
+        "parent_mode": "parent",
+        "output_directory": str(parent_output),
+    }
+
+    checked = check_disclosure_html_output_directory_payload(body)
+
+    assert checked["requested_count"] == 2
+    assert checked["existing_target_html_count"] == 1
+    assert checked["missing_target_html_count"] == 1
+    assert checked["missing_target_acpt_numbers"] == ["20250101000002"]
+    assert checked["invalid_target_html_count"] == 0
+    assert checked["hash_mismatch_target_html_count"] == 0
+    assert checked["deletion_candidate_count"] == 0
+    assert checked["unexpected_file_count"] == 0
+    assert checked["download_required_target_html_count"] == 1
+
+    cleaned = clean_disclosure_html_output_directory_payload(
+        {
+            **body,
+            "delete_confirmed": True,
+            "delete_confirmation_text": "확인했습니다.",
+        }
+    )
+    assert cleaned["deleted_count"] == 0
+    assert present.is_file()
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
+        lambda **_kwargs: pytest.fail("derived external HTML must not download"),
+    )
+    with pytest.raises(ValueError, match="cannot be reused"):
+        download_disclosure_external_html_payload(body)
+
+
 def test_derived_external_html_compression_reuses_parent_file_without_rewrite(
     tmp_path: Path,
 ) -> None:
@@ -409,15 +471,19 @@ def test_derived_external_html_rejects_corrupt_parent_file(tmp_path: Path) -> No
     )
     target.write_text(_valid_html("changed"), encoding="utf-8")
 
+    inspect_body = {
+        "data_root": str(data_root),
+        "mode": "child",
+        "parent_mode": "parent",
+        "output_directory": str(parent_output),
+    }
+    checked = check_disclosure_html_output_directory_payload(inspect_body)
+    assert checked["hash_mismatch_target_html_count"] == 1
+    assert checked["missing_target_html_count"] == 0
+    assert checked["deletion_candidate_count"] == 0
+
     with pytest.raises(ValueError, match="cannot be reused"):
-        download_disclosure_external_html_payload(
-            {
-                "data_root": str(data_root),
-                "mode": "child",
-                "parent_mode": "parent",
-                "output_directory": str(parent_output),
-            }
-        )
+        download_disclosure_external_html_payload(inspect_body)
 
 
 def test_derived_internal_html_strictly_reuses_parent_without_download(
