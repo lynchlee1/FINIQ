@@ -14,7 +14,7 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/DataPathCard";
 import { JobStatusLogger, PageLoadingSpinner, useActionDockFollow } from "@finiq/web-app/status";
 import { htmlControlClassName, htmlInspectorControlClassName, HtmlInspectorField, HtmlInspectorSelect, HtmlInspectorToggle } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import { cancelDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
+import { cancelDownload, detectExistingDownload, fetchDownloadOptions, inspectDownloadFolder, previewDownload, startDownload } from "@/features/download/api";
 import type { DownloadExistingPayload, DownloadExistingResponse, DownloadOptions, DownloadPayload, DownloadSavedFilters } from "@/features/download/types";
 import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -103,6 +103,10 @@ const checkExistingPayloadKey = (payload: DownloadExistingPayload) => JSON.strin
   ),
 });
 
+const metadataInspectionKey = (payload: DownloadExistingPayload) => JSON.stringify({
+  output_directory: payload.output_directory,
+});
+
 const existingPayloadFromDownloadPayload = (payload: DownloadPayload) => ({
   output_directory: payload.output_directory,
   start_date: payload.start_date,
@@ -131,7 +135,8 @@ export default function DownloadPage() {
   const cleanupCandidatePayloadRef = useRef<DownloadPayload | null>(null);
   const [cleanupCandidateKey, setCleanupCandidateKey] = useState<string | null>(null);
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
-  const [lastInspectedExistingKey, setLastInspectedExistingKey] = useState<string | null>(null);
+  const [lastInspectedMetadataKey, setLastInspectedMetadataKey] = useState<string | null>(null);
+  const [lastInspectedFilesKey, setLastInspectedFilesKey] = useState<string | null>(null);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
 
@@ -187,7 +192,8 @@ export default function DownloadPage() {
             || range.metadata_status === "mismatch"
         ) ?? false);
         if (verified) {
-          setLastInspectedExistingKey(completedInspectionKey);
+          setLastInspectedMetadataKey(metadataInspectionKey(existingPayloadFromDownloadPayload(completedPayload)));
+          setLastInspectedFilesKey(completedInspectionKey);
         }
         setLastInspectionCandidateCount(candidateCount);
         if (candidateCount > 0 && data.dry_run) {
@@ -235,7 +241,7 @@ export default function DownloadPage() {
           existingPayloadFromDownloadPayload(buildPayload()),
         );
         if (activeInspection.key === currentKey) {
-          setExistingMetadataError(error.message);
+          setFileInspectionError(error.message);
         }
         clearActiveInspection(activeInspection);
       }
@@ -267,15 +273,19 @@ export default function DownloadPage() {
   const [logLimit, setLogLimit] = useState("20");
   const [selectedDisclosures, setSelectedDisclosures] = useState<Record<string, string[]>>({});
   const [inspectRunning, setInspectRunning] = useState(false);
+  const [metadataInspectRunning, setMetadataInspectRunning] = useState(false);
   const [existingInspectionResult, setExistingInspectionResult] = useState<DownloadExistingResponse | null>(null);
   const [existingMetadataError, setExistingMetadataError] = useState<string | null>(null);
+  const [fileInspectionError, setFileInspectionError] = useState<string | null>(null);
   const acceptExistingInspectionResult = useCallback((nextResult: DownloadExistingResponse) => {
     setExistingInspectionResult(nextResult);
     setExistingMetadataError(null);
+    setFileInspectionError(null);
   }, []);
   const clearExistingInspection = useCallback(() => {
     setExistingInspectionResult(null);
     setExistingMetadataError(null);
+    setFileInspectionError(null);
   }, []);
   const pathFields: DataPathField[] = [
     {
@@ -314,24 +324,27 @@ export default function DownloadPage() {
     await saveSetting("job_retention_minutes", normalized);
   };
 
-  const mismatchedFilterRanges = existingData?.ranges?.filter(
-    (range) => range.filters_match === false || range.metadata_status === "mismatch"
-  ) || [];
-  const filtersMatch = mismatchedFilterRanges.length === 0 && areFiltersMatching(
-    {
-      companyName,
-      submitterName,
-      marketLabel,
-      securitiesLabel,
-      selectedDisclosures,
-      lastReportOnly,
-    },
-    existingData?.saved_filters
+  const currentFilters = {
+    companyName,
+    submitterName,
+    marketLabel,
+    securitiesLabel,
+    selectedDisclosures,
+    lastReportOnly,
+  };
+  const filtersMatch = !existingData || (
+    existingData.saved_filters_consistent
+    && areFiltersMatching(currentFilters, existingData.saved_filters)
   );
+  const mismatchedFilterRanges = filtersMatch
+    ? []
+    : existingData?.ranges?.filter(
+      (range) => range.filters_match === false || range.metadata_status === "mismatch"
+    ) || [];
 
   const handleApplySavedFilters = () => {
     const saved = existingData?.saved_filters;
-    if (!saved) return;
+    if (!saved || !existingData.saved_filters_consistent) return;
     setCompanyName(saved.company_name || "");
     setSubmitterName(saved.submitter_name || "");
     setMarketLabel(saved.market_label || "전체");
@@ -386,15 +399,24 @@ export default function DownloadPage() {
   useEffect(() => {
     clearExistingInspection();
     clearCleanupCandidates();
-    setLastInspectedExistingKey(null);
+    setLastInspectedMetadataKey(null);
+    setLastInspectedFilesKey(null);
   }, [
     clearCleanupCandidates,
     clearExistingInspection,
+    outputDirectory,
+  ]);
+
+  useEffect(() => {
+    clearCleanupCandidates();
+    setFileInspectionError(null);
+    setLastInspectedFilesKey(null);
+  }, [
+    clearCleanupCandidates,
     companyName,
     endDate,
     lastReportOnly,
     marketLabel,
-    outputDirectory,
     pageSize,
     securitiesLabel,
     selectedDisclosures,
@@ -531,7 +553,40 @@ export default function DownloadPage() {
     return lines.join("\n");
   };
 
-  const handleInspectFolder = async () => {
+  const handleInspectMetadata = async () => {
+    if (!outputDirectory) {
+      setStatus("데이터 경로를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    const payload = buildPayload();
+    const metadataKey = metadataInspectionKey(existingPayloadFromDownloadPayload(payload));
+    try {
+      setMetadataInspectRunning(true);
+      setIsErrorStatus(false);
+      setExistingMetadataError(null);
+      setFileInspectionError(null);
+      setLastInspectedFilesKey(null);
+      clearCleanupCandidates();
+      setPreviewResult(null);
+      setResult(null);
+      setStatus("저장된 메타데이터를 확인하는 중...");
+      const data = await detectExistingDownload(existingPayloadFromDownloadPayload(payload));
+      acceptExistingInspectionResult(data);
+      setLastInspectedMetadataKey(metadataKey);
+      setStatus(data.has_existing ? "저장된 메타데이터를 확인했습니다." : "비교할 기존 데이터가 없습니다.");
+    } catch (err: any) {
+      setExistingInspectionResult(null);
+      setLastInspectedMetadataKey(null);
+      setExistingMetadataError(err.message);
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    } finally {
+      setMetadataInspectRunning(false);
+    }
+  };
+
+  const handleInspectFiles = async () => {
     if (!outputDirectory) {
       setStatus("데이터 경로를 선택하세요.");
       setIsErrorStatus(true);
@@ -540,7 +595,8 @@ export default function DownloadPage() {
     try {
       setInspectRunning(true);
       setIsErrorStatus(false);
-      setStatus("기존 데이터 검사를 시작하는 중...");
+      setFileInspectionError(null);
+      setStatus("저장 파일 구성을 검사하는 중...");
       setPreviewResult(null);
       setResult(null);
       setDownloadPanelOpen(true);
@@ -549,7 +605,7 @@ export default function DownloadPage() {
       await inspectExistingFiles(true);
     } catch (err: any) {
       clearActiveInspection();
-      setExistingMetadataError(err.message);
+      setFileInspectionError(err.message);
       setStatus(err.message);
       setIsErrorStatus(true);
       setNotificationPanelOpen(false);
@@ -631,27 +687,34 @@ export default function DownloadPage() {
   const currentExistingKey = outputDirectory
     ? checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()))
     : "";
-  const hasCompletedCurrentInspection = currentExistingKey === lastInspectedExistingKey;
-  const isCurrentInspectionRunning = inspectRunning || activeInspectionRef.current?.key === currentExistingKey;
+  const currentMetadataKey = outputDirectory
+    ? metadataInspectionKey(existingPayloadFromDownloadPayload(buildPayload()))
+    : "";
+  const hasCompletedMetadata = currentMetadataKey === lastInspectedMetadataKey;
+  const hasCompletedFileInspection = currentExistingKey === lastInspectedFilesKey;
+  const isMetadataRunning = metadataInspectRunning;
+  const isFileInspectionRunning = inspectRunning || activeInspectionRef.current?.key === currentExistingKey;
   const currentInspectionCandidateCount = cleanupCandidateKey === currentExistingKey
     ? lastInspectionCandidateCount
     : 0;
   const inspectionRanges = existingData?.ranges || [];
   const staleRanges = inspectionRanges.filter((range) => range.status === "stale");
-  const hasInspectionFailureNotification = hasCompletedCurrentInspection && staleRanges.length > 0;
-  const hasSuccessfulInspectionNotification = hasCompletedCurrentInspection
+  const hasInspectionFailureNotification = hasCompletedFileInspection && staleRanges.length > 0;
+  const hasSuccessfulInspectionNotification = hasCompletedFileInspection
     && result?.format === "kind_download_folder_cleanup_v1"
     && currentInspectionCandidateCount === 0
     && staleRanges.length === 0
     && filtersMatch
     && !isErrorStatus
-    && !existingMetadataError;
+    && !existingMetadataError
+    && !fileInspectionError;
   const hasWarningNotification = currentInspectionCandidateCount > 0
     || hasInspectionFailureNotification
     || isErrorStatus
     || !!existingMetadataError
+    || !!fileInspectionError
     || !!previewResult;
-  const notificationTone = isErrorStatus || !!existingMetadataError
+  const notificationTone = isErrorStatus || !!existingMetadataError || !!fileInspectionError
     ? "error"
     : currentInspectionCandidateCount > 0 || hasInspectionFailureNotification || !!previewResult
       ? "warning"
@@ -678,11 +741,16 @@ export default function DownloadPage() {
     : notificationTone === "warning"
       ? "bg-[var(--tv-warning)]"
       : "bg-[var(--tv-up)]";
-  const inspectionCandidates = hasCompletedCurrentInspection
+  const inspectionCandidates = hasCompletedFileInspection
     && result?.format === "kind_download_folder_cleanup_v1"
     && result?.dry_run === true
     ? (Array.isArray(result.deletion_candidates) ? result.deletion_candidates : [])
     : [];
+  const kindStaleRanges = hasCompletedFileInspection ? staleRanges : [];
+  const filesReady = hasCompletedMetadata
+    && !existingMetadataError
+    && !!existingData
+    && filtersMatch;
   const savedFilters = existingData?.saved_filters;
   const filterDifferences: { label: string; saved: string; current: string }[] = [];
 
@@ -715,7 +783,7 @@ export default function DownloadPage() {
       description: "경로를 선택하고 검사하기를 누르면 기존 데이터와 메타데이터를 확인합니다.",
       tone: "neutral",
     };
-  } else if (isCurrentInspectionRunning) {
+  } else if (isMetadataRunning || isFileInspectionRunning) {
     inspectionVerdict = {
       label: "검사 중",
       title: "기존 데이터를 검사하고 있습니다",
@@ -729,7 +797,7 @@ export default function DownloadPage() {
       description: existingMetadataError,
       tone: "error",
     };
-  } else if (!hasCompletedCurrentInspection) {
+  } else if (!hasCompletedMetadata) {
     inspectionVerdict = {
       label: "대기",
       title: "검사를 시작하지 않았습니다",
@@ -750,7 +818,21 @@ export default function DownloadPage() {
       description: "설정을 맞추기 전에는 기존 데이터에 이어서 저장할 수 없습니다.",
       tone: "error",
     };
-  } else if (inspectionCandidates.length > 0 || staleRanges.length > 0) {
+  } else if (fileInspectionError) {
+    inspectionVerdict = {
+      label: "사용 불가",
+      title: "기존 데이터에 문제가 있습니다",
+      description: fileInspectionError,
+      tone: "error",
+    };
+  } else if (!hasCompletedFileInspection) {
+    inspectionVerdict = {
+      label: "대기",
+      title: "저장 파일 구성 검사",
+      description: "검사하기를 누르면 페이지 번호가 빠짐없이 이어지는지, 파일 구성이 올바른지 확인합니다.",
+      tone: "neutral",
+    };
+  } else if (inspectionCandidates.length > 0 || kindStaleRanges.length > 0) {
     inspectionVerdict = {
       label: "사용 불가",
       title: "기존 데이터에 문제가 있습니다",
@@ -765,10 +847,15 @@ export default function DownloadPage() {
       tone: "success",
     };
   }
-  const inspectionResultStatus = inspectionVerdict.tone === "success"
-    ? { status: "complete", label: "정상" } as const
-    : inspectionVerdict.tone === "error"
-      ? { status: "failed", label: "사용 불가" } as const
+  const metadataResultStatus = existingMetadataError
+    ? { status: "failed" as const, label: "사용 불가" }
+    : hasCompletedMetadata
+      ? { status: "complete" as const, label: "정상" }
+      : undefined;
+  const filesResultStatus = fileInspectionError || inspectionCandidates.length > 0
+    ? { status: "failed" as const, label: "사용 불가" }
+    : hasCompletedFileInspection
+      ? { status: "complete" as const, label: "정상" }
       : undefined;
 
   const inspectionSteps: DataIntegrityInspectionStep[] = [
@@ -779,39 +866,39 @@ export default function DownloadPage() {
         ? `${formatInteger(inspectionRanges.length)}개 저장 범위의 메타데이터를 확인했습니다.`
         : existingMetadataError
           ? "저장된 메타데이터를 읽지 못했습니다."
-          : hasCompletedCurrentInspection
+          : hasCompletedMetadata
             ? "비교할 기존 데이터가 없습니다."
             : "검사하기를 누르면 저장된 메타데이터를 확인합니다.",
       status: existingMetadataError
         ? "failed"
-        : isCurrentInspectionRunning
+        : isMetadataRunning
           ? "running"
-          : hasCompletedCurrentInspection
+          : hasCompletedMetadata
             ? "complete"
             : "waiting",
       statusLabel: existingMetadataError
         ? "실패"
-        : isCurrentInspectionRunning
+        : isMetadataRunning
           ? "검사 중"
-          : hasCompletedCurrentInspection
+          : hasCompletedMetadata
             ? existingData ? EXISTING_DATA_SUCCESS_LABEL : "대상 없음"
             : "대기",
       detail: existingMetadataError ? (
         <p className="text-[13px] leading-5 text-[var(--tv-down-text)]">{existingMetadataError}</p>
       ) : undefined,
       action: outputDirectory ? {
-        label: isCurrentInspectionRunning ? "검사 중..." : "검사하기",
-        onClick: handleInspectFolder,
-        disabled: isCurrentInspectionRunning || !!activeJobId || runStarting,
-        loading: isCurrentInspectionRunning,
+        label: isMetadataRunning ? "검사 중..." : "검사하기",
+        onClick: handleInspectMetadata,
+        disabled: isMetadataRunning || isFileInspectionRunning || !!activeJobId || runStarting,
+        loading: isMetadataRunning,
         showResultStatus: true,
-        resultStatus: inspectionResultStatus,
+        resultStatus: isMetadataRunning ? undefined : metadataResultStatus,
       } : undefined,
     },
     {
       key: "settings",
       title: "현재 설정과 비교",
-      summary: !hasCompletedCurrentInspection
+      summary: isMetadataRunning || !hasCompletedMetadata
         ? "메타데이터를 읽은 뒤 현재 설정과 비교합니다."
         : !existingData
           ? "비교할 저장 설정이 없습니다."
@@ -820,10 +907,10 @@ export default function DownloadPage() {
           : filterDifferences.length > 0
             ? `${formatInteger(filterDifferences.length)}개 설정이 현재 조건과 다릅니다.`
             : `${formatInteger(mismatchedFilterRanges.length)}개 저장 범위의 설정이 현재 조건과 다릅니다.`,
-      status: existingMetadataError || !hasCompletedCurrentInspection
+      status: existingMetadataError || isMetadataRunning || !hasCompletedMetadata
         ? "waiting"
         : !existingData || filtersMatch ? "complete" : "failed",
-      statusLabel: existingMetadataError || !hasCompletedCurrentInspection
+      statusLabel: existingMetadataError || isMetadataRunning || !hasCompletedMetadata
         ? "대기"
         : !existingData ? "대상 없음" : filtersMatch ? EXISTING_DATA_SUCCESS_LABEL : "불일치",
       detail: !filtersMatch && savedFilters ? (
@@ -861,7 +948,7 @@ export default function DownloadPage() {
           )}
         </div>
       ) : undefined,
-      action: !filtersMatch && savedFilters && filterDifferences.length > 0 ? {
+      action: !filtersMatch && existingData?.saved_filters_consistent && savedFilters && filterDifferences.length > 0 ? {
         label: "저장된 설정 적용",
         onClick: handleApplySavedFilters,
       } : undefined,
@@ -869,41 +956,41 @@ export default function DownloadPage() {
     {
       key: "files",
       title: "저장 파일 구성 검사",
-      summary: !hasCompletedCurrentInspection
-        ? "검사하기를 누르면 페이지 번호가 빠짐없이 이어지는지, 파일 구성이 올바른지 확인합니다."
+      summary: !hasCompletedMetadata || isMetadataRunning
+        ? "앞 단계가 끝나면 페이지 번호가 빠짐없이 이어지는지, 파일 구성이 올바른지 확인합니다."
         : !existingData
           ? "검사할 기존 파일이 없습니다."
         : !filtersMatch
           ? "설정 불일치를 먼저 해결해야 합니다."
-          : isCurrentInspectionRunning
+          : isFileInspectionRunning
             ? "페이지 번호와 파일 구성을 검사하고 있습니다."
-          : !hasCompletedCurrentInspection
-            ? "페이지 번호의 연속성과 파일 구성을 검사할 준비가 됐습니다."
+          : fileInspectionError
+            ? fileInspectionError
+          : !hasCompletedFileInspection
+            ? "검사하기를 누르면 페이지 번호가 빠짐없이 이어지는지, 파일 구성이 올바른지 확인합니다."
             : inspectionCandidates.length > 0
               ? `${formatInteger(inspectionCandidates.length)}개 파일에 문제가 있습니다.`
               : "페이지 번호와 저장 파일 구성이 정상입니다.",
-      status: existingMetadataError || !filtersMatch
+      status: existingMetadataError || isMetadataRunning || !hasCompletedMetadata || !filtersMatch
         ? "waiting"
-        : isCurrentInspectionRunning
+        : isFileInspectionRunning
           ? "running"
-          : !hasCompletedCurrentInspection
-            ? "waiting"
-            : !existingData
-              ? "complete"
-              : inspectionCandidates.length > 0
-                ? "failed"
-                : "complete",
-      statusLabel: existingMetadataError || !filtersMatch
+          : fileInspectionError || inspectionCandidates.length > 0
+            ? "failed"
+            : !hasCompletedFileInspection
+              ? existingData ? "waiting" : "complete"
+            : "complete",
+      statusLabel: existingMetadataError || isMetadataRunning || !hasCompletedMetadata || !filtersMatch
         ? "대기"
-        : isCurrentInspectionRunning
+        : isFileInspectionRunning
           ? "검사 중"
-          : !hasCompletedCurrentInspection
-            ? "대기"
+          : fileInspectionError || inspectionCandidates.length > 0
+            ? "문제 발견"
+            : !hasCompletedFileInspection
+              ? existingData ? "대기" : "대상 없음"
             : !existingData
               ? "대상 없음"
-              : inspectionCandidates.length > 0
-                ? "문제 발견"
-                : EXISTING_DATA_SUCCESS_LABEL,
+              : EXISTING_DATA_SUCCESS_LABEL,
       detail: inspectionCandidates.length > 0 ? (
         <ul className="max-h-48 space-y-2 overflow-y-auto text-[13px] leading-5 text-[var(--tv-down-text)]">
           {inspectionCandidates.map((candidate: any) => (
@@ -912,37 +999,47 @@ export default function DownloadPage() {
             </li>
           ))}
         </ul>
+      ) : fileInspectionError ? (
+        <p className="text-[13px] leading-5 text-[var(--tv-down-text)]">{fileInspectionError}</p>
       ) : undefined,
+      action: filesReady ? {
+        label: isFileInspectionRunning ? "검사 중..." : "검사하기",
+        onClick: handleInspectFiles,
+        disabled: isFileInspectionRunning || isMetadataRunning || !!activeJobId || runStarting,
+        loading: isFileInspectionRunning,
+        showResultStatus: true,
+        resultStatus: isFileInspectionRunning ? undefined : filesResultStatus,
+      } : undefined,
     },
     {
       key: "kind-count",
       title: "KIND 건수 비교",
-      summary: !hasCompletedCurrentInspection
+      summary: isFileInspectionRunning || !hasCompletedFileInspection
         ? "앞 단계가 끝나면 로컬 건수와 KIND의 현재 건수를 비교합니다."
         : !existingData
           ? "비교할 기존 데이터가 없습니다."
-        : !filtersMatch || !hasCompletedCurrentInspection
+        : !filtersMatch
           ? "앞 단계가 끝나면 로컬 건수와 KIND의 현재 건수를 비교합니다."
-          : staleRanges.length > 0
-            ? `${formatInteger(staleRanges.length)}개 범위의 로컬 건수가 KIND의 현재 건수와 일치하지 않습니다.`
+          : kindStaleRanges.length > 0
+            ? `${formatInteger(kindStaleRanges.length)}개 범위의 로컬 건수가 KIND의 현재 건수와 일치하지 않습니다.`
             : `${formatInteger(inspectionRanges.length)}개 범위의 로컬 건수와 KIND 건수가 일치합니다.`,
-      status: existingMetadataError || !filtersMatch || !hasCompletedCurrentInspection
+      status: existingMetadataError || !filtersMatch || isFileInspectionRunning || !hasCompletedFileInspection
         ? "waiting"
         : !existingData
           ? "complete"
-          : staleRanges.length > 0
+          : kindStaleRanges.length > 0
             ? "failed"
             : "complete",
-      statusLabel: existingMetadataError || !filtersMatch || !hasCompletedCurrentInspection
+      statusLabel: existingMetadataError || !filtersMatch || isFileInspectionRunning || !hasCompletedFileInspection
         ? "대기"
         : !existingData
           ? "대상 없음"
-          : staleRanges.length > 0
+          : kindStaleRanges.length > 0
             ? "불일치"
             : EXISTING_DATA_SUCCESS_LABEL,
-      detail: staleRanges.length > 0 ? (
+      detail: kindStaleRanges.length > 0 ? (
         <div className="max-h-64 space-y-2 overflow-y-auto">
-          {staleRanges.map((range) => (
+          {kindStaleRanges.map((range) => (
             <div key={range.folder_path} className="rounded-md border border-[color:var(--tv-down)] bg-[var(--tv-down-soft)] px-3 py-2 text-[13px] leading-5 text-[var(--tv-down-text)]">
               <p className="font-semibold">{range.folder_name} · {range.start_date ?? "-"} ~ {range.end_date ?? "-"}</p>
               <p>로컬 {range.local_count == null ? "확인 실패" : `${formatInteger(range.local_count)}건`} / KIND {range.kind_count == null ? "확인 실패" : `${formatInteger(range.kind_count)}건`}</p>
@@ -1095,14 +1192,14 @@ export default function DownloadPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {isErrorStatus || existingMetadataError ? (
+                {isErrorStatus || existingMetadataError || fileInspectionError ? (
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">작업 알림</Label>
-                    <JobStatusLogger status={existingMetadataError || status} isErrorStatus />
+                    <JobStatusLogger status={existingMetadataError || fileInspectionError || status} isErrorStatus />
                   </div>
                 ) : null}
 
-                {previewResult && !isErrorStatus && !existingMetadataError ? (
+                {previewResult && !isErrorStatus && !existingMetadataError && !fileInspectionError ? (
                   <div className="space-y-2">
                     <Label className="dark:text-slate-300">미리보기</Label>
                     <pre className="text-caption max-h-72 overflow-auto rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-[var(--tv-text)]">

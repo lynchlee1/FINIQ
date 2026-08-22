@@ -32,6 +32,20 @@ test("numbered disclosure pages reuse the shared integrity card", async () => {
   assert.match(sources[3], /"\/api\/disclosures\/html\/parse\/inspect"/);
 });
 
+test("bundled inspection rows leave sequence numbers blank", async () => {
+  const [htmlDownload, panel] = await Promise.all([
+    readFile(paths.htmlDownload, "utf8"),
+    readFile(panelPath, "utf8"),
+  ]);
+
+  assert.match(panel, /numbered\?: boolean/);
+  assert.match(panel, /const stepNumber = step\.numbered === false \? null : \+\+sequenceNumber/);
+  assert.match(panel, /step\.status === "waiting" \|\| step\.status === "ready" \? stepNumber/);
+  assert.match(htmlDownload, /key: "pending-download",\s*numbered: false/);
+  assert.match(htmlDownload, /<SingleCheckDataIntegrityInspectionCard[\s\S]*numbered=\{false\}/);
+  assert.equal(htmlDownload.match(/onClick: handleInspectFolder/g)?.length, 1);
+});
+
 test("existing-data inspections start only from explicit actions", async () => {
   const [download, htmlDownload] = await Promise.all([
     readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),

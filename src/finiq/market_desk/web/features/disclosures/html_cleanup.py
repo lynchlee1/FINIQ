@@ -97,16 +97,19 @@ def _clean_disclosure_html_output_directory_payload(
     _ensure_safe_html_cleanup_directory(resolved_output_directory)
     dry_run = bool(body.get("dry_run", False))
     if body.get("parent_mode") not in (None, ""):
-        _saved_paths, summary = _strictly_reuse_parent_html(
-            output_directory=resolved_output_directory,
-            acpt_numbers=acpt_numbers,
-            source_json=source_json if source_type == "external" else _source_json,
+        # Derived filters inspect a subset of parent-owned HTML and never delete it.
+        output_summary = _validate_html_output_directory_files(
+            resolved_output_directory,
+            acpt_numbers,
+            target_years=target_years,
+            allow_unexpected=True,
+            collect_integrity=collect_integrity,
+            problem_file_limit=body.get("problem_file_limit"),
         )
-        verified_integrity = summary.pop("_verified_integrity_by_acpt_no")
-        summary["_target_integrity_by_acpt_no"] = verified_integrity
-        summary["unexpected_file_count"] = 0
-        summary["unexpected_files"] = []
-        summary["deleted_files"] = []
+        output_summary["unexpected_file_count"] = 0
+        output_summary["unexpected_files"] = []
+        output_summary["unexpected_file_omitted_count"] = 0
+        output_summary["deleted_files"] = []
         return {
             "format": "kind_disclosure_html_folder_cleanup_v1",
             "source_type": source_type,
@@ -117,7 +120,7 @@ def _clean_disclosure_html_output_directory_payload(
             "deleted_count": 0,
             "deletion_candidate_count": 0,
             "deletion_candidates": [],
-            **summary,
+            **output_summary,
         }
     if not dry_run and not _is_delete_confirmed(body):
         planned_summary = _delete_unexpected_html_output_directory_files(

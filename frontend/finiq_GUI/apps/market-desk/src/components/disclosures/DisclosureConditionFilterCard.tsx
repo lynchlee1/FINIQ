@@ -561,7 +561,7 @@ function DerivedFilterHelpPopover({ description }: { description: string }) {
   );
 }
 
-function FilterPresetCombobox({
+export function FilterPresetCombobox({
   value,
   presets,
   onValueChange,
@@ -569,6 +569,7 @@ function FilterPresetCombobox({
   getPresetIdentity = (preset) => preset.name,
   getPresetLabel = (preset) => preset.name,
   allowCreate = true,
+  id,
 }: {
   value: string;
   presets: DisclosureConditionPreset[];
@@ -577,6 +578,7 @@ function FilterPresetCombobox({
   getPresetIdentity?: (preset: DisclosureConditionPreset) => string;
   getPresetLabel?: (preset: DisclosureConditionPreset) => string;
   allowCreate?: boolean;
+  id?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -586,9 +588,10 @@ function FilterPresetCombobox({
   const selectedPreset = presets.find((preset) => getPresetIdentity(preset) === value);
   const inputValue = selectedPreset ? getPresetLabel(selectedPreset) : value;
   const query = inputValue.trim().toLowerCase();
-  const matches = query
-    ? presets.filter((preset) => getPresetLabel(preset).toLowerCase().includes(query))
-    : presets;
+  // A selected preset's label is display text, not a search query.
+  const matches = selectedPreset || !query
+    ? presets
+    : presets.filter((preset) => getPresetLabel(preset).toLowerCase().includes(query));
   const exactMatch = presets.some((preset) => getPresetLabel(preset) === inputValue.trim());
   const canCreate = allowCreate && Boolean(inputValue.trim()) && !exactMatch;
 
@@ -668,6 +671,7 @@ function FilterPresetCombobox({
   return (
     <div ref={rootRef} className="relative">
       <Input
+        id={id}
         value={inputValue}
         onChange={(event) => {
           onValueChange(event.target.value);

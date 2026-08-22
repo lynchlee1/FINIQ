@@ -28,7 +28,10 @@ import {
   WorkflowModeSwitch,
   type WorkflowModeOption,
 } from "@/components/layout/WorkflowModeSwitch";
-import type { DisclosureConditionPreset } from "@/components/disclosures/DisclosureConditionFilterCard";
+import {
+  FilterPresetCombobox,
+  type DisclosureConditionPreset,
+} from "@/components/disclosures/DisclosureConditionFilterCard";
 import { listDisclosureConditionPresets } from "@/lib/disclosureConditionPresets";
 
 type DownloadVariant = "external" | "internal";
@@ -569,11 +572,29 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     (variant === "external" && externalTaskMode === "download") ||
     variant === "internal";
   const hasInspectionInput = !!currentSourcePath;
+  // Files still to download are normal work for a 기본 필터. A 파생 필터 cannot
+  // save parent-owned HTML here, so missing parent files block reuse.
+  const pendingDownloadCount = existingData
+    ? Number(
+        existingData.download_required_target_html_count
+          ?? existingData.missing_target_html_count
+          ?? 0,
+      )
+    : 0;
+  const parentMissingHtmlCount = selectedFilterParentMode
+    ? Math.max(
+        Number(existingData?.missing_target_html_count || 0)
+          - Number(existingData?.invalid_target_html_count || 0),
+        0,
+      )
+    : 0;
+  const derivedParentIncomplete = Boolean(selectedFilterParentMode) && pendingDownloadCount > 0;
   const integrityProblemCount = existingData
     ? Number(existingData.invalid_target_html_count || 0)
       + Number(existingData.hash_mismatch_target_html_count || 0)
       + Number(existingData.hash_unverified_target_html_count || 0)
       + Number(existingData.deletion_candidate_count || 0)
+      + parentMissingHtmlCount
     : 0;
   const visibleProblemFiles = Array.isArray(lastInspectionResult?.deletion_candidates)
     ? lastInspectionResult.deletion_candidates
@@ -588,38 +609,46 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     problemFileTotal - visibleProblemFiles.length,
     0,
   );
-  // Files still to download are normal work, not an integrity problem, so they
-  // are kept out of integrityProblemCount and only change the success wording.
-  const pendingDownloadCount = existingData
-    ? Number(
-        existingData.download_required_target_html_count
-          ?? existingData.missing_target_html_count
-          ?? 0,
-      )
-    : 0;
   const integrityProblems = existingData ? ([
     [existingData.invalid_target_html_count, "깨진 파일", "건"],
     [existingData.hash_mismatch_target_html_count, "해시 불일치", "건"],
     [existingData.hash_unverified_target_html_count, "기준 해시 없음", "건"],
+    [parentMissingHtmlCount, "상위 필터에 없는 원문", "건"],
     [existingData.deletion_candidate_count, "대상 외 파일", "개"],
   ] as const)
     .filter(([count]) => Number(count || 0) > 0)
     .map(([count, label, unit]) => `${label} ${formatInteger(count)}${unit}`) : [];
+  const remainingInspection = Boolean(
+    showSaveWorkflow
+    && existingCheckCompleted
+    && pendingDownloadCount > 0
+    && integrityProblemCount === 0
+    && !existingCheckError
+    && !inspectRunning,
+  );
   const inspectionState: SingleCheckDataIntegrityInspectionState = !hasInspectionInput
     ? "waiting"
     : inspectRunning
       ? "running"
       : existingCheckError || integrityProblemCount > 0
         ? "failed"
-        : existingCheckCompleted
-          ? "success"
-          : "waiting";
+        : remainingInspection
+          ? "running"
+          : existingCheckCompleted
+            ? "success"
+            : "waiting";
+  const inspectionStepState: SingleCheckDataIntegrityInspectionState = remainingInspection
+    ? "success"
+    : inspectionState;
+  const remainingInspectionSummary = `대상 ${formatInteger(existingData?.requested_count || 0)}건 중 ${formatInteger(pendingDownloadCount)}건이 아직 저장되지 않았습니다. 재다운로드를 누르면 확인된 기존 파일은 건너뛰고 미저장분만 내려받습니다.`;
   const inspectionCopy = {
     waiting: hasInspectionInput
       ? ["검사를 시작하지 않았습니다", "검사하기를 누르면 현재 경로의 저장 파일과 해시 구성을 확인합니다."]
       : ["데이터 경로를 선택하세요", "입력 경로와 결과 경로를 선택한 다음 검사하기를 누르세요."],
     ready: ["기존 원문 데이터 검사가 필요합니다", "현재 경로의 저장 파일과 해시 구성을 확인하세요."],
-    running: ["기존 원문 데이터를 확인하고 있습니다", "현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."],
+    running: remainingInspection
+      ? ["미저장 원문 다운로드", remainingInspectionSummary]
+      : ["기존 원문 데이터를 확인하고 있습니다", "현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."],
     success: existingData
       ? ["기존 원문 데이터를 그대로 사용해도 됩니다", existingSummary]
       : ["기존 원문 데이터가 없습니다", "현재 대상과 충돌하는 기존 원문 파일이 없습니다."],
@@ -637,37 +666,42 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       ? "현재 대상과 충돌하는 기존 저장 파일이 없습니다."
       : "현재 대상과 저장 파일을 비교하고, 저장 파일의 기준 해시와 대상 외 파일을 함께 확인합니다.";
 
-  // Completeness is reported as its own step: it is filled in by the same
-  // inspection run above and never changes the card verdict.
   const inspectionRan = !!existingData || existingCheckCompleted;
   const pendingStepStatus = inspectRunning
     ? "running"
     : !inspectionRan
       ? "waiting"
-      : pendingDownloadCount > 0
-        ? "ready"
-        : "complete";
+      : derivedParentIncomplete
+        ? "failed"
+        : pendingDownloadCount > 0
+          ? "ready"
+          : "complete";
   const pendingStepSummary = inspectRunning
     ? "새로 저장해야 할 원문 건수를 확인하고 있습니다."
     : !inspectionRan
       ? "위에서 검사하면 새로 저장해야 할 원문 건수를 함께 확인합니다."
-      : pendingDownloadCount > 0
-        ? `대상 ${formatInteger(existingData?.requested_count || 0)}건 중 ${formatInteger(pendingDownloadCount)}건이 아직 저장되지 않았습니다. 재다운로드를 누르면 확인된 기존 파일은 건너뛰고 미저장분만 내려받습니다.`
-        : "이번 대상이 모두 저장되어 있어 새로 받을 원문이 없습니다.";
+      : derivedParentIncomplete
+        ? `대상 ${formatInteger(existingData?.requested_count || 0)}건 중 ${formatInteger(pendingDownloadCount)}건을 상위 필터에서 먼저 저장해야 합니다. 파생 필터에서는 다시 받을 수 없습니다.`
+        : pendingDownloadCount > 0
+          ? `대상 ${formatInteger(existingData?.requested_count || 0)}건 중 ${formatInteger(pendingDownloadCount)}건이 아직 저장되지 않았습니다. 재다운로드를 누르면 확인된 기존 파일은 건너뛰고 미저장분만 내려받습니다.`
+          : "이번 대상이 모두 저장되어 있어 새로 받을 원문이 없습니다.";
   const pendingStepLabel = inspectRunning
     ? "확인 중"
     : !inspectionRan
       ? "대기"
-      : pendingDownloadCount > 0
-        ? "다운로드 필요"
-        : "정상";
+      : derivedParentIncomplete
+        ? "사용 불가"
+        : pendingDownloadCount > 0
+          ? "다운로드 필요"
+          : "정상";
   const inspectionExtraSteps: DataIntegrityInspectionStep[] = showSaveWorkflow ? [{
     key: "pending-download",
+    numbered: false,
     title: "미저장 원문 다운로드",
     summary: pendingStepSummary,
     status: pendingStepStatus,
     statusLabel: pendingStepLabel,
-    action: pendingDownloadCount > 0 ? {
+    action: pendingDownloadCount > 0 && !selectedFilterParentMode ? {
       label: "재다운로드",
       onClick: handleRun,
       disabled: isJobActive
@@ -680,7 +714,9 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const existingDataInspectionCard = showSaveWorkflow ? (
     <SingleCheckDataIntegrityInspectionCard
       description="실행 전에 현재 대상과 저장 파일을 비교하고 기준 해시를 확인합니다."
+      numbered={false}
       state={inspectionState}
+      stepState={inspectionStepState}
       verdictTitle={inspectionCopy[0]}
       verdictDescription={inspectionCopy[1]}
       stepTitle="기존 원문 데이터 검사"
@@ -708,11 +744,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     >
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <section className="min-w-0 space-y-6">
-          {variant === "internal" && existingDataInspectionCard}
-
-          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
-              <DataPathCard onError={handlePathError} fields={activePathFields} /> */}
-
           {variant === "external" && (
             <WorkflowModeSwitch
               ariaLabel="외부 HTML 작업 모드"
@@ -723,28 +754,29 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
             />
           )}
 
+          {existingDataInspectionCard}
+
           <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
             <CardHeader>
               <CardTitle className="dark:text-white">조건검색 필터</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-2">
               <Label htmlFor={`${variant}-filter-preset`} className="dark:text-slate-300">조건검색 필터</Label>
-              <select
+              <FilterPresetCombobox
                 id={`${variant}-filter-preset`}
                 value={selectedFilterId}
-                onChange={(event) => setSelectedFilterId(event.target.value)}
-                className={`${htmlControlClassName} w-full font-semibold`}
-              >
-                {filterPresets.map((preset) => (
-                  <option key={presetIdentity(preset)} value={presetIdentity(preset)}>
-                    {presetLabel(preset)}
-                  </option>
-                ))}
-              </select>
+                presets={filterPresets}
+                onValueChange={setSelectedFilterId}
+                onSelectExisting={setSelectedFilterId}
+                getPresetIdentity={presetIdentity}
+                getPresetLabel={presetLabel}
+                allowCreate={false}
+              />
             </CardContent>
           </Card>
 
-          {variant === "external" && existingDataInspectionCard}
+          {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
+              <DataPathCard onError={handlePathError} fields={activePathFields} /> */}
 
           {isExternalCompressMode && (
             <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
@@ -776,7 +808,9 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                   <Button
                     className="h-10 w-full"
                     onClick={handleRun}
-                    disabled={isJobActive || (skipExisting && (existingData?.hash_unverified_target_html_count || 0) > 0)}
+                    disabled={isJobActive
+                      || derivedParentIncomplete
+                      || (skipExisting && (existingData?.hash_unverified_target_html_count || 0) > 0)}
                   >
                     <Play className="mr-2 h-4 w-4" />
                     실행
@@ -802,7 +836,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
             />
           }
           notificationActive={isErrorStatus || !!existingCheckError || lastInspectionCandidateCount > 0 || !!lastInspectionResult}
-          notificationTone={isErrorStatus ? "error" : existingCheckError || integrityProblemCount > 0 ? "warning" : "success"}
+          notificationTone={isErrorStatus ? "error" : existingCheckError || integrityProblemCount > 0 || remainingInspection ? "warning" : "success"}
           notificationDismissible={false}
           notificationContent={
             <>

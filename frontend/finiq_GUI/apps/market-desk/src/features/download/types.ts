@@ -90,4 +90,5 @@ export type DownloadExistingResponse = {
   latest_date?: string | null;
   ranges?: DownloadExistingRange[];
   saved_filters?: DownloadSavedFilters | null;
+  saved_filters_consistent: boolean;
 };

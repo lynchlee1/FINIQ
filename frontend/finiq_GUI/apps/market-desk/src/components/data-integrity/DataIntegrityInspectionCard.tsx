@@ -22,12 +22,18 @@ export type SingleCheckDataIntegrityInspectionState =
 type SingleCheckDataIntegrityInspectionCardProps = {
   action?: DataIntegrityInspectionStep["action"];
   description: string;
+  numbered?: boolean;
   /**
-   * Follow-up steps listed under the main check. They carry their own status and
-   * action but never change the card verdict, which stays driven by `state`.
+   * Follow-up steps listed under the main check. An incomplete extra step keeps
+   * the overall verdict off `정상`; completed rows may still show `정상`.
    */
   extraSteps?: DataIntegrityInspectionStep[];
   state: SingleCheckDataIntegrityInspectionState;
+  /**
+   * Status of the main check row. Defaults to `state`. Pass `success` while
+   * `state` is still `running` when later steps remain.
+   */
+  stepState?: SingleCheckDataIntegrityInspectionState;
   stepSummary: string;
   stepTitle: string;
   verdictDescription: string;
@@ -69,13 +75,16 @@ export function SingleCheckDataIntegrityInspectionCard({
   action,
   description,
   extraSteps,
+  numbered,
   state,
+  stepState = state,
   stepSummary,
   stepTitle,
   verdictDescription,
   verdictTitle,
 }: SingleCheckDataIntegrityInspectionCardProps) {
   const display = singleCheckState[state];
+  const stepDisplay = singleCheckState[stepState];
   return (
     <DataIntegrityInspectionCard
       description={description}
@@ -88,10 +97,11 @@ export function SingleCheckDataIntegrityInspectionCard({
       steps={[
         {
           key: "integrity",
+          numbered,
           title: stepTitle,
           summary: stepSummary,
-          status: display.stepStatus,
-          statusLabel: display.stepLabel,
+          status: stepDisplay.stepStatus,
+          statusLabel: stepDisplay.stepLabel,
           action,
         },
         ...(extraSteps ?? []),

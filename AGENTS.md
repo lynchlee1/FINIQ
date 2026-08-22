@@ -69,4 +69,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 6. Other Rules
 - Always use `PLANS.md` to record the purpose, implementation summary, and verification result for completed code changes.
-- Before adding or changing UI labels, button names, page titles, status text, or feature names, consult the UI terminology section in `DESIGN.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to that section in the same change and keep UI/tests aligned with it.
+- Before adding or changing UI labels, button names, page titles, status text, or feature names, consult the UI terminology section in `design/README.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to that section in the same change and keep UI/tests aligned with it.
