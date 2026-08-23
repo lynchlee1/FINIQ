@@ -6,8 +6,129 @@ from collections import deque
 import tempfile
 
 from finiq.concurrency import bounded_as_completed
-from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+    atomic_write_json,
+)
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    manage_filter_presets_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_common import *
+
+
+def _workspace_filter_presets(data_root: object) -> list[dict[str, Any]]:
+    response = manage_filter_presets_payload(
+        {"data_root": data_root, "action": "list"}
+    )
+    return list(response["presets"])
+
+
+def inspect_all_disclosure_external_html_compress_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify compressed external HTML for every workspace filter mode."""
+    data_root = str(body.get("data_root") or "").strip()
+    if not data_root:
+        raise ValueError("data_root is required")
+
+    results: list[dict[str, Any]] = []
+    for preset in _workspace_filter_presets(data_root):
+        mode = preset["mode"]
+        parent_mode = preset.get("parent_mode")
+        payload = apply_workspace_defaults(
+            "external_html_compress",
+            {
+                "data_root": data_root,
+                "mode": mode,
+                **({"parent_mode": parent_mode} if parent_mode else {}),
+                "parallel_workers": body.get("parallel_workers"),
+            },
+        )
+        try:
+            inspected = inspect_disclosure_external_html_compress_payload(payload)
+        except Exception as exc:
+            inspected = {
+                "passed": False,
+                "expected_records": 0,
+                "verified_records": 0,
+                "missing_records": 0,
+                "unexpected_records": 0,
+                "duplicate_records": 0,
+                "missing_files": [],
+                "invalid_files": [],
+                "content_matches_source": False,
+                "error": str(exc),
+            }
+        results.append(
+            {
+                "id": preset["id"],
+                "mode": mode,
+                **({"parent_mode": parent_mode} if parent_mode else {}),
+                **inspected,
+            }
+        )
+
+    failed_modes = [result["id"] for result in results if not result["passed"]]
+    return {
+        "format": "finiq_disclosure_external_html_compress_all_inspection_v1",
+        "passed": not failed_modes,
+        "mode_count": len(results),
+        "passed_mode_count": len(results) - len(failed_modes),
+        "failed_mode_count": len(failed_modes),
+        "failed_modes": failed_modes,
+        "expected_records": sum(result["expected_records"] for result in results),
+        "verified_records": sum(result["verified_records"] for result in results),
+        "results": results,
+    }
+
+
+def compress_all_disclosure_external_html_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    """Rebuild compressed external HTML for every owning workspace mode."""
+    data_root = str(body.get("data_root") or "").strip()
+    if not data_root:
+        raise ValueError("data_root is required")
+
+    owners = [
+        preset
+        for preset in _workspace_filter_presets(data_root)
+        if not preset.get("parent_mode")
+    ]
+    results: list[dict[str, Any]] = []
+    for index, preset in enumerate(owners, start=1):
+        mode = preset["mode"]
+        if progress_callback is not None:
+            progress_callback(f"전체 압축 재생성 {index}/{len(owners)}: {mode}")
+        payload = apply_workspace_defaults(
+            "external_html_compress",
+            {
+                "data_root": data_root,
+                "mode": mode,
+                "parallel_workers": body.get("parallel_workers"),
+            },
+        )
+        try:
+            result = compress_disclosure_external_html_payload(
+                payload, progress_callback=progress_callback
+            )
+            results.append({"id": preset["id"], "mode": mode, "passed": True, **result})
+        except Exception as exc:
+            results.append(
+                {"id": preset["id"], "mode": mode, "passed": False, "error": str(exc)}
+            )
+
+    failed_modes = [result["id"] for result in results if not result["passed"]]
+    return {
+        "format": "finiq_disclosure_external_html_compress_all_result_v1",
+        "passed": not failed_modes,
+        "mode_count": len(results),
+        "regenerated_mode_count": len(results) - len(failed_modes),
+        "failed_mode_count": len(failed_modes),
+        "failed_modes": failed_modes,
+        "results": results,
+    }
 
 
 def inspect_disclosure_external_html_compress_payload(

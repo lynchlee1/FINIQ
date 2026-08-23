@@ -15,7 +15,10 @@ from finiq.data.assets_excel import (
 )
 from finiq.market_desk.web.features.disclosures.internal_html_download import download_disclosure_internal_html_payload
 from finiq.market_desk.web.features.disclosures.external_html_download import download_disclosure_external_html_payload
-from finiq.market_desk.web.features.disclosures.external_html_compress import compress_disclosure_external_html_payload
+from finiq.market_desk.web.features.disclosures.external_html_compress import (
+    compress_all_disclosure_external_html_payload,
+    compress_disclosure_external_html_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     create_external_html_integrity_baseline_payload,
     create_internal_html_integrity_baseline_payload,
@@ -152,6 +155,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "title_search": search_disclosure_titles_payload,
     "external_html_download": download_disclosure_external_html_payload,
     "external_html_compress": compress_disclosure_external_html_payload,
+    "external_html_compress_all": compress_all_disclosure_external_html_payload,
     "external_html_integrity_baseline": create_external_html_integrity_baseline_payload,
     "internal_html_download": download_disclosure_internal_html_payload,
     "internal_html_integrity_baseline": create_internal_html_integrity_baseline_payload,

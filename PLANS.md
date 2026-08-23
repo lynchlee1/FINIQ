@@ -1,5 +1,11 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-23: inspect and rebuild compression across every disclosure mode
+
+- Purpose: Make the top compression inspection independent of the filter selected below it and provide one repair action when any mode is stale.
+- Implementation: The compression inspection now enumerates every filter mode, returns per-mode evidence, and the UI lists those results. A failed inspection exposes `전부 재생성`, which rebuilds every base-mode-owned compressed file in one background job; derived modes continue to share their parent file.
+- Verification: Three focused all-mode compression tests and six existing compression service tests pass; all 182 frontend tests pass; Python compilation, route registration, and `git diff --check` pass. MarketDesk TypeScript checking remains blocked only by the pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
+
 ## 2026-08-23: separate save and compression inspection criteria
 
 - Purpose: switching `공시원문 외부 저장` from saving to compression must replace the source-HTML inspection with inspection of the generated compressed JSON.

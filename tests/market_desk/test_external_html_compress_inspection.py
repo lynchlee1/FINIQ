@@ -7,15 +7,27 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
 )
 from finiq.market_desk.web.features.disclosures.external_html_compress import (
+    compress_all_disclosure_external_html_payload,
     compress_disclosure_external_html_payload,
+    inspect_all_disclosure_external_html_compress_payload,
     inspect_disclosure_external_html_compress_payload,
+)
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    manage_filter_presets_payload,
 )
 
 
 def _compression_payload(tmp_path: Path) -> dict[str, object]:
     data_root = tmp_path / "workspace"
+    manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {"mode": "bond_issuance", "condition_blocks": []},
+        }
+    )
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
-    filtered_path.parent.mkdir(parents=True)
+    filtered_path.parent.mkdir(parents=True, exist_ok=True)
     filtered_path.write_text(
         json.dumps(
             {
@@ -100,3 +112,31 @@ def test_inspect_external_html_compression_reports_missing_json(tmp_path: Path) 
     assert inspected["missing_files"] == [
         str(Path(str(payload["output_directory"])) / "compressed-external-html.json")
     ]
+
+
+def test_inspect_and_rebuild_all_external_html_compression_modes(tmp_path: Path) -> None:
+    payload = _compression_payload(tmp_path)
+    compress_disclosure_external_html_payload(payload)
+    compressed_path = Path(str(payload["output_directory"])) / "compressed-external-html.json"
+    compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
+    compressed["records"][0]["title"] = "변조된 제목"
+    compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
+
+    inspected = inspect_all_disclosure_external_html_compress_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+
+    assert inspected["mode_count"] == 1
+    assert inspected["failed_modes"] == ["bond_issuance"]
+    assert inspected["results"][0]["passed"] is False
+
+    rebuilt = compress_all_disclosure_external_html_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+    reinspected = inspect_all_disclosure_external_html_compress_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+
+    assert rebuilt["passed"] is True
+    assert rebuilt["regenerated_mode_count"] == 1
+    assert reinspected["passed"] is True

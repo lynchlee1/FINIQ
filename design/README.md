@@ -249,6 +249,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. The page opens in `공시내역 제목 검색`. |
 | Disclosure filter existing-data inspection scope | 조건검색 폴더 전체 검사 | Manual inspection on stage 03 checks every mode-owned `03-filter/<mode>/filter.json` independently; it does not require a selected `조건검색 필터`. |
+| Disclosure external HTML compression rebuild action | 전부 재생성 | Repair action shown after the compression inspection finds any failed mode. Rebuild every base-mode-owned compressed file; derived modes reuse their parent file. |
 | Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. Show the same filter level, parent, and `조건검색 필터` selectors as filtering mode. Selecting a saved filter immediately loads its conditions, while create, save, and delete actions remain available only in `공시내역 필터링`. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |

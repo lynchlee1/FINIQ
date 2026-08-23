@@ -34,7 +34,7 @@ test("the inspection action is numbered and pending downloads are an unnumbered 
     .split(";")[0];
   assert.doesNotMatch(problemCountStatement, /missing_target_html_count/);
   // ...and are reported by their own result row under the main check instead.
-  assert.match(page, /extraSteps=\{showSaveWorkflow \? inspectionExtraSteps : undefined\}/);
+  assert.match(page, /extraSteps=\{inspectionExtraSteps\.length \? inspectionExtraSteps : undefined\}/);
   assert.match(page, /key: "pending-download",\s*numbered: false/);
   assert.doesNotMatch(page, /<SingleCheckDataIntegrityInspectionCard[\s\S]{0,250}numbered=\{false\}/);
   assert.match(page, /const pendingStepStatus = inspectRunning\s*\? "waiting"/);
@@ -54,12 +54,15 @@ test("the inspection action is numbered and pending downloads are an unnumbered 
 test("switching to compression resets inspection and checks the compressed JSON", () => {
   assert.match(
     page,
-    /\[currentSourcePath, dataRoot, selectedFilterId, limit, problemFileLimit, externalTaskMode\]/,
+    /const inspectionFilterKey = externalTaskMode === "compress" \? "" : selectedFilterId/,
   );
   assert.match(page, /const compressionInspectionCopy = \{/);
   assert.match(page, /"압축 파일에 문제가 있습니다"/);
-  assert.match(page, /compressed-external-html\.json의 형식, 현재 필터 대상 기록, 원문 hash·size 일치 여부/);
+  assert.match(page, /모든 모드의 compressed-external-html\.json 형식, 대상 기록, 원문 hash·size 일치 여부/);
   assert.match(page, /"\/api\/disclosures\/external-html-download\/compress\/check-existing"/);
+  assert.match(page, /"\/api\/disclosures\/external-html-download\/compress\/rebuild-all\/start"/);
+  assert.match(page, /label: "전부 재생성"/);
+  assert.match(page, /compressionResults\.map/);
   assert.match(page, /onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/);
   assert.match(page, /const inspectionCopy = isExternalCompressMode\s*\? compressionInspectionCopy\s*:\s*saveInspectionCopy/);
   assert.match(page, /stepTitle=\{isExternalCompressMode \? "압축 파일 검사" : "기존 원문 데이터 검사"\}/);

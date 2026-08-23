@@ -136,6 +136,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
         lines.push("결과 파일", ...res.written_files);
       }
     }
+    if (res.format === "finiq_disclosure_external_html_compress_all_result_v1") {
+      lines.push(`전체 압축 재생성: ${formatInteger(res.regenerated_mode_count)}/${formatInteger(res.mode_count)}개 모드`);
+      if (res.failed_mode_count) {
+        lines.push(`재생성 실패: ${res.failed_modes.join(", ")}`);
+      }
+    }
     if (Array.isArray(data.progress_log) && data.progress_log.length) {
       lines.push("", "최근 로그", ...data.progress_log);
     }
@@ -256,6 +262,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
 
   const currentSourcePath = dataRoot;
   const currentSourceRequiredMessage = variantConfig.sourceRequiredMessage;
+  const inspectionFilterKey = externalTaskMode === "compress" ? "" : selectedFilterId;
 
   const parsedProblemFileLimit = (() => {
     const parsed = Number(problemFileLimit);
@@ -341,7 +348,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     setLastInspectionResult(null);
     setDeleteConfirmed(false);
     setDeleteConfirmationText("");
-  }, [currentSourcePath, dataRoot, selectedFilterId, limit, problemFileLimit, externalTaskMode]);
+  }, [currentSourcePath, dataRoot, inspectionFilterKey, limit, problemFileLimit, externalTaskMode]);
 
   useEffect(() => {
     return () => {
@@ -421,11 +428,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setIsErrorStatus(true);
       return;
     }
-    if (!selectedFilterPreset) {
-      setStatus("조건검색 필터를 선택하세요.");
-      setIsErrorStatus(true);
-      return;
-    }
     inspectAbortControllerRef.current?.abort();
     const controller = new AbortController();
     inspectAbortControllerRef.current = controller;
@@ -444,10 +446,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             data_root: dataRoot,
-            mode: selectedFilterMode,
-            ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
-            input_directory: "",
-            output_directory: "",
             parallel_workers: compressWorkers ? Number(compressWorkers) : null,
           }),
           signal: controller.signal,
@@ -460,9 +458,9 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setCompressionInspectionCompleted(true);
       setStatus([
         "압축 파일 검사 완료",
-        `대상 기록: ${formatInteger(data.expected_records)}`,
-        `확인 기록: ${formatInteger(data.verified_records)}`,
-        `압축 파일: ${data.compressed_path || ""}`,
+        `대상 모드: ${formatInteger(data.mode_count)}`,
+        `정상 모드: ${formatInteger(data.passed_mode_count)}`,
+        `문제 모드: ${formatInteger(data.failed_mode_count)}`,
       ].join("\n"));
     } catch (err: any) {
       if (err.name === "AbortError") return;
@@ -476,6 +474,21 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
         setInspectRunning(false);
       }
     }
+  };
+
+  const handleRebuildAllCompressedFiles = () => {
+    if (!dataRoot) {
+      setStatus("작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    startJob(
+      "/api/disclosures/external-html-download/compress/rebuild-all/start",
+      {
+        data_root: dataRoot,
+        parallel_workers: compressWorkers ? Number(compressWorkers) : null,
+      },
+    );
   };
 
   const handleDeleteUnexpectedFiles = async () => {
@@ -748,32 +761,23 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           : "검사 결과를 확인해 주세요."),
     ],
   }[saveInspectionState];
-  const compressionProblems = compressionInspectionData ? ([
-    [compressionInspectionData.missing_files?.length, "압축 파일 없음", "개"],
-    [compressionInspectionData.invalid_files?.length, "읽기 또는 형식 오류", "개"],
-    [compressionInspectionData.missing_records, "누락 기록", "건"],
-    [compressionInspectionData.unexpected_records, "대상 외 기록", "건"],
-    [compressionInspectionData.duplicate_records, "중복 기록", "건"],
-  ] as const)
-    .filter(([count]) => Number(count || 0) > 0)
-    .map(([count, label, unit]) => `${label} ${formatInteger(count)}${unit}`) : [];
+  const compressionResults = Array.isArray(compressionInspectionData?.results)
+    ? compressionInspectionData.results
+    : [];
   const compressionInspectionCopy = {
     waiting: hasInspectionInput
       ? ["압축 파일 검사를 시작하지 않았습니다", "검사하기를 누르면 저장된 압축 JSON의 구성과 내용을 확인합니다."]
       : ["데이터 경로를 선택하세요", "압축 파일이 있는 작업공간 경로를 선택한 다음 검사하기를 누르세요."],
     ready: ["압축 파일 검사가 필요합니다", "저장된 압축 JSON의 구성과 내용을 확인하세요."],
-    running: ["압축 파일을 확인하고 있습니다", "현재 필터의 대상 기록과 원문 hash·size가 압축 JSON과 일치하는지 확인합니다."],
+    running: ["압축 파일을 확인하고 있습니다", "모든 모드의 대상 기록과 원문 hash·size가 압축 JSON과 일치하는지 확인합니다."],
     success: [
-      "압축 파일이 정상입니다",
-      `현재 필터의 기록 ${formatInteger(compressionInspectionData?.verified_records || 0)}건이 압축 JSON에 올바르게 저장되어 있습니다.`,
+      "모든 압축 파일이 정상입니다",
+      `${formatInteger(compressionInspectionData?.mode_count || 0)}개 모드의 기록 ${formatInteger(compressionInspectionData?.verified_records || 0)}건을 확인했습니다.`,
     ],
     failed: [
       "압축 파일에 문제가 있습니다",
       compressionInspectionError
-        || compressionInspectionData?.error
-        || (compressionProblems.length
-          ? `${compressionProblems.join(" · ")}을 확인해 주세요.`
-          : "압축 JSON이 현재 원문에서 계산한 결과와 다릅니다."),
+        || `${formatInteger(compressionInspectionData?.failed_mode_count || 0)}개 모드의 압축 파일을 다시 생성해야 합니다.`,
     ],
   }[compressionInspectionState];
   const inspectionCopy = isExternalCompressMode
@@ -785,8 +789,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       ? "현재 대상과 충돌하는 기존 저장 파일이 없습니다."
       : "현재 대상과 저장 파일을 비교하고, 저장 파일의 기준 해시와 대상 외 파일을 함께 확인합니다.";
   const compressionInspectionStepSummary = compressionInspectionData
-    ? `${compressionInspectionData.compressed_path} · 대상 ${formatInteger(compressionInspectionData.expected_records)}건, 확인 ${formatInteger(compressionInspectionData.verified_records)}건, 누락 ${formatInteger(compressionInspectionData.missing_records)}건, 대상 외 ${formatInteger(compressionInspectionData.unexpected_records)}건, 중복 ${formatInteger(compressionInspectionData.duplicate_records)}건입니다.`
-    : "compressed-external-html.json의 형식, 현재 필터 대상 기록, 원문 hash·size 일치 여부를 확인합니다.";
+    ? `전체 ${formatInteger(compressionInspectionData.mode_count)}개 모드 · 정상 ${formatInteger(compressionInspectionData.passed_mode_count)}개 · 문제 ${formatInteger(compressionInspectionData.failed_mode_count)}개 · 확인 기록 ${formatInteger(compressionInspectionData.verified_records)}/${formatInteger(compressionInspectionData.expected_records)}건입니다.`
+    : "모든 모드의 compressed-external-html.json 형식, 대상 기록, 원문 hash·size 일치 여부를 확인합니다.";
   const inspectionStepSummary = isExternalCompressMode
     ? compressionInspectionStepSummary
     : saveInspectionStepSummary;
@@ -832,6 +836,18 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       disabled: isJobActive
         || (skipExisting && (existingData?.hash_unverified_target_html_count || 0) > 0),
     } : undefined,
+  }] : isExternalCompressMode && compressionInspectionFailed ? [{
+    key: "rebuild-all-compression",
+    numbered: false,
+    title: "전체 압축 파일 재생성",
+    summary: "기본 모드가 소유한 압축 파일을 모두 다시 생성합니다. 파생 모드는 상위 모드의 새 압축 파일을 공유합니다.",
+    status: "ready",
+    statusLabel: "재생성 필요",
+    action: {
+      label: "전부 재생성",
+      onClick: handleRebuildAllCompressedFiles,
+      disabled: isJobActive,
+    },
   }] : [];
 
   const activePathFields = isExternalCompressMode ? compressionFields : basePathFields;
@@ -847,7 +863,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       verdictDescription={inspectionCopy[1]}
       stepTitle={isExternalCompressMode ? "압축 파일 검사" : "기존 원문 데이터 검사"}
       stepSummary={inspectionStepSummary}
-      extraSteps={showSaveWorkflow ? inspectionExtraSteps : undefined}
+      extraSteps={inspectionExtraSteps.length ? inspectionExtraSteps : undefined}
       action={hasInspectionInput ? {
         label: inspectRunning ? "검사 중..." : "검사하기",
         onClick: isExternalCompressMode ? handleInspectCompressedFile : handleInspectFolder,
@@ -969,17 +985,24 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
               {isExternalCompressMode && compressionInspectionData && (
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">압축 파일 검사</Label>
-                  <p className="text-body break-all text-[var(--tv-text)]">
-                    {compressionInspectionData.compressed_path}
-                  </p>
                   <p className="text-body text-[var(--tv-muted)]">
-                    대상 {formatInteger(compressionInspectionData.expected_records)}건 · 확인 {formatInteger(compressionInspectionData.verified_records)}건 · 누락 {formatInteger(compressionInspectionData.missing_records)}건 · 대상 외 {formatInteger(compressionInspectionData.unexpected_records)}건 · 중복 {formatInteger(compressionInspectionData.duplicate_records)}건
+                    전체 {formatInteger(compressionInspectionData.mode_count)}개 모드 · 정상 {formatInteger(compressionInspectionData.passed_mode_count)}개 · 문제 {formatInteger(compressionInspectionData.failed_mode_count)}개
                   </p>
-                  {compressionInspectionFailed && (
-                    <p className="text-body text-[var(--tv-warning-text)]">
-                      {compressionInspectionData.error || compressionProblems.join(" · ") || "압축 JSON이 현재 원문과 일치하지 않습니다."}
-                    </p>
-                  )}
+                  <div className="divide-y divide-[color:var(--tv-border)] rounded-md border border-[color:var(--tv-border)]">
+                    {compressionResults.map((result: any) => (
+                      <div key={result.id} className="space-y-1 px-3 py-2">
+                        <p className="text-body font-semibold text-[var(--tv-text)]">
+                          {result.id} · {result.passed ? "정상" : "사용 불가"}
+                        </p>
+                        <p className="text-body break-all text-[var(--tv-muted)]">
+                          {result.compressed_path || result.error || "검사 결과 경로가 없습니다."}
+                        </p>
+                        {!result.passed && result.error && (
+                          <p className="text-body text-[var(--tv-warning-text)]">{result.error}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {isExternalCompressMode && !compressionInspectionData && (compressionInspectionError || isErrorStatus) && (
