@@ -137,6 +137,8 @@ export default function DownloadPage() {
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
   const [lastInspectedMetadataKey, setLastInspectedMetadataKey] = useState<string | null>(null);
   const [lastInspectedFilesKey, setLastInspectedFilesKey] = useState<string | null>(null);
+  const metadataInspectionRequestIdRef = useRef(0);
+  const currentMetadataKeyRef = useRef("");
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
 
@@ -397,6 +399,8 @@ export default function DownloadPage() {
   }, [activeJobId, clearActiveInspection, isPollingRestored, loading]);
 
   useEffect(() => {
+    metadataInspectionRequestIdRef.current += 1;
+    setMetadataInspectRunning(false);
     clearExistingInspection();
     clearCleanupCandidates();
     setLastInspectedMetadataKey(null);
@@ -561,6 +565,7 @@ export default function DownloadPage() {
     }
     const payload = buildPayload();
     const metadataKey = metadataInspectionKey(existingPayloadFromDownloadPayload(payload));
+    const requestId = ++metadataInspectionRequestIdRef.current;
     try {
       setMetadataInspectRunning(true);
       setIsErrorStatus(false);
@@ -572,17 +577,21 @@ export default function DownloadPage() {
       setResult(null);
       setStatus("저장된 메타데이터를 확인하는 중...");
       const data = await detectExistingDownload(existingPayloadFromDownloadPayload(payload));
+      if (metadataInspectionRequestIdRef.current !== requestId || currentMetadataKeyRef.current !== metadataKey) return;
       acceptExistingInspectionResult(data);
       setLastInspectedMetadataKey(metadataKey);
       setStatus(data.has_existing ? "저장된 메타데이터를 확인했습니다." : "비교할 기존 데이터가 없습니다.");
     } catch (err: any) {
+      if (metadataInspectionRequestIdRef.current !== requestId || currentMetadataKeyRef.current !== metadataKey) return;
       setExistingInspectionResult(null);
       setLastInspectedMetadataKey(null);
       setExistingMetadataError(err.message);
       setStatus(err.message);
       setIsErrorStatus(true);
     } finally {
-      setMetadataInspectRunning(false);
+      if (metadataInspectionRequestIdRef.current === requestId) {
+        setMetadataInspectRunning(false);
+      }
     }
   };
 
@@ -690,6 +699,7 @@ export default function DownloadPage() {
   const currentMetadataKey = outputDirectory
     ? metadataInspectionKey(existingPayloadFromDownloadPayload(buildPayload()))
     : "";
+  currentMetadataKeyRef.current = currentMetadataKey;
   const hasCompletedMetadata = currentMetadataKey === lastInspectedMetadataKey;
   const hasCompletedFileInspection = currentExistingKey === lastInspectedFilesKey;
   const isMetadataRunning = metadataInspectRunning;
@@ -1013,6 +1023,7 @@ export default function DownloadPage() {
     },
     {
       key: "kind-count",
+      numbered: false,
       title: "KIND 건수 비교",
       summary: isFileInspectionRunning || !hasCompletedFileInspection
         ? "앞 단계가 끝나면 로컬 건수와 KIND의 현재 건수를 비교합니다."

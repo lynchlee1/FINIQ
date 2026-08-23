@@ -53,6 +53,11 @@ const stepStatusClassNames: Record<DataIntegrityInspectionStepStatus, string> = 
   running: "border-[color:var(--tv-accent)] bg-[var(--tv-accent-soft)] text-[var(--tv-accent)]",
 };
 
+const stepResultStatusClassNames: Record<"complete" | "failed", string> = {
+  complete: "!border-[color:var(--tv-up)] !bg-[var(--tv-up-soft)] !text-[var(--tv-up-text)] hover:!bg-[var(--tv-up-soft)]",
+  failed: "!border-[color:var(--tv-down)] !bg-[var(--tv-down-soft)] !text-[var(--tv-down-text)] hover:!bg-[var(--tv-down-soft)]",
+};
+
 const stepControlClassName = "h-8 w-28 shrink-0 self-start justify-center whitespace-nowrap";
 
 function StepStatusIcon({ status }: { status: DataIntegrityInspectionStepStatus }) {
@@ -82,16 +87,25 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
       <ol className="overflow-hidden rounded-md border border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
         {steps.map((step) => {
           const stepNumber = step.numbered === false ? null : ++sequenceNumber;
+          const stepDisplayStatus = step.numbered === false && step.status === "running"
+            ? "waiting"
+            : step.status;
+          const stepDisplayStatusLabel = step.numbered === false && step.status === "running"
+            ? "대기"
+            : step.statusLabel;
           const resultStatus = step.action?.resultStatus;
           const displayedStatus = resultStatus?.status ?? step.status;
           const displayedStatusLabel = resultStatus?.label ?? step.statusLabel;
           const showResultStatus = !!step.action?.showResultStatus && (displayedStatus === "complete" || displayedStatus === "failed");
+          const resultStatusClassName = displayedStatus === "complete" || displayedStatus === "failed"
+            ? stepResultStatusClassNames[displayedStatus]
+            : "";
           return (
             <li key={step.key} className="border-b border-[color:var(--tv-border)] last:border-b-0">
               <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 gap-3">
-                  <span className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold ${stepStatusClassNames[step.status]}`}>
-                    {step.status === "waiting" || step.status === "ready" ? stepNumber : <StepStatusIcon status={step.status} />}
+                  <span className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold ${stepStatusClassNames[stepDisplayStatus]}`}>
+                    {stepDisplayStatus === "waiting" || stepDisplayStatus === "ready" ? stepNumber : <StepStatusIcon status={stepDisplayStatus} />}
                   </span>
                   <div className="min-w-0 space-y-1">
                     <p className="text-[15px] font-semibold leading-6 text-[var(--tv-text)]">{step.title}</p>
@@ -103,7 +117,7 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
                     type="button"
                     size="sm"
                     variant={showResultStatus ? "outline" : undefined}
-                    className={`${stepControlClassName} px-3 text-[13px] ${showResultStatus ? stepStatusClassNames[displayedStatus] : ""}`}
+                    className={`${stepControlClassName} px-3 text-[13px] ${showResultStatus ? resultStatusClassName : ""}`}
                     onClick={step.action.onClick}
                     disabled={step.action.disabled}
                     aria-label={showResultStatus ? `${displayedStatusLabel}, 검사하기` : undefined}
@@ -121,9 +135,9 @@ export function DataIntegrityInspectionPanel({ verdict, steps }: DataIntegrityIn
                     )}
                   </Button>
                 ) : (
-                  <span className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-semibold leading-4 ${stepControlClassName} ${stepStatusClassNames[step.status]}`}>
-                    <StepStatusIcon status={step.status} />
-                    {step.statusLabel}
+                  <span className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-semibold leading-4 ${stepControlClassName} ${stepStatusClassNames[stepDisplayStatus]}`}>
+                    <StepStatusIcon status={stepDisplayStatus} />
+                    {stepDisplayStatusLabel}
                   </span>
                 )}
               </div>

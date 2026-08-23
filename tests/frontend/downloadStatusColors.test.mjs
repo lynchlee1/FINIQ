@@ -26,10 +26,10 @@ test("download review is first and actionable steps own right-side actions", asy
   assert.doesNotMatch(source.slice(searchCardStart, searchCardClose), /DataIntegrityInspectionPanel/);
   assert.match(card, /<CardTitle[^>]*>[\s\S]*기존 데이터 검토/);
   const settingsStep = source.slice(source.indexOf('key: "settings"'), source.indexOf('key: "files"'));
-  assert.match(settingsStep, /action: !filtersMatch && savedFilters && filterDifferences\.length > 0 \? \{[\s\S]*label: "저장된 설정 적용"/);
+  assert.match(settingsStep, /action: !filtersMatch && existingData\?\.saved_filters_consistent && savedFilters && filterDifferences\.length > 0 \? \{[\s\S]*label: "저장된 설정 적용"/);
   assert.doesNotMatch(settingsStep, /<Button\b/);
-  assert.match(source, /key: "metadata"[\s\S]{0,2200}label: isCurrentInspectionRunning \? "검사 중\.\.\." : "검사하기"/);
-  assert.ok(source.indexOf("label: isCurrentInspectionRunning") < source.indexOf('key: "settings"'));
+  assert.match(source, /key: "metadata"[\s\S]{0,2200}label: isMetadataRunning \? "검사 중\.\.\." : "검사하기"/);
+  assert.ok(source.indexOf("label: isMetadataRunning") < source.indexOf('key: "settings"'));
   assert.match(panel, /\{step\.action \? \(/);
   assert.match(panel, /\{step\.action\.label\}/);
   assert.doesNotMatch(source, /업데이트 기간 적용/);
@@ -56,7 +56,7 @@ test("shared integrity panel presents a verdict, ordered steps and one success l
   assert.ok(panel.indexOf("verdict.label") < panel.indexOf("<ol className="));
   assert.match(panel, /\{step\.status === "failed" && step\.detail && \(/);
   assert.doesNotMatch(panel, /\{step\.detail && \(/);
-  assert.match(panel, /step\.status === "waiting" \|\| step\.status === "ready" \? stepNumber/);
+  assert.match(panel, /stepDisplayStatus === "waiting" \|\| stepDisplayStatus === "ready" \? stepNumber/);
   for (const label of ["메타데이터 읽기", "현재 설정과 비교", "저장 파일 구성 검사", "KIND 건수 비교"]) {
     assert.match(source, new RegExp(label));
   }
@@ -65,7 +65,7 @@ test("shared integrity panel presents a verdict, ordered steps and one success l
   assert.doesNotMatch(source, /"검증 완료"|"메타데이터 확인됨"|filtersMatch \? "일치"|: "통과"/);
   assert.match(source, /filterDifferences\.map/);
   assert.match(source, /저장된 설정 적용/);
-  assert.match(source, /staleRanges\.map/);
+  assert.match(source, /kindStaleRanges\.map/);
 });
 
 test("shared integrity hierarchy stays aligned with the surrounding product UI", async () => {
@@ -98,7 +98,9 @@ test("shared inspection state ignores stale requests and full verification block
   assert.match(hook, /setIsChecking\(true\);\s*setError\(null\);/);
   assert.match(hook, /setError\(message\);\s*onErrorRef\.current\?\.\(message\);/);
   assert.match(hook, /requestRef\.current\.id !== requestId \|\| requestRef\.current\.key !== requestKey/);
-  assert.doesNotMatch(source, /detectExistingDownload|runExistingInspection/);
+  const metadataHandler = source.slice(source.indexOf("const handleInspectMetadata"), source.indexOf("const handleInspectFiles"));
+  assert.match(metadataHandler, /detectExistingDownload/);
+  assert.match(metadataHandler, /metadataInspectionRequestIdRef\.current !== requestId \|\| currentMetadataKeyRef\.current !== metadataKey/);
   assert.match(source, /const hasVerificationFailure = !verified \|\|/);
   assert.match(source, /if \(hasInspectionFailure\)/);
   assert.match(source, /const completedInspection = activeInspectionRef\.current/);
@@ -107,12 +109,12 @@ test("shared inspection state ignores stale requests and full verification block
   assert.match(source, /const verified = data\.existing_downloads as DownloadExistingResponse/);
   assert.match(source, /acceptExistingInspectionResult\(verified\)/);
   assert.doesNotMatch(source, /await checkExistingDownload\(existingPayloadFromDownloadPayload\(completedPayload\)\)/);
-  assert.match(source, /if \(verified\) \{\s*setLastInspectedExistingKey\(completedInspectionKey\);/);
+  assert.match(source, /if \(verified\) \{[\s\S]{0,220}setLastInspectedFilesKey\(completedInspectionKey\);/);
   assert.match(source, /clearActiveInspection\(completedInspection\)/);
   assert.match(source, /if \(existingMetadataError\) \{\s*throw new Error\(existingMetadataError\);/);
   assert.match(source, /result\?\.dry_run === true[\s\S]{0,180}result\.deletion_candidates/);
-  assert.match(source, /const mismatchedFilterRanges = existingData\?\.ranges\?\.filter/);
-  assert.match(source, /mismatchedFilterRanges\.length === 0 && areFiltersMatching/);
+  assert.match(source, /const mismatchedFilterRanges = filtersMatch[\s\S]{0,180}existingData\?\.ranges\?\.filter/);
+  assert.match(source, /existingData\.saved_filters_consistent[\s\S]{0,120}areFiltersMatching/);
   assert.match(source, /mismatchedFilterRanges\.map/);
   assert.doesNotMatch(hook, /catch \{[\s\S]{0,300}setResult\(null\);/);
 });
@@ -145,6 +147,11 @@ test("download colored status surfaces use contrast text tokens", async () => {
   for (const [state, token] of Object.entries(stepMappings)) {
     assert.match(source, new RegExp(`${state}: "[^"\\n]*text-\\[var\\(${token}\\)\\]"`));
   }
+  assert.match(source, /complete: "!border-\[color:var\(--tv-up\)\] !bg-\[var\(--tv-up-soft\)\] !text-\[var\(--tv-up-text\)\]/);
+  assert.match(source, /failed: "!border-\[color:var\(--tv-down\)\] !bg-\[var\(--tv-down-soft\)\] !text-\[var\(--tv-down-text\)\]/);
+  assert.match(source, /showResultStatus \? resultStatusClassName : ""/);
+  assert.match(source, /<li key=\{step\.key\} className="border-b border-\[color:var\(--tv-border\)\] last:border-b-0">/);
+  assert.doesNotMatch(source, /stepStatusBackgroundClassNames/);
 });
 
 test("manual inspection opens the activity panel and keeps progress visible", async () => {
@@ -154,7 +161,7 @@ test("manual inspection opens the activity panel and keeps progress visible", as
     readFile(actionDockPath, "utf8"),
     readFile(actionDockFollowPath, "utf8"),
   ]);
-  const inspectHandler = source.slice(source.indexOf("const handleInspectFolder"), source.indexOf("const handleRun"));
+  const inspectHandler = source.slice(source.indexOf("const handleInspectFiles"), source.indexOf("const handleRun"));
 
   assert.match(inspectHandler, /setDownloadPanelOpen\(true\)/);
   assert.doesNotMatch(inspectHandler, /setNotificationPanelOpen\(true\)/);

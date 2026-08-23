@@ -722,13 +722,11 @@ export default function FilterPage() {
             testId="filter-mode-control"
           />
 
-          {taskMode === "filter" && (
-            <DataIntegrityInspectionCard
-              description="실행 전에 저장된 조건검색 설정과 처리 단계를 확인하고 결과에 문제가 없는지 검사합니다."
-              verdict={inspectionVerdict}
-              steps={inspectionSteps}
-            />
-          )}
+          <DataIntegrityInspectionCard
+            description="실행 전에 저장된 조건검색 설정과 처리 단계를 확인하고 결과에 문제가 없는지 검사합니다."
+            verdict={inspectionVerdict}
+            steps={inspectionSteps}
+          />
 
           {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
               <DataPathCard onError={handlePathError} fields={pathFields} /> */}

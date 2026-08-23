@@ -80,7 +80,10 @@ test("manual HTML workflows preserve derived filter identity", async () => {
   assert.match(downloadPage, /preset\.parent_mode \? `\$\{preset\.parent_mode\} › \$\{preset\.mode\}` : preset\.mode/);
   assert.match(downloadPage, /mode: selectedFilterMode/);
   assert.match(downloadPage, /const selectedFilterMode = selectedFilterPreset\?\.mode \|\| ""/);
-  assert.match(downloadPage, /htmlControlClassName\} w-full font-semibold/);
+  assert.match(downloadPage, /<FilterPresetCombobox/);
+  assert.match(downloadPage, /getPresetIdentity=\{presetIdentity\}/);
+  assert.match(downloadPage, /getPresetLabel=\{presetLabel\}/);
+  assert.match(downloadPage, /allowCreate=\{false\}/);
   assert.doesNotMatch(downloadPage, /selectedFilterId \|\| htmlParseMode/);
   assert.match(downloadPage, /selectedFilterParentMode \? \{ parent_mode: selectedFilterParentMode \} : \{\}/);
   assert.match(downloadPage, /if \(!selectedFilterPreset\) \{[\s\S]*?조건검색 필터를 선택하세요/);

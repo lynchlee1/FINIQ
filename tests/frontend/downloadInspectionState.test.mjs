@@ -6,12 +6,13 @@ const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/download/p
 
 test("applying saved settings preserves metadata inspection and invalidates only later steps", async () => {
   const source = await readFile(downloadPagePath, "utf8");
+  const metadataResetStart = source.indexOf("  useEffect(() => {\n    metadataInspectionRequestIdRef.current += 1;");
   const metadataResetEffect = source.slice(
-    source.indexOf("useEffect(() => {\n    clearExistingInspection();"),
-    source.indexOf("  useEffect(() => {\n    clearCleanupCandidates();", source.indexOf("useEffect(() => {\n    clearExistingInspection();")),
+    metadataResetStart,
+    source.indexOf("  useEffect(() => {\n    clearCleanupCandidates();", metadataResetStart),
   );
   const dependentResetEffect = source.slice(
-    source.indexOf("  useEffect(() => {\n    clearCleanupCandidates();", source.indexOf("useEffect(() => {\n    clearExistingInspection();")),
+    source.indexOf("  useEffect(() => {\n    clearCleanupCandidates();", metadataResetStart),
     source.indexOf("\n\n  const buildPayload"),
   );
   const applySavedSettings = source.slice(

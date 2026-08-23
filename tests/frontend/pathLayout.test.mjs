@@ -484,7 +484,7 @@ test("disclosure filter page combines title search and recorded filtering", asyn
         < source.indexOf('<CardTitle className="dark:text-white">작업 실행</CardTitle>'),
     "동작 전환은 최상단에 있고, 필터 검사와 공시 조건, 작업 실행이 순서대로 이어져야 합니다.",
   );
-  assert.match(source, /\{taskMode === "filter" && \(\s*<DataIntegrityInspectionCard/);
+  assert.doesNotMatch(source, /\{taskMode === "filter" && \(\s*<DataIntegrityInspectionCard/);
   assert.match(source, /showPresetActions=\{taskMode === "filter"\}/);
   assert.match(source, /showEyebrow=\{false\}/);
   assert.doesNotMatch(source, />Result<\/p>/);

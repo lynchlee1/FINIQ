@@ -31,6 +31,9 @@ from finiq.market_desk.web.features.disclosures.html_common import (
     cancel_disclosure_html_download,
     resolve_disclosure_html_file,
 )
+from finiq.market_desk.web.features.disclosures.external_html_compress import (
+    inspect_disclosure_external_html_compress_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_changes import (
     build_parse_change_log_payload,
 )
@@ -593,6 +596,15 @@ def create_workflows_router(
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
         )
+
+    @router.post("/api/disclosures/external-html-download/compress/check-existing")
+    def check_external_html_compress(payload: dict[str, Any]):
+        try:
+            return inspect_disclosure_external_html_compress_payload(
+                apply_workspace_defaults("external_html_compress", payload)
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/internal-html-download/start")
     async def start_internal_html_download(

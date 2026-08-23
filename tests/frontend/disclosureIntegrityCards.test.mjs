@@ -27,23 +27,26 @@ test("numbered disclosure pages reuse the shared integrity card", async () => {
   assert.match(card, /ready: \{ label: "대기"[\s\S]*stepStatus: "waiting"[\s\S]*stepLabel: "대기"/);
 
   assert.match(sources[0], /listDisclosureConditionPresets\(rootDirectory\)/);
-  assert.match(sources[1], /stepTitle="기존 원문 데이터 검사"/);
+  assert.match(sources[1], /stepTitle=\{isExternalCompressMode \? "압축 파일 검사" : "기존 원문 데이터 검사"\}/);
   assert.match(sources[2], /stepTitle="입력 HTML과 목차 구성 검사"/);
   assert.match(sources[3], /"\/api\/disclosures\/html\/parse\/inspect"/);
 });
 
-test("bundled inspection rows leave sequence numbers blank", async () => {
-  const [htmlDownload, panel] = await Promise.all([
+test("bundled inspection numbers the action row and leaves result-only rows blank", async () => {
+  const [download, htmlDownload, panel] = await Promise.all([
+    readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),
     readFile(paths.htmlDownload, "utf8"),
     readFile(panelPath, "utf8"),
   ]);
 
   assert.match(panel, /numbered\?: boolean/);
   assert.match(panel, /const stepNumber = step\.numbered === false \? null : \+\+sequenceNumber/);
-  assert.match(panel, /step\.status === "waiting" \|\| step\.status === "ready" \? stepNumber/);
+  assert.match(panel, /step\.numbered === false && step\.status === "running"\s*\? "waiting"/);
+  assert.match(panel, /stepDisplayStatus === "waiting" \|\| stepDisplayStatus === "ready" \? stepNumber/);
   assert.match(htmlDownload, /key: "pending-download",\s*numbered: false/);
-  assert.match(htmlDownload, /<SingleCheckDataIntegrityInspectionCard[\s\S]*numbered=\{false\}/);
-  assert.equal(htmlDownload.match(/onClick: handleInspectFolder/g)?.length, 1);
+  assert.match(download, /key: "kind-count",\s*numbered: false/);
+  assert.doesNotMatch(htmlDownload, /<SingleCheckDataIntegrityInspectionCard[\s\S]{0,250}numbered=\{false\}/);
+  assert.equal(htmlDownload.match(/onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/g)?.length, 1);
 });
 
 test("existing-data inspections start only from explicit actions", async () => {
@@ -54,14 +57,14 @@ test("existing-data inspections start only from explicit actions", async () => {
 
   assert.doesNotMatch(download, /checkExisting\(outputDirectory\)/);
   assert.doesNotMatch(download, /runExistingInspection/);
-  assert.match(download, /onClick: handleInspectFolder/);
+  assert.match(download, /onClick: handleInspectMetadata/);
   assert.match(download, /label: "대기"[\s\S]{0,250}title: "검사를 시작하지 않았습니다"/);
 
   assert.doesNotMatch(htmlDownload, /setTimeout\(\(\) => \{\s*checkExisting\(\)/);
   assert.doesNotMatch(htmlDownload, /자동 병렬 확인 중/);
   assert.match(htmlDownload, /const handleInspectFolder = async \(\) =>/);
   assert.match(htmlDownload, /fetch\(variantConfig\.checkExistingEndpoint/);
-  assert.match(htmlDownload, /onClick: handleInspectFolder/);
+  assert.match(htmlDownload, /onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/);
 });
 
 test("HTML inspection always derives its mode-owned paths from the workspace", async () => {
@@ -72,11 +75,11 @@ test("HTML inspection always derives its mode-owned paths from the workspace", a
   assert.match(htmlDownload, /const hasInspectionInput = !!currentSourcePath/);
   assert.doesNotMatch(htmlDownload, /useSeparateOutputDirectory/);
   assert.match(htmlDownload, /action=\{hasInspectionInput \? \{/);
-  assert.equal(htmlDownload.match(/onClick: handleInspectFolder/g)?.length, 1);
+  assert.equal(htmlDownload.match(/onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/g)?.length, 1);
   assert.doesNotMatch(htmlDownload, /폴더 검사하기/);
   assert.match(
     htmlDownload,
-    /notificationTone=\{isErrorStatus \? "error" : existingCheckError \|\| integrityProblemCount > 0 \? "warning" : "success"\}/,
+    /notificationTone=\{isErrorStatus \? "error" : existingCheckError \|\| integrityProblemCount > 0 \|\| remainingInspection \|\| compressionInspectionFailed \? "warning" : "success"\}/,
   );
   assert.doesNotMatch(htmlDownload, /description: existingCheckError \|\| existingDetail/);
   assert.match(htmlDownload, /\{existingData\.output_directory\}/);
@@ -117,8 +120,10 @@ test("completed disclosure inspections reuse their result control for another in
   for (const source of [download, filter, htmlDownload, table, sectionSplit, htmlParse]) {
     assert.match(source, /showResultStatus: true/);
   }
-  assert.match(download, /inspectionVerdict\.tone === "success"[\s\S]*status: "complete", label: "정상"[\s\S]*inspectionVerdict\.tone === "error"[\s\S]*status: "failed", label: "사용 불가"/);
-  assert.match(download, /resultStatus: inspectionResultStatus/);
+  assert.match(download, /const metadataResultStatus = existingMetadataError[\s\S]*status: "complete" as const, label: "정상"/);
+  assert.match(download, /const filesResultStatus = fileInspectionError \|\| inspectionCandidates\.length > 0[\s\S]*status: "failed" as const, label: "사용 불가"/);
+  assert.match(download, /resultStatus: isMetadataRunning \? undefined : metadataResultStatus/);
+  assert.match(download, /resultStatus: isFileInspectionRunning \? undefined : filesResultStatus/);
   assert.match(panel, /const displayedStatus = resultStatus\?\.status \?\? step\.status/);
   assert.match(panel, /const displayedStatusLabel = resultStatus\?\.label \?\? step\.statusLabel/);
   assert.match(panel, /aria-label=\{showResultStatus \? `\$\{displayedStatusLabel\}, 검사하기` : undefined\}/);
@@ -143,7 +148,8 @@ test("integrity responses stay bound to the inputs that started them", async () 
     readFile(paths.htmlParse, "utf8"),
   ]);
 
-  assert.match(download, /activeInspection\.key === currentKey[\s\S]{0,120}setExistingMetadataError\(error\.message\)/);
+  assert.match(download, /activeInspection\.key === currentKey[\s\S]{0,120}setFileInspectionError\(error\.message\)/);
+  assert.match(download, /metadataInspectionRequestIdRef\.current !== requestId \|\| currentMetadataKeyRef\.current !== metadataKey/);
   assert.match(filter, /action: "inspect"/);
   assert.match(filter, /if \(!isCurrentPresetWorkspace\(dataRoot, requestId\)\) return;/);
   assert.match(htmlDownload, /inspectAbortControllerRef\.current\?\.abort\(\);[\s\S]{0,120}setInspectRunning\(false\)/);

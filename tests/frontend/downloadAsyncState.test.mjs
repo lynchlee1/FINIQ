@@ -109,8 +109,13 @@ test("job polling distinguishes a responsive status API from silent work", async
 test("download inspection errors are created only by explicit inspection work", async () => {
   const source = await readFile(downloadPagePath, "utf8");
 
-  assert.doesNotMatch(source, /metadataNotificationError|checkingExisting|detectExistingDownload/);
-  assert.match(source, /setExistingMetadataError\(error\.message\)/);
-  assert.match(source, /setExistingMetadataError\(err\.message\)/);
-  assert.match(source, /isErrorStatus \|\| existingMetadataError/);
+  const metadataHandler = source.slice(
+    source.indexOf("const handleInspectMetadata"),
+    source.indexOf("const handleInspectFiles"),
+  );
+  assert.doesNotMatch(source, /metadataNotificationError|checkingExisting/);
+  assert.match(metadataHandler, /detectExistingDownload/);
+  assert.match(metadataHandler, /setExistingMetadataError\(err\.message\)/);
+  assert.match(metadataHandler, /metadataInspectionRequestIdRef\.current !== requestId \|\| currentMetadataKeyRef\.current !== metadataKey/);
+  assert.match(source, /isErrorStatus \|\| !!existingMetadataError/);
 });

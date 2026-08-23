@@ -3,10 +3,137 @@
 from __future__ import annotations
 
 from collections import deque
+import tempfile
 
 from finiq.concurrency import bounded_as_completed
 from finiq.market_desk.web.features.disclosure_workflow.layout import atomic_write_json
 from finiq.market_desk.web.features.disclosures.html_common import *
+
+
+def inspect_disclosure_external_html_compress_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify the saved compressed JSON against the current filter and source HTML."""
+    input_directory_raw = str(body.get("input_directory") or "").strip()
+    output_directory_raw = str(body.get("output_directory") or "").strip()
+    if not input_directory_raw:
+        raise ValueError("input_directory is required")
+    if not output_directory_raw:
+        raise ValueError("output_directory is required")
+
+    input_directory = Path(input_directory_raw).expanduser().resolve()
+    output_directory = Path(output_directory_raw).expanduser().resolve()
+    compressed_path = output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+    source_json, _source_path = _load_workspace_filtered_payload(body)
+    expected_acpt_numbers = collect_acpt_numbers_from_json(source_json)
+
+    if body.get("parent_mode") not in (None, ""):
+        try:
+            compress_disclosure_external_html_payload(body)
+        except Exception as exc:
+            return {
+                "format": "finiq_disclosure_external_html_compress_inspection_v1",
+                "compressed_path": str(compressed_path),
+                "passed": False,
+                "expected_records": len(expected_acpt_numbers),
+                "verified_records": 0,
+                "missing_records": len(expected_acpt_numbers),
+                "unexpected_records": 0,
+                "duplicate_records": 0,
+                "missing_files": [] if compressed_path.is_file() else [str(compressed_path)],
+                "invalid_files": [],
+                "missing_acpt_numbers": [],
+                "unexpected_acpt_numbers": [],
+                "duplicate_acpt_numbers": [],
+                "content_matches_source": False,
+                "error": str(exc),
+            }
+        return {
+            "format": "finiq_disclosure_external_html_compress_inspection_v1",
+            "compressed_path": str(compressed_path),
+            "passed": True,
+            "expected_records": len(expected_acpt_numbers),
+            "verified_records": len(expected_acpt_numbers),
+            "missing_records": 0,
+            "unexpected_records": 0,
+            "duplicate_records": 0,
+            "missing_files": [],
+            "invalid_files": [],
+            "missing_acpt_numbers": [],
+            "unexpected_acpt_numbers": [],
+            "duplicate_acpt_numbers": [],
+            "content_matches_source": True,
+            "error": "",
+        }
+
+    verification = _verify_compressed_external_html_files(
+        written_files=[str(compressed_path)],
+        expected_acpt_numbers=expected_acpt_numbers,
+    )
+    result = {
+        "format": "finiq_disclosure_external_html_compress_inspection_v1",
+        "compressed_path": str(compressed_path),
+        **verification,
+        "content_matches_source": False,
+        "error": "",
+    }
+    if not verification["passed"]:
+        return result
+
+    try:
+        saved_payload = json.loads(compressed_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {**result, "passed": False, "error": str(exc)}
+    if (
+        not isinstance(saved_payload, dict)
+        or saved_payload.get("format")
+        != "finiq_disclosure_external_html_docs_v1"
+        or not isinstance(saved_payload.get("records"), list)
+    ):
+        return {
+            **result,
+            "passed": False,
+            "error": "압축 JSON 형식이 올바르지 않습니다.",
+        }
+
+    if not expected_acpt_numbers:
+        empty_payload = {
+            "format": "finiq_disclosure_external_html_docs_v1",
+            "summary": {"found_files": 0, "compressed_files": 0},
+            "records": [],
+        }
+        content_matches_source = saved_payload == empty_payload
+        return {
+            **result,
+            "passed": content_matches_source,
+            "content_matches_source": content_matches_source,
+            "error": "" if content_matches_source else "빈 필터의 압축 JSON 내용이 올바르지 않습니다.",
+        }
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="finiq-compress-inspection-") as temporary:
+            compress_disclosure_external_html_payload(
+                {
+                    "input_directory": str(input_directory),
+                    "output_directory": temporary,
+                    "parallel_workers": body.get("parallel_workers"),
+                }
+            )
+            rebuilt_payload = json.loads(
+                (Path(temporary) / COMPRESSED_EXTERNAL_HTML_FILENAME).read_text(
+                    encoding="utf-8"
+                )
+            )
+    except Exception as exc:
+        return {**result, "passed": False, "error": str(exc)}
+
+    content_matches_source = saved_payload == rebuilt_payload
+    return {
+        **result,
+        "passed": content_matches_source,
+        "content_matches_source": content_matches_source,
+        "error": "" if content_matches_source else "압축 JSON이 현재 원문에서 다시 계산한 결과와 다릅니다.",
+    }
 
 
 def compress_disclosure_external_html_payload(
