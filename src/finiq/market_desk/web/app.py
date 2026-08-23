@@ -14,10 +14,13 @@ from finiq.data.assets_excel import (
     merge_asset_parquet_outputs,
 )
 from finiq.market_desk.web.features.disclosures.internal_html_download import download_disclosure_internal_html_payload
-from finiq.market_desk.web.features.disclosures.external_html_download import download_disclosure_external_html_payload
+from finiq.market_desk.web.features.disclosures.external_html_download import (
+    download_disclosure_external_html_payload,
+    redownload_missing_disclosure_external_html_payload,
+)
 from finiq.market_desk.web.features.disclosures.external_html_compress import (
-    compress_all_disclosure_external_html_payload,
     compress_disclosure_external_html_payload,
+    rebuild_invalid_disclosure_external_html_compress_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     create_external_html_integrity_baseline_payload,
@@ -154,8 +157,9 @@ def _run_asset_parquet_duplicate_cleanup_job(
 JOB_HANDLERS: dict[str, JobHandler] = {
     "title_search": search_disclosure_titles_payload,
     "external_html_download": download_disclosure_external_html_payload,
+    "external_html_redownload": redownload_missing_disclosure_external_html_payload,
     "external_html_compress": compress_disclosure_external_html_payload,
-    "external_html_compress_all": compress_all_disclosure_external_html_payload,
+    "external_html_compress_repair": rebuild_invalid_disclosure_external_html_compress_payload,
     "external_html_integrity_baseline": create_external_html_integrity_baseline_payload,
     "internal_html_download": download_disclosure_internal_html_payload,
     "internal_html_integrity_baseline": create_internal_html_integrity_baseline_payload,
@@ -205,6 +209,7 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
 
         if kind in {
             "external_html_download",
+            "external_html_redownload",
             "internal_html_download",
             "disclosure_automation",
         }:
@@ -218,7 +223,12 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
                     f"{time.monotonic() - network_wait_started_at:.1f}초. "
                     "실제 처리를 시작합니다."
                 )
-                result = handler(apply_workspace_defaults(kind, payload), **kwargs)
+                handler_payload = (
+                    payload
+                    if kind == "external_html_redownload"
+                    else apply_workspace_defaults(kind, payload)
+                )
+                result = handler(handler_payload, **kwargs)
         else:
             handler_payload = (
                 payload if kind == "title_search" else apply_workspace_defaults(kind, payload)

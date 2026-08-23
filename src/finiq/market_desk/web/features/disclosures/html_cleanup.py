@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from finiq.market_desk.web.features.disclosures import internal_html_download
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+)
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    manage_filter_presets_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 
@@ -221,6 +227,95 @@ def check_disclosure_html_output_directory_payload(
         **summary,
         "format": "kind_disclosure_html_existing_check_v1",
         "has_existing": existing_count > 0 or total_file_count > 0,
+    }
+
+
+def inspect_all_disclosure_external_html_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Inspect saved external HTML for every workspace filter mode."""
+    data_root = str(body.get("data_root") or "").strip()
+    if not data_root:
+        raise ValueError("data_root is required")
+
+    preset_response = manage_filter_presets_payload(
+        {"data_root": data_root, "action": "list"}
+    )
+    results: list[dict[str, Any]] = []
+    for preset in preset_response["presets"]:
+        mode = preset["mode"]
+        parent_mode = preset.get("parent_mode")
+        payload = apply_workspace_defaults(
+            "external_html_download",
+            {
+                "data_root": data_root,
+                "mode": mode,
+                **({"parent_mode": parent_mode} if parent_mode else {}),
+                "problem_file_limit": body.get("problem_file_limit"),
+            },
+        )
+        try:
+            inspected = check_disclosure_html_output_directory_payload(payload)
+            problem_count = (
+                int(inspected.get("download_required_target_html_count") or 0)
+                + int(inspected.get("invalid_target_html_count") or 0)
+                + int(inspected.get("hash_unverified_target_html_count") or 0)
+                + int(inspected.get("deletion_candidate_count") or 0)
+            )
+            passed = problem_count == 0
+        except Exception as exc:
+            inspected = {
+                "requested_count": 0,
+                "existing_target_html_count": 0,
+                "download_required_target_html_count": 0,
+                "missing_target_html_count": 0,
+                "invalid_target_html_count": 0,
+                "hash_mismatch_target_html_count": 0,
+                "hash_unverified_target_html_count": 0,
+                "deletion_candidate_count": 0,
+                "error": str(exc),
+            }
+            passed = False
+        results.append(
+            {
+                "id": preset["id"],
+                "mode": mode,
+                **({"parent_mode": parent_mode} if parent_mode else {}),
+                **inspected,
+                "passed": passed,
+            }
+        )
+
+    failed_modes = [result["id"] for result in results if not result["passed"]]
+    count_fields = (
+        "requested_count",
+        "existing_target_html_count",
+        "download_required_target_html_count",
+        "missing_target_html_count",
+        "invalid_target_html_count",
+        "hash_mismatch_target_html_count",
+        "hash_unverified_target_html_count",
+        "deletion_candidate_count",
+    )
+    totals = {
+        field: sum(int(result.get(field) or 0) for result in results)
+        for field in count_fields
+    }
+    owner_results = [result for result in results if not result.get("parent_mode")]
+    owner_totals = {
+        f"owner_{field}": sum(int(result.get(field) or 0) for result in owner_results)
+        for field in count_fields
+    }
+    return {
+        "format": "finiq_disclosure_external_html_all_inspection_v1",
+        "passed": not failed_modes,
+        "mode_count": len(results),
+        "passed_mode_count": len(results) - len(failed_modes),
+        "failed_mode_count": len(failed_modes),
+        "failed_modes": failed_modes,
+        **totals,
+        **owner_totals,
+        "results": results,
     }
 
 

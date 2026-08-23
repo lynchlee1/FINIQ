@@ -193,6 +193,7 @@ export default function FilterPage() {
   const isJobActive = isStreaming || !!titleJobId;
   const presetListRequestIdRef = useRef(0);
   const inspectionRequestIdRef = useRef(0);
+  const inspectionAbortControllerRef = useRef<AbortController | null>(null);
   const currentDataRootRef = useRef(rootDirectory);
   currentDataRootRef.current = rootDirectory;
 
@@ -237,11 +238,17 @@ export default function FilterPage() {
   }, [rootDirectory, setIsErrorStatus, setStatus]);
 
   useEffect(() => {
+    inspectionAbortControllerRef.current?.abort();
+    inspectionAbortControllerRef.current = null;
     inspectionRequestIdRef.current += 1;
     setInspectionRunning(false);
     setInspectionError("");
     setInspectionSummary(null);
-  }, [rootDirectory]);
+  }, [rootDirectory, taskMode]);
+
+  useEffect(() => () => {
+    inspectionAbortControllerRef.current?.abort();
+  }, []);
 
   const applyPreset = useCallback((preset: DisclosureConditionPreset, statusMessage: string) => {
     setConditions(normalizeDisclosureConditionBlocks(preset.condition_blocks));
@@ -574,6 +581,9 @@ export default function FilterPage() {
     }
     const dataRoot = rootDirectory;
     const requestId = presetListRequestIdRef.current;
+    inspectionAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    inspectionAbortControllerRef.current = abortController;
     const inspectionRequestId = ++inspectionRequestIdRef.current;
     setInspectionRunning(true);
     setInspectionError("");
@@ -584,7 +594,7 @@ export default function FilterPage() {
       }>("/api/disclosures/filter/presets", {
         data_root: dataRoot,
         action: "inspect",
-      });
+      }, { signal: abortController.signal });
       if (!isCurrentPresetWorkspace(dataRoot, requestId)
         || inspectionRequestIdRef.current !== inspectionRequestId) return;
       setPresets(response.presets);
@@ -602,6 +612,7 @@ export default function FilterPage() {
         : `조건검색 폴더 ${summary.total}개를 모두 확인했습니다.`);
       setIsErrorStatus(issues.length > 0);
     } catch (error) {
+      if (abortController.signal.aborted) return;
       if (!isCurrentPresetWorkspace(dataRoot, requestId)
         || inspectionRequestIdRef.current !== inspectionRequestId) return;
       const message = error instanceof Error ? error.message : String(error);
@@ -609,6 +620,9 @@ export default function FilterPage() {
       setStatus(message);
       setIsErrorStatus(true);
     } finally {
+      if (inspectionAbortControllerRef.current === abortController) {
+        inspectionAbortControllerRef.current = null;
+      }
       if (isCurrentPresetWorkspace(dataRoot, requestId)
         && inspectionRequestIdRef.current === inspectionRequestId) {
         setInspectionRunning(false);

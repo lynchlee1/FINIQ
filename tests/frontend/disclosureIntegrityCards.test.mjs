@@ -10,6 +10,7 @@ const paths = {
 };
 const cardPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-integrity/DataIntegrityInspectionCard.tsx";
 const panelPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-integrity/DataIntegrityInspectionPanel.tsx";
+const hookPath = "frontend/finiq_GUI/apps/market-desk/src/hooks/useDataIntegrityInspection.ts";
 
 test("numbered disclosure pages reuse the shared integrity card", async () => {
   const [sources, card] = await Promise.all([
@@ -43,10 +44,12 @@ test("bundled inspection numbers the action row and leaves result-only rows blan
   assert.match(panel, /const stepNumber = step\.numbered === false \? null : \+\+sequenceNumber/);
   assert.match(panel, /step\.numbered === false && step\.status === "running"\s*\? "waiting"/);
   assert.match(panel, /stepDisplayStatus === "waiting" \|\| stepDisplayStatus === "ready" \? stepNumber/);
+  assert.match(htmlDownload, /const inspectionExtraSteps: DataIntegrityInspectionStep\[\] = variant === "internal" \? \[\{/);
   assert.match(htmlDownload, /key: "pending-download",\s*numbered: false/);
   assert.match(download, /key: "kind-count",\s*numbered: false/);
   assert.doesNotMatch(htmlDownload, /<SingleCheckDataIntegrityInspectionCard[\s\S]{0,250}numbered=\{false\}/);
-  assert.equal(htmlDownload.match(/onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/g)?.length, 1);
+  assert.match(htmlDownload, /\? handleInspectCompressedFile\s*: handleInspectFolder/);
+  assert.doesNotMatch(htmlDownload, /key: "rebuild-all-compression"/);
 });
 
 test("existing-data inspections start only from explicit actions", async () => {
@@ -64,7 +67,7 @@ test("existing-data inspections start only from explicit actions", async () => {
   assert.doesNotMatch(htmlDownload, /자동 병렬 확인 중/);
   assert.match(htmlDownload, /const handleInspectFolder = async \(\) =>/);
   assert.match(htmlDownload, /fetch\(variantConfig\.checkExistingEndpoint/);
-  assert.match(htmlDownload, /onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/);
+  assert.match(htmlDownload, /\? handleInspectCompressedFile\s*: handleInspectFolder/);
 });
 
 test("HTML inspection always derives its mode-owned paths from the workspace", async () => {
@@ -75,12 +78,9 @@ test("HTML inspection always derives its mode-owned paths from the workspace", a
   assert.match(htmlDownload, /const hasInspectionInput = !!currentSourcePath/);
   assert.doesNotMatch(htmlDownload, /useSeparateOutputDirectory/);
   assert.match(htmlDownload, /action=\{hasInspectionInput \? \{/);
-  assert.equal(htmlDownload.match(/onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/g)?.length, 1);
+  assert.match(htmlDownload, /\? handleInspectCompressedFile\s*: handleInspectFolder/);
   assert.doesNotMatch(htmlDownload, /폴더 검사하기/);
-  assert.match(
-    htmlDownload,
-    /notificationTone=\{isErrorStatus \? "error" : existingCheckError \|\| integrityProblemCount > 0 \|\| remainingInspection \|\| compressionInspectionFailed \? "warning" : "success"\}/,
-  );
+  assert.match(htmlDownload, /notificationTone=\{isErrorStatus \? "error" : existingCheckError \|\| integrityProblemCount > 0 \|\| remainingInspection \|\| externalSaveInspectionFailed \|\| compressionInspectionFailed \? "warning" : "success"\}/);
   assert.doesNotMatch(htmlDownload, /description: existingCheckError \|\| existingDetail/);
   assert.match(htmlDownload, /\{existingData\.output_directory\}/);
 });
@@ -117,9 +117,10 @@ test("completed disclosure inspections reuse their result control for another in
   assert.match(table, /action=\{hasInspectionInput \? \{/);
   assert.match(sectionSplit, /action=\{inputDirectory \? \{/);
   assert.match(htmlParse, /action=\{hasInspectionInput \? \{/);
-  for (const source of [download, filter, htmlDownload, table, sectionSplit, htmlParse]) {
+  for (const source of [download, filter, table, sectionSplit, htmlParse]) {
     assert.match(source, /showResultStatus: true/);
   }
+  assert.match(htmlDownload, /showResultStatus: !\(externalSaveRedownloadable[\s\S]{0,100}isExternalCompressMode && compressionInspectionRepairable/);
   assert.match(download, /const metadataResultStatus = existingMetadataError[\s\S]*status: "complete" as const, label: "정상"/);
   assert.match(download, /const filesResultStatus = fileInspectionError \|\| inspectionCandidates\.length > 0[\s\S]*status: "failed" as const, label: "사용 불가"/);
   assert.match(download, /resultStatus: isMetadataRunning \? undefined : metadataResultStatus/);
@@ -155,6 +156,26 @@ test("integrity responses stay bound to the inputs that started them", async () 
   assert.match(htmlDownload, /inspectAbortControllerRef\.current\?\.abort\(\);[\s\S]{0,120}setInspectRunning\(false\)/);
   assert.match(table, /context\.key !== currentInspectionKeyRef\.current/);
   assert.match(htmlParse, /context\.key !== currentParseInspectionKeyRef\.current/);
+});
+
+test("changing a main or detail page immediately cancels its running inspection", async () => {
+  const [download, filter, htmlDownload, hook, design] = await Promise.all([
+    readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),
+    readFile(paths.filter, "utf8"),
+    readFile(paths.htmlDownload, "utf8"),
+    readFile(hookPath, "utf8"),
+    readFile("design/components/inspection-block.md", "utf8"),
+  ]);
+
+  assert.match(hook, /inspect: \(payload: TPayload, signal: AbortSignal\)/);
+  assert.match(hook, /useEffect\(\(\) => \(\) => \{\s*abortControllerRef\.current\?\.abort\(\);/);
+  assert.match(hook, /const clear = useCallback\(\(\) => \{\s*abortControllerRef\.current\?\.abort\(\);/);
+  assert.match(download, /useEffect\(\(\) => \(\) => \{[\s\S]{0,260}cancelDownload\(activeInspection\.jobId\)/);
+  assert.match(filter, /inspectionAbortControllerRef\.current\?\.abort\(\);[\s\S]{0,260}\[rootDirectory, taskMode\]/);
+  assert.match(htmlDownload, /inspectAbortControllerRef\.current\?\.abort\(\);[\s\S]{0,500}\[currentSourcePath, dataRoot, inspectionFilterKey, inspectionLimitKey, problemFileLimit, externalTaskMode\]/);
+  assert.match(design, /다른 메인 페이지로 이동하면 해당 페이지의 모든 진행 중 검사를 즉시 취소/);
+  assert.match(design, /`공시원문 외부 저장`의 `외부 HTML 저장`과 `외부 HTML 압축` 전환도 같은 규칙/);
+  assert.match(design, /서버 취소 API도 호출/);
 });
 
 test("section integrity card uses the full inspection endpoint", async () => {

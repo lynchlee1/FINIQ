@@ -138,6 +138,8 @@ export default function DownloadPage() {
   const [lastInspectedMetadataKey, setLastInspectedMetadataKey] = useState<string | null>(null);
   const [lastInspectedFilesKey, setLastInspectedFilesKey] = useState<string | null>(null);
   const metadataInspectionRequestIdRef = useRef(0);
+  const metadataInspectionAbortControllerRef = useRef<AbortController | null>(null);
+  const fileInspectionStartAbortControllerRef = useRef<AbortController | null>(null);
   const currentMetadataKeyRef = useRef("");
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
@@ -400,6 +402,8 @@ export default function DownloadPage() {
 
   useEffect(() => {
     metadataInspectionRequestIdRef.current += 1;
+    metadataInspectionAbortControllerRef.current?.abort();
+    metadataInspectionAbortControllerRef.current = null;
     setMetadataInspectRunning(false);
     clearExistingInspection();
     clearCleanupCandidates();
@@ -410,6 +414,16 @@ export default function DownloadPage() {
     clearExistingInspection,
     outputDirectory,
   ]);
+
+  useEffect(() => () => {
+    metadataInspectionAbortControllerRef.current?.abort();
+    fileInspectionStartAbortControllerRef.current?.abort();
+    const activeInspection = activeInspectionRef.current;
+    if (activeInspection?.jobId) {
+      void cancelDownload(activeInspection.jobId).catch(() => undefined);
+    }
+    clearActiveInspection(activeInspection);
+  }, [clearActiveInspection]);
 
   useEffect(() => {
     clearCleanupCandidates();
@@ -499,6 +513,9 @@ export default function DownloadPage() {
     customPayload?: DownloadPayload,
     runTriggered = false,
   ) => {
+    fileInspectionStartAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    fileInspectionStartAbortControllerRef.current = abortController;
     const basePayload = customPayload || buildPayload();
     const pendingInspection: DownloadInspectionContext = {
       jobId: "",
@@ -516,7 +533,7 @@ export default function DownloadPage() {
         dry_run: dryRun,
         delete_confirmed: deleteConfirmed,
         delete_confirmation_text: deleteConfirmationText,
-      });
+      }, abortController.signal);
       const activeInspection = { ...pendingInspection, jobId: data.job_id };
       activeInspectionRef.current = activeInspection;
       try {
@@ -535,6 +552,10 @@ export default function DownloadPage() {
     } catch (inspectionError) {
       clearActiveInspection(pendingInspection);
       throw inspectionError;
+    } finally {
+      if (fileInspectionStartAbortControllerRef.current === abortController) {
+        fileInspectionStartAbortControllerRef.current = null;
+      }
     }
   };
 
@@ -565,6 +586,9 @@ export default function DownloadPage() {
     }
     const payload = buildPayload();
     const metadataKey = metadataInspectionKey(existingPayloadFromDownloadPayload(payload));
+    metadataInspectionAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    metadataInspectionAbortControllerRef.current = abortController;
     const requestId = ++metadataInspectionRequestIdRef.current;
     try {
       setMetadataInspectRunning(true);
@@ -576,12 +600,16 @@ export default function DownloadPage() {
       setPreviewResult(null);
       setResult(null);
       setStatus("저장된 메타데이터를 확인하는 중...");
-      const data = await detectExistingDownload(existingPayloadFromDownloadPayload(payload));
+      const data = await detectExistingDownload(
+        existingPayloadFromDownloadPayload(payload),
+        abortController.signal,
+      );
       if (metadataInspectionRequestIdRef.current !== requestId || currentMetadataKeyRef.current !== metadataKey) return;
       acceptExistingInspectionResult(data);
       setLastInspectedMetadataKey(metadataKey);
       setStatus(data.has_existing ? "저장된 메타데이터를 확인했습니다." : "비교할 기존 데이터가 없습니다.");
     } catch (err: any) {
+      if (abortController.signal.aborted) return;
       if (metadataInspectionRequestIdRef.current !== requestId || currentMetadataKeyRef.current !== metadataKey) return;
       setExistingInspectionResult(null);
       setLastInspectedMetadataKey(null);
@@ -589,6 +617,9 @@ export default function DownloadPage() {
       setStatus(err.message);
       setIsErrorStatus(true);
     } finally {
+      if (metadataInspectionAbortControllerRef.current === abortController) {
+        metadataInspectionAbortControllerRef.current = null;
+      }
       if (metadataInspectionRequestIdRef.current === requestId) {
         setMetadataInspectRunning(false);
       }

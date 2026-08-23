@@ -167,6 +167,8 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 
 ### Existing Data Inspection
 
+- 검사 전·검사 중·성공·실패·복구 필요 상태가 바뀌어도 카드와 검사 행의 개수는 바뀌지 않는다. 복구 동작은 실패한 기존 행의 우측 버튼을 교체해 제공하며, 결과에 따라 별도 박스나 행을 추가하지 않는다.
+
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
 | Existing data review card | 기존 데이터 검토 | A standalone preflight card. Placement and behavior follow [components/inspection-block.md](./components/inspection-block.md). |
@@ -249,7 +251,9 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure filter workflow status | 작업 상태 | Persist filter state as `입력 완료`, `실행 중`, `중단됨`, `완료`, or `실패`, but do not append this changing state to the fixed mode shown in the selector. |
 | Disclosure filter workflow | 공시내역 필터링 | Stage 03 sidebar item combining the `공시내역 제목 검색` and `공시내역 필터링` actions with one shared `공시 조건` box. The page opens in `공시내역 제목 검색`. |
 | Disclosure filter existing-data inspection scope | 조건검색 폴더 전체 검사 | Manual inspection on stage 03 checks every mode-owned `03-filter/<mode>/filter.json` independently; it does not require a selected `조건검색 필터`. |
-| Disclosure external HTML compression rebuild action | 전부 재생성 | Repair action shown after the compression inspection finds any failed mode. Rebuild every base-mode-owned compressed file; derived modes reuse their parent file. |
+| Disclosure external HTML save inspection scope | 모든 모드 외부 HTML 검사 | The top inspection on `외부 HTML 저장` checks every basic and derived workspace mode independently of the selected `조건검색 필터`. Any missing, invalid, hash-mismatched, or unverified target makes the overall verdict `사용 불가`; list every mode result without adding another inspection card. |
+| Disclosure external HTML redownload action | 재다운로드 | Repair action replacing `검사하기` in the single all-mode `기존 원문 데이터 검사` row whenever owner-mode downloads remain. Do not add a separate `미저장 원문 다운로드` row. Process only affected base-mode-owned files, never duplicate derived-mode work, and run the all-mode inspection again when finished. |
+| Disclosure external HTML compression repair action | 재생성 | Repair action shown in the existing compression inspection row when a base-mode compressed file fails. Rebuild only failed base-mode-owned files. Derived modes inspect the same parent-owned HTML/compressed pair and must not add duplicate repair work. |
 | Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. Show the same filter level, parent, and `조건검색 필터` selectors as filtering mode. Selecting a saved filter immediately loads its conditions, while create, save, and delete actions remain available only in `공시내역 필터링`. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |

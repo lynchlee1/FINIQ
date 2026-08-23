@@ -65,10 +65,14 @@ def inspect_all_disclosure_external_html_compress_payload(
                 "mode": mode,
                 **({"parent_mode": parent_mode} if parent_mode else {}),
                 **inspected,
+                "repairable": not parent_mode and not inspected["passed"],
             }
         )
 
     failed_modes = [result["id"] for result in results if not result["passed"]]
+    repairable_failed_modes = [
+        result["id"] for result in results if result["repairable"]
+    ]
     return {
         "format": "finiq_disclosure_external_html_compress_all_inspection_v1",
         "passed": not failed_modes,
@@ -76,31 +80,37 @@ def inspect_all_disclosure_external_html_compress_payload(
         "passed_mode_count": len(results) - len(failed_modes),
         "failed_mode_count": len(failed_modes),
         "failed_modes": failed_modes,
+        "repairable_failed_mode_count": len(repairable_failed_modes),
+        "repairable_failed_modes": repairable_failed_modes,
         "expected_records": sum(result["expected_records"] for result in results),
         "verified_records": sum(result["verified_records"] for result in results),
         "results": results,
     }
 
 
-def compress_all_disclosure_external_html_payload(
+def rebuild_invalid_disclosure_external_html_compress_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Rebuild compressed external HTML for every owning workspace mode."""
+    """Rebuild only owner files implicated by the current all-mode inspection."""
     data_root = str(body.get("data_root") or "").strip()
     if not data_root:
         raise ValueError("data_root is required")
 
-    owners = [
-        preset
-        for preset in _workspace_filter_presets(data_root)
-        if not preset.get("parent_mode")
-    ]
+    inspection = inspect_all_disclosure_external_html_compress_payload(body)
+    owner_modes = sorted(
+        {
+            result["mode"]
+            for result in inspection["results"]
+            if result["repairable"]
+        }
+    )
     results: list[dict[str, Any]] = []
-    for index, preset in enumerate(owners, start=1):
-        mode = preset["mode"]
+    for index, mode in enumerate(owner_modes, start=1):
         if progress_callback is not None:
-            progress_callback(f"전체 압축 재생성 {index}/{len(owners)}: {mode}")
+            progress_callback(
+                f"재생성 {index}/{len(owner_modes)}: {mode}"
+            )
         payload = apply_workspace_defaults(
             "external_html_compress",
             {
@@ -113,28 +123,31 @@ def compress_all_disclosure_external_html_payload(
             result = compress_disclosure_external_html_payload(
                 payload, progress_callback=progress_callback
             )
-            results.append({"id": preset["id"], "mode": mode, "passed": True, **result})
+            results.append({"mode": mode, "passed": True, **result})
         except Exception as exc:
             results.append(
-                {"id": preset["id"], "mode": mode, "passed": False, "error": str(exc)}
+                {"mode": mode, "passed": False, "error": str(exc)}
             )
 
-    failed_modes = [result["id"] for result in results if not result["passed"]]
+    failed_modes = [result["mode"] for result in results if not result["passed"]]
+    verification = inspect_all_disclosure_external_html_compress_payload(body)
     return {
-        "format": "finiq_disclosure_external_html_compress_all_result_v1",
-        "passed": not failed_modes,
-        "mode_count": len(results),
+        "format": "finiq_disclosure_external_html_compress_repair_result_v1",
+        "passed": not failed_modes and verification["passed"],
+        "inspected_failed_modes": inspection["failed_modes"],
+        "target_mode_count": len(owner_modes),
         "regenerated_mode_count": len(results) - len(failed_modes),
         "failed_mode_count": len(failed_modes),
         "failed_modes": failed_modes,
         "results": results,
+        "verification": verification,
     }
 
 
 def inspect_disclosure_external_html_compress_payload(
     body: dict[str, Any],
 ) -> dict[str, Any]:
-    """Verify the saved compressed JSON against the current filter and source HTML."""
+    """Verify the saved compressed JSON against the source HTML files."""
     input_directory_raw = str(body.get("input_directory") or "").strip()
     output_directory_raw = str(body.get("output_directory") or "").strip()
     if not input_directory_raw:
@@ -145,47 +158,10 @@ def inspect_disclosure_external_html_compress_payload(
     input_directory = Path(input_directory_raw).expanduser().resolve()
     output_directory = Path(output_directory_raw).expanduser().resolve()
     compressed_path = output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
-    source_json, _source_path = _load_workspace_filtered_payload(body)
-    expected_acpt_numbers = collect_acpt_numbers_from_json(source_json)
-
-    if body.get("parent_mode") not in (None, ""):
-        try:
-            compress_disclosure_external_html_payload(body)
-        except Exception as exc:
-            return {
-                "format": "finiq_disclosure_external_html_compress_inspection_v1",
-                "compressed_path": str(compressed_path),
-                "passed": False,
-                "expected_records": len(expected_acpt_numbers),
-                "verified_records": 0,
-                "missing_records": len(expected_acpt_numbers),
-                "unexpected_records": 0,
-                "duplicate_records": 0,
-                "missing_files": [] if compressed_path.is_file() else [str(compressed_path)],
-                "invalid_files": [],
-                "missing_acpt_numbers": [],
-                "unexpected_acpt_numbers": [],
-                "duplicate_acpt_numbers": [],
-                "content_matches_source": False,
-                "error": str(exc),
-            }
-        return {
-            "format": "finiq_disclosure_external_html_compress_inspection_v1",
-            "compressed_path": str(compressed_path),
-            "passed": True,
-            "expected_records": len(expected_acpt_numbers),
-            "verified_records": len(expected_acpt_numbers),
-            "missing_records": 0,
-            "unexpected_records": 0,
-            "duplicate_records": 0,
-            "missing_files": [],
-            "invalid_files": [],
-            "missing_acpt_numbers": [],
-            "unexpected_acpt_numbers": [],
-            "duplicate_acpt_numbers": [],
-            "content_matches_source": True,
-            "error": "",
-        }
+    expected_acpt_numbers = [
+        html_path.stem
+        for _year, html_path in _collect_yearly_html_files(input_directory)
+    ]
 
     verification = _verify_compressed_external_html_files(
         written_files=[str(compressed_path)],
@@ -228,7 +204,7 @@ def inspect_disclosure_external_html_compress_payload(
             **result,
             "passed": content_matches_source,
             "content_matches_source": content_matches_source,
-            "error": "" if content_matches_source else "빈 필터의 압축 JSON 내용이 올바르지 않습니다.",
+            "error": "" if content_matches_source else "원문 HTML이 없는 압축 JSON 내용이 올바르지 않습니다.",
         }
 
     try:

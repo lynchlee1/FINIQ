@@ -5,7 +5,84 @@ from __future__ import annotations
 import time
 from collections import deque
 
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+)
+from finiq.market_desk.web.features.disclosures.html_cleanup import (
+    inspect_all_disclosure_external_html_payload,
+)
 from finiq.market_desk.web.features.disclosures.html_common import *
+
+
+def redownload_missing_disclosure_external_html_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Download missing owner-mode HTML identified by the all-mode inspection."""
+    data_root = str(body.get("data_root") or "").strip()
+    if not data_root:
+        raise ValueError("data_root is required")
+
+    inspection = inspect_all_disclosure_external_html_payload(body)
+    targets = [
+        result
+        for result in inspection["results"]
+        if not result.get("parent_mode")
+        and int(result.get("download_required_target_html_count") or 0) > 0
+    ]
+    results: list[dict[str, Any]] = []
+    cancelled = False
+    setting_keys = (
+        "timeout",
+        "max_requests_per_minute",
+        "wait_seconds",
+        "skip_existing",
+        "progress_interval",
+        "problem_file_limit",
+        "max_workers",
+    )
+    for index, target in enumerate(targets, start=1):
+        if cancel_check is not None and cancel_check():
+            cancelled = True
+            break
+        mode = target["mode"]
+        if progress_callback is not None:
+            progress_callback(f"재다운로드 {index}/{len(targets)}: {mode}")
+        payload = apply_workspace_defaults(
+            "external_html_download",
+            {
+                "data_root": data_root,
+                "mode": mode,
+                **{key: body.get(key) for key in setting_keys if key in body},
+            },
+        )
+        try:
+            result = download_disclosure_external_html_payload(
+                payload,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+            )
+            cancelled = bool(result.get("cancelled"))
+            results.append({"mode": mode, "passed": not cancelled, **result})
+            if cancelled:
+                break
+        except Exception as exc:
+            results.append({"mode": mode, "passed": False, "error": str(exc)})
+
+    failed_modes = [result["mode"] for result in results if not result["passed"]]
+    verification = inspect_all_disclosure_external_html_payload(body)
+    return {
+        "format": "finiq_disclosure_external_html_redownload_result_v1",
+        "passed": not cancelled and not failed_modes and verification["passed"],
+        "cancelled": cancelled,
+        "target_mode_count": len(targets),
+        "completed_mode_count": len(results) - len(failed_modes),
+        "failed_mode_count": len(failed_modes),
+        "failed_modes": failed_modes,
+        "results": results,
+        "verification": verification,
+    }
 
 def download_disclosure_external_html_payload(
     body: dict[str, Any],

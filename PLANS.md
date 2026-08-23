@@ -1,15 +1,27 @@
 # Completed Changes Requiring Follow-up
 
-## 2026-08-23: inspect and rebuild compression across every disclosure mode
+## 2026-08-23: inspect external HTML storage for every mode
 
-- Purpose: Make the top compression inspection independent of the filter selected below it and provide one repair action when any mode is stale.
-- Implementation: The compression inspection now enumerates every filter mode, returns per-mode evidence, and the UI lists those results. A failed inspection exposes `전부 재생성`, which rebuilds every base-mode-owned compressed file in one background job; derived modes continue to share their parent file.
-- Verification: Three focused all-mode compression tests and six existing compression service tests pass; all 182 frontend tests pass; Python compilation, route registration, and `git diff --check` pass. MarketDesk TypeScript checking remains blocked only by the pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
+- Purpose: Make the top `외부 HTML 저장` inspection cover every basic and derived workspace mode, matching its position above the filter selector.
+- Implementation: The external-save inspection endpoint enumerates all workspace presets and aggregates each mode's missing, invalid, hash-mismatched, unverified, and out-of-target evidence. `외부 HTML 저장` now has one `기존 원문 데이터 검사` row; when owner-mode downloads remain, that row's `검사하기` becomes `재다운로드` instead of adding a `미저장 원문 다운로드` row. Owner-only totals avoid derived-mode double counting, and the background repair processes only affected base modes before leaving the final all-mode verification visible.
+- Verification: Seven focused route/repair tests, 113 related backend tests, and all 184 frontend tests pass. The repair regression proves that a failed base mode is processed once while its derived mode and a normal base mode are skipped. A DB-free, read-only run against the real workspace reports all six modes: two normal and four unavailable. The owner-only remediation total is 80,550 missing files instead of the duplicated 103,414 mode-level total. Python compilation and `git diff --check` pass. The changed MarketDesk page compiles successfully; the full Next.js build reaches only the pre-existing unsupported `modal` prop error in `packages/ui/src/components/ui/select.tsx`.
+
+## 2026-08-23: cancel inspections when leaving their page
+
+- Purpose: Ensure a running existing-data inspection never survives a main-page navigation or a `세부 페이지 선택` change, including `공시원문 외부 저장`.
+- Implementation: The shared inspection hook now aborts its active HTTP request on invalidation and unmount. The condition-filter and disclosure-download inspections own equivalent abort controllers; disclosure-download background inspections also request server cancellation and discard their saved polling context when the page unmounts. Existing external-save mode changes continue to abort their active request and are now covered by the inspection design contract and regression test.
+- Verification: All 183 frontend tests pass and `git diff --check` passes. MarketDesk TypeScript checking reaches only the two pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`; no changed file reports a type error.
+
+## 2026-08-23: inspect all modes and repair only invalid compression files
+
+- Purpose: Make the top compression inspection independent of the filter selected below it while keeping the inspection layout structurally stable.
+- Implementation: The compression inspection enumerates every filter mode and compares each owner directory's actual saved HTML with its compressed JSON; current filter targets that have not yet been saved remain exclusively in the external-save inspection. On a repairable base-mode mismatch, the existing inspection row changes its action to `재생성`; no box or row is added. The repair job rebuilds only failed base-mode compressed files and then runs a final all-mode verification that remains visible. Derived modes inspect the same parent-owned pair without adding duplicate repair work.
+- Verification: Six DB-free compression tests pass, including the real background repair API, proof that a normal mode file is not rewritten, a regression for an unsaved current-filter target, and a derived-mode owner-pair check; six existing compression service tests and all 183 frontend tests pass. A read-only run against the real workspace passes all six mode results with 253,526/253,526 mode-level records verified; it reads no database and writes comparison output only to temporary directories. Python compilation, route registration, and `git diff --check` pass. MarketDesk TypeScript checking remains blocked only by the pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
 
 ## 2026-08-23: separate save and compression inspection criteria
 
 - Purpose: switching `공시원문 외부 저장` from saving to compression must replace the source-HTML inspection with inspection of the generated compressed JSON.
-- Implementation summary: the detail-page switch invalidates prior evidence. Save mode keeps its existing source-file inspection, while compression mode checks `compressed-external-html.json` for format, current-filter membership, duplicates and exact agreement with records rebuilt from the source HTML.
+- Implementation summary: the detail-page switch invalidates prior evidence. Save mode keeps its existing source-file inspection, while compression mode checks `compressed-external-html.json` for format, duplicates and exact agreement with records rebuilt from the actually saved source HTML.
 - Verification: all 182 frontend tests pass. Eight focused backend compression tests pass, including valid, missing and source-mismatched compressed JSON cases, and `git diff --check` passes. MarketDesk TypeScript checking remains blocked only by the pre-existing unsupported `modal` prop errors in `packages/ui/src/components/ui/select.tsx`.
 
 ## 2026-08-13: three-mode external/internal HTML data alignment

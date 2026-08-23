@@ -210,7 +210,11 @@ export default function HtmlParsePage() {
     acceptResult: acceptInspectionResult,
     clear: clearInspection,
   } = useDataIntegrityInspection<Record<string, unknown>, ParseInspectionResult>({
-    inspect: (payload) => apiPost<ParseInspectionResult>("/api/disclosures/html/parse/inspect", payload),
+    inspect: (payload, signal) => apiPost<ParseInspectionResult>(
+      "/api/disclosures/html/parse/inspect",
+      payload,
+      { signal },
+    ),
     onError: (message) => {
       setStatus(message);
       setIsErrorStatus(true);

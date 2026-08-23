@@ -27,7 +27,7 @@ test("HTML reuse without a hash baseline is blocked and reported once", () => {
   assert.doesNotMatch(page, /trust_existing_files: true/);
 });
 
-test("the inspection action is numbered and pending downloads are an unnumbered bundled result", () => {
+test("external save uses one repairable inspection row and internal save keeps its bundled result", () => {
   // Missing files stay out of the integrity verdict...
   const problemCountStatement = page
     .slice(page.indexOf("const integrityProblemCount"))
@@ -35,38 +35,59 @@ test("the inspection action is numbered and pending downloads are an unnumbered 
   assert.doesNotMatch(problemCountStatement, /missing_target_html_count/);
   // ...and are reported by their own result row under the main check instead.
   assert.match(page, /extraSteps=\{inspectionExtraSteps\.length \? inspectionExtraSteps : undefined\}/);
+  assert.match(page, /const inspectionExtraSteps: DataIntegrityInspectionStep\[\] = variant === "internal" \? \[\{/);
   assert.match(page, /key: "pending-download",\s*numbered: false/);
   assert.doesNotMatch(page, /<SingleCheckDataIntegrityInspectionCard[\s\S]{0,250}numbered=\{false\}/);
   assert.match(page, /const pendingStepStatus = inspectRunning\s*\? "waiting"/);
   assert.match(page, /const pendingStepLabel = inspectRunning\s*\? "대기"/);
   assert.doesNotMatch(page, /const pendingStepStatus = inspectRunning\s*\? "running"/);
   assert.match(page, /statusLabel: pendingStepLabel/);
-  assert.match(page, /setExistingData\(data\)/);
+  assert.match(page, /setExternalSaveInspectionData\(variant === "external" \? data : null\)/);
   assert.doesNotMatch(page, /setExistingData\(data\.has_existing \? data : null\)/);
   assert.match(page, /"다운로드 필요"/);
   assert.doesNotMatch(problemCountStatement, /compressionInspectionData/);
   assert.match(page, /const existingDataInspectionCard = \(\s*<SingleCheckDataIntegrityInspectionCard/);
-  // That step drives the shortcut back into the normal download job.
+  // The internal-only result row still drives its selected-mode download job.
   assert.match(page, /label: "재다운로드",\s*onClick: handleRun/);
-  assert.match(page, /action: !inspectRunning && pendingDownloadCount > 0 && !selectedFilterParentMode \?/);
 });
 
 test("switching to compression resets inspection and checks the compressed JSON", () => {
   assert.match(
     page,
-    /const inspectionFilterKey = externalTaskMode === "compress" \? "" : selectedFilterId/,
+    /const inspectionFilterKey = variant === "external" \? "" : selectedFilterId/,
   );
   assert.match(page, /const compressionInspectionCopy = \{/);
   assert.match(page, /"압축 파일에 문제가 있습니다"/);
-  assert.match(page, /모든 모드의 compressed-external-html\.json 형식, 대상 기록, 원문 hash·size 일치 여부/);
+  assert.match(page, /모든 모드의 compressed-external-html\.json 형식, 저장된 원문 HTML 기록, hash·size 일치 여부/);
   assert.match(page, /"\/api\/disclosures\/external-html-download\/compress\/check-existing"/);
-  assert.match(page, /"\/api\/disclosures\/external-html-download\/compress\/rebuild-all\/start"/);
-  assert.match(page, /label: "전부 재생성"/);
+  assert.match(page, /"\/api\/disclosures\/external-html-download\/compress\/repair\/start"/);
+  assert.match(page, /\? "재생성"/);
+  assert.match(page, /setCompressionInspectionData\(nextResult\.verification\)/);
+  assert.match(page, /setCompressionInspectionError\(nextResult\.passed \? "" : "압축 파일 재생성에 실패했습니다\."\)/);
+  assert.match(page, /compressionInspectionData\?\.repairable_failed_mode_count/);
+  assert.match(page, /compressionInspectionRepairable\s*\? `\$\{formatInteger\(compressionInspectionData\?\.repairable_failed_mode_count/);
+  assert.doesNotMatch(page, /key: "rebuild-all-compression"/);
+  assert.match(page, /extraSteps=\{inspectionExtraSteps\.length \? inspectionExtraSteps : undefined\}/);
   assert.match(page, /compressionResults\.map/);
-  assert.match(page, /onClick: isExternalCompressMode \? handleInspectCompressedFile : handleInspectFolder/);
+  assert.match(page, /\? handleInspectCompressedFile\s*: handleInspectFolder/);
   assert.match(page, /const inspectionCopy = isExternalCompressMode\s*\? compressionInspectionCopy\s*:\s*saveInspectionCopy/);
   assert.match(page, /stepTitle=\{isExternalCompressMode \? "압축 파일 검사" : "기존 원문 데이터 검사"\}/);
   assert.match(page, /const inspectionStepSummary = isExternalCompressMode\s*\? compressionInspectionStepSummary\s*:\s*saveInspectionStepSummary/);
+});
+
+test("external HTML save inspection checks every workspace mode", () => {
+  assert.match(page, /const \[externalSaveInspectionData, setExternalSaveInspectionData\] = useState<any>\(null\)/);
+  assert.match(page, /variant === "external"[\s\S]{0,180}data_root: dataRoot/);
+  assert.match(page, /externalSaveInspectionData\.results\.find\(\(item: any\) => item\.id === selectedFilterId\)/);
+  assert.match(page, /모든 모드의 대상과 저장 파일을 비교/);
+  assert.match(page, /externalSaveResults\.map/);
+  assert.match(page, /미저장 또는 무결성 문제가 있습니다/);
+  assert.match(page, /externalSaveInspectionData\?\.owner_download_required_target_html_count/);
+  assert.match(page, /기본 모드 대상 .*owner_requested_count/);
+  assert.match(page, /"\/api\/disclosures\/external-html-download\/redownload\/start"/);
+  assert.match(page, /const externalSaveRedownloadable = variant === "external"/);
+  assert.match(page, /externalSaveRedownloadable\s*\? handleRedownloadMissingExternalHtml/);
+  assert.match(page, /externalSaveRedownloadable\s*\? "재다운로드"/);
 });
 
 test("internal HTML save derives its compressed source from the workspace mode", () => {

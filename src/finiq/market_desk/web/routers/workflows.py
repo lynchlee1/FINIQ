@@ -17,6 +17,7 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
     clean_disclosure_html_output_directory_payload,
     create_external_html_integrity_baseline_payload,
+    inspect_all_disclosure_external_html_payload,
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.filter_presets import (
@@ -569,9 +570,7 @@ def create_workflows_router(
     @router.post("/api/disclosures/external-html-download/check-existing")
     def check_external_html_download_folder(payload: dict[str, Any]):
         try:
-            return check_disclosure_html_output_directory_payload(
-                apply_workspace_defaults("external_html_download", payload)
-            )
+            return inspect_all_disclosure_external_html_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -581,6 +580,17 @@ def create_workflows_router(
     ):
         return _start_background_job(
             kind="external_html_integrity_baseline",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
+
+    @router.post("/api/disclosures/external-html-download/redownload/start")
+    async def start_missing_external_html_redownload(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
+        return _start_background_job(
+            kind="external_html_redownload",
             payload=payload,
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,
@@ -604,12 +614,12 @@ def create_workflows_router(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.post("/api/disclosures/external-html-download/compress/rebuild-all/start")
-    async def start_all_external_html_compress(
+    @router.post("/api/disclosures/external-html-download/compress/repair/start")
+    async def start_invalid_external_html_compress_repair(
         payload: dict[str, Any], background_tasks: BackgroundTasks
     ):
         return _start_background_job(
-            kind="external_html_compress_all",
+            kind="external_html_compress_repair",
             payload=payload,
             background_tasks=background_tasks,
             run_job_worker=run_job_worker,

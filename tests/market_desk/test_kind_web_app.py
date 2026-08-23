@@ -14,6 +14,7 @@ from finiq.market_desk.web.jobs import JobManager, job_manager
 from finiq.market_desk.web.features.downloads.kind_common import (
     configure_download_job_retention,
 )
+from finiq.market_desk.web.features.disclosures import external_html_download
 
 
 def _save_filter_workflow(
@@ -121,6 +122,7 @@ def _external_workspace_body(
     tmp_path: Path, source_json: dict, **body: object
 ) -> dict[str, object]:
     data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
     filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
     normalized_source_json = dict(source_json)
@@ -1843,7 +1845,12 @@ def test_html_download_inspect_folder_route_dry_run_reports_unexpected_file(tmp_
 
 
 def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path) -> None:
-    output_directory = tmp_path / "viewer_html"
+    output_directory = (
+        tmp_path
+        / "workspace"
+        / "04-external-html-download"
+        / "bond_issuance"
+    )
     (output_directory / "2025").mkdir(parents=True)
     (output_directory / "2025" / "20250101000001.html").write_text(
         "<html><body>" + ("valid " * 30) + "</body></html>", encoding="utf-8"
@@ -1860,19 +1867,22 @@ def test_html_download_check_existing_route_reports_existing_html(tmp_path: Path
                     {"acpt_no": "20250101000002"},
                 ]
             },
-            output_directory=str(output_directory),
+            output_directory="",
         ),
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["format"] == "kind_disclosure_html_existing_check_v1"
-    assert payload["has_existing"] is True
-    assert payload["existing_target_html_count"] == 1
-    assert payload["missing_target_html_count"] == 1
-    assert payload["hash_verified_target_html_count"] == 0
-    assert payload["hash_unverified_target_html_count"] == 1
-    assert payload["hash_mismatch_target_html_count"] == 0
+    assert payload["format"] == "finiq_disclosure_external_html_all_inspection_v1"
+    assert payload["mode_count"] == 1
+    assert payload["failed_modes"] == ["bond_issuance"]
+    result = payload["results"][0]
+    assert result["has_existing"] is True
+    assert result["existing_target_html_count"] == 1
+    assert result["missing_target_html_count"] == 1
+    assert result["hash_verified_target_html_count"] == 0
+    assert result["hash_unverified_target_html_count"] == 1
+    assert result["hash_mismatch_target_html_count"] == 0
 
 
 def test_external_html_check_existing_route_uses_workspace_default_output(
@@ -1904,7 +1914,106 @@ def test_external_html_check_existing_route_uses_workspace_default_output(
     assert response.status_code == 200
     payload = response.json()
     assert payload["existing_target_html_count"] == 1
-    assert payload["output_directory"] == str(output_directory.parent.resolve())
+    assert payload["results"][0]["output_directory"] == str(output_directory.parent.resolve())
+
+
+def test_external_html_check_existing_route_inspects_every_workspace_mode(
+    tmp_path: Path,
+) -> None:
+    body = _external_workspace_body(
+        tmp_path,
+        {"disclosures": [{"acpt_no": "20250101000001"}]},
+        output_directory="",
+    )
+    data_root = Path(str(body["data_root"]))
+    _save_filter_workflow(data_root, mode="rights_issuance")
+    rights_filtered = data_root / "03-filter" / "rights_issuance" / "filtered.json"
+    rights_filtered.parent.mkdir(parents=True, exist_ok=True)
+    rights_filtered.write_text(
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250102000002",
+                        "disclosed_at": "2025-01-02",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).post(
+        "/api/disclosures/external-html-download/check-existing",
+        json={"data_root": str(data_root)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode_count"] == 2
+    assert payload["failed_mode_count"] == 2
+    assert payload["failed_modes"] == ["bond_issuance", "rights_issuance"]
+    assert [result["id"] for result in payload["results"]] == [
+        "bond_issuance",
+        "rights_issuance",
+    ]
+    assert payload["download_required_target_html_count"] == 2
+    assert payload["owner_requested_count"] == 2
+    assert payload["owner_download_required_target_html_count"] == 2
+
+
+def test_external_html_redownload_processes_only_failed_owner_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initial_inspection = {
+        "passed": False,
+        "failed_modes": ["bond_issuance", "bond_issuance/child"],
+        "results": [
+            {
+                "id": "bond_issuance",
+                "mode": "bond_issuance",
+                "download_required_target_html_count": 2,
+            },
+            {
+                "id": "bond_issuance/child",
+                "mode": "child",
+                "parent_mode": "bond_issuance",
+                "download_required_target_html_count": 1,
+            },
+            {
+                "id": "rights_issuance",
+                "mode": "rights_issuance",
+                "download_required_target_html_count": 0,
+            },
+        ],
+    }
+    final_inspection = {"passed": True, "failed_modes": [], "results": []}
+    inspections = iter([initial_inspection, final_inspection])
+    downloaded_modes: list[str] = []
+    monkeypatch.setattr(
+        external_html_download,
+        "inspect_all_disclosure_external_html_payload",
+        lambda _body: next(inspections),
+    )
+    monkeypatch.setattr(
+        external_html_download,
+        "download_disclosure_external_html_payload",
+        lambda body, progress_callback=None, cancel_check=None: (
+            downloaded_modes.append(str(body["mode"]))
+            or {"cancelled": False, "requested_count": 2, "saved_count": 2}
+        ),
+    )
+
+    result = external_html_download.redownload_missing_disclosure_external_html_payload(
+        {"data_root": str(tmp_path / "workspace")}
+    )
+
+    assert result["passed"] is True
+    assert result["target_mode_count"] == 1
+    assert result["completed_mode_count"] == 1
+    assert result["verification"] is final_inspection
+    assert downloaded_modes == ["bond_issuance"]
 
 
 def test_external_html_trust_existing_route_creates_hash_baseline(

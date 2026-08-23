@@ -61,7 +61,11 @@ export default function TablePage() {
     acceptResult: acceptInspectionResult,
     clear: clearInspection,
   } = useDataIntegrityInspection<TableInspectionPayload, TableInspectionResult>({
-    inspect: (payload) => apiPost<TableInspectionResult>("/api/disclosures/table/inspect", payload),
+    inspect: (payload, signal) => apiPost<TableInspectionResult>(
+      "/api/disclosures/table/inspect",
+      payload,
+      { signal },
+    ),
     onError: (message) => {
       setStatus(message);
       setIsErrorStatus(true);

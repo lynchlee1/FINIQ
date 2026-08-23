@@ -27,10 +27,10 @@ export function cancelDownload(jobId: string) {
   return apiPost<any>("/api/download/run/cancel", { job_id: jobId });
 }
 
-export function inspectDownloadFolder(payload: DownloadInspectPayload) {
-  return apiPost<JobStartResponse>("/api/download/inspect-folder/start", payload);
+export function inspectDownloadFolder(payload: DownloadInspectPayload, signal?: AbortSignal) {
+  return apiPost<JobStartResponse>("/api/download/inspect-folder/start", payload, { signal });
 }
 
-export function detectExistingDownload(payload: DownloadExistingPayload) {
-  return apiPost<DownloadExistingResponse>("/api/download/detect-existing", payload);
+export function detectExistingDownload(payload: DownloadExistingPayload, signal?: AbortSignal) {
+  return apiPost<DownloadExistingResponse>("/api/download/detect-existing", payload, { signal });
 }

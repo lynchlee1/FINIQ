@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type DataIntegrityInspectionOptions<TPayload, TResult> = {
-  inspect: (payload: TPayload) => Promise<TResult>;
+  inspect: (payload: TPayload, signal: AbortSignal) => Promise<TResult>;
   onError?: (message: string) => void;
 };
 
@@ -14,6 +14,7 @@ export function useDataIntegrityInspection<TPayload, TResult>({
   const inspectRef = useRef(inspect);
   const onErrorRef = useRef(onError);
   const requestRef = useRef({ id: 0, key: "" });
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [result, setResult] = useState<TResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
@@ -23,7 +24,15 @@ export function useDataIntegrityInspection<TPayload, TResult>({
     onErrorRef.current = onError;
   }, [inspect, onError]);
 
+  useEffect(() => () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    requestRef.current = { id: requestRef.current.id + 1, key: "" };
+  }, []);
+
   const clear = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     requestRef.current = { id: requestRef.current.id + 1, key: "" };
     setResult(null);
     setError(null);
@@ -31,6 +40,8 @@ export function useDataIntegrityInspection<TPayload, TResult>({
   }, []);
 
   const acceptResult = useCallback((nextResult: TResult) => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     requestRef.current = { id: requestRef.current.id + 1, key: "" };
     setResult(nextResult);
     setError(null);
@@ -38,13 +49,16 @@ export function useDataIntegrityInspection<TPayload, TResult>({
   }, []);
 
   const runInspection = useCallback(async (payload: TPayload, requestKey: string) => {
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     const requestId = requestRef.current.id + 1;
     requestRef.current = { id: requestId, key: requestKey };
     setIsChecking(true);
     setError(null);
 
     try {
-      const nextResult = await inspectRef.current(payload);
+      const nextResult = await inspectRef.current(payload, abortController.signal);
       if (requestRef.current.id !== requestId || requestRef.current.key !== requestKey) {
         return null;
       }
@@ -62,6 +76,9 @@ export function useDataIntegrityInspection<TPayload, TResult>({
       onErrorRef.current?.(message);
       return null;
     } finally {
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
       if (requestRef.current.id === requestId && requestRef.current.key === requestKey) {
         setIsChecking(false);
       }
