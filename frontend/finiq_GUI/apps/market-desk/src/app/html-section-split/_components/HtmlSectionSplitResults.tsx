@@ -13,12 +13,6 @@ import {
   type HtmlWorkflowField,
 } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { formatInteger } from "@/lib/format";
-import {
-  HtmlSectionPatternCard,
-  type SectionPattern,
-} from "@/components/disclosures/HtmlSectionPatternCard";
-
-export type { SectionPattern } from "@/components/disclosures/HtmlSectionPatternCard";
 
 export type TocItem = {
   toc_id: string;
@@ -67,16 +61,12 @@ export type InspectResult = {
   };
   documents?: DocumentRow[];
   problem_files?: ProblemFile[];
-  section_patterns?: SectionPattern[];
 };
 
 type HtmlSectionSplitResultsProps = {
   inputDirectory: string;
   documents: DocumentRow[];
   problemFiles: ProblemFile[];
-  sectionPatterns: SectionPattern[];
-  selectedPatternTocIds: Record<string, string[]>;
-  isLoadingSectionPatterns: boolean;
   page: number;
   hasNextPage: boolean;
   selectedDocument: DocumentRow | null;
@@ -94,8 +84,6 @@ type HtmlSectionSplitResultsProps = {
   onPreviousPage: () => void;
   onNextPage: () => void;
   onSelectSection: (tocId: string) => void;
-  onTogglePatternSection: (signature: string, tocId: string) => void;
-  onSetPatternSelection: (signature: string, tocIds: string[]) => void;
 };
 
 type HtmlSectionSplitActionDockProps = {
@@ -133,9 +121,6 @@ export function HtmlSectionSplitResults({
   inputDirectory,
   documents,
   problemFiles,
-  sectionPatterns,
-  selectedPatternTocIds,
-  isLoadingSectionPatterns,
   page,
   hasNextPage,
   selectedDocument,
@@ -153,8 +138,6 @@ export function HtmlSectionSplitResults({
   onPreviousPage,
   onNextPage,
   onSelectSection,
-  onTogglePatternSection,
-  onSetPatternSelection,
 }: HtmlSectionSplitResultsProps) {
   const reviewPanelRef = useRef<HTMLDivElement | null>(null);
   const selectedSection = splitResult?.sections.find((section) => section.toc_id === selectedSectionId) || splitResult?.sections[0] || null;
@@ -382,15 +365,6 @@ export function HtmlSectionSplitResults({
           {renderReviewContent()}
         </HtmlWorkflowCard>
       </div>
-
-      <HtmlSectionPatternCard
-        inputDirectory={inputDirectory}
-        sectionPatterns={sectionPatterns}
-        selectedPatternTocIds={selectedPatternTocIds}
-        isLoading={isLoadingSectionPatterns}
-        onTogglePatternSection={onTogglePatternSection}
-        onSetPatternSelection={onSetPatternSelection}
-      />
 
       {problemFiles.length ? (
         <HtmlWorkflowCard title="문제 파일" description="목차가 없거나 읽기에 실패한 HTML 파일입니다.">

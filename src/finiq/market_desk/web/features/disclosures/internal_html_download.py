@@ -10,6 +10,14 @@ from finiq.data_scraper.core.html_rate_limit import (
     RequestSpacingLimiter,
     wait_for_html_download_request_slot,
 )
+from finiq.data_scraper.core.kind_computers import (
+    KIND_VIRTUAL_COMPUTER_COUNT,
+    KindVirtualComputer,
+    create_kind_computer_session,
+    headers_for_computer,
+    resolve_virtual_computer_count,
+    run_kind_virtual_computers,
+)
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 
@@ -136,6 +144,41 @@ def _collect_internal_cleanup_targets_from_compressed_payload(
     return targets, payload
 
 
+def _internal_html_virtual_computer_worker(
+    computer: KindVirtualComputer,
+    targets: list[dict[str, str]],
+    worker_kwargs: dict[str, object],
+    progress_queue: object,
+    cancel_event: object,
+) -> list[str]:
+    session = create_kind_computer_session(
+        computer,
+        pool_size=int(worker_kwargs["max_workers"]),
+    )
+    try:
+        paths = download_disclosure_internal_htmls(
+            output_directory=Path(str(worker_kwargs["output_directory"])),
+            request_headers=headers_for_computer(
+                computer, dict(worker_kwargs["request_headers"])  # type: ignore[arg-type]
+            ),
+            targets=targets,
+            timeout=float(worker_kwargs["timeout"]),
+            wait_seconds_between_requests=float(
+                worker_kwargs["wait_seconds_between_requests"]
+            ),
+            max_requests_per_minute=int(worker_kwargs["max_requests_per_minute"]),
+            skip_existing=bool(worker_kwargs["skip_existing"]),
+            progress_callback=lambda message: progress_queue.put(message),  # type: ignore[attr-defined]
+            cancel_check=lambda: bool(cancel_event.is_set()),  # type: ignore[attr-defined]
+            max_workers=int(worker_kwargs["max_workers"]),
+            session=session,
+            virtual_computer_count=1,
+        )
+    finally:
+        session.close()
+    return [str(path) for path in paths]
+
+
 def download_disclosure_internal_htmls(
     *,
     output_directory: Path,
@@ -149,6 +192,8 @@ def download_disclosure_internal_htmls(
     cancel_check: Callable[[], bool] | None = None,
     max_workers: int | None = None,
     spacing_limiter: RequestSpacingLimiter | None = None,
+    session: requests.Session | None = None,
+    virtual_computer_count: int | None = None,
 ) -> list[Path]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     if timeout <= 0:
@@ -162,11 +207,48 @@ def download_disclosure_internal_htmls(
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
+    computer_count = resolve_virtual_computer_count(
+        virtual_computer_count,
+        item_count=len(targets),
+        session=session,
+    )
     worker_count = resolve_worker_count(
         max_workers,
         item_count=len(targets),
         field_name="max_workers",
     )
+    if computer_count > 1:
+        computer_results = run_kind_virtual_computers(
+            items=targets,
+            worker_qualname=(
+                "finiq.market_desk.web.features.disclosures."
+                "internal_html_download._internal_html_virtual_computer_worker"
+            ),
+            worker_kwargs={
+                "output_directory": str(output_directory),
+                "request_headers": {
+                    str(key): str(value) for key, value in request_headers.items()
+                },
+                "timeout": timeout,
+                "wait_seconds_between_requests": wait_seconds_between_requests,
+                "max_requests_per_minute": max_requests_per_minute,
+                "skip_existing": skip_existing,
+            },
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+            computer_count=computer_count,
+            max_workers=worker_count,
+        )
+        saved_paths: dict[str, Path] = {}
+        for result in computer_results:
+            for path_value in result:
+                path = Path(str(path_value))
+                saved_paths[path.stem] = path
+        return [
+            saved_paths[target["acpt_no"]]
+            for target in targets
+            if target["acpt_no"] in saved_paths
+        ]
     normalized_headers = {
         str(key): str(value) for key, value in request_headers.items()
     }
@@ -228,27 +310,36 @@ def download_disclosure_internal_htmls(
     worker_local = threading.local()
     worker_sessions: list[requests.Session] = []
     worker_sessions_lock = Lock()
+    active_session = session
 
     def download_parallel_target(
         item: tuple[int, dict[str, str]],
     ) -> tuple[int, Path | None]:
         index, target = item
-        session = getattr(worker_local, "session", None)
-        if session is None:
-            session = requests.Session()
-            worker_local.session = session
-            with worker_sessions_lock:
-                worker_sessions.append(session)
-        return index, download_target(target, session)
+        worker_session = active_session
+        if worker_session is None:
+            worker_session = getattr(worker_local, "session", None)
+            if worker_session is None:
+                worker_session = requests.Session()
+                worker_local.session = worker_session
+                with worker_sessions_lock:
+                    worker_sessions.append(worker_session)
+        return index, download_target(target, worker_session)
 
     indexed_paths: list[Path | None] = [None] * len(targets)
     if worker_count == 1:
-        with requests.Session() as session:
+        def download_serial(active: requests.Session) -> None:
             for index, target in enumerate(targets):
-                path = download_target(target, session)
+                path = download_target(target, active)
                 indexed_paths[index] = path
                 if path is None and cancel_check is not None and cancel_check():
                     break
+
+        if active_session is None:
+            with requests.Session() as owned_session:
+                download_serial(owned_session)
+        else:
+            download_serial(active_session)
     else:
         try:
             with ThreadPoolExecutor(
@@ -265,8 +356,8 @@ def download_disclosure_internal_htmls(
                     result_index, path = future.result()
                     indexed_paths[result_index] = path
         finally:
-            for session in worker_sessions:
-                session.close()
+            for worker_session in worker_sessions:
+                worker_session.close()
 
     return [path for path in indexed_paths if path is not None]
 
@@ -593,6 +684,7 @@ def download_disclosure_internal_html_payload(
                         or bool(cancel_check and cancel_check()),
                         max_workers=max_workers,
                         spacing_limiter=spacing_limiter,
+                        virtual_computer_count=KIND_VIRTUAL_COMPUTER_COUNT,
                     )
                 )
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())

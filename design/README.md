@@ -232,7 +232,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Internal HTML selected disclosure source view | 원문 보기 | Row action that loads the selected disclosure source and its section review data. |
 | Internal HTML selected disclosure split action | 목차 분리 | Button/action that splits the selected disclosure into TOC sections for review. |
 | Internal HTML selected disclosure section view | 목차별 보기 | Button/action and result card that split and show the selected disclosure by TOC section. |
-| Internal HTML section save action | 목차 저장 | Button/action that saves one HTML file per disclosure containing only the selected TOC sections, while preserving the source-relative path. |
+| Internal HTML section save action | 목차 저장 | Button/action that structurally splits every TOC range, removes only the correction section, and saves the remaining ranges as one HTML file per disclosure while preserving the source-relative path. |
 | Internal HTML individual disclosure table | 개별 공시 | Table listing per-file section lists and source-open actions. |
 | Internal HTML individual disclosure section count | 목차 수 | Column showing the number of sections in each listed disclosure. |
 | Internal HTML problem file table | 문제 파일 | Table listing files without TOC sections and files that failed to read. |
@@ -386,6 +386,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Notification clear action | 지우기 | Button in the right-side `알림` panel that clears the currently accumulated notification display. |
 | Settings panel | 설정 | Use as the generic right dock settings title unless a page-specific settings title is already established. |
 | Shared worker count setting | 워커 수 | Shared right-dock worker-count label. Same wording on download, table, filter, HTML, and automation pages. |
+| KIND virtual computer | 가상 컴퓨터 | Isolated KIND client used so two computers can download at once. Each identity has its own process, HTTP session, and IP binding. Shown in `실행 현황` while HTML downloads run. |
 | Shared request timeout setting | 타임아웃 (초) | Shared right-dock timeout label. |
 | Shared request interval setting | 요청 간격 (초) | Shared right-dock wait/interval label. Do not use `대기 시간 (초)` or `요청 timeout(초)`. |
 | Shared progress interval setting | 진행 확인 간격 (건) | Shared right-dock progress-interval label. Do not use `진행 표시 간격`. |

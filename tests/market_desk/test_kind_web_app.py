@@ -2487,7 +2487,7 @@ def test_html_section_inspect_route_rejects_file_without_canonical_toc(tmp_path:
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "canonical SECTION heading is required"
+    assert response.json()["detail"] == "supported TOC structure is required"
 
 
 def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_path: Path) -> None:
@@ -2674,7 +2674,7 @@ def test_html_section_source_split_route_returns_selected_disclosure_sections(tm
     assert "발행금액 250,000,000" in data["sections"][1]["html"]
 
 
-def test_html_section_save_start_route_saves_all_explicitly_selected_toc_sections(
+def test_html_section_save_start_route_saves_all_toc_sections_automatically(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
@@ -2728,6 +2728,7 @@ def test_html_section_save_start_route_saves_all_explicitly_selected_toc_section
         "expected_files": 1,
         "integrity_ok": True,
         "missing_files": 0,
+        "removed_correction_sections": 0,
     }
     section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
     assert "주요사항보고서" in section_html
@@ -2740,7 +2741,7 @@ def test_html_section_save_start_route_saves_all_explicitly_selected_toc_section
     assert not (output_directory / "2008" / "toc_1").exists()
 
 
-def test_html_section_save_start_route_applies_pattern_toc_selection(tmp_path: Path) -> None:
+def test_html_section_save_start_route_ignores_obsolete_pattern_selection(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     source_directory = input_directory / "2008"
@@ -2787,12 +2788,13 @@ def test_html_section_save_start_route_applies_pattern_toc_selection(tmp_path: P
         "expected_files": 1,
         "integrity_ok": True,
         "missing_files": 0,
+        "removed_correction_sections": 0,
     }
     section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
     assert "주요사항보고서" in section_html
     assert "표지 내용" in section_html
-    assert "전환사채권 발행결정" not in section_html
-    assert "발행금액 250,000,000" not in section_html
+    assert "전환사채권 발행결정" in section_html
+    assert "발행금액 250,000,000" in section_html
     assert not (output_directory / "2008" / "20260422000832_1.html").exists()
     assert not (output_directory / "2008" / "20260422000832_2.html").exists()
     assert not (output_directory / "toc_1").exists()

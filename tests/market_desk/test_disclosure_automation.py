@@ -87,7 +87,10 @@ def test_normalize_automation_profile_fixes_safe_kind_execution_settings(
     assert profile["data_root"] == str(tmp_path.resolve())
     assert profile["execution"]["max_requests_per_minute"] == 45
     assert "mutable_lookback_days" not in profile["execution"]
-    assert profile["decisions"]["s6_sections"]["unmatched_policy"] == "needs_review"
+    assert profile["decisions"]["s6_sections"] == {
+        "unmatched_policy": "automatic",
+        "section_save_rules": {},
+    }
 
 
 def test_normalize_automation_profile_uses_cpu_worker_default_and_cap(
@@ -901,7 +904,7 @@ def test_html_inspections_require_complete_current_membership(
     assert automation._inspect_detail_internal_html(profile)["confirmed"] is False
 
 
-def test_section_inspection_uses_current_rules_and_exact_output(
+def test_section_inspection_uses_automatic_exact_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
@@ -918,9 +921,7 @@ def test_section_inspection_uses_current_rules_and_exact_output(
     result = automation._inspect_detail_sections(profile)
 
     assert result["confirmed"] is True
-    assert captured["section_save_rules"] == profile["decisions"]["s6_sections"][
-        "section_save_rules"
-    ]
+    assert "section_save_rules" not in captured
     assert captured["input_directory"] == str(
         tmp_path
         / "05-internal-html-download"
@@ -1581,35 +1582,17 @@ def test_stage_four_rejects_compressed_record_without_main_document(
 
 
 def test_stage_six_rejects_source_without_sections(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    captured_workers: list[object] = []
-
-    def fake_summary(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
-        captured_workers.append(body.get("workers"))
-        return {
-            "summary": {
-                "found_files": 1,
-                "documents_with_sections": 0,
-                "files_without_sections": 1,
-                "failed_files": 0,
-            },
-            "items": [],
-        }
-
-    monkeypatch.setattr(
-        automation,
-        "summarize_disclosure_html_section_kinds_payload",
-        fake_summary,
-    )
-    monkeypatch.setattr(
-        automation,
-        "save_disclosure_html_sections_payload",
-        lambda *args, **kwargs: pytest.fail("section save must not start"),
+    stage_five_output = _stage_output_paths(profile, 5)[0]
+    stage_five_output.mkdir(parents=True)
+    (stage_five_output / "20260101000001.html").write_text(
+        "<html><head></head><body><p>no structural toc</p></body></html>",
+        encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="목차 없음=1"):
+    with pytest.raises(ValueError, match="supported TOC structure is required"):
         _run_stage(
             6,
             profile,
@@ -1617,7 +1600,6 @@ def test_stage_six_rejects_source_without_sections(
             progress_callback=lambda _message: None,
             cancel_check=lambda: False,
         )
-    assert captured_workers == [profile["execution"]["local_workers"]]
 
 
 def test_stage_six_allows_an_empty_filtered_result(
@@ -1632,20 +1614,6 @@ def test_stage_six_allows_an_empty_filtered_result(
         / ".automation-current"
     )
     stage_five_output.mkdir(parents=True)
-
-    monkeypatch.setattr(
-        automation,
-        "summarize_disclosure_html_section_kinds_payload",
-        lambda *args, **kwargs: {
-            "summary": {
-                "found_files": 0,
-                "documents_with_sections": 0,
-                "files_without_sections": 0,
-                "failed_files": 0,
-            },
-            "items": [],
-        },
-    )
 
     def fake_save(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
         Path(str(body["output_directory"])).mkdir(parents=True)

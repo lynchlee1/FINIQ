@@ -53,7 +53,6 @@ from finiq.market_desk.web.features.disclosures.html_parse_common import (
 from finiq.market_desk.web.features.disclosures.html_sections import (
     inspect_disclosure_html_section_output_payload,
     save_disclosure_html_sections_payload,
-    summarize_disclosure_html_section_kinds_payload,
 )
 from finiq.market_desk.web.features.disclosures.table_export import (
     build_disclosure_table_payload,
@@ -226,22 +225,6 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
     filter_blocks = raw_selection.get("filter_blocks") or []
     if not isinstance(filter_blocks, list):
         raise ValueError("filter_blocks must be a list")
-    section_rules = raw_sections.get("section_save_rules") or {}
-    if not isinstance(section_rules, dict):
-        raise ValueError("section_save_rules must be an object")
-    normalized_section_rules: dict[str, list[str]] = {}
-    for signature, toc_ids in section_rules.items():
-        signature_text = str(signature or "").strip()
-        if not signature_text or not isinstance(toc_ids, list):
-            continue
-        normalized_section_rules[signature_text] = list(
-            dict.fromkeys(
-                str(toc_id).strip()
-                for toc_id in toc_ids
-                if str(toc_id).strip()
-            )
-        )
-
     execution = payload.get("execution") or {}
     if not isinstance(execution, dict):
         raise ValueError("execution must be an object")
@@ -274,8 +257,8 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
                 "filter_blocks": filter_blocks,
             },
             "s6_sections": {
-                "unmatched_policy": "needs_review",
-                "section_save_rules": normalized_section_rules,
+                "unmatched_policy": "automatic",
+                "section_save_rules": {},
             },
         },
         "execution": {
@@ -331,7 +314,7 @@ def _stage_config_hash(profile: dict[str, Any], stage: int) -> str:
     if stage >= 3:
         semantic["s3_selection"] = decisions["s3_selection"]
     if stage >= 6:
-        semantic["s6_sections"] = decisions["s6_sections"]
+        semantic["s6_sections"] = {"unmatched_policy": "automatic"}
         semantic["mode"] = profile["execution"]["mode"]
     if stage >= 7:
         semantic["parser_method"] = profile["execution"]["parser_method"]
@@ -882,9 +865,6 @@ def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
             "output_directory": str(
                 root / "06-sections" / ".automation-current"
             ),
-            "section_save_rules": profile["decisions"]["s6_sections"][
-                "section_save_rules"
-            ],
             "workers": profile["execution"]["local_workers"],
         }
     )
@@ -892,7 +872,7 @@ def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
     if not summary.get("integrity_ok"):
         return _inspection_failure(
             6,
-            reason="현재 목차 선택 설정으로 계산한 결과와 저장된 HTML이 다릅니다.",
+            reason="현재 자동 목차 분리 결과와 저장된 HTML이 다릅니다.",
             details={
                 "summary": summary,
                 "problem_files": list(checked.get("problem_files") or [])[:20],
@@ -903,7 +883,7 @@ def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
         )
     return _inspection_success(
         6,
-        reason="목차 선택 설정과 모든 분리 HTML 내용이 일치합니다.",
+        reason="자동 목차 분리 결과와 모든 저장 HTML 내용이 일치합니다.",
         details={"records": int(summary.get("actual_files") or 0)},
     )
 
@@ -1988,41 +1968,6 @@ def _run_stage(
             if temporary.exists():
                 shutil.rmtree(temporary)
     if stage == 6:
-        pattern_result = summarize_disclosure_html_section_kinds_payload(
-            {
-                "input_directory": str(
-                    _internal_mode_directory(profile) / ".automation-current"
-                ),
-                "workers": execution["local_workers"],
-            },
-            progress_callback=progress_callback,
-            cancel_check=cancel_check,
-        )
-        if pattern_result.get("cancelled"):
-            raise RuntimeError("Job cancelled")
-        pattern_summary = pattern_result.get("summary") or {}
-        if (
-            int(pattern_summary.get("files_without_sections") or 0)
-            or int(pattern_summary.get("failed_files") or 0)
-        ):
-            raise ValueError(
-                "목차 조합 확인에 실패한 공시원문이 있습니다. "
-                f"전체={pattern_summary.get('found_files', 0)}, "
-                f"목차 없음={pattern_summary.get('files_without_sections', 0)}, "
-                f"읽기 실패={pattern_summary.get('failed_files', 0)}"
-            )
-        rules = profile["decisions"]["s6_sections"]["section_save_rules"]
-        unknown = [
-            item
-            for item in pattern_result.get("items") or []
-            if str(item.get("signature") or "") not in rules
-        ]
-        if unknown:
-            return {
-                "needs_review": True,
-                "review_patterns": unknown,
-                "summary": pattern_result.get("summary") or {},
-            }
         output_directory = root / "06-sections" / ".automation-current"
         temporary = output_directory.with_name(
             f".{output_directory.name}.part-{uuid.uuid4().hex}"
@@ -2035,7 +1980,6 @@ def _run_stage(
                     ),
                     "output_directory": str(temporary),
                     "workers": execution["local_workers"],
-                    "section_save_rules": rules,
                 },
                 progress_callback=progress_callback,
                 cancel_check=cancel_check,
@@ -2048,7 +1992,7 @@ def _run_stage(
                 temporary / "automation-sections.json",
                 {
                     "format": AUTOMATION_SECTIONS_FORMAT,
-                    "rules_hash": _canonical_hash(rules),
+                    "algorithm": "structural-toc-with-correction-filter-v1",
                     "upstream_fingerprint": _stage_output_fingerprint(profile, 5),
                     "complete": True,
                 },
@@ -2162,24 +2106,6 @@ def run_disclosure_automation_payload(
                 "download_conflicts": result["download_conflicts"],
                 "download_confirmation": result["download_confirmation"],
             }
-        if stage == 6 and result.get("needs_review"):
-            stage_results.append(
-                {
-                    "stage": stage,
-                    "label": stage_plan["label"],
-                    "status": "needs_review",
-                    "result": result,
-                }
-            )
-            emit("공시원문 목차 분리: 판단 필요")
-            return {
-                "format": "finiq_disclosure_automation_run_v1",
-                "workflow_status": "needs_review",
-                "profile_hash": plan["profile_hash"],
-                "stages": stage_results,
-                "review_patterns": result["review_patterns"],
-            }
-
         checkpoint = {
             "format": AUTOMATION_CHECKPOINT_FORMAT,
             "stage": stage,

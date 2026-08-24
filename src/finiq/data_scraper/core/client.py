@@ -18,6 +18,14 @@ from .html_rate_limit import (
     SlidingWindowRateLimiter,
     wait_for_html_download_request_slot,
 )
+from .kind_computers import (
+    KindVirtualComputer,
+    create_kind_computer_session,
+    headers_for_computer,
+    resolve_virtual_computer_count,
+    run_kind_virtual_computers,
+    session_uses_source_address,
+)
 
 from .payload import (
     DisclosureTypeGroupKey,
@@ -572,6 +580,54 @@ def fetch_disclosure_viewer_html(
     return output_path
 
 
+def _external_html_virtual_computer_worker(
+    computer: KindVirtualComputer,
+    acpt_numbers: list[str],
+    worker_kwargs: dict[str, object],
+    progress_queue: object,
+    cancel_event: object,
+) -> list[str]:
+    session = create_kind_computer_session(
+        computer,
+        pool_size=int(worker_kwargs["max_workers"]),
+    )
+    try:
+        paths = download_disclosure_external_htmls(
+            output_directory=Path(str(worker_kwargs["output_directory"])),
+            request_headers=headers_for_computer(
+                computer, dict(worker_kwargs["request_headers"])  # type: ignore[arg-type]
+            ),
+            acpt_numbers=acpt_numbers,
+            timeout=float(worker_kwargs["timeout"]),
+            wait_seconds_between_requests=float(
+                worker_kwargs["wait_seconds_between_requests"]
+            ),
+            max_requests_per_minute=int(worker_kwargs["max_requests_per_minute"]),
+            session=session,
+            skip_existing=bool(worker_kwargs["skip_existing"]),
+            progress_callback=lambda message: progress_queue.put(message),  # type: ignore[attr-defined]
+            cancel_check=lambda: bool(cancel_event.is_set()),  # type: ignore[attr-defined]
+            max_workers=int(worker_kwargs["max_workers"]),
+            max_retries=int(worker_kwargs["max_retries"]),
+            virtual_computer_count=1,
+        )
+    finally:
+        session.close()
+    return [str(path) for path in paths]
+
+
+def _paths_in_request_order(
+    requested_ids: Sequence[str],
+    computer_results: Sequence[Sequence[object]],
+) -> list[Path]:
+    saved_paths: dict[str, Path] = {}
+    for result in computer_results:
+        for path_value in result:
+            path = Path(str(path_value))
+            saved_paths[path.stem] = path
+    return [saved_paths[item_id] for item_id in requested_ids if item_id in saved_paths]
+
+
 def download_disclosure_external_htmls(
     *,
     output_directory: Path,
@@ -587,6 +643,7 @@ def download_disclosure_external_htmls(
     cancel_check: KindCancelCheck | None = None,
     max_workers: int | None = None,
     max_retries: int = 5,
+    virtual_computer_count: int | None = None,
 ) -> list[Path]:
     """여러 KIND 접수번호의 뷰어 HTML을 병렬로 처리하며 무결성을 보장한다."""
     if timeout <= 0:
@@ -602,6 +659,15 @@ def download_disclosure_external_htmls(
         _validate_kind_identifier(acpt_no, field_name="acpt_no")
         for acpt_no in acpt_numbers
     ]
+    computer_count = resolve_virtual_computer_count(
+        virtual_computer_count,
+        item_count=len(normalized_acpt_numbers),
+        session=session,
+    )
+    if computer_count > 1 and saved_file_callback is not None:
+        raise ValueError(
+            "saved_file_callback cannot be combined with virtual_computer_count > 1"
+        )
     max_workers = resolve_worker_count(
         max_workers,
         item_count=len(normalized_acpt_numbers),
@@ -609,11 +675,36 @@ def download_disclosure_external_htmls(
     )
     output_directory = output_directory.resolve()
     normalized_request_headers = _normalize_request_headers(request_headers)
+    if computer_count > 1:
+        computer_results = run_kind_virtual_computers(
+            items=normalized_acpt_numbers,
+            worker_qualname=(
+                "finiq.data_scraper.core.client._external_html_virtual_computer_worker"
+            ),
+            worker_kwargs={
+                "output_directory": str(output_directory),
+                "request_headers": normalized_request_headers,
+                "timeout": timeout,
+                "wait_seconds_between_requests": wait_seconds_between_requests,
+                "max_requests_per_minute": max_requests_per_minute,
+                "skip_existing": skip_existing,
+                "max_retries": max_retries,
+            },
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+            computer_count=computer_count,
+            max_workers=max_workers,
+        )
+        return _paths_in_request_order(normalized_acpt_numbers, computer_results)
     owns_session = session is None
     active_session = session or requests.Session()
     
     # Increase connection pool size for parallel requests
-    if not owns_session and hasattr(active_session, "mount"):
+    if (
+        not owns_session
+        and hasattr(active_session, "mount")
+        and not session_uses_source_address(active_session)
+    ):
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=max_workers,
             pool_maxsize=max_workers

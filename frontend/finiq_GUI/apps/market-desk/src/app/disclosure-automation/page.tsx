@@ -27,10 +27,6 @@ import {
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
 import { DisclosureLockedSettingsCard } from "@/components/disclosures/DisclosureLockedSettingsCard";
 import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
-import {
-  HtmlSectionPatternCard,
-  type SectionPattern,
-} from "@/components/disclosures/HtmlSectionPatternCard";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { useJobPolling } from "@/hooks/useJobPolling";
@@ -47,7 +43,6 @@ import {
 
 const PROFILE_STORAGE_KEY = "finiq.disclosureAutomation.profile.v1";
 const PROFILE_FORMAT = "finiq_disclosure_automation_profile_v1";
-const REVIEW_STORAGE_KEY = "finiq.disclosureAutomation.review.v1";
 
 const automationFilterPresets = (presets: DisclosureConditionPreset[]) => (
   presets.filter((preset) => !preset.parent_mode)
@@ -65,8 +60,8 @@ const STAGES = [
 
 type StageKey = (typeof STAGES)[number]["key"];
 type StageToggleState = Record<StageKey, boolean>;
-type PlanAction = "disabled" | "reuse" | "process" | "review" | "blocked";
-type RunStageStatus = "disabled" | "reused" | "succeeded" | "needs_download_confirmation" | "needs_review" | "failed";
+type PlanAction = "disabled" | "reuse" | "process" | "blocked";
+type RunStageStatus = "disabled" | "reused" | "succeeded" | "needs_download_confirmation" | "failed";
 
 type PlanStage = {
   stage: number;
@@ -94,8 +89,6 @@ type InspectionStage = {
 };
 type WorkspaceInspection = { stage: InspectionStage };
 
-type ReviewPattern = SectionPattern;
-
 type DownloadConflict = {
   range: string;
   saved_pages?: number | null;
@@ -104,11 +97,10 @@ type DownloadConflict = {
 };
 
 type AutomationRunResult = {
-  workflow_status: "completed" | "needs_download_confirmation" | "needs_review";
+  workflow_status: "completed" | "needs_download_confirmation";
   stages: { stage: number; label: string; status: RunStageStatus; completed_at?: string }[];
   download_conflicts?: DownloadConflict[];
   download_confirmation?: string;
-  review_patterns?: ReviewPattern[];
   output_path?: string;
 };
 
@@ -124,7 +116,6 @@ type StoredProfile = {
   disclosureTypeGroups?: Record<string, string[]>;
   conditions?: DisclosureConditionBlock[];
   filterMode?: string;
-  sectionRules?: Record<string, string[]>;
   rangeStart?: number;
   rangeEnd?: number;
   parserMethod?: string;
@@ -179,13 +170,12 @@ function planLabel(action?: PlanAction | "confirmed" | "mismatch") {
   if (action === "disabled") return "사용 안 함";
   if (action === "reuse") return "재사용";
   if (action === "process") return "실행 예정";
-  if (action === "review") return "Pending";
   if (action === "blocked") return "차단됨";
   return "확인 전";
 }
 
 function planTone(action?: PlanAction | "confirmed" | "mismatch") {
-  if (action === "blocked" || action === "review" || action === "mismatch") return "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200";
+  if (action === "blocked" || action === "mismatch") return "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200";
   if (action === "process") return "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200";
   if (action === "reuse" || action === "confirmed") return "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200";
   return "border-[color:var(--tv-border)] bg-[var(--tv-control)] text-[var(--tv-muted)]";
@@ -196,7 +186,6 @@ function runStatusLabel(status?: RunStageStatus) {
   if (status === "reused") return "완료 · 재사용";
   if (status === "succeeded") return "완료";
   if (status === "needs_download_confirmation") return "확인 필요";
-  if (status === "needs_review") return "Pending";
   if (status === "failed") return "실패";
   return "대기 중";
 }
@@ -228,7 +217,6 @@ export default function DisclosureAutomationPage() {
   const [securitiesLabel, setSecuritiesLabel] = useState("전체");
   const [disclosureTypeGroups, setDisclosureTypeGroups] = useState<Record<string, string[]>>({});
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
-  const [sectionRules, setSectionRules] = useState<Record<string, string[]>>({});
   const [rangeStart, setRangeStart] = useState(1);
   const [rangeEnd, setRangeEnd] = useState(7);
   const [parserMethod, setParserMethod] = useState("");
@@ -243,16 +231,12 @@ export default function DisclosureAutomationPage() {
   const [runResult, setRunResult] = useState<AutomationRunResult | null>(null);
   const [downloadConflicts, setDownloadConflicts] = useState<DownloadConflict[]>([]);
   const [downloadConfirmation, setDownloadConfirmation] = useState("");
-  const [reviewPatterns, setReviewPatterns] = useState<ReviewPattern[]>([]);
-  const [reviewSelections, setReviewSelections] = useState<Record<string, string[]>>({});
-  const [reviewDecided, setReviewDecided] = useState<Record<string, boolean>>({});
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [filterPresetPath, setFilterPresetPath] = useState("");
   const [notification, setNotification] = useState("");
   const searchSettingsRef = useRef<HTMLDivElement | null>(null);
   const filterSettingsRef = useRef<HTMLDivElement | null>(null);
-  const sectionSettingsRef = useRef<HTMLDivElement | null>(null);
   const rangeDragAnchorRef = useRef<number | null>(null);
   const lastRangeDragValueRef = useRef<number | null>(null);
 
@@ -289,21 +273,9 @@ export default function DisclosureAutomationPage() {
       }
       setDownloadConflicts([]);
       setDownloadConfirmation("");
-      if (result.workflow_status === "needs_review") {
-        const patterns = result.review_patterns || [];
-        setReviewPatterns(patterns);
-        setReviewSelections({});
-        setReviewDecided({});
-        window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(patterns));
-        setNotification(`Pending · 목차 조합 ${formatInteger(patterns.length)}개에 입력이 필요합니다.`);
-        setIsErrorStatus(false);
-      } else {
-        setReviewPatterns([]);
-        window.localStorage.removeItem(REVIEW_STORAGE_KEY);
-        setNotification("공시 자동화가 완료되었습니다.");
-        setIsErrorStatus(false);
-      }
-      void refreshPlan(result.workflow_status === "needs_review" ? "review" : "resume", false);
+      setNotification("공시 자동화가 완료되었습니다.");
+      setIsErrorStatus(false);
+      void refreshPlan("resume", false);
     },
     onError: (error) => setNotification(error.message),
     onCancel: () => setNotification("실행을 취소했습니다. 완료된 단계는 다음 실행에서 재사용됩니다."),
@@ -335,7 +307,6 @@ export default function DisclosureAutomationPage() {
           : normalizeDisclosureConditionBlocks(stored.conditions),
       );
       setSelectedPreset(stored?.filterMode || config?.html_parse_mode || "");
-      setSectionRules(stored?.sectionRules || {});
       setRangeStart(stored?.rangeStart ?? 1);
       setRangeEnd(stored?.rangeEnd ?? 7);
       const configuredParserMethod = stored?.parserMethod ?? config?.html_parser_method;
@@ -360,8 +331,6 @@ export default function DisclosureAutomationPage() {
         throw new Error("timeout must be a positive number");
       }
       setTimeoutValue(String(configuredTimeout));
-      const storedReview = loadJson<ReviewPattern[]>(REVIEW_STORAGE_KEY) || [];
-      setReviewPatterns(storedReview);
     }).catch((error) => {
       setInitializationError(error instanceof Error ? error : new Error(String(error)));
     }).finally(() => setLoading(false));
@@ -398,7 +367,6 @@ export default function DisclosureAutomationPage() {
     pageSize,
     parserMethod,
     selectedPreset,
-    sectionRules,
     securitiesLabel,
     startDate,
     submitterName,
@@ -415,7 +383,6 @@ export default function DisclosureAutomationPage() {
   );
   const searchSettingsSelected = executionMask.includes(1);
   const filterSettingsSelected = executionMask.some((stage) => stage >= 3);
-  const sectionSettingsSelected = executionMask.includes(7);
 
   const validatedExecution = () => {
     const configuredPageSize = Number(pageSize);
@@ -438,8 +405,7 @@ export default function DisclosureAutomationPage() {
   };
 
   const buildProfile = (
-    trigger: "sync" | "resume" | "review",
-    sectionRulesOverride: Record<string, string[]> = sectionRules,
+    trigger: "sync" | "resume",
     confirmedDownload = "",
   ) => {
     const execution = validatedExecution();
@@ -467,7 +433,7 @@ export default function DisclosureAutomationPage() {
         s3_selection: {
           filter_blocks: validatedConditions(),
         },
-        s6_sections: { unmatched_policy: "needs_review", section_save_rules: sectionRulesOverride },
+        s6_sections: { unmatched_policy: "automatic" },
       },
       execution: {
         mode: selectedPreset,
@@ -480,9 +446,7 @@ export default function DisclosureAutomationPage() {
     };
   };
 
-  const saveProfile = async (
-    sectionRulesOverride: Record<string, string[]> = sectionRules,
-  ) => {
+  const saveProfile = async () => {
     const execution = validatedExecution();
     const stored: StoredProfile = {
       format: PROFILE_FORMAT,
@@ -496,7 +460,6 @@ export default function DisclosureAutomationPage() {
       disclosureTypeGroups,
       conditions: validatedConditions(),
       filterMode: selectedPreset,
-      sectionRules: sectionRulesOverride,
       rangeStart,
       rangeEnd,
       parserMethod,
@@ -512,7 +475,7 @@ export default function DisclosureAutomationPage() {
   };
 
   async function refreshPlan(
-    trigger: "sync" | "resume" | "review" = "sync",
+    trigger: "sync" | "resume" = "sync",
     announce = true,
   ) {
     try {
@@ -554,15 +517,14 @@ export default function DisclosureAutomationPage() {
   }
 
   const startRun = async (
-    trigger: "sync" | "resume" | "review",
-    sectionRulesOverride: Record<string, string[]> = sectionRules,
+    trigger: "sync" | "resume",
     confirmedDownload = "",
   ) => {
     try {
-      await saveProfile(sectionRulesOverride);
+      await saveProfile();
       const nextPlan = await apiPost<AutomationPlan>(
         "/api/disclosure-workflows/plan",
-        buildProfile(trigger, sectionRulesOverride, confirmedDownload),
+        buildProfile(trigger, confirmedDownload),
       );
       setPlan(nextPlan);
       if (!nextPlan?.execution_allowed) {
@@ -575,7 +537,7 @@ export default function DisclosureAutomationPage() {
       setIsErrorStatus(false);
       const started = await apiPost<{ job_id: string }>(
         "/api/disclosure-workflows/run/start",
-        buildProfile(trigger, sectionRulesOverride, confirmedDownload),
+        buildProfile(trigger, confirmedDownload),
       );
       startPolling(started.job_id);
     } catch (error) {
@@ -592,7 +554,7 @@ export default function DisclosureAutomationPage() {
     setPlan(null);
   };
 
-  const rangeSelectionDisabled = !!activeJobId || !!downloadConflicts.length || !!reviewPatterns.length;
+  const rangeSelectionDisabled = !!activeJobId || !!downloadConflicts.length;
 
   const selectRangeThrough = (value: number) => {
     const anchor = rangeDragAnchorRef.current;
@@ -717,28 +679,9 @@ export default function DisclosureAutomationPage() {
     }
   };
 
-  const decideReviewPattern = (pattern: ReviewPattern, tocIds: string[]) => {
-    setReviewSelections((current) => ({ ...current, [pattern.signature]: tocIds }));
-    setReviewDecided((current) => ({ ...current, [pattern.signature]: true }));
-  };
-
   const confirmDownloadConflicts = () => {
     if (!downloadConfirmation) return;
-    void startRun("sync", sectionRules, downloadConfirmation);
-  };
-
-  const runAfterReview = async () => {
-    const unresolved = reviewPatterns.filter((pattern) => !reviewDecided[pattern.signature]);
-    if (unresolved.length) {
-      setNotification(`Pending · 목차 조합 ${formatInteger(unresolved.length)}개가 아직 결정되지 않았습니다.`);
-      setIsErrorStatus(false);
-      return;
-    }
-    const nextRules = { ...sectionRules, ...reviewSelections };
-    setSectionRules(nextRules);
-    const stored = loadStoredProfile();
-    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({ ...stored, format: PROFILE_FORMAT, sectionRules: nextRules }));
-    void startRun("review", nextRules);
+    void startRun("sync", downloadConfirmation);
   };
 
   const runStageStatus = (stage: number) => runResult?.stages.find((item) => item.stage === stage)?.status;
@@ -746,7 +689,7 @@ export default function DisclosureAutomationPage() {
   const inspectionForStage = (stage: number) => workspaceInspections[stage];
   const notificationTone = isErrorStatus
     ? "error"
-    : downloadConflicts.length || reviewPatterns.length
+    : downloadConflicts.length
       ? "warning"
       : notification
         ? "success"
@@ -788,17 +731,12 @@ export default function DisclosureAutomationPage() {
                   >
                     {STAGES.map((stage) => {
                       const stagePlan = planForStage(stage.number);
-                      const statusValue = runStageStatus(stage.number)
-                        || (stage.number === 6 && reviewPatterns.length ? "needs_review" : undefined);
-                      const planAction = stage.number === 6 && reviewPatterns.length
-                        ? "review"
-                        : stagePlan?.plan_action;
+                      const statusValue = runStageStatus(stage.number);
+                      const planAction = stagePlan?.plan_action;
                       const stageInspection = inspectionForStage(stage.number);
-                      const displayedPlanAction = stage.number === 6 && reviewPatterns.length
-                        ? "review"
-                        : stageInspection
-                          ? stageInspection.confirmed ? "confirmed" : "mismatch"
-                          : planAction;
+                      const displayedPlanAction = stageInspection
+                        ? stageInspection.confirmed ? "confirmed" : "mismatch"
+                        : planAction;
                       const inRange = executionMask.includes(stage.number);
                       const isRangeStart = stage.number === rangeStart;
                       const isRangeEnd = stage.number === rangeEnd;
@@ -813,9 +751,7 @@ export default function DisclosureAutomationPage() {
                         ? searchSettingsRef
                         : stage.target === "filter"
                           ? filterSettingsRef
-                          : stage.target === "sections"
-                            ? sectionSettingsRef
-                            : null;
+                          : null;
                       return (
                         <tr key={stage.key} className={inRange ? "text-[var(--tv-text)]" : "bg-[var(--tv-control)]/30 text-[var(--tv-muted)]"}>
                           <td className="px-5 py-2 align-middle">
@@ -932,38 +868,13 @@ export default function DisclosureAutomationPage() {
             /> : <DisclosureLockedSettingsCard title="공시 조건" />}
           </div>
 
-          <div ref={sectionSettingsRef} className="scroll-mt-6 space-y-4">
-            {sectionSettingsSelected || reviewPatterns.length ? <HtmlSectionPatternCard
-              inputDirectory={`${dataRoot}/05-internal-html-download/${selectedPreset}/.automation-current`}
-              sectionPatterns={reviewPatterns}
-              selectedPatternTocIds={reviewSelections}
-              isLoading={false}
-              onTogglePatternSection={(signature, tocId) => {
-                const pattern = reviewPatterns.find((item) => item.signature === signature);
-                if (!pattern) return;
-                const selection = reviewSelections[signature] || [];
-                decideReviewPattern(pattern, selection.includes(tocId) ? selection.filter((item) => item !== tocId) : [...selection, tocId]);
-              }}
-              onSetPatternSelection={(signature, tocIds) => {
-                const pattern = reviewPatterns.find((item) => item.signature === signature);
-                if (pattern) decideReviewPattern(pattern, tocIds);
-              }}
-              decidedPatterns={reviewDecided}
-              pending={!runResult || !!activeJobId || !!reviewPatterns.length}
-              emptyText="판단이 필요한 새 목차 조합이 없습니다."
-            /> : <DisclosureLockedSettingsCard title="목차 조합 모아보기" />}
-            <div>
-              {reviewPatterns.length ? <Button onClick={runAfterReview} disabled={!!activeJobId}><RefreshCw className="mr-2 h-4 w-4" />후속 실행</Button> : null}
-            </div>
-          </div>
-
           <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
             <CardHeader><CardTitle className="text-[var(--tv-text)]">작업 실행</CardTitle></CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
               <Button variant="outline" onClick={() => void saveProfile().then(() => setNotification("공시 자동화 설정을 저장했습니다.")).catch((error) => setNotification(error.message))} disabled={!!activeJobId}><Save className="mr-2 h-4 w-4" />설정 저장</Button>
               <Button variant="outline" onClick={() => void refreshPlan("sync")} disabled={!!activeJobId}><RefreshCw className="mr-2 h-4 w-4" />실행 계획</Button>
-              <Button onClick={() => void startRun("sync")} disabled={!!activeJobId || !!downloadConflicts.length || !!reviewPatterns.length}>{activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}동기화</Button>
-              <Button variant="outline" onClick={() => void startRun("resume")} disabled={!!activeJobId || !!downloadConflicts.length || !!reviewPatterns.length}><Play className="mr-2 h-4 w-4" />이어서 실행</Button>
+              <Button onClick={() => void startRun("sync")} disabled={!!activeJobId || !!downloadConflicts.length}>{activeJobId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}동기화</Button>
+              <Button variant="outline" onClick={() => void startRun("resume")} disabled={!!activeJobId || !!downloadConflicts.length}><Play className="mr-2 h-4 w-4" />이어서 실행</Button>
               <Button variant="outline" onClick={cancelJob} disabled={!activeJobId}><Square className="mr-2 h-4 w-4" />취소</Button>
             </CardContent>
           </Card>
@@ -972,10 +883,10 @@ export default function DisclosureAutomationPage() {
         <ActionDock
           activityActive={!!activeJobId}
           activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} isCancellable={!!activeJobId} onCancel={cancelJob} />}
-          notificationActive={isErrorStatus || !!downloadConflicts.length || !!reviewPatterns.length || !!notification}
+          notificationActive={isErrorStatus || !!downloadConflicts.length || !!notification}
           notificationTone={notificationTone}
           notificationDismissible={!downloadConflicts.length}
-          notificationResetKey={`${notification}:${downloadConfirmation}:${reviewPatterns.length}`}
+          notificationResetKey={`${notification}:${downloadConfirmation}`}
           notificationContent={
             <div className="space-y-3 text-sm text-[var(--tv-text)]">
               <p className="whitespace-pre-wrap">{notification || "알림 없음"}</p>
@@ -991,7 +902,6 @@ export default function DisclosureAutomationPage() {
                   <RefreshCw className="mr-2 h-4 w-4" />전체 다시 받기
                 </Button>
               </> : null}
-              {reviewPatterns.length ? <p className="font-medium text-[var(--tv-warning-text)]">Pending · 목차 조합 {formatInteger(reviewPatterns.length)}개를 결정하세요.</p> : null}
             </div>
           }
           settingsTitle="실행 설정"

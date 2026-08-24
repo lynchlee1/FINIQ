@@ -66,7 +66,7 @@ test("html section split uses shared data path and execution cards", async () =>
   assert.doesNotMatch(source, /title="폴더 선택"/);
 });
 
-test("html section split exposes worker count setting and background section kind job", async () => {
+test("html section split exposes worker count setting for automatic section save", async () => {
   const source = await readFile(htmlSectionSplitPath, "utf8");
 
   assert.match(source, /const \[workers, setWorkers\] = useState\("1"\)/);
@@ -74,10 +74,10 @@ test("html section split exposes worker count setting and background section kin
   assert.match(source, /setWorkers\(String\(workerCount\)\)/);
   assert.doesNotMatch(source, /config\.parallel_worker_count \|\| 1/);
   assert.match(source, /label: SETTINGS_LABELS\.workerCount/);
-  assert.match(source, /\/api\/disclosures\/html\/sections\/kinds\/start/);
   assert.match(source, /workers: parseOptionalNumber\(workers\)/);
   assert.match(source, /\/api\/disclosures\/html\/cancel/);
-  assert.match(source, /setSectionPatterns\(items\)/);
+  assert.match(source, /\/api\/disclosures\/html\/sections\/save\/start/);
+  assert.doesNotMatch(source, /sections\/kinds\/start|setSectionPatterns|section_save_rules/);
 });
 
 test("html section split can cancel save jobs and source loading", async () => {

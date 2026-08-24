@@ -315,17 +315,6 @@ GUI_EXTERNAL_HTML_DOWNLOAD_COMPONENT = GUI_APP_DIR / "external-html-download" / 
 GUI_INTERNAL_HTML_DOWNLOAD_PAGE = GUI_APP_DIR / "internal-html-download" / "page.tsx"
 GUI_HTML_SECTION_SPLIT_PAGE = GUI_APP_DIR / "html-section-split" / "page.tsx"
 GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT = GUI_APP_DIR / "html-section-split" / "_components" / "HtmlSectionSplitResults.tsx"
-GUI_HTML_SECTION_PATTERN_CARD = (
-    REPO_ROOT
-    / "frontend"
-    / "finiq_GUI"
-    / "apps"
-    / "market-desk"
-    / "src"
-    / "components"
-    / "disclosures"
-    / "HtmlSectionPatternCard.tsx"
-)
 GUI_HTML_PARSE_PAGE = GUI_APP_DIR / "html-parse" / "page.tsx"
 GUI_HTML_CHANGE_LOG_PAGE = GUI_APP_DIR / "html-change-log" / "page.tsx"
 GUI_UTILITY_PAGE = GUI_APP_DIR / "utility" / "page.tsx"
@@ -4762,29 +4751,37 @@ def test_split_internal_html_sections_uses_direct_section_heading_regardless_of_
         """
     )
 
-    assert [section.toc_id for section in sections] == ["toc_1"]
-    assert sections[0].title == "정규 목차"
-    assert "정규 내용" in sections[0].html
-    assert "중첩 내용" not in sections[0].html
+    assert [section.toc_id for section in sections] == ["toc_1", "toc_2"]
+    assert sections[0].title == "중첩 목차"
+    assert "중첩 내용" in sections[0].html
+    assert sections[1].title == "정규 목차"
+    assert "정규 내용" in sections[1].html
+    assert "중첩 내용" not in sections[1].html
 
 
-def test_split_internal_html_sections_does_not_use_legacy_section_one_paragraphs() -> None:
-    with pytest.raises(ValueError, match="canonical SECTION heading is required"):
-        split_internal_html_sections(
-            """
-            <html><head></head><body>
-              <p class="SECTION-1"><a name="#10">주요경영사항 신고</a></p>
-              <table><tr><td>표지 내용</td></tr></table>
-              <p class="PGBRK"></p>
-              <p class="SECTION-1"><a name="#87">신주인수권부사채 발행결정</a></p>
-              <table><tr><td>발행금액 16,000,000,000</td></tr></table>
-            </body></html>
-            """
-        )
+def test_split_internal_html_sections_uses_legacy_section_one_paragraphs() -> None:
+    sections = split_internal_html_sections(
+        """
+        <html><head></head><body>
+          <p class="SECTION-1"><a name="#10">주요경영사항 신고</a></p>
+          <table><tr><td>표지 내용</td></tr></table>
+          <p class="PGBRK"></p>
+          <p class="SECTION-1"><a name="#87">신주인수권부사채 발행결정</a></p>
+          <table><tr><td>발행금액 16,000,000,000</td></tr></table>
+        </body></html>
+        """
+    )
+
+    assert [section.title for section in sections] == [
+        "주요경영사항 신고",
+        "신주인수권부사채 발행결정",
+    ]
+    assert "표지 내용" in sections[0].html
+    assert "발행금액" in sections[1].html
 
 
-def test_split_internal_html_sections_does_not_use_xforms_title_boundaries() -> None:
-    with pytest.raises(ValueError, match="canonical SECTION heading is required"):
+def test_split_internal_html_sections_rejects_multiple_direct_xforms_boundaries() -> None:
+    with pytest.raises(ValueError, match="one direct XForms TOC boundary is required"):
         split_internal_html_sections(
             """
             <html>
@@ -4803,6 +4800,34 @@ def test_split_internal_html_sections_does_not_use_xforms_title_boundaries() -> 
             </html>
             """
         )
+
+
+def test_split_internal_html_sections_uses_one_main_xforms_boundary() -> None:
+    sections = split_internal_html_sections(
+        """
+        <html>
+          <head><title>:: form</title></head>
+          <body>
+            <div class="xforms">
+              <div>
+                <div id="LIB_LC000"><div><span>정정신고(보고)</span></div></div>
+                <div class="xforms_title"><div><span>주주총회소집 결의</span></div></div>
+                <table><tbody><tr><td><span>1. 일시</span></td></tr></tbody></table>
+                <div><div><div class="xforms_title"><span>하위 서식</span></div></div></div>
+              </div>
+            </div>
+          </body>
+        </html>
+        """
+    )
+
+    assert [section.title for section in sections] == [
+        "정정신고(보고)",
+        "주주총회소집 결의",
+    ]
+    assert "하위 서식" not in sections[0].html
+    assert "하위 서식" in sections[1].html
+    assert 'class="xforms"' in sections[1].html
 
 
 @pytest.mark.parametrize(
@@ -4829,7 +4854,7 @@ def test_split_internal_html_sections_rejects_missing_canonical_structure(
         split_internal_html_sections(markup)
 
 
-def test_save_disclosure_html_sections_payload_requires_explicit_selection(
+def test_save_disclosure_html_sections_payload_is_automatic_without_selection(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
@@ -4848,16 +4873,15 @@ def test_save_disclosure_html_sections_payload_requires_explicit_selection(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="missing section selection"):
-        save_disclosure_html_sections_payload(
-            {
-                "input_directory": str(input_directory),
-                "output_directory": str(output_directory),
-            }
-        )
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+        }
+    )
 
-    assert not output_directory.exists()
-    assert not (output_directory / "2008" / "20260422000832.html").exists()
+    assert result["summary"]["saved_files"] == 1
+    assert (output_directory / "2008" / "20260422000832.html").is_file()
     assert not (output_directory / "toc_1").exists()
     assert not (output_directory / "2008" / "toc_1").exists()
 
@@ -4883,7 +4907,7 @@ def test_save_disclosure_html_sections_payload_rejects_files_without_toc(tmp_pat
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="canonical SECTION heading is required"):
+    with pytest.raises(ValueError, match="supported TOC structure is required"):
         save_disclosure_html_sections_payload(
             {
                 "input_directory": str(input_directory),
@@ -4901,7 +4925,7 @@ def test_save_disclosure_html_sections_payload_rejects_files_without_toc(tmp_pat
     assert not list(output_directory.rglob("*.html"))
 
 
-def test_section_save_reports_zero_rule_selection_as_integrity_failure(
+def test_section_save_ignores_obsolete_zero_rule_selection(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
@@ -4925,14 +4949,9 @@ def test_section_save_reports_zero_rule_selection_as_integrity_failure(
     )
 
     assert payload["summary"]["integrity_ok"] is True
-    assert payload["summary"]["skipped_files"] == 1
-    assert payload["skipped_files"] == [
-        {
-            "source_file": str(source),
-            "error": "section save rules selected no sections",
-        }
-    ]
-    assert not stale_output.exists()
+    assert payload["summary"]["skipped_files"] == 0
+    assert payload["skipped_files"] == []
+    assert stale_output.is_file()
     inspected = inspect_disclosure_html_section_output_payload(
         {
             "input_directory": str(input_directory),
@@ -4943,7 +4962,7 @@ def test_section_save_reports_zero_rule_selection_as_integrity_failure(
     assert inspected["summary"]["integrity_ok"] is True
 
 
-def test_section_save_rejects_unknown_selected_toc_before_writing(
+def test_section_save_ignores_obsolete_unknown_selected_toc(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
@@ -4955,18 +4974,18 @@ def test_section_save_rejects_unknown_selected_toc_before_writing(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="section selection matches no sections"):
-        save_disclosure_html_sections_payload(
-            {
-                "input_directory": str(input_directory),
-                "output_directory": str(output_directory),
-                "section_save_rules": {
-                    "toc_1 주요사항보고서": ["toc_999"]
-                },
-            }
-        )
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {
+                "toc_1 주요사항보고서": ["toc_999"]
+            },
+        }
+    )
 
-    assert not output_directory.exists()
+    assert result["summary"]["saved_files"] == 1
+    assert (output_directory / source.name).is_file()
 
 
 def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: Path) -> None:
@@ -5274,7 +5293,7 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
     ]
 
 
-def test_save_disclosure_html_sections_payload_rejects_incomplete_pattern_rules_before_writing(
+def test_save_disclosure_html_sections_payload_ignores_incomplete_obsolete_rules(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
@@ -5302,16 +5321,16 @@ def test_save_disclosure_html_sections_payload_rejects_incomplete_pattern_rules_
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="missing section selection"):
-        save_disclosure_html_sections_payload(
-            {
-                "input_directory": str(input_directory),
-                "output_directory": str(output_directory),
-                "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
-            }
-        )
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
+        }
+    )
 
-    assert not output_directory.exists()
+    assert result["summary"]["saved_files"] == 2
+    assert len(list(output_directory.rglob("*.html"))) == 2
 
 
 def test_section_output_inspection_reuses_save_selection_and_detects_content_change(
@@ -5465,7 +5484,7 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
     source_file.write_text(
         """
         <html><head></head><body>
-          <p class="CORRECTION">정정신고(보고)</p>
+          <p class="CORRECTION">정 정 신 고 (보고)</p>
           <table>
             <tr><td>1. 사채의 종류</td><td>회차</td><td>15</td><td>종류</td><td>신주인수권부사채</td></tr>
             <tr><td>2. 사채의 권면총액 (원)</td><td>10,000,000,000</td></tr>
@@ -5493,6 +5512,13 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
         encoding="utf-8",
     )
 
+    split_sections = split_internal_html_sections(source_file.read_bytes())
+    assert [section.title for section in split_sections] == [
+        "정 정 신 고 (보고)",
+        "주요사항보고서",
+        "신주인수권부사채권 발행결정",
+    ]
+
     save_disclosure_html_sections_payload(
         {
             "input_directory": str(input_directory),
@@ -5509,7 +5535,7 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
 
     assert "정정신고" not in section_html
     assert "정정 전 투자자" not in section_html
-    assert "표지" not in section_html
+    assert "표지" in section_html
     assert section_html.count("사채의 종류") == 1
     assert section_html.count("발행 대상자명") == 1
     parsed = parse_bond_issuance(
@@ -8556,12 +8582,7 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     internal_html_download_ui_html = GUI_INTERNAL_HTML_DOWNLOAD_PAGE.read_text(encoding="utf-8")
     section_split_page_html = GUI_HTML_SECTION_SPLIT_PAGE.read_text(encoding="utf-8")
     section_split_results_component_html = GUI_HTML_SECTION_SPLIT_RESULTS_COMPONENT.read_text(encoding="utf-8")
-    section_pattern_card_html = GUI_HTML_SECTION_PATTERN_CARD.read_text(encoding="utf-8")
-    section_split_ui_html = (
-        section_split_page_html
-        + section_split_results_component_html
-        + section_pattern_card_html
-    )
+    section_split_ui_html = section_split_page_html + section_split_results_component_html
     parse_ui_html = GUI_HTML_PARSE_PAGE.read_text(encoding="utf-8")
     change_log_ui_html = GUI_HTML_CHANGE_LOG_PAGE.read_text(encoding="utf-8")
     utility_ui_html = GUI_UTILITY_PAGE.read_text(encoding="utf-8")
@@ -8575,7 +8596,7 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     assert "/internal-html-download" in parse_ui_html
     assert "공시원문 목차 분리" in section_split_ui_html
     assert "/api/disclosures/html/sections/list" in section_split_ui_html
-    assert "/api/disclosures/html/sections/kinds" in section_split_ui_html
+    assert "/api/disclosures/html/sections/kinds" not in section_split_ui_html
     assert "/api/disclosures/html/sections/source" in section_split_ui_html
     assert "/api/disclosures/html/sections/source/split" in section_split_ui_html
     assert "/api/disclosures/html/sections/save/start" in section_split_ui_html
@@ -8597,16 +8618,12 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     assert "폴더 요약" not in section_split_ui_html
     assert "개별 공시" in section_split_ui_html
     assert "목차 수" in section_split_ui_html
-    assert "목차 조합 모아보기" in section_split_ui_html
-    assert "불러오기" in section_split_ui_html
-    assert "sectionPatterns" in section_split_ui_html
-    assert "section_save_rules" in section_split_ui_html
-    assert "selectedPatternTocIds" in section_split_ui_html
-    assert "onTogglePatternSection" in section_split_ui_html
-    assert "저장할 목차" in section_split_ui_html
-    assert "sample_documents" in section_pattern_card_html
-    assert "공시 열기" in section_pattern_card_html
-    assert 'target="_blank"' in section_pattern_card_html
+    assert "목차 조합 모아보기" not in section_split_ui_html
+    assert "sectionPatterns" not in section_split_ui_html
+    assert "section_save_rules" not in section_split_ui_html
+    assert "selectedPatternTocIds" not in section_split_ui_html
+    assert "onTogglePatternSection" not in section_split_ui_html
+    assert "저장할 목차" not in section_split_ui_html
     assert "limit: parseOptionalNumber(limit)" not in section_split_page_html
     assert "align-middle" in section_split_results_component_html
     assert "원문 보기" in section_split_ui_html

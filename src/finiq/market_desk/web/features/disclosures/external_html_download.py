@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections import deque
 
+from finiq.data_scraper.core.kind_computers import KIND_VIRTUAL_COMPUTER_COUNT
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
 )
@@ -299,6 +300,7 @@ def download_disclosure_external_html_payload(
                         or bool(cancel_check and cancel_check()),
                         max_workers=max_workers,
                         max_retries=max_retries,
+                        virtual_computer_count=KIND_VIRTUAL_COMPUTER_COUNT,
                     )
                 )
         saved_paths_by_acpt_no = dict(existing_paths_by_acpt_no)

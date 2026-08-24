@@ -1080,6 +1080,74 @@ def test_internal_html_download_runs_targets_in_parallel_and_preserves_order(
     ]
 
 
+def test_external_html_payload_uses_two_virtual_computers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_download(**kwargs: object) -> list[Path]:
+        captured.update(kwargs)
+        output_directory = Path(str(kwargs["output_directory"]))
+        paths = []
+        for acpt_no in list(kwargs["acpt_numbers"]):
+            path = output_directory / f"{acpt_no}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_html(), encoding="utf-8")
+            paths.append(path)
+        return paths
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
+        fake_download,
+    )
+    download_disclosure_external_html_payload(
+        _external_workspace_body(
+            tmp_path,
+            {
+                "disclosures": [
+                    {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"},
+                    {"acpt_no": "20250101000002", "disclosed_at": "2025-01-02"},
+                ]
+            },
+            output_directory=str(tmp_path / "external"),
+            skip_existing=False,
+        )
+    )
+
+    assert captured["virtual_computer_count"] == 2
+
+
+def test_internal_html_payload_uses_two_virtual_computers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_download(**kwargs: object) -> list[Path]:
+        captured.update(kwargs)
+        output_directory = Path(str(kwargs["output_directory"]))
+        paths = []
+        for target in list(kwargs["targets"]):
+            path = output_directory / f"{target['acpt_no']}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_html(), encoding="utf-8")
+            paths.append(path)
+        return paths
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fake_download,
+    )
+    download_disclosure_internal_html_payload(
+        _internal_html_body(
+            tmp_path,
+            ["20250101000001", "20250101000002"],
+            skip_existing=False,
+        )
+    )
+
+    assert captured["virtual_computer_count"] == 2
+
+
 def test_download_payload_reports_parent_cancellation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -7,7 +7,6 @@ const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigatio
 const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx";
 const sectionResultsPath = "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx";
 const lockedCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureLockedSettingsCard.tsx";
-const sectionPatternCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/HtmlSectionPatternCard.tsx";
 
 test("disclosure automation navigation keeps all seven detail routes", async () => {
   const navigation = await readFile(navigationPath, "utf8");
@@ -38,8 +37,8 @@ test("automation page uses a continuous work range and in-page settings actions"
   assert.match(page, /DisclosureConditionFilterCard/);
   assert.match(page, /동기화/);
   assert.match(page, /이어서 실행/);
-  assert.match(page, /후속 실행/);
-  assert.match(page, /needs_review/);
+  assert.doesNotMatch(page, /후속 실행|needs_review|section_save_rules/);
+  assert.match(page, /unmatched_policy: "automatic"/);
   assert.match(page, /STAGES\.map\(\(stage\) => \[stage\.key, true\]\)/);
   assert.doesNotMatch(page, /\[stage\.key, executionMask\.includes\(stage\.number\)\]/);
   assert.doesNotMatch(page, /1·3·6|1–7|01-list부터|07-converted|Stage 1|Stage 6/);
@@ -96,49 +95,46 @@ test("automation task table uses standard card spacing and a far-right outlined 
   assert.doesNotMatch(taskTable, /variant="ghost"[\s\S]{0,220}설정/);
 });
 
-test("inactive judgment settings render locked summary cards and section review can wait", async () => {
-  const [page, lockedCard, sectionPatternCard] = await Promise.all([
+test("inactive search settings render locked summary cards without section review", async () => {
+  const [page, lockedCard] = await Promise.all([
     readFile(pagePath, "utf8"),
     readFile(lockedCardPath, "utf8"),
-    readFile(sectionPatternCardPath, "utf8"),
   ]);
 
   assert.match(page, /searchSettingsSelected \? <>/);
   assert.match(page, /filterSettingsSelected \? <DisclosureConditionFilterCard/);
-  assert.match(page, /sectionSettingsSelected \|\| reviewPatterns\.length/);
   assert.match(page, /DisclosureLockedSettingsCard title="검색 조건"/);
   assert.match(page, /DisclosureLockedSettingsCard title="공시 종류"/);
-  assert.match(page, /pending=\{!runResult \|\| !!activeJobId \|\| !!reviewPatterns\.length\}/);
+  assert.doesNotMatch(page, /HtmlSectionPatternCard|reviewPatterns|sectionSettingsSelected/);
   assert.match(lockedCard, /Lock/);
   assert.match(lockedCard, /min-h-8/);
   assert.doesNotMatch(lockedCard, /min-h-14/);
-  assert.match(sectionPatternCard, /Pending/);
 });
 
 test("download page-count conflicts require confirmation in the notification panel", async () => {
   const page = await readFile(pagePath, "utf8");
 
-  assert.match(page, /workflow_status: "completed" \| "needs_download_confirmation" \| "needs_review"/);
+  assert.match(page, /workflow_status: "completed" \| "needs_download_confirmation"/);
   assert.match(page, /download_confirmation: confirmedDownload/);
   assert.match(page, /setDownloadConflicts\(conflicts\)/);
   assert.match(page, /notificationDismissible=\{!downloadConflicts\.length\}/);
   assert.match(page, /저장 \{conflict\.saved_pages \?\? "확인 불가"\}페이지 · KIND \{conflict\.kind_pages \?\? "확인 불가"\}페이지/);
   assert.match(page, /전체 다시 받기/);
-  assert.match(page, /startRun\("sync", sectionRules, downloadConfirmation\)/);
+  assert.match(page, /startRun\("sync", downloadConfirmation\)/);
 });
 
-test("automation notifications keep completion, decisions, and errors on distinct tones", async () => {
+test("automation notifications keep completion, download confirmation, and errors on distinct tones", async () => {
   const page = await readFile(pagePath, "utf8");
 
   assert.match(page, /workflow_status === "needs_download_confirmation"[\s\S]*?setIsErrorStatus\(false\)/);
-  assert.match(page, /Pending · 목차 조합 \$\{formatInteger\(unresolved\.length\)\}개가 아직 결정되지 않았습니다\.[\s\S]*?setIsErrorStatus\(false\)/);
-  assert.match(page, /const notificationTone = isErrorStatus[\s\S]*?\? "error"[\s\S]*?downloadConflicts\.length \|\| reviewPatterns\.length[\s\S]*?\? "warning"[\s\S]*?: notification[\s\S]*?\? "success"[\s\S]*?: "neutral"/);
+  assert.match(page, /const notificationTone = isErrorStatus[\s\S]*?\? "error"[\s\S]*?downloadConflicts\.length[\s\S]*?\? "warning"[\s\S]*?: notification[\s\S]*?\? "success"[\s\S]*?: "neutral"/);
   assert.match(page, /notificationTone=\{notificationTone\}/);
-  assert.match(page, /refreshPlan\(result\.workflow_status === "needs_review" \? "review" : "resume", false\)/);
+  assert.match(page, /refreshPlan\("resume", false\)/);
+  assert.doesNotMatch(page, /reviewPatterns|Pending · 목차 조합/);
   assert.match(page, /if \(announce\) \{[\s\S]*?setNotification\([\s\S]*?setIsErrorStatus\(!next\.execution_allowed\);[\s\S]*?\}/);
 });
 
-test("automation and detail pages share the same judgment setting components", async () => {
+test("automation and detail pages share search settings and omit manual section decisions", async () => {
   const [page, downloadPage, sectionResults] = await Promise.all([
     readFile(pagePath, "utf8"),
     readFile(downloadPagePath, "utf8"),
@@ -149,8 +145,8 @@ test("automation and detail pages share the same judgment setting components", a
     assert.match(page, new RegExp(component));
     assert.match(downloadPage, new RegExp(component));
   }
-  assert.match(page, /HtmlSectionPatternCard/);
-  assert.match(sectionResults, /HtmlSectionPatternCard/);
+  assert.doesNotMatch(page, /HtmlSectionPatternCard/);
+  assert.doesNotMatch(sectionResults, /HtmlSectionPatternCard/);
 });
 
 test("automation page inspects detail-page outputs and shows confirmed plans", async () => {
@@ -166,6 +162,7 @@ test("automation page inspects detail-page outputs and shows confirmed plans", a
   assert.match(page, /action === "mismatch"\) return "확인 필요"/);
   assert.match(page, /action === "reuse" \|\| action === "confirmed"/);
   assert.match(page, /stageInspection\?\.reason \|\| stagePlan\?\.reason/);
-  assert.match(page, /companyName,[\s\S]*conditions,[\s\S]*disclosureTypeGroups,[\s\S]*sectionRules/);
+  assert.match(page, /companyName,[\s\S]*conditions,[\s\S]*disclosureTypeGroups/);
+  assert.doesNotMatch(page, /sectionRules|reviewPatterns/);
   assert.equal(page.match(/\/api\/disclosure-workflows\/inspect/g)?.length, 1);
 });

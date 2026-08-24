@@ -220,7 +220,8 @@ test("section integrity card uses the full inspection endpoint", async () => {
   assert.match(source, /mode: currentFilterMode/);
   assert.match(source, /currentParentMode \? \{ parent_mode: currentParentMode \} : \{\}/);
   assert.match(source, /input_directory: useSeparateOutputDirectory \? inputDirectory : ""/);
-  assert.match(source, /const handleFilterInputChange = \(value: string\) => \{[\s\S]*?setInspectResult\(null\)[\s\S]*?setSectionPatterns\(\[\]\)/);
+  assert.match(source, /const handleFilterInputChange = \(value: string\) => \{[\s\S]*?setInspectResult\(null\)[\s\S]*?resetSelectedDisclosure\(\)/);
+  assert.doesNotMatch(source, /setSectionPatterns|selectedPatternTocIds|section_save_rules/);
 });
 
 test("parse inspection waits for its mode and parser method", async () => {

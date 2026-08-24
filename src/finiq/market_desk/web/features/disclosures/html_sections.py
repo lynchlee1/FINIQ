@@ -8,7 +8,6 @@ from collections import deque
 from copy import deepcopy
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from html import escape
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, TypeVar
 
@@ -20,6 +19,7 @@ from finiq.market_desk.web.html_parsers.common import decode_html_markup
 ProgressCallback = Callable[[str], None]
 _SECTION_CLASS_RE = re.compile(r"^SECTION-\d+$")
 _HEADING_TAGS = {f"h{level}" for level in range(1, 7)}
+# Post-split classification only; structural boundary detection must not use text.
 _CORRECTION_TITLE_TOKEN = "정정"
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 T = TypeVar("T")
@@ -51,10 +51,6 @@ def _clean_text(value: object) -> str:
     return " ".join(str(value or "").split())
 
 
-def _element_html(element: etree._Element) -> str:
-    return html.tostring(element, encoding="unicode", method="html")
-
-
 def _element_children(element: etree._Element) -> list[etree._Element]:
     return [child for child in element if isinstance(child.tag, str)]
 
@@ -67,32 +63,6 @@ def _parse_internal_html_document(html_markup: str | bytes) -> html.HtmlElement:
         raise ValueError("HTML body is required")
     parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
     return html.fromstring(decoded_markup, parser=parser)
-
-
-def _body_direct_children(document: html.HtmlElement) -> list[etree._Element]:
-    body_nodes = document.xpath("//body")
-    if not body_nodes:
-        raise ValueError("HTML body is required")
-    return list(body_nodes[0])
-
-
-def _body_attrs(document: html.HtmlElement) -> str:
-    body_nodes = document.xpath("//body")
-    if not body_nodes:
-        raise ValueError("HTML body is required")
-    attrs = []
-    for key, value in body_nodes[0].attrib.items():
-        if key.lower() == "style":
-            continue
-        attrs.append(f'{key}="{escape(str(value), quote=True)}"')
-    return (" " + " ".join(attrs)) if attrs else ""
-
-
-def _head_markup(document: html.HtmlElement) -> str:
-    head_nodes = document.xpath("//head")
-    if not head_nodes:
-        raise ValueError("HTML head is required")
-    return "".join(_element_html(child) for child in head_nodes[0])
 
 
 def _section_title(
@@ -115,20 +85,6 @@ def _first_text_fragment(elements: Iterable[etree._Element]) -> str:
             if title:
                 return title
     return ""
-
-
-def _wrap_section_html(document: html.HtmlElement, section_markup: str) -> str:
-    return (
-        "<!DOCTYPE html>\n"
-        "<html>\n"
-        "<head>\n"
-        f"{_head_markup(document)}\n"
-        "</head>\n"
-        f"<body{_body_attrs(document)}>\n"
-        f"{section_markup}\n"
-        "</body>\n"
-        "</html>\n"
-    )
 
 
 def _is_section_heading(element: etree._Element) -> bool:
@@ -452,29 +408,6 @@ def _section_patterns(documents: Iterable[dict[str, Any]]) -> list[dict[str, Any
             str(item["signature"]),
         ),
     )
-
-
-def _section_save_rules(value: Any) -> dict[str, set[str]]:
-    if not isinstance(value, dict):
-        return {}
-    rules: dict[str, set[str]] = {}
-    for signature, toc_ids in value.items():
-        signature_text = str(signature or "").strip()
-        if not signature_text or not isinstance(toc_ids, list):
-            continue
-        rules[signature_text] = {
-            str(toc_id).strip() for toc_id in toc_ids if str(toc_id).strip()
-        }
-    return rules
-
-
-def _section_dicts_from_split_sections(
-    sections: list[HtmlSection],
-) -> list[dict[str, Any]]:
-    return [
-        {"toc_id": section.toc_id, "index": section.index, "title": section.title}
-        for section in sections
-    ]
 
 
 def _resolve_html_source_file(
