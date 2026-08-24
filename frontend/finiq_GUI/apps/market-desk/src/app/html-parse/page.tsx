@@ -438,6 +438,9 @@ export default function HtmlParsePage() {
     setExecutionOptionCandidates([]);
     setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
+    setPreviewData(null);
+    setLatestParseResult(null);
+    setWarningOpenPages({});
   };
 
   const handleOutputDirectoryChange = (val: string) => {
@@ -453,6 +456,9 @@ export default function HtmlParsePage() {
     setExecutionOptionCandidates([]);
     setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
+    setPreviewData(null);
+    setLatestParseResult(null);
+    setWarningOpenPages({});
     if (val) void saveSetting("html_parser_method", val);
   };
 
@@ -470,6 +476,9 @@ export default function HtmlParsePage() {
     setExecutionOptionCandidates([]);
     setExecutionOptionInputDirectory("");
     setExecutionOptionExampleNotice(null);
+    setPreviewData(null);
+    setLatestParseResult(null);
+    setWarningOpenPages({});
     const preset = presets.find((item) => presetIdentity(item) === val);
     if (!preset) return;
     applyPreset(preset, `조건검색 필터를 불러왔습니다: ${presetLabel(preset)}`);
@@ -778,7 +787,12 @@ export default function HtmlParsePage() {
   };
 
   const handleInspectExistingParse = async () => {
-    if (!dataRoot || !inputDirectory) {
+    if (!dataRoot || !currentFilterMode || !parserMethod) {
+      setStatus("모드와 파싱 방법, 작업공간 디렉토리를 선택하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
+    if (useSeparateOutputDirectory && !inputDirectory) {
       setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
       setIsErrorStatus(true);
       return;
@@ -1019,8 +1033,9 @@ export default function HtmlParsePage() {
   }
 
   const hasInspectionInput = !!dataRoot
-    && !!inputDirectory
-    && (!useSeparateOutputDirectory || !!outputDirectory);
+    && !!currentFilterMode
+    && !!parserMethod
+    && (!useSeparateOutputDirectory || (!!inputDirectory && !!outputDirectory));
   const inspectionState: SingleCheckDataIntegrityInspectionState = !hasInspectionInput
     ? "waiting"
     : inspectionRunning
@@ -1031,7 +1046,7 @@ export default function HtmlParsePage() {
           ? "success"
           : "ready";
   const inspectionCopy = {
-    waiting: ["입력 경로와 결과 경로를 선택하세요", "경로를 선택한 다음 현재 설정으로 변환 결과를 다시 계산해 저장된 결과와 비교하세요."],
+    waiting: ["모드와 파싱 방법, 경로를 선택하세요", "변환 설정과 작업공간 디렉토리를 선택한 다음 저장된 결과를 검사하세요."],
     ready: ["기존 변환 결과 검사가 필요합니다", "현재 설정과 입력 HTML을 기준으로 저장된 결과를 확인하세요."],
     running: ["기존 변환 결과를 다시 계산하고 있습니다", "현재 설정으로 입력 HTML을 다시 변환해 저장된 결과와 비교합니다."],
     success: ["기존 변환 결과를 그대로 사용해도 됩니다", inspectionResult?.reason || "정상"],

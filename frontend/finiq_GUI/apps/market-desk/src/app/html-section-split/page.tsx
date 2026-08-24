@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Play, Square } from "lucide-react";
-import { Button } from "@finiq/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Label } from "@finiq/ui";
 import { PageLoadingSpinner } from "@finiq/web-app/status";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -30,6 +30,19 @@ import {
   SingleCheckDataIntegrityInspectionCard,
   type SingleCheckDataIntegrityInspectionState,
 } from "@/components/data-integrity/DataIntegrityInspectionCard";
+import {
+  FilterPresetCombobox,
+  type DisclosureConditionPreset,
+} from "@/components/disclosures/DisclosureConditionFilterCard";
+import { listDisclosureConditionPresets } from "@/lib/disclosureConditionPresets";
+
+const presetIdentity = (preset: DisclosureConditionPreset) => (
+  preset.id || (preset.parent_mode ? `${preset.parent_mode}/${preset.mode}` : preset.mode)
+);
+
+const presetLabel = (preset: DisclosureConditionPreset) => (
+  preset.parent_mode ? `${preset.parent_mode} › ${preset.mode}` : preset.mode
+);
 
 function statusLabel(status: string) {
   if (status === "queued") return "대기 중";
@@ -80,6 +93,8 @@ export default function HtmlSectionSplitPage() {
   const [limit, setLimit] = useState("20");
   const [reportLimit, setReportLimit] = useState("50");
   const [workers, setWorkers] = useState("1");
+  const [filterPresets, setFilterPresets] = useState<DisclosureConditionPreset[]>([]);
+  const [selectedFilterId, setSelectedFilterId] = useState("");
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [integrityInspectionResult, setIntegrityInspectionResult] = useState<InspectResult | null>(null);
   const [integrityInspectionError, setIntegrityInspectionError] = useState("");
@@ -191,9 +206,15 @@ export default function HtmlSectionSplitPage() {
   const patternsWithoutSelection = sectionPatterns.filter(
     (pattern) => !Object.prototype.hasOwnProperty.call(selectedPatternTocIds, pattern.signature),
   );
+  const selectedFilterPreset = filterPresets.find(
+    (preset) => presetIdentity(preset) === selectedFilterId,
+  );
+  const currentFilterMode = selectedFilterPreset?.mode || "";
+  const currentParentMode = selectedFilterPreset?.parent_mode || "";
   const integrityInspectionPayload = {
     data_root: dataRoot,
-    mode: htmlParseMode,
+    mode: currentFilterMode,
+    ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
     input_directory: useSeparateOutputDirectory ? inputDirectory : "",
     workers: parseOptionalNumber(workers),
   };
@@ -221,6 +242,30 @@ export default function HtmlSectionSplitPage() {
       setLoading(false);
     });
   }, [fetchSettings, setIsErrorStatus, setStatus]);
+
+  useEffect(() => {
+    if (!dataRoot.trim()) {
+      setFilterPresets([]);
+      setSelectedFilterId("");
+      return;
+    }
+    listDisclosureConditionPresets(dataRoot).then((response) => {
+      setFilterPresets(response.presets);
+    }).catch((err) => {
+      setFilterPresets([]);
+      setSelectedFilterId("");
+      setStatus(errorMessage(err));
+      setIsErrorStatus(true);
+    });
+  }, [dataRoot, setIsErrorStatus, setStatus]);
+
+  useEffect(() => {
+    if (selectedFilterId || !htmlParseMode) return;
+    const match = filterPresets.find(
+      (preset) => !preset.parent_mode && preset.mode === htmlParseMode,
+    );
+    if (match) setSelectedFilterId(presetIdentity(match));
+  }, [filterPresets, htmlParseMode, selectedFilterId]);
 
   useEffect(() => {
     return () => {
@@ -268,7 +313,33 @@ export default function HtmlSectionSplitPage() {
     setIntegrityInspectionResult(null);
     setIntegrityInspectionError("");
     setIsIntegrityInspecting(false);
-  }, [dataRoot, htmlParseMode, inputDirectory, useSeparateOutputDirectory, workers]);
+  }, [
+    currentFilterMode,
+    currentParentMode,
+    dataRoot,
+    inputDirectory,
+    useSeparateOutputDirectory,
+    workers,
+  ]);
+
+  const handleFilterInputChange = (value: string) => {
+    if (value === selectedFilterId) return;
+    inspectAbortControllerRef.current?.abort();
+    sectionPatternAbortControllerRef.current?.abort();
+    if (activeJobId) cancelJob();
+    setSelectedFilterId(value);
+    setInspectResult(null);
+    setSectionPatterns([]);
+    setSelectedPatternTocIds({});
+    setPage(1);
+    resetSelectedDisclosure();
+  };
+
+  const handleFilterChange = (value: string) => {
+    handleFilterInputChange(value);
+    const preset = filterPresets.find((item) => presetIdentity(item) === value);
+    if (preset && !preset.parent_mode) void saveSetting("html_parse_mode", preset.mode);
+  };
 
   const handleOutputDirectoryChange = (value: string) => {
     setOutputDirectory(value);
@@ -417,8 +488,8 @@ export default function HtmlSectionSplitPage() {
   };
 
   const loadSourcePage = async (targetPage: number, options: { refreshSectionPatterns?: boolean } = {}) => {
-    if (!inputDirectory) {
-      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
+    if (!dataRoot || !currentFilterMode || (useSeparateOutputDirectory && !inputDirectory)) {
+      setStatus("조건검색 필터와 작업공간 디렉토리를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -444,7 +515,9 @@ export default function HtmlSectionSplitPage() {
         signal: abortController.signal,
         body: JSON.stringify({
           data_root: dataRoot,
-          input_directory: inputDirectory,
+          mode: currentFilterMode,
+          ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
+          input_directory: useSeparateOutputDirectory ? inputDirectory : "",
           page: targetPage,
           page_size: configuredPageSize,
         }),
@@ -487,8 +560,8 @@ export default function HtmlSectionSplitPage() {
   };
 
   const inspectExistingData = async () => {
-    if (!inputDirectory) {
-      setStatus(`${DATA_PATH_LABELS.workspace}를 선택하세요.`);
+    if (!dataRoot || !currentFilterMode || (useSeparateOutputDirectory && !inputDirectory)) {
+      setStatus("조건검색 필터와 작업공간 디렉토리를 선택하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -637,8 +710,8 @@ export default function HtmlSectionSplitPage() {
   };
 
   const startSave = async () => {
-    if (!dataRoot || (useSeparateOutputDirectory && !outputDirectory)) {
-      setStatus(`${DATA_PATH_LABELS.workspace}를 확인하세요.`);
+    if (!dataRoot || !currentFilterMode || (useSeparateOutputDirectory && (!inputDirectory || !outputDirectory))) {
+      setStatus("조건검색 필터와 작업공간 디렉토리를 확인하세요.");
       setIsErrorStatus(true);
       return;
     }
@@ -658,7 +731,8 @@ export default function HtmlSectionSplitPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data_root: dataRoot,
-          mode: htmlParseMode,
+          mode: currentFilterMode,
+          ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
           input_directory: useSeparateOutputDirectory ? inputDirectory : "",
           output_directory: useSeparateOutputDirectory ? outputDirectory : "",
           workers: parseOptionalNumber(workers),
@@ -681,8 +755,11 @@ export default function HtmlSectionSplitPage() {
     return <PageLoadingSpinner message="설정을 불러오는 중입니다..." />;
   }
 
+  const hasInspectionInput = !!dataRoot
+    && !!currentFilterMode
+    && (!useSeparateOutputDirectory || !!inputDirectory);
   const integrityProblemFiles = integrityInspectionResult?.problem_files || [];
-  const inspectionState: SingleCheckDataIntegrityInspectionState = !inputDirectory
+  const inspectionState: SingleCheckDataIntegrityInspectionState = !hasInspectionInput
     ? "waiting"
     : isIntegrityInspecting
       ? "running"
@@ -692,7 +769,7 @@ export default function HtmlSectionSplitPage() {
         ? integrityProblemFiles.length > 0 ? "failed" : "success"
         : "ready";
   const inspectionCopy = {
-    waiting: [`${DATA_PATH_LABELS.workspace}를 선택하세요`, "작업공간 디렉토리를 선택한 다음 기존 원문의 목차 구성을 검사하세요."],
+    waiting: ["조건검색 필터와 경로를 선택하세요", "조건검색 필터와 작업공간 디렉토리를 선택한 다음 기존 원문의 목차 구성을 검사하세요."],
     ready: ["기존 원문 데이터 검사가 필요합니다", "목차 분리 전에 입력 HTML 전체의 구성을 확인하세요."],
     running: ["기존 원문 데이터를 확인하고 있습니다", "입력 HTML을 읽어 목차 구성과 문제 파일을 확인합니다."],
     success: ["기존 원문 데이터를 그대로 사용해도 됩니다", `목차가 있는 공시 ${formatInteger(integrityInspectionResult?.summary?.documents_with_sections || 0)}개를 확인했습니다.`],
@@ -718,7 +795,7 @@ export default function HtmlSectionSplitPage() {
             verdictDescription={inspectionCopy[1]}
             stepTitle="입력 HTML과 목차 구성 검사"
             stepSummary={inspectionStepSummary}
-            action={inputDirectory ? {
+            action={hasInspectionInput ? {
               label: isIntegrityInspecting ? "검사 중..." : "검사하기",
               onClick: inspectExistingData,
               disabled: isIntegrityInspecting || isInspecting || isJobActive,
@@ -726,6 +803,25 @@ export default function HtmlSectionSplitPage() {
               showResultStatus: true,
             } : undefined}
           />
+
+          <Card className="border-[color:var(--tv-border)] bg-[var(--tv-surface)]">
+            <CardHeader>
+              <CardTitle className="dark:text-white">조건검색 필터</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2">
+              <Label htmlFor="section-filter-preset" className="dark:text-slate-300">조건검색 필터</Label>
+              <FilterPresetCombobox
+                id="section-filter-preset"
+                value={selectedFilterId}
+                presets={filterPresets}
+                onValueChange={handleFilterInputChange}
+                onSelectExisting={handleFilterChange}
+                getPresetIdentity={presetIdentity}
+                getPresetLabel={presetLabel}
+                allowCreate={false}
+              />
+            </CardContent>
+          </Card>
 
           {/* LEGACY: 본문 데이터 경로 카드. 경로 입력은 우측 설정 패널(WorkflowPathSettings)로 옮겼다.
               <DataPathCard onError={handlePathError} fields={folderPathFields} /> */}

@@ -65,6 +65,31 @@ test("08 correction history selects workspace filters instead of parser keys", a
   assert.doesNotMatch(source, /changeMode \|\| "bond_issuance"/);
 });
 
+test("08 correction history keeps active query controls visible", async () => {
+  const source = await readFile(pagePath, "utf8");
+  const mainCard = source.slice(
+    source.indexOf('<HtmlWorkflowCard\n          title="조회 조건"'),
+    source.indexOf("<ActionDock"),
+  );
+
+  assert.match(mainCard, /<HtmlWorkflowForm fields=\{pathFields\} \/>/);
+  assert.match(mainCard, /<HtmlWorkflowForm fields=\{optionFields\} \/>/);
+  assert.match(mainCard, /<HtmlWorkflowForm fields=\{filterOnlyFields\} \/>/);
+  assert.match(mainCard, /<HtmlWorkflowForm fields=\{exportFields\} \/>/);
+  assert.match(source, /settingsContent=\{\s*<ChangeLogSettings \/>\s*\}/);
+});
+
+test("08 correction history resolves base and derived results from the workspace", async () => {
+  const source = await readFile(pagePath, "utf8");
+
+  assert.match(source, /data_root: dataRoot/);
+  assert.match(source, /currentParentMode \? \{ parent_mode: currentParentMode \} : \{\}/);
+  assert.match(source, /useSeparateOutputDirectory \? \{ output_path: outputPath \} : \{\}/);
+  assert.match(source, /params\.set\("parent_mode", currentParentMode\)/);
+  assert.match(source, /summaryAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(source, /requestKey !== currentRequestKeyRef\.current/);
+});
+
 test("numbered workflow groups render zero-padded stage numbers", async () => {
   const source = await readFile(sidebarPath, "utf8");
 

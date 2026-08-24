@@ -68,6 +68,18 @@ test("html parse conversion settings describe the selected parser method", async
   assert.match(source, /selectedParserMethod\.status/);
 });
 
+test("html parse mode changes clear results from the previous mode", async () => {
+  const source = await readFile(pagePath, "utf8");
+  const modeHandler = source.match(/const handleModeChange = \(val: string\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+  const parserHandler = source.match(/const handleParserMethodChange = \(val: string\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+
+  for (const handler of [modeHandler, parserHandler]) {
+    assert.match(handler, /setPreviewData\(null\)/);
+    assert.match(handler, /setLatestParseResult\(null\)/);
+    assert.match(handler, /setWarningOpenPages\(\{\}\)/);
+  }
+});
+
 test("html parse page renders report preview box for selected mode", async () => {
   const source = await readFile(pagePath, "utf8");
   const previewCardContent = source.match(/<CardTitle className="dark:text-white">리포트 미리보기<\/CardTitle>[\s\S]*?<CardTitle className="dark:text-white">작업 실행<\/CardTitle>/)?.[0] ?? "";

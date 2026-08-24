@@ -169,6 +169,51 @@ def test_api_settings(tmp_path: Path):
     assert settings_path.exists()
 
 
+def test_change_log_routes_resolve_derived_workspace_result(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    result_directory = (
+        data_root
+        / "07-converted"
+        / "rights_issuance"
+        / "subfilters"
+        / "rights_issuance_kosdaq"
+    )
+    result_directory.mkdir(parents=True)
+    (result_directory / "parsed-rights_issuance_kosdaq.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "rights_issuance_kosdaq",
+                "parser_method": "rights_issuance",
+                "records": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    query = {
+        "data_root": str(data_root),
+        "mode": "rights_issuance_kosdaq",
+        "parent_mode": "rights_issuance",
+    }
+
+    response = client.post("/api/disclosures/html/parse/change-log", json=query)
+    assert response.status_code == 200
+    assert response.json()["source_path"].endswith(
+        "07-converted/rights_issuance/subfilters/rights_issuance_kosdaq/parsed-rights_issuance_kosdaq.json"
+    )
+
+    export_response = client.get(
+        "/api/disclosures/html/parse/export.xlsx",
+        params=query,
+    )
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
 def test_api_settings_preserves_manual_sqlite_output(tmp_path: Path, monkeypatch):
     settings_path = tmp_path / "settings.json"
     monkeypatch.setattr(config, "settings_path", str(settings_path))
@@ -1985,12 +2030,24 @@ def test_external_html_redownload_processes_only_failed_owner_modes(
                 "id": "rights_issuance",
                 "mode": "rights_issuance",
                 "download_required_target_html_count": 0,
+                "hash_unverified_target_html_count": 1,
             },
         ],
     }
     final_inspection = {"passed": True, "failed_modes": [], "results": []}
     inspections = iter([initial_inspection, final_inspection])
-    downloaded_modes: list[str] = []
+    downloaded_payloads: list[tuple[dict[str, object], bool]] = []
+
+    def fake_download(
+        body: dict[str, object],
+        progress_callback: object = None,
+        cancel_check: object = None,
+        *,
+        redownload_unverified_existing: bool = False,
+    ) -> dict[str, object]:
+        downloaded_payloads.append((body, redownload_unverified_existing))
+        return {"cancelled": False, "requested_count": 2, "saved_count": 2}
+
     monkeypatch.setattr(
         external_html_download,
         "inspect_all_disclosure_external_html_payload",
@@ -1999,10 +2056,7 @@ def test_external_html_redownload_processes_only_failed_owner_modes(
     monkeypatch.setattr(
         external_html_download,
         "download_disclosure_external_html_payload",
-        lambda body, progress_callback=None, cancel_check=None: (
-            downloaded_modes.append(str(body["mode"]))
-            or {"cancelled": False, "requested_count": 2, "saved_count": 2}
-        ),
+        fake_download,
     )
 
     result = external_html_download.redownload_missing_disclosure_external_html_payload(
@@ -2010,10 +2064,14 @@ def test_external_html_redownload_processes_only_failed_owner_modes(
     )
 
     assert result["passed"] is True
-    assert result["target_mode_count"] == 1
-    assert result["completed_mode_count"] == 1
+    assert result["target_mode_count"] == 2
+    assert result["completed_mode_count"] == 2
     assert result["verification"] is final_inspection
-    assert downloaded_modes == ["bond_issuance"]
+    assert [payload["mode"] for payload, _repair in downloaded_payloads] == [
+        "bond_issuance",
+        "rights_issuance",
+    ]
+    assert all(repair is True for _payload, repair in downloaded_payloads)
 
 
 def test_external_html_trust_existing_route_creates_hash_baseline(

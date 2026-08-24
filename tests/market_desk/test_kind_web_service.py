@@ -7541,6 +7541,43 @@ def test_build_parse_change_log_payload_accepts_result_folder(tmp_path: Path) ->
     assert payload["source_path"] == str(parse_path.resolve())
 
 
+def test_build_parse_change_log_payload_resolves_derived_workspace_result(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    result_directory = (
+        data_root
+        / "07-converted"
+        / "rights_issuance"
+        / "subfilters"
+        / "rights_issuance_kosdaq"
+    )
+    result_directory.mkdir(parents=True)
+    parse_path = result_directory / "parsed-rights_issuance_kosdaq.json"
+    parse_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_parse_v1",
+                "mode": "rights_issuance_kosdaq",
+                "parser_method": "rights_issuance",
+                "records": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_parse_change_log_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "rights_issuance_kosdaq",
+            "parent_mode": "rights_issuance",
+        }
+    )
+
+    assert payload["source_path"] == str(parse_path.resolve())
+
+
 def test_build_parse_change_log_payload_requires_mode_for_result_folder(tmp_path: Path) -> None:
     parse_path = tmp_path / "parsed-bond_issuance.json"
     parse_path.write_text(

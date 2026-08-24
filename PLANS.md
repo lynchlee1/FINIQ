@@ -1,5 +1,23 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-24: restore external HTML redownload action
+
+- Purpose: Fix the disabled `재다운로드` action shown after the all-mode external HTML inspection reports missing files together with existing files that have no hash baseline.
+- Implementation: The repair target now includes owner-mode missing, invalid, hash-mismatched and hash-unverified HTML. The inspection action remains enabled for that recoverable state. Its dedicated background repair re-downloads unverified files and records fresh hashes while continuing to skip verified existing files; the normal resume path still rejects unverified reuse.
+- Verification: All 189 frontend tests and 109 related backend tests pass. A focused regression proves that explicit repair re-downloads a baseline-less existing file while the ordinary resume regression remains blocked. Browser verification against the real six-mode workspace reproduces two failed modes and confirms an enabled `재다운로드` action with 71,015 owner-mode repair targets; the network download was not started. Python compilation and `git diff --check` pass. The MarketDesk production build compiles successfully and stops during TypeScript checking only at the pre-existing unsupported `modal` prop in `packages/ui/src/components/ui/select.tsx`.
+
+## 2026-08-24: prohibit text-based TOC boundaries and audit structural coverage
+
+- Purpose: Make content-string hardcoding a prohibited TOC-boundary and section-selection technique and determine whether stage 06 can split every stored internal HTML document from source structure alone.
+- Implementation: Documented the fatal-failure rule for exact text, substring, regex, normalized text and title-list boundary decisions. The contract permits only verified source-format structure and requires unknown structures to fail instead of using a text or selector fallback. No runtime parser was changed. The proposed algorithm assigns one mutually exclusive structural schema per document, avoids treating parser-relocated heading title paragraphs as duplicate boundaries, and excludes the preamble before the first business-body boundary while preserving each schema's ancestor wrappers.
+- Verification: A read-only DOM audit covered all 107,114 stage-05 HTML files: 32,388 direct heading `SECTION-N` documents, 994 direct paragraph `SECTION-N` documents and 73,732 XForms documents with exactly one main-wrapper direct `xforms_title`. Two nested XForms titles were excluded by the direct-child constraint. No file was unclassified, missing a boundary or unparseable. Runtime implementation and regression tests for the latter two structural families remain follow-up work.
+
+## 2026-08-24: audit stage 05–08 user workflows
+
+- Purpose: Review stages 05 through 08 from the user's workflow perspective, with extra attention to existing-data inspection placement, explicit operation and fixture-backed behavior.
+- Implementation: Stage 06 now exposes the active basic or derived filter directly below its top inspection card and sends that same mode identity through inspection, source listing and save. Stage 07 keeps inspection unavailable until the workspace, mode and parser method are selected. Stage 08 moves active query, search and export controls into the visible `조회 조건` card, resolves derived results from the canonical workspace path, and cancels or ignores stale list/detail requests after the source changes.
+- Verification: All 189 frontend tests and 41 focused backend tests pass. Temporary-workspace fixtures prove base/derived result resolution for both change-log JSON and Excel routes without accessing the database. The MarketDesk production build compiles the changed pages and stops only at the pre-existing unsupported `modal` prop in `packages/ui/src/components/ui/select.tsx`. Browser verification confirms that 05–07 keep `기존 데이터 검토` at the top, 06 exposes and switches a derived filter without retaining the previous result, 07 waits when the parser method is missing, and 08 shows its active query/search/export controls in the main card. Python compilation and `git diff --check` pass.
+
 ## 2026-08-23: inspect external HTML storage for every mode
 
 - Purpose: Make the top `외부 HTML 저장` inspection cover every basic and derived workspace mode, matching its position above the filter selector.

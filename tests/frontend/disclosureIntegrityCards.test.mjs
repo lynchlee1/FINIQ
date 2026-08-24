@@ -70,6 +70,27 @@ test("existing-data inspections start only from explicit actions", async () => {
   assert.match(htmlDownload, /\? handleInspectCompressedFile\s*: handleInspectFolder/);
 });
 
+test("stage 05 through 07 keep existing-data review above workflow inputs", async () => {
+  const [htmlDownload, sectionSplit, htmlParse] = await Promise.all([
+    readFile(paths.htmlDownload, "utf8"),
+    readFile(paths.sectionSplit, "utf8"),
+    readFile(paths.htmlParse, "utf8"),
+  ]);
+
+  assert.ok(
+    htmlDownload.indexOf("{existingDataInspectionCard}")
+      < htmlDownload.indexOf('<CardTitle className="dark:text-white">조건검색 필터</CardTitle>'),
+  );
+  assert.ok(
+    sectionSplit.indexOf("<SingleCheckDataIntegrityInspectionCard")
+      < sectionSplit.indexOf('<CardTitle className="dark:text-white">조건검색 필터</CardTitle>'),
+  );
+  assert.ok(
+    htmlParse.indexOf("<SingleCheckDataIntegrityInspectionCard")
+      < htmlParse.indexOf('<CardTitle className="dark:text-white">변환 설정</CardTitle>'),
+  );
+});
+
 test("HTML inspection always derives its mode-owned paths from the workspace", async () => {
   const htmlDownload = await readFile(paths.htmlDownload, "utf8");
 
@@ -115,7 +136,7 @@ test("completed disclosure inspections reuse their result control for another in
   assert.match(filter, /action: rootDirectory\?\.trim\(\) \? \{/);
   assert.match(htmlDownload, /action=\{hasInspectionInput \? \{/);
   assert.match(table, /action=\{hasInspectionInput \? \{/);
-  assert.match(sectionSplit, /action=\{inputDirectory \? \{/);
+  assert.match(sectionSplit, /action=\{hasInspectionInput \? \{/);
   assert.match(htmlParse, /action=\{hasInspectionInput \? \{/);
   for (const source of [download, filter, table, sectionSplit, htmlParse]) {
     assert.match(source, /showResultStatus: true/);
@@ -190,10 +211,24 @@ test("section integrity card uses the full inspection endpoint", async () => {
   assert.match(handler, /startPolling\(jobId\)/);
   assert.match(source, /activeIntegrityInspectionRef/);
   assert.match(source, /inspectionContext\.key !== currentIntegrityInspectionKeyRef\.current/);
-  assert.match(source, /inputDirectory, useSeparateOutputDirectory, workers/);
+  assert.match(source, /currentFilterMode,[\s\S]{0,160}inputDirectory,[\s\S]{0,120}useSeparateOutputDirectory,[\s\S]{0,80}workers/);
   assert.match(source, /const \[integrityInspectionError, setIntegrityInspectionError\] = useState\(""\)/);
   assert.match(source, /integrityInspectionError[\s\S]{0,100}\? "failed"/);
   assert.match(source, /onClick: inspectExistingData/);
+  assert.match(source, /<CardTitle className="dark:text-white">조건검색 필터<\/CardTitle>/);
+  assert.match(source, /<FilterPresetCombobox/);
+  assert.match(source, /mode: currentFilterMode/);
+  assert.match(source, /currentParentMode \? \{ parent_mode: currentParentMode \} : \{\}/);
+  assert.match(source, /input_directory: useSeparateOutputDirectory \? inputDirectory : ""/);
+  assert.match(source, /const handleFilterInputChange = \(value: string\) => \{[\s\S]*?setInspectResult\(null\)[\s\S]*?setSectionPatterns\(\[\]\)/);
+});
+
+test("parse inspection waits for its mode and parser method", async () => {
+  const source = await readFile(paths.htmlParse, "utf8");
+
+  assert.match(source, /const hasInspectionInput = !!dataRoot\s*&& !!currentFilterMode\s*&& !!parserMethod/);
+  assert.match(source, /if \(!dataRoot \|\| !currentFilterMode \|\| !parserMethod\)/);
+  assert.match(source, /모드와 파싱 방법, 경로를 선택하세요/);
 });
 
 test("existing-data guidance avoids mechanical Korean phrasing", async () => {

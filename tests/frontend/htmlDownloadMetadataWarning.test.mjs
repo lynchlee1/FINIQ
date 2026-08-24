@@ -86,8 +86,18 @@ test("external HTML save inspection checks every workspace mode", () => {
   assert.match(page, /기본 모드 대상 .*owner_requested_count/);
   assert.match(page, /"\/api\/disclosures\/external-html-download\/redownload\/start"/);
   assert.match(page, /const externalSaveRedownloadable = variant === "external"/);
+  assert.match(
+    page,
+    /const externalSaveRepairTargetCount = Number\([\s\S]{0,180}owner_download_required_target_html_count[\s\S]{0,180}owner_hash_unverified_target_html_count/,
+  );
+  assert.match(page, /externalSaveRepairTargetCount > 0/);
   assert.match(page, /externalSaveRedownloadable\s*\? handleRedownloadMissingExternalHtml/);
   assert.match(page, /externalSaveRedownloadable\s*\? "재다운로드"/);
+  const inspectionAction = page.slice(
+    page.indexOf("action={hasInspectionInput ?"),
+    page.indexOf("/>\n  );", page.indexOf("action={hasInspectionInput ?")),
+  );
+  assert.doesNotMatch(inspectionAction, /owner_hash_unverified_target_html_count/);
 });
 
 test("internal HTML save derives its compressed source from the workspace mode", () => {

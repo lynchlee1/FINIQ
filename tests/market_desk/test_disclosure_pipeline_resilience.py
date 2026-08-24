@@ -800,6 +800,63 @@ def test_external_html_resume_rejects_existing_file_without_hash_baseline(
         )
 
 
+def test_external_html_repair_redownloads_existing_file_without_hash_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output_directory = tmp_path / "external"
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    target.write_text(_valid_html("unverified"), encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_download(**kwargs: object) -> list[Path]:
+        acpt_numbers = list(kwargs["acpt_numbers"])
+        calls.append(acpt_numbers)
+        target.write_text(_valid_html("redownloaded"), encoding="utf-8")
+        return [target]
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
+        fake_download,
+    )
+
+    result = download_disclosure_external_html_payload(
+        _external_workspace_body(
+            tmp_path,
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "disclosed_at": "2025-01-01",
+                    }
+                ]
+            },
+            output_directory=str(output_directory),
+            skip_existing=True,
+        ),
+        redownload_unverified_existing=True,
+    )
+
+    assert calls == [["20250101000001"]]
+    assert result["saved_count"] == 1
+    inspection = check_disclosure_html_output_directory_payload(
+        _external_workspace_body(
+            tmp_path,
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "disclosed_at": "2025-01-01",
+                    }
+                ]
+            },
+            output_directory=str(output_directory),
+        )
+    )
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert inspection["hash_unverified_target_html_count"] == 0
+
+
 def test_internal_html_integrity_baseline_requires_explicit_trust(
     tmp_path: Path,
 ) -> None:

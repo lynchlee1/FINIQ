@@ -37,6 +37,7 @@ from finiq.market_desk.web.features.disclosures.external_html_compress import (
 )
 from finiq.market_desk.web.features.disclosures.html_parse_changes import (
     build_parse_change_log_payload,
+    resolve_parse_change_log_output_directory,
 )
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
     cancel_disclosure_html_parse,
@@ -862,13 +863,25 @@ def create_workflows_router(
 
     @router.get("/api/disclosures/html/parse/export.xlsx")
     async def export_parse_results(
-        output_path: str,
         mode: str,
         background_tasks: BackgroundTasks,
+        output_path: str = "",
+        data_root: str = "",
+        parent_mode: str = "",
         latest_only: bool = False,
     ):
-        payload = build_parse_export_xlsx(output_path, mode, latest_only=latest_only)
-        filename = f"{Path(output_path).stem}_export.xlsx"
+        output_directory = resolve_parse_change_log_output_directory(
+            {
+                "output_path": output_path,
+                "data_root": data_root,
+                "mode": mode,
+                "parent_mode": parent_mode,
+            }
+        )
+        payload = build_parse_export_xlsx(
+            str(output_directory), mode, latest_only=latest_only
+        )
+        filename = f"{output_directory.stem}_export.xlsx"
         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
             temp_path = Path(tmp.name)
             tmp.write(payload)

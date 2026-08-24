@@ -4,6 +4,26 @@
 
 KIND 본문에서 목차를 골라 해당 범위의 문서 구조를 보존한 HTML로 저장한다.
 
+## TOC Boundary Safety Contract
+
+- 목차 경계를 찾거나, 저장할 section을 선택하거나, 정정 영역을 제거하기 위해 표시 문자열을 하드코딩하는 방식을 금지한다. 정확히 같은 문자열, 부분 문자열, 정규식, 공백·기호 정규화, 문서 제목 목록 비교를 모두 포함한다. 이를 목차 분리 근거로 사용하는 것은 치명적인 파싱 실패로 본다.
+- 표시 문자열은 DOM 구조로 경계를 먼저 확정한 다음 section 제목을 표시하는 데만 사용한다. 경계 발견, section 선택, 정정 판별, 제거 범위 결정에는 사용하지 않는다.
+- tag, DOM 계층, sibling 순서, class·id, anchor 연결은 원문 생성 형식의 구조 identifier로만 사용한다. class·id의 이름이 제목처럼 보인다는 이유로 의미를 추론하지 않고, 생성 형식과 전체 입력에서 위치·유일성을 검증한 식별자만 사용한다.
+- 사업 모드별로 분기하지 않고 HTML 생성 형식의 구조로 분기한다. 검증된 구조가 아닌 입력은 문자열 규칙이나 다른 selector로 우회하지 않고 실패 처리한다.
+
+### Verified Structural Expansion
+
+2026-08-24에 05단계 저장 HTML 107,114건을 read-only로 전수 검사한 결과, 표시 문자열 비교 없이 다음 세 구조로 모두 분류되었다.
+
+- `body` 직계 heading(`h1`~`h6`) + `SECTION-N`: 32,388건. 1개 문서는 경계 1개, 32,387개 문서는 경계 2개였다.
+- `body` 직계 `p` + `SECTION-N`: 994건. 모든 문서의 경계가 2개였다.
+- `body > div.xforms`의 주 콘텐츠 wrapper 직계 `div.xforms_title`: 73,732건. 모든 문서에서 이 위치의 경계가 정확히 1개였다. 하위 서식에 중첩된 `xforms_title` 2개는 주 wrapper 직계 조건에서 제외되었다.
+- 미분류, 경계 없음, HTML parse 실패: 0건.
+
+구조 확장은 문서마다 위 세 생성 형식 중 하나를 상호 배타적으로 확정한 뒤 해당 형식의 경계만 사용한다. heading `SECTION-N`이 있는 문서에서 HTML recovery parser가 heading 안의 제목 `p.SECTION-N`을 다음 sibling으로 옮길 수 있으므로, 이 `p`를 두 번째 경계로 중복 해석하지 않는다. heading 구조가 없고 `body` 직계 `p.SECTION-N`만 있을 때만 paragraph 형식으로 확정한다.
+
+확정한 section container의 sibling 순서에서 첫 경계 이전 preamble을 section에 포함하지 않고, 각 경계부터 다음 경계 직전까지를 section으로 삼는다. XForms는 경계가 `body` 직계가 아니므로 원문 document를 clone한 후 section container의 선택하지 않은 sibling만 제거해 조상 wrapper와 head를 보존한다. 정정 여부나 정정 표시 문자열을 판별하지 않아도 정정 preamble은 첫 업무 본문 경계 이전에서 제외된다. 현재 코드는 이 중 heading + `SECTION-N`만 구현한 상태이며, 나머지 두 형식은 구현과 regression test가 필요하다.
+
 ## Features
 
 ### Split HTML by Table of Contents
@@ -47,6 +67,8 @@ KIND 본문에서 목차를 골라 해당 범위의 문서 구조를 보존한 H
 - `기존 데이터 검토`는 첫 화면에 표시할 목록만이 아니라 입력 HTML 전체를 읽어 목차 구성과 문제 파일을 검사한다.
 - 저장 결과 검사는 입력 순서대로 만든 예상 HTML을 실제 파일과 즉시 비교하고, 이후 비교에는 상대 경로와 건수만 보관한다.
 - 목차 HTML 저장 결과의 진행 내역은 생성 중부터 최근 200줄만 보관한다.
+- 화면은 `기존 데이터 검토` 바로 아래에서 `조건검색 필터`를 선택하게 하고, 검사·개별 공시·저장은 모두 같은 기본 또는 파생 필터를 사용한다.
+- 파생 필터는 상위 필터의 내부 HTML을 사용하되 `parent_mode`와 자식 `mode`를 함께 전달한다. 화면에 보이지 않는 이전 페이지의 모드를 대신 사용하지 않는다.
 
 ### Review an Unknown TOC Combination
 

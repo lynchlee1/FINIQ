@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Loader2, FileSpreadsheet } from "lucide-react";
 import { Button, Label, Checkbox } from "@finiq/ui";
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
@@ -45,9 +45,13 @@ export default function HtmlChangeLogPage() {
     html_parse_output_directory: outputPath,
     html_parse_mode: storedMode,
     output_root: dataRoot,
+    disclosure_separate_output_directory: useSeparateOutputDirectory,
     fetchSettings,
     saveSetting,
   } = useSettingsStore();
+  const summaryAbortControllerRef = useRef<AbortController | null>(null);
+  const detailAbortControllerRef = useRef<AbortController | null>(null);
+  const currentRequestKeyRef = useRef("");
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState("");
   const [changeSearch, setChangeSearch] = useState("");
@@ -60,10 +64,36 @@ export default function HtmlChangeLogPage() {
   );
   const currentFilterMode = selectedPresetEntry?.mode || "";
   const currentParentMode = selectedPresetEntry?.parent_mode || "";
+  const currentRequestKey = JSON.stringify({
+    dataRoot,
+    outputPath,
+    useSeparateOutputDirectory,
+    currentFilterMode,
+    currentParentMode,
+  });
+  currentRequestKeyRef.current = currentRequestKey;
+
+  const resultSourcePayload = () => ({
+    data_root: dataRoot,
+    mode: currentFilterMode,
+    ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
+    ...(useSeparateOutputDirectory ? { output_path: outputPath } : {}),
+  });
+
+  const clearLoadedResults = () => {
+    setChangeLog(null);
+    setSelectedFamilyId("");
+    setFamilyDetails({});
+  };
 
   useEffect(() => {
     fetchSettings().finally(() => setLoading(false));
   }, [fetchSettings]);
+
+  useEffect(() => () => {
+    summaryAbortControllerRef.current?.abort();
+    detailAbortControllerRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     if (!dataRoot?.trim()) {
@@ -86,7 +116,7 @@ export default function HtmlChangeLogPage() {
   }, [presets, selectedPreset, storedMode]);
 
   const loadChangeLog = async () => {
-    if (!outputPath) {
+    if (!dataRoot || (useSeparateOutputDirectory && !outputPath)) {
       setStatus(`${DATA_PATH_LABELS.workspace}가 필요합니다.`);
       setIsErrorStatus(true);
       return;
@@ -100,18 +130,20 @@ export default function HtmlChangeLogPage() {
     setIsFetching(true);
     setStatus("변동 기록을 불러오는 중...");
     setIsErrorStatus(false);
-    setChangeLog(null);
-    setSelectedFamilyId("");
-    setFamilyDetails({});
+    clearLoadedResults();
+    summaryAbortControllerRef.current?.abort();
+    detailAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    summaryAbortControllerRef.current = abortController;
+    const requestKey = currentRequestKey;
 
     try {
       const response = await fetch("/api/disclosures/html/parse/change-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
-          output_path: outputPath,
-          mode: currentFilterMode,
-          ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
+          ...resultSourcePayload(),
           summary_only: true,
           limit: changeLimit === "" ? null : Number(changeLimit),
         }),
@@ -119,48 +151,62 @@ export default function HtmlChangeLogPage() {
       
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "변동 기록을 불러오지 못했습니다.");
+      if (requestKey !== currentRequestKeyRef.current) return;
       setChangeLog(data);
       setStatus(`${formatInteger(data.families.length)}건의 목록을 불러왔습니다.`);
       
       if (data.families.length > 0) {
-        handleSelectFamily(data.families[0].family_id);
+        void handleSelectFamily(data.families[0].family_id, requestKey);
       }
     } catch (err: any) {
+      if (err?.name === "AbortError") return;
       setStatus(err.message);
       setIsErrorStatus(true);
     } finally {
-      setIsFetching(false);
+      if (summaryAbortControllerRef.current === abortController) {
+        summaryAbortControllerRef.current = null;
+        setIsFetching(false);
+      }
     }
   };
 
-  const handleSelectFamily = async (familyId: string) => {
+  const handleSelectFamily = async (familyId: string, requestKey = currentRequestKey) => {
     setSelectedFamilyId(familyId);
     if (familyDetails[familyId]) return;
+    detailAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    detailAbortControllerRef.current = abortController;
 
     try {
       const response = await fetch("/api/disclosures/html/parse/change-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
-          output_path: outputPath,
-          mode: currentFilterMode,
-          ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
+          ...resultSourcePayload(),
           family_id: familyId,
         }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "상세 변동 기록을 불러오지 못했습니다.");
+      if (requestKey !== currentRequestKeyRef.current) return;
       const detailedFamily = data.families.find((f: any) => f.family_id === familyId);
       if (detailedFamily) {
         setFamilyDetails(prev => ({ ...prev, [familyId]: detailedFamily }));
       }
     } catch (err: any) {
-      console.error(err);
+      if (err?.name === "AbortError") return;
+      setStatus(err.message);
+      setIsErrorStatus(true);
+    } finally {
+      if (detailAbortControllerRef.current === abortController) {
+        detailAbortControllerRef.current = null;
+      }
     }
   };
 
   const handleExport = () => {
-    if (!outputPath) {
+    if (!dataRoot || (useSeparateOutputDirectory && !outputPath)) {
       setStatus(`${DATA_PATH_LABELS.workspace}가 필요합니다.`);
       setIsErrorStatus(true);
       return;
@@ -171,10 +217,12 @@ export default function HtmlChangeLogPage() {
       return;
     }
     const params = new URLSearchParams({
-      output_path: outputPath,
+      data_root: dataRoot,
       mode: currentFilterMode,
       latest_only: String(exportLatestOnly),
     });
+    if (currentParentMode) params.set("parent_mode", currentParentMode);
+    if (useSeparateOutputDirectory) params.set("output_path", outputPath);
     window.location.href = `/api/disclosures/html/parse/export.xlsx?${params.toString()}`;
   };
 
@@ -220,7 +268,10 @@ export default function HtmlChangeLogPage() {
       label: "모드",
       value: selectedPreset,
       onChange: (val) => {
+        summaryAbortControllerRef.current?.abort();
+        detailAbortControllerRef.current?.abort();
         setSelectedPreset(val);
+        clearLoadedResults();
         const preset = presets.find((item) => presetIdentity(item) === val);
         if (!preset || preset.parent_mode) return;
         void saveSetting("html_parse_mode", preset.mode);
@@ -230,10 +281,13 @@ export default function HtmlChangeLogPage() {
     {
       id: "outputPath",
       kind: "path",
-      label: DATA_PATH_LABELS.output,
+      label: useSeparateOutputDirectory ? DATA_PATH_LABELS.output : DATA_PATH_LABELS.workspace,
       mode: "folder",
-      value: outputPath || "",
-      onChange: (val) => saveSetting("html_parse_output_directory", val),
+      value: useSeparateOutputDirectory ? outputPath || "" : dataRoot || "",
+      onChange: (val) => saveSetting(
+        useSeparateOutputDirectory ? "html_parse_output_directory" : "output_root",
+        val,
+      ),
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 2,
     },
@@ -277,7 +331,12 @@ export default function HtmlChangeLogPage() {
             <Checkbox id="exportLatestOnly" checked={exportLatestOnly} onCheckedChange={(v) => setExportLatestOnly(!!v)} className="dark:border-[#30363d]" />
             <Label htmlFor="exportLatestOnly" className="cursor-pointer text-xs text-slate-500 dark:text-slate-400">최신버전만</Label>
           </div>
-          <Button variant="outline" onClick={handleExport} disabled={!outputPath} className="h-10 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200">
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={!dataRoot || (useSeparateOutputDirectory && !outputPath) || !currentFilterMode}
+            className="h-10 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200"
+          >
             <FileSpreadsheet className="mr-2 h-3.5 w-3.5" />
             Export
           </Button>
@@ -303,7 +362,7 @@ export default function HtmlChangeLogPage() {
       <div className="relative action-dock-host space-y-6 md:grid md:grid-cols-[minmax(0,1fr)_4rem] md:items-start md:gap-x-4">
         <HtmlWorkflowCard
           title="조회 조건"
-          description="모든 조회형 원문 처리 화면은 같은 필드 높이와 열 규칙을 사용합니다."
+          description="조회할 변환 결과와 표시 범위를 정하고, 불러온 정정 내역을 검색하거나 Excel로 내보냅니다."
           actions={
             <Button onClick={loadChangeLog} disabled={isFetching} className="h-10 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white transition-colors">
               {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -313,6 +372,9 @@ export default function HtmlChangeLogPage() {
         >
 
           <HtmlWorkflowForm fields={pathFields} />
+          <HtmlWorkflowForm fields={optionFields} />
+          <HtmlWorkflowForm fields={filterOnlyFields} />
+          <HtmlWorkflowForm fields={exportFields} />
 
           <div className="grid lg:grid-cols-10 gap-6 min-h-[500px]">
             <ChangeLogSidebar 
@@ -333,27 +395,7 @@ export default function HtmlChangeLogPage() {
           notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>{isErrorStatus ? status : "알림 없음"}</div>}
           settingsTitle="설정"
           settingsContent={
-            <div className="space-y-5">
-              <ChangeLogSettings />
-              <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>
-                </div>
-                <HtmlWorkflowForm layout="inspector" fields={optionFields} />
-              </div>
-              <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">필터</p>
-                </div>
-                <HtmlWorkflowForm layout="inspector" fields={filterOnlyFields} />
-              </div>
-              <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">내보내기</p>
-                </div>
-                <HtmlWorkflowForm layout="inspector" fields={exportFields} />
-              </div>
-            </div>
+            <ChangeLogSettings />
           }
         />
       </div>

@@ -828,11 +828,14 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const compressionInspectionRepairable = Number(
     compressionInspectionData?.repairable_failed_mode_count || 0,
   ) > 0;
+  const externalSaveRepairTargetCount = Number(
+    externalSaveInspectionData?.owner_download_required_target_html_count || 0,
+  ) + Number(
+    externalSaveInspectionData?.owner_hash_unverified_target_html_count || 0,
+  );
   const externalSaveRedownloadable = variant === "external"
     && externalTaskMode === "download"
-    && Number(
-      externalSaveInspectionData?.owner_download_required_target_html_count || 0,
-    ) > 0;
+    && externalSaveRepairTargetCount > 0;
   const inspectionState = isExternalCompressMode
     ? compressionInspectionState
     : saveInspectionState;
@@ -894,7 +897,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     ? compressionInspectionCopy
     : saveInspectionCopy;
   const saveInspectionStepSummary = variant === "external" && externalSaveInspectionData
-    ? `전체 ${formatInteger(externalSaveInspectionData.mode_count)}개 모드 · 정상 ${formatInteger(externalSaveInspectionData.passed_mode_count)}개 · 문제 ${formatInteger(externalSaveInspectionData.failed_mode_count)}개 · 기본 모드 대상 ${formatInteger(externalSaveInspectionData.owner_requested_count)}건 중 미저장·재저장 필요 ${formatInteger(externalSaveInspectionData.owner_download_required_target_html_count)}건입니다.`
+    ? `전체 ${formatInteger(externalSaveInspectionData.mode_count)}개 모드 · 정상 ${formatInteger(externalSaveInspectionData.passed_mode_count)}개 · 문제 ${formatInteger(externalSaveInspectionData.failed_mode_count)}개 · 기본 모드 대상 ${formatInteger(externalSaveInspectionData.owner_requested_count)}건 중 미저장·재저장 필요 ${formatInteger(externalSaveRepairTargetCount)}건입니다.`
     : existingData
       ? `${existingData.output_directory} · 대상 ${formatInteger(existingData.requested_count)}건 중 ${formatInteger(existingData.existing_target_html_count)}건은 저장되어 있고 ${formatInteger(existingData.download_required_target_html_count ?? existingData.missing_target_html_count)}건은 새로 저장해야 합니다. 해시 불일치 ${formatInteger(existingData.hash_mismatch_target_html_count)}건, 기준 없음 ${formatInteger(existingData.hash_unverified_target_html_count)}건, 대상 외 파일 ${formatInteger(existingData.deletion_candidate_count)}개입니다.`
       : existingCheckCompleted
@@ -984,10 +987,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
               ? handleInspectCompressedFile
               : handleInspectFolder,
         disabled: inspectRunning
-          || isJobActive
-          || (externalSaveRedownloadable
-            && skipExisting
-            && Number(externalSaveInspectionData?.owner_hash_unverified_target_html_count || 0) > 0),
+          || isJobActive,
         loading: inspectRunning,
         showResultStatus: !(externalSaveRedownloadable
           || (isExternalCompressMode && compressionInspectionRepairable)),

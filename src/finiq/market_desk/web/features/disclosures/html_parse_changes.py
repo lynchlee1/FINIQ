@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 from finiq.market_desk.web.features.disclosures.html_parse_support import *
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    resolve_disclosure_workspace,
+)
 
-def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
-    """Load parse results and return correction-family field changes with generic support."""
+
+def resolve_parse_change_log_output_directory(body: dict[str, Any]) -> Path:
     output_path_raw = str(
         body.get("output_path") or body.get("parse_result_path") or ""
     ).strip()
-    if not output_path_raw:
-        msg = "output_path is required"
-        raise ValueError(msg)
+    if output_path_raw:
+        return Path(output_path_raw).expanduser().resolve()
 
+    workspace = resolve_disclosure_workspace(body.get("data_root") or "")
+    return workspace.converted_filter_mode(
+        body.get("mode"),
+        parent_mode=body.get("parent_mode"),
+    )
+
+def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
+    """Load parse results and return correction-family field changes with generic support."""
     requested_mode = str(body.get("mode") or "").strip()
     output_path = _resolve_parse_result_path(
-        Path(output_path_raw).expanduser().resolve(), requested_mode
+        resolve_parse_change_log_output_directory(body), requested_mode
     )
 
     try:

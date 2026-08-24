@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 from collections import deque
+from copy import deepcopy
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from html import escape
@@ -19,6 +20,7 @@ from finiq.market_desk.web.html_parsers.common import decode_html_markup
 ProgressCallback = Callable[[str], None]
 _SECTION_CLASS_RE = re.compile(r"^SECTION-\d+$")
 _HEADING_TAGS = {f"h{level}" for level in range(1, 7)}
+_CORRECTION_TITLE_TOKEN = "정정"
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 T = TypeVar("T")
 
@@ -38,12 +40,23 @@ class HtmlSectionSummary:
     title: str
 
 
+@dataclass(frozen=True)
+class _HtmlSectionPlan:
+    start: int
+    end: int
+    title: str
+
+
 def _clean_text(value: object) -> str:
     return " ".join(str(value or "").split())
 
 
 def _element_html(element: etree._Element) -> str:
     return html.tostring(element, encoding="unicode", method="html")
+
+
+def _element_children(element: etree._Element) -> list[etree._Element]:
+    return [child for child in element if isinstance(child.tag, str)]
 
 
 def _parse_internal_html_document(html_markup: str | bytes) -> html.HtmlElement:
@@ -95,6 +108,15 @@ def _section_title(
     return title
 
 
+def _first_text_fragment(elements: Iterable[etree._Element]) -> str:
+    for element in elements:
+        for fragment in element.itertext():
+            title = _clean_text(fragment)
+            if title:
+                return title
+    return ""
+
+
 def _wrap_section_html(document: html.HtmlElement, section_markup: str) -> str:
     return (
         "<!DOCTYPE html>\n"
@@ -120,63 +142,135 @@ def _is_section_heading(element: etree._Element) -> bool:
     )
 
 
-def split_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
-    """Split a KIND internal HTML document by top-level SECTION headings."""
-    document = _parse_internal_html_document(html_markup)
-    children = _body_direct_children(document)
-    heading_positions: list[tuple[int, etree._Element]] = []
-    for position, child in enumerate(children):
-        if _is_section_heading(child):
-            heading_positions.append((position, child))
-    if not heading_positions:
-        raise ValueError("canonical SECTION heading is required")
-    sections: list[HtmlSection] = []
-    for order, (start, heading) in enumerate(heading_positions, start=1):
-        end = (
-            heading_positions[order][0]
-            if order < len(heading_positions)
-            else len(children)
+def _is_section_paragraph(element: etree._Element) -> bool:
+    if not isinstance(element.tag, str) or element.tag.lower() != "p":
+        return False
+    return any(
+        _SECTION_CLASS_RE.match(class_name)
+        for class_name in str(element.get("class") or "").split()
+    )
+
+
+def _has_class(element: etree._Element, class_name: str) -> bool:
+    return class_name in str(element.get("class") or "").split()
+
+
+def _section_container_and_boundaries(
+    document: html.HtmlElement,
+) -> tuple[etree._Element, list[tuple[int, etree._Element]], str]:
+    body_nodes = document.xpath("//body")
+    if not body_nodes:
+        raise ValueError("HTML body is required")
+    body = body_nodes[0]
+    body_children = _element_children(body)
+
+    heading_boundaries = [
+        (position, child)
+        for position, child in enumerate(body_children)
+        if _is_section_heading(child)
+    ]
+    if heading_boundaries:
+        return body, heading_boundaries, "heading"
+
+    paragraph_boundaries = [
+        (position, child)
+        for position, child in enumerate(body_children)
+        if _is_section_paragraph(child)
+    ]
+    if paragraph_boundaries:
+        return body, paragraph_boundaries, "paragraph"
+
+    xforms_wrappers = [child for child in body_children if _has_class(child, "xforms")]
+    if len(xforms_wrappers) != 1:
+        raise ValueError("supported TOC structure is required")
+    wrapper_children = _element_children(xforms_wrappers[0])
+    if len(wrapper_children) != 1:
+        raise ValueError("XForms content wrapper is required")
+    container = wrapper_children[0]
+    container_children = _element_children(container)
+    xforms_boundaries = [
+        (position, child)
+        for position, child in enumerate(container_children)
+        if child.tag.lower() == "div" and _has_class(child, "xforms_title")
+    ]
+    if len(xforms_boundaries) != 1:
+        raise ValueError("one direct XForms TOC boundary is required")
+    return container, xforms_boundaries, "xforms"
+
+
+def _section_plans(
+    document: html.HtmlElement,
+) -> tuple[etree._Element, list[_HtmlSectionPlan]]:
+    container, boundaries, structure = _section_container_and_boundaries(document)
+    children = _element_children(container)
+    plans: list[_HtmlSectionPlan] = []
+    first_boundary = boundaries[0][0]
+    preamble_title = _first_text_fragment(children[:first_boundary])
+    if preamble_title:
+        plans.append(
+            _HtmlSectionPlan(start=0, end=first_boundary, title=preamble_title)
         )
-        toc_id = f"toc_{order}"
+
+    for order, (start, boundary) in enumerate(boundaries):
+        end = boundaries[order + 1][0] if order + 1 < len(boundaries) else len(children)
         section_children = children[start:end]
-        section_markup = "".join(_element_html(child) for child in section_children)
-        sections.append(
-            HtmlSection(
-                toc_id=toc_id,
-                index=order,
-                title=_section_title(heading, section_children),
-                html=_wrap_section_html(document, section_markup),
-            )
+        if structure == "heading":
+            title = _section_title(boundary, section_children)
+        else:
+            title = _clean_text(boundary.text_content())
+            if not title:
+                raise ValueError("SECTION boundary title is required")
+        plans.append(_HtmlSectionPlan(start=start, end=end, title=title))
+    return container, plans
+
+
+def _render_section_plan(
+    document: html.HtmlElement,
+    container: etree._Element,
+    plan: _HtmlSectionPlan,
+) -> str:
+    cloned_document = deepcopy(document)
+    container_path = document.getroottree().getpath(container)
+    cloned_containers = cloned_document.getroottree().xpath(container_path)
+    if len(cloned_containers) != 1:
+        raise ValueError("section container clone is required")
+    cloned_container = cloned_containers[0]
+    cloned_children = _element_children(cloned_container)
+    for index in range(len(cloned_children) - 1, -1, -1):
+        if index < plan.start or index >= plan.end:
+            cloned_container.remove(cloned_children[index])
+    return "<!DOCTYPE html>\n" + html.tostring(
+        cloned_document, encoding="unicode", method="html"
+    )
+
+
+def _is_correction_section_title(title: str) -> bool:
+    return _CORRECTION_TITLE_TOKEN in re.sub(r"\s+", "", title)
+
+
+def split_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
+    """Split every structural TOC section before any correction filtering."""
+    document = _parse_internal_html_document(html_markup)
+    container, plans = _section_plans(document)
+    return [
+        HtmlSection(
+            toc_id=f"toc_{index}",
+            index=index,
+            title=plan.title,
+            html=_render_section_plan(document, container, plan),
         )
-    return sections
+        for index, plan in enumerate(plans, start=1)
+    ]
 
 
 def inspect_internal_html_sections(html_markup: str | bytes) -> list[HtmlSectionSummary]:
-    """Read only top-level SECTION metadata from a KIND internal HTML document."""
+    """Read every structural TOC title without rendering section HTML."""
     document = _parse_internal_html_document(html_markup)
-    children = _body_direct_children(document)
-    heading_positions: list[tuple[int, etree._Element]] = []
-    for position, child in enumerate(children):
-        if _is_section_heading(child):
-            heading_positions.append((position, child))
-    if not heading_positions:
-        raise ValueError("canonical SECTION heading is required")
-    sections: list[HtmlSectionSummary] = []
-    for order, (start, heading) in enumerate(heading_positions, start=1):
-        end = (
-            heading_positions[order][0]
-            if order < len(heading_positions)
-            else len(children)
-        )
-        toc_id = f"toc_{order}"
-        sections.append(
-            HtmlSectionSummary(
-                toc_id=toc_id,
-                index=order,
-                title=_section_title(heading, children[start:end]),
-            )
-        )
-    return sections
+    _container, plans = _section_plans(document)
+    return [
+        HtmlSectionSummary(toc_id=f"toc_{index}", index=index, title=plan.title)
+        for index, plan in enumerate(plans, start=1)
+    ]
 
 
 def _parse_page(value: Any) -> int:
@@ -645,54 +739,63 @@ def _parse_limit(value: Any) -> int | None:
     return parsed
 
 
-def _selected_section_output(
-    source_file: Path,
-    section_save_rules: dict[str, set[str]],
-) -> dict[str, Any]:
-    sections = split_internal_html_sections(source_file.read_bytes())
-    signature = _section_signature(_section_dicts_from_split_sections(sections))
-    if signature not in section_save_rules:
-        return {
-            "status": "missing_selection",
-            "source_file": str(source_file),
-            "error": "missing section selection",
-        }
-    allowed_toc_ids = section_save_rules[signature]
-    selected_sections = [
-        section
-        for section in sections
-        if section.toc_id in allowed_toc_ids
+def _render_without_section_plans(
+    document: html.HtmlElement,
+    container: etree._Element,
+    excluded_plans: list[_HtmlSectionPlan],
+) -> str:
+    excluded_indexes = {
+        index
+        for plan in excluded_plans
+        for index in range(plan.start, plan.end)
+    }
+    cloned_document = deepcopy(document)
+    container_path = document.getroottree().getpath(container)
+    cloned_containers = cloned_document.getroottree().xpath(container_path)
+    if len(cloned_containers) != 1:
+        raise ValueError("section container clone is required")
+    cloned_container = cloned_containers[0]
+    cloned_children = _element_children(cloned_container)
+    for index in range(len(cloned_children) - 1, -1, -1):
+        if index in excluded_indexes:
+            cloned_container.remove(cloned_children[index])
+    return "<!DOCTYPE html>\n" + html.tostring(
+        cloned_document, encoding="unicode", method="html"
+    )
+
+
+def _automatic_section_output(source_file: Path) -> dict[str, Any]:
+    document = _parse_internal_html_document(source_file.read_bytes())
+    container, plans = _section_plans(document)
+    correction_plans = [
+        plan for plan in plans if _is_correction_section_title(plan.title)
     ]
+    if len(correction_plans) > 1:
+        raise ValueError(f"multiple correction sections: {source_file}")
+    selected_sections = len(plans) - len(correction_plans)
+    if selected_sections < 1:
+        raise ValueError(f"business section is required: {source_file}")
     return {
         "status": "ok",
         "source_file": str(source_file),
-        "content": "\n".join(section.html for section in selected_sections),
-        "selected_sections": len(selected_sections),
+        "content": _render_without_section_plans(
+            document, container, correction_plans
+        ),
+        "selected_sections": selected_sections,
+        "removed_correction_sections": len(correction_plans),
     }
 
 
-def _validate_section_save_rule(
-    source_file: Path,
-    section_save_rules: dict[str, set[str]],
-) -> None:
-    sections = inspect_internal_html_sections(source_file.read_bytes())
-    signature = _section_signature(
-        [
-            {
-                "toc_id": section.toc_id,
-                "index": section.index,
-                "title": section.title,
-            }
-            for section in sections
-        ]
+def _validate_automatic_section_output(source_file: Path) -> None:
+    document = _parse_internal_html_document(source_file.read_bytes())
+    _container, plans = _section_plans(document)
+    correction_count = sum(
+        1 for plan in plans if _is_correction_section_title(plan.title)
     )
-    if signature not in section_save_rules:
-        raise ValueError(f"missing section selection: {source_file}")
-    selected_toc_ids = section_save_rules[signature]
-    if selected_toc_ids and not any(
-        section.toc_id in selected_toc_ids for section in sections
-    ):
-        raise ValueError(f"section selection matches no sections: {source_file}")
+    if correction_count > 1:
+        raise ValueError(f"multiple correction sections: {source_file}")
+    if len(plans) == correction_count:
+        raise ValueError(f"business section is required: {source_file}")
 
 
 def inspect_disclosure_html_section_output_payload(
@@ -714,11 +817,10 @@ def inspect_disclosure_html_section_output_payload(
 
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
-    section_save_rules = _section_save_rules(body.get("section_save_rules"))
     results = _map_html_files(
         html_files,
         workers,
-        lambda source_file: _selected_section_output(source_file, section_save_rules),
+        _automatic_section_output,
         cancel_check,
     )
     if _cancel_requested(cancel_check):
@@ -829,25 +931,22 @@ def save_disclosure_html_sections_payload(
     emit("입력 폴더에서 목차 분리 대상 HTML을 찾습니다.")
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
-    section_save_rules = _section_save_rules(body.get("section_save_rules"))
     emit(
         f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. "
         f"파일 탐색 {time.monotonic() - collect_started_at:.1f}초 · "
         f"병렬 처리 {workers}개를 사용합니다."
     )
     validation_started_at = time.monotonic()
-    emit("목차 저장 규칙 사전 검사를 시작합니다.")
+    emit("목차 구조와 정정 section 사전 검사를 시작합니다.")
     for _ in _map_html_files(
         html_files,
         workers,
-        lambda source_file: _validate_section_save_rule(
-            source_file, section_save_rules
-        ),
+        _validate_automatic_section_output,
         cancel_check,
     ):
         pass
     emit(
-        "목차 저장 규칙 사전 검사 완료: "
+        "목차 구조와 정정 section 사전 검사 완료: "
         f"{time.monotonic() - validation_started_at:.1f}초."
     )
     if _cancel_requested(cancel_check):
@@ -857,31 +956,10 @@ def save_disclosure_html_sections_payload(
     saved_files: list[str] = []
     expected_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
+    removed_correction_sections = 0
 
     def save_one(source_file: Path) -> dict[str, Any]:
-        selected = _selected_section_output(source_file, section_save_rules)
-        if selected["status"] == "missing_selection":
-            return {
-                "status": "missing_selection",
-                "skipped": {
-                    "source_file": str(source_file),
-                    "error": str(selected["error"]),
-                },
-                "saved": [],
-            }
-        if int(selected.get("selected_sections") or 0) == 0:
-            source_relative_path = source_file.relative_to(input_directory)
-            output_path = output_directory / source_relative_path
-            if output_path.is_file():
-                output_path.unlink()
-            return {
-                "status": "no_selected_sections",
-                "skipped": {
-                    "source_file": str(source_file),
-                    "error": "section save rules selected no sections",
-                },
-                "saved": [],
-            }
+        selected = _automatic_section_output(source_file)
         source_relative_path = source_file.relative_to(input_directory)
         output_path = output_directory / source_relative_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -890,6 +968,9 @@ def save_disclosure_html_sections_payload(
             "status": "ok",
             "saved": [str(output_path)],
             "expected": [str(output_path)],
+            "removed_correction_sections": int(
+                selected["removed_correction_sections"]
+            ),
         }
 
     results = _map_html_files(html_files, workers, save_one, cancel_check)
@@ -899,13 +980,13 @@ def save_disclosure_html_sections_payload(
         if result["status"] == "ok":
             saved_files.extend(result["saved"])
             expected_files.extend(result["expected"])
+            removed_correction_sections += int(
+                result.get("removed_correction_sections") or 0
+            )
         else:
             skipped_files.append(result["skipped"])
             source_name = Path(result["skipped"]["source_file"]).name
-            if result["status"] == "missing_selection":
-                emit(f"목차 선택 없음 {index}/{len(html_files)}: {source_name}")
-            else:
-                emit(f"선택 목차 없음 {index}/{len(html_files)}: {source_name}")
+            emit(f"목차 저장 제외 {index}/{len(html_files)}: {source_name}")
         if index == 1 or index == len(html_files) or index % 25 == 0:
             emit(f"목차 저장 중간 확인: {index}/{len(html_files)}건 처리.")
 
@@ -926,6 +1007,7 @@ def save_disclosure_html_sections_payload(
             "integrity_ok": len(saved_files) == len(expected_files)
             and not missing_files,
             "missing_files": len(missing_files),
+            "removed_correction_sections": removed_correction_sections,
         },
         "saved_files": saved_files,
         "expected_files": expected_files,
