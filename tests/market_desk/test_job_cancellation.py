@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from finiq.market_desk.web.app import app, _run_job_worker
-from finiq.market_desk.web.jobs import job_manager
+from finiq.market_desk.web.jobs import JobManager, job_manager
 from finiq.data.assets_excel import (
     convert_asset_excels_to_wide_parquet,
     default_account_mappings,
@@ -32,6 +32,30 @@ def test_start_job_cancelled_prevention():
     started = job_manager.start_job(job_id)
     assert not started
     assert job_manager.get_job(job_id).status == "cancelled"
+
+
+def test_job_manager_reserves_cancellation_before_job_creation():
+    manager = JobManager()
+    job_id = "33333333333343338333333333333333"
+
+    assert manager.cancel_job(job_id, reserve_missing=True) is True
+    job = manager.create_job(job_id, "section_inspect")
+
+    assert job.status == "cancelled"
+    assert manager.start_job(job_id) is False
+
+
+def test_html_cancel_route_reserves_client_generated_job_id():
+    job_id = "44444444444444448444444444444444"
+
+    response = TestClient(app).post(
+        "/api/disclosures/html/cancel",
+        json={"job_id": job_id},
+    )
+    job = job_manager.create_job(job_id, "section_inspect")
+
+    assert response.status_code == 200
+    assert job.status == "cancelled"
 
 def test_cancel_endpoints():
     client = TestClient(app)

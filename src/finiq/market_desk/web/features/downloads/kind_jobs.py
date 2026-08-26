@@ -150,7 +150,9 @@ def cancel_download_job(job_id: str) -> dict[str, Any]:
         _purge_expired_download_jobs_locked()
         job = _DOWNLOAD_JOBS.get(normalized_job_id)
         if job is None:
-            raise ValueError(f"download job not found: {normalized_job_id}")
+            job = DownloadJob(id=normalized_job_id, status="cancelled")
+            _DOWNLOAD_JOBS[normalized_job_id] = job
+            return _job_snapshot(job)
         if job.status in {"completed", "failed", "cancelled"}:
             return _job_snapshot(job)
         _CANCELLED_DOWNLOAD_JOBS.add(normalized_job_id)
@@ -170,10 +172,18 @@ def get_download_job(job_id: str) -> dict[str, Any]:
 
 def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
     payload = apply_workspace_defaults("kind_download", payload)
-    job_id = uuid.uuid4().hex
+    requested_job_id = str(payload.pop("job_id", "") or "").strip()
+    try:
+        job_id = uuid.UUID(requested_job_id).hex if requested_job_id else uuid.uuid4().hex
+    except ValueError as exc:
+        raise ValueError("job_id must be a UUID") from exc
     job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
     with _DOWNLOAD_JOBS_LOCK:
         _purge_expired_download_jobs_locked()
+        if job_id in _DOWNLOAD_JOBS:
+            if _DOWNLOAD_JOBS[job_id].status == "cancelled":
+                return _job_snapshot(_DOWNLOAD_JOBS[job_id])
+            raise ValueError(f"download job already exists: {job_id}")
         _DOWNLOAD_JOBS[job_id] = job
         _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
 

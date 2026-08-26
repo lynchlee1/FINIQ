@@ -135,6 +135,34 @@ def test_inspect_external_html_compression_skips_mode_without_source_html(
     assert inspected["missing_files"] == []
 
 
+def test_inspect_external_html_compression_skips_missing_source_directory(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {"mode": "bond_issuance", "condition_blocks": []},
+        }
+    )
+    output_directory = (
+        data_root / "04-external-html-download" / "bond_issuance"
+    )
+
+    inspected = inspect_all_disclosure_external_html_compress_payload(
+        {"data_root": str(data_root), "parallel_workers": 1}
+    )
+
+    assert inspected["passed"] is True
+    assert inspected["skipped_modes"] == ["bond_issuance"]
+    assert inspected["repairable_failed_modes"] == []
+    assert not output_directory.exists()
+    assert not (data_root / "01-list").exists()
+    assert not (data_root / "02-table").exists()
+    assert not (data_root / "05-internal-html-download").exists()
+
+
 def test_inspect_external_html_compression_ignores_filter_targets_without_html(
     tmp_path: Path,
 ) -> None:
@@ -231,6 +259,46 @@ def test_rebuild_only_modes_with_source_html_when_modes_are_mixed(tmp_path: Path
     assert rebuilt["target_mode_count"] == 1
     assert rebuilt["regenerated_mode_count"] == 1
     assert rebuilt["verification"]["skipped_modes"] == ["rights_issuance"]
+
+
+def test_rebuild_invalid_compression_stops_before_next_mode_when_cancelled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    inspection = {
+        "passed": False,
+        "failed_modes": ["bond_issuance", "rights_issuance"],
+        "results": [
+            {"mode": "bond_issuance", "repairable": True},
+            {"mode": "rights_issuance", "repairable": True},
+        ],
+    }
+    calls: list[str] = []
+    cancelled = False
+
+    def fake_compress(body, progress_callback=None):
+        nonlocal cancelled
+        calls.append(str(body["mode"]))
+        cancelled = True
+        return {"format": "fake"}
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_compress.inspect_all_disclosure_external_html_compress_payload",
+        lambda _body: inspection,
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_compress.compress_disclosure_external_html_payload",
+        fake_compress,
+    )
+
+    result = rebuild_invalid_disclosure_external_html_compress_payload(
+        {"data_root": str(tmp_path / "workspace")},
+        cancel_check=lambda: cancelled,
+    )
+
+    assert calls == ["bond_issuance"]
+    assert result["cancelled"] is True
+    assert result["passed"] is False
+    assert result["verification"] is inspection
 
 
 def test_repair_route_regenerates_invalid_compression_without_database(

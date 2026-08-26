@@ -872,6 +872,39 @@ def test_internal_html_integrity_baseline_requires_explicit_trust(
     assert not (output_directory / "kind_disclosure_html_manifest.json").exists()
 
 
+def test_internal_html_repair_redownloads_existing_file_without_hash_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _internal_html_body(tmp_path, ["20250101000001"])
+    output_directory = Path(str(body["output_directory"]))
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    target.write_text(_valid_html("unverified"), encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_download(**kwargs: object) -> list[Path]:
+        targets = list(kwargs["targets"])
+        calls.append([item["acpt_no"] for item in targets])
+        target.write_text(_valid_html("redownloaded"), encoding="utf-8")
+        return [target]
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fake_download,
+    )
+
+    result = download_disclosure_internal_html_payload(
+        {**body, "skip_existing": True},
+        redownload_unverified_existing=True,
+    )
+
+    assert calls == [["20250101000001"]]
+    assert result["saved_count"] == 1
+    inspection = check_disclosure_html_output_directory_payload(body)
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert inspection["hash_unverified_target_html_count"] == 0
+
+
 def test_internal_html_hash_mismatch_redownloads_only_changed_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

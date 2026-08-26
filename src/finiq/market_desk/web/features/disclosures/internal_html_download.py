@@ -18,7 +18,91 @@ from finiq.data_scraper.core.kind_computers import (
     normalize_kind_proxy_urls,
     run_kind_virtual_computers,
 )
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+)
 from finiq.market_desk.web.features.disclosures.html_common import *
+
+
+def redownload_missing_disclosure_internal_html_payload(
+    body: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Repair owner-mode internal HTML identified by the all-mode inspection."""
+    from finiq.market_desk.web.features.disclosures.html_cleanup import (
+        inspect_all_disclosure_internal_html_payload,
+    )
+
+    data_root = str(body.get("data_root") or "").strip()
+    if not data_root:
+        raise ValueError("data_root is required")
+
+    inspection = inspect_all_disclosure_internal_html_payload(body)
+    targets = [
+        result
+        for result in inspection["results"]
+        if not result.get("parent_mode")
+        and (
+            int(result.get("download_required_target_html_count") or 0)
+            + int(result.get("hash_unverified_target_html_count") or 0)
+        )
+        > 0
+    ]
+    results: list[dict[str, Any]] = []
+    cancelled = False
+    setting_keys = (
+        "timeout",
+        "max_requests_per_minute",
+        "wait_seconds",
+        "progress_interval",
+        "problem_file_limit",
+        "max_workers",
+        "kind_proxy_urls",
+    )
+    for index, target in enumerate(targets, start=1):
+        if cancel_check is not None and cancel_check():
+            cancelled = True
+            break
+        mode = target["mode"]
+        if progress_callback is not None:
+            progress_callback(f"재다운로드 {index}/{len(targets)}: {mode}")
+        payload = apply_workspace_defaults(
+            "internal_html_download",
+            {
+                "data_root": data_root,
+                "mode": mode,
+                **{key: body.get(key) for key in setting_keys if key in body},
+                "skip_existing": True,
+            },
+        )
+        try:
+            result = download_disclosure_internal_html_payload(
+                payload,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+                redownload_unverified_existing=True,
+            )
+            cancelled = bool(result.get("cancelled"))
+            results.append({"mode": mode, "passed": not cancelled, **result})
+            if cancelled:
+                break
+        except Exception as exc:
+            results.append({"mode": mode, "passed": False, "error": str(exc)})
+
+    failed_modes = [result["mode"] for result in results if not result["passed"]]
+    verification = inspect_all_disclosure_internal_html_payload(body)
+    return {
+        "format": "finiq_disclosure_internal_html_redownload_result_v1",
+        "passed": not cancelled and not failed_modes and verification["passed"],
+        "cancelled": cancelled,
+        "target_mode_count": len(targets),
+        "completed_mode_count": len(results) - len(failed_modes),
+        "failed_mode_count": len(failed_modes),
+        "failed_modes": failed_modes,
+        "results": results,
+        "verification": verification,
+    }
 
 
 def _fetch_internal_html(
@@ -443,6 +527,8 @@ def download_disclosure_internal_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    *,
+    redownload_unverified_existing: bool = False,
 ) -> dict[str, Any]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     output_directory = str(body.get("output_directory") or "").strip()
@@ -630,7 +716,7 @@ def download_disclosure_internal_html_payload(
         unverified_acpt_numbers = integrity_summary[
             "hash_unverified_target_acpt_numbers"
         ]
-        if unverified_acpt_numbers:
+        if unverified_acpt_numbers and not redownload_unverified_existing:
             sample = ", ".join(unverified_acpt_numbers[:10])
             raise ValueError(
                 f"기준 해시가 없는 기존 내부 HTML이 {len(unverified_acpt_numbers)}건 있습니다. "
@@ -644,6 +730,8 @@ def download_disclosure_internal_html_payload(
         download_targets.update(
             integrity_summary["hash_mismatch_target_acpt_numbers"]
         )
+        if redownload_unverified_existing:
+            download_targets.update(unverified_acpt_numbers)
         download_acpt_numbers = [
             acpt_no for acpt_no in acpt_numbers if acpt_no in download_targets
         ]

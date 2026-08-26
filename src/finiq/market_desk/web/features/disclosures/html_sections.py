@@ -71,7 +71,7 @@ def _section_title(
     title = _clean_text(heading.text_content())
     if not title and len(section_children) > 1:
         first_content = section_children[1]
-        if isinstance(first_content.tag, str) and first_content.tag.lower() == "p":
+        if _is_section_paragraph(first_content):
             title = _clean_text(first_content.text_content())
     if not title:
         raise ValueError("SECTION heading title is required")
@@ -119,6 +119,7 @@ def _section_container_and_boundaries(
         raise ValueError("HTML body is required")
     body = body_nodes[0]
     body_children = _element_children(body)
+    xforms_wrappers = [child for child in body_children if _has_class(child, "xforms")]
 
     heading_boundaries = [
         (position, child)
@@ -126,6 +127,8 @@ def _section_container_and_boundaries(
         if _is_section_heading(child)
     ]
     if heading_boundaries:
+        if xforms_wrappers:
+            raise ValueError("one unambiguous TOC structure is required")
         return body, heading_boundaries, "heading"
 
     paragraph_boundaries = [
@@ -134,9 +137,10 @@ def _section_container_and_boundaries(
         if _is_section_paragraph(child)
     ]
     if paragraph_boundaries:
+        if xforms_wrappers:
+            raise ValueError("one unambiguous TOC structure is required")
         return body, paragraph_boundaries, "paragraph"
 
-    xforms_wrappers = [child for child in body_children if _has_class(child, "xforms")]
     if len(xforms_wrappers) != 1:
         raise ValueError("supported TOC structure is required")
     wrapper_children = _element_children(xforms_wrappers[0])

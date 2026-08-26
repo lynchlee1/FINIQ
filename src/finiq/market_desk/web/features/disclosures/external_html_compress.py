@@ -43,6 +43,7 @@ def inspect_all_disclosure_external_html_compress_payload(
                 **({"parent_mode": parent_mode} if parent_mode else {}),
                 "parallel_workers": body.get("parallel_workers"),
             },
+            create_workspace=False,
         )
         try:
             inspected = inspect_disclosure_external_html_compress_payload(payload)
@@ -94,6 +95,7 @@ def inspect_all_disclosure_external_html_compress_payload(
 def rebuild_invalid_disclosure_external_html_compress_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Rebuild only owner files implicated by the current all-mode inspection."""
     data_root = str(body.get("data_root") or "").strip()
@@ -109,7 +111,11 @@ def rebuild_invalid_disclosure_external_html_compress_payload(
         }
     )
     results: list[dict[str, Any]] = []
+    cancelled = False
     for index, mode in enumerate(owner_modes, start=1):
+        if cancel_check is not None and cancel_check():
+            cancelled = True
+            break
         if progress_callback is not None:
             progress_callback(
                 f"재생성 {index}/{len(owner_modes)}: {mode}"
@@ -131,12 +137,20 @@ def rebuild_invalid_disclosure_external_html_compress_payload(
             results.append(
                 {"mode": mode, "passed": False, "error": str(exc)}
             )
+        if cancel_check is not None and cancel_check():
+            cancelled = True
+            break
 
     failed_modes = [result["mode"] for result in results if not result["passed"]]
-    verification = inspect_all_disclosure_external_html_compress_payload(body)
+    verification = (
+        inspection
+        if cancelled
+        else inspect_all_disclosure_external_html_compress_payload(body)
+    )
     return {
         "format": "finiq_disclosure_external_html_compress_repair_result_v1",
-        "passed": not failed_modes and verification["passed"],
+        "passed": not cancelled and not failed_modes and verification["passed"],
+        "cancelled": cancelled,
         "inspected_failed_modes": inspection["failed_modes"],
         "target_mode_count": len(owner_modes),
         "regenerated_mode_count": len(results) - len(failed_modes),
@@ -161,10 +175,14 @@ def inspect_disclosure_external_html_compress_payload(
     input_directory = Path(input_directory_raw).expanduser().resolve()
     output_directory = Path(output_directory_raw).expanduser().resolve()
     compressed_path = output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
-    expected_acpt_numbers = [
-        html_path.stem
-        for _year, html_path in _collect_yearly_html_files(input_directory)
-    ]
+    expected_acpt_numbers = (
+        [
+            html_path.stem
+            for _year, html_path in _collect_yearly_html_files(input_directory)
+        ]
+        if input_directory.exists()
+        else []
+    )
 
     if not expected_acpt_numbers:
         return {

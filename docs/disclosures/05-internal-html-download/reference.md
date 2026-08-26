@@ -29,7 +29,7 @@ WGConfig = /absolute/path/to/proton-route-1.conf
 BindAddress = 127.0.0.1:25001
 ```
 
-두 번째 설정은 다른 Proton WireGuard 파일과 포트 `25002`를 사용한다. 같은 방식으로 `25007`까지 최대 일곱 개를 띄울 수 있다. 직접 연결을 포함한 전체 경로와 worker 상한은 이 컴퓨터의 CPU 코어 수에 맞춘 8개다.
+두 번째 설정은 다른 Proton WireGuard 파일과 포트 `25002`를 사용한다. 같은 방식으로 현재 CPU 개수보다 하나 적은 수까지 프록시를 추가할 수 있다. 직접 연결을 포함한 전체 경로와 worker 상한은 실행 중 확인한 CPU 개수를 따른다.
 
 ```shell
 wireproxy -c /absolute/path/to/wireproxy-route-1.conf

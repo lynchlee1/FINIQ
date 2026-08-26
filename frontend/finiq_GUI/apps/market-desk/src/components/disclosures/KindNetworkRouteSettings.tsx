@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button, Input } from "@finiq/ui";
 import { apiPost } from "@/api/client";
@@ -31,12 +31,15 @@ export function KindNetworkRouteSettings() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [checkResult, setCheckResult] = useState<RouteCheckResult | null>(null);
+  const routeVersionRef = useRef(0);
 
   useEffect(() => {
+    routeVersionRef.current += 1;
     setRoutes(kindProxyUrls);
   }, [kindProxyUrls]);
 
   const changeRoutes = (nextRoutes: string[]) => {
+    routeVersionRef.current += 1;
     setRoutes(nextRoutes);
     setCheckResult(null);
     setMessage("");
@@ -65,15 +68,18 @@ export function KindNetworkRouteSettings() {
 
   const checkRoutes = async () => {
     if (!validateRoutes()) return;
+    const routeVersion = routeVersionRef.current;
     setChecking(true);
     setMessage("");
     try {
       const result = await apiPost<RouteCheckResult>("/api/kind-network-routes/check", {
         kind_proxy_urls: normalizedRoutes(),
       });
+      if (routeVersion !== routeVersionRef.current) return;
       setCheckResult(result);
       setMessage(result.ready ? "" : "연결 실패 또는 중복 IP가 있는 경로를 확인하세요.");
     } catch (error) {
+      if (routeVersion !== routeVersionRef.current) return;
       setCheckResult(null);
       setMessage(error instanceof Error ? error.message : "연결 검사에 실패했습니다.");
     } finally {
@@ -136,6 +142,7 @@ export function KindNetworkRouteSettings() {
                       <Input
                         aria-label={`경로 ${index} 프록시 주소`}
                         value={route}
+                        disabled={checking || saving}
                         placeholder="http://127.0.0.1:25001"
                         onChange={(event) => changeRoutes(routes.map((value, routeIndex) => routeIndex === index - 1 ? event.target.value : value))}
                         className="h-8 min-w-0 font-mono text-body"
@@ -154,6 +161,7 @@ export function KindNetworkRouteSettings() {
                   size="icon"
                   className="h-8 w-8 shrink-0"
                   aria-label={`경로 ${index} 삭제`}
+                  disabled={checking || saving}
                   onClick={() => changeRoutes(routes.filter((_, routeIndex) => routeIndex !== index - 1))}
                 >
                   <Trash2 className="h-4 w-4" />

@@ -7,13 +7,14 @@ import pytest
 import requests
 
 from finiq.data_scraper.core.client import download_disclosure_external_htmls
+from finiq.data_scraper.core import kind_computers
 from finiq.data_scraper.core.kind_computers import (
-    MAX_KIND_PROXY_COUNT,
-    MAX_KIND_VIRTUAL_COMPUTERS,
     KindVirtualComputer,
     allocate_computer_workers,
     build_kind_virtual_computers,
     create_kind_computer_session,
+    kind_proxy_count_limit,
+    kind_route_count_limit,
     normalize_kind_proxy_urls,
     check_kind_network_routes,
     run_kind_virtual_computers,
@@ -102,7 +103,7 @@ def test_allocate_computer_workers_preserves_total_limit() -> None:
 def test_normalize_kind_proxy_urls_accepts_cpu_limited_local_proxies() -> None:
     proxies = [
         f"http://127.0.0.1:{25001 + index}"
-        for index in range(MAX_KIND_PROXY_COUNT)
+        for index in range(kind_proxy_count_limit())
     ]
 
     assert normalize_kind_proxy_urls(proxies) == proxies
@@ -123,9 +124,9 @@ def test_normalize_kind_proxy_urls_accepts_cpu_limited_local_proxies() -> None:
         (
             [
                 f"http://127.0.0.1:{25001 + index}"
-                for index in range(MAX_KIND_PROXY_COUNT + 1)
+                for index in range(kind_proxy_count_limit() + 1)
             ],
-            f"at most {MAX_KIND_PROXY_COUNT}",
+            f"at most {kind_proxy_count_limit()}",
         ),
     ],
 )
@@ -146,7 +147,7 @@ def test_build_kind_virtual_computers_uses_direct_plus_proxies() -> None:
         KindVirtualComputer(index=1, proxy_url="http://127.0.0.1:25001"),
         KindVirtualComputer(index=2, proxy_url="http://127.0.0.1:25002"),
     ]
-    assert computers[0].label == "가상 컴퓨터 1"
+    assert computers[0].label == "직접 연결"
     assert "직접 연결" in computers[0].describe(item_count=1, worker_count=1)
     assert "127.0.0.1:25001" in computers[1].describe(
         item_count=1, worker_count=1
@@ -154,19 +155,33 @@ def test_build_kind_virtual_computers_uses_direct_plus_proxies() -> None:
 
 
 def test_build_kind_virtual_computers_supports_cpu_count_egresses() -> None:
+    max_proxy_count = kind_proxy_count_limit()
     proxies = [
         f"http://127.0.0.1:{25001 + index}"
-        for index in range(MAX_KIND_PROXY_COUNT)
+        for index in range(max_proxy_count)
     ]
 
     computers = build_kind_virtual_computers(proxies)
 
-    assert len(computers) == MAX_KIND_VIRTUAL_COMPUTERS
+    assert len(computers) == kind_route_count_limit()
     assert computers[0] == KindVirtualComputer(index=0, proxy_url=None)
     if proxies:
         assert computers[-1] == KindVirtualComputer(
-            index=MAX_KIND_PROXY_COUNT,
+            index=max_proxy_count,
             proxy_url=proxies[-1],
+        )
+
+
+def test_kind_proxy_limit_uses_current_cpu_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(kind_computers, "available_cpu_count", lambda: 2)
+
+    assert kind_route_count_limit() == 2
+    assert kind_proxy_count_limit() == 1
+    with pytest.raises(ValueError, match="at most 1 proxies"):
+        normalize_kind_proxy_urls(
+            ["http://127.0.0.1:25001", "http://127.0.0.1:25002"]
         )
 
 
@@ -200,7 +215,9 @@ def test_run_kind_virtual_computers_uses_three_egress_threads() -> None:
     )
 
     assert results == [["a", "d"], ["b", "e"], ["c", "f"]]
-    assert any(message.startswith("가상 컴퓨터 3대로") for message in progress)
+    assert any(
+        message.startswith("KIND 네트워크 경로 3개로") for message in progress
+    )
     process_ids = {
         int(message.split(":")[1])
         for message in progress

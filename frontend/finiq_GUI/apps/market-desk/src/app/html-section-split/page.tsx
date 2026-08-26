@@ -94,6 +94,17 @@ export default function HtmlSectionSplitPage() {
   const activeIntegrityInspectionRef = useRef<{ jobId: string; key: string } | null>(null);
   const currentIntegrityInspectionKeyRef = useRef("");
 
+  const cancelActiveIntegrityInspection = useCallback(() => {
+    const inspection = activeIntegrityInspectionRef.current;
+    activeIntegrityInspectionRef.current = null;
+    if (!inspection?.jobId) return;
+    fetch("/api/disclosures/html/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: inspection.jobId }),
+    }).catch(() => undefined);
+  }, []);
+
   const formatStatus = useCallback((data: any) => {
     const res = data.result || {};
     const summary = res.summary || {};
@@ -252,12 +263,14 @@ export default function HtmlSectionSplitPage() {
           body: JSON.stringify({ job_id: activeJobIdRef.current }),
         }).catch(() => undefined);
       }
+      cancelActiveIntegrityInspection();
     };
-  }, []);
+  }, [cancelActiveIntegrityInspection]);
 
   const handleWorkspaceDirectoryChange = async (value: string) => {
     integrityInspectAbortControllerRef.current?.abort();
     integrityInspectAbortControllerRef.current = null;
+    cancelActiveIntegrityInspection();
     if (await saveSetting("output_root", value)) {
       const settings = useSettingsStore.getState();
       setInputDirectory(settings.internal_html_output_directory || "");
@@ -278,6 +291,7 @@ export default function HtmlSectionSplitPage() {
   useEffect(() => {
     integrityInspectAbortControllerRef.current?.abort();
     integrityInspectAbortControllerRef.current = null;
+    cancelActiveIntegrityInspection();
     setIntegrityInspectionResult(null);
     setIntegrityInspectionError("");
     setIsIntegrityInspecting(false);
@@ -288,6 +302,7 @@ export default function HtmlSectionSplitPage() {
     inputDirectory,
     useSeparateOutputDirectory,
     workers,
+    cancelActiveIntegrityInspection,
   ]);
 
   const handleFilterInputChange = (value: string) => {
@@ -443,6 +458,11 @@ export default function HtmlSectionSplitPage() {
     const abortController = new AbortController();
     integrityInspectAbortControllerRef.current = abortController;
     const inspectionKey = currentIntegrityInspectionKey;
+    const requestedJobId = window.crypto.randomUUID().replaceAll("-", "");
+    activeIntegrityInspectionRef.current = {
+      jobId: requestedJobId,
+      key: inspectionKey,
+    };
     setIsIntegrityInspecting(true);
     setIntegrityInspectionResult(null);
     setIntegrityInspectionError("");
@@ -453,7 +473,7 @@ export default function HtmlSectionSplitPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: abortController.signal,
-        body: JSON.stringify(integrityInspectionPayload),
+        body: JSON.stringify({ ...integrityInspectionPayload, job_id: requestedJobId }),
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
@@ -461,8 +481,11 @@ export default function HtmlSectionSplitPage() {
       }
       const data = await response.json();
       const jobId = String(data.job_id || "");
-      if (!jobId) {
-        throw new Error("입력 HTML 검사 작업 ID를 받지 못했습니다.");
+      if (jobId !== requestedJobId) {
+        if (activeIntegrityInspectionRef.current?.jobId === requestedJobId) {
+          activeIntegrityInspectionRef.current = null;
+        }
+        throw new Error("입력 HTML 검사 작업 ID가 요청과 일치하지 않습니다.");
       }
       if (integrityInspectAbortControllerRef.current !== abortController
         || inspectionKey !== currentIntegrityInspectionKeyRef.current) {
@@ -473,9 +496,11 @@ export default function HtmlSectionSplitPage() {
         }).catch(() => undefined);
         return;
       }
-      activeIntegrityInspectionRef.current = { jobId, key: inspectionKey };
       startPolling(jobId);
     } catch (err: any) {
+      if (activeIntegrityInspectionRef.current?.jobId === requestedJobId) {
+        activeIntegrityInspectionRef.current = null;
+      }
       if (err?.name === "AbortError") return;
       const message = errorMessage(err);
       setIntegrityInspectionError(message);

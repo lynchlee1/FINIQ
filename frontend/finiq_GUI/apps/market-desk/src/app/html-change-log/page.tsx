@@ -284,10 +284,16 @@ export default function HtmlChangeLogPage() {
       label: useSeparateOutputDirectory ? DATA_PATH_LABELS.output : DATA_PATH_LABELS.workspace,
       mode: "folder",
       value: useSeparateOutputDirectory ? outputPath || "" : dataRoot || "",
-      onChange: (val) => saveSetting(
-        useSeparateOutputDirectory ? "html_parse_output_directory" : "output_root",
-        val,
-      ),
+      onChange: (val) => {
+        summaryAbortControllerRef.current?.abort();
+        detailAbortControllerRef.current?.abort();
+        setIsFetching(false);
+        clearLoadedResults();
+        return saveSetting(
+          useSeparateOutputDirectory ? "html_parse_output_directory" : "output_root",
+          val,
+        );
+      },
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 2,
     },

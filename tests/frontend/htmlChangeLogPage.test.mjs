@@ -87,6 +87,8 @@ test("08 correction history resolves base and derived results from the workspace
   assert.match(source, /useSeparateOutputDirectory \? \{ output_path: outputPath \} : \{\}/);
   assert.match(source, /params\.set\("parent_mode", currentParentMode\)/);
   assert.match(source, /summaryAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(source, /detailAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(source, /setIsFetching\(false\);\s*clearLoadedResults\(\);\s*return saveSetting/);
   assert.match(source, /requestKey !== currentRequestKeyRef\.current/);
 });
 

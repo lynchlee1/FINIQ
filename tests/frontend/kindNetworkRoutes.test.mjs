@@ -29,6 +29,9 @@ test("KIND network routes expose provider-neutral editing, checking, and saving"
   assert.match(component, /const hasChanges =/);
   assert.match(component, /disabled=\{!hasChanges \|\| checking \|\| saving\}/);
   assert.match(component, /setCheckResult\(null\)/);
+  assert.match(component, /routeVersionRef\.current \+= 1/);
+  assert.match(component, /routeVersion !== routeVersionRef\.current/);
+  assert.match(component, /disabled=\{checking \|\| saving\}/);
   assert.match(component, /divide-y divide-\[color:var\(--tv-border\)\]/);
   assert.doesNotMatch(component, /className="w-full"[\s\S]{0,160}>\s*<Plus/);
   assert.match(component, /className="h-8 min-w-0 font-mono text-body"/);

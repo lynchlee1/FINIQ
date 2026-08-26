@@ -18,6 +18,7 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     clean_disclosure_html_output_directory_payload,
     create_external_html_integrity_baseline_payload,
     inspect_all_disclosure_external_html_payload,
+    inspect_all_disclosure_internal_html_payload,
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.filter_presets import (
@@ -266,7 +267,13 @@ def _start_background_job(
     background_tasks: BackgroundTasks,
     run_job_worker: RunJobWorker,
 ) -> dict[str, Any]:
-    job_id = uuid.uuid4().hex
+    requested_job_id = str(payload.pop("job_id", "") or "").strip()
+    try:
+        job_id = uuid.UUID(requested_job_id).hex if requested_job_id else uuid.uuid4().hex
+    except ValueError as exc:
+        raise ValueError("job_id must be a UUID") from exc
+    if job_manager.get_job(job_id) is not None:
+        raise ValueError(f"job already exists: {job_id}")
     job_manager.create_job(job_id, kind)
     background_tasks.add_task(run_job_worker, job_id, kind, payload)
     return job_manager.get_snapshot(job_id)
@@ -653,11 +660,20 @@ def create_workflows_router(
     @router.post("/api/disclosures/internal-html-download/check-existing")
     def check_internal_html_download_folder(payload: dict[str, Any]):
         try:
-            return check_disclosure_html_output_directory_payload(
-                apply_workspace_defaults("internal_html_download", payload)
-            )
+            return inspect_all_disclosure_internal_html_payload(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/internal-html-download/redownload/start")
+    async def start_missing_internal_html_redownload(
+        payload: dict[str, Any], background_tasks: BackgroundTasks
+    ):
+        return _start_background_job(
+            kind="internal_html_redownload",
+            payload=payload,
+            background_tasks=background_tasks,
+            run_job_worker=run_job_worker,
+        )
 
     @router.post("/api/disclosures/internal-html-download/trust-existing/start")
     async def start_internal_html_integrity_baseline(
@@ -760,7 +776,7 @@ def create_workflows_router(
         job_id = str(payload.get("job_id") or "").strip()
         if not job_id:
             raise HTTPException(status_code=400, detail="Missing job_id")
-        if not job_manager.cancel_job(job_id):
+        if not job_manager.cancel_job(job_id, reserve_missing=True):
             raise HTTPException(status_code=404, detail="Job not found")
         return {"status": "success", "job_id": job_id}
 

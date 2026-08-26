@@ -14,7 +14,11 @@ from finiq.market_desk.web.jobs import JobManager, job_manager
 from finiq.market_desk.web.features.downloads.kind_common import (
     configure_download_job_retention,
 )
-from finiq.market_desk.web.features.disclosures import external_html_download
+from finiq.market_desk.web.features.disclosures import (
+    external_html_download,
+    html_cleanup,
+    internal_html_download,
+)
 
 
 def _save_filter_workflow(
@@ -2078,6 +2082,45 @@ def test_external_html_check_existing_route_inspects_every_workspace_mode(
     assert payload["owner_download_required_target_html_count"] == 2
 
 
+def test_external_html_check_existing_does_not_create_stage_directories(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "disclosed_at": "2025-01-01",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).post(
+        "/api/disclosures/external-html-download/check-existing",
+        json={"data_root": str(data_root)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["failed_modes"] == ["bond_issuance"]
+    for stage in (
+        "01-list",
+        "02-table",
+        "04-external-html-download",
+        "05-internal-html-download",
+        "06-sections",
+        "07-converted",
+    ):
+        assert not (data_root / stage).exists()
+
+
 def test_external_html_redownload_processes_only_failed_owner_modes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2130,7 +2173,7 @@ def test_external_html_redownload_processes_only_failed_owner_modes(
     )
 
     result = external_html_download.redownload_missing_disclosure_external_html_payload(
-        {"data_root": str(tmp_path / "workspace")}
+        {"data_root": str(tmp_path / "workspace"), "skip_existing": False}
     )
 
     assert result["passed"] is True
@@ -2142,6 +2185,150 @@ def test_external_html_redownload_processes_only_failed_owner_modes(
         "rights_issuance",
     ]
     assert all(repair is True for _payload, repair in downloaded_payloads)
+    assert all(payload["skip_existing"] is True for payload, _ in downloaded_payloads)
+
+
+def test_internal_html_all_mode_inspection_aggregates_owner_totals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        html_cleanup,
+        "manage_filter_presets_payload",
+        lambda _payload: {
+            "presets": [
+                {"id": "bond_issuance", "mode": "bond_issuance"},
+                {
+                    "id": "bond_issuance/child",
+                    "mode": "child",
+                    "parent_mode": "bond_issuance",
+                },
+                {"id": "rights_issuance", "mode": "rights_issuance"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        html_cleanup,
+        "apply_workspace_defaults",
+        lambda kind, payload, create_workspace=False: {**payload, "kind": kind},
+    )
+
+    def fake_counts(payload: dict[str, object]) -> dict[str, object]:
+        assert payload["kind"] == "internal_html_download"
+        counts = {
+            "bond_issuance": (3, 1),
+            "child": (2, 1),
+            "rights_issuance": (4, 0),
+        }
+        requested, missing = counts[str(payload["mode"])]
+        return {
+            "requested_count": requested,
+            "existing_target_html_count": requested - missing,
+            "download_required_target_html_count": missing,
+            "missing_target_html_count": missing,
+            "invalid_target_html_count": 0,
+            "hash_mismatch_target_html_count": 0,
+            "hash_unverified_target_html_count": 0,
+            "deletion_candidate_count": 0,
+        }
+
+    monkeypatch.setattr(
+        html_cleanup,
+        "_check_disclosure_html_output_directory_payload",
+        lambda payload, return_scan_context=False: {
+            **fake_counts(payload),
+            "_scan_context": {},
+        },
+    )
+    monkeypatch.setattr(
+        html_cleanup,
+        "_check_derived_html_from_owner_scan",
+        lambda payload, _owner, _scan: fake_counts(payload),
+    )
+
+    result = html_cleanup.inspect_all_disclosure_internal_html_payload(
+        {"data_root": str(tmp_path / "workspace")}
+    )
+
+    assert result["format"] == "finiq_disclosure_internal_html_all_inspection_v1"
+    assert result["mode_count"] == 3
+    assert result["failed_modes"] == ["bond_issuance", "bond_issuance/child"]
+    assert result["requested_count"] == 9
+    assert result["owner_requested_count"] == 7
+    assert result["owner_download_required_target_html_count"] == 1
+
+
+def test_internal_html_redownload_processes_only_failed_owner_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert web_app.JOB_HANDLERS["internal_html_redownload"] is (
+        internal_html_download.redownload_missing_disclosure_internal_html_payload
+    )
+    initial_inspection = {
+        "passed": False,
+        "results": [
+            {
+                "id": "bond_issuance",
+                "mode": "bond_issuance",
+                "download_required_target_html_count": 2,
+            },
+            {
+                "id": "bond_issuance/child",
+                "mode": "child",
+                "parent_mode": "bond_issuance",
+                "download_required_target_html_count": 1,
+            },
+            {
+                "id": "rights_issuance",
+                "mode": "rights_issuance",
+                "download_required_target_html_count": 0,
+                "hash_unverified_target_html_count": 1,
+            },
+        ],
+    }
+    final_inspection = {"passed": True, "failed_modes": [], "results": []}
+    inspections = iter([initial_inspection, final_inspection])
+    downloaded_payloads: list[tuple[dict[str, object], bool]] = []
+
+    monkeypatch.setattr(
+        html_cleanup,
+        "inspect_all_disclosure_internal_html_payload",
+        lambda _body: next(inspections),
+    )
+    monkeypatch.setattr(
+        internal_html_download,
+        "apply_workspace_defaults",
+        lambda _kind, payload: payload,
+    )
+
+    def fake_download(
+        body: dict[str, object],
+        progress_callback: object = None,
+        cancel_check: object = None,
+        *,
+        redownload_unverified_existing: bool = False,
+    ) -> dict[str, object]:
+        downloaded_payloads.append((body, redownload_unverified_existing))
+        return {"cancelled": False, "requested_count": 2, "saved_count": 2}
+
+    monkeypatch.setattr(
+        internal_html_download,
+        "download_disclosure_internal_html_payload",
+        fake_download,
+    )
+
+    result = internal_html_download.redownload_missing_disclosure_internal_html_payload(
+        {"data_root": str(tmp_path / "workspace")}
+    )
+
+    assert result["passed"] is True
+    assert result["target_mode_count"] == 2
+    assert result["verification"] is final_inspection
+    assert [payload["mode"] for payload, _ in downloaded_payloads] == [
+        "bond_issuance",
+        "rights_issuance",
+    ]
+    assert all(repair is True for _, repair in downloaded_payloads)
+    assert all(payload["skip_existing"] is True for payload, _ in downloaded_payloads)
 
 
 def test_external_html_trust_existing_route_creates_hash_baseline(
@@ -2250,7 +2437,7 @@ def test_internal_html_download_inspect_folder_rejects_source_directory(tmp_path
     assert "source_directory is not supported" in response.json()["detail"]
 
 
-def test_internal_html_download_check_existing_route_uses_yearly_layout(tmp_path: Path) -> None:
+def test_internal_html_check_existing_uses_yearly_layout(tmp_path: Path) -> None:
     compressed_path = tmp_path / "compressed-external-html.json"
     compressed_path.write_text(
         json.dumps({
@@ -2270,17 +2457,13 @@ def test_internal_html_download_check_existing_route_uses_yearly_layout(tmp_path
         "<html><body>" + ("valid " * 30) + "</body></html>", encoding="utf-8"
     )
 
-    client = TestClient(app)
-    response = client.post(
-        "/api/disclosures/internal-html-download/check-existing",
-        json={
+    payload = html_cleanup.check_disclosure_html_output_directory_payload(
+        {
             "source_compressed_json_path": str(compressed_path),
             "output_directory": str(output_directory),
-        },
+        }
     )
 
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["format"] == "kind_disclosure_html_existing_check_v1"
     assert payload["source_type"] == "content"
     assert payload["has_existing"] is True
@@ -2288,7 +2471,7 @@ def test_internal_html_download_check_existing_route_uses_yearly_layout(tmp_path
     assert payload["missing_target_html_count"] == 0
 
 
-def test_internal_html_download_check_existing_route_uses_compressed_json_year(
+def test_internal_html_check_existing_uses_compressed_json_year(
     tmp_path: Path,
 ) -> None:
     compressed_path = tmp_path / "compressed-external-html.json"
@@ -2310,17 +2493,13 @@ def test_internal_html_download_check_existing_route_uses_compressed_json_year(
     output_directory = tmp_path / "content_html"
     output_directory.mkdir()
 
-    client = TestClient(app)
-    response = client.post(
-        "/api/disclosures/internal-html-download/check-existing",
-        json={
+    payload = html_cleanup.check_disclosure_html_output_directory_payload(
+        {
             "source_compressed_json_path": str(compressed_path),
             "output_directory": str(output_directory),
-        },
+        }
     )
 
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["source_type"] == "content"
     assert payload["requested_count"] == 1
 
@@ -2329,6 +2508,12 @@ def test_internal_html_check_existing_route_uses_workspace_defaults(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20250101000001", "title": "sample"}],
+    )
     compressed_path = (
         data_root
         / "04-external-html-download"
@@ -2371,11 +2556,13 @@ def test_internal_html_check_existing_route_uses_workspace_defaults(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["existing_target_html_count"] == 1
-    assert payload["output_directory"] == str(output_directory.parent.resolve())
+    assert payload["format"] == "finiq_disclosure_internal_html_all_inspection_v1"
+    assert payload["mode_count"] == 1
+    assert payload["results"][0]["existing_target_html_count"] == 1
+    assert payload["results"][0]["output_directory"] == str(output_directory.parent.resolve())
 
 
-def test_internal_html_download_check_existing_route_finds_yearly_output(
+def test_internal_html_check_existing_finds_yearly_output(
     tmp_path: Path,
 ) -> None:
     compressed_path = tmp_path / "compressed-external-html.json"
@@ -2400,17 +2587,13 @@ def test_internal_html_download_check_existing_route_finds_yearly_output(
         "<html><body>" + ("valid " * 30) + "</body></html>", encoding="utf-8"
     )
 
-    client = TestClient(app)
-    response = client.post(
-        "/api/disclosures/internal-html-download/check-existing",
-        json={
+    payload = html_cleanup.check_disclosure_html_output_directory_payload(
+        {
             "source_compressed_json_path": str(compressed_path),
             "output_directory": str(output_directory),
-        },
+        }
     )
 
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["existing_target_html_count"] == 1
     assert payload["hash_verified_target_html_count"] == 0
     assert payload["hash_unverified_target_html_count"] == 1
@@ -2508,9 +2691,11 @@ def test_download_inspect_folder_start_route(tmp_path: Path, monkeypatch) -> Non
     )
 
     client = TestClient(app)
+    requested_job_id = "11111111111141118111111111111111"
     response = client.post(
         "/api/download/inspect-folder/start",
         json={
+            "job_id": requested_job_id,
             "mode": "single",
             "output_directory": str(tmp_path),
             "start_date": "2026-01-01",
@@ -2520,7 +2705,7 @@ def test_download_inspect_folder_start_route(tmp_path: Path, monkeypatch) -> Non
 
     assert response.status_code == 200
     data = response.json()
-    assert "job_id" in data
+    assert data["job_id"] == requested_job_id
     assert data["status"] in {"queued", "running", "completed"}
 
     # Poll status
@@ -2541,9 +2726,9 @@ def test_html_section_inspect_route_rejects_file_without_canonical_toc(tmp_path:
     (input_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -2564,9 +2749,9 @@ def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_pat
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     for index in range(21):
-        section_markup = "<h2 class='SECTION-1' id='toc_1'><p>목차</p></h2>"
+        section_markup = "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2>"
         if index == 0:
-            section_markup += "<h2 class='SECTION-2' id='toc_2'><p>본문</p></h2>"
+            section_markup += "<h2 class='SECTION-2' id='toc_2'><p class='SECTION-2'>본문</p></h2>"
         (input_directory / f"202604{index + 1:02d}000001.html").write_text(
             f"<html><head></head><body>{section_markup}</body></html>",
             encoding="utf-8",
@@ -2599,14 +2784,14 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
         (input_directory / source_name).write_text(
             """
             <html><head></head><body>
-              <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
-              <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
+              <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
+              <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">2</p></h2>
             </body></html>
             """,
             encoding="utf-8",
         )
     (input_directory / "20260403000001.html").write_text(
-        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2></body></html>",
         encoding="utf-8",
     )
 
@@ -2718,9 +2903,9 @@ def test_html_section_source_split_route_returns_selected_disclosure_sections(tm
     source_file.write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -2754,9 +2939,9 @@ def test_html_section_save_start_route_saves_all_toc_sections_automatically(
     (source_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -2819,9 +3004,9 @@ def test_html_section_save_start_route_ignores_obsolete_pattern_selection(tmp_pa
     (source_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -2877,9 +3062,9 @@ def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> 
     (input_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -2887,13 +3072,19 @@ def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> 
     )
 
     client = TestClient(app)
+    requested_job_id = "22222222222242228222222222222222"
     response = client.post(
         "/api/disclosures/html/sections/inspect/start",
-        json={"input_directory": str(input_directory), "workers": 8},
+        json={
+            "job_id": requested_job_id,
+            "input_directory": str(input_directory),
+            "workers": 8,
+        },
     )
 
     assert response.status_code == 200
     job_id = response.json()["job_id"]
+    assert job_id == requested_job_id
     snapshot = None
     for _ in range(20):
         status_response = client.get(f"/api/disclosures/html/jobs/{job_id}")

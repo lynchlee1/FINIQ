@@ -42,6 +42,7 @@ class JobManager:
 
     def __init__(self, *, retention_minutes: int = DEFAULT_JOB_RETENTION_MINUTES):
         self._jobs: Dict[str, HtmlJob] = {}
+        self._pending_cancellations: Dict[str, float] = {}
         self._lock = threading.RLock()
         self._retention_minutes = normalize_job_retention_minutes(retention_minutes)
 
@@ -61,6 +62,11 @@ class JobManager:
         ]
         for job_id in expired_ids:
             del self._jobs[job_id]
+        self._pending_cancellations = {
+            job_id: requested_at
+            for job_id, requested_at in self._pending_cancellations.items()
+            if requested_at >= cutoff
+        }
         return len(expired_ids)
 
     def purge_expired(self, *, now: float | None = None) -> int:
@@ -71,6 +77,9 @@ class JobManager:
         job = HtmlJob(id=job_id, kind=kind)
         with self._lock:
             self._purge_expired_locked()
+            if job_id in self._pending_cancellations:
+                job.status = "cancelled"
+                self._pending_cancellations.pop(job_id, None)
             self._jobs[job_id] = job
         return job
 
@@ -138,7 +147,7 @@ class JobManager:
                 "error": job.error,
             }
 
-    def cancel_job(self, job_id: str) -> bool:
+    def cancel_job(self, job_id: str, *, reserve_missing: bool = False) -> bool:
         with self._lock:
             self._purge_expired_locked()
             if job := self._jobs.get(job_id):
@@ -146,6 +155,9 @@ class JobManager:
                     job.status = "cancelled"
                     job.updated_at = time.time()
                     self.add_log(job_id, "작업 중단이 요청되었습니다.")
+                return True
+            if reserve_missing:
+                self._pending_cancellations[job_id] = time.time()
                 return True
             return False
 

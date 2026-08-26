@@ -517,8 +517,9 @@ export default function DownloadPage() {
     const abortController = new AbortController();
     fileInspectionStartAbortControllerRef.current = abortController;
     const basePayload = customPayload || buildPayload();
+    const inspectionJobId = window.crypto.randomUUID().replaceAll("-", "");
     const pendingInspection: DownloadInspectionContext = {
-      jobId: "",
+      jobId: inspectionJobId,
       key: checkExistingPayloadKey(existingPayloadFromDownloadPayload(basePayload)),
       payload: basePayload,
       runTriggered,
@@ -530,10 +531,14 @@ export default function DownloadPage() {
     try {
       const data = await inspectDownloadFolder({
         ...basePayload,
+        job_id: inspectionJobId,
         dry_run: dryRun,
         delete_confirmed: deleteConfirmed,
         delete_confirmation_text: deleteConfirmationText,
       }, abortController.signal);
+      if (data.job_id !== inspectionJobId) {
+        throw new Error("검사 작업 ID가 요청과 일치하지 않습니다.");
+      }
       const activeInspection = { ...pendingInspection, jobId: data.job_id };
       activeInspectionRef.current = activeInspection;
       try {

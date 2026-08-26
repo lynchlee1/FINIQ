@@ -70,6 +70,27 @@ def _load_internal_html_integrity_source(
     return source_json, str(source_path), acpt_numbers, target_years
 
 
+def _load_html_integrity_source(
+    body: dict[str, Any],
+) -> tuple[Any, str, list[str], dict[str, str], str]:
+    source_compressed_json_path_raw = str(
+        body.get("source_compressed_json_path") or ""
+    ).strip()
+    if "source_directory" in body or source_compressed_json_path_raw:
+        source_json, source_path, acpt_numbers, target_years = (
+            _load_internal_html_integrity_source(body)
+        )
+        return source_json, source_path, acpt_numbers, target_years, "content"
+
+    source_json, source_path = _load_workspace_filtered_payload(body)
+    acpt_numbers = collect_acpt_numbers_from_json(source_json)
+    if not acpt_numbers:
+        raise ValueError("No acpt_no values found in JSON")
+    acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
+    target_years = _target_years_from_json(source_json, acpt_numbers)
+    return source_json, source_path, acpt_numbers, target_years, "external"
+
+
 def _clean_disclosure_html_output_directory_payload(
     body: dict[str, Any],
     *,
@@ -80,24 +101,15 @@ def _clean_disclosure_html_output_directory_payload(
     if not output_directory:
         msg = "output_directory is required"
         raise ValueError(msg)
-    source_compressed_json_path_raw = str(
-        body.get("source_compressed_json_path") or ""
-    ).strip()
+    source_json, source_path, acpt_numbers, target_years, source_type = (
+        _load_html_integrity_source(body)
+    )
 
-    if "source_directory" in body or source_compressed_json_path_raw:
-        _source_json, source_path, acpt_numbers, target_years = (
-            _load_internal_html_integrity_source(body)
-        )
-        source_type = "content"
-    else:
-        source_json, source_path = _load_workspace_filtered_payload(body)
-        acpt_numbers = collect_acpt_numbers_from_json(source_json)
-        if not acpt_numbers:
-            msg = "No acpt_no values found in JSON"
-            raise ValueError(msg)
-        acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
-        target_years = _target_years_from_json(source_json, acpt_numbers)
-        source_type = "external"
+    def with_source_context(result: dict[str, Any]) -> dict[str, Any]:
+        if collect_integrity:
+            result["_source_json"] = source_json
+            result["_source_acpt_numbers"] = acpt_numbers
+        return result
 
     resolved_output_directory = Path(output_directory).expanduser().resolve()
     _ensure_safe_html_cleanup_directory(resolved_output_directory)
@@ -116,18 +128,20 @@ def _clean_disclosure_html_output_directory_payload(
         output_summary["unexpected_files"] = []
         output_summary["unexpected_file_omitted_count"] = 0
         output_summary["deleted_files"] = []
-        return {
-            "format": "kind_disclosure_html_folder_cleanup_v1",
-            "source_type": source_type,
-            "source_path": source_path,
-            "output_directory": str(resolved_output_directory),
-            "dry_run": dry_run,
-            "requested_count": len(acpt_numbers),
-            "deleted_count": 0,
-            "deletion_candidate_count": 0,
-            "deletion_candidates": [],
-            **output_summary,
-        }
+        return with_source_context(
+            {
+                "format": "kind_disclosure_html_folder_cleanup_v1",
+                "source_type": source_type,
+                "source_path": source_path,
+                "output_directory": str(resolved_output_directory),
+                "dry_run": dry_run,
+                "requested_count": len(acpt_numbers),
+                "deleted_count": 0,
+                "deletion_candidate_count": 0,
+                "deletion_candidates": [],
+                **output_summary,
+            }
+        )
     if not dry_run and not _is_delete_confirmed(body):
         planned_summary = _delete_unexpected_html_output_directory_files(
             resolved_output_directory,
@@ -149,18 +163,20 @@ def _clean_disclosure_html_output_directory_payload(
         problem_file_limit=body.get("problem_file_limit"),
     )
     deletion_candidate_count = int(summary.get("deleted_file_count") or 0)
-    return {
-        "format": "kind_disclosure_html_folder_cleanup_v1",
-        "source_type": source_type,
-        "source_path": source_path,
-        "output_directory": str(resolved_output_directory),
-        "dry_run": dry_run,
-        "requested_count": len(acpt_numbers),
-        "deleted_count": 0 if dry_run else deletion_candidate_count,
-        "deletion_candidate_count": deletion_candidate_count,
-        "deletion_candidates": summary["deleted_files"],
-        **summary,
-    }
+    return with_source_context(
+        {
+            "format": "kind_disclosure_html_folder_cleanup_v1",
+            "source_type": source_type,
+            "source_path": source_path,
+            "output_directory": str(resolved_output_directory),
+            "dry_run": dry_run,
+            "requested_count": len(acpt_numbers),
+            "deleted_count": 0 if dry_run else deletion_candidate_count,
+            "deletion_candidate_count": deletion_candidate_count,
+            "deletion_candidates": summary["deleted_files"],
+            **summary,
+        }
+    )
 
 
 def clean_disclosure_html_output_directory_payload(
@@ -173,8 +189,10 @@ def clean_disclosure_html_output_directory_payload(
     )
 
 
-def check_disclosure_html_output_directory_payload(
+def _check_disclosure_html_output_directory_payload(
     body: dict[str, Any],
+    *,
+    return_scan_context: bool = False,
 ) -> dict[str, Any]:
     """Inspect existing HTML download files without deleting anything."""
     payload = dict(body)
@@ -183,39 +201,23 @@ def check_disclosure_html_output_directory_payload(
         payload,
         collect_integrity=True,
     )
+    source_json = summary.pop("_source_json")
+    acpt_numbers = summary.pop("_source_acpt_numbers")
     actual_integrity_by_acpt_no = summary.pop(
         "_target_integrity_by_acpt_no"
     )
-    if summary.get("source_type") == "external":
-        source_json, _source_json_path = _load_workspace_filtered_payload(body)
-        acpt_numbers = collect_acpt_numbers_from_json(source_json)
-        acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
-        integrity_summary = _inspect_html_integrity(
-            Path(summary["output_directory"]),
-            acpt_numbers,
-            source_json=source_json,
-            structurally_valid_acpt_numbers=summary[
-                "existing_target_acpt_numbers"
-            ],
-            actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
-        )
-        integrity_summary.pop("_verified_integrity_by_acpt_no", None)
-        summary.update(integrity_summary)
-    elif summary.get("source_type") == "content":
-        source_json, _source_path, acpt_numbers, _target_years = (
-            _load_internal_html_integrity_source(body)
-        )
-        integrity_summary = _inspect_html_integrity(
-            Path(summary["output_directory"]),
-            acpt_numbers,
-            source_json=source_json,
-            structurally_valid_acpt_numbers=summary[
-                "existing_target_acpt_numbers"
-            ],
-            actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
-        )
-        integrity_summary.pop("_verified_integrity_by_acpt_no", None)
-        summary.update(integrity_summary)
+    output_directory = Path(summary["output_directory"])
+    loaded_manifest_integrity = _load_html_manifest_integrity(output_directory)
+    integrity_summary = _inspect_html_integrity(
+        output_directory,
+        acpt_numbers,
+        source_json=source_json,
+        structurally_valid_acpt_numbers=summary["existing_target_acpt_numbers"],
+        actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
+        loaded_manifest_integrity=loaded_manifest_integrity,
+    )
+    integrity_summary.pop("_verified_integrity_by_acpt_no", None)
+    summary.update(integrity_summary)
     if summary.get("source_type") in {"external", "content"}:
         summary["download_required_target_html_count"] = (
             int(summary.get("missing_target_html_count") or 0)
@@ -223,17 +225,114 @@ def check_disclosure_html_output_directory_payload(
         )
     existing_count = int(summary.get("existing_target_html_count") or 0)
     total_file_count = int(summary.get("total_file_count") or 0)
-    return {
+    result = {
         **summary,
         "format": "kind_disclosure_html_existing_check_v1",
         "has_existing": existing_count > 0 or total_file_count > 0,
     }
+    if return_scan_context:
+        result["_scan_context"] = {
+            "owner_acpt_numbers": acpt_numbers,
+            "structurally_valid_acpt_numbers": summary[
+                "existing_target_acpt_numbers"
+            ],
+            "invalid_target_acpt_numbers": summary["invalid_target_acpt_numbers"],
+            "actual_integrity_by_acpt_no": actual_integrity_by_acpt_no,
+            "loaded_manifest_integrity": loaded_manifest_integrity,
+        }
+    return result
 
 
-def inspect_all_disclosure_external_html_payload(
+def check_disclosure_html_output_directory_payload(
     body: dict[str, Any],
 ) -> dict[str, Any]:
-    """Inspect saved external HTML for every workspace filter mode."""
+    return _check_disclosure_html_output_directory_payload(body)
+
+
+def _check_derived_html_from_owner_scan(
+    body: dict[str, Any],
+    owner_result: dict[str, Any],
+    owner_scan: dict[str, Any],
+) -> dict[str, Any]:
+    source_json, source_path, acpt_numbers, _target_years, source_type = (
+        _load_html_integrity_source(body)
+    )
+    owner_acpt_numbers = set(owner_scan["owner_acpt_numbers"])
+    missing_from_owner = [
+        acpt_no for acpt_no in acpt_numbers if acpt_no not in owner_acpt_numbers
+    ]
+    if missing_from_owner:
+        raise ValueError(
+            "derived filter targets are missing from the parent filter: "
+            + ", ".join(missing_from_owner[:10])
+        )
+
+    structurally_valid = set(owner_scan["structurally_valid_acpt_numbers"])
+    invalid = set(owner_scan["invalid_target_acpt_numbers"])
+    existing_target_acpt_numbers = [
+        acpt_no for acpt_no in acpt_numbers if acpt_no in structurally_valid
+    ]
+    invalid_target_acpt_numbers = [
+        acpt_no for acpt_no in acpt_numbers if acpt_no in invalid
+    ]
+    missing_target_acpt_numbers = [
+        acpt_no for acpt_no in acpt_numbers if acpt_no not in structurally_valid
+    ]
+    actual_integrity_by_acpt_no = {
+        acpt_no: owner_scan["actual_integrity_by_acpt_no"][acpt_no]
+        for acpt_no in existing_target_acpt_numbers
+    }
+    output_directory = Path(owner_result["output_directory"])
+    integrity_summary = _inspect_html_integrity(
+        output_directory,
+        acpt_numbers,
+        source_json=source_json,
+        structurally_valid_acpt_numbers=existing_target_acpt_numbers,
+        actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
+        loaded_manifest_integrity=owner_scan["loaded_manifest_integrity"],
+    )
+    integrity_summary.pop("_verified_integrity_by_acpt_no", None)
+    download_required_count = (
+        len(missing_target_acpt_numbers)
+        + int(integrity_summary.get("hash_mismatch_target_html_count") or 0)
+    )
+    return {
+        "format": "kind_disclosure_html_existing_check_v1",
+        "source_type": source_type,
+        "source_path": source_path,
+        "output_directory": str(output_directory),
+        "dry_run": True,
+        "requested_count": len(acpt_numbers),
+        "deleted_count": 0,
+        "deletion_candidate_count": 0,
+        "deletion_candidates": [],
+        "existing_target_html_count": len(existing_target_acpt_numbers),
+        "missing_target_html_count": len(missing_target_acpt_numbers),
+        "existing_target_acpt_numbers": existing_target_acpt_numbers,
+        "missing_target_acpt_numbers": missing_target_acpt_numbers,
+        "invalid_target_html_count": len(invalid_target_acpt_numbers),
+        "invalid_target_acpt_numbers": invalid_target_acpt_numbers,
+        "auxiliary_file_count": owner_result["auxiliary_file_count"],
+        "total_file_count": owner_result["total_file_count"],
+        "unexpected_file_count": 0,
+        "unexpected_files": [],
+        "unexpected_file_omitted_count": 0,
+        "deleted_files": [],
+        "deleted_file_count": 0,
+        "deleted_file_omitted_count": 0,
+        **integrity_summary,
+        "download_required_target_html_count": download_required_count,
+        "has_existing": bool(existing_target_acpt_numbers)
+        or int(owner_result["total_file_count"]) > 0,
+    }
+
+
+def _inspect_all_disclosure_html_payload(
+    body: dict[str, Any],
+    *,
+    workflow_kind: str,
+    result_format: str,
+) -> dict[str, Any]:
     data_root = str(body.get("data_root") or "").strip()
     if not data_root:
         raise ValueError("data_root is required")
@@ -241,21 +340,42 @@ def inspect_all_disclosure_external_html_payload(
     preset_response = manage_filter_presets_payload(
         {"data_root": data_root, "action": "list"}
     )
-    results: list[dict[str, Any]] = []
-    for preset in preset_response["presets"]:
+    presets = list(preset_response["presets"])
+    results_by_id: dict[str, dict[str, Any]] = {}
+    owner_scans: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+
+    def inspect_preset(preset: dict[str, Any]) -> None:
         mode = preset["mode"]
         parent_mode = preset.get("parent_mode")
         payload = apply_workspace_defaults(
-            "external_html_download",
+            workflow_kind,
             {
                 "data_root": data_root,
                 "mode": mode,
                 **({"parent_mode": parent_mode} if parent_mode else {}),
                 "problem_file_limit": body.get("problem_file_limit"),
             },
+            create_workspace=False,
         )
         try:
-            inspected = check_disclosure_html_output_directory_payload(payload)
+            if parent_mode:
+                owner = owner_scans.get(parent_mode)
+                if owner is None:
+                    raise ValueError(
+                        f"parent HTML inspection is unavailable: {parent_mode}"
+                    )
+                inspected = _check_derived_html_from_owner_scan(
+                    payload,
+                    owner[0],
+                    owner[1],
+                )
+            else:
+                inspected = _check_disclosure_html_output_directory_payload(
+                    payload,
+                    return_scan_context=True,
+                )
+                owner_scan = inspected.pop("_scan_context")
+                owner_scans[mode] = (inspected, owner_scan)
             problem_count = (
                 int(inspected.get("download_required_target_html_count") or 0)
                 + int(inspected.get("invalid_target_html_count") or 0)
@@ -276,15 +396,26 @@ def inspect_all_disclosure_external_html_payload(
                 "error": str(exc),
             }
             passed = False
-        results.append(
-            {
-                "id": preset["id"],
-                "mode": mode,
-                **({"parent_mode": parent_mode} if parent_mode else {}),
-                **inspected,
-                "passed": passed,
-            }
-        )
+        results_by_id[preset["id"]] = {
+            "id": preset["id"],
+            "mode": mode,
+            **({"parent_mode": parent_mode} if parent_mode else {}),
+            **inspected,
+            "passed": passed,
+        }
+
+    for preset in presets:
+        if not preset.get("parent_mode"):
+            inspect_preset(preset)
+            for child in presets:
+                if child.get("parent_mode") == preset["mode"]:
+                    inspect_preset(child)
+            owner_scans.pop(preset["mode"], None)
+    for preset in presets:
+        if preset["id"] not in results_by_id:
+            inspect_preset(preset)
+
+    results = [results_by_id[preset["id"]] for preset in presets]
 
     failed_modes = [result["id"] for result in results if not result["passed"]]
     count_fields = (
@@ -307,7 +438,7 @@ def inspect_all_disclosure_external_html_payload(
         for field in count_fields
     }
     return {
-        "format": "finiq_disclosure_external_html_all_inspection_v1",
+        "format": result_format,
         "passed": not failed_modes,
         "mode_count": len(results),
         "passed_mode_count": len(results) - len(failed_modes),
@@ -317,6 +448,28 @@ def inspect_all_disclosure_external_html_payload(
         **owner_totals,
         "results": results,
     }
+
+
+def inspect_all_disclosure_external_html_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Inspect saved external HTML for every workspace filter mode."""
+    return _inspect_all_disclosure_html_payload(
+        body,
+        workflow_kind="external_html_download",
+        result_format="finiq_disclosure_external_html_all_inspection_v1",
+    )
+
+
+def inspect_all_disclosure_internal_html_payload(
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Inspect saved internal HTML for every workspace filter mode."""
+    return _inspect_all_disclosure_html_payload(
+        body,
+        workflow_kind="internal_html_download",
+        result_format="finiq_disclosure_internal_html_all_inspection_v1",
+    )
 
 
 def create_external_html_integrity_baseline_payload(

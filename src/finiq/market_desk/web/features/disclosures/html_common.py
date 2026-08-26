@@ -557,9 +557,14 @@ def _inspect_html_integrity(
     source_json: Any,
     structurally_valid_acpt_numbers: list[str],
     actual_integrity_by_acpt_no: dict[str, dict[str, Any]],
+    loaded_manifest_integrity: (
+        tuple[str, str, dict[str, dict[str, Any]]] | None
+    ) = None,
 ) -> dict[str, Any]:
     manifest_format, manifest_source_fingerprint, expected_integrity = (
-        _load_html_manifest_integrity(output_directory)
+        loaded_manifest_integrity
+        if loaded_manifest_integrity is not None
+        else _load_html_manifest_integrity(output_directory)
     )
     if manifest_format == HTML_MANIFEST_FORMAT_V2:
         # Per-acpt_no hashes are keyed by receipt number, so they survive filter
@@ -844,6 +849,29 @@ def _delete_unexpected_html_output_directory_files(
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
+    if dry_run:
+        summary = _validate_html_output_directory_files(
+            output_directory,
+            acpt_numbers,
+            target_years=target_years,
+            allow_unexpected=True,
+            collect_integrity=collect_integrity,
+            problem_file_limit=problem_file_limit,
+        )
+        summary["deleted_files"] = [
+            {
+                "path": str(output_directory / filename),
+                "name": filename,
+                "reason": _describe_unexpected_html_output_file(Path(filename).name),
+            }
+            for filename in summary["unexpected_files"]
+        ]
+        summary["deleted_file_count"] = summary["unexpected_file_count"]
+        summary["deleted_file_omitted_count"] = summary[
+            "unexpected_file_omitted_count"
+        ]
+        return summary
+
     allowed_paths = {
         _target_html_path(
             output_directory,

@@ -3170,6 +3170,273 @@ def test_check_disclosure_external_html_output_directory_reports_existing_overla
     assert used_workers == [2]
 
 
+def test_check_disclosure_html_output_directory_loads_source_and_inventory_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import finiq.market_desk.web.features.disclosures.html_cleanup as html_cleanup
+    import finiq.market_desk.web.features.disclosures.html_common as html_common
+
+    source_loads = 0
+    inventories = 0
+    real_load = html_cleanup._load_workspace_filtered_payload
+    real_inventory = html_common._iter_html_output_files
+
+    def tracked_load(body):
+        nonlocal source_loads
+        source_loads += 1
+        return real_load(body)
+
+    def tracked_inventory(output_directory):
+        nonlocal inventories
+        inventories += 1
+        return real_inventory(output_directory)
+
+    monkeypatch.setattr(html_cleanup, "_load_workspace_filtered_payload", tracked_load)
+    monkeypatch.setattr(html_common, "_iter_html_output_files", tracked_inventory)
+
+    output_directory = tmp_path / "viewer_html"
+    (output_directory / "2025").mkdir(parents=True)
+    (output_directory / "2025" / "20250101000001.html").write_text(
+        _valid_download_html(), encoding="utf-8"
+    )
+    check_disclosure_html_output_directory_payload(
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(output_directory),
+        )
+    )
+
+    assert source_loads == 1
+    assert inventories == 1
+
+
+def test_all_external_html_inspection_reuses_parent_file_hashes_for_derived_filter(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import finiq.market_desk.web.features.disclosures.html_cleanup as html_cleanup
+    import finiq.market_desk.web.features.disclosures.html_common as html_common
+
+    parent_source = {
+        "disclosures": [
+            {"acpt_no": "20250101000001"},
+            {"acpt_no": "20250101000002"},
+        ]
+    }
+    parent_body = _external_workspace_body(tmp_path, parent_source)
+    data_root = Path(str(parent_body["data_root"]))
+    parent_payload = json.loads(
+        (data_root / "03-filter" / "bond_issuance" / "filtered.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    child_path = (
+        data_root
+        / "03-filter"
+        / "bond_issuance"
+        / "subfilters"
+        / "bond_issuance_kosdaq"
+        / "filtered.json"
+    )
+    child_path.parent.mkdir(parents=True)
+    child_path.write_text(
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "parent_mode": "bond_issuance",
+                "parent_result_fingerprint": html_common._source_json_fingerprint(
+                    parent_payload
+                ),
+                "disclosures": [parent_payload["disclosures"][0]],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output_directory = data_root / "04-external-html-download" / "bond_issuance"
+    (output_directory / "2025").mkdir(parents=True)
+    for acpt_no in ("20250101000001", "20250101000002"):
+        (output_directory / "2025" / f"{acpt_no}.html").write_text(
+            _valid_download_html(), encoding="utf-8"
+        )
+    create_external_html_integrity_baseline_payload(
+        {
+            **parent_body,
+            "output_directory": str(output_directory),
+            "trust_existing_files": True,
+        }
+    )
+
+    monkeypatch.setattr(
+        html_cleanup,
+        "manage_filter_presets_payload",
+        lambda _payload: {
+            "presets": [
+                {"id": "bond_issuance", "mode": "bond_issuance"},
+                {
+                    "id": "bond_issuance/bond_issuance_kosdaq",
+                    "mode": "bond_issuance_kosdaq",
+                    "parent_mode": "bond_issuance",
+                },
+            ]
+        },
+    )
+    hash_calls = 0
+    real_validation = html_common._html_file_validation_and_integrity
+
+    def tracked_validation(path):
+        nonlocal hash_calls
+        hash_calls += 1
+        return real_validation(path)
+
+    monkeypatch.setattr(
+        html_common,
+        "_html_file_validation_and_integrity",
+        tracked_validation,
+    )
+
+    result = html_cleanup.inspect_all_disclosure_external_html_payload(
+        {"data_root": str(data_root)}
+    )
+
+    assert result["passed"] is True
+    assert result["mode_count"] == 2
+    assert hash_calls == 2
+    derived_result = result["results"][1]
+    direct_result = check_disclosure_html_output_directory_payload(
+        html_cleanup.apply_workspace_defaults(
+            "external_html_download",
+            {
+                "data_root": str(data_root),
+                "mode": "bond_issuance_kosdaq",
+                "parent_mode": "bond_issuance",
+            },
+        )
+    )
+    for key, value in direct_result.items():
+        assert derived_result[key] == value
+
+
+def test_all_internal_html_inspection_reuses_parent_file_hashes_for_derived_filter(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import finiq.market_desk.web.features.disclosures.html_cleanup as html_cleanup
+    import finiq.market_desk.web.features.disclosures.html_common as html_common
+
+    parent_body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {"acpt_no": "20250101000001"},
+                {"acpt_no": "20250101000002"},
+            ]
+        },
+    )
+    data_root = Path(str(parent_body["data_root"]))
+    parent_payload = json.loads(
+        (data_root / "03-filter" / "bond_issuance" / "filtered.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    child_path = (
+        data_root
+        / "03-filter"
+        / "bond_issuance"
+        / "subfilters"
+        / "bond_issuance_kosdaq"
+        / "filtered.json"
+    )
+    child_path.parent.mkdir(parents=True)
+    child_path.write_text(
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "parent_mode": "bond_issuance",
+                "parent_result_fingerprint": html_common._source_json_fingerprint(
+                    parent_payload
+                ),
+                "disclosures": [parent_payload["disclosures"][0]],
+            }
+        ),
+        encoding="utf-8",
+    )
+    compressed_path = (
+        data_root
+        / "04-external-html-download"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+    compressed_path.parent.mkdir(parents=True)
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": acpt_no,
+                        "selected_main_doc_no": f"{acpt_no[:-2]}99",
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                    for acpt_no in ("20250101000001", "20250101000002")
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = data_root / "05-internal-html-download" / "bond_issuance"
+    (output_directory / "2025").mkdir(parents=True)
+    for acpt_no in ("20250101000001", "20250101000002"):
+        (output_directory / "2025" / f"{acpt_no}.html").write_text(
+            _valid_download_html(), encoding="utf-8"
+        )
+    html_cleanup.create_internal_html_integrity_baseline_payload(
+        {
+            "source_compressed_json_path": str(compressed_path),
+            "output_directory": str(output_directory),
+            "trust_existing_files": True,
+        }
+    )
+
+    monkeypatch.setattr(
+        html_cleanup,
+        "manage_filter_presets_payload",
+        lambda _payload: {
+            "presets": [
+                {"id": "bond_issuance", "mode": "bond_issuance"},
+                {
+                    "id": "bond_issuance/bond_issuance_kosdaq",
+                    "mode": "bond_issuance_kosdaq",
+                    "parent_mode": "bond_issuance",
+                },
+            ]
+        },
+    )
+    hash_calls = 0
+    real_validation = html_common._html_file_validation_and_integrity
+
+    def tracked_validation(path):
+        nonlocal hash_calls
+        hash_calls += 1
+        return real_validation(path)
+
+    monkeypatch.setattr(
+        html_common,
+        "_html_file_validation_and_integrity",
+        tracked_validation,
+    )
+
+    result = html_cleanup.inspect_all_disclosure_internal_html_payload(
+        {"data_root": str(data_root)}
+    )
+
+    assert result["passed"] is True
+    assert result["mode_count"] == 2
+    assert hash_calls == 2
+
+
 def test_check_disclosure_external_html_output_directory_uses_single_worker_for_single_target(
     tmp_path: Path,
     monkeypatch,
@@ -4106,6 +4373,36 @@ def test_inspect_folder_job_cancellation(tmp_path: Path, monkeypatch) -> None:
     assert any("cancelled" in msg.lower() for msg in status["progress_log"])
 
 
+def test_inspect_folder_job_honors_cancellation_before_start(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from finiq.market_desk.web.features.downloads.kind_jobs import (
+        cancel_download_job,
+        start_inspect_folder_job,
+    )
+
+    requested_job_id = "55555555555545559555555555555555"
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.downloads.kind_jobs.inspect_download_output_directory_payload",
+        lambda *_args, **_kwargs: pytest.fail("cancelled inspection must not start"),
+    )
+
+    cancelled = cancel_download_job(requested_job_id)
+    started = start_inspect_folder_job(
+        {
+            "job_id": requested_job_id,
+            "mode": "single",
+            "output_directory": str(tmp_path),
+            "page_size": 100,
+            "dry_run": True,
+        }
+    )
+
+    assert cancelled["status"] == "cancelled"
+    assert started["job_id"] == requested_job_id
+    assert started["status"] == "cancelled"
+
+
 def test_inspect_folder_job_runs_kind_verification_in_background(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -4720,9 +5017,9 @@ def test_split_internal_html_sections_uses_toc_boundaries(tmp_path: Path) -> Non
         <html>
           <head><style>body { width:600px; }</style></head>
           <body bgcolor="#FFFFFF">
-            <h2 class="SECTION-2" id="ignored-source-id"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+            <h2 class="SECTION-2" id="ignored-source-id"><p class="SECTION-2">주요사항보고서 / 거래소 신고의무 사항</p></h2>
             <table><tr><td>표지 내용</td></tr></table>
-            <h2 class="SECTION-1"><p>전환사채권 발행결정</p></h2>
+            <h2 class="SECTION-1"><p class="SECTION-1">전환사채권 발행결정</p></h2>
             <table><tr><td>발행금액</td><td>250,000,000</td></tr></table>
           </body>
         </html>
@@ -4745,10 +5042,10 @@ def test_split_internal_html_sections_uses_direct_section_heading_regardless_of_
     sections = split_internal_html_sections(
         """
         <html><head></head><body>
-          <div><h2 class="SECTION-1" id="toc_1"><p>중첩 목차</p></h2><p>중첩 내용</p></div>
+          <div><h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">중첩 목차</p></h2><p>중첩 내용</p></div>
           <h2 id="toc_appendix"><p>SECTION class 없는 제목</p></h2>
           <p>비정규 내용</p>
-          <h1 class="SECTION-7" id="not-a-toc-id"><p>정규 목차</p></h1>
+          <h1 class="SECTION-7" id="not-a-toc-id"><p class="SECTION-7">정규 목차</p></h1>
           <p>정규 내용</p>
         </body></html>
         """
@@ -4857,6 +5154,24 @@ def test_split_internal_html_sections_rejects_missing_canonical_structure(
         split_internal_html_sections(markup)
 
 
+def test_split_internal_html_sections_rejects_ordinary_paragraph_as_heading_title() -> None:
+    with pytest.raises(ValueError, match="SECTION heading title is required"):
+        split_internal_html_sections(
+            "<html><head></head><body><h2 class='SECTION-1'></h2>"
+            "<p>일반 본문</p></body></html>"
+        )
+
+
+def test_split_internal_html_sections_rejects_mixed_heading_and_xforms() -> None:
+    with pytest.raises(ValueError, match="one unambiguous TOC structure is required"):
+        split_internal_html_sections(
+            "<html><head></head><body>"
+            "<h2 class='SECTION-1'>목차</h2>"
+            "<div class='xforms'><div><div class='xforms_title'>다른 목차</div>"
+            "</div></div></body></html>"
+        )
+
+
 def test_save_disclosure_html_sections_payload_is_automatic_without_selection(
     tmp_path: Path,
 ) -> None:
@@ -4867,9 +5182,9 @@ def test_save_disclosure_html_sections_payload_is_automatic_without_selection(
     (source_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서 / 거래소 신고의무 사항</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-1" id="toc_2"><p class="SECTION-1">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -4901,9 +5216,9 @@ def test_save_disclosure_html_sections_payload_rejects_files_without_toc(tmp_pat
     (source_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -4939,7 +5254,7 @@ def test_section_save_ignores_obsolete_zero_rule_selection(
     output_directory.mkdir()
     stale_output.write_text("stale", encoding="utf-8")
     source.write_text(
-        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>주요사항보고서</p></h2><p>본문</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>주요사항보고서</p></h2><p>본문</p></body></html>",
         encoding="utf-8",
     )
 
@@ -4973,7 +5288,7 @@ def test_section_save_ignores_obsolete_unknown_selected_toc(
     input_directory.mkdir()
     source = input_directory / "20260422000832.html"
     source.write_text(
-        "<html><head></head><body><h2 class='SECTION-1'><p>주요사항보고서</p></h2><p>본문</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1'><p class='SECTION-1'>주요사항보고서</p></h2><p>본문</p></body></html>",
         encoding="utf-8",
     )
 
@@ -4999,9 +5314,9 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: P
     (input_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서 / 거래소 신고의무 사항</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-1" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-1" id="toc_2"><p class="SECTION-1">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -5010,7 +5325,7 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: P
     (nested_directory / "20260423000533.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서 / 거래소 신고의무 사항</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서 / 거래소 신고의무 사항</p></h2>
           <p>표지 내용</p>
         </body></html>
         """,
@@ -5047,11 +5362,11 @@ def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_ca
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     (input_directory / "20260401000001.html").write_text(
-        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2><p>첫 번째</p></body></html>",
         encoding="utf-8",
     )
     (input_directory / "20260402000001.html").write_text(
-        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>2</p></h2><p>두 번째</p></body></html>",
         encoding="utf-8",
     )
     checks = 0
@@ -5114,9 +5429,9 @@ def test_list_disclosure_html_section_sources_payload_pages_with_current_page_to
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     for index in range(22):
-        section_markup = "<h2 class='SECTION-1' id='toc_1'><p>목차</p></h2>"
+        section_markup = "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2>"
         if index == 0:
-            section_markup += "<h2 class='SECTION-2' id='toc_2'><p>본문</p></h2>"
+            section_markup += "<h2 class='SECTION-2' id='toc_2'><p class='SECTION-2'>본문</p></h2>"
         (input_directory / f"202604{index + 1:02d}000001.html").write_text(
             f"<html><head></head><body>{section_markup}</body></html>",
             encoding="utf-8",
@@ -5160,7 +5475,7 @@ def test_list_disclosure_html_section_sources_ignores_hidden_automation_cache(
     visible = input_directory / "20260712000001.html"
     hidden = input_directory / ".automation-current" / "20260712000002.html"
     hidden.parent.mkdir()
-    markup = "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>목차</p></h2></body></html>"
+    markup = "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2></body></html>"
     visible.write_text(markup, encoding="utf-8")
     hidden.write_text(markup, encoding="utf-8")
 
@@ -5182,7 +5497,7 @@ def test_summarize_disclosure_html_section_kinds_payload_uses_workers(
     for acpt_no in ("20260401000001", "20260402000001"):
         (input_directory / f"{acpt_no}.html").write_text(
             "<html><head></head><body>"
-            "<h2 class='SECTION-1' id='toc_1'><p>1</p></h2>"
+            "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2>"
             "</body></html>",
             encoding="utf-8",
         )
@@ -5226,9 +5541,9 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
         source_file.write_text(
             """
             <html><head></head><body>
-              <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
+              <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
               <p>표지</p>
-              <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
+              <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">2</p></h2>
               <p>본문</p>
             </body></html>
             """,
@@ -5237,7 +5552,7 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
     (input_directory / "20260405000001.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
           <p>표지</p>
         </body></html>
         """,
@@ -5306,9 +5621,9 @@ def test_save_disclosure_html_sections_payload_ignores_incomplete_obsolete_rules
     (source_directory / "20260401000001.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
           <p>표지</p>
-          <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">2</p></h2>
           <p>본문</p>
         </body></html>
         """,
@@ -5317,7 +5632,7 @@ def test_save_disclosure_html_sections_payload_ignores_incomplete_obsolete_rules
     (source_directory / "20260402000001.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>단독</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">단독</p></h2>
           <p>단독 본문</p>
         </body></html>
         """,
@@ -5346,8 +5661,8 @@ def test_section_output_inspection_reuses_save_selection_and_detects_content_cha
     source.write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2><p>표지</p>
-          <h2 class="SECTION-2" id="toc_2"><p>2</p></h2><p>본문</p>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2><p>표지</p>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">2</p></h2><p>본문</p>
         </body></html>
         """,
         encoding="utf-8",
@@ -5459,7 +5774,7 @@ def test_section_save_ignores_automation_cache_below_standard_input(
     hidden = input_directory / ".automation-current" / "20260101000002.html"
     visible.parent.mkdir(parents=True)
     hidden.parent.mkdir(parents=True)
-    html = "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2><p>본문</p></body></html>"
+    html = "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2><p>본문</p></body></html>"
     visible.write_text(html)
     hidden.write_text(html)
 
@@ -5497,9 +5812,9 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
             <tr><th>발행 대상자명</th><th>발행권면총액 (원)</th></tr>
             <tr><td>정정 전 투자자</td><td>10,000,000,000</td></tr>
           </table>
-          <h2 class="SECTION-1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지</p>
-          <h2 class="SECTION-1"><p>신주인수권부사채권 발행결정</p></h2>
+          <h2 class="SECTION-1"><p class="SECTION-1">신주인수권부사채권 발행결정</p></h2>
           <table>
             <tr><td>1. 사채의 종류</td><td>회차</td><td>16</td><td>종류</td><td>신주인수권부사채</td></tr>
             <tr><td>2. 사채의 권면총액 (원)</td><td>7,500,000,000</td></tr>
@@ -5562,9 +5877,9 @@ def test_save_disclosure_html_sections_payload_preserves_multiple_selected_secti
     (source_directory / "20260401000001.html").write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>1</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
           <p>표지</p>
-          <h2 class="SECTION-2" id="toc_2"><p>2</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">2</p></h2>
           <p>본문</p>
         </body></html>
         """,
@@ -5594,11 +5909,11 @@ def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cance
     source_directory = input_directory / "2008"
     source_directory.mkdir(parents=True)
     (source_directory / "20260401000001.html").write_text(
-        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>1</p></h2><p>첫 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2><p>첫 번째</p></body></html>",
         encoding="utf-8",
     )
     (source_directory / "20260402000001.html").write_text(
-        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p>2</p></h2><p>두 번째</p></body></html>",
+        "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>2</p></h2><p>두 번째</p></body></html>",
         encoding="utf-8",
     )
     def cancel_check() -> bool:
@@ -5630,9 +5945,9 @@ def test_split_disclosure_html_section_source_payload_splits_one_selected_file(t
     source_file.write_text(
         """
         <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p>주요사항보고서</p></h2>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
           <p>표지 내용</p>
-          <h2 class="SECTION-2" id="toc_2"><p>전환사채권 발행결정</p></h2>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">전환사채권 발행결정</p></h2>
           <p>발행금액 250,000,000</p>
         </body></html>
         """,
@@ -8677,7 +8992,7 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     assert "parallel_workers" in download_component_html
     assert "외부 HTML 압축 JSON 파일" not in download_component_html
     assert "외부 저장 화면의 외부 HTML 압축으로 만든 compressed-external-html.json 파일을 선택하세요." not in download_component_html
-    assert "data.has_existing ? data : null" in download_component_html
+    assert "setExistingData(selectedResult || null)" in download_component_html
     assert "async function readJsonResponse" in download_component_html
     assert "const handleApplyExistingSettings = () => {" not in download_component_html
     assert "setDownloadSplitByYear(existingOutputSplitByYear)" not in download_component_html
@@ -8698,12 +9013,12 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     # The inspection verdict lives only in the integrity card; the data-path
     # card must not repeat it.
     assert "기존 원문 저장 범위 감지됨" not in download_component_html
-    assert "기존 원문 저장 ${formatInteger(existingCount)}건 감지됨" in download_component_html
+    assert "allModeSaveInspectionData" in download_component_html
     assert "상위 필터에 없는 원문" in download_component_html
     assert "상위 필터에서 먼저 저장해야 합니다" in download_component_html
     assert "파생 필터에서는 다시 받을 수 없습니다." in download_component_html
-    assert "pendingDownloadCount > 0 && !selectedFilterParentMode" in download_component_html
-    assert "remainingInspection" in download_component_html
+    assert "const saveRedownloadable = showSaveWorkflow && saveRepairTargetCount > 0" in download_component_html
+    assert "/api/disclosures/internal-html-download/redownload/start" in download_component_html
     assert "stepState={inspectionStepState}" in download_component_html
     inspection_card_html = (
         REPO_ROOT

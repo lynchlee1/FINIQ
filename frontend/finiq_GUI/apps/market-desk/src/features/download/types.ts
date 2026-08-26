@@ -40,6 +40,7 @@ export type DownloadPayload = {
 };
 
 export type DownloadInspectPayload = DownloadPayload & {
+  job_id?: string;
   dry_run: boolean;
   delete_confirmed: boolean;
   delete_confirmation_text: string;

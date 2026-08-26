@@ -13,7 +13,10 @@ from finiq.data.assets_excel import (
     convert_asset_excels_to_wide_parquet,
     merge_asset_parquet_outputs,
 )
-from finiq.market_desk.web.features.disclosures.internal_html_download import download_disclosure_internal_html_payload
+from finiq.market_desk.web.features.disclosures.internal_html_download import (
+    download_disclosure_internal_html_payload,
+    redownload_missing_disclosure_internal_html_payload,
+)
 from finiq.market_desk.web.features.disclosures.external_html_download import (
     download_disclosure_external_html_payload,
     redownload_missing_disclosure_external_html_payload,
@@ -162,6 +165,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "external_html_compress_repair": rebuild_invalid_disclosure_external_html_compress_payload,
     "external_html_integrity_baseline": create_external_html_integrity_baseline_payload,
     "internal_html_download": download_disclosure_internal_html_payload,
+    "internal_html_redownload": redownload_missing_disclosure_internal_html_payload,
     "internal_html_integrity_baseline": create_internal_html_integrity_baseline_payload,
     "parse": parse_disclosure_html_payload,
     "section_inspect": inspect_disclosure_html_sections_payload,
@@ -211,6 +215,7 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
             "external_html_download",
             "external_html_redownload",
             "internal_html_download",
+            "internal_html_redownload",
             "disclosure_automation",
         }:
             network_wait_started_at = time.monotonic()
@@ -223,11 +228,13 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
                     f"{time.monotonic() - network_wait_started_at:.1f}초. "
                     "실제 처리를 시작합니다."
                 )
-                handler_payload = (
-                    payload
-                    if kind == "external_html_redownload"
-                    else apply_workspace_defaults(kind, payload)
-                )
+                if kind in {
+                    "external_html_redownload",
+                    "internal_html_redownload",
+                }:
+                    handler_payload = payload
+                else:
+                    handler_payload = apply_workspace_defaults(kind, payload)
                 result = handler(handler_payload, **kwargs)
         else:
             handler_payload = (

@@ -41,7 +41,6 @@ def redownload_missing_disclosure_external_html_payload(
         "timeout",
         "max_requests_per_minute",
         "wait_seconds",
-        "skip_existing",
         "progress_interval",
         "problem_file_limit",
         "max_workers",
@@ -60,6 +59,7 @@ def redownload_missing_disclosure_external_html_payload(
                 "data_root": data_root,
                 "mode": mode,
                 **{key: body.get(key) for key in setting_keys if key in body},
+                "skip_existing": True,
             },
         )
         try:

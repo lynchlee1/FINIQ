@@ -227,13 +227,18 @@ def _set_default(payload: dict[str, Any], key: str, value: object) -> None:
         payload[key] = value
 
 
-def apply_workspace_defaults(kind: str, body: dict[str, Any]) -> dict[str, Any]:
+def apply_workspace_defaults(
+    kind: str,
+    body: dict[str, Any],
+    *,
+    create_workspace: bool = True,
+) -> dict[str, Any]:
     """Fill missing stage paths from ``data_root`` without blocking overrides."""
     payload = dict(body)
     data_root = str(payload.get("data_root") or "").strip()
     if not data_root:
         return payload
-    workspace = resolve_disclosure_workspace(data_root, create=True)
+    workspace = resolve_disclosure_workspace(data_root, create=create_workspace)
     normalized_kind = str(kind or "").strip()
     parent_mode = body.get("parent_mode")
 

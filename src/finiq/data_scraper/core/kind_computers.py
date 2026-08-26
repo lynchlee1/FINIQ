@@ -19,8 +19,6 @@ from requests.adapters import HTTPAdapter
 from finiq.concurrency import available_cpu_count
 
 
-MAX_KIND_VIRTUAL_COMPUTERS = available_cpu_count()
-MAX_KIND_PROXY_COUNT = MAX_KIND_VIRTUAL_COMPUTERS - 1
 PUBLIC_IP_CHECK_URL = "https://api.ipify.org"
 
 T = TypeVar("T")
@@ -35,14 +33,19 @@ class KindVirtualComputer:
 
     @property
     def label(self) -> str:
-        return f"가상 컴퓨터 {self.index + 1}"
+        return "직접 연결" if self.proxy_url is None else f"경로 {self.index}"
 
     def describe(self, *, item_count: int, worker_count: int) -> str:
-        route = self.proxy_url or "직접 연결"
-        return (
-            f"{self.label}: 대상 {item_count}건 · "
-            f"워커 {worker_count}개 · {route}"
-        )
+        proxy = f" · {self.proxy_url}" if self.proxy_url else ""
+        return f"{self.label}: 대상 {item_count}건 · 워커 {worker_count}개{proxy}"
+
+
+def kind_route_count_limit() -> int:
+    return available_cpu_count()
+
+
+def kind_proxy_count_limit() -> int:
+    return kind_route_count_limit() - 1
 
 
 def normalize_kind_proxy_urls(value: object) -> list[str]:
@@ -51,9 +54,10 @@ def normalize_kind_proxy_urls(value: object) -> list[str]:
         return []
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise ValueError("kind_proxy_urls must be a list")
-    if len(value) > MAX_KIND_PROXY_COUNT:
+    max_proxy_count = kind_proxy_count_limit()
+    if len(value) > max_proxy_count:
         raise ValueError(
-            f"kind_proxy_urls must contain at most {MAX_KIND_PROXY_COUNT} proxies"
+            f"kind_proxy_urls must contain at most {max_proxy_count} proxies"
         )
 
     normalized: list[str] = []
@@ -103,7 +107,7 @@ def build_kind_virtual_computers(
 
 def split_items_round_robin(items: Sequence[T], count: int) -> list[list[T]]:
     if count < 1:
-        raise ValueError("virtual computer count must be >= 1")
+        raise ValueError("route count must be >= 1")
     buckets: list[list[T]] = [[] for _ in range(count)]
     for index, item in enumerate(items):
         buckets[index % count].append(item)
@@ -260,7 +264,7 @@ def run_kind_virtual_computers(
     worker_counts = allocate_computer_workers(max_workers, active_count)
 
     if progress_callback is not None:
-        progress_callback(f"가상 컴퓨터 {active_count}대로 KIND 저장을 시작합니다.")
+        progress_callback(f"KIND 네트워크 경로 {active_count}개로 저장을 시작합니다.")
         for computer, bucket, worker_count in zip(
             computers, buckets, worker_counts, strict=True
         ):
@@ -315,19 +319,19 @@ def run_kind_virtual_computers(
 
     if errors:
         raise RuntimeError(
-            "가상 컴퓨터 KIND 저장이 실패했습니다: " + "; ".join(errors)
+            "KIND 네트워크 경로 저장이 실패했습니다: " + "; ".join(errors)
         )
     return [collected[computer.index] for computer in computers]
 
 
 __all__ = [
-    "MAX_KIND_PROXY_COUNT",
-    "MAX_KIND_VIRTUAL_COMPUTERS",
     "KindVirtualComputer",
     "allocate_computer_workers",
     "build_kind_virtual_computers",
     "create_kind_computer_session",
     "check_kind_network_routes",
+    "kind_proxy_count_limit",
+    "kind_route_count_limit",
     "normalize_kind_proxy_urls",
     "run_kind_virtual_computers",
     "split_items_round_robin",
