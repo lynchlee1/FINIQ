@@ -8,14 +8,14 @@ from collections import Counter, deque
 
 from finiq.data_scraper.core.html_rate_limit import (
     RequestSpacingLimiter,
+    SlidingWindowRateLimiter,
     wait_for_html_download_request_slot,
 )
 from finiq.data_scraper.core.kind_computers import (
-    KIND_VIRTUAL_COMPUTER_COUNT,
     KindVirtualComputer,
+    build_kind_virtual_computers,
     create_kind_computer_session,
-    headers_for_computer,
-    resolve_virtual_computer_count,
+    normalize_kind_proxy_urls,
     run_kind_virtual_computers,
 )
 from finiq.market_desk.web.features.disclosures.html_common import *
@@ -151,31 +151,30 @@ def _internal_html_virtual_computer_worker(
     progress_queue: object,
     cancel_event: object,
 ) -> list[str]:
-    session = create_kind_computer_session(
-        computer,
-        pool_size=int(worker_kwargs["max_workers"]),
+    paths = download_disclosure_internal_htmls(
+        output_directory=Path(str(worker_kwargs["output_directory"])),
+        request_headers=dict(worker_kwargs["request_headers"]),  # type: ignore[arg-type]
+        targets=targets,
+        timeout=float(worker_kwargs["timeout"]),
+        wait_seconds_between_requests=float(
+            worker_kwargs["wait_seconds_between_requests"]
+        ),
+        max_requests_per_minute=int(worker_kwargs["max_requests_per_minute"]),
+        skip_existing=bool(worker_kwargs["skip_existing"]),
+        progress_callback=lambda message: progress_queue.put(message),  # type: ignore[attr-defined]
+        cancel_check=lambda: bool(cancel_event.is_set()),  # type: ignore[attr-defined]
+        max_workers=int(worker_kwargs["max_workers"]),
+        target_output_directories={
+            target["acpt_no"]: str(
+                dict(worker_kwargs["target_output_directories"])[
+                    target["acpt_no"]
+                ]
+            )
+            for target in targets
+        },
+        _egress_proxy_url=computer.proxy_url,
+        _include_process_limiter=False,
     )
-    try:
-        paths = download_disclosure_internal_htmls(
-            output_directory=Path(str(worker_kwargs["output_directory"])),
-            request_headers=headers_for_computer(
-                computer, dict(worker_kwargs["request_headers"])  # type: ignore[arg-type]
-            ),
-            targets=targets,
-            timeout=float(worker_kwargs["timeout"]),
-            wait_seconds_between_requests=float(
-                worker_kwargs["wait_seconds_between_requests"]
-            ),
-            max_requests_per_minute=int(worker_kwargs["max_requests_per_minute"]),
-            skip_existing=bool(worker_kwargs["skip_existing"]),
-            progress_callback=lambda message: progress_queue.put(message),  # type: ignore[attr-defined]
-            cancel_check=lambda: bool(cancel_event.is_set()),  # type: ignore[attr-defined]
-            max_workers=int(worker_kwargs["max_workers"]),
-            session=session,
-            virtual_computer_count=1,
-        )
-    finally:
-        session.close()
     return [str(path) for path in paths]
 
 
@@ -193,7 +192,10 @@ def download_disclosure_internal_htmls(
     max_workers: int | None = None,
     spacing_limiter: RequestSpacingLimiter | None = None,
     session: requests.Session | None = None,
-    virtual_computer_count: int | None = None,
+    kind_proxy_urls: Sequence[str] | None = None,
+    target_output_directories: Mapping[str, str | Path] | None = None,
+    _egress_proxy_url: str | None = None,
+    _include_process_limiter: bool = True,
 ) -> list[Path]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     if timeout <= 0:
@@ -207,17 +209,36 @@ def download_disclosure_internal_htmls(
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
-    computer_count = resolve_virtual_computer_count(
-        virtual_computer_count,
-        item_count=len(targets),
-        session=session,
-    )
+    target_acpt_numbers = [target["acpt_no"] for target in targets]
+    if target_output_directories is None:
+        resolved_output_directories = {
+            acpt_no: output_directory for acpt_no in target_acpt_numbers
+        }
+    else:
+        if set(target_output_directories) != set(target_acpt_numbers):
+            raise ValueError(
+                "target_output_directories must match target acpt_numbers"
+            )
+        resolved_output_directories = {
+            acpt_no: Path(target_output_directories[acpt_no]).resolve()
+            for acpt_no in target_acpt_numbers
+        }
+    normalized_proxy_urls = normalize_kind_proxy_urls(kind_proxy_urls)
+    if session is not None and (
+        normalized_proxy_urls or _egress_proxy_url is not None
+    ):
+        raise ValueError("session cannot be combined with KIND proxy configuration")
     worker_count = resolve_worker_count(
         max_workers,
         item_count=len(targets),
         field_name="max_workers",
     )
-    if computer_count > 1:
+    active_computer_count = min(
+        len(build_kind_virtual_computers(normalized_proxy_urls)),
+        len(targets),
+        worker_count,
+    )
+    if active_computer_count > 1:
         computer_results = run_kind_virtual_computers(
             items=targets,
             worker_qualname=(
@@ -233,10 +254,14 @@ def download_disclosure_internal_htmls(
                 "wait_seconds_between_requests": wait_seconds_between_requests,
                 "max_requests_per_minute": max_requests_per_minute,
                 "skip_existing": skip_existing,
+                "target_output_directories": {
+                    acpt_no: str(path)
+                    for acpt_no, path in resolved_output_directories.items()
+                },
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,
-            computer_count=computer_count,
+            proxy_urls=normalized_proxy_urls,
             max_workers=worker_count,
         )
         saved_paths: dict[str, Path] = {}
@@ -257,6 +282,7 @@ def download_disclosure_internal_htmls(
             wait_seconds_between_requests, 60.0 / max_requests_per_minute
         )
         spacing_limiter = RequestSpacingLimiter(min_interval_seconds)
+    rate_limiter = SlidingWindowRateLimiter(max_requests_per_minute)
     progress_lock = Lock()
 
     def report(message: str) -> None:
@@ -267,7 +293,9 @@ def download_disclosure_internal_htmls(
     def wait_for_request() -> None:
         if wait_for_html_download_request_slot(
             cancel_check,
+            local_limiter=rate_limiter,
             spacing_limiter=spacing_limiter,
+            include_process_limiter=_include_process_limiter,
         ):
             raise InterruptedError("internal HTML download cancelled")
 
@@ -279,7 +307,9 @@ def download_disclosure_internal_htmls(
         doc_no = target["doc_no"]
         if cancel_check is not None and cancel_check():
             return None
-        output_path = output_directory / VIEWER_HTML_FILENAME_TEMPLATE.format(
+        output_path = resolved_output_directories[
+            acpt_no
+        ] / VIEWER_HTML_FILENAME_TEMPLATE.format(
             acpt_no=acpt_no
         )
         if skip_existing and _is_valid_html(output_path):
@@ -311,6 +341,7 @@ def download_disclosure_internal_htmls(
     worker_sessions: list[requests.Session] = []
     worker_sessions_lock = Lock()
     active_session = session
+    computer = KindVirtualComputer(index=0, proxy_url=_egress_proxy_url)
 
     def download_parallel_target(
         item: tuple[int, dict[str, str]],
@@ -320,7 +351,9 @@ def download_disclosure_internal_htmls(
         if worker_session is None:
             worker_session = getattr(worker_local, "session", None)
             if worker_session is None:
-                worker_session = requests.Session()
+                worker_session = create_kind_computer_session(
+                    computer, pool_size=worker_count
+                )
                 worker_local.session = worker_session
                 with worker_sessions_lock:
                     worker_sessions.append(worker_session)
@@ -336,7 +369,9 @@ def download_disclosure_internal_htmls(
                     break
 
         if active_session is None:
-            with requests.Session() as owned_session:
+            with create_kind_computer_session(
+                computer, pool_size=worker_count
+            ) as owned_session:
                 download_serial(owned_session)
         else:
             download_serial(active_session)
@@ -662,31 +697,36 @@ def download_disclosure_internal_html_payload(
                 max(wait_seconds, 60.0 / max_requests_per_minute)
             )
             target_by_acpt_no = {target["acpt_no"]: target for target in targets}
-            grouped_targets: dict[str, list[dict[str, str]]] = {}
-            for acpt_no in download_acpt_numbers:
-                target = target_by_acpt_no[acpt_no]
-                grouped_targets.setdefault(target_years[acpt_no], []).append(target)
-            for year, group_targets in grouped_targets.items():
-                downloaded_paths.extend(
-                    download_disclosure_internal_htmls(
-                        output_directory=resolved_output_directory / year,
-                        request_headers=DEFAULT_REQUEST_HEADERS,
-                        targets=[
-                            {"acpt_no": target["acpt_no"], "doc_no": target["doc_no"]}
-                            for target in group_targets
-                        ],
-                        timeout=timeout,
-                        wait_seconds_between_requests=wait_seconds,
-                        max_requests_per_minute=max_requests_per_minute,
-                        skip_existing=False,
-                        progress_callback=handle_progress,
-                        cancel_check=lambda: _is_cancelled(cancel_token)
-                        or bool(cancel_check and cancel_check()),
-                        max_workers=max_workers,
-                        spacing_limiter=spacing_limiter,
-                        virtual_computer_count=KIND_VIRTUAL_COMPUTER_COUNT,
-                    )
+            download_targets = [
+                target_by_acpt_no[acpt_no] for acpt_no in download_acpt_numbers
+            ]
+            downloaded_paths.extend(
+                download_disclosure_internal_htmls(
+                    output_directory=resolved_output_directory,
+                    request_headers=DEFAULT_REQUEST_HEADERS,
+                    targets=[
+                        {"acpt_no": target["acpt_no"], "doc_no": target["doc_no"]}
+                        for target in download_targets
+                    ],
+                    timeout=timeout,
+                    wait_seconds_between_requests=wait_seconds,
+                    max_requests_per_minute=max_requests_per_minute,
+                    skip_existing=False,
+                    progress_callback=handle_progress,
+                    cancel_check=lambda: _is_cancelled(cancel_token)
+                    or bool(cancel_check and cancel_check()),
+                    max_workers=max_workers,
+                    spacing_limiter=spacing_limiter,
+                    kind_proxy_urls=body.get("kind_proxy_urls"),
+                    target_output_directories={
+                        target["acpt_no"]: (
+                            resolved_output_directory
+                            / target_years[target["acpt_no"]]
+                        )
+                        for target in download_targets
+                    },
                 )
+            )
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
         verification = _verify_internal_download_membership(
             expected_acpt_numbers=acpt_numbers,

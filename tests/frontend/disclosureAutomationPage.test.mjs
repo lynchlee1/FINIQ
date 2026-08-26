@@ -166,3 +166,9 @@ test("automation page inspects detail-page outputs and shows confirmed plans", a
   assert.doesNotMatch(page, /sectionRules|reviewPatterns/);
   assert.equal(page.match(/\/api\/disclosure-workflows\/inspect/g)?.length, 1);
 });
+
+test("automation passes saved KIND proxy routes to HTML stages", async () => {
+  const page = await readFile(pagePath, "utf8");
+
+  assert.match(page, /kind_proxy_urls: kindProxyUrls/);
+});

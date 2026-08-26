@@ -470,6 +470,33 @@ def test_init_config_does_not_invent_mode_or_workspace_paths(
     assert loaded.job_retention_minutes == 60
 
 
+def test_init_config_loads_kind_proxy_urls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "kind_proxy_urls": [
+                    "http://127.0.0.1:25001",
+                    "http://localhost:25002",
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        finiq_config, "get_default_settings_path", lambda: settings_path
+    )
+
+    loaded = finiq_config.init_config()
+
+    assert loaded.kind_proxy_urls == [
+        "http://127.0.0.1:25001",
+        "http://localhost:25002",
+    ]
+
+
 def test_separate_output_directory_setting_is_shared_and_persisted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

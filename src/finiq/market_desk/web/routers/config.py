@@ -7,9 +7,13 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from finiq.concurrency import available_cpu_count
+from finiq.data_scraper.core.kind_computers import (
+    check_kind_network_routes,
+    normalize_kind_proxy_urls,
+)
 from finiq.config import (
     build_disclosure_workspace_path_settings,
     normalize_path,
@@ -67,7 +71,12 @@ class SettingsUpdate(BaseModel):
     integrated_data_values: Optional[dict[str, str]] = None
     change_log_date_thresholds: Optional[dict[str, float]] = None
     change_log_numeric_thresholds: Optional[dict[str, float]] = None
+    kind_proxy_urls: Optional[list[str]] = None
     job_retention_minutes: Optional[int] = None
+
+
+class KindNetworkRoutesCheckRequest(BaseModel):
+    kind_proxy_urls: list[str] = Field(default_factory=list)
 
 
 class FileDialogRequest(BaseModel):
@@ -225,6 +234,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             "integrated_data_values": config.integrated_data_values,
             "change_log_date_thresholds": config.change_log_date_thresholds,
             "change_log_numeric_thresholds": config.change_log_numeric_thresholds,
+            "kind_proxy_urls": config.kind_proxy_urls,
             "job_retention_minutes": config.job_retention_minutes,
             "range_options": list(INSIGHT_RANGE_OPTIONS),
             "display_frequency_options": list(DISPLAY_FREQUENCY_OPTIONS),
@@ -273,6 +283,13 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if "kind_proxy_urls" in payload:
+            try:
+                payload["kind_proxy_urls"] = normalize_kind_proxy_urls(
+                    payload["kind_proxy_urls"]
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         current_settings = {}
         for key in config.__slots__:
             val = getattr(config, key)
@@ -296,6 +313,7 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
                 "change_log_date_thresholds",
                 "change_log_numeric_thresholds",
                 "asset_excel_account_mappings",
+                "kind_proxy_urls",
             ) and isinstance(value, (dict, list)):
                 normalized = value
             else:
@@ -352,6 +370,14 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             job_manager.set_retention_minutes(config.job_retention_minutes)
             configure_download_job_retention(config.job_retention_minutes)
         return config_payload()
+
+    @router.post("/api/kind-network-routes/check")
+    async def check_network_routes(req: KindNetworkRoutesCheckRequest):
+        try:
+            proxy_urls = normalize_kind_proxy_urls(req.kind_proxy_urls)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await asyncio.to_thread(check_kind_network_routes, proxy_urls)
 
     @router.post("/api/file-dialog")
     async def file_dialog(req: FileDialogRequest):

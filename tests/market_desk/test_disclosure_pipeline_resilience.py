@@ -677,7 +677,7 @@ def test_external_html_hash_mismatch_redownloads_only_changed_file(
         calls.append(acpt_numbers)
         paths: list[Path] = []
         for acpt_no in acpt_numbers:
-            path = Path(kwargs["output_directory"]) / f"{acpt_no}.html"
+            path = Path(kwargs["target_output_directories"][acpt_no]) / f"{acpt_no}.html"
             path.write_text(_valid_html("redownloaded"), encoding="utf-8")
             paths.append(path)
         return paths
@@ -901,7 +901,9 @@ def test_internal_html_hash_mismatch_redownloads_only_changed_file(
         calls.append([target["acpt_no"] for target in targets])
         paths: list[Path] = []
         for target in targets:
-            path = Path(kwargs["output_directory"]) / f"{target['acpt_no']}.html"
+            path = Path(
+                kwargs["target_output_directories"][target["acpt_no"]]
+            ) / f"{target['acpt_no']}.html"
             path.write_text(_valid_html("redownloaded"), encoding="utf-8")
             paths.append(path)
         return paths
@@ -1080,17 +1082,18 @@ def test_internal_html_download_runs_targets_in_parallel_and_preserves_order(
     ]
 
 
-def test_external_html_payload_uses_two_virtual_computers(
+def test_external_html_payload_passes_configured_kind_proxies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, object] = {}
 
     def fake_download(**kwargs: object) -> list[Path]:
         captured.update(kwargs)
-        output_directory = Path(str(kwargs["output_directory"]))
         paths = []
         for acpt_no in list(kwargs["acpt_numbers"]):
-            path = output_directory / f"{acpt_no}.html"
+            path = Path(
+                kwargs["target_output_directories"][acpt_no]
+            ) / f"{acpt_no}.html"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(_valid_html(), encoding="utf-8")
             paths.append(path)
@@ -1111,23 +1114,25 @@ def test_external_html_payload_uses_two_virtual_computers(
             },
             output_directory=str(tmp_path / "external"),
             skip_existing=False,
+            kind_proxy_urls=["http://127.0.0.1:25001"],
         )
     )
 
-    assert captured["virtual_computer_count"] == 2
+    assert captured["kind_proxy_urls"] == ["http://127.0.0.1:25001"]
 
 
-def test_internal_html_payload_uses_two_virtual_computers(
+def test_internal_html_payload_passes_configured_kind_proxies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, object] = {}
 
     def fake_download(**kwargs: object) -> list[Path]:
         captured.update(kwargs)
-        output_directory = Path(str(kwargs["output_directory"]))
         paths = []
         for target in list(kwargs["targets"]):
-            path = output_directory / f"{target['acpt_no']}.html"
+            path = Path(
+                kwargs["target_output_directories"][target["acpt_no"]]
+            ) / f"{target['acpt_no']}.html"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(_valid_html(), encoding="utf-8")
             paths.append(path)
@@ -1142,10 +1147,11 @@ def test_internal_html_payload_uses_two_virtual_computers(
             tmp_path,
             ["20250101000001", "20250101000002"],
             skip_existing=False,
+            kind_proxy_urls=["http://127.0.0.1:25001"],
         )
     )
 
-    assert captured["virtual_computer_count"] == 2
+    assert captured["kind_proxy_urls"] == ["http://127.0.0.1:25001"]
 
 
 def test_download_payload_reports_parent_cancellation(

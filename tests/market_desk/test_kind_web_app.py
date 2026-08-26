@@ -504,6 +504,76 @@ def test_api_settings_rejects_non_positive_job_retention_minutes() -> None:
     assert "must be >= 1" in response.json()["detail"]
 
 
+def test_api_settings_persists_valid_kind_proxy_urls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    original = list(config.kind_proxy_urls)
+    monkeypatch.setattr(config, "settings_path", str(settings_path))
+
+    try:
+        response = TestClient(app).post(
+            "/api/settings",
+            json={"kind_proxy_urls": ["http://127.0.0.1:25001"]},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["kind_proxy_urls"] == [
+            "http://127.0.0.1:25001"
+        ]
+        saved = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert saved["kind_proxy_urls"] == ["http://127.0.0.1:25001"]
+    finally:
+        config.kind_proxy_urls = original
+
+
+def test_api_settings_rejects_nonlocal_kind_proxy_url() -> None:
+    response = TestClient(app).post(
+        "/api/settings",
+        json={"kind_proxy_urls": ["http://10.0.0.2:25001"]},
+    )
+
+    assert response.status_code == 400
+    assert "must use localhost" in response.json()["detail"]
+
+
+def test_api_checks_unsaved_kind_network_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_check(proxy_urls: object) -> dict[str, object]:
+        captured["proxy_urls"] = proxy_urls
+        return {
+            "ready": True,
+            "route_count": 2,
+            "unique_ip_count": 2,
+            "routes": [],
+        }
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.routers.config.check_kind_network_routes",
+        fake_check,
+    )
+
+    response = TestClient(app).post(
+        "/api/kind-network-routes/check",
+        json={"kind_proxy_urls": ["http://127.0.0.1:25001"]},
+    )
+
+    assert response.status_code == 200
+    assert captured["proxy_urls"] == ["http://127.0.0.1:25001"]
+    assert response.json()["unique_ip_count"] == 2
+
+
+def test_api_rejects_invalid_kind_network_route_check() -> None:
+    response = TestClient(app).post(
+        "/api/kind-network-routes/check",
+        json={"kind_proxy_urls": ["https://example.com:25001"]},
+    )
+
+    assert response.status_code == 400
+    assert "must use http" in response.json()["detail"]
+
+
 def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypatch) -> None:
     def fake_filter_disclosures_payload(body, progress_callback=None, **_kwargs):
         if progress_callback:

@@ -16,6 +16,7 @@ export type SingleCheckDataIntegrityInspectionState =
   | "waiting"
   | "ready"
   | "running"
+  | "action-required"
   | "success"
   | "failed";
 
@@ -44,6 +45,7 @@ const singleCheckState = {
   waiting: { label: "대기", tone: "neutral", stepStatus: "waiting", stepLabel: "대기" },
   ready: { label: "대기", tone: "neutral", stepStatus: "waiting", stepLabel: "대기" },
   running: { label: "검사 중", tone: "neutral", stepStatus: "running", stepLabel: "검사 중" },
+  "action-required": { label: "다운로드 필요", tone: "warning", stepStatus: "ready", stepLabel: "다운로드 필요" },
   success: { label: "정상", tone: "success", stepStatus: "complete", stepLabel: "정상" },
   failed: { label: "사용 불가", tone: "error", stepStatus: "failed", stepLabel: "사용 불가" },
 } as const;

@@ -66,6 +66,9 @@ test("switching to compression resets inspection and checks the compressed JSON"
   assert.match(page, /setCompressionInspectionError\(nextResult\.passed \? "" : "압축 파일 재생성에 실패했습니다\."\)/);
   assert.match(page, /compressionInspectionData\?\.repairable_failed_mode_count/);
   assert.match(page, /compressionInspectionRepairable\s*\? `\$\{formatInteger\(compressionInspectionData\?\.repairable_failed_mode_count/);
+  assert.match(page, /compressionInspectionData\?\.skipped_mode_count/);
+  assert.match(page, /result\.skipped \? "압축 안 함"/);
+  assert.match(page, /원본 HTML이 없어 압축 파일을 검사하거나 생성하지 않습니다/);
   assert.doesNotMatch(page, /key: "rebuild-all-compression"/);
   assert.match(page, /extraSteps=\{inspectionExtraSteps\.length \? inspectionExtraSteps : undefined\}/);
   assert.match(page, /compressionResults\.map/);

@@ -94,13 +94,14 @@ def wait_for_html_download_request_slot(
     *,
     local_limiter: SlidingWindowRateLimiter | None = None,
     spacing_limiter: RequestSpacingLimiter | None = None,
+    include_process_limiter: bool = True,
 ) -> bool:
     """Reserve one request atomically across windows and minimum spacing."""
-    limiters = (
-        (_HTML_DOWNLOAD_RATE_LIMITER, local_limiter)
-        if local_limiter is not None
-        else (_HTML_DOWNLOAD_RATE_LIMITER,)
-    )
+    limiters: tuple[SlidingWindowRateLimiter, ...] = ()
+    if include_process_limiter:
+        limiters += (_HTML_DOWNLOAD_RATE_LIMITER,)
+    if local_limiter is not None:
+        limiters += (local_limiter,)
     return wait_for_rate_limiters(
         limiters,
         cancel_check,

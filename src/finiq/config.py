@@ -67,6 +67,7 @@ SAVED_SETTINGS_KEYS = (
     "integrated_data_values",
     "change_log_date_thresholds",
     "change_log_numeric_thresholds",
+    "kind_proxy_urls",
     "job_retention_minutes",
 )
 
@@ -109,6 +110,7 @@ class AppConfig:
     integrated_data_values: dict[str, str] = field(default_factory=dict)
     change_log_date_thresholds: dict[str, float] = field(default_factory=dict)
     change_log_numeric_thresholds: dict[str, float] = field(default_factory=dict)
+    kind_proxy_urls: list[str] = field(default_factory=list)
     job_retention_minutes: int = 60
 
 def get_default_settings_path() -> Path:
@@ -201,6 +203,8 @@ def save_settings(settings_path: str | Path, settings: dict[str, Any]) -> None:
         temporary_path.unlink(missing_ok=True)
 
 def init_config() -> AppConfig:
+    from finiq.data_scraper.core.kind_computers import normalize_kind_proxy_urls
+
     settings_path = get_default_settings_path()
     settings = load_settings(settings_path)
 
@@ -271,5 +275,6 @@ def init_config() -> AppConfig:
         integrated_data_values=settings.get("integrated_data_values", {}),
         change_log_date_thresholds=settings.get("change_log_date_thresholds", {}),
         change_log_numeric_thresholds=settings.get("change_log_numeric_thresholds", {}),
+        kind_proxy_urls=normalize_kind_proxy_urls(settings.get("kind_proxy_urls")),
         job_retention_minutes=job_retention_minutes,
     )

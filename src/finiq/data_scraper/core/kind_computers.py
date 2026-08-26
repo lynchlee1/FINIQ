@@ -1,36 +1,27 @@
-"""Two isolated KIND clients so one machine can download at twice the per-computer limit."""
+"""Explicit KIND egress sessions for direct and local HTTP proxy connections."""
 
 from __future__ import annotations
 
 import importlib
 import ipaddress
 import os
-import re
-import socket
-import subprocess
-from collections.abc import Callable, Mapping, Sequence
+import threading
+from collections import Counter
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from multiprocessing import get_context
-from queue import Empty
 from typing import Any, TypeVar
+from urllib.parse import urlsplit
 
 import requests
 from requests.adapters import HTTPAdapter
 
-KIND_VIRTUAL_COMPUTER_COUNT = 2
-KIND_HOSTS = frozenset({"kind.krx.co.kr", "www.kind.krx.co.kr"})
-KIND_VIRTUAL_COMPUTER_USER_AGENTS = (
-    (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
-    ),
-)
+from finiq.concurrency import available_cpu_count
+
+
+MAX_KIND_VIRTUAL_COMPUTERS = available_cpu_count()
+MAX_KIND_PROXY_COUNT = MAX_KIND_VIRTUAL_COMPUTERS - 1
+PUBLIC_IP_CHECK_URL = "https://api.ipify.org"
 
 T = TypeVar("T")
 ProgressCallback = Callable[[str], None]
@@ -40,131 +31,74 @@ CancelCheck = Callable[[], bool]
 @dataclass(frozen=True)
 class KindVirtualComputer:
     index: int
-    source_ip: str | None
-    destination_ip: str | None
-    user_agent: str
+    proxy_url: str | None
 
     @property
     def label(self) -> str:
         return f"가상 컴퓨터 {self.index + 1}"
 
     def describe(self, *, item_count: int, worker_count: int) -> str:
-        parts = [f"{self.label}: 대상 {item_count}건", f"워커 {worker_count}개"]
-        if self.source_ip and self.destination_ip:
-            parts.append(f"{self.source_ip} → {self.destination_ip}")
-        elif self.source_ip:
-            parts.append(self.source_ip)
-        elif self.destination_ip:
-            parts.append(self.destination_ip)
-        return " · ".join(parts)
+        route = self.proxy_url or "직접 연결"
+        return (
+            f"{self.label}: 대상 {item_count}건 · "
+            f"워커 {worker_count}개 · {route}"
+        )
 
 
-class KindSourceAddressAdapter(HTTPAdapter):
-    """Bind outgoing KIND sockets to one local address."""
+def normalize_kind_proxy_urls(value: object) -> list[str]:
+    """Validate loopback HTTP CONNECT proxy URLs against the CPU limit."""
+    if value in (None, ""):
+        return []
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError("kind_proxy_urls must be a list")
+    if len(value) > MAX_KIND_PROXY_COUNT:
+        raise ValueError(
+            f"kind_proxy_urls must contain at most {MAX_KIND_PROXY_COUNT} proxies"
+        )
 
-    def __init__(self, source_ip: str, **kwargs: Any) -> None:
-        self.source_ip = source_ip
-        super().__init__(**kwargs)
-
-    def init_poolmanager(
-        self,
-        connections: int,
-        maxsize: int,
-        block: bool = False,
-        **pool_kwargs: Any,
-    ) -> None:
-        pool_kwargs["source_address"] = (self.source_ip, 0)
-        return super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
-
-    def proxy_manager_for(self, proxy: str, **proxy_kwargs: Any) -> Any:
-        proxy_kwargs["source_address"] = (self.source_ip, 0)
-        return super().proxy_manager_for(proxy, **proxy_kwargs)
-
-
-def list_local_ipv4_addresses() -> list[str]:
-    """Return unique non-loopback IPv4 addresses on this machine."""
-    found: list[str] = []
-    seen: set[str] = set()
-
-    def add(host: str) -> None:
+    normalized: list[str] = []
+    seen_endpoints: set[tuple[str, int]] = set()
+    for index, raw_url in enumerate(value):
+        proxy_url = str(raw_url or "").strip()
+        parsed = urlsplit(proxy_url)
+        if parsed.scheme != "http":
+            raise ValueError(f"kind_proxy_urls[{index}] must use http")
+        if parsed.hostname not in {"127.0.0.1", "localhost"}:
+            raise ValueError(f"kind_proxy_urls[{index}] must use localhost")
         try:
-            parsed = ipaddress.ip_address(host)
-        except ValueError:
-            return
-        if parsed.version != 4 or parsed.is_loopback or parsed.is_link_local:
-            return
-        if parsed.is_multicast or parsed.is_unspecified:
-            return
-        if host not in seen:
-            seen.add(host)
-            found.append(host)
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect(("kind.krx.co.kr", 443))
-            add(sock.getsockname()[0])
-    except OSError:
-        pass
-    try:
-        for info in socket.getaddrinfo(
-            socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM
-        ):
-            add(info[4][0])
-    except socket.gaierror:
-        pass
-    for command in (("ifconfig",), ("ip", "-4", "-o", "addr")):
-        try:
-            output = subprocess.check_output(
-                command, text=True, stderr=subprocess.DEVNULL
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(
+                f"kind_proxy_urls[{index}] has an invalid port"
+            ) from exc
+        if port is None:
+            raise ValueError(f"kind_proxy_urls[{index}] must include a port")
+        if port == 0:
+            raise ValueError(f"kind_proxy_urls[{index}] has an invalid port")
+        if parsed.username or parsed.password:
+            raise ValueError(
+                f"kind_proxy_urls[{index}] must not include credentials"
             )
-        except (FileNotFoundError, subprocess.CalledProcessError, OSError):
-            continue
-        for match in re.finditer(
-            r"\b(?:inet\s+)?(\d{1,3}(?:\.\d{1,3}){3})(?:/\d+)?\b", output
-        ):
-            add(match.group(1))
-        break
-    return found
-
-
-def list_kind_ipv4_addresses() -> list[str]:
-    """Return unique IPv4 addresses currently published for KIND."""
-    found: list[str] = []
-    seen: set[str] = set()
-    try:
-        infos = socket.getaddrinfo("kind.krx.co.kr", 443, socket.AF_INET, socket.SOCK_STREAM)
-    except socket.gaierror:
-        return found
-    for info in infos:
-        host = info[4][0]
-        if host not in seen:
-            seen.add(host)
-            found.append(host)
-    return found
+        if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            raise ValueError(
+                f"kind_proxy_urls[{index}] must not include a path, query, or fragment"
+            )
+        endpoint = ("127.0.0.1", port)
+        if endpoint in seen_endpoints:
+            raise ValueError("kind_proxy_urls contains a duplicate proxy")
+        seen_endpoints.add(endpoint)
+        normalized.append(proxy_url.rstrip("/"))
+    return normalized
 
 
 def build_kind_virtual_computers(
-    count: int = KIND_VIRTUAL_COMPUTER_COUNT,
+    proxy_urls: Sequence[str] | None = None,
 ) -> list[KindVirtualComputer]:
-    if count < 1:
-        raise ValueError("virtual computer count must be >= 1")
-    source_ips = list_local_ipv4_addresses()
-    destination_ips = list_kind_ipv4_addresses()
-    computers: list[KindVirtualComputer] = []
-    for index in range(count):
-        computers.append(
-            KindVirtualComputer(
-                index=index,
-                source_ip=source_ips[index] if index < len(source_ips) else None,
-                destination_ip=(
-                    destination_ips[index] if index < len(destination_ips) else None
-                ),
-                user_agent=KIND_VIRTUAL_COMPUTER_USER_AGENTS[
-                    index % len(KIND_VIRTUAL_COMPUTER_USER_AGENTS)
-                ],
-            )
-        )
-    return computers
+    normalized_proxy_urls = normalize_kind_proxy_urls(proxy_urls)
+    return [
+        KindVirtualComputer(index=index, proxy_url=proxy_url)
+        for index, proxy_url in enumerate([None, *normalized_proxy_urls])
+    ]
 
 
 def split_items_round_robin(items: Sequence[T], count: int) -> list[list[T]]:
@@ -176,120 +110,119 @@ def split_items_round_robin(items: Sequence[T], count: int) -> list[list[T]]:
     return buckets
 
 
-def headers_for_computer(
-    computer: KindVirtualComputer,
-    request_headers: Mapping[str, object],
-) -> dict[str, str]:
-    headers = {str(key): str(value) for key, value in request_headers.items()}
-    headers["User-Agent"] = computer.user_agent
-    return headers
+def allocate_computer_workers(max_workers: int, computer_count: int) -> list[int]:
+    if max_workers < 1:
+        raise ValueError("max_workers must be >= 1")
+    if computer_count < 1 or computer_count > max_workers:
+        raise ValueError("computer_count must be between 1 and max_workers")
+    base, remainder = divmod(max_workers, computer_count)
+    return [base + (1 if index < remainder else 0) for index in range(computer_count)]
 
 
 def create_kind_computer_session(
-    computer: KindVirtualComputer | None,
+    computer: KindVirtualComputer,
     *,
     pool_size: int = 10,
 ) -> requests.Session:
     session = requests.Session()
-    adapter_kwargs = {"pool_connections": pool_size, "pool_maxsize": pool_size}
-    adapter: HTTPAdapter
-    if computer is not None and computer.source_ip:
-        adapter = KindSourceAddressAdapter(computer.source_ip, **adapter_kwargs)
-    else:
-        adapter = HTTPAdapter(**adapter_kwargs)
+    session.trust_env = False
+    adapter = HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
+    if computer.proxy_url:
+        session.proxies.update(
+            {"http": computer.proxy_url, "https": computer.proxy_url}
+        )
     return session
 
 
-def session_uses_source_address(session: requests.Session) -> bool:
-    adapters = getattr(session, "adapters", {})
-    return any(
-        isinstance(adapter, KindSourceAddressAdapter) for adapter in adapters.values()
-    )
-
-
-def prepare_kind_virtual_computer(computer: KindVirtualComputer) -> None:
-    """Pin KIND host lookups to this computer's destination IP in the current process."""
-    destination_ip = computer.destination_ip
-    if not destination_ip:
-        return
-    real_getaddrinfo = socket.getaddrinfo
-
-    def pinned_getaddrinfo(
-        host: str | bytes | None,
-        port: Any,
-        family: int = 0,
-        type: int = 0,
-        proto: int = 0,
-        flags: int = 0,
-    ) -> list[tuple[Any, ...]]:
-        hostname = host.decode() if isinstance(host, bytes) else host
-        if hostname not in KIND_HOSTS:
-            return real_getaddrinfo(host, port, family, type, proto, flags)
-        port_number = 0 if port in (None, "") else int(port)
-        socktype = type or socket.SOCK_STREAM
-        protocol = proto or socket.IPPROTO_TCP
-        return [
-            (
-                socket.AF_INET,
-                socktype,
-                protocol,
-                "",
-                (destination_ip, port_number),
-            )
-        ]
-
-    socket.getaddrinfo = pinned_getaddrinfo  # type: ignore[assignment]
-
-
-def workers_per_computer(max_workers: int, computer_count: int) -> int:
-    if computer_count < 1:
-        raise ValueError("virtual computer count must be >= 1")
-    return max(1, (max_workers + computer_count - 1) // computer_count)
-
-
-def resolve_virtual_computer_count(
-    value: object,
+def check_kind_network_routes(
+    proxy_urls: Sequence[str] | None = None,
     *,
-    item_count: int,
-    session: requests.Session | None,
-) -> int:
-    if value in (None, ""):
-        count = 1
-    else:
+    timeout: float = 10,
+    session_factory: Callable[[KindVirtualComputer], requests.Session] = create_kind_computer_session,
+) -> dict[str, Any]:
+    """Check each configured egress and report whether its public IP is unique."""
+    computers = build_kind_virtual_computers(proxy_urls)
+
+    def check_one(computer: KindVirtualComputer) -> dict[str, Any]:
+        session = session_factory(computer)
         try:
-            count = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("virtual_computer_count must be an integer") from exc
-    if count not in {1, 2}:
-        raise ValueError("virtual_computer_count must be 1 or 2")
-    if session is not None and count > 1:
-        raise ValueError("session cannot be combined with virtual_computer_count > 1")
-    if item_count < 2:
-        return 1
-    return count
+            response = session.get(PUBLIC_IP_CHECK_URL, timeout=timeout)
+            response.raise_for_status()
+            public_ip = str(ipaddress.ip_address(response.text.strip()))
+            return {
+                "index": computer.index,
+                "label": "직접 연결" if computer.proxy_url is None else f"경로 {computer.index}",
+                "proxy_url": computer.proxy_url,
+                "status": "ready",
+                "public_ip": public_ip,
+                "unique": None,
+            }
+        except (requests.RequestException, ValueError):
+            return {
+                "index": computer.index,
+                "label": "직접 연결" if computer.proxy_url is None else f"경로 {computer.index}",
+                "proxy_url": computer.proxy_url,
+                "status": "error",
+                "public_ip": None,
+                "unique": None,
+            }
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(
+        max_workers=len(computers),
+        thread_name_prefix="kind-route-check",
+    ) as executor:
+        routes = list(executor.map(check_one, computers))
+
+    ip_counts = Counter(
+        route["public_ip"] for route in routes if route["public_ip"] is not None
+    )
+    for route in routes:
+        public_ip = route["public_ip"]
+        if public_ip is not None:
+            route["unique"] = ip_counts[public_ip] == 1
+
+    return {
+        "ready": all(
+            route["status"] == "ready" and route["unique"] is True
+            for route in routes
+        ),
+        "route_count": len(routes),
+        "unique_ip_count": len(ip_counts),
+        "routes": routes,
+    }
 
 
-def _computer_process_entry(
-    worker_qualname: str,
-    computer: KindVirtualComputer,
-    items: list[Any],
-    worker_kwargs: dict[str, Any],
-    progress_queue: Any,
-    cancel_event: Any,
-    result_queue: Any,
-) -> None:
-    prepare_kind_virtual_computer(computer)
-    module_name, func_name = worker_qualname.rsplit(".", 1)
-    worker = getattr(importlib.import_module(module_name), func_name)
-    try:
-        result = worker(
-            computer, items, worker_kwargs, progress_queue, cancel_event
+class _ProgressQueue:
+    def __init__(
+        self,
+        callback: ProgressCallback | None,
+        lock: threading.Lock,
+    ) -> None:
+        self._callback = callback
+        self._lock = lock
+
+    def put(self, message: str) -> None:
+        if self._callback is not None:
+            with self._lock:
+                self._callback(message)
+
+
+class _CancelEvent:
+    def __init__(self, cancel_check: CancelCheck | None) -> None:
+        self._cancel_check = cancel_check
+        self._cancelled = threading.Event()
+
+    def is_set(self) -> bool:
+        return self._cancelled.is_set() or bool(
+            self._cancel_check is not None and self._cancel_check()
         )
-        result_queue.put(("ok", computer.index, result))
-    except Exception as exc:
-        result_queue.put(("err", computer.index, f"{type(exc).__name__}: {exc}"))
+
+    def set(self) -> None:
+        self._cancelled.set()
 
 
 def _identity_worker(
@@ -300,7 +233,7 @@ def _identity_worker(
     cancel_event: Any,
 ) -> list[Any]:
     del worker_kwargs, cancel_event
-    progress_queue.put(f"{computer.index}:{os.getpid()}")
+    progress_queue.put(f"{computer.index}:{os.getpid()}:{threading.get_ident()}")
     return list(items)
 
 
@@ -311,149 +244,91 @@ def run_kind_virtual_computers(
     worker_kwargs: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: CancelCheck | None = None,
-    computer_count: int = KIND_VIRTUAL_COMPUTER_COUNT,
+    proxy_urls: Sequence[str] | None = None,
     max_workers: int = 1,
 ) -> list[list[Any]]:
-    """Run ``worker_qualname`` on isolated processes and return per-computer results."""
-    if computer_count not in {1, 2}:
-        raise ValueError("virtual_computer_count must be 1 or 2")
-    computers = build_kind_virtual_computers(computer_count)
-    buckets = split_items_round_robin(items, computer_count)
-    assigned = [
-        (computer, bucket)
-        for computer, bucket in zip(computers, buckets, strict=True)
-        if bucket
-    ]
-    per_computer_workers = workers_per_computer(max_workers, max(1, len(assigned)))
+    """Run one isolated worker group for each explicit KIND egress."""
+    if max_workers < 1:
+        raise ValueError("max_workers must be >= 1")
+    if not items:
+        return []
+
+    all_computers = build_kind_virtual_computers(proxy_urls)
+    active_count = min(len(all_computers), len(items), max_workers)
+    computers = all_computers[:active_count]
+    buckets = split_items_round_robin(items, active_count)
+    worker_counts = allocate_computer_workers(max_workers, active_count)
+
     if progress_callback is not None:
-        progress_callback(f"가상 컴퓨터 {len(assigned)}대로 KIND 저장을 시작합니다.")
-        for computer, bucket in assigned:
+        progress_callback(f"가상 컴퓨터 {active_count}대로 KIND 저장을 시작합니다.")
+        for computer, bucket, worker_count in zip(
+            computers, buckets, worker_counts, strict=True
+        ):
             progress_callback(
                 computer.describe(
-                    item_count=len(bucket), worker_count=per_computer_workers
+                    item_count=len(bucket), worker_count=worker_count
                 )
             )
 
-    child_kwargs = dict(worker_kwargs)
-    child_kwargs["max_workers"] = per_computer_workers
-
-    if len(assigned) == 1:
-        computer, bucket = assigned[0]
-
-        class _LocalQueue:
-            def put(self, message: str) -> None:
-                if progress_callback is not None:
-                    progress_callback(message)
-
-        class _LocalEvent:
-            def is_set(self) -> bool:
-                return bool(cancel_check is not None and cancel_check())
-
-        module_name, func_name = worker_qualname.rsplit(".", 1)
-        worker = getattr(importlib.import_module(module_name), func_name)
-        result = worker(computer, bucket, child_kwargs, _LocalQueue(), _LocalEvent())
-        results: list[list[Any]] = [[] for _ in computers]
-        results[computer.index] = result
-        return results
-
-    context = get_context("spawn")
-    progress_queue = context.Queue()
-    result_queue = context.Queue()
-    cancel_event = context.Event()
-    processes = [
-        context.Process(
-            target=_computer_process_entry,
-            args=(
-                worker_qualname,
-                computer,
-                bucket,
-                child_kwargs,
-                progress_queue,
-                cancel_event,
-                result_queue,
-            ),
-        )
-        for computer, bucket in assigned
-    ]
+    module_name, func_name = worker_qualname.rsplit(".", 1)
+    worker = getattr(importlib.import_module(module_name), func_name)
+    progress_lock = threading.Lock()
+    progress_queue = _ProgressQueue(progress_callback, progress_lock)
+    cancel_event = _CancelEvent(cancel_check)
     collected: dict[int, list[Any]] = {}
     errors: list[str] = []
 
-    def drain_progress() -> None:
-        while True:
-            try:
-                message = progress_queue.get_nowait()
-            except Empty:
-                return
-            if progress_callback is not None:
-                progress_callback(str(message))
+    def run_one(
+        computer: KindVirtualComputer,
+        bucket: list[T],
+        worker_count: int,
+    ) -> tuple[int, list[Any]]:
+        computer_kwargs = dict(worker_kwargs)
+        computer_kwargs["max_workers"] = worker_count
+        result = worker(
+            computer,
+            bucket,
+            computer_kwargs,
+            progress_queue,
+            cancel_event,
+        )
+        return computer.index, list(result)
 
-    def drain_results() -> None:
-        while True:
-            try:
-                status, index, payload = result_queue.get_nowait()
-            except Empty:
-                return
-            if status == "ok":
-                collected[int(index)] = list(payload)
-            else:
-                errors.append(str(payload))
-
-    try:
-        for process in processes:
-            process.start()
-        while len(collected) + len(errors) < len(processes):
-            if cancel_check is not None and cancel_check():
-                cancel_event.set()
-            drain_progress()
-            try:
-                status, index, payload = result_queue.get(timeout=0.1)
-            except Empty:
-                if not any(process.is_alive() for process in processes):
-                    drain_progress()
-                    drain_results()
-                    break
-                continue
-            if status == "ok":
-                collected[int(index)] = list(payload)
-            else:
-                errors.append(str(payload))
-        drain_progress()
-        drain_results()
-        crashed = [
-            computer.label
-            for computer, _bucket in assigned
-            if computer.index not in collected
-        ]
-        if crashed and not errors:
-            errors.append("프로세스 종료: " + ", ".join(crashed))
-        if errors:
-            raise RuntimeError(
-                "가상 컴퓨터 KIND 저장이 실패했습니다: " + "; ".join(errors)
+    with ThreadPoolExecutor(
+        max_workers=active_count,
+        thread_name_prefix="kind-egress",
+    ) as executor:
+        future_computers = {
+            executor.submit(run_one, computer, bucket, worker_count): computer
+            for computer, bucket, worker_count in zip(
+                computers, buckets, worker_counts, strict=True
             )
-    finally:
-        cancel_event.set()
-        for process in processes:
-            process.join(timeout=5)
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=2)
+        }
+        for future in as_completed(future_computers):
+            computer = future_computers[future]
+            try:
+                index, result = future.result()
+                collected[index] = result
+            except Exception as exc:
+                cancel_event.set()
+                errors.append(f"{computer.label}: {type(exc).__name__}: {exc}")
 
-    return [collected.get(computer.index, []) for computer in computers]
+    if errors:
+        raise RuntimeError(
+            "가상 컴퓨터 KIND 저장이 실패했습니다: " + "; ".join(errors)
+        )
+    return [collected[computer.index] for computer in computers]
 
 
 __all__ = [
-    "KIND_VIRTUAL_COMPUTER_COUNT",
-    "KindSourceAddressAdapter",
+    "MAX_KIND_PROXY_COUNT",
+    "MAX_KIND_VIRTUAL_COMPUTERS",
     "KindVirtualComputer",
+    "allocate_computer_workers",
     "build_kind_virtual_computers",
     "create_kind_computer_session",
-    "headers_for_computer",
-    "list_kind_ipv4_addresses",
-    "list_local_ipv4_addresses",
-    "prepare_kind_virtual_computer",
-    "resolve_virtual_computer_count",
+    "check_kind_network_routes",
+    "normalize_kind_proxy_urls",
     "run_kind_virtual_computers",
-    "session_uses_source_address",
     "split_items_round_robin",
-    "workers_per_computer",
 ]

@@ -2578,7 +2578,7 @@ def test_download_disclosure_external_html_payload_uses_collected_acpt_numbers(t
         assert kwargs["max_retries"] == 5
         paths = []
         for acpt_no in kwargs["acpt_numbers"]:
-            path = Path(kwargs["output_directory"]) / f"{acpt_no}.html"
+            path = Path(kwargs["target_output_directories"][acpt_no]) / f"{acpt_no}.html"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(_valid_download_html(), encoding="utf-8")
             paths.append(path)
@@ -2706,7 +2706,9 @@ def test_write_disclosure_html_manifest_payload_rejects_source_directory(
 def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Path, monkeypatch) -> None:
     def fake_download(**kwargs):
         assert kwargs["targets"] == [{"acpt_no": "20250101000001", "doc_no": "20250101000099"}]
-        path = Path(kwargs["output_directory"]) / "20250101000001.html"
+        path = Path(
+            kwargs["target_output_directories"]["20250101000001"]
+        ) / "20250101000001.html"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("<html><body>content</body></html>", encoding="utf-8")
         kwargs["progress_callback"](f"Saved KIND internal HTML to: {path}")
@@ -2824,11 +2826,12 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
     calls: list[tuple[Path, list[dict[str, str]]]] = []
 
     def fake_download(**kwargs):
-        output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
-        calls.append((output_directory, targets))
+        calls.append((Path(kwargs["output_directory"]), targets))
         paths = [
-            output_directory / f"{target['acpt_no']}.html" for target in targets
+            Path(kwargs["target_output_directories"][target["acpt_no"]])
+            / f"{target['acpt_no']}.html"
+            for target in targets
         ]
         for path in paths:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -2863,7 +2866,7 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
 
     assert calls == [
         (
-            tmp_path / "content_html" / "2025",
+            tmp_path / "content_html",
             [{"acpt_no": "AB202501010001", "doc_no": "DOC202501Z"}],
         )
     ]
@@ -3205,7 +3208,7 @@ def test_download_disclosure_external_html_payload_logs_existing_html_overlap(
         assert kwargs["skip_existing"] is False
         paths = []
         for acpt_no in kwargs["acpt_numbers"]:
-            path = Path(kwargs["output_directory"]) / f"{acpt_no}.html"
+            path = Path(kwargs["target_output_directories"][acpt_no]) / f"{acpt_no}.html"
             path.write_text(_valid_download_html(), encoding="utf-8")
             paths.append(path)
         return paths
@@ -3605,12 +3608,11 @@ def test_download_disclosure_external_html_payload_resumes_yearly_files(
     calls: list[tuple[Path, list[str]]] = []
 
     def fake_download(**kwargs):
-        output_directory = Path(kwargs["output_directory"])
         acpt_numbers = list(kwargs["acpt_numbers"])
-        calls.append((output_directory, acpt_numbers))
+        calls.append((Path(kwargs["output_directory"]), acpt_numbers))
         paths = []
         for acpt_no in acpt_numbers:
-            path = output_directory / f"{acpt_no}.html"
+            path = Path(kwargs["target_output_directories"][acpt_no]) / f"{acpt_no}.html"
             path.write_text(_valid_download_html(), encoding="utf-8")
             paths.append(path)
         return paths
@@ -3646,7 +3648,7 @@ def test_download_disclosure_external_html_payload_resumes_yearly_files(
         )
     )
 
-    assert calls == [(output_directory / "2025", ["20250101000002"])]
+    assert calls == [(output_directory, ["20250101000002"])]
     assert payload["saved_files"] == [
         str(output_directory / "2025" / "20250101000001.html"),
         str(output_directory / "2025" / "20250101000002.html"),
@@ -4556,12 +4558,13 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
     spacing_limiter_ids: list[int] = []
 
     def fake_download(**kwargs):
-        output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
-        calls.append((output_directory, targets))
+        calls.append((Path(kwargs["output_directory"]), targets))
         spacing_limiter_ids.append(id(kwargs["spacing_limiter"]))
         paths = [
-            output_directory / f"{target['acpt_no']}.html" for target in targets
+            Path(kwargs["target_output_directories"][target["acpt_no"]])
+            / f"{target['acpt_no']}.html"
+            for target in targets
         ]
         for path in paths:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -4601,12 +4604,11 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
 
     assert calls == [
         (
-            tmp_path / "content_html" / "2025",
-            [{"acpt_no": "20250101000001", "doc_no": "20250101000099"}],
-        ),
-        (
-            tmp_path / "content_html" / "2026",
-            [{"acpt_no": "20260101000001", "doc_no": "20260101000099"}],
+            tmp_path / "content_html",
+            [
+                {"acpt_no": "20250101000001", "doc_no": "20250101000099"},
+                {"acpt_no": "20260101000001", "doc_no": "20260101000099"},
+            ],
         ),
     ]
     assert len(set(spacing_limiter_ids)) == 1
@@ -4637,11 +4639,12 @@ def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_
     calls: list[tuple[Path, list[dict[str, str]]]] = []
 
     def fake_download(**kwargs):
-        output_directory = Path(kwargs["output_directory"])
         targets = list(kwargs["targets"])
-        calls.append((output_directory, targets))
+        calls.append((Path(kwargs["output_directory"]), targets))
         paths = [
-            output_directory / f"{target['acpt_no']}.html" for target in targets
+            Path(kwargs["target_output_directories"][target["acpt_no"]])
+            / f"{target['acpt_no']}.html"
+            for target in targets
         ]
         for path in paths:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -4701,7 +4704,7 @@ def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_
 
     assert calls == [
         (
-            tmp_path / "content_html" / "2025",
+            tmp_path / "content_html",
             [{"acpt_no": "20250101000001", "doc_no": "20250101000000"}],
         )
     ]

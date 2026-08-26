@@ -173,7 +173,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | --- | --- | --- |
 | Existing data review card | 기존 데이터 검토 | A standalone preflight card. Placement and behavior follow [components/inspection-block.md](./components/inspection-block.md). |
 | Existing data integrity inspection action | 검사하기 | Use one right-side control: show `검사하기` before the first run, a loading state while running, and the clickable result `정상` or `사용 불가` afterward. Clicking a result runs the same inspection again. |
-| Existing data clear verdict | 정상 | Use only when every page-owned inspection step on the card has passed. Incomplete follow-up steps, including `미저장 원문 다운로드`, keep the overall verdict at `검사 중`. Completed rows may still show `정상`. |
+| Existing data clear verdict | 정상 | Use only when every page-owned inspection step on the card has passed. Incomplete follow-up steps, including `미저장 원문 다운로드`, keep the overall verdict at `검사 중`. If the inspection row itself reports missing targets, show that row as `다운로드 필요`, not `정상`. |
 | Existing data blocked verdict | 사용 불가 | Use when a mismatch or integrity failure blocks reuse. Keep the failed step and repair action visible. On HTML save pages, a 파생 필터 with 상위 필터에 없는 원문 is also 사용 불가; do not offer 재다운로드. |
 | Existing data successful step state | 정상 | Use for every completed inspection step with no issue, including metadata, settings, saved files, and KIND count checks. Keep specific evidence in the step summary. |
 | Existing data inspection-pending state | 대기 | Neutral default before the user clicks `검사하기`. Loading a page or changing an input must not start an integrity API. Input changes invalidate only the affected step and its dependents as defined in [components/inspection-block.md](./components/inspection-block.md). |
@@ -224,6 +224,13 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 
 | Concept | Preferred UI Term | Notes |
 | --- | --- | --- |
+| KIND egress route settings | KIND 네트워크 경로 | Right-side settings section shown only on `공시원문 외부 저장`, `공시원문 내부 저장`, and `공시 자동화`. Keep it provider-neutral. Index the fixed direct connection as route 0 and allow localhost HTTP proxy routes up to the current CPU count minus one. |
+| KIND egress route add action | 경로 추가 | Adds one editable localhost HTTP proxy address. |
+| KIND egress route check action | 연결 검사 | Checks the unsaved route list and reports each public IP, connection failure, and duplicate IP before saving. |
+| KIND egress route save action | 변경사항 저장 | Persists the current proxy route list for later KIND work. Keep it disabled while the edited list matches the saved list. Checking does not save. |
+| KIND egress route unchecked state | 검사 필요 | Header summary shown before the first check and immediately after any route is added, edited, or removed. |
+| KIND egress route duplicate state | IP 중복 | Indicates that two or more configured routes resolve to the same public IP. |
+| KIND egress route IP result | 공인 IP: 정상(IP) | Keep connection state and public IP in one line beneath the route. Use `공인 IP: 검사 필요`, `공인 IP: 연결 실패`, or `공인 IP: 중복(IP)` for the other states instead of a separate right-side status label. |
 | External HTML download workflow | 공시원문 외부 저장 | Navigation/page workflow name. |
 | Internal HTML download workflow | 공시원문 내부 저장 | Navigation/page workflow name. |
 | Internal HTML section workflow | 공시원문 목차 분리 | Navigation/page workflow name. |
@@ -254,6 +261,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Disclosure external HTML save inspection scope | 모든 모드 외부 HTML 검사 | The top inspection on `외부 HTML 저장` checks every basic and derived workspace mode independently of the selected `조건검색 필터`. Any missing, invalid, hash-mismatched, or unverified target makes the overall verdict `사용 불가`; list every mode result without adding another inspection card. |
 | Disclosure external HTML redownload action | 재다운로드 | Repair action replacing `검사하기` in the single all-mode `기존 원문 데이터 검사` row whenever owner-mode downloads remain. Do not add a separate `미저장 원문 다운로드` row. Process only affected base-mode-owned files, never duplicate derived-mode work, and run the all-mode inspection again when finished. |
 | Disclosure external HTML compression repair action | 재생성 | Repair action shown in the existing compression inspection row when a base-mode compressed file fails. Rebuild only failed base-mode-owned files. Derived modes inspect the same parent-owned HTML/compressed pair and must not add duplicate repair work. |
+| Disclosure external HTML compression skipped state | 압축 안 함 | Use for a mode with no saved source HTML. It is not a compression failure or repair target; mixed inspections continue to regenerate only modes that have source HTML. |
 | Disclosure title search mode | 공시내역 제목 검색 | Read-only mode on stage 03; it searches the stage 02 SQLite database without creating an output file. Show the same filter level, parent, and `조건검색 필터` selectors as filtering mode. Selecting a saved filter immediately loads its conditions, while create, save, and delete actions remain available only in `공시내역 필터링`. |
 | Disclosure filtering mode | 공시내역 필터링 | Recording mode on stage 03; it updates the stage 03 workflow result and transfer file. |
 | Disclosure filter exclusive connector | XOR | Condition-block connector that matches when exactly one side is true. |

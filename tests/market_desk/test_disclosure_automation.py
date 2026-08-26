@@ -354,6 +354,8 @@ def test_internal_html_download_rate_limits_each_actual_kind_request(
             return None
 
     class Session:
+        trust_env = True
+
         def __enter__(self) -> "Session":
             return self
 
@@ -362,6 +364,9 @@ def test_internal_html_download_rate_limits_each_actual_kind_request(
 
         def get(self, *_args: object, **_kwargs: object) -> Response:
             return Response()
+
+        def mount(self, *_args: object, **_kwargs: object) -> None:
+            return None
 
     def sleep(seconds: float) -> None:
         sleeps.append(seconds)

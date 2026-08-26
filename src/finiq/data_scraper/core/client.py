@@ -20,11 +20,10 @@ from .html_rate_limit import (
 )
 from .kind_computers import (
     KindVirtualComputer,
+    build_kind_virtual_computers,
     create_kind_computer_session,
-    headers_for_computer,
-    resolve_virtual_computer_count,
+    normalize_kind_proxy_urls,
     run_kind_virtual_computers,
-    session_uses_source_address,
 )
 
 from .payload import (
@@ -587,32 +586,29 @@ def _external_html_virtual_computer_worker(
     progress_queue: object,
     cancel_event: object,
 ) -> list[str]:
-    session = create_kind_computer_session(
-        computer,
-        pool_size=int(worker_kwargs["max_workers"]),
+    paths = download_disclosure_external_htmls(
+        output_directory=Path(str(worker_kwargs["output_directory"])),
+        request_headers=dict(worker_kwargs["request_headers"]),  # type: ignore[arg-type]
+        acpt_numbers=acpt_numbers,
+        timeout=float(worker_kwargs["timeout"]),
+        wait_seconds_between_requests=float(
+            worker_kwargs["wait_seconds_between_requests"]
+        ),
+        max_requests_per_minute=int(worker_kwargs["max_requests_per_minute"]),
+        skip_existing=bool(worker_kwargs["skip_existing"]),
+        progress_callback=lambda message: progress_queue.put(message),  # type: ignore[attr-defined]
+        cancel_check=lambda: bool(cancel_event.is_set()),  # type: ignore[attr-defined]
+        max_workers=int(worker_kwargs["max_workers"]),
+        max_retries=int(worker_kwargs["max_retries"]),
+        target_output_directories={
+            acpt_no: str(
+                dict(worker_kwargs["target_output_directories"])[acpt_no]
+            )
+            for acpt_no in acpt_numbers
+        },
+        _egress_proxy_url=computer.proxy_url,
+        _include_process_limiter=False,
     )
-    try:
-        paths = download_disclosure_external_htmls(
-            output_directory=Path(str(worker_kwargs["output_directory"])),
-            request_headers=headers_for_computer(
-                computer, dict(worker_kwargs["request_headers"])  # type: ignore[arg-type]
-            ),
-            acpt_numbers=acpt_numbers,
-            timeout=float(worker_kwargs["timeout"]),
-            wait_seconds_between_requests=float(
-                worker_kwargs["wait_seconds_between_requests"]
-            ),
-            max_requests_per_minute=int(worker_kwargs["max_requests_per_minute"]),
-            session=session,
-            skip_existing=bool(worker_kwargs["skip_existing"]),
-            progress_callback=lambda message: progress_queue.put(message),  # type: ignore[attr-defined]
-            cancel_check=lambda: bool(cancel_event.is_set()),  # type: ignore[attr-defined]
-            max_workers=int(worker_kwargs["max_workers"]),
-            max_retries=int(worker_kwargs["max_retries"]),
-            virtual_computer_count=1,
-        )
-    finally:
-        session.close()
     return [str(path) for path in paths]
 
 
@@ -643,7 +639,10 @@ def download_disclosure_external_htmls(
     cancel_check: KindCancelCheck | None = None,
     max_workers: int | None = None,
     max_retries: int = 5,
-    virtual_computer_count: int | None = None,
+    kind_proxy_urls: Sequence[str] | None = None,
+    target_output_directories: Mapping[str, str | Path] | None = None,
+    _egress_proxy_url: str | None = None,
+    _include_process_limiter: bool = True,
 ) -> list[Path]:
     """여러 KIND 접수번호의 뷰어 HTML을 병렬로 처리하며 무결성을 보장한다."""
     if timeout <= 0:
@@ -659,14 +658,14 @@ def download_disclosure_external_htmls(
         _validate_kind_identifier(acpt_no, field_name="acpt_no")
         for acpt_no in acpt_numbers
     ]
-    computer_count = resolve_virtual_computer_count(
-        virtual_computer_count,
-        item_count=len(normalized_acpt_numbers),
-        session=session,
-    )
-    if computer_count > 1 and saved_file_callback is not None:
+    normalized_proxy_urls = normalize_kind_proxy_urls(kind_proxy_urls)
+    if session is not None and (
+        normalized_proxy_urls or _egress_proxy_url is not None
+    ):
+        raise ValueError("session cannot be combined with KIND proxy configuration")
+    if normalized_proxy_urls and saved_file_callback is not None:
         raise ValueError(
-            "saved_file_callback cannot be combined with virtual_computer_count > 1"
+            "saved_file_callback cannot be combined with kind_proxy_urls"
         )
     max_workers = resolve_worker_count(
         max_workers,
@@ -674,8 +673,26 @@ def download_disclosure_external_htmls(
         field_name="max_workers",
     )
     output_directory = output_directory.resolve()
+    if target_output_directories is None:
+        resolved_output_directories = {
+            acpt_no: output_directory for acpt_no in normalized_acpt_numbers
+        }
+    else:
+        if set(target_output_directories) != set(normalized_acpt_numbers):
+            raise ValueError(
+                "target_output_directories must match requested acpt_numbers"
+            )
+        resolved_output_directories = {
+            acpt_no: Path(target_output_directories[acpt_no]).resolve()
+            for acpt_no in normalized_acpt_numbers
+        }
     normalized_request_headers = _normalize_request_headers(request_headers)
-    if computer_count > 1:
+    active_computer_count = min(
+        len(build_kind_virtual_computers(normalized_proxy_urls)),
+        len(normalized_acpt_numbers),
+        max_workers,
+    )
+    if active_computer_count > 1:
         computer_results = run_kind_virtual_computers(
             items=normalized_acpt_numbers,
             worker_qualname=(
@@ -689,22 +706,24 @@ def download_disclosure_external_htmls(
                 "max_requests_per_minute": max_requests_per_minute,
                 "skip_existing": skip_existing,
                 "max_retries": max_retries,
+                "target_output_directories": {
+                    acpt_no: str(path)
+                    for acpt_no, path in resolved_output_directories.items()
+                },
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,
-            computer_count=computer_count,
+            proxy_urls=normalized_proxy_urls,
             max_workers=max_workers,
         )
         return _paths_in_request_order(normalized_acpt_numbers, computer_results)
     owns_session = session is None
-    active_session = session or requests.Session()
-    
-    # Increase connection pool size for parallel requests
-    if (
-        not owns_session
-        and hasattr(active_session, "mount")
-        and not session_uses_source_address(active_session)
-    ):
+    computer = KindVirtualComputer(index=0, proxy_url=_egress_proxy_url)
+    active_session = session or create_kind_computer_session(
+        computer, pool_size=max_workers
+    )
+
+    if not owns_session and hasattr(active_session, "mount"):
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=max_workers,
             pool_maxsize=max_workers
@@ -729,7 +748,9 @@ def download_disclosure_external_htmls(
             return active_session
         worker_session = getattr(worker_local, "session", None)
         if worker_session is None:
-            worker_session = requests.Session()
+            worker_session = create_kind_computer_session(
+                computer, pool_size=max_workers
+            )
             worker_session.cookies.update(active_session.cookies)
             worker_local.session = worker_session
             with worker_sessions_lock:
@@ -740,7 +761,9 @@ def download_disclosure_external_htmls(
         if cancel_check is not None and cancel_check():
             return None
 
-        output_path = output_directory / _build_viewer_html_filename(acpt_no)
+        output_path = resolved_output_directories[
+            acpt_no
+        ] / _build_viewer_html_filename(acpt_no)
 
         if skip_existing and _is_valid_html(output_path):
             _report_progress(progress_callback, f"Skipping existing KIND external HTML: {output_path}")
@@ -753,6 +776,7 @@ def download_disclosure_external_htmls(
             cancel_check,
             local_limiter=rate_limiter,
             spacing_limiter=spacing_limiter,
+            include_process_limiter=_include_process_limiter,
         ):
             return None
 

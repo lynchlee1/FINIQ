@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from finiq.concurrency import resolve_worker_count
 from finiq.data_scraper.core.client import _is_valid_html
+from finiq.data_scraper.core.kind_computers import normalize_kind_proxy_urls
 from finiq.data_scraper.parse import disclosure_file_rows, pagination_info
 from finiq.data_scraper.workflow import inspect_download_directory_pages
 
@@ -273,6 +274,9 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
                 field_name="local_workers",
             ),
             "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
+            "kind_proxy_urls": normalize_kind_proxy_urls(
+                execution.get("kind_proxy_urls")
+            ),
         },
         "download_confirmation": str(
             payload.get("download_confirmation") or ""
@@ -1823,6 +1827,7 @@ def _run_stage(
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
                         "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
                         "max_workers": execution["local_workers"],
+                        "kind_proxy_urls": execution["kind_proxy_urls"],
                         "progress_interval": 25,
                         "cancel_token": uuid.uuid4().hex,
                     },
@@ -1934,6 +1939,7 @@ def _run_stage(
                         "wait_seconds": KIND_AUTOMATION_WAIT_SECONDS,
                         "max_requests_per_minute": KIND_AUTOMATION_CONTENT_REQUESTS_PER_MINUTE,
                         "max_workers": execution["local_workers"],
+                        "kind_proxy_urls": execution["kind_proxy_urls"],
                         "progress_interval": 25,
                         "cancel_token": uuid.uuid4().hex,
                     },

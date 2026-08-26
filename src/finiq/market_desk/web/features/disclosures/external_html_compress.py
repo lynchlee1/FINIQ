@@ -70,6 +70,7 @@ def inspect_all_disclosure_external_html_compress_payload(
         )
 
     failed_modes = [result["id"] for result in results if not result["passed"]]
+    skipped_modes = [result["id"] for result in results if result.get("skipped")]
     repairable_failed_modes = [
         result["id"] for result in results if result["repairable"]
     ]
@@ -80,6 +81,8 @@ def inspect_all_disclosure_external_html_compress_payload(
         "passed_mode_count": len(results) - len(failed_modes),
         "failed_mode_count": len(failed_modes),
         "failed_modes": failed_modes,
+        "skipped_mode_count": len(skipped_modes),
+        "skipped_modes": skipped_modes,
         "repairable_failed_mode_count": len(repairable_failed_modes),
         "repairable_failed_modes": repairable_failed_modes,
         "expected_records": sum(result["expected_records"] for result in results),
@@ -163,6 +166,23 @@ def inspect_disclosure_external_html_compress_payload(
         for _year, html_path in _collect_yearly_html_files(input_directory)
     ]
 
+    if not expected_acpt_numbers:
+        return {
+            "format": "finiq_disclosure_external_html_compress_inspection_v1",
+            "compressed_path": str(compressed_path),
+            "passed": True,
+            "skipped": True,
+            "expected_records": 0,
+            "verified_records": 0,
+            "missing_records": 0,
+            "unexpected_records": 0,
+            "duplicate_records": 0,
+            "missing_files": [],
+            "invalid_files": [],
+            "content_matches_source": True,
+            "error": "",
+        }
+
     verification = _verify_compressed_external_html_files(
         written_files=[str(compressed_path)],
         expected_acpt_numbers=expected_acpt_numbers,
@@ -171,6 +191,7 @@ def inspect_disclosure_external_html_compress_payload(
         "format": "finiq_disclosure_external_html_compress_inspection_v1",
         "compressed_path": str(compressed_path),
         **verification,
+        "skipped": False,
         "content_matches_source": False,
         "error": "",
     }
@@ -191,20 +212,6 @@ def inspect_disclosure_external_html_compress_payload(
             **result,
             "passed": False,
             "error": "압축 JSON 형식이 올바르지 않습니다.",
-        }
-
-    if not expected_acpt_numbers:
-        empty_payload = {
-            "format": "finiq_disclosure_external_html_docs_v1",
-            "summary": {"found_files": 0, "compressed_files": 0},
-            "records": [],
-        }
-        content_matches_source = saved_payload == empty_payload
-        return {
-            **result,
-            "passed": content_matches_source,
-            "content_matches_source": content_matches_source,
-            "error": "" if content_matches_source else "원문 HTML이 없는 압축 JSON 내용이 올바르지 않습니다.",
         }
 
     try:

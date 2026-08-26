@@ -26,6 +26,7 @@ import {
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
 import { DisclosureLockedSettingsCard } from "@/components/disclosures/DisclosureLockedSettingsCard";
+import { KindNetworkRouteSettings } from "@/components/disclosures/KindNetworkRouteSettings";
 import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
@@ -202,6 +203,7 @@ export default function DisclosureAutomationPage() {
     html_parse_mode: storedMode,
     html_parser_method: storedParserMethod,
     parallel_worker_count: parallelWorkerCount,
+    kind_proxy_urls: kindProxyUrls,
     fetchSettings,
     saveSetting,
   } = useSettingsStore();
@@ -441,6 +443,7 @@ export default function DisclosureAutomationPage() {
         page_size: execution.pageSize,
         local_workers: execution.localWorkers,
         timeout: execution.timeout,
+        kind_proxy_urls: kindProxyUrls,
       },
       download_confirmation: confirmedDownload,
     };
@@ -927,6 +930,7 @@ export default function DisclosureAutomationPage() {
                   <Input type="number" min="1" max="120" value={timeout} onChange={(event) => { setTimeoutValue(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
                 </HtmlInspectorField>
               </div>
+              <KindNetworkRouteSettings />
               <div className="rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-xs leading-5 text-[var(--tv-muted)]">
                 KIND 검색·외부 HTML은 분당 최대 45회, 내부 HTML의 실제 HTTP 요청은 분당 최대 30회, 동시 요청은 1개로 고정합니다.
               </div>

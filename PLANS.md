@@ -1,7 +1,44 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-26: align KIND route count and direct-route indexing
+
+- Purpose: Remove the fixed eight-route claim and make the direct connection read as part of the same indexed KIND route list.
+- Implementation: The backend and Web settings now derive the total KIND route limit from the current CPU count, with one direct route plus up to CPU-count-minus-one localhost proxies. The UI reports that live CPU count, applies it to `경로 추가`, and renders the fixed direct connection as route 0 using the same index and content alignment as proxy routes.
+- Verification: 105 focused backend tests and all 194 frontend tests pass; `git diff --check` passes. Browser verification on the saved four-proxy configuration reports the live eight-CPU limit, renders direct access as route 0, and measures identical index/content alignment and row height across routes 0–4. No route setting was saved and no external connection check was triggered.
+
+## 2026-08-25: keep incomplete internal HTML inspection non-green
+
+- Purpose: Prevent `기존 원문 데이터 검사` from showing the green `정상` state when its own summary reports target HTML files that still need to be downloaded.
+- Implementation: Added the warning-colored `다운로드 필요` inspection-step state and use it for internal HTML inspections while target downloads remain. The overall card continues to stay at `검사 중`, and the separate download action remains available.
+- Verification: The focused regression test and all 194 frontend tests pass; `git diff --check` passes.
+
+## 2026-08-25: skip compression modes without source HTML
+
+- Purpose: Prevent modes with no saved source HTML from appearing as broken compression files or regeneration targets.
+- Implementation: Compression inspection now marks source-empty modes as `압축 안 함` and excludes them from failures and repairs. Mixed workspaces regenerate only failed modes that actually have source HTML, while the UI reports normal, skipped, and failed mode counts separately.
+- Verification: Eight focused backend tests and all 193 frontend tests pass; `git diff --check` passes. A read-only inspection of the real workspace reports all six base/derived modes normal with 414,626 mode-level records verified and no missing, unexpected, or duplicate records. The stale `2개 모드 재생성 필요` result is absent in a fresh local page session, and the development backend was restarted on the changed code.
+
+## 2026-08-25: compact the KIND network-route inspector
+
+- Purpose: Replace the tall repeated route form with a dense settings list that fits the existing right inspector and makes editing, verification state, and save readiness immediately legible.
+- Implementation: Grouped each route's number, editable proxy address, public-IP result, and delete action into one compact row separated by a single divider. Public IP and its state share one line, such as `공인 IP: 정상(84.233.167.238)`, instead of repeating a detached right-side status. Typography now uses only the documented 14px Body scale for route controls and the 12px Caption scale for headings, explanations, indices, IP results, and summaries; hierarchy comes from weight and semantic color instead of extra font sizes. The fixed direct route uses the same alignment without looking editable. The section header now owns the aggregate `검사 필요` or checked-count state, `경로 추가` is a small secondary action, and `변경사항 저장` is disabled until the normalized route list differs from saved settings. Any add, edit, or removal clears all prior IP evidence because uniqueness is a whole-list property.
+- Verification: The focused route UI tests and all 193 frontend tests pass; `git diff --check` passes. Browser verification on the real four-proxy configuration measures the section at about 516px high, confirms the unchanged list disables saving, a route edit enables saving while retaining `검사 필요`, and both light and dark themes preserve alignment and contrast. No route setting was saved and no external connection check was triggered during visual verification.
+
+## 2026-08-24: manage provider-neutral KIND network routes in relevant Web settings
+
+- Purpose: Let users configure and verify the multiple public-IP paths used by KIND work from the relevant Web UI without tying FINIQ to ProtonVPN or showing the control on unrelated pages.
+- Implementation: Added one shared `KIND 네트워크 경로` section to the right settings panels of `공시원문 외부 저장`, `공시원문 내부 저장`, and `공시 자동화` only. Direct access stays fixed, up to seven localhost HTTP proxy endpoints can be added or removed, and saving remains explicit. A new provider-neutral check endpoint tests the unsaved direct/proxy routes concurrently through one public-IP lookup, reports each public IP, marks connection failures and duplicate IPs, and never falls back to the direct route.
+- Verification: 14 focused backend tests and all 193 frontend tests pass; `git diff --check` passes. A live check reports five ready routes and five distinct public IPs for direct access plus ports 25001-25004. Browser verification confirms the section appears once on each of the three intended workflows, is absent from `공시원문 목차 분리`, and remains readable in both light and dark themes. The MarketDesk production build compiles successfully and stops during TypeScript checking at the pre-existing unsupported `modal` prop in `packages/ui/src/components/ui/select.tsx`.
+
+## 2026-08-24: replace simulated KIND computers with explicit IP egresses
+
+- Purpose: Make the KIND HTML split-download feature use genuinely distinct public-IP paths and scale from one through five routes without pretending that local or destination IP aliases are separate computers.
+- Implementation: Replaced source-address binding, destination-DNS pinning, User-Agent variation and multiprocessing with one direct route plus up to seven explicitly configured localhost HTTP CONNECT proxies, matching this computer's eight CPU cores. Every route owns its HTTP sessions, request spacing and per-minute limiter; the configured `max_workers` total is divided exactly across active routes, all years are dispatched in one job, and a failed proxy is never retried over the direct route. Settings, detail-page jobs, redownloads and disclosure automation now carry the validated `kind_proxy_urls` list. The reference documents the minimal Proton WireGuard + `wireproxy` setup without storing or reading VPN keys.
+- Verification: 91 focused backend tests and all 191 frontend tests pass; Python compilation and `git diff --check` pass. The full backend run completes with 1,407 passed and 167 skipped; its six failures are in unchanged classification-path, input-validation-order and HTML-parser UI-contract behavior. The MarketDesk production build compiled the changed pages and then stopped at the pre-existing unsupported `modal` prop in `packages/ui/src/components/ui/select.tsx`. Four Proton WireGuard routes run through `wireproxy` on localhost ports 25001–25004; all four reach KIND with HTTP 200, have distinct public IPs, and differ from the direct route.
+
 ## 2026-08-24: download KIND HTML with two virtual computers
 
+- Status: Superseded the same day by explicit direct/proxy egress routing above.
 - Purpose: Make KIND external and internal HTML downloads twice as fast by appearing as two computers.
 - Implementation: HTML save jobs split targets across two processes. Each process has its own HTTP session, User-Agent, per-computer 100/min limiter, local source IP when two addresses exist, and a pinned KIND destination IP when DNS returns more than one. `실행 현황` logs the `가상 컴퓨터` assignment. Stage 01 list download is unchanged.
 - Verification: 83 focused backend tests pass, including two-process isolation, IP/User-Agent assignment, payload `virtual_computer_count=2`, and the existing 100/min shared-limiter regression for a single computer. Python compilation and `git diff --check` pass. Live KIND throughput was not measured in the browser; the pages were not exercised end-to-end against the network.

@@ -13,7 +13,38 @@
 - `records[].acpt_no`는 저장할 공시를 식별한다.
 - `records[].selected_main_doc_no`는 선택한 본문 문서 번호다.
 - `records[].metadata.disclosed_at`은 ISO 날짜로 시작한다.
-- `max_workers`는 가상 컴퓨터 전체의 동시 처리 공시 대상 수를 정하고, 컴퓨터마다 나눠 쓴다. 분당 요청 한도와 요청 간격은 가상 컴퓨터마다 따로 적용한다.
+- `kind_proxy_urls`는 localhost HTTP 프록시 URL을 현재 CPU 개수보다 하나 적게 저장한다. 직접 연결을 0번 경로로 사용하고 설정 순서대로 프록시 경로를 추가한다.
+- `max_workers`는 모든 연결의 동시 처리 공시 대상 수를 정한다. 경로별 worker 합계는 이 값을 넘지 않으며, 분당 요청 한도와 요청 간격은 연결마다 따로 적용한다.
+
+## Local Proxy Setup
+
+Proton VPN 앱 자체는 시스템 기본 경로 하나만 만든다. 여러 IP 경로를 함께 쓰려면 Proton 계정에서 경로마다 서로 다른 WireGuard 설정 파일을 내려받고, 각 파일을 별도 `wireproxy` 프로세스로 실행한다. 비밀키가 들어 있는 WireGuard 설정 파일은 프로젝트에 저장하거나 커밋하지 않는다.
+
+WireGuard 설정을 직접 복사하지 않고 불러오는 최소 `wireproxy` 설정은 다음과 같다.
+
+```ini
+WGConfig = /absolute/path/to/proton-route-1.conf
+
+[http]
+BindAddress = 127.0.0.1:25001
+```
+
+두 번째 설정은 다른 Proton WireGuard 파일과 포트 `25002`를 사용한다. 같은 방식으로 `25007`까지 최대 일곱 개를 띄울 수 있다. 직접 연결을 포함한 전체 경로와 worker 상한은 이 컴퓨터의 CPU 코어 수에 맞춘 8개다.
+
+```shell
+wireproxy -c /absolute/path/to/wireproxy-route-1.conf
+wireproxy -c /absolute/path/to/wireproxy-route-2.conf
+```
+
+준비된 프록시는 실행 중인 FINIQ 서버에 저장한다.
+
+```shell
+curl -X POST http://127.0.0.1:8765/api/settings \
+  -H 'Content-Type: application/json' \
+  -d '{"kind_proxy_urls":["http://127.0.0.1:25001","http://127.0.0.1:25002"]}'
+```
+
+설정 뒤의 04·05단계 저장 작업부터 직접 연결과 등록된 프록시를 함께 사용한다. FINIQ는 `wireproxy`를 설치하거나 실행하지 않으며 WireGuard 비밀키도 읽지 않는다. 프록시가 중단되면 그 경로에 배정된 다운로드는 실패하며 직접 연결로 다시 보내지 않는다.
 
 ### `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`
 

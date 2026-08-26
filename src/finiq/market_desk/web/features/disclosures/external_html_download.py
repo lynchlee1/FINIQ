@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from collections import deque
 
-from finiq.data_scraper.core.kind_computers import KIND_VIRTUAL_COMPUTER_COUNT
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
 )
@@ -46,6 +45,7 @@ def redownload_missing_disclosure_external_html_payload(
         "progress_interval",
         "problem_file_limit",
         "max_workers",
+        "kind_proxy_urls",
     )
     for index, target in enumerate(targets, start=1):
         if cancel_check is not None and cancel_check():
@@ -276,33 +276,31 @@ def download_disclosure_external_html_payload(
         else:
             max_retries = int(raw_max_retries)
         if download_acpt_numbers:
-            grouped_acpt_numbers: dict[str, list[str]] = {}
-            for acpt_no in download_acpt_numbers:
-                grouped_acpt_numbers.setdefault(target_years[acpt_no], []).append(
-                    acpt_no
+            downloaded_paths.extend(
+                download_disclosure_external_htmls(
+                    output_directory=resolved_output_directory,
+                    request_headers=DEFAULT_REQUEST_HEADERS,
+                    acpt_numbers=download_acpt_numbers,
+                    timeout=float(body.get("timeout") or 20.0),
+                    wait_seconds_between_requests=float(
+                        body.get("wait_seconds") or 0.0
+                    ),
+                    max_requests_per_minute=int(
+                        body.get("max_requests_per_minute") or 90
+                    ),
+                    skip_existing=False,
+                    progress_callback=handle_progress,
+                    cancel_check=lambda: _is_cancelled(cancel_token)
+                    or bool(cancel_check and cancel_check()),
+                    max_workers=max_workers,
+                    max_retries=max_retries,
+                    kind_proxy_urls=body.get("kind_proxy_urls"),
+                    target_output_directories={
+                        acpt_no: resolved_output_directory / target_years[acpt_no]
+                        for acpt_no in download_acpt_numbers
+                    },
                 )
-            for year, group_acpt_numbers in grouped_acpt_numbers.items():
-                downloaded_paths.extend(
-                    download_disclosure_external_htmls(
-                        output_directory=resolved_output_directory / year,
-                        request_headers=DEFAULT_REQUEST_HEADERS,
-                        acpt_numbers=group_acpt_numbers,
-                        timeout=float(body.get("timeout") or 20.0),
-                        wait_seconds_between_requests=float(
-                            body.get("wait_seconds") or 0.0
-                        ),
-                        max_requests_per_minute=int(
-                            body.get("max_requests_per_minute") or 90
-                        ),
-                        skip_existing=False,
-                        progress_callback=handle_progress,
-                        cancel_check=lambda: _is_cancelled(cancel_token)
-                        or bool(cancel_check and cancel_check()),
-                        max_workers=max_workers,
-                        max_retries=max_retries,
-                        virtual_computer_count=KIND_VIRTUAL_COMPUTER_COUNT,
-                    )
-                )
+            )
         saved_paths_by_acpt_no = dict(existing_paths_by_acpt_no)
         saved_paths_by_acpt_no.update({path.stem: path for path in downloaded_paths})
         saved_paths = [

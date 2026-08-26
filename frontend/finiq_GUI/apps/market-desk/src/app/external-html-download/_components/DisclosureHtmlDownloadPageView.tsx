@@ -33,6 +33,7 @@ import {
   type DisclosureConditionPreset,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { listDisclosureConditionPresets } from "@/lib/disclosureConditionPresets";
+import { KindNetworkRouteSettings } from "@/components/disclosures/KindNetworkRouteSettings";
 
 type DownloadVariant = "external" | "internal";
 type ExternalTaskMode = "download" | "compress";
@@ -94,6 +95,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const {
     output_root: dataRoot,
     html_parse_mode: htmlParseMode,
+    kind_proxy_urls: kindProxyUrls,
     fetchSettings,
     saveSetting,
   } = useSettingsStore();
@@ -309,6 +311,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       limit: limit ? Number(limit) : null,
       skip_existing: skipExisting,
       progress_interval: Number(progressInterval),
+      kind_proxy_urls: kindProxyUrls,
       ...(parsedProblemFileLimit != null ? { problem_file_limit: parsedProblemFileLimit } : {}),
       cancel_token: cancelToken,
   }), [
@@ -322,6 +325,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     skipExisting,
     progressInterval,
     parsedProblemFileLimit,
+    kindProxyUrls,
   ]);
 
   const handleRun = async () => {
@@ -564,6 +568,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
         wait_seconds: Number(waitSeconds),
         skip_existing: skipExisting,
         progress_interval: Number(progressInterval),
+        kind_proxy_urls: kindProxyUrls,
         ...(parsedProblemFileLimit != null ? { problem_file_limit: parsedProblemFileLimit } : {}),
       },
     );
@@ -828,6 +833,13 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const compressionInspectionRepairable = Number(
     compressionInspectionData?.repairable_failed_mode_count || 0,
   ) > 0;
+  const compressionSkippedModeCount = Number(
+    compressionInspectionData?.skipped_mode_count || 0,
+  );
+  const compressionPassedModeCount = Math.max(
+    0,
+    Number(compressionInspectionData?.passed_mode_count || 0) - compressionSkippedModeCount,
+  );
   const externalSaveRepairTargetCount = Number(
     externalSaveInspectionData?.owner_download_required_target_html_count || 0,
   ) + Number(
@@ -840,7 +852,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     ? compressionInspectionState
     : saveInspectionState;
   const inspectionStepState: SingleCheckDataIntegrityInspectionState = remainingInspection
-    ? "success"
+    ? "action-required"
     : inspectionState;
   const remainingInspectionSummary = `대상 ${formatInteger(existingData?.requested_count || 0)}건 중 ${formatInteger(pendingDownloadCount)}건이 아직 저장되지 않았습니다. 재다운로드를 누르면 확인된 기존 파일은 건너뛰고 미저장분만 내려받습니다.`;
   const saveInspectionCopy = {
@@ -882,14 +894,16 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     ready: ["압축 파일 검사가 필요합니다", "저장된 압축 JSON의 구성과 내용을 확인하세요."],
     running: ["압축 파일을 확인하고 있습니다", "모든 모드의 저장된 원문 HTML과 압축 JSON의 기록·hash·size가 일치하는지 확인합니다."],
     success: [
-      "모든 압축 파일이 정상입니다",
-      `${formatInteger(compressionInspectionData?.mode_count || 0)}개 모드의 기록 ${formatInteger(compressionInspectionData?.verified_records || 0)}건을 확인했습니다.`,
+      compressionSkippedModeCount === Number(compressionInspectionData?.mode_count || 0)
+        ? "압축할 원본 HTML이 없습니다"
+        : "압축 대상 파일이 정상입니다",
+      `정상 ${formatInteger(compressionPassedModeCount)}개 모드의 기록 ${formatInteger(compressionInspectionData?.verified_records || 0)}건을 확인했고, 원본 HTML이 없는 ${formatInteger(compressionSkippedModeCount)}개 모드는 압축하지 않았습니다.`,
     ],
     failed: [
       "압축 파일에 문제가 있습니다",
       compressionInspectionError
         || (compressionInspectionRepairable
-          ? `${formatInteger(compressionInspectionData?.repairable_failed_mode_count || 0)}개 모드의 압축 파일을 다시 생성해야 합니다.`
+          ? `${formatInteger(compressionInspectionData?.repairable_failed_mode_count || 0)}개 모드의 압축 파일을 다시 생성합니다.${compressionSkippedModeCount > 0 ? ` 원본 HTML이 없는 ${formatInteger(compressionSkippedModeCount)}개 모드는 압축하지 않습니다.` : ""}`
           : "압축 파일 검사 결과를 확인해 주세요."),
     ],
   }[compressionInspectionState];
@@ -906,7 +920,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           ? "모든 모드의 대상과 저장 파일을 비교하고, 저장 파일의 기준 해시와 대상 외 파일을 함께 확인합니다."
           : "현재 대상과 저장 파일을 비교하고, 저장 파일의 기준 해시와 대상 외 파일을 함께 확인합니다.";
   const compressionInspectionStepSummary = compressionInspectionData
-    ? `전체 ${formatInteger(compressionInspectionData.mode_count)}개 모드 · 정상 ${formatInteger(compressionInspectionData.passed_mode_count)}개 · 문제 ${formatInteger(compressionInspectionData.failed_mode_count)}개 · 확인 기록 ${formatInteger(compressionInspectionData.verified_records)}/${formatInteger(compressionInspectionData.expected_records)}건입니다.`
+    ? `전체 ${formatInteger(compressionInspectionData.mode_count)}개 모드 · 정상 ${formatInteger(compressionPassedModeCount)}개 · 원본 HTML 없음 ${formatInteger(compressionSkippedModeCount)}개 · 문제 ${formatInteger(compressionInspectionData.failed_mode_count)}개 · 확인 기록 ${formatInteger(compressionInspectionData.verified_records)}/${formatInteger(compressionInspectionData.expected_records)}건입니다.`
     : "모든 모드의 compressed-external-html.json 형식, 저장된 원문 HTML 기록, hash·size 일치 여부를 확인합니다.";
   const inspectionStepSummary = isExternalCompressMode
     ? compressionInspectionStepSummary
@@ -1130,16 +1144,18 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                 <div className="space-y-2">
                   <Label className="dark:text-slate-300">압축 파일 검사</Label>
                   <p className="text-body text-[var(--tv-muted)]">
-                    전체 {formatInteger(compressionInspectionData.mode_count)}개 모드 · 정상 {formatInteger(compressionInspectionData.passed_mode_count)}개 · 문제 {formatInteger(compressionInspectionData.failed_mode_count)}개
+                    전체 {formatInteger(compressionInspectionData.mode_count)}개 모드 · 정상 {formatInteger(compressionPassedModeCount)}개 · 원본 HTML 없음 {formatInteger(compressionSkippedModeCount)}개 · 문제 {formatInteger(compressionInspectionData.failed_mode_count)}개
                   </p>
                   <div className="divide-y divide-[color:var(--tv-border)] rounded-md border border-[color:var(--tv-border)]">
                     {compressionResults.map((result: any) => (
                       <div key={result.id} className="space-y-1 px-3 py-2">
                         <p className="text-body font-semibold text-[var(--tv-text)]">
-                          {result.id} · {result.passed ? "정상" : "사용 불가"}
+                          {result.id} · {result.skipped ? "압축 안 함" : result.passed ? "정상" : "사용 불가"}
                         </p>
                         <p className="text-body break-all text-[var(--tv-muted)]">
-                          {result.compressed_path || result.error || "검사 결과 경로가 없습니다."}
+                          {result.skipped
+                            ? "원본 HTML이 없어 압축 파일을 검사하거나 생성하지 않습니다."
+                            : result.compressed_path || result.error || "검사 결과 경로가 없습니다."}
                         </p>
                         {!result.passed && result.error && (
                           <p className="text-body text-[var(--tv-warning-text)]">{result.error}</p>
@@ -1244,6 +1260,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                 </div>
               ) : (
                 <div className="space-y-5">
+                  <KindNetworkRouteSettings />
                   <div className="space-y-3">
                     <div className="border-b border-[color:var(--tv-border)] pb-2">
                       <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>

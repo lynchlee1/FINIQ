@@ -52,6 +52,17 @@ test("bundled inspection numbers the action row and leaves result-only rows blan
   assert.doesNotMatch(htmlDownload, /key: "rebuild-all-compression"/);
 });
 
+test("internal HTML inspection stays non-green while target files are missing", async () => {
+  const [htmlDownload, card] = await Promise.all([
+    readFile(paths.htmlDownload, "utf8"),
+    readFile(cardPath, "utf8"),
+  ]);
+
+  assert.match(htmlDownload, /const inspectionStepState:[\s\S]{0,180}remainingInspection\s*\? "action-required"/);
+  assert.match(card, /"action-required": \{ label: "다운로드 필요", tone: "warning", stepStatus: "ready", stepLabel: "다운로드 필요" \}/);
+  assert.doesNotMatch(htmlDownload, /remainingInspection\s*\? "success"/);
+});
+
 test("existing-data inspections start only from explicit actions", async () => {
   const [download, htmlDownload] = await Promise.all([
     readFile("frontend/finiq_GUI/apps/market-desk/src/app/download/page.tsx", "utf8"),
@@ -245,4 +256,10 @@ test("existing-data guidance avoids mechanical Korean phrasing", async () => {
   }
   assert.doesNotMatch(sources[0], /label: "검토 중단"/);
   assert.doesNotMatch(sources[1], /\$\{preset\.status\}/);
+});
+
+test("HTML save jobs pass saved KIND proxy routes", async () => {
+  const source = await readFile(paths.htmlDownload, "utf8");
+
+  assert.match(source, /kind_proxy_urls: kindProxyUrls/);
 });

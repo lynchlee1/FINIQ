@@ -1,148 +1,215 @@
 from __future__ import annotations
 
 import os
-import socket
 from pathlib import Path
 
 import pytest
+import requests
 
 from finiq.data_scraper.core.client import download_disclosure_external_htmls
 from finiq.data_scraper.core.kind_computers import (
-    KIND_VIRTUAL_COMPUTER_COUNT,
-    KindSourceAddressAdapter,
+    MAX_KIND_PROXY_COUNT,
+    MAX_KIND_VIRTUAL_COMPUTERS,
     KindVirtualComputer,
+    allocate_computer_workers,
     build_kind_virtual_computers,
     create_kind_computer_session,
-    headers_for_computer,
-    prepare_kind_virtual_computer,
-    resolve_virtual_computer_count,
+    normalize_kind_proxy_urls,
+    check_kind_network_routes,
     run_kind_virtual_computers,
-    session_uses_source_address,
     split_items_round_robin,
-    workers_per_computer,
 )
 from finiq.market_desk.web.features.disclosures.internal_html_download import (
     download_disclosure_internal_htmls,
 )
 
 
-def test_split_items_round_robin_assigns_even_and_odd() -> None:
-    assert split_items_round_robin(["a", "b", "c", "d", "e"], 2) == [
-        ["a", "c", "e"],
-        ["b", "d"],
+class _PublicIpResponse:
+    def __init__(self, public_ip: str) -> None:
+        self.text = public_ip
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _PublicIpSession:
+    def __init__(self, result: str | Exception) -> None:
+        self._result = result
+
+    def get(self, _url: str, *, timeout: float) -> _PublicIpResponse:
+        assert timeout > 0
+        if isinstance(self._result, Exception):
+            raise self._result
+        return _PublicIpResponse(self._result)
+
+    def close(self) -> None:
+        return None
+
+
+def test_check_kind_network_routes_reports_unique_public_ips() -> None:
+    public_ips = {
+        None: "203.0.113.1",
+        "http://127.0.0.1:25001": "203.0.113.2",
+    }
+
+    result = check_kind_network_routes(
+        ["http://127.0.0.1:25001"],
+        session_factory=lambda computer: _PublicIpSession(public_ips[computer.proxy_url]),
+    )
+
+    assert result["ready"] is True
+    assert result["route_count"] == 2
+    assert result["unique_ip_count"] == 2
+    assert [route["status"] for route in result["routes"]] == ["ready", "ready"]
+    assert all(route["unique"] is True for route in result["routes"])
+
+
+def test_check_kind_network_routes_marks_duplicates_and_failures() -> None:
+    results = {
+        None: "203.0.113.1",
+        "http://127.0.0.1:25001": "203.0.113.1",
+        "http://127.0.0.1:25002": requests.ConnectionError("offline"),
+    }
+
+    result = check_kind_network_routes(
+        ["http://127.0.0.1:25001", "http://127.0.0.1:25002"],
+        session_factory=lambda computer: _PublicIpSession(results[computer.proxy_url]),
+    )
+
+    assert result["ready"] is False
+    assert result["unique_ip_count"] == 1
+    assert result["routes"][0]["unique"] is False
+    assert result["routes"][1]["unique"] is False
+    assert result["routes"][2]["status"] == "error"
+    assert result["routes"][2]["public_ip"] is None
+
+
+def test_split_items_round_robin_assigns_all_buckets() -> None:
+    assert split_items_round_robin(["a", "b", "c", "d", "e"], 3) == [
+        ["a", "d"],
+        ["b", "e"],
+        ["c"],
     ]
 
 
-def test_workers_per_computer_splits_total() -> None:
-    assert workers_per_computer(8, 2) == 4
-    assert workers_per_computer(1, 2) == 1
+def test_allocate_computer_workers_preserves_total_limit() -> None:
+    assert allocate_computer_workers(7, 5) == [2, 2, 1, 1, 1]
+    assert allocate_computer_workers(5, 3) == [2, 2, 1]
+    assert allocate_computer_workers(8, 8) == [1] * 8
+    assert allocate_computer_workers(1, 1) == [1]
 
 
-def test_resolve_virtual_computer_count_keeps_one_item_on_one_computer() -> None:
-    assert (
-        resolve_virtual_computer_count(2, item_count=1, session=None) == 1
-    )
-    assert (
-        resolve_virtual_computer_count(2, item_count=2, session=None) == 2
-    )
+def test_normalize_kind_proxy_urls_accepts_cpu_limited_local_proxies() -> None:
+    proxies = [
+        f"http://127.0.0.1:{25001 + index}"
+        for index in range(MAX_KIND_PROXY_COUNT)
+    ]
+
+    assert normalize_kind_proxy_urls(proxies) == proxies
 
 
-def test_resolve_virtual_computer_count_rejects_session_plus_two() -> None:
-    with pytest.raises(ValueError, match="session cannot be combined"):
-        resolve_virtual_computer_count(2, item_count=4, session=object())  # type: ignore[arg-type]
-
-
-def test_build_kind_virtual_computers_separates_ips_and_user_agents(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "finiq.data_scraper.core.kind_computers.list_local_ipv4_addresses",
-        lambda: ["192.168.0.10", "192.168.0.11"],
-    )
-    monkeypatch.setattr(
-        "finiq.data_scraper.core.kind_computers.list_kind_ipv4_addresses",
-        lambda: ["23.53.2.185", "23.53.2.131"],
-    )
-
-    computers = build_kind_virtual_computers(2)
-
-    assert computers[0].source_ip == "192.168.0.10"
-    assert computers[1].source_ip == "192.168.0.11"
-    assert computers[0].destination_ip == "23.53.2.185"
-    assert computers[1].destination_ip == "23.53.2.131"
-    assert computers[0].user_agent != computers[1].user_agent
-    assert computers[0].label == "가상 컴퓨터 1"
-
-
-def test_source_address_adapter_binds_local_ip() -> None:
-    adapter = KindSourceAddressAdapter("192.168.0.10", pool_connections=1, pool_maxsize=1)
-    adapter.init_poolmanager(1, 1)
-
-    assert adapter.poolmanager.connection_pool_kw["source_address"] == (
-        "192.168.0.10",
-        0,
-    )
-    session = create_kind_computer_session(
-        KindVirtualComputer(
-            index=0,
-            source_ip="192.168.0.10",
-            destination_ip="23.53.2.185",
-            user_agent="test-agent",
+@pytest.mark.parametrize(
+    "value, message",
+    [
+        ("http://127.0.0.1:25001", "must be a list"),
+        (["https://127.0.0.1:25001"], "must use http"),
+        (["http://10.0.0.2:25001"], "must use localhost"),
+        (["http://127.0.0.1"], "must include a port"),
+        (["http://127.0.0.1:0"], "invalid port"),
+        (
+            ["http://127.0.0.1:25001", "http://localhost:25001"],
+            "duplicate",
         ),
-        pool_size=2,
+        (
+            [
+                f"http://127.0.0.1:{25001 + index}"
+                for index in range(MAX_KIND_PROXY_COUNT + 1)
+            ],
+            f"at most {MAX_KIND_PROXY_COUNT}",
+        ),
+    ],
+)
+def test_normalize_kind_proxy_urls_rejects_invalid_values(
+    value: object, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        normalize_kind_proxy_urls(value)
+
+
+def test_build_kind_virtual_computers_uses_direct_plus_proxies() -> None:
+    computers = build_kind_virtual_computers(
+        ["http://127.0.0.1:25001", "http://127.0.0.1:25002"]
     )
-    assert session_uses_source_address(session)
-    assert headers_for_computer(
-        KindVirtualComputer(0, None, None, "test-agent"),
-        {"Accept": "text/html"},
-    )["User-Agent"] == "test-agent"
-    session.close()
+
+    assert computers == [
+        KindVirtualComputer(index=0, proxy_url=None),
+        KindVirtualComputer(index=1, proxy_url="http://127.0.0.1:25001"),
+        KindVirtualComputer(index=2, proxy_url="http://127.0.0.1:25002"),
+    ]
+    assert computers[0].label == "가상 컴퓨터 1"
+    assert "직접 연결" in computers[0].describe(item_count=1, worker_count=1)
+    assert "127.0.0.1:25001" in computers[1].describe(
+        item_count=1, worker_count=1
+    )
 
 
-def test_prepare_kind_virtual_computer_pins_kind_host_only() -> None:
-    original = socket.getaddrinfo
-    computer = KindVirtualComputer(
-        index=0,
-        source_ip=None,
-        destination_ip="203.0.113.10",
-        user_agent="test-agent",
+def test_build_kind_virtual_computers_supports_cpu_count_egresses() -> None:
+    proxies = [
+        f"http://127.0.0.1:{25001 + index}"
+        for index in range(MAX_KIND_PROXY_COUNT)
+    ]
+
+    computers = build_kind_virtual_computers(proxies)
+
+    assert len(computers) == MAX_KIND_VIRTUAL_COMPUTERS
+    assert computers[0] == KindVirtualComputer(index=0, proxy_url=None)
+    if proxies:
+        assert computers[-1] == KindVirtualComputer(
+            index=MAX_KIND_PROXY_COUNT,
+            proxy_url=proxies[-1],
+        )
+
+
+def test_create_kind_computer_session_sets_only_explicit_proxy() -> None:
+    direct = create_kind_computer_session(KindVirtualComputer(0, None), pool_size=2)
+    proxied = create_kind_computer_session(
+        KindVirtualComputer(1, "http://127.0.0.1:25001"), pool_size=2
     )
     try:
-        prepare_kind_virtual_computer(computer)
-        kind_infos = socket.getaddrinfo("kind.krx.co.kr", 443)
-        assert kind_infos[0][4][0] == "203.0.113.10"
-        other_infos = socket.getaddrinfo(
-            "127.0.0.1", 443, socket.AF_INET, socket.SOCK_STREAM
-        )
-        assert other_infos[0][4][0] == "127.0.0.1"
+        assert direct.proxies == {}
+        assert direct.trust_env is False
+        assert proxied.proxies == {
+            "http": "http://127.0.0.1:25001",
+            "https": "http://127.0.0.1:25001",
+        }
+        assert proxied.trust_env is False
     finally:
-        socket.getaddrinfo = original
+        direct.close()
+        proxied.close()
 
 
-def test_run_kind_virtual_computers_uses_two_processes() -> None:
+def test_run_kind_virtual_computers_uses_three_egress_threads() -> None:
     progress: list[str] = []
     results = run_kind_virtual_computers(
-        items=["a", "b"],
+        items=["a", "b", "c", "d", "e", "f"],
         worker_qualname="finiq.data_scraper.core.kind_computers._identity_worker",
         worker_kwargs={},
         progress_callback=progress.append,
-        computer_count=2,
-        max_workers=2,
+        proxy_urls=["http://127.0.0.1:25001", "http://127.0.0.1:25002"],
+        max_workers=5,
     )
 
-    assert results[0] == ["a"]
-    assert results[1] == ["b"]
-    assert any(message.startswith("가상 컴퓨터 2대로") for message in progress)
-    pids = {
+    assert results == [["a", "d"], ["b", "e"], ["c", "f"]]
+    assert any(message.startswith("가상 컴퓨터 3대로") for message in progress)
+    process_ids = {
         int(message.split(":")[1])
         for message in progress
-        if message[:1].isdigit() and ":" in message
+        if message[:1].isdigit() and message.count(":") == 2
     }
-    assert len(pids) == 2
-    assert os.getpid() not in pids
+    assert process_ids == {os.getpid()}
 
 
-def test_external_html_dispatches_two_virtual_computers(
+def test_external_html_dispatches_configured_egresses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -150,7 +217,11 @@ def test_external_html_dispatches_two_virtual_computers(
 
     def fake_run(**kwargs: object) -> list[list[str]]:
         captured.update(kwargs)
-        return [[str(tmp_path / "20250101000001.html")], [str(tmp_path / "20250101000002.html")]]
+        return [
+            [str(tmp_path / "20250101000001.html")],
+            [str(tmp_path / "20250101000002.html")],
+            [str(tmp_path / "20250101000003.html")],
+        ]
 
     monkeypatch.setattr(
         "finiq.data_scraper.core.client.run_kind_virtual_computers",
@@ -159,20 +230,31 @@ def test_external_html_dispatches_two_virtual_computers(
     saved = download_disclosure_external_htmls(
         output_directory=tmp_path,
         request_headers={},
-        acpt_numbers=["20250101000001", "20250101000002"],
-        virtual_computer_count=KIND_VIRTUAL_COMPUTER_COUNT,
+        acpt_numbers=[
+            "20250101000001",
+            "20250101000002",
+            "20250101000003",
+        ],
+        kind_proxy_urls=[
+            "http://127.0.0.1:25001",
+            "http://127.0.0.1:25002",
+        ],
+        max_workers=3,
         max_retries=0,
     )
 
-    assert captured["computer_count"] == 2
-    assert captured["items"] == ["20250101000001", "20250101000002"]
+    assert captured["proxy_urls"] == [
+        "http://127.0.0.1:25001",
+        "http://127.0.0.1:25002",
+    ]
     assert [path.name for path in saved] == [
         "20250101000001.html",
         "20250101000002.html",
+        "20250101000003.html",
     ]
 
 
-def test_internal_html_dispatches_two_virtual_computers(
+def test_internal_html_dispatches_configured_egresses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -180,7 +262,10 @@ def test_internal_html_dispatches_two_virtual_computers(
 
     def fake_run(**kwargs: object) -> list[list[str]]:
         captured.update(kwargs)
-        return [[str(tmp_path / "20250101000002.html")], [str(tmp_path / "20250101000001.html")]]
+        return [
+            [str(tmp_path / "20250101000002.html")],
+            [str(tmp_path / "20250101000001.html")],
+        ]
 
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download.run_kind_virtual_computers",
@@ -193,9 +278,10 @@ def test_internal_html_dispatches_two_virtual_computers(
             {"acpt_no": "20250101000002", "doc_no": "2"},
             {"acpt_no": "20250101000001", "doc_no": "1"},
         ],
-        virtual_computer_count=2,
+        kind_proxy_urls=["http://127.0.0.1:25001"],
+        max_workers=2,
         skip_existing=False,
     )
 
-    assert captured["computer_count"] == 2
+    assert captured["proxy_urls"] == ["http://127.0.0.1:25001"]
     assert [path.stem for path in saved] == ["20250101000002", "20250101000001"]

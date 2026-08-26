@@ -120,6 +120,21 @@ def test_inspect_external_html_compression_reports_missing_json(tmp_path: Path) 
     ]
 
 
+def test_inspect_external_html_compression_skips_mode_without_source_html(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    output_directory = Path(str(payload["output_directory"]))
+    (output_directory / "2025" / "20250101000001.html").unlink()
+
+    inspected = inspect_disclosure_external_html_compress_payload(payload)
+
+    assert inspected["passed"] is True
+    assert inspected["skipped"] is True
+    assert inspected["expected_records"] == 0
+    assert inspected["missing_files"] == []
+
+
 def test_inspect_external_html_compression_ignores_filter_targets_without_html(
     tmp_path: Path,
 ) -> None:
@@ -186,6 +201,36 @@ def test_inspect_and_rebuild_invalid_external_html_compression_modes(tmp_path: P
     assert rebuilt["verification"]["passed"] is True
     assert valid_compressed_path.stat().st_ino == valid_compressed_inode
     assert reinspected["passed"] is True
+
+
+def test_rebuild_only_modes_with_source_html_when_modes_are_mixed(tmp_path: Path) -> None:
+    payload = _compression_payload(tmp_path)
+    empty_payload = _compression_payload(tmp_path, mode="rights_issuance")
+    compress_disclosure_external_html_payload(payload)
+    compressed_path = Path(str(payload["output_directory"])) / "compressed-external-html.json"
+    compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
+    compressed["records"][0]["title"] = "변조된 제목"
+    compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
+    empty_output_directory = Path(str(empty_payload["output_directory"]))
+    (empty_output_directory / "2025" / "20250101000001.html").unlink()
+
+    inspected = inspect_all_disclosure_external_html_compress_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+
+    assert inspected["passed"] is False
+    assert inspected["failed_modes"] == ["bond_issuance"]
+    assert inspected["repairable_failed_modes"] == ["bond_issuance"]
+    assert inspected["skipped_modes"] == ["rights_issuance"]
+
+    rebuilt = rebuild_invalid_disclosure_external_html_compress_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+
+    assert rebuilt["passed"] is True
+    assert rebuilt["target_mode_count"] == 1
+    assert rebuilt["regenerated_mode_count"] == 1
+    assert rebuilt["verification"]["skipped_modes"] == ["rights_issuance"]
 
 
 def test_repair_route_regenerates_invalid_compression_without_database(
