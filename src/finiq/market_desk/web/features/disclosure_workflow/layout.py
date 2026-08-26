@@ -15,6 +15,8 @@ from finiq.config import PROJECT_ROOT, build_disclosure_workspace_path_settings
 
 WORKSPACE_FORMAT = "finiq_disclosure_workspace_v1"
 WORKSPACE_MANIFEST_FILENAME = "disclosure-workspace.json"
+STAGE_LINK_FORMAT = "finiq_stage_link_v1"
+STAGE_LINK_FILENAME = ".finiq-stage-link.json"
 _MODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -108,6 +110,47 @@ def _validate_workspace_root(root: Path) -> None:
         raise ValueError(f"data_root is not a directory: {root}")
 
 
+def _resolve_stage_directory(root: Path, stage_name: str) -> Path:
+    local_directory = root / stage_name
+    link_path = local_directory / STAGE_LINK_FILENAME
+    if not link_path.exists():
+        return local_directory
+    if not link_path.is_file():
+        raise ValueError(f"Stage link is not a file: {link_path}")
+    try:
+        payload = json.loads(link_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Stage link is not valid JSON: {link_path}") from exc
+    if not isinstance(payload, dict) or payload.get("format") != STAGE_LINK_FORMAT:
+        raise ValueError(f"Stage link has an invalid format: {link_path}")
+    if payload.get("schema_version") != 1:
+        raise ValueError(f"Stage link has an unsupported schema version: {link_path}")
+    target_text = str(payload.get("target_workspace") or "").strip()
+    if not target_text:
+        raise ValueError(f"Stage link target_workspace is required: {link_path}")
+    target_root = Path(target_text).expanduser()
+    if not target_root.is_absolute():
+        target_root = root / target_root
+    target_root = target_root.resolve()
+    _validate_workspace_root(target_root)
+    if not target_root.is_dir():
+        raise ValueError(f"Stage link target workspace does not exist: {target_root}")
+    target_directory = target_root / stage_name
+    if not target_directory.is_dir():
+        raise ValueError(f"Stage link target directory does not exist: {target_directory}")
+    if (target_directory / STAGE_LINK_FILENAME).exists():
+        raise ValueError(f"Chained stage links are not supported: {target_directory}")
+    unexpected_entries = [
+        path.name for path in local_directory.iterdir() if path.name != STAGE_LINK_FILENAME
+    ]
+    if unexpected_entries:
+        raise ValueError(
+            f"Linked stage directory must contain only {STAGE_LINK_FILENAME}: "
+            f"{local_directory}"
+        )
+    return target_directory.resolve()
+
+
 def resolve_disclosure_workspace(
     data_root: str | Path, *, create: bool = False
 ) -> DisclosureWorkspace:
@@ -118,13 +161,13 @@ def resolve_disclosure_workspace(
     _validate_workspace_root(root)
     workspace = DisclosureWorkspace(
         root=root,
-        list=root / "01-list",
-        table=root / "02-table",
-        filtered=root / "03-filter",
-        external=root / "04-external-html-download",
-        internal=root / "05-internal-html-download",
-        sections=root / "06-sections",
-        converted=root / "07-converted",
+        list=_resolve_stage_directory(root, "01-list"),
+        table=_resolve_stage_directory(root, "02-table"),
+        filtered=_resolve_stage_directory(root, "03-filter"),
+        external=_resolve_stage_directory(root, "04-external-html-download"),
+        internal=_resolve_stage_directory(root, "05-internal-html-download"),
+        sections=_resolve_stage_directory(root, "06-sections"),
+        converted=_resolve_stage_directory(root, "07-converted"),
     )
     if create:
         for directory in (

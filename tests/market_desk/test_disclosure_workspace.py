@@ -11,6 +11,7 @@ import finiq.market_desk.web.app as web_app
 from finiq.market_desk.web.app import app
 from finiq.market_desk.web.app import config as app_config
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    STAGE_LINK_FILENAME,
     apply_workspace_defaults,
     disclosure_workspace_settings,
     prepare_disclosure_workspace_payload,
@@ -72,6 +73,122 @@ def test_workspace_rejects_unsafe_mode_name(tmp_path: Path) -> None:
         prepare_disclosure_workspace_payload(
             {"data_root": str(tmp_path / "workspace"), "modes": ["../escape"]}
         )
+
+
+def test_workspace_resolves_each_linked_stage_to_same_stage_in_target_workspace(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    for stage_name in ("01-list", "04-external-html-download"):
+        local_stage = data_root / stage_name
+        local_stage.mkdir(parents=True)
+        (target_root / stage_name).mkdir(parents=True)
+        (local_stage / STAGE_LINK_FILENAME).write_text(
+            json.dumps(
+                {
+                    "format": "finiq_stage_link_v1",
+                    "schema_version": 1,
+                    "target_workspace": str(target_root),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    workspace = resolve_disclosure_workspace(data_root)
+
+    assert workspace.root == data_root.resolve()
+    assert workspace.list == (target_root / "01-list").resolve()
+    assert workspace.external == (
+        target_root / "04-external-html-download"
+    ).resolve()
+    assert workspace.table == data_root.resolve() / "02-table"
+
+
+def test_workspace_resolves_relative_stage_link_target_from_data_root(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    local_stage = data_root / "06-sections"
+    local_stage.mkdir(parents=True)
+    (target_root / "06-sections").mkdir(parents=True)
+    (local_stage / STAGE_LINK_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_stage_link_v1",
+                "schema_version": 1,
+                "target_workspace": "../hdd-workspace",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    workspace = resolve_disclosure_workspace(data_root)
+
+    assert workspace.sections == (target_root / "06-sections").resolve()
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({"format": "wrong", "schema_version": 1, "target_workspace": "x"}, "format"),
+        ({"format": "finiq_stage_link_v1", "schema_version": 2, "target_workspace": "x"}, "schema version"),
+        ({"format": "finiq_stage_link_v1", "schema_version": 1}, "target_workspace"),
+    ],
+)
+def test_workspace_rejects_invalid_stage_link(
+    tmp_path: Path, payload: dict[str, object], error: str
+) -> None:
+    local_stage = tmp_path / "workspace" / "01-list"
+    local_stage.mkdir(parents=True)
+    (local_stage / STAGE_LINK_FILENAME).write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match=error):
+        resolve_disclosure_workspace(tmp_path / "workspace")
+
+
+def test_workspace_rejects_linked_stage_with_local_data(tmp_path: Path) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    local_stage = data_root / "01-list"
+    local_stage.mkdir(parents=True)
+    (target_root / "01-list").mkdir(parents=True)
+    (local_stage / "local-data.body").write_text("data", encoding="utf-8")
+    (local_stage / STAGE_LINK_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_stage_link_v1",
+                "schema_version": 1,
+                "target_workspace": str(target_root),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must contain only"):
+        resolve_disclosure_workspace(data_root)
+
+
+def test_workspace_rejects_chained_stage_link(tmp_path: Path) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    payload = {
+        "format": "finiq_stage_link_v1",
+        "schema_version": 1,
+        "target_workspace": str(target_root),
+    }
+    for root in (data_root, target_root):
+        stage = root / "01-list"
+        stage.mkdir(parents=True)
+        (stage / STAGE_LINK_FILENAME).write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+
+    with pytest.raises(ValueError, match="Chained"):
+        resolve_disclosure_workspace(data_root)
 
 
 def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
