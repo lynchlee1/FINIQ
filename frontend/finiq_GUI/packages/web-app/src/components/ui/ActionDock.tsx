@@ -17,7 +17,6 @@ type ActionDockProps = {
   notificationContent?: ReactNode;
   notificationActive?: boolean;
   notificationTone?: ActionDockNotificationTone;
-  notificationDismissible?: boolean;
   notificationResetKey?: string | number | boolean | null;
   settingsTitle?: string;
   settingsContent?: ReactNode;
@@ -31,7 +30,6 @@ export function ActionDock({
   notificationContent,
   notificationActive = false,
   notificationTone = "warning",
-  notificationDismissible = true,
   notificationResetKey = null,
   settingsTitle = "설정",
   settingsContent,
@@ -110,7 +108,7 @@ export function ActionDock({
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-[var(--tv-text)]">{title}</CardTitle>
             <div className="flex items-center gap-2">
-              {isNotificationPanel && visibleNotificationActive && notificationDismissible && (
+              {isNotificationPanel && visibleNotificationActive && (
                 <Button
                   type="button"
                   variant="outline"

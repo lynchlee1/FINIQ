@@ -888,7 +888,6 @@ export default function DisclosureAutomationPage() {
           activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} isCancellable={!!activeJobId} onCancel={cancelJob} />}
           notificationActive={isErrorStatus || !!downloadConflicts.length || !!notification}
           notificationTone={notificationTone}
-          notificationDismissible={!downloadConflicts.length}
           notificationResetKey={`${notification}:${downloadConfirmation}`}
           notificationContent={
             <div className="space-y-3 text-sm text-[var(--tv-text)]">

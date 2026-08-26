@@ -12,10 +12,10 @@ test("action dock notification panel can clear accumulated notifications", async
   assert.match(source, /const visibleNotificationActive = notificationActive && !notificationDismissed/);
   assert.match(source, /if \(!notificationActive\) \{[\s\S]*?setNotificationDismissed\(false\)/);
   assert.match(source, /notificationResetKey = null/);
-  assert.match(source, /notificationDismissible = true/);
   assert.match(source, /if \(notificationActive\) \{[\s\S]*?setNotificationDismissed\(false\)/);
   assert.match(source, /\}, \[notificationActive, notificationResetKey, notificationTone\]\)/);
-  assert.match(source, /isNotificationPanel && visibleNotificationActive && notificationDismissible/);
+  assert.match(source, /isNotificationPanel && visibleNotificationActive && \(/);
+  assert.doesNotMatch(source, /notificationDismissible/);
   assert.match(source, /onClick=\{\(\) => setNotificationDismissed\(true\)\}/);
   assert.match(source, />\s*지우기\s*</);
   assert.match(source, /title="누적 알림 지우기"/);

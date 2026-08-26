@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import requests
 
 from finiq.market_desk.web.features.disclosures.html_common import (
     _source_json_fingerprint,
@@ -1080,6 +1081,85 @@ def test_internal_html_download_rejects_invalid_response(
     assert not (tmp_path / "20250101000001.html").exists()
 
 
+def test_internal_html_download_accepts_legacy_html_fragment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        lambda *args, **kwargs: (
+            b'<P class="section-1">Legacy disclosure</P>'
+            b"<TABLE><TR><TD>content</TD></TR></TABLE>"
+        ),
+    )
+
+    saved = download_disclosure_internal_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        targets=[{"acpt_no": "19970415M00003", "doc_no": "19970415M00003"}],
+        max_requests_per_minute=100,
+    )
+
+    assert [path.name for path in saved] == ["19970415M00003.html"]
+
+
+def test_internal_html_download_retries_transient_proxy_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = 0
+
+    def fake_fetch(*args: object, **kwargs: object) -> bytes:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise requests.exceptions.ProxyError("temporary proxy failure")
+        return _valid_html().encode("utf-8")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fake_fetch,
+    )
+
+    saved = download_disclosure_internal_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        targets=[{"acpt_no": "20250101000001", "doc_no": "1"}],
+        max_requests_per_minute=100,
+        max_retries=1,
+    )
+
+    assert attempts == 2
+    assert [path.name for path in saved] == ["20250101000001.html"]
+
+
+def test_internal_html_failure_does_not_stop_following_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_fetch(*args: object, **kwargs: object) -> bytes:
+        if kwargs["acpt_no"] == "20250101000001":
+            raise requests.exceptions.ProxyError("persistent proxy failure")
+        return _valid_html().encode("utf-8")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fake_fetch,
+    )
+
+    with pytest.raises(requests.exceptions.ProxyError):
+        download_disclosure_internal_htmls(
+            output_directory=tmp_path,
+            request_headers={},
+            targets=[
+                {"acpt_no": "20250101000001", "doc_no": "1"},
+                {"acpt_no": "20250101000002", "doc_no": "2"},
+            ],
+            max_requests_per_minute=100,
+            max_retries=0,
+            max_workers=1,
+        )
+
+    assert (tmp_path / "20250101000002.html").is_file()
+
+
 def test_internal_html_download_runs_targets_in_parallel_and_preserves_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1245,6 +1325,42 @@ def test_internal_html_download_cancellation_stops_before_manifest(
     assert result["cancelled"] is True
     assert result["manifest_path"] == ""
     assert not (tmp_path / "content" / "kind_disclosure_html_manifest.json").exists()
+
+
+def test_internal_html_partial_failure_records_saved_files_before_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acpt_numbers = ["20250101000001", "20250101000002"]
+
+    def fake_download(**kwargs: object) -> list[Path]:
+        acpt_no = acpt_numbers[0]
+        path = Path(kwargs["target_output_directories"][acpt_no]) / f"{acpt_no}.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_valid_html(), encoding="utf-8")
+        return [path]
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fake_download,
+    )
+    body = _internal_html_body(
+        tmp_path,
+        acpt_numbers,
+        skip_existing=False,
+    )
+
+    with pytest.raises(ValueError, match="membership.*missing="):
+        download_disclosure_internal_html_payload(body)
+
+    manifest_path = (
+        Path(str(body["output_directory"]))
+        / "kind_disclosure_html_manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert [item["acpt_no"] for item in manifest["disclosures"]] == [
+        acpt_numbers[0]
+    ]
+    assert manifest["disclosures"][0]["source_sha256"]
 
 
 def test_external_html_compression_rejects_receipt_number_mismatching_filename(

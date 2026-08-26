@@ -1005,7 +1005,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           }
           notificationActive={isErrorStatus || !!existingCheckError || lastInspectionCandidateCount > 0 || !!lastInspectionResult || !!allModeSaveInspectionData || !!compressionInspectionData}
           notificationTone={isErrorStatus ? "error" : existingCheckError || integrityProblemCount > 0 || saveInspectionFailed || compressionInspectionFailed ? "warning" : "success"}
-          notificationDismissible={false}
           notificationContent={
             <>
               {showSaveWorkflow && allModeSaveInspectionData && (

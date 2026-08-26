@@ -2704,6 +2704,8 @@ def test_write_disclosure_html_manifest_payload_rejects_source_directory(
 
 
 def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Path, monkeypatch) -> None:
+    download_events: list[None] = []
+
     def fake_download(**kwargs):
         assert kwargs["targets"] == [{"acpt_no": "20250101000001", "doc_no": "20250101000099"}]
         path = Path(
@@ -2735,7 +2737,8 @@ def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Pat
             "output_directory": str(tmp_path / "content_html"),
             "source_compressed_json_path": str(compressed_path),
             "progress_interval": 1,
-        }
+        },
+        download_callback=lambda: download_events.append(None),
     )
 
     assert payload["format"] == "kind_disclosure_internal_html_download_v1"
@@ -2744,6 +2747,7 @@ def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Pat
         str(tmp_path / "content_html" / "2025" / "20250101000001.html")
     ]
     assert "HTML 내부 저장 중간 확인: 1/1건 처리." in payload["progress_log"]
+    assert len(download_events) == 1
     manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["disclosures"][0]["source_size_bytes"] > 0
     assert len(manifest["disclosures"][0]["source_sha256"]) == 64
@@ -3470,6 +3474,8 @@ def test_download_disclosure_external_html_payload_logs_existing_html_overlap(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    download_events: list[None] = []
+
     def fake_download(**kwargs):
         assert kwargs["acpt_numbers"] == ["20250101000002"]
         assert kwargs["skip_existing"] is False
@@ -3477,6 +3483,7 @@ def test_download_disclosure_external_html_payload_logs_existing_html_overlap(
         for acpt_no in kwargs["acpt_numbers"]:
             path = Path(kwargs["target_output_directories"][acpt_no]) / f"{acpt_no}.html"
             path.write_text(_valid_download_html(), encoding="utf-8")
+            kwargs["progress_callback"](f"Saved KIND external HTML to: {path}")
             paths.append(path)
         return paths
 
@@ -3508,12 +3515,14 @@ def test_download_disclosure_external_html_payload_logs_existing_html_overlap(
             output_directory=str(output_directory),
             skip_existing=True,
             progress_interval=1,
-        )
+        ),
+        download_callback=lambda: download_events.append(None),
     )
 
     assert "기존 HTML 겹침 확인: 1/2건." in payload["progress_log"]
     assert "새로 저장할 대상: 1건." in payload["progress_log"]
     assert "HTML 저장 중간 확인: 1/2건 처리." in payload["progress_log"]
+    assert len(download_events) == 1
     assert payload["saved_files"] == [
         str(output_directory / "2025" / "20250101000001.html"),
         str(output_directory / "2025" / "20250101000002.html"),

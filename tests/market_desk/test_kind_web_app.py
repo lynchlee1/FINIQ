@@ -448,6 +448,29 @@ def test_job_manager_snapshot_reports_elapsed_and_progress_silence(monkeypatch) 
     assert snapshot["progress_idle_seconds"] == 12.5
 
 
+def test_job_manager_reports_download_rate_from_latest_ten_seconds(monkeypatch) -> None:
+    import finiq.market_desk.web.jobs as jobs_module
+
+    now = 100.0
+    monkeypatch.setattr(jobs_module.time, "time", lambda: now)
+    manager = JobManager()
+    manager.create_job("job-download-rate", "external_html_download")
+
+    manager.record_download("job-download-rate")
+    now = 105.0
+    manager.record_download("job-download-rate")
+    now = 111.0
+    manager.record_download("job-download-rate")
+
+    snapshot = manager.get_snapshot("job-download-rate")
+
+    assert snapshot is not None
+    assert snapshot["download_rate_window_seconds"] == 10
+    assert snapshot["recent_download_count"] == 2
+    assert snapshot["downloads_per_minute"] == 12
+    assert snapshot["progress_idle_seconds"] == 0
+
+
 def test_job_manager_purges_only_expired_terminal_jobs() -> None:
     manager = JobManager(retention_minutes=60)
     completed = manager.create_job("completed", "download")

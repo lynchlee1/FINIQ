@@ -408,6 +408,7 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Parallel pages within one year option | 한 연도 내 병렬 | Runs yearly folders in sequence and downloads pages within the active year concurrently. Shown as a right-side inspector select under `병렬 처리 방식`. |
 | Background job retention setting | 작업 기록 보관 시간 (분) | Retains terminal in-memory job status for the configured number of minutes. It never removes saved files or workflow metadata. |
 | Active job elapsed time | 작업 경과 | Show server-reported elapsed time while a right-dock background job is queued or running. |
+| HTML download throughput | 다운로드 속도 | Show `download/min` from actual network downloads completed during the latest 10 seconds, multiplied by six. Exclude reused or skipped files. |
 | Active job progress freshness | 진행 확인 | Pair `상태 조회 정상` with either the age of the latest log or `새 로그 N초째 없음` after 10 seconds. This reports observed API/log freshness and does not claim that silent work has stopped. |
 | Disclosure separate output directory setting | (not shown in UI) | Code/config only. The right-dock settings panel never exposes a separate save-directory toggle. Jobs use the canonical stage directory under the workspace unless a payload or saved setting overrides the path. |
 | Disclosure workspace root path | 작업공간 디렉토리 | Shared root directory shown on every disclosure detail page. All canonical stage paths are resolved below this directory. |

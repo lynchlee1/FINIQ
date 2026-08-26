@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import time
+from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 from fastapi import FastAPI
@@ -74,8 +75,25 @@ from finiq.market_desk.web.features.downloads.kind_common import (
     configure_download_job_retention,
 )
 from finiq.market_desk.web.features.storage.partition import run_partition_storage_payload
+from finiq.market_desk.web.wireproxy_lifecycle import (
+    start_wireproxy_launch_agents,
+    stop_wireproxy_launch_agents,
+)
 
-app = FastAPI(title="FINIQ MarketDesk API")
+
+config = init_config()
+
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    wireproxy_labels = start_wireproxy_launch_agents(config.kind_proxy_urls)
+    try:
+        yield
+    finally:
+        stop_wireproxy_launch_agents(wireproxy_labels)
+
+
+app = FastAPI(title="FINIQ MarketDesk API", lifespan=_app_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -85,7 +103,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-config = init_config()
 job_manager.set_retention_minutes(config.job_retention_minutes)
 configure_download_job_retention(config.job_retention_minutes)
 
@@ -210,6 +227,8 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
         kwargs = {"progress_callback": progress_callback}
         if "cancel_check" in sig.parameters:
             kwargs["cancel_check"] = lambda: job_manager.is_cancelled(job_id)
+        if "download_callback" in sig.parameters:
+            kwargs["download_callback"] = lambda: job_manager.record_download(job_id)
 
         if kind in {
             "external_html_download",

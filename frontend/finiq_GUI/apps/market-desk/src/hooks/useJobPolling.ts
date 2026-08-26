@@ -29,10 +29,21 @@ function jobTimingLines(data: JobSnapshot<any>) {
   const progressState = data.progress_idle_seconds >= LONG_PROGRESS_SILENCE_SECONDS
     ? `새 로그 ${idle}째 없음`
     : `마지막 로그 ${idle} 전`;
-  return [
+  const lines = [
     `작업 경과: ${elapsed}`,
     `진행 확인: 상태 조회 정상 · ${progressState}`,
   ];
+  if (
+    data.downloads_per_minute !== undefined
+    && data.recent_download_count !== undefined
+    && data.download_rate_window_seconds !== undefined
+  ) {
+    lines.push(
+      `다운로드 속도: ${data.downloads_per_minute} download/min · `
+      + `최근 ${data.download_rate_window_seconds}초 ${data.recent_download_count}건`,
+    );
+  }
+  return lines;
 }
 
 export function useJobPolling(options: UseJobPollingOptions) {

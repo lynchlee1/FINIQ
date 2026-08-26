@@ -44,7 +44,7 @@ curl -X POST http://127.0.0.1:8765/api/settings \
   -d '{"kind_proxy_urls":["http://127.0.0.1:25001","http://127.0.0.1:25002"]}'
 ```
 
-설정 뒤의 04·05단계 저장 작업부터 직접 연결과 등록된 프록시를 함께 사용한다. FINIQ는 `wireproxy`를 설치하거나 실행하지 않으며 WireGuard 비밀키도 읽지 않는다. 프록시가 중단되면 그 경로에 배정된 다운로드는 실패하며 직접 연결로 다시 보내지 않는다.
+설정 뒤의 04·05단계 저장 작업부터 직접 연결과 등록된 프록시를 함께 사용한다. FINIQ 백엔드는 시작할 때 등록된 `com.finiq.wireproxy.routeN` LaunchAgent를 실행하고 종료할 때 함께 정지한다. FINIQ는 WireGuard 비밀키를 읽지 않는다. 프록시가 중단되면 그 경로에 배정된 다운로드는 실패하며 직접 연결로 다시 보내지 않는다.
 
 ### `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`
 

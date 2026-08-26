@@ -117,7 +117,7 @@ test("download page-count conflicts require confirmation in the notification pan
   assert.match(page, /workflow_status: "completed" \| "needs_download_confirmation"/);
   assert.match(page, /download_confirmation: confirmedDownload/);
   assert.match(page, /setDownloadConflicts\(conflicts\)/);
-  assert.match(page, /notificationDismissible=\{!downloadConflicts\.length\}/);
+  assert.doesNotMatch(page, /notificationDismissible/);
   assert.match(page, /저장 \{conflict\.saved_pages \?\? "확인 불가"\}페이지 · KIND \{conflict\.kind_pages \?\? "확인 불가"\}페이지/);
   assert.match(page, /전체 다시 받기/);
   assert.match(page, /startRun\("sync", downloadConfirmation\)/);

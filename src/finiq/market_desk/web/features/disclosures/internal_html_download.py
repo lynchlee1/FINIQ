@@ -28,6 +28,7 @@ def redownload_missing_disclosure_internal_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    download_callback: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Repair owner-mode internal HTML identified by the all-mode inspection."""
     from finiq.market_desk.web.features.disclosures.html_cleanup import (
@@ -81,6 +82,11 @@ def redownload_missing_disclosure_internal_html_payload(
                 payload,
                 progress_callback=progress_callback,
                 cancel_check=cancel_check,
+                **(
+                    {"download_callback": download_callback}
+                    if download_callback is not None
+                    else {}
+                ),
                 redownload_unverified_existing=True,
             )
             cancelled = bool(result.get("cancelled"))
@@ -244,6 +250,7 @@ def _internal_html_virtual_computer_worker(
             worker_kwargs["wait_seconds_between_requests"]
         ),
         max_requests_per_minute=int(worker_kwargs["max_requests_per_minute"]),
+        max_retries=int(worker_kwargs["max_retries"]),
         skip_existing=bool(worker_kwargs["skip_existing"]),
         progress_callback=lambda message: progress_queue.put(message),  # type: ignore[attr-defined]
         cancel_check=lambda: bool(cancel_event.is_set()),  # type: ignore[attr-defined]
@@ -258,6 +265,7 @@ def _internal_html_virtual_computer_worker(
         },
         _egress_proxy_url=computer.proxy_url,
         _include_process_limiter=False,
+        _allow_partial=True,
     )
     return [str(path) for path in paths]
 
@@ -270,6 +278,7 @@ def download_disclosure_internal_htmls(
     timeout: float = 20.0,
     wait_seconds_between_requests: float = 0.0,
     max_requests_per_minute: int = 90,
+    max_retries: int = 5,
     skip_existing: bool = True,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
@@ -280,6 +289,7 @@ def download_disclosure_internal_htmls(
     target_output_directories: Mapping[str, str | Path] | None = None,
     _egress_proxy_url: str | None = None,
     _include_process_limiter: bool = True,
+    _allow_partial: bool = False,
 ) -> list[Path]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     if timeout <= 0:
@@ -290,6 +300,9 @@ def download_disclosure_internal_htmls(
         raise ValueError(msg)
     if max_requests_per_minute < 1 or max_requests_per_minute > 100:
         msg = "max_requests_per_minute must be between 1 and 100"
+        raise ValueError(msg)
+    if max_retries < 0:
+        msg = "max_retries must be >= 0"
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
@@ -337,6 +350,7 @@ def download_disclosure_internal_htmls(
                 "timeout": timeout,
                 "wait_seconds_between_requests": wait_seconds_between_requests,
                 "max_requests_per_minute": max_requests_per_minute,
+                "max_retries": max_retries,
                 "skip_existing": skip_existing,
                 "target_output_directories": {
                     acpt_no: str(path)
@@ -353,6 +367,49 @@ def download_disclosure_internal_htmls(
             for path_value in result:
                 path = Path(str(path_value))
                 saved_paths[path.stem] = path
+        missing_targets = [
+            target
+            for target in targets
+            if target["acpt_no"] not in saved_paths
+        ]
+        if missing_targets and not (cancel_check is not None and cancel_check()):
+            if progress_callback is not None:
+                progress_callback(
+                    "병렬 경로에서 완료하지 못한 내부 HTML "
+                    f"{len(missing_targets)}건을 직접 연결로 재시도합니다."
+                )
+            recovered_paths = download_disclosure_internal_htmls(
+                output_directory=output_directory,
+                request_headers=request_headers,
+                targets=missing_targets,
+                timeout=timeout,
+                wait_seconds_between_requests=wait_seconds_between_requests,
+                max_requests_per_minute=max_requests_per_minute,
+                max_retries=max_retries,
+                skip_existing=skip_existing,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+                max_workers=min(worker_count, len(missing_targets)),
+                target_output_directories={
+                    target["acpt_no"]: resolved_output_directories[
+                        target["acpt_no"]
+                    ]
+                    for target in missing_targets
+                },
+                _include_process_limiter=_include_process_limiter,
+                _allow_partial=True,
+            )
+            saved_paths.update({path.stem: path for path in recovered_paths})
+        remaining_targets = [
+            target["acpt_no"]
+            for target in targets
+            if target["acpt_no"] not in saved_paths
+        ]
+        if remaining_targets and not _allow_partial:
+            raise RuntimeError(
+                "Failed to download KIND internal HTML after retries: "
+                f"{remaining_targets[:10]}"
+            )
         return [
             saved_paths[target["acpt_no"]]
             for target in targets
@@ -368,6 +425,8 @@ def download_disclosure_internal_htmls(
         spacing_limiter = RequestSpacingLimiter(min_interval_seconds)
     rate_limiter = SlidingWindowRateLimiter(max_requests_per_minute)
     progress_lock = Lock()
+    failures: dict[str, Exception] = {}
+    failures_lock = Lock()
 
     def report(message: str) -> None:
         if progress_callback is not None:
@@ -399,27 +458,54 @@ def download_disclosure_internal_htmls(
         if skip_existing and _is_valid_html(output_path):
             report(f"Skipping existing KIND internal HTML: {output_path}")
             return output_path
-        report(f"Fetching KIND internal HTML acpt_no={acpt_no} doc_no={doc_no}...")
-        try:
-            internal_html = _fetch_internal_html(
-                session,
-                acpt_no=acpt_no,
-                doc_no=doc_no,
-                request_headers=normalized_headers,
-                timeout=timeout,
-                before_request=wait_for_request,
+        for attempt in range(max_retries + 1):
+            report(
+                f"Fetching KIND internal HTML acpt_no={acpt_no} "
+                f"doc_no={doc_no}..."
             )
-        except InterruptedError:
-            return None
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(internal_html)
-        if not _is_valid_html(output_path):
-            output_path.unlink(missing_ok=True)
-            raise ValueError(
-                f"Downloaded internal response for acpt_no={acpt_no} is invalid HTML"
-            )
-        report(f"Saved KIND internal HTML to: {output_path}")
-        return output_path
+            try:
+                internal_html = _fetch_internal_html(
+                    session,
+                    acpt_no=acpt_no,
+                    doc_no=doc_no,
+                    request_headers=normalized_headers,
+                    timeout=timeout,
+                    before_request=wait_for_request,
+                )
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(internal_html)
+                if not _is_valid_html(output_path):
+                    output_path.unlink(missing_ok=True)
+                    raise ValueError(
+                        "Downloaded internal response for "
+                        f"acpt_no={acpt_no} is invalid HTML"
+                    )
+            except InterruptedError:
+                return None
+            except Exception as exc:
+                output_path.unlink(missing_ok=True)
+                is_connection_failure = isinstance(
+                    exc,
+                    (
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.Timeout,
+                    ),
+                )
+                if is_connection_failure and attempt < max_retries:
+                    report(
+                        "Retrying KIND internal HTML after connection failure "
+                        f"({attempt + 1}/{max_retries}) acpt_no={acpt_no}: {exc}"
+                    )
+                    continue
+                with failures_lock:
+                    failures[acpt_no] = exc
+                report(
+                    f"Failed KIND internal HTML acpt_no={acpt_no}: {exc}"
+                )
+                return None
+            report(f"Saved KIND internal HTML to: {output_path}")
+            return output_path
+        return None
 
     worker_local = threading.local()
     worker_sessions: list[requests.Session] = []
@@ -478,6 +564,13 @@ def download_disclosure_internal_htmls(
             for worker_session in worker_sessions:
                 worker_session.close()
 
+    if failures and not _allow_partial:
+        if len(failures) == 1:
+            raise next(iter(failures.values()))
+        raise RuntimeError(
+            "Failed to download KIND internal HTML after retries: "
+            f"{list(failures)[:10]}"
+        )
     return [path for path in indexed_paths if path is not None]
 
 
@@ -527,6 +620,7 @@ def download_disclosure_internal_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    download_callback: Callable[[], None] | None = None,
     *,
     redownload_unverified_existing: bool = False,
 ) -> dict[str, Any]:
@@ -668,6 +762,11 @@ def download_disclosure_internal_html_payload(
             with progress_lock:
                 processed_count += 1
                 current_count = processed_count
+            if (
+                message.startswith("Saved KIND internal HTML ")
+                and download_callback is not None
+            ):
+                download_callback()
             emit(message)
             if current_count % progress_interval == 0:
                 emit(
@@ -813,13 +912,14 @@ def download_disclosure_internal_html_payload(
                         )
                         for target in download_targets
                     },
+                    _allow_partial=True,
                 )
             )
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
         verification = _verify_internal_download_membership(
             expected_acpt_numbers=acpt_numbers,
             saved_paths=[*existing_paths_by_acpt_no.values(), *downloaded_paths],
-            allow_missing=cancelled,
+            allow_missing=True,
         )
         saved_paths_by_acpt_no = dict(existing_paths_by_acpt_no)
         saved_paths_by_acpt_no.update({path.stem: path for path in downloaded_paths})
@@ -865,6 +965,12 @@ def download_disclosure_internal_html_payload(
             source_integrity=source_integrity_by_acpt_no,
         )
         emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
+    if not cancelled and not verification["complete"]:
+        _verify_internal_download_membership(
+            expected_acpt_numbers=acpt_numbers,
+            saved_paths=saved_paths,
+            allow_missing=False,
+        )
     emit(
         f"HTML 내부 저장 {'중지' if cancelled else '완료'}: 저장 파일 {len(saved_paths)}/{len(acpt_numbers)}건."
     )

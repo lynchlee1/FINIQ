@@ -124,7 +124,7 @@ test("HTML problem-file notices require visible confirmation and limit details",
   assert.match(htmlDownload, /label: "문제 파일 표시 수"/);
   assert.match(htmlDownload, /parsedProblemFileLimit/);
   assert.match(htmlDownload, /problem_file_limit: parsedProblemFileLimit/);
-  assert.match(htmlDownload, /notificationDismissible=\{false\}/);
+  assert.doesNotMatch(htmlDownload, /notificationDismissible/);
   assert.match(htmlDownload, /Label htmlFor="deleteConfirmationText"[\s\S]*확인 문구/);
   assert.match(htmlDownload, /확인했습니다\.&quot;를 정확히 입력하고 삭제 허가를 선택하세요/);
   assert.match(htmlDownload, /deleteConfirmed && deleteConfirmationText\.trim\(\) === "확인했습니다\." && \(/);

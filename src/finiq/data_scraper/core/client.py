@@ -63,7 +63,12 @@ def _is_valid_html(path: Path) -> bool:
         return False
     try:
         content = path.read_text(encoding="utf-8", errors="ignore")
-        return "<html" in content.lower() or "openDisclsViewer" in content
+        normalized = content.lstrip().lower()
+        return (
+            "<html" in normalized
+            or "opendisclsviewer" in normalized
+            or (normalized.startswith("<p") and "<table" in normalized)
+        )
     except Exception:
         return False
 

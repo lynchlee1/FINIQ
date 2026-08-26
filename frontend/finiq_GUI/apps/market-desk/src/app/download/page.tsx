@@ -128,6 +128,7 @@ export default function DownloadPage() {
   const [result, setResult] = useState<any>(null);
   const [previewResult, setPreviewResult] = useState<any>(null);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
+  const [notificationDismissed, setNotificationDismissed] = useState(false);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [runStarting, setRunStarting] = useState(false);
@@ -725,6 +726,10 @@ export default function DownloadPage() {
     }
   };
 
+  useEffect(() => {
+    setNotificationDismissed(false);
+  }, [existingMetadataError, fileInspectionError, isErrorStatus, lastInspectedFilesKey, lastInspectionCandidateCount, previewResult, result]);
+
   if (loading) {
     return <PageLoadingSpinner message="옵션을 불러오는 중입니다..." />;
   }
@@ -760,13 +765,17 @@ export default function DownloadPage() {
     || !!existingMetadataError
     || !!fileInspectionError
     || !!previewResult;
-  const notificationTone = isErrorStatus || !!existingMetadataError || !!fileInspectionError
-    ? "error"
-    : currentInspectionCandidateCount > 0 || hasInspectionFailureNotification || !!previewResult
-      ? "warning"
-      : hasSuccessfulInspectionNotification
-        ? "success"
-        : "neutral";
+  const visibleWarningNotification = !notificationDismissed && hasWarningNotification;
+  const visibleSuccessfulInspectionNotification = !notificationDismissed && hasSuccessfulInspectionNotification;
+  const notificationTone = notificationDismissed
+    ? "neutral"
+    : isErrorStatus || !!existingMetadataError || !!fileInspectionError
+      ? "error"
+      : currentInspectionCandidateCount > 0 || hasInspectionFailureNotification || !!previewResult
+        ? "warning"
+        : hasSuccessfulInspectionNotification
+          ? "success"
+          : "neutral";
   const dockToneStyle = (tone: "neutral" | "success" | "warning" | "error", selected: boolean): CSSProperties | undefined => {
     if (tone === "neutral") return undefined;
     const tokens = tone === "error"
@@ -1191,17 +1200,17 @@ export default function DownloadPage() {
               }}
               aria-pressed={notificationPanelOpen}
               className={
-                (hasWarningNotification || hasSuccessfulInspectionNotification) && notificationTone !== "neutral"
+                (visibleWarningNotification || visibleSuccessfulInspectionNotification) && notificationTone !== "neutral"
                   ? "relative h-10 w-10 rounded-lg"
                     : "relative h-10 w-10 rounded-lg border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-muted)]"
               }
-              style={hasWarningNotification || hasSuccessfulInspectionNotification
+              style={visibleWarningNotification || visibleSuccessfulInspectionNotification
                 ? dockToneStyle(notificationTone, notificationPanelOpen)
                 : undefined}
               title={notificationPanelOpen ? "알림 닫기" : "알림 열기"}
             >
               <Bell className="h-5 w-5" />
-              {(hasWarningNotification || hasSuccessfulInspectionNotification) && (
+              {(visibleWarningNotification || visibleSuccessfulInspectionNotification) && (
                 <span className={`absolute right-2 top-2 h-2 w-2 rounded-full ${notificationDotClass}`} />
               )}
             </Button>
@@ -1227,24 +1236,42 @@ export default function DownloadPage() {
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="dark:text-white">알림</CardTitle>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setNotificationPanelOpen(false)}
-                    className="h-8 w-8 text-[var(--tv-text)] hover:text-[var(--tv-accent)]"
-                    title="알림 닫기"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {(hasWarningNotification || hasSuccessfulInspectionNotification) && !notificationDismissed && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setNotificationDismissed(true)}
+                        className="h-8 border-[color:var(--tv-border)] bg-[var(--tv-surface)] text-[var(--tv-text)] hover:text-[var(--tv-accent)]"
+                        title="누적 알림 지우기"
+                      >
+                        지우기
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setNotificationPanelOpen(false)}
+                      className="h-8 w-8 text-[var(--tv-text)] hover:text-[var(--tv-accent)]"
+                      title="알림 닫기"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {isErrorStatus || existingMetadataError || fileInspectionError ? (
-                  <div className="space-y-2">
-                    <Label className="dark:text-slate-300">작업 알림</Label>
-                    <JobStatusLogger status={existingMetadataError || fileInspectionError || status} isErrorStatus />
-                  </div>
-                ) : null}
+                {notificationDismissed ? (
+                  <div className="text-body text-slate-500 dark:text-slate-400">알림 없음</div>
+                ) : (
+                  <>
+                    {isErrorStatus || existingMetadataError || fileInspectionError ? (
+                      <div className="space-y-2">
+                        <Label className="dark:text-slate-300">작업 알림</Label>
+                        <JobStatusLogger status={existingMetadataError || fileInspectionError || status} isErrorStatus />
+                      </div>
+                    ) : null}
 
                 {previewResult && !isErrorStatus && !existingMetadataError && !fileInspectionError ? (
                   <div className="space-y-2">
@@ -1303,8 +1330,10 @@ export default function DownloadPage() {
                   </div>
                 )}
 
-                {!hasWarningNotification && !hasSuccessfulInspectionNotification && (
-                  <div className="text-body text-slate-500 dark:text-slate-400">알림 없음</div>
+                    {!hasWarningNotification && !hasSuccessfulInspectionNotification && (
+                      <div className="text-body text-slate-500 dark:text-slate-400">알림 없음</div>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>

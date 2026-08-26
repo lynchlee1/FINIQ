@@ -11,6 +11,13 @@ from typing import Any, Callable, Dict, Optional
 
 DEFAULT_JOB_RETENTION_MINUTES = 60
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
+DOWNLOAD_RATE_WINDOW_SECONDS = 10
+DOWNLOAD_JOB_KINDS = {
+    "external_html_download",
+    "external_html_redownload",
+    "internal_html_download",
+    "internal_html_redownload",
+}
 
 
 def normalize_job_retention_minutes(value: Any) -> int:
@@ -33,6 +40,7 @@ class HtmlJob:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     progress_log: deque[str] = field(default_factory=lambda: deque(maxlen=100))
+    download_timestamps: deque[float] = field(default_factory=deque)
     result: dict[str, Any] | None = None
     error: str | None = None
 
@@ -126,6 +134,16 @@ class JobManager:
                 self._jobs[job_id].progress_log.append(f"[{timestamp}] {message}")
                 self._jobs[job_id].updated_at = time.time()
 
+    def record_download(self, job_id: str) -> None:
+        now = time.time()
+        with self._lock:
+            if job := self._jobs.get(job_id):
+                cutoff = now - DOWNLOAD_RATE_WINDOW_SECONDS
+                while job.download_timestamps and job.download_timestamps[0] < cutoff:
+                    job.download_timestamps.popleft()
+                job.download_timestamps.append(now)
+                job.updated_at = now
+
     def get_snapshot(self, job_id: str) -> Optional[dict[str, Any]]:
         with self._lock:
             self._purge_expired_locked()
@@ -133,7 +151,7 @@ class JobManager:
             if not job:
                 return None
             server_time = time.time()
-            return {
+            snapshot = {
                 "job_id": job.id,
                 "kind": job.kind,
                 "status": job.status,
@@ -146,6 +164,20 @@ class JobManager:
                 "result": job.result,
                 "error": job.error,
             }
+            if job.kind in DOWNLOAD_JOB_KINDS:
+                cutoff = server_time - DOWNLOAD_RATE_WINDOW_SECONDS
+                while job.download_timestamps and job.download_timestamps[0] < cutoff:
+                    job.download_timestamps.popleft()
+                recent_download_count = len(job.download_timestamps)
+                snapshot.update(
+                    {
+                        "download_rate_window_seconds": DOWNLOAD_RATE_WINDOW_SECONDS,
+                        "recent_download_count": recent_download_count,
+                        "downloads_per_minute": recent_download_count
+                        * (60 // DOWNLOAD_RATE_WINDOW_SECONDS),
+                    }
+                )
+            return snapshot
 
     def cancel_job(self, job_id: str, *, reserve_missing: bool = False) -> bool:
         with self._lock:

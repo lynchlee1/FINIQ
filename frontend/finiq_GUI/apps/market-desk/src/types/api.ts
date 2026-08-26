@@ -13,6 +13,9 @@ export type JobSnapshot<T = unknown> = {
   server_time: number;
   elapsed_seconds: number;
   progress_idle_seconds: number;
+  download_rate_window_seconds?: number;
+  recent_download_count?: number;
+  downloads_per_minute?: number;
   progress_log?: string[];
   result?: T;
   error?: string | null;

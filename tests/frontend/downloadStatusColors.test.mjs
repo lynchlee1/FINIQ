@@ -177,7 +177,11 @@ test("manual inspection opens the activity panel and keeps progress visible", as
   assert.match(source, /activeJobId && \(\s*<span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-\[var\(--tv-warning\)\]" \/>/);
   assert.doesNotMatch(source, /rounded-full bg-\[var\(--tv-muted\)\]/);
   assert.match(source, /currentInspectionCandidateCount > 0 \|\| hasInspectionFailureNotification \|\| !!previewResult/);
-  assert.match(source, /style=\{hasWarningNotification \|\| hasSuccessfulInspectionNotification[\s\S]{0,150}dockToneStyle\(notificationTone, notificationPanelOpen\)/);
+  assert.match(source, /style=\{visibleWarningNotification \|\| visibleSuccessfulInspectionNotification[\s\S]{0,150}dockToneStyle\(notificationTone, notificationPanelOpen\)/);
+  assert.match(source, /const \[notificationDismissed, setNotificationDismissed\] = useState\(false\)/);
+  assert.match(source, /title="누적 알림 지우기"[\s\S]{0,120}>\s*지우기\s*<\/Button>/);
+  assert.match(source, /notificationDismissed \? \([\s\S]{0,180}알림 없음/);
+  assert.match(source, /setNotificationDismissed\(false\)/);
   assert.match(source, /const actionDockRef = useActionDockFollow<HTMLDivElement>\(\)/);
   assert.match(source, /<div ref=\{actionDockRef\} className="action-dock-root/);
   assert.doesNotMatch(source, /md:sticky|md:top-\[/);

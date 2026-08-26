@@ -18,6 +18,7 @@ def redownload_missing_disclosure_external_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    download_callback: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Repair owner-mode HTML identified by the all-mode inspection."""
     data_root = str(body.get("data_root") or "").strip()
@@ -67,6 +68,11 @@ def redownload_missing_disclosure_external_html_payload(
                 payload,
                 progress_callback=progress_callback,
                 cancel_check=cancel_check,
+                **(
+                    {"download_callback": download_callback}
+                    if download_callback is not None
+                    else {}
+                ),
                 redownload_unverified_existing=True,
             )
             cancelled = bool(result.get("cancelled"))
@@ -94,6 +100,7 @@ def download_disclosure_external_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    download_callback: Callable[[], None] | None = None,
     *,
     redownload_unverified_existing: bool = False,
 ) -> dict[str, Any]:
@@ -177,6 +184,11 @@ def download_disclosure_external_html_payload(
             ("Saved KIND external HTML ", "Skipping existing KIND external HTML")
         ):
             processed_count += 1
+            if (
+                message.startswith("Saved KIND external HTML ")
+                and download_callback is not None
+            ):
+                download_callback()
             if processed_count % progress_interval == 0:
                 emit(
                     f"HTML 저장 중간 확인: {processed_count}/{len(acpt_numbers)}건 처리."

@@ -302,3 +302,42 @@ def test_internal_html_dispatches_configured_egresses(
 
     assert captured["proxy_urls"] == ["http://127.0.0.1:25001"]
     assert [path.stem for path in saved] == ["20250101000002", "20250101000001"]
+
+
+def test_internal_html_reassigns_missing_egress_result_to_direct_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    targets = [
+        {"acpt_no": "20250101000001", "doc_no": "1"},
+        {"acpt_no": "20250101000002", "doc_no": "2"},
+    ]
+    first_path = tmp_path / "20250101000001.html"
+    first_path.write_text("<html><body>first</body></html>", encoding="utf-8")
+    progress: list[str] = []
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.run_kind_virtual_computers",
+        lambda **kwargs: [[str(first_path)], []],
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        lambda *args, **kwargs: b"<html><body>recovered</body></html>",
+    )
+
+    saved = download_disclosure_internal_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        targets=targets,
+        kind_proxy_urls=["http://127.0.0.1:25001"],
+        max_workers=2,
+        max_retries=1,
+        skip_existing=False,
+        progress_callback=progress.append,
+    )
+
+    assert [path.stem for path in saved] == [
+        "20250101000001",
+        "20250101000002",
+    ]
+    assert any("직접 연결로 재시도" in message for message in progress)
