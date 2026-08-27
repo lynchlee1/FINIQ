@@ -46,9 +46,10 @@ Graph Viewer는 graph JSON을 시각적으로 탐색하는 UI입니다. 노드�
 
 ## 개발 명령
 
-모든 npm 명령은 저장소 루트에서 실행합니다.
+프런트엔드 npm 명령은 저장소의 `frontend` 디렉터리에서 실행합니다.
 
 ```bash
+cd frontend
 npm install
 npm run build
 npm run dev:graph-viewer

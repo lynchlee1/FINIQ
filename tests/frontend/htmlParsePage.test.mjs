@@ -223,7 +223,7 @@ test("html parse page renders parser-method filters in a separate options card",
   assert.match(source, /if \(filterCandidatesRequestIdRef\.current !== requestId\) return/);
   assert.match(source, /notificationActive=\{isErrorStatus \|\| !!executionOptionExampleNotice \|\| warningReports\.length > 0\}/);
   assert.match(source, /notificationTone=\{isErrorStatus \? "error" : warningReports\.length > 0 \|\| executionOptionExampleNotice \? "warning" : "neutral"\}/);
-  assert.match(source, /notificationResetKey=\{notificationResetKey\}/);
+  assert.match(source, /notificationResetKey=\{`\$\{notificationResetKey\}:\$\{isErrorStatus \? status : ""\}`\}/);
   assert.match(source, /setNotificationResetKey\(\(current\) => current \+ 1\)/);
   assert.match(source, /executionOptionExampleNotice \? \(/);
   assert.match(source, /executionOptionExampleNotice\.examples\.map/);

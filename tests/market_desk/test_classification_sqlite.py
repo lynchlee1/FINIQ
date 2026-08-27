@@ -14,7 +14,7 @@ from finiq.market_desk.data.facade import (
 
 
 def test_market_desk_finds_and_loads_sqlite_company_classification(tmp_path: Path) -> None:
-    output_path = tmp_path / "kind.company_classification.json"
+    output_path = tmp_path / "kind.company_classification.sqlite"
     write_company_classification_artifact(
         output_path,
         {
@@ -42,9 +42,7 @@ def test_market_desk_finds_and_loads_sqlite_company_classification(tmp_path: Pat
         },
         compact=True,
     )
-    output_path.write_text('{"companies":[]}\n', encoding="utf-8")
-
-    assert find_company_classification_files(tmp_path) == [tmp_path / "kind.company_classification.sqlite"]
+    assert find_company_classification_files(tmp_path) == [output_path]
 
     index_payload = load_company_classification_index_file(output_path)
     assert index_payload["summary"]["companies"] == 1
@@ -83,7 +81,7 @@ def test_recursive_find_company_classification_files(tmp_path: Path) -> None:
     deep_sqlite = deep_dir / "kind.company_classification.sqlite"
     deep_sqlite.touch()
 
-    # 3. all_companies.json nested
+    # 3. Legacy JSON is not a classification artifact.
     all_companies = tmp_path / "subdir1" / "all_companies.json"
     all_companies.touch()
 
@@ -108,13 +106,13 @@ def test_recursive_find_company_classification_files(tmp_path: Path) -> None:
     # Run discovery
     found = find_company_classification_files(tmp_path)
 
-    # Should find 1, 2, 3, and 5
+    # Should find 1, 2, and 5.
     assert root_sqlite in found
     assert deep_sqlite in found
-    assert all_companies in found
+    assert all_companies not in found
     assert viewer_sqlite in found
 
     # Should NOT find 4 or 6
     assert date_sqlite not in found
     assert git_sqlite not in found
-    assert len(found) == 4
+    assert len(found) == 3

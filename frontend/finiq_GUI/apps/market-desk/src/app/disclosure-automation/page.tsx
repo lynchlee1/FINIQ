@@ -698,6 +698,9 @@ export default function DisclosureAutomationPage() {
       : notification
         ? "success"
         : "neutral";
+  const notificationResetKey = `${notification}:${downloadConfirmation}:${downloadConflicts
+    .map((conflict) => `${conflict.range}:${conflict.reason}:${conflict.saved_pages ?? ""}:${conflict.kind_pages ?? ""}`)
+    .join("|")}`;
 
   if (initializationError) throw initializationError;
   if (loading) return <PageLoadingSpinner message="공시 자동화 설정을 불러오는 중입니다..." />;
@@ -889,7 +892,7 @@ export default function DisclosureAutomationPage() {
           activityContent={<JobStatusLogger status={status} isErrorStatus={isErrorStatus} isCancellable={!!activeJobId} onCancel={cancelJob} />}
           notificationActive={isErrorStatus || !!downloadConflicts.length || !!notification}
           notificationTone={notificationTone}
-          notificationResetKey={`${notification}:${downloadConfirmation}`}
+          notificationResetKey={notificationResetKey}
           notificationContent={
             <div className="space-y-3 text-sm text-[var(--tv-text)]">
               <p className="whitespace-pre-wrap">{notification || "알림 없음"}</p>

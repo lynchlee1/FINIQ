@@ -127,7 +127,12 @@ def test_html_download_rejects_invalid_worker_values(tmp_path, value, message) -
         json.dumps(
             {
                 "format": "kind_disclosure_filter_v1",
-                "disclosures": [{"acpt_no": "20250101000001"}],
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "disclosed_at": "2025-01-01",
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -186,6 +191,7 @@ def test_skip_errors_must_be_explicit_boolean(tmp_path) -> None:
                 "input_directory": str(tmp_path),
                 "output_directory": str(tmp_path / "output"),
                 "mode": "security_transaction",
+                "parser_method": "security_transaction",
             }
         )
     with pytest.raises(ValueError, match="skip_errors must be a boolean"):

@@ -48,6 +48,7 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
+    _render_internal_html_source_unavailable_placeholder,
     cancel_disclosure_html_download,
     collect_acpt_numbers_from_json,
     resolve_disclosure_html_file,
@@ -3085,6 +3086,9 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
         "doc_no": doc_no,
         "reason": "invalid_html",
     }
+    assert len(manifest["disclosures"][0]["source_sha256"]) == 64
+    placeholder_path = output_directory / "2025" / f"{acpt_no}.html"
+    assert placeholder_path.is_file()
 
     inspection = check_disclosure_html_output_directory_payload(
         {
@@ -3103,8 +3107,49 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
         acpt_numbers=[acpt_no],
         source_json=compressed_payload,
     )
-    assert reused_paths == []
+    assert reused_paths == [placeholder_path]
     assert reuse_integrity["source_unavailable_target_acpt_numbers"] == [acpt_no]
+
+    sections_directory = tmp_path / "sections"
+    section_result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(output_directory),
+            "output_directory": str(sections_directory),
+        }
+    )
+    section_placeholder = sections_directory / "2025" / f"{acpt_no}.html"
+    assert section_result["summary"]["integrity_ok"] is True
+    assert section_result["summary"]["source_unavailable_files"] == 1
+    assert section_placeholder.read_bytes() == placeholder_path.read_bytes()
+    section_inspection = inspect_disclosure_html_section_output_payload(
+        {
+            "input_directory": str(output_directory),
+            "output_directory": str(sections_directory),
+        }
+    )
+    assert section_inspection["summary"]["integrity_ok"] is True
+    assert section_inspection["summary"]["source_unavailable_files"] == 1
+
+    parsed = parse_disclosure_html_payload(
+        {
+            "input_directory": str(sections_directory),
+            "output_directory": str(tmp_path / "parsed"),
+            "mode": "saved_filter",
+            "parser_method": "bond_issuance",
+            "skip_errors": False,
+            **_html_parse_metadata_paths(compressed_path=compressed_path),
+        }
+    )
+    assert parsed["summary"] == {
+        "found_files": 1,
+        "parsed_files": 1,
+        "failed_files": 0,
+    }
+    assert parsed["records"][0]["acpt_no"] == acpt_no
+    assert parsed["records"][0]["source_unavailable"] == {
+        "doc_no": doc_no,
+        "reason": "invalid_html",
+    }
 
     compressed_payload["records"][0]["selected_main_doc_no"] = "20250101000888"
     compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
@@ -3114,12 +3159,27 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
             "source_compressed_json_path": str(compressed_path),
         }
     )
-    assert changed_source_inspection["missing_target_html_count"] == 1
+    assert changed_source_inspection["missing_target_html_count"] == 0
+    assert changed_source_inspection["invalid_target_html_count"] == 1
     assert changed_source_inspection["download_required_target_html_count"] == 1
     assert changed_source_inspection["source_unavailable_target_html_count"] == 0
 
     compressed_payload["records"][0]["selected_main_doc_no"] = doc_no
     compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+    manifest["disclosures"][0]["source_sha256"] = "0" * 64
+    Path(result["manifest_path"]).write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    hash_mismatch_inspection = check_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_compressed_json_path": str(compressed_path),
+        }
+    )
+    assert hash_mismatch_inspection["download_required_target_html_count"] == 1
+    assert hash_mismatch_inspection["invalid_target_html_count"] == 1
+    assert hash_mismatch_inspection["source_unavailable_target_html_count"] == 0
 
     def recover_download(**kwargs):
         target = kwargs["targets"][0]
@@ -3139,7 +3199,6 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
         {
             "output_directory": str(output_directory),
             "source_compressed_json_path": str(compressed_path),
-            "skip_existing": False,
         }
     )
     assert recovered["source_unavailable_count"] == 0
@@ -3147,6 +3206,135 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
         Path(recovered["manifest_path"]).read_text(encoding="utf-8")
     )
     assert "source_unavailable" not in recovered_manifest["disclosures"][0]
+
+
+def test_source_unavailable_placeholder_receipt_must_match_filename(
+    tmp_path: Path,
+) -> None:
+    embedded_acpt_no = "20250101000001"
+    filename_acpt_no = "20250101000002"
+    doc_no = "20250101000999"
+    input_directory = tmp_path / "input"
+    placeholder_path = input_directory / "2025" / f"{filename_acpt_no}.html"
+    placeholder_path.parent.mkdir(parents=True)
+    placeholder_path.write_bytes(
+        _render_internal_html_source_unavailable_placeholder(
+            acpt_no=embedded_acpt_no,
+            doc_no=doc_no,
+            reason="invalid_html",
+        )
+    )
+
+    with pytest.raises(ValueError, match="receipt number does not match filename"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path / "sections"),
+            }
+        )
+
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": filename_acpt_no,
+                        "selected_main_doc_no": doc_no,
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="receipt number does not match filename"):
+        parse_disclosure_html_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path / "parsed"),
+                "mode": "saved_filter",
+                "parser_method": "bond_issuance",
+                "skip_errors": False,
+                **_html_parse_metadata_paths(compressed_path=compressed_path),
+            }
+        )
+
+
+def test_failed_placeholder_refresh_reports_membership_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acpt_no = "20250101000001"
+    doc_no = "20250101000999"
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": acpt_no,
+                        "selected_main_doc_no": doc_no,
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "content_html"
+    placeholder_path = output_directory / "2025" / f"{acpt_no}.html"
+    placeholder_path.parent.mkdir(parents=True)
+    placeholder_path.write_bytes(
+        _render_internal_html_source_unavailable_placeholder(
+            acpt_no=acpt_no,
+            doc_no=doc_no,
+            reason="invalid_html",
+        )
+    )
+    write_disclosure_html_manifest_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_compressed_json_path": str(compressed_path),
+        }
+    )
+    manifest_path = output_directory / "kind_disclosure_html_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["disclosures"][0]["source_unavailable"] = {
+        "doc_no": doc_no,
+        "reason": "invalid_html",
+    }
+    manifest["disclosures"][0]["source_sha256"] = "0" * 64
+    manifest["disclosures"][0]["source_size_bytes"] = placeholder_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        lambda **_kwargs: [],
+    )
+
+    def fail_revalidation(*_args, **_kwargs):
+        raise OSError("network unavailable")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fail_revalidation,
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.wait_for_html_download_request_slot",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(ValueError, match="membership does not match"):
+        download_disclosure_internal_html_payload(
+            {
+                "output_directory": str(output_directory),
+                "source_compressed_json_path": str(compressed_path),
+            },
+            redownload_unverified_existing=True,
+        )
 
 
 def test_internal_html_redownload_does_not_hide_revalidation_request_failure(
@@ -9196,7 +9384,7 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     ).read_text(encoding="utf-8")
     assert "stepState?: SingleCheckDataIntegrityInspectionState" in inspection_card_html
     assert "never change the card verdict" not in inspection_card_html
-    assert "isCurrentInspectionRunning || !hasCompletedCurrentInspection" in (
+    assert "isFileInspectionRunning || !hasCompletedFileInspection" in (
         GUI_APP_DIR / "download" / "page.tsx"
     ).read_text(encoding="utf-8")
     assert "기존 메타데이터 기준으로 설정 맞추기" not in download_component_html

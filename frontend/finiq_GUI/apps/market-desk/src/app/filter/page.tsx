@@ -947,6 +947,7 @@ export default function FilterPage() {
           }
           notificationActive={isErrorStatus}
           notificationTone="error"
+          notificationResetKey={isErrorStatus ? status : ""}
           notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>{isErrorStatus ? status : "알림 없음"}</div>}
           settingsTitle="시스템 설정"
           settingsContent={

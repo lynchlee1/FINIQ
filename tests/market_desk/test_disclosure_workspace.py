@@ -137,6 +137,30 @@ def test_workspace_resolves_relative_stage_link_target_from_data_root(
     assert workspace.sections == (target_root / "06-sections").resolve()
 
 
+def test_manage_stage_links_resolves_relative_target_from_data_root(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = data_root / "hdd-workspace"
+    target_root.mkdir(parents=True)
+
+    result = manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "01-list",
+            "target_workspace": "hdd-workspace",
+        }
+    )
+
+    list_status = next(
+        item for item in result["stages"] if item["stage"] == "01-list"
+    )
+    assert list_status["target_workspace"] == str(target_root)
+    assert list_status["resolved_directory"] == str(target_root / "01-list")
+    assert resolve_disclosure_workspace(data_root).list == target_root / "01-list"
+
+
 @pytest.mark.parametrize(
     ("payload", "error"),
     [
@@ -1192,6 +1216,47 @@ def test_config_api_returns_saved_stage_paths(
     assert {key: response.json()[key] for key in expected} == {
         key: str(tmp_path / "legacy" / key) for key in expected
     }
+
+
+def test_config_api_prefers_linked_stage_over_saved_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "resources"
+    target_root = tmp_path / "compressed-target"
+    target_root.mkdir()
+    manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "04-external-html-compress",
+            "target_workspace": str(target_root),
+        }
+    )
+    monkeypatch.setattr(app_config, "output_root", str(data_root))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+    monkeypatch.setattr(
+        app_config,
+        "external_html_compress_output_directory",
+        str(tmp_path / "stale-compress"),
+    )
+    monkeypatch.setattr(
+        app_config,
+        "external_html_compressed_json_path",
+        str(tmp_path / "stale-compressed.json"),
+    )
+
+    response = TestClient(app).get("/api/config")
+
+    expected_directory = (
+        target_root / "04-external-html-compress" / "bond_issuance"
+    )
+    assert response.status_code == 200
+    assert response.json()["external_html_compress_output_directory"] == str(
+        expected_directory
+    )
+    assert response.json()["external_html_compressed_json_path"] == str(
+        expected_directory / "compressed-external-html.json"
+    )
 
 
 def test_changing_parse_mode_updates_mode_workspace_paths(

@@ -17,6 +17,7 @@ from finiq.data_scraper.core.kind_computers import (
     create_kind_computer_session,
     normalize_kind_proxy_urls,
     run_kind_virtual_computers,
+    split_items_round_robin,
 )
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
@@ -88,6 +89,7 @@ def redownload_missing_disclosure_internal_html_payload(
                     else {}
                 ),
                 redownload_unverified_existing=True,
+                confirm_source_unavailable=True,
             )
             cancelled = bool(result.get("cancelled"))
             results.append({"mode": mode, "passed": not cancelled, **result})
@@ -263,6 +265,16 @@ def _internal_html_virtual_computer_worker(
             )
             for target in targets
         },
+        spacing_limiter=(
+            worker_kwargs.get("direct_spacing_limiter")
+            if computer.proxy_url is None
+            else None
+        ),  # type: ignore[arg-type]
+        _rate_limiter=(
+            worker_kwargs.get("direct_rate_limiter")
+            if computer.proxy_url is None
+            else None
+        ),  # type: ignore[arg-type]
         _egress_proxy_url=computer.proxy_url,
         _include_process_limiter=False,
         _allow_partial=True,
@@ -287,6 +299,7 @@ def download_disclosure_internal_htmls(
     session: requests.Session | None = None,
     kind_proxy_urls: Sequence[str] | None = None,
     target_output_directories: Mapping[str, str | Path] | None = None,
+    _rate_limiter: SlidingWindowRateLimiter | None = None,
     _egress_proxy_url: str | None = None,
     _include_process_limiter: bool = True,
     _allow_partial: bool = False,
@@ -336,6 +349,12 @@ def download_disclosure_internal_htmls(
         worker_count,
     )
     if active_computer_count > 1:
+        direct_spacing_limiter = spacing_limiter or RequestSpacingLimiter(
+            max(wait_seconds_between_requests, 60.0 / max_requests_per_minute)
+        )
+        direct_rate_limiter = _rate_limiter or SlidingWindowRateLimiter(
+            max_requests_per_minute
+        )
         computer_results = run_kind_virtual_computers(
             items=targets,
             worker_qualname=(
@@ -356,6 +375,8 @@ def download_disclosure_internal_htmls(
                     acpt_no: str(path)
                     for acpt_no, path in resolved_output_directories.items()
                 },
+                "direct_spacing_limiter": direct_spacing_limiter,
+                "direct_rate_limiter": direct_rate_limiter,
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,
@@ -367,10 +388,17 @@ def download_disclosure_internal_htmls(
             for path_value in result:
                 path = Path(str(path_value))
                 saved_paths[path.stem] = path
+        computer_buckets = split_items_round_robin(targets, active_computer_count)
+        proxy_target_acpt_numbers = {
+            target["acpt_no"]
+            for bucket in computer_buckets[1:]
+            for target in bucket
+        }
         missing_targets = [
             target
             for target in targets
-            if target["acpt_no"] not in saved_paths
+            if target["acpt_no"] in proxy_target_acpt_numbers
+            and target["acpt_no"] not in saved_paths
         ]
         if missing_targets and not (cancel_check is not None and cancel_check()):
             if progress_callback is not None:
@@ -390,12 +418,14 @@ def download_disclosure_internal_htmls(
                 progress_callback=progress_callback,
                 cancel_check=cancel_check,
                 max_workers=min(worker_count, len(missing_targets)),
+                spacing_limiter=direct_spacing_limiter,
                 target_output_directories={
                     target["acpt_no"]: resolved_output_directories[
                         target["acpt_no"]
                     ]
                     for target in missing_targets
                 },
+                _rate_limiter=direct_rate_limiter,
                 _include_process_limiter=_include_process_limiter,
                 _allow_partial=True,
             )
@@ -423,7 +453,7 @@ def download_disclosure_internal_htmls(
             wait_seconds_between_requests, 60.0 / max_requests_per_minute
         )
         spacing_limiter = RequestSpacingLimiter(min_interval_seconds)
-    rate_limiter = SlidingWindowRateLimiter(max_requests_per_minute)
+    rate_limiter = _rate_limiter or SlidingWindowRateLimiter(max_requests_per_minute)
     progress_lock = Lock()
     failures: dict[str, Exception] = {}
     failures_lock = Lock()
@@ -589,7 +619,7 @@ def _verify_internal_download_membership(
     duplicate_acpt_numbers = sorted(
         acpt_no for acpt_no, count in counts.items() if count > 1
     )
-    missing_acpt_numbers = sorted(expected - actual - source_unavailable)
+    missing_acpt_numbers = sorted(expected - actual)
     unexpected_acpt_numbers = sorted(actual - expected)
     passed = (
         not duplicate_acpt_numbers
@@ -632,6 +662,7 @@ def download_disclosure_internal_html_payload(
     download_callback: Callable[[], None] | None = None,
     *,
     redownload_unverified_existing: bool = False,
+    confirm_source_unavailable: bool = False,
 ) -> dict[str, Any]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     output_directory = str(body.get("output_directory") or "").strip()
@@ -811,12 +842,30 @@ def download_disclosure_internal_html_payload(
     recorded_source_unavailable = _load_html_manifest_source_unavailable(
         resolved_output_directory
     )
-    source_unavailable_by_acpt_no = {
-        acpt_no: marker
-        for acpt_no, marker in recorded_source_unavailable.items()
-        if acpt_no in target_by_acpt_no
-        and marker["doc_no"] == target_by_acpt_no[acpt_no]["doc_no"]
-    }
+    source_unavailable_by_acpt_no: dict[str, dict[str, str]] = {}
+    stale_placeholder_acpt_numbers: set[str] = set()
+    for acpt_no, target in target_by_acpt_no.items():
+        output_path = _target_html_path(
+            resolved_output_directory,
+            acpt_no,
+            target_years=target_years,
+        )
+        placeholder = _internal_html_source_unavailable_placeholder(output_path)
+        marker = recorded_source_unavailable.get(acpt_no)
+        if placeholder is None:
+            if marker is not None and output_path.is_file():
+                stale_placeholder_acpt_numbers.add(acpt_no)
+            continue
+        if (
+            marker is not None
+            and placeholder["acpt_no"] == acpt_no
+            and placeholder["doc_no"] == target["doc_no"]
+            and marker["doc_no"] == target["doc_no"]
+            and placeholder["reason"] == marker["reason"]
+        ):
+            source_unavailable_by_acpt_no[acpt_no] = marker
+        else:
+            stale_placeholder_acpt_numbers.add(acpt_no)
     download_acpt_numbers = acpt_numbers
     if bool(body.get("skip_existing", True)):
         existing_check_started_at = time.monotonic()
@@ -853,7 +902,13 @@ def download_disclosure_internal_html_payload(
         existing_acpt_numbers = integrity_summary[
             "hash_verified_target_acpt_numbers"
         ]
+        existing_acpt_numbers = [
+            acpt_no
+            for acpt_no in existing_acpt_numbers
+            if acpt_no not in stale_placeholder_acpt_numbers
+        ]
         download_targets = set(output_summary["missing_target_acpt_numbers"])
+        download_targets.update(stale_placeholder_acpt_numbers)
         download_targets.update(
             integrity_summary["hash_mismatch_target_acpt_numbers"]
         )
@@ -863,11 +918,14 @@ def download_disclosure_internal_html_payload(
             acpt_no
             for acpt_no in acpt_numbers
             if acpt_no in download_targets
-            and acpt_no not in source_unavailable_by_acpt_no
         ]
+        for acpt_no in download_acpt_numbers:
+            source_unavailable_by_acpt_no.pop(acpt_no, None)
         source_integrity_by_acpt_no.update(
             integrity_summary["_verified_integrity_by_acpt_no"]
         )
+        for acpt_no in stale_placeholder_acpt_numbers:
+            source_integrity_by_acpt_no.pop(acpt_no, None)
         existing_paths_by_acpt_no = {
             acpt_no: _target_html_path(
                 resolved_output_directory,
@@ -958,7 +1016,9 @@ def download_disclosure_internal_html_payload(
                 for target in download_targets
                 if target["acpt_no"] not in downloaded_acpt_numbers
             ]
-            if redownload_unverified_existing and revalidation_targets:
+            if (
+                confirm_source_unavailable or redownload_unverified_existing
+            ) and revalidation_targets:
                 emit(
                     "다운로드 실패 대상의 KIND 원본 재검증을 시작합니다: "
                     f"{len(revalidation_targets)}건."
@@ -1026,6 +1086,15 @@ def download_disclosure_internal_html_payload(
                             "doc_no": doc_no,
                             "reason": reason,
                         }
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        output_path.write_bytes(
+                            _render_internal_html_source_unavailable_placeholder(
+                                acpt_no=acpt_no,
+                                doc_no=doc_no,
+                                reason=reason,
+                            )
+                        )
+                        downloaded_paths.append(output_path)
                         emit(
                             "KIND 원본 없음 확인: "
                             f"acpt_no={acpt_no} doc_no={doc_no} reason={reason}"

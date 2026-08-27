@@ -37,6 +37,7 @@
 - UTF-8 decode가 실패하면 다른 문자셋을 시도하지 않고 오류로 처리한다.
 - `rowspan`이나 `colspan`이 유효한 양의 정수가 아니면 실패 처리한다.
 - HTML·metadata 구조가 공통 입력 계약과 다르면 해당 결과를 만들지 않는다.
+- 규격화된 `KIND 원본 없음` 빈 원문은 파일명의 접수번호와 파일 안의 접수번호가 같을 때만 업무 parser를 건너뛴다. 이때 `acpt_no`, 문서 번호, 누락 사유가 담긴 성공 record를 만들며 임의의 공시 값은 채우지 않는다.
 
 ### Run the Selected Mode Parser
 

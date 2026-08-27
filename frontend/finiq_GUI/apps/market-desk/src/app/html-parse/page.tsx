@@ -250,6 +250,7 @@ export default function HtmlParsePage() {
     return lines;
   }, []);
 
+  const [notificationResetKey, setNotificationResetKey] = useState(0);
   const {
     status,
     isErrorStatus,
@@ -261,6 +262,7 @@ export default function HtmlParsePage() {
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     formatStatus,
     onSuccess: (result, jobId) => {
+      setNotificationResetKey((current) => current + 1);
       setLatestParseResult(result);
       const context = activeParseInspectionRef.current;
       if (!context || context.jobId !== jobId) return;
@@ -308,7 +310,6 @@ export default function HtmlParsePage() {
   const [executionOptionCandidates, setExecutionOptionCandidates] = useState<FilterCandidate[]>([]);
   const [executionOptionInputDirectory, setExecutionOptionInputDirectory] = useState("");
   const [executionOptionExampleNotice, setExecutionOptionExampleNotice] = useState<ExecutionOptionExampleNotice | null>(null);
-  const [notificationResetKey, setNotificationResetKey] = useState(0);
   const [filterCandidatesLoading, setFilterCandidatesLoading] = useState(false);
   const filterCandidatesRequestIdRef = useRef(0);
   const [conditions, setConditions] = useState<DisclosureConditionBlock[]>([makeEmptyDisclosureCondition()]);
@@ -1235,7 +1236,7 @@ export default function HtmlParsePage() {
           }
           notificationActive={isErrorStatus || !!executionOptionExampleNotice || warningReports.length > 0}
           notificationTone={isErrorStatus ? "error" : warningReports.length > 0 || executionOptionExampleNotice ? "warning" : "neutral"}
-          notificationResetKey={notificationResetKey}
+          notificationResetKey={`${notificationResetKey}:${isErrorStatus ? status : ""}`}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (

@@ -180,6 +180,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [compressionInspectionData, setCompressionInspectionData] = useState<any>(null);
   const [compressionInspectionError, setCompressionInspectionError] = useState("");
   const [compressionInspectionCompleted, setCompressionInspectionCompleted] = useState(false);
+  const [notificationResetKey, setNotificationResetKey] = useState(0);
   const inspectAbortControllerRef = useRef<AbortController | null>(null);
 
   // Form State
@@ -204,6 +205,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     pollingEndpoint: "/api/disclosures/html/jobs/{jobId}",
     formatStatus,
     onSuccess: (nextResult) => {
+      setNotificationResetKey((current) => current + 1);
       setResult(nextResult);
       if (nextResult?.format === "finiq_disclosure_external_html_compress_repair_result_v1") {
         setCompressionInspectionData(nextResult.verification);
@@ -451,6 +453,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setLastInspectionResult(selectedResult || null);
       setExistingData(selectedResult || null);
       setAllModeSaveInspectionData(data);
+      setNotificationResetKey((current) => current + 1);
       setExistingCheckCompleted(true);
       const lines = [
         `${variant === "external" ? "외부" : "내부"} HTML 검사 완료`,
@@ -508,6 +511,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       if (!response.ok) throw new Error(data.detail || "압축 파일 검사에 실패했습니다.");
 
       setCompressionInspectionData(data);
+      setNotificationResetKey((current) => current + 1);
       setCompressionInspectionCompleted(true);
       setStatus([
         "압축 파일 검사 완료",
@@ -598,6 +602,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       const deletedFiles = Array.isArray(data.deleted_files) ? data.deleted_files : [];
       setLastInspectionCandidateCount(0);
       setLastInspectionResult(data);
+      setNotificationResetKey((current) => current + 1);
       setExistingData(null);
       setAllModeSaveInspectionData(null);
       setExistingCheckCompleted(false);
@@ -1006,6 +1011,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           }
           notificationActive={isErrorStatus || !!existingCheckError || lastInspectionCandidateCount > 0 || !!lastInspectionResult || !!allModeSaveInspectionData || !!compressionInspectionData}
           notificationTone={isErrorStatus ? "error" : existingCheckError || integrityProblemCount > 0 || saveInspectionFailed || compressionInspectionFailed ? "warning" : "success"}
+          notificationResetKey={`${notificationResetKey}:${selectedFilterId}:${isErrorStatus ? status : existingCheckError || compressionInspectionError}`}
           notificationContent={
             <>
               {showSaveWorkflow && allModeSaveInspectionData && (
@@ -1023,6 +1029,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                         <p className="text-body break-all text-[var(--tv-muted)]">
                           대상 {formatInteger(result.requested_count)}건 · 저장 {formatInteger(result.existing_target_html_count)}건{variant === "internal" ? ` · KIND 원본 없음 ${formatInteger(result.source_unavailable_target_html_count || 0)}건` : ""} · 미저장·재저장 필요 {formatInteger(result.download_required_target_html_count)}건 · 해시 불일치 {formatInteger(result.hash_mismatch_target_html_count)}건 · 기준 해시 없음 {formatInteger(result.hash_unverified_target_html_count)}건
                         </p>
+                        {!result.passed && result.parent_mode && Number(result.missing_target_html_count || 0) > 0 && (
+                          <p className="text-body text-[var(--tv-warning-text)]">
+                            상위 필터에 없는 원문입니다. 상위 필터에서 먼저 저장해야 합니다. 파생 필터에서는 다시 받을 수 없습니다.
+                          </p>
+                        )}
                         {!result.passed && result.error && (
                           <p className="text-body text-[var(--tv-warning-text)]">{result.error}</p>
                         )}

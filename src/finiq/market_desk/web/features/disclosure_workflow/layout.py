@@ -233,7 +233,10 @@ def manage_disclosure_stage_links_payload(payload: dict[str, Any]) -> dict[str, 
         target_text = str(payload.get("target_workspace") or "").strip()
         if not target_text:
             raise ValueError("target_workspace is required")
-        target_root = Path(target_text).expanduser().resolve()
+        target_root = Path(target_text).expanduser()
+        if not target_root.is_absolute():
+            target_root = root / target_root
+        target_root = target_root.resolve()
         _validate_workspace_root(target_root)
         if target_root == root:
             raise ValueError("target_workspace must differ from data_root")

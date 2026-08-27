@@ -17,6 +17,7 @@ type ActionDockProps = {
   notificationContent?: ReactNode;
   notificationActive?: boolean;
   notificationTone?: ActionDockNotificationTone;
+  /** Stable notification-content revision supplied by the owning workflow. */
   notificationResetKey?: string | number | boolean | null;
   settingsTitle?: string;
   settingsContent?: ReactNode;

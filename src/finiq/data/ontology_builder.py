@@ -865,9 +865,9 @@ _SHAREHOLDER_RELATION_ENDPOINT_KINDS = {
     "transferor_of": ({"person", "organization"}, {"company"}),
     "transferee_of": ({"person", "organization"}, {"company"}),
     "proposed_allottee_of": ({"person", "organization"}, {"company"}),
-    "merger_target_of": ({"organization"}, {"company", "agenda"}),
-    "acquisition_target_of": ({"organization"}, {"company", "agenda"}),
-    "divestment_target_of": ({"organization"}, {"company", "agenda"}),
+    "merger_target_of": ({"organization"}, {"company"}),
+    "acquisition_target_of": ({"organization"}, {"agenda"}),
+    "divestment_target_of": ({"organization"}, {"agenda"}),
     "shareholder_of": ({"person", "organization"}, {"company"}),
 }
 

@@ -439,6 +439,7 @@ export function HtmlSectionSplitActionDock({
       }
       notificationActive={isErrorStatus || problemFileCount > 0}
       notificationTone={isErrorStatus ? "error" : "warning"}
+      notificationResetKey={isErrorStatus ? status : `problem-files:${problemFileCount}`}
       notificationContent={notificationContent}
       settingsTitle="설정"
       settingsContent={

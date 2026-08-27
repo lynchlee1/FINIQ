@@ -644,12 +644,13 @@ def test_download_disclosure_external_htmls_skips_short_existing_html(
     assert progress_messages == [f"Skipping existing KIND external HTML: {existing_path}"]
 
 
-def test_download_disclosure_external_htmls_replaces_invalid_existing_html(
+def test_download_disclosure_external_htmls_reports_replaced_file_as_completed_download(
     tmp_path: Path,
 ) -> None:
     existing_path = tmp_path / "20260108000150.html"
     existing_path.write_text("broken", encoding="utf-8")
     session = ViewerFakeSession()
+    progress_messages: list[str] = []
 
     saved_paths = download_disclosure_external_htmls(
         output_directory=tmp_path,
@@ -657,11 +658,16 @@ def test_download_disclosure_external_htmls_replaces_invalid_existing_html(
         acpt_numbers=["20260108000150"],
         timeout=5,
         session=session,
+        progress_callback=progress_messages.append,
     )
 
     assert saved_paths == [existing_path]
     assert len(session.get_calls) == 1
     assert existing_path.read_text("utf-8").startswith("<html><body>")
+    assert progress_messages == [
+        "Fetching KIND external HTML acpt_no=20260108000150 (retry=0)...",
+        f"Saved KIND external HTML to: {existing_path}",
+    ]
 
 
 def test_download_disclosure_external_htmls_rejects_rates_over_kind_limit(tmp_path: Path) -> None:

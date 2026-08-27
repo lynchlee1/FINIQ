@@ -40,6 +40,13 @@ HTML_MANIFEST_FILENAME = "kind_disclosure_html_manifest.json"
 HTML_MANIFEST_FORMAT_V1 = "finiq_disclosure_html_manifest_v1"
 HTML_MANIFEST_FORMAT_V2 = "finiq_disclosure_html_manifest_v2"
 HTML_MANIFEST_FORMATS = {HTML_MANIFEST_FORMAT_V1, HTML_MANIFEST_FORMAT_V2}
+INTERNAL_HTML_SOURCE_UNAVAILABLE_FORMAT = (
+    "finiq_disclosure_internal_html_source_unavailable_v1"
+)
+INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS = {
+    "content_path_missing",
+    "invalid_html",
+}
 COMPRESSED_EXTERNAL_HTML_FILENAME = "compressed-external-html.json"
 HTML_DOWNLOAD_AUXILIARY_FILENAMES = {
     HTML_MANIFEST_FILENAME,
@@ -50,6 +57,108 @@ HTML_DELETE_CONFIRMATION_TEXT = "확인했습니다."
 _CANCELLED_DOWNLOADS: set[str] = set()
 _CANCEL_LOCK = Lock()
 ProgressCallback = Callable[[str], None]
+
+
+def _render_internal_html_source_unavailable_placeholder(
+    *,
+    acpt_no: str,
+    doc_no: str,
+    reason: str,
+) -> bytes:
+    payload = {
+        "format": INTERNAL_HTML_SOURCE_UNAVAILABLE_FORMAT,
+        "acpt_no": acpt_no,
+        "doc_no": doc_no,
+        "reason": reason,
+    }
+    if not acpt_no or not doc_no or reason not in INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS:
+        raise ValueError("invalid internal HTML source-unavailable placeholder")
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return (
+        "<!DOCTYPE html>\n"
+        f"<!-- FINIQ_SOURCE_UNAVAILABLE {encoded} -->\n"
+        f'<html data-finiq-placeholder="{INTERNAL_HTML_SOURCE_UNAVAILABLE_FORMAT}">'
+        "<head><meta charset=\"utf-8\"><title>KIND source unavailable</title></head>"
+        "<body></body></html>\n"
+    ).encode("utf-8")
+
+
+def _internal_html_source_unavailable_placeholder(
+    source: Path | bytes,
+) -> dict[str, str] | None:
+    try:
+        content = source.read_bytes() if isinstance(source, Path) else source
+        text = content.decode("utf-8")
+        lines = text.splitlines()
+        prefix = "<!-- FINIQ_SOURCE_UNAVAILABLE "
+        suffix = " -->"
+        if len(lines) < 2 or not lines[1].startswith(prefix) or not lines[1].endswith(suffix):
+            return None
+        payload = json.loads(lines[1][len(prefix) : -len(suffix)])
+        if not isinstance(payload, dict):
+            return None
+        normalized = {
+            "format": str(payload.get("format") or ""),
+            "acpt_no": str(payload.get("acpt_no") or ""),
+            "doc_no": str(payload.get("doc_no") or ""),
+            "reason": str(payload.get("reason") or ""),
+        }
+        if set(payload) != set(normalized):
+            return None
+        if normalized["format"] != INTERNAL_HTML_SOURCE_UNAVAILABLE_FORMAT:
+            return None
+        rendered = _render_internal_html_source_unavailable_placeholder(
+            acpt_no=normalized["acpt_no"],
+            doc_no=normalized["doc_no"],
+            reason=normalized["reason"],
+        )
+        return normalized if rendered == content else None
+    except (OSError, UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _internal_html_source_unavailable_placeholder_file(
+    source_file: Path,
+) -> dict[str, str] | None:
+    placeholder = _internal_html_source_unavailable_placeholder(source_file)
+    if placeholder is not None and placeholder["acpt_no"] != source_file.stem:
+        raise ValueError(
+            "source-unavailable placeholder receipt number does not match filename: "
+            f"{source_file}"
+        )
+    return placeholder
+
+
+def _internal_html_source_unavailable_placeholder_from_integrity(
+    *,
+    acpt_no: str,
+    doc_no: str,
+    integrity: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    if integrity is None:
+        return None
+    for reason in INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS:
+        content = _render_internal_html_source_unavailable_placeholder(
+            acpt_no=acpt_no,
+            doc_no=doc_no,
+            reason=reason,
+        )
+        if (
+            integrity.get("source_sha256") == hashlib.sha256(content).hexdigest()
+            and integrity.get("source_size_bytes") == len(content)
+        ):
+            return {
+                "format": INTERNAL_HTML_SOURCE_UNAVAILABLE_FORMAT,
+                "acpt_no": acpt_no,
+                "doc_no": doc_no,
+                "reason": reason,
+            }
+    return None
 
 
 def _html_file_integrity(path: Path) -> dict[str, Any]:
@@ -360,20 +469,47 @@ def _strictly_reuse_parent_html(
     recorded_source_unavailable = _load_html_manifest_source_unavailable(
         output_directory
     )
+    placeholders = {
+        acpt_no: placeholder
+        for acpt_no in output_summary["existing_target_acpt_numbers"]
+        if (
+            doc_no := (
+                recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
+                or selected_doc_numbers.get(acpt_no)
+            )
+        )
+        and (
+            placeholder := (
+                _internal_html_source_unavailable_placeholder_from_integrity(
+                    acpt_no=acpt_no,
+                    doc_no=doc_no,
+                    integrity=actual_integrity.get(acpt_no),
+                )
+            )
+        )
+        is not None
+    }
     source_unavailable = [
         acpt_no
-        for acpt_no in output_summary["missing_target_acpt_numbers"]
-        if selected_doc_numbers.get(acpt_no)
+        for acpt_no, placeholder in placeholders.items()
+        if acpt_no in integrity_summary["hash_verified_target_acpt_numbers"]
+        and selected_doc_numbers.get(acpt_no)
         and recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
         == selected_doc_numbers.get(acpt_no)
+        and placeholder["doc_no"] == selected_doc_numbers.get(acpt_no)
+        and placeholder["reason"]
+        == recorded_source_unavailable.get(acpt_no, {}).get("reason")
     ]
-    source_unavailable_set = set(source_unavailable)
-    missing = [
-        acpt_no
-        for acpt_no in output_summary["missing_target_acpt_numbers"]
-        if acpt_no not in source_unavailable_set
-    ]
-    invalid = list(output_summary["invalid_target_acpt_numbers"])
+    recorded_existing = set(output_summary["existing_target_acpt_numbers"]) & set(
+        recorded_source_unavailable
+    )
+    stale_placeholders = sorted(
+        (set(placeholders) | recorded_existing) - set(source_unavailable)
+    )
+    missing = list(output_summary["missing_target_acpt_numbers"])
+    invalid = sorted(
+        set(output_summary["invalid_target_acpt_numbers"]) | set(stale_placeholders)
+    )
     unverified = list(integrity_summary["hash_unverified_target_acpt_numbers"])
     mismatched = list(integrity_summary["hash_mismatch_target_acpt_numbers"])
     if missing or invalid or unverified or mismatched:
@@ -385,7 +521,6 @@ def _strictly_reuse_parent_html(
     paths = [
         _target_html_path(output_directory, acpt_no, target_years=target_years)
         for acpt_no in acpt_numbers
-        if acpt_no not in source_unavailable_set
     ]
     return paths, {
         **output_summary,
@@ -520,10 +655,11 @@ def _write_html_manifest(
     disclosures = [
         {
             **metadata[acpt_no],
+            **(source_integrity[acpt_no] if source_integrity is not None else {}),
             **(
                 {"source_unavailable": unavailable[acpt_no]}
                 if acpt_no in unavailable
-                else (source_integrity[acpt_no] if source_integrity is not None else {})
+                else {}
             ),
         }
         for acpt_no in manifest_acpt_numbers
@@ -575,7 +711,7 @@ def _load_html_manifest_source_unavailable(
         if (
             not acpt_no
             or not doc_no
-            or reason not in {"content_path_missing", "invalid_html"}
+            or reason not in INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS
         ):
             raise ValueError(f"invalid source_unavailable metadata for acpt_no: {acpt_no}")
         unavailable[acpt_no] = {"doc_no": doc_no, "reason": reason}

@@ -69,8 +69,10 @@ while kill -0 "$backend_pid" 2>/dev/null && kill -0 "$frontend_pid" 2>/dev/null;
   sleep 1
 done
 
+exit_code=0
 if ! kill -0 "$backend_pid" 2>/dev/null; then
-  wait "$backend_pid"
+  wait "$backend_pid" || exit_code=$?
+else
+  wait "$frontend_pid" || exit_code=$?
 fi
-
-wait "$frontend_pid"
+exit "$exit_code"

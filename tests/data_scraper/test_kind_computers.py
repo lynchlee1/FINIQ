@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import threading
 
 import pytest
 import requests
@@ -341,3 +342,106 @@ def test_internal_html_reassigns_missing_egress_result_to_direct_route(
         "20250101000002",
     ]
     assert any("직접 연결로 재시도" in message for message in progress)
+
+
+def test_internal_html_does_not_reassign_failed_direct_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy_path = tmp_path / "20250101000002.html"
+    proxy_path.write_text("<html><body>proxy</body></html>", encoding="utf-8")
+    fetched_acpt_numbers: list[str] = []
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.run_kind_virtual_computers",
+        lambda **kwargs: [[], [str(proxy_path)]],
+    )
+
+    def fake_fetch(*args: object, **kwargs: object) -> bytes:
+        fetched_acpt_numbers.append(str(kwargs["acpt_no"]))
+        return b"<html><body>unexpected retry</body></html>"
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fake_fetch,
+    )
+
+    saved = download_disclosure_internal_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        targets=[
+            {"acpt_no": "20250101000001", "doc_no": "1"},
+            {"acpt_no": "20250101000002", "doc_no": "2"},
+        ],
+        kind_proxy_urls=["http://127.0.0.1:25001"],
+        max_workers=2,
+        max_retries=0,
+        skip_existing=False,
+        _allow_partial=True,
+    )
+
+    assert [path.stem for path in saved] == ["20250101000002"]
+    assert fetched_acpt_numbers == []
+
+
+def test_internal_html_direct_fallback_keeps_direct_rate_limiters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_target = threading.local()
+    limiter_ids_by_acpt_no: dict[str, list[tuple[int, int]]] = {}
+
+    def fake_wait(
+        cancel_check: object,
+        *,
+        local_limiter: object,
+        spacing_limiter: object,
+        include_process_limiter: bool,
+    ) -> bool:
+        del cancel_check, include_process_limiter
+        acpt_no = str(active_target.acpt_no)
+        limiter_ids_by_acpt_no.setdefault(acpt_no, []).append(
+            (id(local_limiter), id(spacing_limiter))
+        )
+        return False
+
+    def fake_fetch(session: requests.Session, **kwargs: object) -> bytes:
+        acpt_no = str(kwargs["acpt_no"])
+        active_target.acpt_no = acpt_no
+        kwargs["before_request"]()
+        if acpt_no == "20250101000002" and session.proxies:
+            raise requests.ConnectionError("proxy unavailable")
+        return b"<html><body>saved</body></html>"
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.wait_for_html_download_request_slot",
+        fake_wait,
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fake_fetch,
+    )
+
+    saved = download_disclosure_internal_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        targets=[
+            {"acpt_no": "20250101000001", "doc_no": "1"},
+            {"acpt_no": "20250101000002", "doc_no": "2"},
+        ],
+        kind_proxy_urls=["http://127.0.0.1:25001"],
+        max_workers=2,
+        max_retries=0,
+        skip_existing=False,
+    )
+
+    assert [path.stem for path in saved] == [
+        "20250101000001",
+        "20250101000002",
+    ]
+    assert limiter_ids_by_acpt_no["20250101000001"] == [
+        limiter_ids_by_acpt_no["20250101000002"][1]
+    ]
+    assert limiter_ids_by_acpt_no["20250101000002"][0] != (
+        limiter_ids_by_acpt_no["20250101000002"][1]
+    )

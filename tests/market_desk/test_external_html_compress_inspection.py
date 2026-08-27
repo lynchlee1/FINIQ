@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from finiq.market_desk.web.app import app
@@ -85,6 +86,17 @@ def _compression_payload(
         encoding="utf-8",
     )
     return payload
+
+
+def test_external_html_compression_requires_output_directory(tmp_path: Path) -> None:
+    input_directory = tmp_path / "04-external-html-download" / "bond_issuance"
+
+    with pytest.raises(ValueError, match="output_directory is required"):
+        compress_disclosure_external_html_payload(
+            {"input_directory": str(input_directory)}
+        )
+
+    assert not (input_directory / "compressed-external-html.json").exists()
 
 
 def test_inspect_external_html_compression_checks_saved_json_content(tmp_path: Path) -> None:

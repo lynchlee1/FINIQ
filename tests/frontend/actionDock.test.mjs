@@ -14,6 +14,7 @@ test("action dock notification panel can clear accumulated notifications", async
   assert.match(source, /notificationResetKey = null/);
   assert.match(source, /if \(notificationActive\) \{[\s\S]*?setNotificationDismissed\(false\)/);
   assert.match(source, /\}, \[notificationActive, notificationResetKey, notificationTone\]\)/);
+  assert.doesNotMatch(source, /\[notificationActive, notificationContent/);
   assert.match(source, /isNotificationPanel && visibleNotificationActive && \(/);
   assert.doesNotMatch(source, /notificationDismissible/);
   assert.match(source, /onClick=\{\(\) => setNotificationDismissed\(true\)\}/);
@@ -34,4 +35,26 @@ test("action dock notification panel can clear accumulated notifications", async
   assert.match(source, /outline: selected \? `2px solid var\(\$\{tokens\[0\]\}\)` : undefined/);
   assert.match(source, /\{activityTone !== "neutral" && <span/);
   assert.match(source, /\{visibleNotificationTone !== "neutral" && <span/);
+});
+
+test("dynamic action dock notifications provide stable reset keys", async () => {
+  const sources = await Promise.all([
+    "frontend/finiq_GUI/apps/market-desk/src/app/utility/page.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/table/page.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/disclosure-automation/page.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-change-log/page.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/filter/page.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-bond-summary/page.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/features/assets-excel/AssetExcelUtilityView.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/graph/chart/OntologyChartWorkspace.tsx",
+    "frontend/finiq_GUI/apps/market-desk/src/app/page.tsx",
+  ].map((file) => readFile(path.resolve(file), "utf8")));
+
+  for (const source of sources) {
+    assert.match(source, /notificationActive=/);
+    assert.match(source, /notificationResetKey=/);
+  }
 });

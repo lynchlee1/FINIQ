@@ -1547,8 +1547,8 @@ def test_shareholder_semantic_boundary_enforces_endpoint_kinds(tmp_path: Path) -
         relationship("person:p", "@reporting_company", "transferor_of"),
         relationship("org:o", "@reporting_company", "transferee_of"),
         relationship("org:o", "@reporting_company", "proposed_allottee_of"),
-        relationship("org:o", "agenda:0", "merger_target_of"),
-        relationship("org:o", "@reporting_company", "acquisition_target_of"),
+        relationship("org:o", "@reporting_company", "merger_target_of"),
+        relationship("org:o", "agenda:0", "acquisition_target_of"),
         relationship("org:o", "agenda:0", "divestment_target_of"),
         relationship("person:p", "@reporting_company", "shareholder_of"),
     ]
@@ -1571,6 +1571,9 @@ def test_shareholder_semantic_boundary_enforces_endpoint_kinds(tmp_path: Path) -
         relationship("@meeting", "@reporting_company", "transferee_of"),
         relationship("@meeting", "@reporting_company", "proposed_allottee_of"),
         relationship("person:p", "agenda:0", "merger_target_of"),
+        relationship("org:o", "agenda:0", "merger_target_of"),
+        relationship("org:o", "@reporting_company", "acquisition_target_of"),
+        relationship("org:o", "@reporting_company", "divestment_target_of"),
         relationship("org:o", "@meeting", "acquisition_target_of"),
         relationship("org:o", "person:p", "divestment_target_of"),
         relationship("@meeting", "@reporting_company", "shareholder_of"),
@@ -1658,6 +1661,21 @@ def test_shareholder_semantic_boundary_enforces_endpoint_kinds(tmp_path: Path) -
     assert len(semantic_edges) == len(expected_types)
     serves_at = next(edge for edge in semantic_edges if edge.edge_type == EdgeTypes.SERVES_AT)
     assert serves_at.target_id == "company_654321"
+    transaction_targets = {
+        edge.edge_type: edge.target_id
+        for edge in semantic_edges
+        if edge.edge_type
+        in {
+            EdgeTypes.MERGER_TARGET_OF,
+            EdgeTypes.ACQUISITION_TARGET_OF,
+            EdgeTypes.DIVESTMENT_TARGET_OF,
+        }
+    }
+    assert transaction_targets == {
+        EdgeTypes.MERGER_TARGET_OF: "company_026178",
+        EdgeTypes.ACQUISITION_TARGET_OF: "agenda_20260401000002_0",
+        EdgeTypes.DIVESTMENT_TARGET_OF: "agenda_20260401000002_0",
+    }
 
 
 def test_shareholder_termination_edges_require_passed_result_and_end_at_meeting(

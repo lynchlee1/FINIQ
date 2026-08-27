@@ -29,7 +29,7 @@ WGConfig = /absolute/path/to/proton-route-1.conf
 BindAddress = 127.0.0.1:25001
 ```
 
-두 번째 설정은 다른 Proton WireGuard 파일과 포트 `25002`를 사용한다. 같은 방식으로 현재 CPU 개수보다 하나 적은 수까지 프록시를 추가할 수 있다. 직접 연결을 포함한 전체 경로와 worker 상한은 실행 중 확인한 CPU 개수를 따른다.
+두 번째 설정은 다른 Proton WireGuard 파일과 포트 `25002`를 사용한다. `com.finiq.wireproxy.routeN`은 포트 `25000 + N`을 사용하고 등록 범위는 1~7이다. FINIQ는 저장된 프록시 URL의 실제 포트로 이 범위에 해당하는 LaunchAgent만 실행한다. 다른 localhost 포트는 사용자가 관리하는 프록시로 보고 lifecycle 대상에 넣지 않는다. 같은 방식으로 현재 CPU 개수보다 하나 적은 수까지 프록시를 추가할 수 있다. 직접 연결을 포함한 전체 경로와 worker 상한은 실행 중 확인한 CPU 개수를 따른다.
 
 ```shell
 wireproxy -c /absolute/path/to/wireproxy-route-1.conf
@@ -44,7 +44,7 @@ curl -X POST http://127.0.0.1:8765/api/settings \
   -d '{"kind_proxy_urls":["http://127.0.0.1:25001","http://127.0.0.1:25002"]}'
 ```
 
-설정 뒤의 04·05단계 저장 작업부터 직접 연결과 등록된 프록시를 함께 사용한다. FINIQ 백엔드는 시작할 때 등록된 `com.finiq.wireproxy.routeN` LaunchAgent를 실행하고 종료할 때 함께 정지한다. FINIQ는 WireGuard 비밀키를 읽지 않는다. 프록시가 중단되면 그 경로에 배정된 다운로드는 실패하며 직접 연결로 다시 보내지 않는다.
+설정 뒤의 04·05단계 저장 작업부터 직접 연결과 등록된 프록시를 함께 사용한다. FINIQ 백엔드는 시작할 때 설정 URL의 포트와 일치하는 `com.finiq.wireproxy.routeN` LaunchAgent를 실행하고 종료할 때 함께 정지한다. 시작 도중 한 경로라도 실패하면 앞서 실행한 경로를 정지하고 백엔드 시작을 중단한다. FINIQ는 WireGuard 비밀키를 읽지 않는다. 04단계는 프록시가 중단된 경로의 대상을 직접 연결로 보내지 않는다. 05단계는 프록시 경로에서 완료하지 못한 대상만 같은 실행의 요청 제한을 이어받은 직접 연결로 한 번 더 보낸다.
 
 ### `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`
 

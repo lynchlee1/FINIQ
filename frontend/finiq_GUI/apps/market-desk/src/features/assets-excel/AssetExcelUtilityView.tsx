@@ -499,6 +499,11 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
   const duplicateDeletionCandidateCount = duplicateInspectionResult?.dry_run ? Number(duplicateInspectionResult?.deletion_candidate_count || duplicateDeletionCandidates.length) : 0;
   const duplicateDeletedCount = !duplicateInspectionResult?.dry_run ? Number(duplicateInspectionResult?.deleted_count || duplicateDeletedFiles.length) : 0;
   const duplicateNotificationActive = isMergeMode && !!duplicateInspectionResult;
+  const notificationResetKey = isErrorStatus
+    ? `error:${status}`
+    : duplicateNotificationActive
+      ? JSON.stringify(duplicateInspectionResult)
+      : `skipped:${skippedRows.length}:conflicts:${conflictCount}`;
   const conflictRows = useMemo(
     () => Object.entries(previewData?.conflicts || {}).flatMap(([accountName, items]: [string, any]) =>
       (Array.isArray(items) ? items : []).map((item: any) => ({ accountName, ...item })),
@@ -1574,6 +1579,7 @@ export default function AssetExcelUtilityPage({ mode = "preview" }: { mode?: "pr
           }
           notificationActive={isErrorStatus || skippedRows.length > 0 || conflictCount > 0 || duplicateNotificationActive}
           notificationTone={isErrorStatus ? "error" : skippedRows.length > 0 || conflictCount > 0 || duplicateDeletionCandidateCount > 0 || duplicateMismatchedRows.length > 0 ? "warning" : "success"}
+          notificationResetKey={notificationResetKey}
           notificationContent={
             <div className="space-y-3">
               {isErrorStatus ? (

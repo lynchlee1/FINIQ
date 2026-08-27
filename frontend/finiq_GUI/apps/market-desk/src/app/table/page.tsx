@@ -336,6 +336,7 @@ export default function TablePage() {
           }
           notificationActive={isErrorStatus}
           notificationTone="error"
+          notificationResetKey={isErrorStatus ? status : ""}
           notificationContent={
             <div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>{isErrorStatus ? status : "알림 없음"}</div>
           }

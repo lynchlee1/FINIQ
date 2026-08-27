@@ -14,6 +14,9 @@ from typing import Any, Callable, Iterable, Iterator, TypeVar
 from lxml import etree, html
 
 from finiq.concurrency import resolve_worker_count
+from finiq.market_desk.web.features.disclosures.html_common import (
+    _internal_html_source_unavailable_placeholder_file,
+)
 from finiq.market_desk.web.html_parsers.common import decode_html_markup
 
 ProgressCallback = Callable[[str], None]
@@ -702,6 +705,16 @@ def _render_without_section_plans(
 
 
 def _automatic_section_output(source_file: Path) -> dict[str, Any]:
+    source_unavailable = _internal_html_source_unavailable_placeholder_file(source_file)
+    if source_unavailable is not None:
+        return {
+            "status": "ok",
+            "source_file": str(source_file),
+            "content": source_file.read_text(encoding="utf-8"),
+            "selected_sections": 1,
+            "removed_correction_sections": 0,
+            "source_unavailable": source_unavailable,
+        }
     document = _parse_internal_html_document(source_file.read_bytes())
     container, plans = _section_plans(document)
     correction_plans = [
@@ -724,6 +737,8 @@ def _automatic_section_output(source_file: Path) -> dict[str, Any]:
 
 
 def _validate_automatic_section_output(source_file: Path) -> None:
+    if _internal_html_source_unavailable_placeholder_file(source_file) is not None:
+        return
     document = _parse_internal_html_document(source_file.read_bytes())
     _container, plans = _section_plans(document)
     correction_count = sum(
@@ -780,6 +795,7 @@ def inspect_disclosure_html_section_output_payload(
     problems: list[dict[str, str]] = []
     missing_files: list[str] = []
     mismatched_files: list[str] = []
+    source_unavailable_files = 0
     for source_file, result in zip(html_files, results):
         if result["status"] != "ok":
             problems.append(
@@ -791,6 +807,8 @@ def inspect_disclosure_html_section_output_payload(
             continue
         if int(result.get("selected_sections") or 0) == 0:
             continue
+        if result.get("source_unavailable"):
+            source_unavailable_files += 1
         relative_path = _relative_source_path(input_directory, source_file)
         expected_relative_paths.add(relative_path)
         actual_path = actual_paths.get(relative_path)
@@ -826,6 +844,7 @@ def inspect_disclosure_html_section_output_payload(
             "unexpected_files": len(unexpected_files),
             "mismatched_files": len(mismatched_files),
             "integrity_ok": integrity_ok,
+            "source_unavailable_files": source_unavailable_files,
         },
         "problem_files": problems,
         "missing_files": missing_files,
@@ -894,6 +913,7 @@ def save_disclosure_html_sections_payload(
     expected_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
     removed_correction_sections = 0
+    source_unavailable_files = 0
 
     def save_one(source_file: Path) -> dict[str, Any]:
         selected = _automatic_section_output(source_file)
@@ -908,6 +928,7 @@ def save_disclosure_html_sections_payload(
             "removed_correction_sections": int(
                 selected["removed_correction_sections"]
             ),
+            "source_unavailable": bool(selected.get("source_unavailable")),
         }
 
     results = _map_html_files(html_files, workers, save_one, cancel_check)
@@ -920,6 +941,7 @@ def save_disclosure_html_sections_payload(
             removed_correction_sections += int(
                 result.get("removed_correction_sections") or 0
             )
+            source_unavailable_files += int(bool(result.get("source_unavailable")))
         else:
             skipped_files.append(result["skipped"])
             source_name = Path(result["skipped"]["source_file"]).name
@@ -945,6 +967,7 @@ def save_disclosure_html_sections_payload(
             and not missing_files,
             "missing_files": len(missing_files),
             "removed_correction_sections": removed_correction_sections,
+            "source_unavailable_files": source_unavailable_files,
         },
         "saved_files": saved_files,
         "expected_files": expected_files,

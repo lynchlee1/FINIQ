@@ -130,7 +130,7 @@ export default function UtilityPage() {
               <DataPathCard onError={handlePathError} fields={pathFields} /> */}
           <Card className="dark:bg-[#161b22] dark:border-[#30363d]">
             <CardHeader>
-              <CardTitle className="dark:text-white">작업 실행</CardTitle>
+              <CardTitle className="dark:text-white">분할저장 구조 전환</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid gap-3 md:grid-cols-2">
@@ -169,6 +169,7 @@ export default function UtilityPage() {
           }
           notificationActive={isErrorStatus}
           notificationTone="error"
+          notificationResetKey={isErrorStatus ? status : ""}
           notificationContent={<div className={isErrorStatus ? "whitespace-pre-wrap text-sm text-[var(--tv-down-text)]" : "text-sm text-[var(--tv-muted)]"}>{isErrorStatus ? status : "알림 없음"}</div>}
           settingsTitle="시스템 설정"
           settingsContent={

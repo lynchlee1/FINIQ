@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
 from fastapi.testclient import TestClient
 
 import finiq.market_desk.web.app as web_app
 from finiq.market_desk.web import wireproxy_lifecycle
 
 
-def test_wireproxy_launch_agents_follow_configured_proxy_count(monkeypatch) -> None:
+def test_wireproxy_launch_agents_start_and_stop_configured_routes(monkeypatch) -> None:
     calls: list[tuple[list[str], bool]] = []
 
     def fake_run(command: list[str], *, check: bool) -> subprocess.CompletedProcess:
@@ -67,6 +68,65 @@ def test_wireproxy_launch_agents_follow_configured_proxy_count(monkeypatch) -> N
             False,
         ),
     ]
+
+
+def test_wireproxy_launch_agents_follow_proxy_ports(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], *, check: bool) -> subprocess.CompletedProcess:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(wireproxy_lifecycle.os, "getuid", lambda: 501)
+    monkeypatch.setattr(wireproxy_lifecycle.subprocess, "run", fake_run)
+
+    labels = wireproxy_lifecycle.start_wireproxy_launch_agents(
+        ["http://127.0.0.1:25002"]
+    )
+
+    assert labels == ("com.finiq.wireproxy.route2",)
+    assert calls == [
+        [
+            "launchctl",
+            "kickstart",
+            "-k",
+            "gui/501/com.finiq.wireproxy.route2",
+        ]
+    ]
+
+
+def test_wireproxy_launch_agents_ignore_user_managed_proxy_port() -> None:
+    assert wireproxy_lifecycle.wireproxy_launch_agent_labels(
+        ["http://127.0.0.1:26001"]
+    ) == ()
+
+
+def test_wireproxy_launch_agents_roll_back_partial_start(monkeypatch) -> None:
+    calls: list[tuple[list[str], bool]] = []
+
+    def fake_run(command: list[str], *, check: bool) -> subprocess.CompletedProcess:
+        calls.append((command, check))
+        if "kickstart" in command and command[-1].endswith("route2"):
+            raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(wireproxy_lifecycle.os, "getuid", lambda: 501)
+    monkeypatch.setattr(wireproxy_lifecycle.subprocess, "run", fake_run)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        wireproxy_lifecycle.start_wireproxy_launch_agents(
+            ["http://127.0.0.1:25001", "http://127.0.0.1:25002"]
+        )
+
+    assert calls[-1] == (
+        [
+            "launchctl",
+            "kill",
+            "SIGTERM",
+            "gui/501/com.finiq.wireproxy.route1",
+        ],
+        False,
+    )
 
 
 def test_market_desk_lifespan_starts_and_stops_wireproxy(monkeypatch) -> None:

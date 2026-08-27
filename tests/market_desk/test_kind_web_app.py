@@ -2310,7 +2310,7 @@ def test_internal_html_redownload_processes_only_failed_owner_modes(
     }
     final_inspection = {"passed": True, "failed_modes": [], "results": []}
     inspections = iter([initial_inspection, final_inspection])
-    downloaded_payloads: list[tuple[dict[str, object], bool]] = []
+    downloaded_payloads: list[tuple[dict[str, object], bool, bool]] = []
 
     monkeypatch.setattr(
         html_cleanup,
@@ -2329,8 +2329,11 @@ def test_internal_html_redownload_processes_only_failed_owner_modes(
         cancel_check: object = None,
         *,
         redownload_unverified_existing: bool = False,
+        confirm_source_unavailable: bool = False,
     ) -> dict[str, object]:
-        downloaded_payloads.append((body, redownload_unverified_existing))
+        downloaded_payloads.append(
+            (body, redownload_unverified_existing, confirm_source_unavailable)
+        )
         return {"cancelled": False, "requested_count": 2, "saved_count": 2}
 
     monkeypatch.setattr(
@@ -2346,12 +2349,15 @@ def test_internal_html_redownload_processes_only_failed_owner_modes(
     assert result["passed"] is True
     assert result["target_mode_count"] == 2
     assert result["verification"] is final_inspection
-    assert [payload["mode"] for payload, _ in downloaded_payloads] == [
+    assert [payload["mode"] for payload, _, _ in downloaded_payloads] == [
         "bond_issuance",
         "rights_issuance",
     ]
-    assert all(repair is True for _, repair in downloaded_payloads)
-    assert all(payload["skip_existing"] is True for payload, _ in downloaded_payloads)
+    assert all(repair is True for _, repair, _ in downloaded_payloads)
+    assert all(confirm is True for _, _, confirm in downloaded_payloads)
+    assert all(
+        payload["skip_existing"] is True for payload, _, _ in downloaded_payloads
+    )
 
 
 def test_external_html_trust_existing_route_creates_hash_baseline(
@@ -3007,6 +3013,7 @@ def test_html_section_save_start_route_saves_all_toc_sections_automatically(
         "integrity_ok": True,
         "missing_files": 0,
         "removed_correction_sections": 0,
+        "source_unavailable_files": 0,
     }
     section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
     assert "주요사항보고서" in section_html
@@ -3067,6 +3074,7 @@ def test_html_section_save_start_route_ignores_obsolete_pattern_selection(tmp_pa
         "integrity_ok": True,
         "missing_files": 0,
         "removed_correction_sections": 0,
+        "source_unavailable_files": 0,
     }
     section_html = (output_directory / "2008" / "20260422000832.html").read_text(encoding="utf-8")
     assert "주요사항보고서" in section_html

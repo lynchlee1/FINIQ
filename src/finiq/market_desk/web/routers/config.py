@@ -19,6 +19,11 @@ from finiq.config import (
     normalize_path,
     save_settings,
 )
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    DISCLOSURE_STAGE_NAMES,
+    STAGE_LINK_FILENAME,
+    manage_disclosure_stage_links_payload,
+)
 from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
     list_price_source_files,
@@ -148,21 +153,84 @@ end run
 ChooseFinderPath = Callable[..., str]
 
 
+def _disclosure_config_path_settings(
+    data_root: str, *, mode: str
+) -> tuple[dict[str, str], set[str]]:
+    settings = build_disclosure_workspace_path_settings(data_root, mode=mode)
+    root = Path(data_root).expanduser().resolve()
+    if not any(
+        (root / stage / STAGE_LINK_FILENAME).exists()
+        for stage in DISCLOSURE_STAGE_NAMES
+    ):
+        return settings, set()
+
+    statuses = manage_disclosure_stage_links_payload(
+        {"data_root": str(root), "action": "list"}
+    )["stages"]
+    linked_keys: set[str] = set()
+    for status in statuses:
+        if not status["linked"] or not status["valid"]:
+            continue
+        stage = status["stage"]
+        stage_root = Path(status["resolved_directory"])
+        replacements: dict[str, str] = {}
+        if stage == "01-list":
+            replacements = {
+                "download_output_directory": str(stage_root),
+                "sqlite_source_path": str(stage_root),
+            }
+        elif stage == "02-table":
+            replacements = {"sqlite_output_directory": str(stage_root)}
+        elif stage == "03-filter":
+            replacements = {"external_html_transfer_directory": str(stage_root)}
+        elif stage == "04-external-html-download":
+            mode_root = stage_root / mode
+            replacements = {
+                "external_html_output_directory": str(mode_root),
+                "external_html_compress_input_directory": str(mode_root),
+            }
+        elif stage == "04-external-html-compress":
+            mode_root = stage_root / mode
+            replacements = {
+                "external_html_compress_output_directory": str(mode_root),
+                "external_html_compressed_json_path": str(
+                    mode_root / "compressed-external-html.json"
+                ),
+            }
+        elif stage == "05-internal-html-download":
+            replacements = {
+                "internal_html_output_directory": str(stage_root / mode)
+            }
+        elif stage == "06-sections":
+            replacements = {"html_section_split_output_directory": str(stage_root)}
+        elif stage == "07-converted":
+            mode_root = stage_root / mode
+            replacements = {
+                "html_parse_output_directory": str(mode_root),
+                "html_parse_result_path": str(mode_root / f"parsed-{mode}.json"),
+            }
+        settings.update(replacements)
+        linked_keys.update(replacements)
+    return settings, linked_keys
+
+
 def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _choose_finder_path) -> APIRouter:
     router = APIRouter()
 
     def config_payload(*, include_discovery: bool = False) -> dict[str, Any]:
         price_root = config.price_root_directory or str(Path(config.quanti_dir).expanduser().parent)
-        workspace_defaults = (
-            build_disclosure_workspace_path_settings(
+        workspace_defaults, linked_workspace_keys = (
+            _disclosure_config_path_settings(
                 config.output_root,
                 mode=config.html_parse_mode,
             )
             if str(config.output_root).strip() and str(config.html_parse_mode).strip()
-            else {}
+            else ({}, set())
         )
 
         def workspace_value(key: str, configured: str) -> str:
+            if key in linked_workspace_keys:
+                return workspace_defaults[key]
             return configured or workspace_defaults.get(key, "")
 
         payload = {
@@ -331,8 +399,12 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
         ):
             parse_mode = str(config.html_parse_mode).strip()
             try:
-                workspace_settings = build_disclosure_workspace_path_settings(
-                    config.output_root, mode=parse_mode
+                (
+                    workspace_settings,
+                    _linked_workspace_keys,
+                ) = _disclosure_config_path_settings(
+                    config.output_root,
+                    mode=parse_mode,
                 )
             except ValueError as exc:
                 restore_original_settings()

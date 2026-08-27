@@ -212,29 +212,36 @@ def _check_disclosure_html_output_directory_payload(
     recorded_source_unavailable = _load_html_manifest_source_unavailable(
         output_directory
     )
-    source_unavailable_acpt_numbers = [
+    placeholders = {
+        acpt_no: placeholder
+        for acpt_no in summary["existing_target_acpt_numbers"]
+        if (
+            doc_no := (
+                recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
+                or selected_doc_numbers.get(acpt_no)
+            )
+        )
+        if (
+            placeholder := (
+                _internal_html_source_unavailable_placeholder_from_integrity(
+                    acpt_no=acpt_no,
+                    doc_no=doc_no,
+                    integrity=actual_integrity_by_acpt_no.get(acpt_no),
+                )
+            )
+        )
+        is not None
+    }
+    matching_source_unavailable_acpt_numbers = [
         acpt_no
-        for acpt_no in summary["missing_target_acpt_numbers"]
+        for acpt_no, placeholder in placeholders.items()
         if selected_doc_numbers.get(acpt_no)
         and recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
         == selected_doc_numbers.get(acpt_no)
+        and placeholder["doc_no"] == selected_doc_numbers.get(acpt_no)
+        and placeholder["reason"]
+        == recorded_source_unavailable.get(acpt_no, {}).get("reason")
     ]
-    if source_unavailable_acpt_numbers:
-        unavailable_set = set(source_unavailable_acpt_numbers)
-        summary["missing_target_acpt_numbers"] = [
-            acpt_no
-            for acpt_no in summary["missing_target_acpt_numbers"]
-            if acpt_no not in unavailable_set
-        ]
-        summary["missing_target_html_count"] = len(
-            summary["missing_target_acpt_numbers"]
-        )
-    summary["source_unavailable_target_html_count"] = len(
-        source_unavailable_acpt_numbers
-    )
-    summary["source_unavailable_target_acpt_numbers"] = (
-        source_unavailable_acpt_numbers
-    )
     integrity_summary = _inspect_html_integrity(
         output_directory,
         acpt_numbers,
@@ -243,12 +250,40 @@ def _check_disclosure_html_output_directory_payload(
         actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
         loaded_manifest_integrity=loaded_manifest_integrity,
     )
+    hash_verified = set(integrity_summary["hash_verified_target_acpt_numbers"])
+    source_unavailable_acpt_numbers = [
+        acpt_no
+        for acpt_no in matching_source_unavailable_acpt_numbers
+        if acpt_no in hash_verified
+    ]
+    recorded_existing = set(summary["existing_target_acpt_numbers"]) & set(
+        recorded_source_unavailable
+    )
+    stale_placeholder_acpt_numbers = sorted(
+        (set(placeholders) | recorded_existing)
+        - set(source_unavailable_acpt_numbers)
+    )
+    if stale_placeholder_acpt_numbers:
+        invalid = set(summary["invalid_target_acpt_numbers"])
+        invalid.update(stale_placeholder_acpt_numbers)
+        summary["invalid_target_acpt_numbers"] = sorted(invalid)
+        summary["invalid_target_html_count"] = len(invalid)
+    summary["source_unavailable_target_html_count"] = len(
+        source_unavailable_acpt_numbers
+    )
+    summary["source_unavailable_target_acpt_numbers"] = (
+        source_unavailable_acpt_numbers
+    )
     integrity_summary.pop("_verified_integrity_by_acpt_no", None)
     summary.update(integrity_summary)
     if summary.get("source_type") in {"external", "content"}:
-        summary["download_required_target_html_count"] = (
-            int(summary.get("missing_target_html_count") or 0)
-            + int(summary.get("hash_mismatch_target_html_count") or 0)
+        download_required_acpt_numbers = (
+            set(summary["missing_target_acpt_numbers"])
+            | set(summary["hash_mismatch_target_acpt_numbers"])
+            | set(stale_placeholder_acpt_numbers)
+        )
+        summary["download_required_target_html_count"] = len(
+            download_required_acpt_numbers
         )
     existing_count = int(summary.get("existing_target_html_count") or 0)
     total_file_count = int(summary.get("total_file_count") or 0)
@@ -312,7 +347,6 @@ def _check_derived_html_from_owner_scan(
         and recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
         == selected_doc_numbers.get(acpt_no)
     ]
-    source_unavailable = set(source_unavailable_acpt_numbers)
     existing_target_acpt_numbers = [
         acpt_no for acpt_no in acpt_numbers if acpt_no in structurally_valid
     ]
@@ -322,7 +356,7 @@ def _check_derived_html_from_owner_scan(
     missing_target_acpt_numbers = [
         acpt_no
         for acpt_no in acpt_numbers
-        if acpt_no not in structurally_valid and acpt_no not in source_unavailable
+        if acpt_no not in structurally_valid
     ]
     actual_integrity_by_acpt_no = {
         acpt_no: owner_scan["actual_integrity_by_acpt_no"][acpt_no]

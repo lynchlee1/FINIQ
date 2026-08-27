@@ -274,11 +274,9 @@ def compress_disclosure_external_html_payload(
     input_directory = Path(input_directory_raw).expanduser().resolve()
     limit = _parse_merge_limit(body.get("limit"))
     output_directory_raw = str(body.get("output_directory") or "").strip()
-    output_directory = (
-        Path(output_directory_raw).expanduser().resolve()
-        if output_directory_raw
-        else input_directory
-    )
+    if not output_directory_raw:
+        raise ValueError("output_directory is required")
+    output_directory = Path(output_directory_raw).expanduser().resolve()
 
     if body.get("parent_mode") not in (None, ""):
         workspace = resolve_disclosure_workspace(body.get("data_root") or "")

@@ -18,6 +18,7 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     validate_workspace_mode,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
+    _internal_html_source_unavailable_placeholder_file,
     _load_workspace_filtered_payload,
     collect_acpt_numbers_from_json,
 )
@@ -1216,8 +1217,21 @@ def _parse_one_html_file(
     html_file: Path,
 ) -> None:
     try:
-        parsed_record = _record_without_raw_tables(
-            _parse_html_file_record(request, html_file)
+        source_unavailable = _internal_html_source_unavailable_placeholder_file(
+            html_file
+        )
+        parsed_record = (
+            {
+                "acpt_no": html_file.stem,
+                "source_unavailable": {
+                    "doc_no": source_unavailable["doc_no"],
+                    "reason": source_unavailable["reason"],
+                },
+            }
+            if source_unavailable is not None
+            else _record_without_raw_tables(
+                _parse_html_file_record(request, html_file)
+            )
         )
         record = _apply_parse_metadata(
             parsed_record,
@@ -1275,8 +1289,21 @@ def _parse_html_file_for_worker(
     html_file: Path,
 ) -> dict[str, Any]:
     try:
-        parsed_record = _record_without_raw_tables(
-            _parse_html_file_record(request, html_file)
+        source_unavailable = _internal_html_source_unavailable_placeholder_file(
+            html_file
+        )
+        parsed_record = (
+            {
+                "acpt_no": html_file.stem,
+                "source_unavailable": {
+                    "doc_no": source_unavailable["doc_no"],
+                    "reason": source_unavailable["reason"],
+                },
+            }
+            if source_unavailable is not None
+            else _record_without_raw_tables(
+                _parse_html_file_record(request, html_file)
+            )
         )
         record = _apply_parse_metadata(
             parsed_record,

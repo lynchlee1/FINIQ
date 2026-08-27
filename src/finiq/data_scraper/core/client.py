@@ -805,6 +805,11 @@ def download_disclosure_external_htmls(
             with lock:
                 saved_paths[acpt_no] = output_path
                 valid_acpt_numbers.add(acpt_no)
+
+            _report_progress(
+                progress_callback,
+                f"Saved KIND external HTML to: {output_path}",
+            )
             
             if saved_file_callback is not None:
                 saved_file_callback(output_path, acpt_no, None)

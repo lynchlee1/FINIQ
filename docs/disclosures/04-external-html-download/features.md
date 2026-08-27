@@ -84,7 +84,7 @@ KIND 요청은 직접 연결과 `kind_proxy_urls`에 명시한 localhost HTTP �
 
 #### Defaults and Exceptions
 
-- 압축할 폴더는 `input_directory`로만 받고 worker 수는 `parallel_workers`로만 받는다.
+- 압축할 폴더는 `input_directory`, 압축 JSON을 저장할 폴더는 `output_directory`로 받는다. 두 경로는 모두 필수며, worker 수는 `parallel_workers`로만 받는다.
 - 외부 HTML 안에 `acptNo`, `mainDoc`, `attachedDoc` 또는 각 select의 option 목록이 없으면 실패 처리한다.
 - 외부 HTML에서 읽은 `acptNo`가 파일명과 다르면 실패 처리하며, 빈 `acptNo`를 파일명으로 대신하지 않는다.
 - 외부 HTML의 `<YYYY>` 폴더와 manifest metadata의 `disclosed_at` 연도가 다르면 실패 처리한다.

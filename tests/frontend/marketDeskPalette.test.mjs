@@ -25,7 +25,7 @@ test("MarketDesk restores the flat slate palette and typography", async () => {
   assert.match(source, /--tv-border: #30363d/);
   assert.match(source, /--tv-accent: #2f81f7/);
   assert.match(source, /--tv-shadow: none/);
-  assert.match(source, /--font-sans: "IBM Plex Sans KR"/);
+  assert.match(source, /--font-sans: "IBM Plex Sans KR", Inter,/);
   assert.match(source, /--font-mono: "Space Grotesk Variable"/);
   assert.match(layoutSource, /@fontsource\/ibm-plex-sans-kr\/korean-400\.css/);
   assert.match(layoutSource, /@fontsource-variable\/space-grotesk/);

@@ -1434,6 +1434,7 @@ def test_stage_five_rebuilds_internal_html_without_reusing_current(
         existing_before_download.extend(output.rglob("*.html"))
         assert body["skip_existing"] is False
         assert body["max_workers"] == profile["execution"]["local_workers"]
+        assert _kwargs["confirm_source_unavailable"] is True
         path = output / "2026" / "20260712000001.html"
         path.parent.mkdir(parents=True)
         path.write_text("<html><body>new</body></html>", encoding="utf-8")
