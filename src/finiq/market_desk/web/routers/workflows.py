@@ -77,6 +77,7 @@ from finiq.market_desk.web.features.disclosure_workflow.automation import (
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
     atomic_write_json,
+    manage_disclosure_stage_links_payload,
     prepare_disclosure_workspace_payload,
     validate_workspace_mode,
 )
@@ -461,6 +462,15 @@ def create_workflows_router(
     async def prepare_disclosure_workspace(payload: dict[str, Any]):
         try:
             return prepare_disclosure_workspace_payload(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/disclosures/workspace/stage-links")
+    async def manage_disclosure_stage_links(payload: dict[str, Any]):
+        try:
+            return await run_in_threadpool(
+                manage_disclosure_stage_links_payload, payload
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

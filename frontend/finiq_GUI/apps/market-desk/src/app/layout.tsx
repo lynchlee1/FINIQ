@@ -1,18 +1,11 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans_KR, Space_Grotesk } from "next/font/google";
+import "@fontsource/ibm-plex-sans-kr/korean-400.css";
+import "@fontsource/ibm-plex-sans-kr/korean-500.css";
+import "@fontsource/ibm-plex-sans-kr/korean-600.css";
+import "@fontsource/ibm-plex-sans-kr/korean-700.css";
+import "@fontsource-variable/space-grotesk";
 import "./globals.css";
 import { AppFrame } from "@/components/layout/AppFrame";
-
-const sans = IBM_Plex_Sans_KR({
-  weight: ["400", "500", "600", "700"],
-  subsets: ["latin"],
-  variable: "--font-ibm-plex-sans-kr",
-});
-
-const mono = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space-grotesk",
-});
 
 export const metadata: Metadata = {
   title: "FINIQ MarketDesk",
@@ -25,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ko" className={`${sans.variable} ${mono.variable}`}>
+    <html lang="ko">
       <body className="antialiased">
         <AppFrame>
           {children}

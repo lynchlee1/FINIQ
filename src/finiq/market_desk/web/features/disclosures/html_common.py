@@ -73,18 +73,27 @@ def _html_file_validation_and_integrity(
     valid = False
     decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
     text_tail = ""
+    normalized_prefix = ""
+    has_table = False
     try:
         with path.open("rb") as handle:
             while chunk := handle.read(1024 * 1024):
                 digest.update(chunk)
                 size += len(chunk)
-                text = text_tail + decoder.decode(chunk)
-                if "<html" in text.lower() or "openDisclsViewer" in text:
+                decoded = decoder.decode(chunk)
+                normalized_prefix = (normalized_prefix + decoded).lstrip()[:16].lower()
+                text = text_tail + decoded
+                normalized = text.lower()
+                has_table = has_table or "<table" in normalized
+                if "<html" in normalized or "opendisclsviewer" in normalized:
                     valid = True
                 text_tail = text[-16:]
         text = text_tail + decoder.decode(b"", final=True)
-        if "<html" in text.lower() or "openDisclsViewer" in text:
+        normalized = text.lower()
+        has_table = has_table or "<table" in normalized
+        if "<html" in normalized or "opendisclsviewer" in normalized:
             valid = True
+        valid = valid or (normalized_prefix.startswith("<p") and has_table)
     except Exception:
         return False, None
     if not valid:
@@ -347,7 +356,23 @@ def _strictly_reuse_parent_html(
         ],
         actual_integrity_by_acpt_no=actual_integrity,
     )
-    missing = list(output_summary["missing_target_acpt_numbers"])
+    selected_doc_numbers = _selected_main_doc_numbers(source_json)
+    recorded_source_unavailable = _load_html_manifest_source_unavailable(
+        output_directory
+    )
+    source_unavailable = [
+        acpt_no
+        for acpt_no in output_summary["missing_target_acpt_numbers"]
+        if selected_doc_numbers.get(acpt_no)
+        and recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
+        == selected_doc_numbers.get(acpt_no)
+    ]
+    source_unavailable_set = set(source_unavailable)
+    missing = [
+        acpt_no
+        for acpt_no in output_summary["missing_target_acpt_numbers"]
+        if acpt_no not in source_unavailable_set
+    ]
     invalid = list(output_summary["invalid_target_acpt_numbers"])
     unverified = list(integrity_summary["hash_unverified_target_acpt_numbers"])
     mismatched = list(integrity_summary["hash_mismatch_target_acpt_numbers"])
@@ -360,8 +385,16 @@ def _strictly_reuse_parent_html(
     paths = [
         _target_html_path(output_directory, acpt_no, target_years=target_years)
         for acpt_no in acpt_numbers
+        if acpt_no not in source_unavailable_set
     ]
-    return paths, {**output_summary, **integrity_summary}
+    return paths, {
+        **output_summary,
+        **integrity_summary,
+        "missing_target_html_count": len(missing),
+        "missing_target_acpt_numbers": missing,
+        "source_unavailable_target_html_count": len(source_unavailable),
+        "source_unavailable_target_acpt_numbers": source_unavailable,
+    }
 
 
 def _year_from_disclosure(
@@ -455,9 +488,21 @@ def _write_html_manifest(
     acpt_numbers: list[str],
     source_json: Any,
     source_integrity: dict[str, dict[str, Any]] | None = None,
+    source_unavailable: dict[str, dict[str, str]] | None = None,
 ) -> Path:
     metadata = _collect_disclosure_metadata_from_json(source_json)
-    missing_metadata = [acpt_no for acpt_no in acpt_numbers if acpt_no not in metadata]
+    unavailable = source_unavailable or {}
+    included_acpt_numbers = set(acpt_numbers) | set(unavailable)
+    manifest_acpt_numbers = [
+        acpt_no
+        for acpt_no in metadata
+        if acpt_no in included_acpt_numbers
+    ]
+    missing_metadata = [
+        acpt_no
+        for acpt_no in [*acpt_numbers, *unavailable]
+        if acpt_no not in metadata
+    ]
     if missing_metadata:
         raise ValueError(
             "Missing disclosure metadata for acpt_no values: "
@@ -475,9 +520,13 @@ def _write_html_manifest(
     disclosures = [
         {
             **metadata[acpt_no],
-            **(source_integrity[acpt_no] if source_integrity is not None else {}),
+            **(
+                {"source_unavailable": unavailable[acpt_no]}
+                if acpt_no in unavailable
+                else (source_integrity[acpt_no] if source_integrity is not None else {})
+            ),
         }
-        for acpt_no in acpt_numbers
+        for acpt_no in manifest_acpt_numbers
     ]
     manifest_path = output_directory / HTML_MANIFEST_FILENAME
     atomic_write_json(
@@ -488,6 +537,68 @@ def _write_html_manifest(
         },
     )
     return manifest_path
+
+
+def _load_html_manifest_source_unavailable(
+    output_directory: Path,
+) -> dict[str, dict[str, str]]:
+    manifest_path = output_directory / HTML_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        return {}
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(payload, dict)
+        or payload.get("format") not in HTML_MANIFEST_FORMATS
+    ):
+        raise ValueError(f"invalid HTML manifest format: {manifest_path}")
+    disclosures = payload.get("disclosures")
+    if not isinstance(disclosures, list):
+        raise ValueError(f"HTML manifest disclosures must be a list: {manifest_path}")
+    unavailable: dict[str, dict[str, str]] = {}
+    for index, disclosure in enumerate(disclosures):
+        if not isinstance(disclosure, dict):
+            raise ValueError(f"HTML manifest disclosures[{index}] must be an object")
+        marker = disclosure.get("source_unavailable")
+        if marker is None:
+            continue
+        acpt_no = str(disclosure.get("acpt_no") or "").strip()
+        doc_no = (
+            str(marker.get("doc_no") or "").strip()
+            if isinstance(marker, dict)
+            else ""
+        )
+        reason = (
+            str(marker.get("reason") or "").strip()
+            if isinstance(marker, dict)
+            else ""
+        )
+        if (
+            not acpt_no
+            or not doc_no
+            or reason not in {"content_path_missing", "invalid_html"}
+        ):
+            raise ValueError(f"invalid source_unavailable metadata for acpt_no: {acpt_no}")
+        unavailable[acpt_no] = {"doc_no": doc_no, "reason": reason}
+    return unavailable
+
+
+def _selected_main_doc_numbers(source_json: Any) -> dict[str, str]:
+    if (
+        not isinstance(source_json, dict)
+        or source_json.get("format")
+        != "finiq_disclosure_external_html_docs_v1"
+    ):
+        return {}
+    records = source_json.get("records")
+    if not isinstance(records, list):
+        return {}
+    return {
+        str(record.get("acpt_no") or "").strip(): str(
+            record.get("selected_main_doc_no") or ""
+        ).strip()
+        for record in records
+        if isinstance(record, dict)
+    }
 
 
 def _source_json_fingerprint(source_json: Any) -> str:

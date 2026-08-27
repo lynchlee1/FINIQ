@@ -11,12 +11,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from finiq.config import PROJECT_ROOT, build_disclosure_workspace_path_settings
+from finiq.config import PROJECT_ROOT
 
 WORKSPACE_FORMAT = "finiq_disclosure_workspace_v1"
 WORKSPACE_MANIFEST_FILENAME = "disclosure-workspace.json"
 STAGE_LINK_FORMAT = "finiq_stage_link_v1"
-STAGE_LINK_FILENAME = ".finiq-stage-link.json"
+STAGE_LINK_FILENAME = "finiq-stage-link.json"
+DISCLOSURE_STAGE_NAMES = (
+    "01-list",
+    "02-table",
+    "03-filter",
+    "04-external-html-download",
+    "04-external-html-compress",
+    "05-internal-html-download",
+    "06-sections",
+    "07-converted",
+)
 _MODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -27,12 +37,16 @@ class DisclosureWorkspace:
     table: Path
     filtered: Path
     external: Path
+    external_compress: Path
     internal: Path
     sections: Path
     converted: Path
 
     def external_mode(self, mode: str) -> Path:
         return self.external / validate_workspace_mode(mode)
+
+    def external_compress_mode(self, mode: str) -> Path:
+        return self.external_compress / validate_workspace_mode(mode)
 
     def internal_mode(self, mode: str) -> Path:
         return self.internal / validate_workspace_mode(mode)
@@ -62,6 +76,12 @@ class DisclosureWorkspace:
         owner_mode = mode if parent_mode in (None, "") else parent_mode
         return self.external_mode(validate_workspace_mode(owner_mode))
 
+    def external_compress_owner_mode(
+        self, mode: str, *, parent_mode: object = None
+    ) -> Path:
+        owner_mode = mode if parent_mode in (None, "") else parent_mode
+        return self.external_compress_mode(validate_workspace_mode(owner_mode))
+
     def internal_owner_mode(self, mode: str, *, parent_mode: object = None) -> Path:
         owner_mode = mode if parent_mode in (None, "") else parent_mode
         return self.internal_mode(validate_workspace_mode(owner_mode))
@@ -76,6 +96,11 @@ class DisclosureWorkspace:
             "external_root": str(self.external),
             "external": {
                 mode: str(self.external_mode(mode)) for mode in normalized_modes
+            },
+            "external_compress_root": str(self.external_compress),
+            "external_compress": {
+                mode: str(self.external_compress_mode(mode))
+                for mode in normalized_modes
             },
             "internal_root": str(self.internal),
             "internal": {
@@ -140,15 +165,112 @@ def _resolve_stage_directory(root: Path, stage_name: str) -> Path:
         raise ValueError(f"Stage link target directory does not exist: {target_directory}")
     if (target_directory / STAGE_LINK_FILENAME).exists():
         raise ValueError(f"Chained stage links are not supported: {target_directory}")
-    unexpected_entries = [
-        path.name for path in local_directory.iterdir() if path.name != STAGE_LINK_FILENAME
-    ]
-    if unexpected_entries:
-        raise ValueError(
-            f"Linked stage directory must contain only {STAGE_LINK_FILENAME}: "
-            f"{local_directory}"
-        )
     return target_directory.resolve()
+
+
+def _validate_stage_name(stage_name: object) -> str:
+    normalized = str(stage_name or "").strip()
+    if normalized not in DISCLOSURE_STAGE_NAMES:
+        raise ValueError(f"Unsupported disclosure stage: {normalized}")
+    return normalized
+
+
+def _stage_link_status(root: Path, stage_name: str) -> dict[str, Any]:
+    local_directory = root / stage_name
+    link_path = local_directory / STAGE_LINK_FILENAME
+    if not link_path.exists():
+        return {
+            "stage": stage_name,
+            "linked": False,
+            "valid": True,
+            "local_directory": str(local_directory),
+            "target_workspace": None,
+            "resolved_directory": str(local_directory),
+            "error": None,
+        }
+    target_workspace: str | None = None
+    try:
+        payload = json.loads(link_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            target_text = str(payload.get("target_workspace") or "").strip()
+            if target_text:
+                target_root = Path(target_text).expanduser()
+                if not target_root.is_absolute():
+                    target_root = root / target_root
+                target_workspace = str(target_root.resolve())
+        resolved_directory = _resolve_stage_directory(root, stage_name)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        return {
+            "stage": stage_name,
+            "linked": True,
+            "valid": False,
+            "local_directory": str(local_directory),
+            "target_workspace": target_workspace,
+            "resolved_directory": "",
+            "error": str(exc),
+        }
+    return {
+        "stage": stage_name,
+        "linked": True,
+        "valid": True,
+        "local_directory": str(local_directory),
+        "target_workspace": target_workspace,
+        "resolved_directory": str(resolved_directory),
+        "error": None,
+    }
+
+
+def manage_disclosure_stage_links_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_root = str(payload.get("data_root") or "").strip()
+    if not raw_root:
+        raise ValueError("data_root is required")
+    root = Path(raw_root).expanduser().resolve()
+    _validate_workspace_root(root)
+    action = str(payload.get("action") or "list").strip()
+
+    if action == "set":
+        stage_name = _validate_stage_name(payload.get("stage"))
+        target_text = str(payload.get("target_workspace") or "").strip()
+        if not target_text:
+            raise ValueError("target_workspace is required")
+        target_root = Path(target_text).expanduser().resolve()
+        _validate_workspace_root(target_root)
+        if target_root == root:
+            raise ValueError("target_workspace must differ from data_root")
+        if not target_root.is_dir():
+            raise ValueError(f"Stage link target workspace does not exist: {target_root}")
+        target_directory = target_root / stage_name
+        target_directory.mkdir(parents=True, exist_ok=True)
+        if (target_directory / STAGE_LINK_FILENAME).exists():
+            raise ValueError(f"Chained stage links are not supported: {target_directory}")
+        local_directory = root / stage_name
+        if local_directory.exists() and not local_directory.is_dir():
+            raise ValueError(f"Stage path is not a directory: {local_directory}")
+        local_directory.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            local_directory / STAGE_LINK_FILENAME,
+            {
+                "format": STAGE_LINK_FORMAT,
+                "schema_version": 1,
+                "target_workspace": str(target_root),
+            },
+        )
+    elif action == "remove":
+        stage_name = _validate_stage_name(payload.get("stage"))
+        link_path = root / stage_name / STAGE_LINK_FILENAME
+        if not link_path.is_file():
+            raise ValueError(f"Stage link does not exist: {link_path}")
+        link_path.unlink()
+    elif action != "list":
+        raise ValueError(f"Unsupported stage link action: {action}")
+
+    return {
+        "data_root": str(root),
+        "stages": [
+            _stage_link_status(root, stage_name)
+            for stage_name in DISCLOSURE_STAGE_NAMES
+        ],
+    }
 
 
 def resolve_disclosure_workspace(
@@ -165,6 +287,7 @@ def resolve_disclosure_workspace(
         table=_resolve_stage_directory(root, "02-table"),
         filtered=_resolve_stage_directory(root, "03-filter"),
         external=_resolve_stage_directory(root, "04-external-html-download"),
+        external_compress=_resolve_stage_directory(root, "04-external-html-compress"),
         internal=_resolve_stage_directory(root, "05-internal-html-download"),
         sections=_resolve_stage_directory(root, "06-sections"),
         converted=_resolve_stage_directory(root, "07-converted"),
@@ -175,6 +298,7 @@ def resolve_disclosure_workspace(
             workspace.table,
             workspace.filtered,
             workspace.external,
+            workspace.external_compress,
             workspace.internal,
             workspace.sections,
             workspace.converted,
@@ -240,6 +364,7 @@ def prepare_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, A
     workspace = resolve_disclosure_workspace(workspace.root, create=True)
     for mode in modes:
         workspace.external_mode(mode).mkdir(parents=True, exist_ok=True)
+        workspace.external_compress_mode(mode).mkdir(parents=True, exist_ok=True)
         workspace.internal_mode(mode).mkdir(parents=True, exist_ok=True)
         workspace.converted_mode(mode).mkdir(parents=True, exist_ok=True)
 
@@ -260,14 +385,57 @@ def disclosure_workspace_settings(
 ) -> dict[str, str]:
     workspace = resolve_disclosure_workspace(data_root)
     normalized_mode = validate_workspace_mode(mode)
-    return build_disclosure_workspace_path_settings(
-        workspace.root, mode=normalized_mode
-    )
+    external_path = workspace.external_mode(normalized_mode)
+    external_compress_path = workspace.external_compress_mode(normalized_mode)
+    converted_path = workspace.converted_mode(normalized_mode)
+    return {
+        "download_output_directory": str(workspace.list),
+        "sqlite_source_path": str(workspace.list),
+        "sqlite_output_directory": str(workspace.table),
+        "external_html_transfer_directory": str(workspace.filtered),
+        "external_html_output_directory": str(external_path),
+        "external_html_compress_input_directory": str(external_path),
+        "external_html_compress_output_directory": str(external_compress_path),
+        "external_html_compressed_json_path": str(
+            external_compress_path / "compressed-external-html.json"
+        ),
+        "internal_html_output_directory": str(
+            workspace.internal_mode(normalized_mode)
+        ),
+        "html_section_split_output_directory": str(workspace.sections),
+        "html_parse_output_directory": str(converted_path),
+        "html_parse_result_path": str(
+            converted_path / f"parsed-{normalized_mode}.json"
+        ),
+    }
 
 
 def _set_default(payload: dict[str, Any], key: str, value: object) -> None:
     if not str(payload.get(key) or "").strip():
         payload[key] = value
+
+
+def _set_stage_path(
+    payload: dict[str, Any], key: str, value: object, *, linked: bool
+) -> None:
+    if linked:
+        payload[key] = value
+    else:
+        _set_default(payload, key, value)
+
+
+def _stage_is_linked(workspace: DisclosureWorkspace, stage_name: str) -> bool:
+    stage_paths = {
+        "01-list": workspace.list,
+        "02-table": workspace.table,
+        "03-filter": workspace.filtered,
+        "04-external-html-download": workspace.external,
+        "04-external-html-compress": workspace.external_compress,
+        "05-internal-html-download": workspace.internal,
+        "06-sections": workspace.sections,
+        "07-converted": workspace.converted,
+    }
+    return stage_paths[stage_name] != workspace.root / stage_name
 
 
 def apply_workspace_defaults(
@@ -288,70 +456,122 @@ def apply_workspace_defaults(
     if normalized_kind == "kind_download":
         # The download detail page accepts the workspace root. Raw KIND files
         # always live in the first canonical stage below that root.
-        if payload.get("separate_output_directory"):
+        if payload.get("separate_output_directory") and not _stage_is_linked(
+            workspace, "01-list"
+        ):
             _set_default(payload, "output_directory", str(workspace.list))
         else:
             payload["output_directory"] = str(workspace.list)
     elif normalized_kind == "table_build":
-        _set_default(payload, "root_directory", str(workspace.list))
-        _set_default(payload, "output_path", str(workspace.table))
+        _set_stage_path(
+            payload,
+            "root_directory",
+            str(workspace.list),
+            linked=_stage_is_linked(workspace, "01-list"),
+        )
+        _set_stage_path(
+            payload,
+            "output_path",
+            str(workspace.table),
+            linked=_stage_is_linked(workspace, "02-table"),
+        )
     elif normalized_kind == "filter":
         if str(payload.get("classification_path") or "").strip():
             raise ValueError("classification_path is not supported; use data_root")
         if str(payload.get("root_directory") or "").strip():
             raise ValueError("root_directory is not supported; use data_root")
         payload["mode"] = validate_workspace_mode(payload.get("mode"))
-        _set_default(payload, "external_html_transfer_path", str(workspace.filtered))
+        _set_stage_path(
+            payload,
+            "external_html_transfer_path",
+            str(workspace.filtered),
+            linked=_stage_is_linked(workspace, "03-filter"),
+        )
     elif normalized_kind in {
         "external_html_download",
         "external_html_integrity_baseline",
     }:
         mode = validate_workspace_mode(payload.get("mode"))
-        _set_default(
+        _set_stage_path(
             payload,
             "output_directory",
             str(workspace.external_owner_mode(mode, parent_mode=parent_mode)),
+            linked=_stage_is_linked(workspace, "04-external-html-download"),
         )
     elif normalized_kind == "external_html_compress":
         mode = validate_workspace_mode(payload.get("mode"))
-        owner_directory = workspace.external_owner_mode(mode, parent_mode=parent_mode)
-        _set_default(payload, "input_directory", str(owner_directory))
-        _set_default(payload, "output_directory", str(owner_directory))
+        input_directory = workspace.external_owner_mode(mode, parent_mode=parent_mode)
+        output_directory = workspace.external_compress_owner_mode(
+            mode, parent_mode=parent_mode
+        )
+        _set_stage_path(
+            payload,
+            "input_directory",
+            str(input_directory),
+            linked=_stage_is_linked(workspace, "04-external-html-download"),
+        )
+        _set_stage_path(
+            payload,
+            "output_directory",
+            str(output_directory),
+            linked=_stage_is_linked(workspace, "04-external-html-compress"),
+        )
     elif normalized_kind in {
         "internal_html_download",
         "internal_html_integrity_baseline",
     }:
         mode = validate_workspace_mode(payload.get("mode"))
-        external_owner = workspace.external_owner_mode(mode, parent_mode=parent_mode)
+        external_compress_owner = workspace.external_compress_owner_mode(
+            mode, parent_mode=parent_mode
+        )
         internal_owner = workspace.internal_owner_mode(mode, parent_mode=parent_mode)
-        if not str(payload.get("source_compressed_json_path") or "").strip():
-            _set_default(
-                payload,
-                "source_compressed_json_path",
-                str(external_owner / "compressed-external-html.json"),
-            )
-        _set_default(payload, "output_directory", str(internal_owner))
+        _set_stage_path(
+            payload,
+            "source_compressed_json_path",
+            str(external_compress_owner / "compressed-external-html.json"),
+            linked=_stage_is_linked(workspace, "04-external-html-compress"),
+        )
+        _set_stage_path(
+            payload,
+            "output_directory",
+            str(internal_owner),
+            linked=_stage_is_linked(workspace, "05-internal-html-download"),
+        )
     elif normalized_kind in {"section_inspect", "section_kinds", "section_list"}:
-        if not str(payload.get("input_directory") or "").strip():
+        internal_linked = _stage_is_linked(workspace, "05-internal-html-download")
+        if internal_linked or not str(payload.get("input_directory") or "").strip():
             mode = validate_workspace_mode(payload.get("mode"))
-            _set_default(
+            _set_stage_path(
                 payload,
                 "input_directory",
                 str(workspace.internal_owner_mode(mode, parent_mode=parent_mode)),
+                linked=internal_linked,
             )
     elif normalized_kind == "section_save":
-        if not str(payload.get("input_directory") or "").strip():
+        internal_linked = _stage_is_linked(workspace, "05-internal-html-download")
+        if internal_linked or not str(payload.get("input_directory") or "").strip():
             mode = validate_workspace_mode(payload.get("mode"))
-            _set_default(
+            _set_stage_path(
                 payload,
                 "input_directory",
                 str(workspace.internal_owner_mode(mode, parent_mode=parent_mode)),
+                linked=internal_linked,
             )
-        _set_default(payload, "output_directory", str(workspace.sections))
+        _set_stage_path(
+            payload,
+            "output_directory",
+            str(workspace.sections),
+            linked=_stage_is_linked(workspace, "06-sections"),
+        )
     elif normalized_kind == "parse":
         mode = validate_workspace_mode(payload.get("mode"))
-        _set_default(payload, "input_directory", str(workspace.sections))
-        _set_default(
+        _set_stage_path(
+            payload,
+            "input_directory",
+            str(workspace.sections),
+            linked=_stage_is_linked(workspace, "06-sections"),
+        )
+        _set_stage_path(
             payload,
             "output_directory",
             str(
@@ -360,22 +580,25 @@ def apply_workspace_defaults(
                     parent_mode=parent_mode,
                 )
             ),
+            linked=_stage_is_linked(workspace, "07-converted"),
         )
-        _set_default(
+        _set_stage_path(
             payload,
             "filtered_metadata_path",
             str(
                 workspace.filter_mode(mode, parent_mode=parent_mode)
                 / "filtered.json"
             ),
+            linked=_stage_is_linked(workspace, "03-filter"),
         )
-        _set_default(
+        _set_stage_path(
             payload,
             "compressed_metadata_path",
             str(
-                workspace.external_owner_mode(mode, parent_mode=parent_mode)
+                workspace.external_compress_owner_mode(mode, parent_mode=parent_mode)
                 / "compressed-external-html.json"
             ),
+            linked=_stage_is_linked(workspace, "04-external-html-compress"),
         )
     return payload
 

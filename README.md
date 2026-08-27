@@ -55,6 +55,14 @@ npm run dev:graph-viewer
 npm run dev:market-desk
 ```
 
+MarketDesk 백엔드와 프론트엔드를 함께 실행하려면 저장소 루트에서 다음 명령을 사용합니다.
+
+```bash
+./scripts/dev-market-desk.sh
+```
+
+두 서버는 `Ctrl+C` 한 번으로 함께 종료됩니다.
+
 Backend API는 `src/finiq/market_desk/web/app.py`에서 실행하며, 기본 포트는 `8765`입니다.
 공통 설정은 `src/finiq/config.py`에서 관리됩니다.
 

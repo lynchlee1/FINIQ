@@ -2,8 +2,8 @@
 
 ## Paths
 
-- `<data_root>/03-filter/<mode>/filtered.json`을 입력으로 받아 `<data_root>/04-external-html-download/<mode>/<YYYY>/<acpt_no>.html`에 외부 HTML을, `<data_root>/04-external-html-download/<mode>/kind_disclosure_html_manifest.json`에 원본 연결 정보를, `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`에 압축한 문서 선택 정보를 저장한다.
-- 파생 필터 `<parent_mode>/<mode>`는 `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`의 멤버십을 사용하되 04단계 산출물 전체는 `<data_root>/04-external-html-download/<parent_mode>`에서 읽는다. `<data_root>/04-external-html-download/<parent_mode>/subfilters/<mode>`나 자식 `mode`의 별도 출력 폴더는 만들지 않는다.
+- `<data_root>/03-filter/<mode>/filtered.json`을 입력으로 받아 `<data_root>/04-external-html-download/<mode>/<YYYY>/<acpt_no>.html`에 외부 HTML을, `<data_root>/04-external-html-download/<mode>/kind_disclosure_html_manifest.json`에 원본 연결 정보를, `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`에 압축한 문서 선택 정보를 저장한다.
+- 파생 필터 `<parent_mode>/<mode>`는 `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`의 멤버십을 사용하되 원본은 `<data_root>/04-external-html-download/<parent_mode>`, 압축 결과는 `<data_root>/04-external-html-compress/<parent_mode>`에서 읽는다. 두 폴더 모두 `subfilters/<mode>`나 자식 `mode`의 별도 출력 폴더는 만들지 않는다.
 
 ### `<data_root>/03-filter/<mode>/filtered.json`
 
@@ -29,7 +29,7 @@
 - `format`은 `finiq_disclosure_html_manifest_v2`이며 입력 JSON 전체를 대상으로 한 `source_fingerprint`는 기록하지 않는다. 재사용 판정은 접수번호별 `source_sha256`만으로 하므로 필터를 다시 실행해도 기존 HTML이 무효화되지 않는다.
 - 구버전 `finiq_disclosure_html_manifest_v1`은 읽기만 지원하며, 이 경우에만 `source_fingerprint` 비교를 유지한다.
 
-### `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`
+### `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`
 
 #### I/O Structure
 

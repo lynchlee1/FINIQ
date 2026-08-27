@@ -12,6 +12,9 @@ from finiq.data.ontology_builder import (
     build_ontology_graph,
     export_ontology_to_web_json,
 )
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    resolve_disclosure_workspace,
+)
 
 GRAPH_FORMAT = "finiq_disclosure_graph_v1"
 GRAPH_OUTPUT_DIRECTORY = "09-disclosure-graph"
@@ -29,27 +32,25 @@ def _workspace_root(body: dict[str, Any]) -> Path:
 
 
 def _source_paths(data_root: Path) -> tuple[dict[str, Path | None], list[str]]:
+    workspace = resolve_disclosure_workspace(data_root)
     source_pairs = {
         "rights_issuance": (
-            data_root
-            / "07-converted"
+            workspace.converted
             / "rights_issuance"
             / "parsed-rights_issuance.json",
-            data_root / "03-filter" / "rights_issuance" / "filtered.json",
+            workspace.filtered / "rights_issuance" / "filtered.json",
         ),
         "bond_issuance": (
-            data_root
-            / "07-converted"
+            workspace.converted
             / "bond_issuance"
             / "parsed-bond_issuance.json",
-            data_root / "03-filter" / "bond_issuance" / "filtered.json",
+            workspace.filtered / "bond_issuance" / "filtered.json",
         ),
         "shareholder_meeting": (
-            data_root
-            / "07-converted"
+            workspace.converted
             / "shareholder_meeting"
             / "parsed-shareholder_meeting.json",
-            data_root / "03-filter" / "shareholder_meeting" / "filtered.json",
+            workspace.filtered / "shareholder_meeting" / "filtered.json",
         ),
     }
 

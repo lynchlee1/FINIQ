@@ -13,7 +13,7 @@
 - 필수 입력: `<data_root>/06-sections/<YYYY>/<acpt_no>.html`
 - 선택 입력: `<data_root>/03-filter/<mode>/filtered.json`
 - 파생 필터 입력: `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`
-- 선택 입력: `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`
+- 선택 입력: `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`
 - 출력: `<data_root>/07-converted/<mode>/parsed-<mode>.json`
 
 ## Parse Request
@@ -55,7 +55,7 @@
   "output_directory": "/data/07-converted/<mode>",
   "skip_errors": true,
   "filtered_metadata_path": "/data/03-filter/<mode>/filtered.json",
-  "compressed_metadata_path": "/data/04-external-html-download/<mode>/compressed-external-html.json",
+  "compressed_metadata_path": "/data/04-external-html-compress/<mode>/compressed-external-html.json",
   "progress_interval": 1000
 }
 ```
@@ -125,7 +125,7 @@ N=1             N=2      N=3
 
 ### Compressed External HTML Metadata
 
-`<data_root>/04-external-html-download/<mode>/compressed-external-html.json`을 지정하면 제목, 본문 문서번호와 정정공시 관계를 연결한다.
+`<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`을 지정하면 제목, 본문 문서번호와 정정공시 관계를 연결한다.
 
 - 최상위 `format`은 `finiq_disclosure_external_html_docs_v1`이어야 한다.
 - `records`는 객체 배열이어야 한다.

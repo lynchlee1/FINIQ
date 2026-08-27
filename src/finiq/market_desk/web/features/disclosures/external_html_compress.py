@@ -284,25 +284,30 @@ def compress_disclosure_external_html_payload(
         workspace = resolve_disclosure_workspace(body.get("data_root") or "")
         mode = validate_workspace_mode(body.get("mode"))
         parent_mode = validate_workspace_mode(body.get("parent_mode"))
-        expected_directory = workspace.external_owner_mode(
+        expected_input_directory = workspace.external_owner_mode(
             mode, parent_mode=parent_mode
         ).resolve()
-        if (
-            input_directory != expected_directory
-            or output_directory != expected_directory
-        ):
+        expected_output_directory = workspace.external_compress_owner_mode(
+            mode, parent_mode=parent_mode
+        ).resolve()
+        if input_directory != expected_input_directory:
             raise ValueError(
-                "derived filter compression must reuse its parent-owned directory: "
-                f"{expected_directory}"
+                "derived filter compression must reuse its parent-owned input directory: "
+                f"{expected_input_directory}"
+            )
+        if output_directory != expected_output_directory:
+            raise ValueError(
+                "derived filter compression must reuse its parent-owned output directory: "
+                f"{expected_output_directory}"
             )
         source_json, _source_path = _load_workspace_filtered_payload(body)
         acpt_numbers = collect_acpt_numbers_from_json(source_json)
         _paths, integrity = _strictly_reuse_parent_html(
-            output_directory=expected_directory,
+            output_directory=expected_input_directory,
             acpt_numbers=acpt_numbers,
             source_json=source_json,
         )
-        compressed_path = expected_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+        compressed_path = expected_output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
         if not compressed_path.is_file():
             raise ValueError(
                 "parent compressed external HTML does not exist: "
@@ -358,8 +363,8 @@ def compress_disclosure_external_html_payload(
             "mode": mode,
             "parent_mode": parent_mode,
             "reused_parent_compressed_html": True,
-            "input_directory": str(expected_directory),
-            "output_directory": str(expected_directory),
+            "input_directory": str(expected_input_directory),
+            "output_directory": str(expected_output_directory),
             "summary": {
                 "found_files": len(acpt_numbers),
                 "compressed_files": len(acpt_numbers),

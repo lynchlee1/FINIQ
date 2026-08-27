@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@finiq/ui";
 import { ActionDock, JobStatusLogger } from "@finiq/web-app/status";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
 import type { DataPathField } from "@/components/data-path/DataPathCard";
 import {
   HtmlWorkflowCard,
@@ -87,6 +88,7 @@ type HtmlSectionSplitResultsProps = {
 };
 
 type HtmlSectionSplitActionDockProps = {
+  dataRoot: string;
   isJobActive: boolean;
   isInspecting: boolean;
   status: string;
@@ -396,6 +398,7 @@ export function HtmlSectionSplitResults({
 }
 
 export function HtmlSectionSplitActionDock({
+  dataRoot,
   isJobActive,
   isInspecting,
   status,
@@ -441,6 +444,12 @@ export function HtmlSectionSplitActionDock({
       settingsContent={
         <div className="space-y-5">
           <WorkflowPathSettings id="section-split-separate-output-directory" fields={pathFields} onError={onPathError} />
+          <DisclosureStageStorageSettings
+            dataRoot={dataRoot}
+            stages={["06-sections"]}
+            disabled={isJobActive || isInspecting}
+            onError={onPathError}
+          />
           <div className="space-y-3">
             <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>

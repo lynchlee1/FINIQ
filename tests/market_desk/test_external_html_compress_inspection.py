@@ -54,9 +54,9 @@ def _compression_payload(
         "external_html_compress",
         {"data_root": str(data_root), "mode": mode, "parallel_workers": 1},
     )
-    output_directory = Path(str(payload["output_directory"]))
-    (output_directory / "2025").mkdir(parents=True)
-    (output_directory / "kind_disclosure_html_manifest.json").write_text(
+    input_directory = Path(str(payload["input_directory"]))
+    (input_directory / "2025").mkdir(parents=True)
+    (input_directory / "kind_disclosure_html_manifest.json").write_text(
         json.dumps(
             {
                 "format": "finiq_disclosure_html_manifest_v1",
@@ -72,7 +72,7 @@ def _compression_payload(
         ),
         encoding="utf-8",
     )
-    (output_directory / "2025" / "20250101000001.html").write_text(
+    (input_directory / "2025" / "20250101000001.html").write_text(
         """
         <html><body>
           <input type="hidden" name="acptNo" value="20250101000001" />
@@ -124,8 +124,8 @@ def test_inspect_external_html_compression_skips_mode_without_source_html(
     tmp_path: Path,
 ) -> None:
     payload = _compression_payload(tmp_path)
-    output_directory = Path(str(payload["output_directory"]))
-    (output_directory / "2025" / "20250101000001.html").unlink()
+    input_directory = Path(str(payload["input_directory"]))
+    (input_directory / "2025" / "20250101000001.html").unlink()
 
     inspected = inspect_disclosure_external_html_compress_payload(payload)
 
@@ -239,8 +239,8 @@ def test_rebuild_only_modes_with_source_html_when_modes_are_mixed(tmp_path: Path
     compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
     compressed["records"][0]["title"] = "변조된 제목"
     compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
-    empty_output_directory = Path(str(empty_payload["output_directory"]))
-    (empty_output_directory / "2025" / "20250101000001.html").unlink()
+    empty_input_directory = Path(str(empty_payload["input_directory"]))
+    (empty_input_directory / "2025" / "20250101000001.html").unlink()
 
     inspected = inspect_all_disclosure_external_html_compress_payload(
         {"data_root": payload["data_root"], "parallel_workers": 1}

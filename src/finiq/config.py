@@ -138,6 +138,7 @@ def build_disclosure_workspace_path_settings(
     converted_path = root / "07-converted" / normalized_mode
     filtered_path = root / "03-filter"
     external_path = root / "04-external-html-download" / normalized_mode
+    external_compress_path = root / "04-external-html-compress" / normalized_mode
     return {
         "download_output_directory": str(root / "01-list"),
         "sqlite_source_path": str(root / "01-list"),
@@ -145,9 +146,9 @@ def build_disclosure_workspace_path_settings(
         "external_html_transfer_directory": str(filtered_path),
         "external_html_output_directory": str(external_path),
         "external_html_compress_input_directory": str(external_path),
-        "external_html_compress_output_directory": str(external_path),
+        "external_html_compress_output_directory": str(external_compress_path),
         "external_html_compressed_json_path": str(
-            external_path / "compressed-external-html.json"
+            external_compress_path / "compressed-external-html.json"
         ),
         "internal_html_output_directory": str(
             root / "05-internal-html-download" / normalized_mode

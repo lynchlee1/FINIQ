@@ -86,6 +86,32 @@ def test_build_disclosure_graph_payload_writes_stage_09_graph(tmp_path: Path) ->
     assert saved["edges"]
 
 
+def test_build_disclosure_graph_reads_linked_filter_and_converted_stages(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    _write_rights_sources(target_root)
+    for stage_name in ("03-filter", "07-converted"):
+        local_stage = data_root / stage_name
+        local_stage.mkdir(parents=True)
+        (local_stage / "finiq-stage-link.json").write_text(
+            json.dumps(
+                {
+                    "format": "finiq_stage_link_v1",
+                    "schema_version": 1,
+                    "target_workspace": str(target_root),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = build_disclosure_graph_payload({"data_root": str(data_root)})
+
+    assert result["source_modes"] == ["rights_issuance"]
+    assert (data_root / "09-disclosure-graph" / "disclosure-graph.json").is_file()
+
+
 def test_build_disclosure_graph_payload_rejects_incomplete_mode(
     tmp_path: Path,
 ) -> None:

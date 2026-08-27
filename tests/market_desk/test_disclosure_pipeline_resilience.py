@@ -273,7 +273,13 @@ def test_derived_external_html_compression_reuses_parent_file_without_rewrite(
             "trust_existing_files": True,
         }
     )
-    compressed_path = parent_output / "compressed-external-html.json"
+    compressed_path = (
+        data_root
+        / "04-external-html-compress"
+        / "parent"
+        / "compressed-external-html.json"
+    )
+    compressed_path.parent.mkdir(parents=True, exist_ok=True)
     integrity_by_acpt_no = {
         item["acpt_no"]: {
             "source_sha256": item["source_sha256"],
@@ -306,7 +312,7 @@ def test_derived_external_html_compression_reuses_parent_file_without_rewrite(
             "mode": "child",
             "parent_mode": "parent",
             "input_directory": str(parent_output),
-            "output_directory": str(parent_output),
+            "output_directory": str(compressed_path.parent),
         }
     )
 
@@ -502,7 +508,7 @@ def test_derived_internal_html_strictly_reuses_parent_without_download(
     )
     compressed_path = (
         data_root
-        / "04-external-html-download"
+        / "04-external-html-compress"
         / "parent"
         / "compressed-external-html.json"
     )
@@ -1102,6 +1108,29 @@ def test_internal_html_download_accepts_legacy_html_fragment(
     assert [path.name for path in saved] == ["19970415M00003.html"]
 
 
+def test_internal_html_integrity_baseline_accepts_legacy_html_fragment(
+    tmp_path: Path,
+) -> None:
+    acpt_no = "19970415M00003"
+    body = _internal_html_body(tmp_path, [acpt_no])
+    output_directory = Path(str(body["output_directory"]))
+    target = output_directory / "2025" / f"{acpt_no}.html"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(
+        b'<P class="section-1">Legacy disclosure</P>'
+        b"<TABLE><TR><TD>content</TD></TR></TABLE>"
+    )
+
+    result = create_internal_html_integrity_baseline_payload(
+        {**body, "trust_existing_files": True}
+    )
+
+    assert result["hashed_count"] == 1
+    inspection = check_disclosure_html_output_directory_payload(body)
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert inspection["invalid_target_html_count"] == 0
+
+
 def test_internal_html_download_retries_transient_proxy_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1294,7 +1323,7 @@ def test_download_payload_reports_parent_cancellation(
     assert manifest["disclosures"] == []
 
 
-def test_internal_html_download_cancellation_stops_before_manifest(
+def test_internal_html_download_cancellation_writes_partial_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     compressed_path = tmp_path / "compressed-external-html.json"
@@ -1309,9 +1338,19 @@ def test_internal_html_download_cancellation_stops_before_manifest(
         }),
         encoding="utf-8",
     )
+
+    def fake_download(**kwargs: object) -> list[Path]:
+        target = list(kwargs["targets"])[0]
+        path = Path(
+            kwargs["target_output_directories"][target["acpt_no"]]
+        ) / f"{target['acpt_no']}.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_valid_html(), encoding="utf-8")
+        return [path]
+
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
-        lambda **kwargs: [],
+        fake_download,
     )
 
     result = download_disclosure_internal_html_payload(
@@ -1323,8 +1362,21 @@ def test_internal_html_download_cancellation_stops_before_manifest(
     )
 
     assert result["cancelled"] is True
-    assert result["manifest_path"] == ""
-    assert not (tmp_path / "content" / "kind_disclosure_html_manifest.json").exists()
+    manifest_path = Path(result["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert [item["acpt_no"] for item in manifest["disclosures"]] == [
+        "20250101000001"
+    ]
+    assert manifest["disclosures"][0]["source_sha256"]
+
+    inspection = check_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(tmp_path / "content"),
+            "source_compressed_json_path": str(compressed_path),
+        }
+    )
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert inspection["hash_unverified_target_html_count"] == 0
 
 
 def test_internal_html_partial_failure_records_saved_files_before_raising(

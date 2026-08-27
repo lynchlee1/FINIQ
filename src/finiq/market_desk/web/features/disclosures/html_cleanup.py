@@ -208,6 +208,33 @@ def _check_disclosure_html_output_directory_payload(
     )
     output_directory = Path(summary["output_directory"])
     loaded_manifest_integrity = _load_html_manifest_integrity(output_directory)
+    selected_doc_numbers = _selected_main_doc_numbers(source_json)
+    recorded_source_unavailable = _load_html_manifest_source_unavailable(
+        output_directory
+    )
+    source_unavailable_acpt_numbers = [
+        acpt_no
+        for acpt_no in summary["missing_target_acpt_numbers"]
+        if selected_doc_numbers.get(acpt_no)
+        and recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
+        == selected_doc_numbers.get(acpt_no)
+    ]
+    if source_unavailable_acpt_numbers:
+        unavailable_set = set(source_unavailable_acpt_numbers)
+        summary["missing_target_acpt_numbers"] = [
+            acpt_no
+            for acpt_no in summary["missing_target_acpt_numbers"]
+            if acpt_no not in unavailable_set
+        ]
+        summary["missing_target_html_count"] = len(
+            summary["missing_target_acpt_numbers"]
+        )
+    summary["source_unavailable_target_html_count"] = len(
+        source_unavailable_acpt_numbers
+    )
+    summary["source_unavailable_target_acpt_numbers"] = (
+        source_unavailable_acpt_numbers
+    )
     integrity_summary = _inspect_html_integrity(
         output_directory,
         acpt_numbers,
@@ -237,6 +264,7 @@ def _check_disclosure_html_output_directory_payload(
                 "existing_target_acpt_numbers"
             ],
             "invalid_target_acpt_numbers": summary["invalid_target_acpt_numbers"],
+            "source_unavailable_target_acpt_numbers": source_unavailable_acpt_numbers,
             "actual_integrity_by_acpt_no": actual_integrity_by_acpt_no,
             "loaded_manifest_integrity": loaded_manifest_integrity,
         }
@@ -269,6 +297,22 @@ def _check_derived_html_from_owner_scan(
 
     structurally_valid = set(owner_scan["structurally_valid_acpt_numbers"])
     invalid = set(owner_scan["invalid_target_acpt_numbers"])
+    owner_source_unavailable = set(
+        owner_scan["source_unavailable_target_acpt_numbers"]
+    )
+    selected_doc_numbers = _selected_main_doc_numbers(source_json)
+    recorded_source_unavailable = _load_html_manifest_source_unavailable(
+        Path(owner_result["output_directory"])
+    )
+    source_unavailable_acpt_numbers = [
+        acpt_no
+        for acpt_no in acpt_numbers
+        if acpt_no in owner_source_unavailable
+        and selected_doc_numbers.get(acpt_no)
+        and recorded_source_unavailable.get(acpt_no, {}).get("doc_no")
+        == selected_doc_numbers.get(acpt_no)
+    ]
+    source_unavailable = set(source_unavailable_acpt_numbers)
     existing_target_acpt_numbers = [
         acpt_no for acpt_no in acpt_numbers if acpt_no in structurally_valid
     ]
@@ -276,7 +320,9 @@ def _check_derived_html_from_owner_scan(
         acpt_no for acpt_no in acpt_numbers if acpt_no in invalid
     ]
     missing_target_acpt_numbers = [
-        acpt_no for acpt_no in acpt_numbers if acpt_no not in structurally_valid
+        acpt_no
+        for acpt_no in acpt_numbers
+        if acpt_no not in structurally_valid and acpt_no not in source_unavailable
     ]
     actual_integrity_by_acpt_no = {
         acpt_no: owner_scan["actual_integrity_by_acpt_no"][acpt_no]
@@ -310,6 +356,10 @@ def _check_derived_html_from_owner_scan(
         "missing_target_html_count": len(missing_target_acpt_numbers),
         "existing_target_acpt_numbers": existing_target_acpt_numbers,
         "missing_target_acpt_numbers": missing_target_acpt_numbers,
+        "source_unavailable_target_html_count": len(
+            source_unavailable_acpt_numbers
+        ),
+        "source_unavailable_target_acpt_numbers": source_unavailable_acpt_numbers,
         "invalid_target_html_count": len(invalid_target_acpt_numbers),
         "invalid_target_acpt_numbers": invalid_target_acpt_numbers,
         "auxiliary_file_count": owner_result["auxiliary_file_count"],
@@ -392,6 +442,7 @@ def _inspect_all_disclosure_html_payload(
                 "invalid_target_html_count": 0,
                 "hash_mismatch_target_html_count": 0,
                 "hash_unverified_target_html_count": 0,
+                "source_unavailable_target_html_count": 0,
                 "deletion_candidate_count": 0,
                 "error": str(exc),
             }
@@ -426,6 +477,7 @@ def _inspect_all_disclosure_html_payload(
         "invalid_target_html_count",
         "hash_mismatch_target_html_count",
         "hash_unverified_target_html_count",
+        "source_unavailable_target_html_count",
         "deletion_candidate_count",
     )
     totals = {

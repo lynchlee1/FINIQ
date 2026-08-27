@@ -2753,7 +2753,7 @@ def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Pat
     assert len(manifest["disclosures"][0]["source_sha256"]) == 64
 
 
-def test_download_disclosure_internal_html_payload_stops_when_hashing_is_cancelled(
+def test_download_disclosure_internal_html_payload_finishes_hashing_after_cancel(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2762,21 +2762,12 @@ def test_download_disclosure_internal_html_payload_stops_when_hashing_is_cancell
         path = Path(kwargs["output_directory"]) / f"{target['acpt_no']}.html"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_valid_download_html(), encoding="utf-8")
-        return [path]
-
-    def cancelled_hash(paths_by_acpt_no, *, progress_callback, cancel_check):
-        assert list(paths_by_acpt_no) == ["20250101000001"]
         cancel_disclosure_html_download("cancel-during-hash")
-        assert cancel_check()
-        return {}, True
+        return [path]
 
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
         fake_download,
-    )
-    monkeypatch.setattr(
-        "finiq.market_desk.web.features.disclosures.internal_html_download._hash_html_files",
-        cancelled_hash,
     )
     compressed_path = tmp_path / "compressed-external-html.json"
     compressed_path.write_text(
@@ -2804,9 +2795,11 @@ def test_download_disclosure_internal_html_payload_stops_when_hashing_is_cancell
     )
 
     assert payload["cancelled"] is True
-    assert payload["manifest_path"] == ""
-    assert any("기준 해시 생성을 중지했습니다" in line for line in payload["progress_log"])
-    assert not any("기준 해시 생성 완료" in line for line in payload["progress_log"])
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert [item["acpt_no"] for item in manifest["disclosures"]] == [
+        "20250101000001"
+    ]
+    assert any("기준 해시 생성 완료" in line for line in payload["progress_log"])
 
 
 def test_download_disclosure_internal_html_payload_rejects_json_only_input(tmp_path: Path) -> None:
@@ -3039,6 +3032,167 @@ def test_download_disclosure_internal_html_payload_rejects_result_membership_mis
                 "output_directory": str(tmp_path / "content_html"),
                 "source_compressed_json_path": str(compressed_path),
             }
+        )
+
+
+def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acpt_no = "20250101000001"
+    doc_no = "20250101000999"
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_payload = {
+        "format": "finiq_disclosure_external_html_docs_v1",
+        "records": [
+            {
+                "acpt_no": acpt_no,
+                "selected_main_doc_no": doc_no,
+                "metadata": {"disclosed_at": "2025-01-01"},
+            }
+        ],
+    }
+    compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        lambda *_args, **_kwargs: b"",
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.wait_for_html_download_request_slot",
+        lambda *_args, **_kwargs: False,
+    )
+    output_directory = tmp_path / "content_html"
+
+    result = download_disclosure_internal_html_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_compressed_json_path": str(compressed_path),
+        },
+        redownload_unverified_existing=True,
+    )
+
+    assert result["verification"]["passed"] is True
+    assert result["verification"]["complete"] is True
+    assert result["source_unavailable_count"] == 1
+    assert result["source_unavailable_acpt_numbers"] == [acpt_no]
+    assert any("KIND 원본 없음 확인" in line for line in result["progress_log"])
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["disclosures"][0]["source_unavailable"] == {
+        "doc_no": doc_no,
+        "reason": "invalid_html",
+    }
+
+    inspection = check_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_compressed_json_path": str(compressed_path),
+        }
+    )
+    assert inspection["missing_target_html_count"] == 0
+    assert inspection["download_required_target_html_count"] == 0
+    assert inspection["source_unavailable_target_html_count"] == 1
+    assert inspection["source_unavailable_target_acpt_numbers"] == [acpt_no]
+    import finiq.market_desk.web.features.disclosures.html_common as html_common
+
+    reused_paths, reuse_integrity = html_common._strictly_reuse_parent_html(
+        output_directory=output_directory,
+        acpt_numbers=[acpt_no],
+        source_json=compressed_payload,
+    )
+    assert reused_paths == []
+    assert reuse_integrity["source_unavailable_target_acpt_numbers"] == [acpt_no]
+
+    compressed_payload["records"][0]["selected_main_doc_no"] = "20250101000888"
+    compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+    changed_source_inspection = check_disclosure_html_output_directory_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_compressed_json_path": str(compressed_path),
+        }
+    )
+    assert changed_source_inspection["missing_target_html_count"] == 1
+    assert changed_source_inspection["download_required_target_html_count"] == 1
+    assert changed_source_inspection["source_unavailable_target_html_count"] == 0
+
+    compressed_payload["records"][0]["selected_main_doc_no"] = doc_no
+    compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
+
+    def recover_download(**kwargs):
+        target = kwargs["targets"][0]
+        path = (
+            Path(kwargs["target_output_directories"][target["acpt_no"]])
+            / f"{target['acpt_no']}.html"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_valid_download_html(), encoding="utf-8")
+        return [path]
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        recover_download,
+    )
+    recovered = download_disclosure_internal_html_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_compressed_json_path": str(compressed_path),
+            "skip_existing": False,
+        }
+    )
+    assert recovered["source_unavailable_count"] == 0
+    recovered_manifest = json.loads(
+        Path(recovered["manifest_path"]).read_text(encoding="utf-8")
+    )
+    assert "source_unavailable" not in recovered_manifest["disclosures"][0]
+
+
+def test_internal_html_redownload_does_not_hide_revalidation_request_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000999",
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        lambda **_kwargs: [],
+    )
+
+    def fail_revalidation(*_args, **_kwargs):
+        raise RuntimeError("request failed")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fail_revalidation,
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.wait_for_html_download_request_slot",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(ValueError, match="membership.*missing="):
+        download_disclosure_internal_html_payload(
+            {
+                "output_directory": str(tmp_path / "content_html"),
+                "source_compressed_json_path": str(compressed_path),
+            },
+            redownload_unverified_existing=True,
         )
 
 
@@ -3369,7 +3523,7 @@ def test_all_internal_html_inspection_reuses_parent_file_hashes_for_derived_filt
     )
     compressed_path = (
         data_root
-        / "04-external-html-download"
+        / "04-external-html-compress"
         / "bond_issuance"
         / "compressed-external-html.json"
     )

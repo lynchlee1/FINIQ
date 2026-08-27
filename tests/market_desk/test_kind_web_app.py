@@ -2539,7 +2539,7 @@ def test_internal_html_check_existing_route_uses_workspace_defaults(
     )
     compressed_path = (
         data_root
-        / "04-external-html-download"
+        / "04-external-html-compress"
         / "bond_issuance"
         / "compressed-external-html.json"
     )
@@ -2629,7 +2629,7 @@ def test_internal_html_trust_existing_route_creates_hash_baseline(
     data_root = tmp_path / "workspace"
     compressed_path = (
         data_root
-        / "04-external-html-download"
+        / "04-external-html-compress"
         / "bond_issuance"
         / "compressed-external-html.json"
     )

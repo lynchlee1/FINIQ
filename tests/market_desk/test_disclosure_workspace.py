@@ -14,6 +14,7 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     STAGE_LINK_FILENAME,
     apply_workspace_defaults,
     disclosure_workspace_settings,
+    manage_disclosure_stage_links_payload,
     prepare_disclosure_workspace_payload,
     resolve_disclosure_workspace,
 )
@@ -23,6 +24,10 @@ from finiq.market_desk.web.features.disclosures.table_export import (
 from finiq.market_desk.web.features.disclosures.filter_presets import (
     manage_filter_presets_payload,
 )
+
+
+def test_stage_link_uses_visible_filename() -> None:
+    assert STAGE_LINK_FILENAME == "finiq-stage-link.json"
 
 
 def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
@@ -41,6 +46,9 @@ def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
         "04-external-html-download",
         "04-external-html-download/bond_issuance",
         "04-external-html-download/rights_issuance",
+        "04-external-html-compress",
+        "04-external-html-compress/bond_issuance",
+        "04-external-html-compress/rights_issuance",
         "05-internal-html-download",
         "05-internal-html-download/bond_issuance",
         "05-internal-html-download/rights_issuance",
@@ -150,7 +158,7 @@ def test_workspace_rejects_invalid_stage_link(
         resolve_disclosure_workspace(tmp_path / "workspace")
 
 
-def test_workspace_rejects_linked_stage_with_local_data(tmp_path: Path) -> None:
+def test_workspace_link_shadows_existing_local_data(tmp_path: Path) -> None:
     data_root = tmp_path / "local-workspace"
     target_root = tmp_path / "hdd-workspace"
     local_stage = data_root / "01-list"
@@ -168,8 +176,10 @@ def test_workspace_rejects_linked_stage_with_local_data(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="must contain only"):
-        resolve_disclosure_workspace(data_root)
+    workspace = resolve_disclosure_workspace(data_root)
+
+    assert workspace.list == (target_root / "01-list").resolve()
+    assert (local_stage / "local-data.body").read_text(encoding="utf-8") == "data"
 
 
 def test_workspace_rejects_chained_stage_link(tmp_path: Path) -> None:
@@ -189,6 +199,200 @@ def test_workspace_rejects_chained_stage_link(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Chained"):
         resolve_disclosure_workspace(data_root)
+
+
+def test_manage_stage_links_add_change_and_remove(tmp_path: Path) -> None:
+    data_root = tmp_path / "local-workspace"
+    first_target = tmp_path / "first-target"
+    second_target = tmp_path / "second-target"
+    for target in (first_target, second_target):
+        (target / "03-filter").mkdir(parents=True)
+
+    linked = manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "03-filter",
+            "target_workspace": str(first_target),
+        }
+    )
+    filter_status = next(
+        item for item in linked["stages"] if item["stage"] == "03-filter"
+    )
+    assert filter_status == {
+        "stage": "03-filter",
+        "linked": True,
+        "valid": True,
+        "local_directory": str(data_root / "03-filter"),
+        "target_workspace": str(first_target),
+        "resolved_directory": str(first_target / "03-filter"),
+        "error": None,
+    }
+
+    changed = manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "03-filter",
+            "target_workspace": str(second_target),
+        }
+    )
+    filter_status = next(
+        item for item in changed["stages"] if item["stage"] == "03-filter"
+    )
+    assert filter_status["target_workspace"] == str(second_target)
+    assert resolve_disclosure_workspace(data_root).filtered == second_target / "03-filter"
+
+    removed = manage_disclosure_stage_links_payload(
+        {"data_root": str(data_root), "action": "remove", "stage": "03-filter"}
+    )
+    filter_status = next(
+        item for item in removed["stages"] if item["stage"] == "03-filter"
+    )
+    assert filter_status["linked"] is False
+    assert resolve_disclosure_workspace(data_root).filtered == data_root / "03-filter"
+
+
+def test_manage_stage_links_lists_missing_target_for_change_or_removal(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "missing-target"
+    local_stage = data_root / "03-filter"
+    local_stage.mkdir(parents=True)
+    (local_stage / STAGE_LINK_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_stage_link_v1",
+                "schema_version": 1,
+                "target_workspace": str(target_root),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    listed = manage_disclosure_stage_links_payload(
+        {"data_root": str(data_root), "action": "list"}
+    )
+
+    filter_status = next(
+        item for item in listed["stages"] if item["stage"] == "03-filter"
+    )
+    assert filter_status["linked"] is True
+    assert filter_status["valid"] is False
+    assert filter_status["target_workspace"] == str(target_root)
+    assert "does not exist" in filter_status["error"]
+
+    removed = manage_disclosure_stage_links_payload(
+        {"data_root": str(data_root), "action": "remove", "stage": "03-filter"}
+    )
+    filter_status = next(
+        item for item in removed["stages"] if item["stage"] == "03-filter"
+    )
+    assert filter_status["linked"] is False
+
+
+def test_stage_links_resolve_each_stage_to_its_own_workspace(tmp_path: Path) -> None:
+    data_root = tmp_path / "local-workspace"
+    list_target = tmp_path / "list-database"
+    table_target = tmp_path / "table-database"
+    list_target.mkdir()
+    table_target.mkdir()
+
+    manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "01-list",
+            "target_workspace": str(list_target),
+        }
+    )
+    manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "02-table",
+            "target_workspace": str(table_target),
+        }
+    )
+
+    workspace = resolve_disclosure_workspace(data_root)
+
+    assert workspace.list == list_target / "01-list"
+    assert workspace.table == table_target / "02-table"
+
+
+def test_manage_stage_links_preserves_local_data_and_rejects_chained_target(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "target-workspace"
+    local_stage = data_root / "04-external-html-download"
+    target_stage = target_root / "04-external-html-download"
+    local_stage.mkdir(parents=True)
+    target_root.mkdir(parents=True)
+    (local_stage / "existing.json").write_text("{}", encoding="utf-8")
+
+    result = manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "04-external-html-download",
+            "target_workspace": str(target_root),
+        }
+    )
+
+    assert target_stage.is_dir()
+    assert (local_stage / "existing.json").is_file()
+    external = next(
+        item for item in result["stages"] if item["stage"] == "04-external-html-download"
+    )
+    assert external["resolved_directory"] == str(target_stage)
+    assert resolve_disclosure_workspace(data_root).external == target_stage
+
+    manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "remove",
+            "stage": "04-external-html-download",
+        }
+    )
+    assert resolve_disclosure_workspace(data_root).external == local_stage
+    assert (local_stage / "existing.json").is_file()
+
+    (target_stage / STAGE_LINK_FILENAME).write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="Chained"):
+        manage_disclosure_stage_links_payload(
+            {
+                "data_root": str(data_root),
+                "action": "set",
+                "stage": "04-external-html-download",
+                "target_workspace": str(target_root),
+            }
+        )
+
+
+def test_workspace_stage_links_api(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    target_root = tmp_path / "hdd-workspace"
+    (target_root / "06-sections").mkdir(parents=True)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/disclosures/workspace/stage-links",
+        json={
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "06-sections",
+            "target_workspace": str(target_root),
+        },
+    )
+
+    assert response.status_code == 200
+    sections = next(
+        item for item in response.json()["stages"] if item["stage"] == "06-sections"
+    )
+    assert sections["resolved_directory"] == str(target_root / "06-sections")
 
 
 def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
@@ -226,14 +430,14 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
         workspace.external / "bond_issuance"
     )
     assert compressed["output_directory"] == str(
-        workspace.external / "bond_issuance"
+        workspace.external_compress / "bond_issuance"
     )
     internal = apply_workspace_defaults(
         "internal_html_download",
         {"data_root": str(workspace.root), "mode": "bond_issuance"},
     )
     assert internal["source_compressed_json_path"] == str(
-        workspace.external / "bond_issuance" / "compressed-external-html.json"
+        workspace.external_compress / "bond_issuance" / "compressed-external-html.json"
     )
     assert internal["output_directory"] == str(
         workspace.internal / "bond_issuance"
@@ -266,7 +470,7 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
         workspace.filtered / "bond_issuance" / "filtered.json"
     )
     assert converted["compressed_metadata_path"] == str(
-        workspace.external / "bond_issuance" / "compressed-external-html.json"
+        workspace.external_compress / "bond_issuance" / "compressed-external-html.json"
     )
 
 
@@ -285,13 +489,13 @@ def test_workspace_defaults_use_parent_html_for_derived_filter(tmp_path: Path) -
     assert external["output_directory"] == str(workspace.external / "parent")
     assert internal["output_directory"] == str(workspace.internal / "parent")
     assert internal["source_compressed_json_path"] == str(
-        workspace.external / "parent" / "compressed-external-html.json"
+        workspace.external_compress / "parent" / "compressed-external-html.json"
     )
     assert parsed["filtered_metadata_path"] == str(
         workspace.filtered / "parent" / "subfilters" / "child" / "filtered.json"
     )
     assert parsed["compressed_metadata_path"] == str(
-        workspace.external / "parent" / "compressed-external-html.json"
+        workspace.external_compress / "parent" / "compressed-external-html.json"
     )
     assert parsed["output_directory"] == str(
         workspace.converted / "parent" / "subfilters" / "child"
@@ -405,6 +609,160 @@ def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> Non
     )
     assert sections["input_directory"] == str(explicit / "internal")
     assert sections["output_directory"] == str(explicit / "sections")
+
+
+def test_workspace_links_override_explicit_stage_paths(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    target_root = tmp_path / "target"
+    explicit = tmp_path / "explicit"
+    target_root.mkdir()
+    for stage in (
+        "01-list",
+        "02-table",
+        "03-filter",
+            "04-external-html-download",
+            "04-external-html-compress",
+        "05-internal-html-download",
+        "06-sections",
+        "07-converted",
+    ):
+        manage_disclosure_stage_links_payload(
+            {
+                "data_root": str(data_root),
+                "action": "set",
+                "stage": stage,
+                "target_workspace": str(target_root),
+            }
+        )
+
+    downloaded = apply_workspace_defaults(
+        "kind_download",
+        {
+            "data_root": str(data_root),
+            "separate_output_directory": True,
+            "output_directory": str(explicit / "list"),
+        },
+    )
+    assert downloaded["output_directory"] == str(target_root / "01-list")
+
+    table = apply_workspace_defaults(
+        "table_build",
+        {
+            "data_root": str(data_root),
+            "root_directory": str(explicit / "list"),
+            "output_path": str(explicit / "table"),
+        },
+    )
+    assert table["root_directory"] == str(target_root / "01-list")
+    assert table["output_path"] == str(target_root / "02-table")
+
+    filtered = apply_workspace_defaults(
+        "filter",
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "external_html_transfer_path": str(explicit / "filter"),
+        },
+    )
+    assert filtered["external_html_transfer_path"] == str(target_root / "03-filter")
+
+    external = apply_workspace_defaults(
+        "external_html_download",
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "output_directory": str(explicit / "external"),
+        },
+    )
+    assert external["output_directory"] == str(
+        target_root / "04-external-html-download" / "bond_issuance"
+    )
+
+    internal = apply_workspace_defaults(
+        "internal_html_download",
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "source_compressed_json_path": str(explicit / "compressed.json"),
+            "output_directory": str(explicit / "internal"),
+        },
+    )
+    assert internal["source_compressed_json_path"] == str(
+        target_root
+            / "04-external-html-compress"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+    assert internal["output_directory"] == str(
+        target_root / "05-internal-html-download" / "bond_issuance"
+    )
+
+    sections = apply_workspace_defaults(
+        "section_save",
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "input_directory": str(explicit / "internal"),
+            "output_directory": str(explicit / "sections"),
+        },
+    )
+    assert sections["input_directory"] == str(
+        target_root / "05-internal-html-download" / "bond_issuance"
+    )
+    assert sections["output_directory"] == str(target_root / "06-sections")
+
+    parsed = apply_workspace_defaults(
+        "parse",
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "input_directory": str(explicit / "sections"),
+            "output_directory": str(explicit / "converted"),
+            "filtered_metadata_path": str(explicit / "filtered.json"),
+            "compressed_metadata_path": str(explicit / "compressed.json"),
+        },
+    )
+    assert parsed["input_directory"] == str(target_root / "06-sections")
+    assert parsed["output_directory"] == str(
+        target_root / "07-converted" / "bond_issuance"
+    )
+    assert parsed["filtered_metadata_path"] == str(
+        target_root / "03-filter" / "bond_issuance" / "filtered.json"
+    )
+    assert parsed["compressed_metadata_path"] == str(
+        target_root
+        / "04-external-html-compress"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+
+
+def test_external_html_save_and_compress_storage_links_are_independent(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "04-external-html-compress",
+            "target_workspace": str(target_root),
+        }
+    )
+
+    compressed = apply_workspace_defaults(
+        "external_html_compress",
+        {"data_root": str(data_root), "mode": "bond_issuance"},
+    )
+
+    assert compressed["input_directory"] == str(
+        data_root / "04-external-html-download" / "bond_issuance"
+    )
+    assert compressed["output_directory"] == str(
+        target_root / "04-external-html-compress" / "bond_issuance"
+    )
 
 
 def test_workspace_prepare_api(tmp_path: Path) -> None:
@@ -545,9 +903,9 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
         "external_html_transfer_directory": str(data_root / "03-filter"),
         "external_html_output_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
         "external_html_compress_input_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
-        "external_html_compress_output_directory": str(data_root / "04-external-html-download" / "bond_issuance"),
+        "external_html_compress_output_directory": str(data_root / "04-external-html-compress" / "bond_issuance"),
         "external_html_compressed_json_path": str(
-            data_root / "04-external-html-download" / "bond_issuance" / "compressed-external-html.json"
+            data_root / "04-external-html-compress" / "bond_issuance" / "compressed-external-html.json"
         ),
         "internal_html_output_directory": str(
             data_root / "05-internal-html-download" / "bond_issuance"
@@ -563,6 +921,62 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
             / "parsed-bond_issuance.json"
         ),
     }
+
+
+def test_workspace_settings_use_linked_stage_directories(tmp_path: Path) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    for stage_name in ("01-list", "05-internal-html-download"):
+        local_stage = data_root / stage_name
+        local_stage.mkdir(parents=True)
+        (target_root / stage_name).mkdir(parents=True)
+        (local_stage / STAGE_LINK_FILENAME).write_text(
+            json.dumps(
+                {
+                    "format": "finiq_stage_link_v1",
+                    "schema_version": 1,
+                    "target_workspace": str(target_root),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    settings = disclosure_workspace_settings(data_root, mode="bond_issuance")
+
+    assert settings["download_output_directory"] == str(target_root / "01-list")
+    assert settings["sqlite_source_path"] == str(target_root / "01-list")
+    assert settings["sqlite_output_directory"] == str(data_root / "02-table")
+    assert settings["internal_html_output_directory"] == str(
+        target_root / "05-internal-html-download" / "bond_issuance"
+    )
+
+
+def test_prepare_workspace_creates_mode_in_linked_stage(tmp_path: Path) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    local_stage = data_root / "07-converted"
+    local_stage.mkdir(parents=True)
+    (target_root / "07-converted").mkdir(parents=True)
+    (local_stage / STAGE_LINK_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_stage_link_v1",
+                "schema_version": 1,
+                "target_workspace": str(target_root),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = prepare_disclosure_workspace_payload(
+        {"data_root": str(data_root), "modes": ["bond_issuance"]}
+    )
+
+    assert (target_root / "07-converted" / "bond_issuance").is_dir()
+    assert not (data_root / "07-converted" / "bond_issuance").exists()
+    assert result["paths"]["converted"]["bond_issuance"] == str(
+        target_root / "07-converted" / "bond_issuance"
+    )
 
 
 def test_init_config_does_not_invent_mode_or_workspace_paths(

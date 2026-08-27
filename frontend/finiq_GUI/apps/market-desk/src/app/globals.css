@@ -6,8 +6,8 @@
 @source "../../../../packages/graph-viewer/src/**/*.tsx";
 
 @theme {
-  --font-sans: var(--font-ibm-plex-sans-kr), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
-  --font-mono: var(--font-space-grotesk), "SFMono-Regular", Consolas, monospace;
+  --font-sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "Space Grotesk Variable", "SFMono-Regular", Consolas, monospace;
 
   --color-primary: var(--tv-accent);
   --color-primary-foreground: var(--tv-accent-foreground);

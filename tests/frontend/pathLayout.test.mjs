@@ -21,6 +21,7 @@ const chartWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/ch
 const analysisWorkspacePath = "frontend/finiq_GUI/apps/market-desk/src/app/graph/analysis/DisclosureAnalysisWorkspace.tsx";
 const dataPathCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-path/DataPathCard.tsx";
 const pathSettingsPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-path/WorkflowPathSettings.tsx";
+const stageStorageSettingsPath = "frontend/finiq_GUI/apps/market-desk/src/components/data-path/DisclosureStageStorageSettings.tsx";
 const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
 const marketDeskGlobalsPath = "frontend/finiq_GUI/apps/market-desk/src/app/globals.css";
 
@@ -164,6 +165,45 @@ test("disclosure detail pages share one workspace and hide separate outputs by d
   for (const source of [downloadSource, tableSource, filterSource, htmlDownloadSource, parseSource]) {
     assert.match(source, /data_root:/);
   }
+});
+
+test("numbered disclosure pages manage their own stage storage link", async () => {
+  const [
+    component,
+    download,
+    table,
+    filter,
+    htmlDownload,
+    sectionResults,
+    parse,
+    automation,
+  ] = await Promise.all([
+    readFile(stageStorageSettingsPath, "utf8"),
+    readFile(downloadPagePath, "utf8"),
+    readFile(tablePagePath, "utf8"),
+    readFile(filterPagePath, "utf8"),
+    readFile("frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx", "utf8"),
+    readFile("frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/_components/HtmlSectionSplitResults.tsx", "utf8"),
+    readFile(htmlParsePagePath, "utf8"),
+    readFile(disclosureAutomationPagePath, "utf8"),
+  ]);
+
+  assert.match(component, /\/api\/disclosures\/workspace\/stage-links/);
+  assert.match(component, /action: "set"/);
+  assert.match(component, /action: "remove"/);
+  assert.match(component, /단계별 저장 위치/);
+  assert.match(component, /status\.linked && status\.valid/);
+  assert.match(component, /설정 오류/);
+  assert.match(component, /연결 해제/);
+  assert.match(component, /name: "04-external-html-compress", label: "04 외부 HTML 압축"/);
+  assert.match(download, /stages=\{\["01-list"\]\}/);
+  assert.match(table, /stages=\{\["02-table"\]\}/);
+  assert.match(filter, /stages=\{\["03-filter"\]\}/);
+  assert.match(htmlDownload, /\["04-external-html-download", "04-external-html-compress"\]/);
+  assert.match(htmlDownload, /\["05-internal-html-download"\]/);
+  assert.match(sectionResults, /stages=\{\["06-sections"\]\}/);
+  assert.match(parse, /stages=\{\["07-converted"\]\}/);
+  assert.match(automation, /<DisclosureStageStorageSettings[\s\S]*?setWorkspaceInspections\(\{\}\)/);
 });
 
 test("html section split keeps job status only in the action dock", async () => {

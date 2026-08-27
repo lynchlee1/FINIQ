@@ -100,7 +100,7 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
     )
     compressed_path = (
         data_root
-        / "04-external-html-download"
+        / "04-external-html-compress"
         / "bond_issuance"
         / "compressed-external-html.json"
     )
@@ -133,7 +133,7 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
     )
     assert payload["compressed_metadata_path"] == str(
         data_root
-        / "04-external-html-download"
+        / "04-external-html-compress"
         / "bond_issuance"
         / "compressed-external-html.json"
     )

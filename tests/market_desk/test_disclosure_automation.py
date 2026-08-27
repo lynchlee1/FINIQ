@@ -156,6 +156,37 @@ def test_plan_propagates_stage_one_check_to_downstream_processing(
     assert plan["kind_limit"] == {"max_requests_per_minute": 45, "max_in_flight": 1}
 
 
+def test_automation_stage_paths_use_linked_stage_directories(tmp_path: Path) -> None:
+    data_root = tmp_path / "local-workspace"
+    target_root = tmp_path / "hdd-workspace"
+    for stage_name in ("01-list", "02-table", "06-sections"):
+        local_stage = data_root / stage_name
+        local_stage.mkdir(parents=True)
+        (target_root / stage_name).mkdir(parents=True)
+        (local_stage / "finiq-stage-link.json").write_text(
+            json.dumps(
+                {
+                    "format": "finiq_stage_link_v1",
+                    "schema_version": 1,
+                    "target_workspace": str(target_root),
+                }
+            ),
+            encoding="utf-8",
+        )
+    profile = normalize_automation_profile(_profile(data_root))
+
+    assert _stage_output_paths(profile, 1) == [
+        target_root / "01-list" / ".automation-windows"
+    ]
+    assert _stage_output_paths(profile, 2) == [target_root / "02-table"]
+    assert _stage_output_paths(profile, 6) == [
+        target_root / "06-sections" / ".automation-current"
+    ]
+    assert automation._detail_download_payload(profile)["output_directory"] == str(
+        target_root / "01-list"
+    )
+
+
 def test_resume_reuses_valid_stage_checkpoints_when_stage_one_is_not_selected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -306,7 +337,7 @@ def test_stage_seven_passes_compressed_metadata_path(
 
     assert captured["compressed_metadata_path"] == str(
         tmp_path
-        / "04-external-html-download"
+        / "04-external-html-compress"
         / "bond_issuance"
         / "compressed-external-html.json"
     )
@@ -1315,7 +1346,8 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
             }
             for path in sorted(directory.rglob("*.html"))
         ]
-        (directory / "compressed-external-html.json").write_text(
+        output_directory = Path(str(body["output_directory"]))
+        (output_directory / "compressed-external-html.json").write_text(
             json.dumps({"records": records}), encoding="utf-8"
         )
         return {
@@ -1352,8 +1384,9 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
         / ".automation-current"
     )
     assert [path.stem for path in current.rglob("*.html")] == ["20260712000001"]
+    assert not (current / "compressed-external-html.json").exists()
     compressed = json.loads(
-        (tmp_path / "04-external-html-download" / "bond_issuance" / "compressed-external-html.json").read_text(
+        (tmp_path / "04-external-html-compress" / "bond_issuance" / "compressed-external-html.json").read_text(
             "utf-8"
         )
     )

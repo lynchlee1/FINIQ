@@ -733,6 +733,7 @@ export default function HtmlSectionSplitPage() {
         </section>
 
         <HtmlSectionSplitActionDock
+          dataRoot={dataRoot}
           isJobActive={isJobActive}
           isInspecting={isInspecting}
           status={status}

@@ -25,10 +25,11 @@ test("MarketDesk restores the flat slate palette and typography", async () => {
   assert.match(source, /--tv-border: #30363d/);
   assert.match(source, /--tv-accent: #2f81f7/);
   assert.match(source, /--tv-shadow: none/);
-  assert.match(source, /--font-sans: var\(--font-ibm-plex-sans-kr\)/);
-  assert.match(source, /--font-mono: var\(--font-space-grotesk\)/);
-  assert.match(layoutSource, /IBM_Plex_Sans_KR/);
-  assert.match(layoutSource, /Space_Grotesk/);
+  assert.match(source, /--font-sans: "IBM Plex Sans KR"/);
+  assert.match(source, /--font-mono: "Space Grotesk Variable"/);
+  assert.match(layoutSource, /@fontsource\/ibm-plex-sans-kr\/korean-400\.css/);
+  assert.match(layoutSource, /@fontsource-variable\/space-grotesk/);
+  assert.doesNotMatch(layoutSource, /next\/font\/google/);
 });
 
 test("shared navigation active states use accent foreground instead of fixed white", async () => {

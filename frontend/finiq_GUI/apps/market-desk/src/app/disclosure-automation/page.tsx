@@ -30,6 +30,7 @@ import { KindNetworkRouteSettings } from "@/components/disclosures/KindNetworkRo
 import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import { WorkflowPageShell } from "@/components/layout/WorkflowPageShell";
 import { DataPathCard, DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
+import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { SETTINGS_LABELS } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
@@ -929,6 +930,15 @@ export default function DisclosureAutomationPage() {
                   <Input type="number" min="1" max="120" value={timeout} onChange={(event) => { setTimeoutValue(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
                 </HtmlInspectorField>
               </div>
+              <DisclosureStageStorageSettings
+                dataRoot={dataRoot}
+                disabled={!!activeJobId}
+                onChanged={() => {
+                  setPlan(null);
+                  setWorkspaceInspections({});
+                }}
+                onError={handlePathError}
+              />
               <KindNetworkRouteSettings />
               <div className="rounded-lg border border-[color:var(--tv-border)] bg-[var(--tv-control)] p-3 text-xs leading-5 text-[var(--tv-muted)]">
                 KIND 검색·외부 HTML은 분당 최대 45회, 내부 HTML의 실제 HTTP 요청은 분당 최대 30회, 동시 요청은 1개로 고정합니다.

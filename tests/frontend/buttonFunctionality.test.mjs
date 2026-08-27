@@ -13,11 +13,11 @@ const graphViewerControllerPath = "frontend/finiq_GUI/packages/graph-viewer/src/
 const sharedButtonPath = "frontend/finiq_GUI/packages/ui/src/components/ui/button.tsx";
 const sharedSelectPath = "frontend/finiq_GUI/packages/ui/src/components/ui/select.tsx";
 
-test("shared selects do not lock page scroll when opened", async () => {
+test("shared selects pass only supported Radix root properties", async () => {
   const source = await readFile(sharedSelectPath, "utf8");
 
-  assert.match(source, /modal = false/);
-  assert.match(source, /<SelectPrimitive\.Root data-slot="select" modal=\{modal\} \{\.\.\.props\} \/>/);
+  assert.match(source, /<SelectPrimitive\.Root data-slot="select" \{\.\.\.props\} \/>/);
+  assert.doesNotMatch(source, /modal=/);
 });
 
 test("shared buttons provide immediate press feedback", async () => {

@@ -147,8 +147,9 @@ test("download colored status surfaces use contrast text tokens", async () => {
   for (const [state, token] of Object.entries(stepMappings)) {
     assert.match(source, new RegExp(`${state}: "[^"\\n]*text-\\[var\\(${token}\\)\\]"`));
   }
-  assert.match(source, /complete: "!border-\[color:var\(--tv-up\)\] !bg-\[var\(--tv-up-soft\)\] !text-\[var\(--tv-up-text\)\]/);
-  assert.match(source, /failed: "!border-\[color:var\(--tv-down\)\] !bg-\[var\(--tv-down-soft\)\] !text-\[var\(--tv-down-text\)\]/);
+  assert.match(source, /complete: "!border-\[color:var\(--tv-border\)\] !bg-\[var\(--tv-up-soft\)\] !text-\[var\(--tv-up-text\)\]/);
+  assert.match(source, /failed: "!border-\[color:var\(--tv-border\)\] !bg-\[var\(--tv-down-soft\)\] !text-\[var\(--tv-down-text\)\]/);
+  assert.doesNotMatch(source, /!border-\[color:var\(--tv-(?:up|down)\)\]/);
   assert.match(source, /showResultStatus \? resultStatusClassName : ""/);
   assert.match(source, /<li key=\{step\.key\} className="border-b border-\[color:var\(--tv-border\)\] last:border-b-0">/);
   assert.doesNotMatch(source, /stepStatusBackgroundClassNames/);

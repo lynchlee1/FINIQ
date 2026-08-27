@@ -23,6 +23,7 @@ import {
   DisclosureTypeSelectionCard,
 } from "@/components/disclosures/DisclosureSearchSettingsCards";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
 import {
   type DataIntegrityInspectionStep,
   type DataIntegrityInspectionVerdict,
@@ -1357,6 +1358,12 @@ export default function DownloadPage() {
               </CardHeader>
               <CardContent className="space-y-5">
                 <WorkflowPathSettings id="download-separate-output-directory" fields={pathFields} onError={handlePathError} />
+                <DisclosureStageStorageSettings
+                  dataRoot={dataRoot}
+                  stages={["01-list"]}
+                  disabled={!!activeJobId || runStarting}
+                  onError={handlePathError}
+                />
                 <div className="space-y-3">
                   <div className="border-b border-[color:var(--tv-border)] pb-2">
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">요청 설정</p>

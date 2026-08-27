@@ -19,6 +19,7 @@ import {
 import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { formatInteger } from "@/lib/format";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
 import {
   SingleCheckDataIntegrityInspectionCard,
   type SingleCheckDataIntegrityInspectionState,
@@ -811,7 +812,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     success: saveInspectionData
       ? [
           `모든 모드의 ${variant === "external" ? "외부" : "내부"} HTML이 정상입니다`,
-          `${formatInteger(allModeSaveInspectionData?.mode_count || 0)}개 모드와 기본 모드 대상 ${formatInteger(allModeSaveInspectionData?.owner_requested_count || 0)}건을 확인했습니다.`,
+          `${formatInteger(allModeSaveInspectionData?.mode_count || 0)}개 모드와 기본 모드 대상 ${formatInteger(allModeSaveInspectionData?.owner_requested_count || 0)}건을 확인했습니다.${variant === "internal" && Number(allModeSaveInspectionData?.owner_source_unavailable_target_html_count || 0) > 0 ? ` KIND 원본 없음 ${formatInteger(allModeSaveInspectionData.owner_source_unavailable_target_html_count)}건은 로그에 기록했습니다.` : ""}`,
         ]
       : ["기존 원문 데이터가 없습니다", "현재 대상과 충돌하는 기존 원문 파일이 없습니다."],
     failed: [
@@ -1020,7 +1021,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                           {result.id} · {result.passed ? "정상" : "사용 불가"}
                         </p>
                         <p className="text-body break-all text-[var(--tv-muted)]">
-                          대상 {formatInteger(result.requested_count)}건 · 저장 {formatInteger(result.existing_target_html_count)}건 · 미저장·재저장 필요 {formatInteger(result.download_required_target_html_count)}건 · 해시 불일치 {formatInteger(result.hash_mismatch_target_html_count)}건 · 기준 해시 없음 {formatInteger(result.hash_unverified_target_html_count)}건
+                          대상 {formatInteger(result.requested_count)}건 · 저장 {formatInteger(result.existing_target_html_count)}건{variant === "internal" ? ` · KIND 원본 없음 ${formatInteger(result.source_unavailable_target_html_count || 0)}건` : ""} · 미저장·재저장 필요 {formatInteger(result.download_required_target_html_count)}건 · 해시 불일치 {formatInteger(result.hash_mismatch_target_html_count)}건 · 기준 해시 없음 {formatInteger(result.hash_unverified_target_html_count)}건
                         </p>
                         {!result.passed && result.error && (
                           <p className="text-body text-[var(--tv-warning-text)]">{result.error}</p>
@@ -1141,6 +1142,16 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
           settingsContent={
             <div className="space-y-5">
               <WorkflowPathSettings id={`${variant}-separate-output-directory`} fields={activePathFields} onError={handlePathError} />
+              <DisclosureStageStorageSettings
+                dataRoot={dataRoot}
+                stages={
+                  variant === "external"
+                    ? ["04-external-html-download", "04-external-html-compress"]
+                    : ["05-internal-html-download"]
+                }
+                disabled={isJobActive || !!activeCancelToken}
+                onError={handlePathError}
+              />
               {isExternalCompressMode ? (
                 <div className="space-y-3">
                   <div className="border-b border-[color:var(--tv-border)] pb-2">

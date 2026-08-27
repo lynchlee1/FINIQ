@@ -12,6 +12,7 @@ import { DATA_PATH_LABELS, type DataPathField } from "@/components/data-path/Dat
 import { JobStatusLogger, PageLoadingSpinner, ActionDock } from "@finiq/web-app/status";
 import { SETTINGS_LABELS, UI_TEXT } from "@/config/uiText";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
 import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
   SingleCheckDataIntegrityInspectionCard,
@@ -342,6 +343,12 @@ export default function TablePage() {
           settingsContent={
             <div className="space-y-5">
               <WorkflowPathSettings id="table-separate-output-directory" fields={pathFields} onError={handlePathError} />
+              <DisclosureStageStorageSettings
+                dataRoot={dataRoot}
+                stages={["02-table"]}
+                disabled={!!activeJobId || inspectionRunning}
+                onError={handlePathError}
+              />
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>

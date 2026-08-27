@@ -89,6 +89,7 @@ from finiq.market_desk.web.features.market_data.service_sources import (
 )
 
 from .layout import (
+    DisclosureWorkspace,
     atomic_write_json,
     prepare_disclosure_workspace_payload,
     resolve_disclosure_workspace,
@@ -288,19 +289,25 @@ def _automation_root(profile: dict[str, Any]) -> Path:
     return Path(profile["data_root"]) / ".finiq" / "disclosure-automation"
 
 
+def _profile_workspace(profile: dict[str, Any]) -> DisclosureWorkspace:
+    return resolve_disclosure_workspace(profile["data_root"])
+
+
 def _external_mode_directory(profile: dict[str, Any]) -> Path:
-    return (
-        Path(profile["data_root"])
-        / "04-external-html-download"
-        / validate_workspace_mode(profile["execution"]["mode"])
+    return _profile_workspace(profile).external_mode(
+        validate_workspace_mode(profile["execution"]["mode"])
+    )
+
+
+def _external_compress_mode_directory(profile: dict[str, Any]) -> Path:
+    return _profile_workspace(profile).external_compress_mode(
+        validate_workspace_mode(profile["execution"]["mode"])
     )
 
 
 def _internal_mode_directory(profile: dict[str, Any]) -> Path:
-    return (
-        Path(profile["data_root"])
-        / "05-internal-html-download"
-        / validate_workspace_mode(profile["execution"]["mode"])
+    return _profile_workspace(profile).internal_mode(
+        validate_workspace_mode(profile["execution"]["mode"])
     )
 
 
@@ -326,23 +333,24 @@ def _stage_config_hash(profile: dict[str, Any], stage: int) -> str:
 
 
 def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
-    root = Path(profile["data_root"])
+    workspace = _profile_workspace(profile)
     mode = profile["execution"]["mode"]
     if stage == 3:
         return [
-            filter_workflow_path(root, mode),
-            root / "03-filter" / mode / "filtered.json",
+            filter_workflow_path(workspace.root, mode),
+            workspace.filtered / mode / "filtered.json",
         ]
     paths = {
-        1: [root / "01-list" / ".automation-windows"],
-        2: [root / "02-table"],
+        1: [workspace.list / ".automation-windows"],
+        2: [workspace.table],
         4: [
-            _external_mode_directory(profile) / "compressed-external-html.json",
+            _external_compress_mode_directory(profile)
+            / "compressed-external-html.json",
             _external_mode_directory(profile) / ".automation-current",
         ],
         5: [_internal_mode_directory(profile) / ".automation-current"],
-        6: [root / "06-sections" / ".automation-current"],
-        7: [root / "07-converted" / mode / f"parsed-{mode}.json"],
+        6: [workspace.sections / ".automation-current"],
+        7: [workspace.converted / mode / f"parsed-{mode}.json"],
     }
     return paths[stage]
 
@@ -424,7 +432,7 @@ def _inspection_failure(
 def _detail_download_payload(profile: dict[str, Any]) -> dict[str, Any]:
     search = profile["decisions"]["s1_search"]
     return {
-        "output_directory": str(Path(profile["data_root"]) / "01-list"),
+        "output_directory": str(_profile_workspace(profile).list),
         "mode": "yearly",
         "start_date": search["start_date"],
         "end_date": search["end_date"],
@@ -584,8 +592,7 @@ def _inspect_automation_download(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _table_manifest(profile: dict[str, Any]) -> Path:
-    root = Path(profile["data_root"])
-    path = root / "02-table" / "sqlite_manifest.json"
+    path = _profile_workspace(profile).table / "sqlite_manifest.json"
     try:
         manifest = _load_sqlite_manifest(path)
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -597,8 +604,7 @@ def _table_manifest(profile: dict[str, Any]) -> Path:
 
 def _filter_result_path(profile: dict[str, Any]) -> Path:
     return (
-        Path(profile["data_root"])
-        / "03-filter"
+        _profile_workspace(profile).filtered
         / profile["execution"]["mode"]
         / "filtered.json"
     )
@@ -741,12 +747,13 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
     mode = profile["execution"]["mode"]
     output_directory = _external_mode_directory(profile)
+    compressed_directory = _external_compress_mode_directory(profile)
     expected_acpt_numbers = [
         acpt_no for acpt_no, _year in _active_workspace_disclosure_targets(root, mode)
     ]
     if not expected_acpt_numbers:
         compressed = _read_json_object(
-            output_directory / "compressed-external-html.json"
+            compressed_directory / "compressed-external-html.json"
         )
         html_files = (
             [
@@ -793,7 +800,7 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
             reason="외부 HTML에 누락·손상 또는 현재 대상이 아닌 파일이 있습니다.",
             details=_html_inspection_details(checked),
         )
-    compressed_path = output_directory / "compressed-external-html.json"
+    compressed_path = compressed_directory / "compressed-external-html.json"
     verification = _verify_compressed_external_html_files(
         written_files=[str(compressed_path)],
         expected_acpt_numbers=list(checked.get("existing_target_acpt_numbers") or []),
@@ -833,7 +840,8 @@ def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
     checked = check_disclosure_html_output_directory_payload(
         {
             "source_compressed_json_path": str(
-                _external_mode_directory(profile) / "compressed-external-html.json"
+                _external_compress_mode_directory(profile)
+                / "compressed-external-html.json"
             ),
             "output_directory": str(
                 _internal_mode_directory(profile) / ".automation-current"
@@ -860,15 +868,13 @@ def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
-    root = Path(profile["data_root"])
+    workspace = _profile_workspace(profile)
     checked = inspect_disclosure_html_section_output_payload(
         {
             "input_directory": str(
                 _internal_mode_directory(profile) / ".automation-current"
             ),
-            "output_directory": str(
-                root / "06-sections" / ".automation-current"
-            ),
+            "output_directory": str(workspace.sections / ".automation-current"),
             "workers": profile["execution"]["local_workers"],
         }
     )
@@ -894,12 +900,13 @@ def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
 
 def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
+    workspace = _profile_workspace(profile)
     mode = profile["execution"]["mode"]
-    path = root / "07-converted" / mode / f"parsed-{mode}.json"
+    path = workspace.converted / mode / f"parsed-{mode}.json"
     payload = _read_json_object(path)
     if payload is None or payload.get("format") != "finiq_disclosure_html_parse_v1":
         return _inspection_failure(7, reason="공시원문 변환 결과가 없거나 손상되었습니다.")
-    input_directory = (root / "06-sections" / ".automation-current").resolve()
+    input_directory = (workspace.sections / ".automation-current").resolve()
     filters = payload.get("filter_settings") or {}
     html_files = (
         _collect_parse_html_files(input_directory, None)
@@ -951,7 +958,8 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
                 "output_directory": temporary,
                 "filtered_metadata_path": str(_filter_result_path(profile)),
                 "compressed_metadata_path": str(
-                    _external_mode_directory(profile) / "compressed-external-html.json"
+                    _external_compress_mode_directory(profile)
+                    / "compressed-external-html.json"
                 ),
                 "parallel_workers": profile["execution"]["local_workers"],
                 "skip_errors": False,
@@ -1079,8 +1087,7 @@ def _load_valid_checkpoint(profile: dict[str, Any], stage: int) -> dict[str, Any
             AUTOMATION_INTERNAL_FORMAT,
         ),
         6: (
-            Path(profile["data_root"])
-            / "06-sections"
+            _profile_workspace(profile).sections
             / ".automation-current"
             / "automation-sections.json",
             AUTOMATION_SECTIONS_FORMAT,
@@ -1247,7 +1254,7 @@ def _probe_window_page_count(
     progress_callback: ProgressCallback | None,
     cancel_check: CancelCheck,
 ) -> int:
-    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
+    windows_root = _profile_workspace(profile).list / ".automation-windows"
     windows_root.mkdir(parents=True, exist_ok=True)
     name = f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
     probe = windows_root / f".{name}.probe-{uuid.uuid4().hex}"
@@ -1307,7 +1314,7 @@ def _inspect_stage_one_downloads(
     start = date.fromisoformat(search["start_date"])
     end = date.fromisoformat(search["end_date"])
     ranges = _split_yearly_ranges(start, end)
-    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
+    windows_root = _profile_workspace(profile).list / ".automation-windows"
     windows_root.mkdir(parents=True, exist_ok=True)
     desired_names = {
         f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
@@ -1395,7 +1402,7 @@ def _stage_one_windows_valid(profile: dict[str, Any]) -> bool:
     search = profile["decisions"]["s1_search"]
     start = date.fromisoformat(search["start_date"])
     end = date.fromisoformat(search["end_date"])
-    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
+    windows_root = _profile_workspace(profile).list / ".automation-windows"
     expected_names: set[str] = set()
     for window_start, window_end in _split_yearly_ranges(start, end):
         name = f"{window_start:%Y%m%d}_{window_end:%Y%m%d}"
@@ -1509,7 +1516,11 @@ def _active_workspace_disclosure_targets(
     root: Path, mode: object
 ) -> list[tuple[str, str]]:
     normalized_mode = validate_workspace_mode(mode)
-    filtered_path = root / "03-filter" / normalized_mode / "filtered.json"
+    filtered_path = (
+        resolve_disclosure_workspace(root).filtered
+        / normalized_mode
+        / "filtered.json"
+    )
     if not filtered_path.is_file():
         raise ValueError(f"필터 mode 폴더의 filtered.json을 찾을 수 없습니다: {normalized_mode}")
     return _active_disclosure_targets(filtered_path)
@@ -1561,7 +1572,7 @@ def _active_html_outputs_valid(profile: dict[str, Any], stage: int) -> bool:
                 return False
         if stage == 4:
             compressed_payload = json.loads(
-                (_external_mode_directory(profile) / "compressed-external-html.json").read_text(
+                (_external_compress_mode_directory(profile) / "compressed-external-html.json").read_text(
                     "utf-8"
                 )
             )
@@ -1590,7 +1601,7 @@ def _run_stage_one(
     cancel_check: CancelCheck,
 ) -> dict[str, Any]:
     execution = profile["execution"]
-    windows_root = Path(profile["data_root"]) / "01-list" / ".automation-windows"
+    windows_root = _profile_workspace(profile).list / ".automation-windows"
     windows_root.mkdir(parents=True, exist_ok=True)
     inspected = _inspect_stage_one_downloads(
         profile,
@@ -1735,6 +1746,7 @@ def _run_stage(
     cancel_check: CancelCheck,
 ) -> dict[str, Any]:
     root = Path(profile["data_root"])
+    workspace = _profile_workspace(profile)
     execution = profile["execution"]
     if stage == 1:
         return _run_stage_one(
@@ -1747,8 +1759,8 @@ def _run_stage(
         return build_disclosure_table_payload(
             {
                 "data_root": str(root),
-                "root_directory": str(root / "01-list" / ".automation-windows"),
-                "output_path": str(root / "02-table"),
+                "root_directory": str(workspace.list / ".automation-windows"),
+                "output_path": str(workspace.table),
                 "table_name": "disclosures",
                 "table_workers": execution["local_workers"],
             },
@@ -1790,7 +1802,7 @@ def _run_stage(
                 result=incremental_result,
             )
             result = completed["result"]
-            atomic_write_json(root / "03-filter" / mode / "filtered.json", result)
+            atomic_write_json(workspace.filtered / mode / "filtered.json", result)
             return result
         except FilterCancelled as error:
             interrupt_filter_workflow_payload(
@@ -1813,9 +1825,16 @@ def _run_stage(
         targets = _active_workspace_disclosure_targets(root, mode)
         current = _external_mode_directory(profile) / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
-        compressed_path = _external_mode_directory(profile) / "compressed-external-html.json"
+        compressed_path = (
+            _external_compress_mode_directory(profile)
+            / "compressed-external-html.json"
+        )
+        compressed_temporary = compressed_path.parent / (
+            f".{compressed_path.stem}.part-{uuid.uuid4().hex}"
+        )
         try:
             temporary.mkdir(parents=True, exist_ok=True)
+            compressed_temporary.mkdir(parents=True, exist_ok=True)
             if targets:
                 external_html_download_result = download_disclosure_external_html_payload(
                     {
@@ -1843,7 +1862,7 @@ def _run_stage(
                 external_html_compress_result = compress_disclosure_external_html_payload(
                     {
                         "input_directory": str(temporary),
-                        "output_directory": str(temporary),
+                        "output_directory": str(compressed_temporary),
                         "parallel_workers": execution["local_workers"],
                     },
                     progress_callback=progress_callback,
@@ -1853,7 +1872,9 @@ def _run_stage(
                 ).get("passed"):
                     raise ValueError("외부 HTML 압축 결과 재검사에 실패했습니다.")
                 compressed_payload = json.loads(
-                    (temporary / "compressed-external-html.json").read_text("utf-8")
+                    (compressed_temporary / "compressed-external-html.json").read_text(
+                        "utf-8"
+                    )
                 )
                 compressed_acpt_numbers = {
                     str(record.get("acpt_no") or "")
@@ -1893,7 +1914,8 @@ def _run_stage(
                     "records": [],
                 }
                 atomic_write_json(
-                    temporary / "compressed-external-html.json", compressed_payload
+                    compressed_temporary / "compressed-external-html.json",
+                    compressed_payload,
                 )
                 external_html_compress_result = {
                     "summary": {"found_files": 0, "compressed_files": 0}
@@ -1920,6 +1942,8 @@ def _run_stage(
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
+            if compressed_temporary.exists():
+                shutil.rmtree(compressed_temporary)
     if stage == 5:
         mode = execution["mode"]
         targets = _active_workspace_disclosure_targets(root, mode)
@@ -1931,7 +1955,8 @@ def _run_stage(
                 result = download_disclosure_internal_html_payload(
                     {
                         "source_compressed_json_path": str(
-                            _external_mode_directory(profile) / "compressed-external-html.json"
+                            _external_compress_mode_directory(profile)
+                            / "compressed-external-html.json"
                         ),
                         "output_directory": str(temporary),
                         "skip_existing": False,
@@ -1974,7 +1999,7 @@ def _run_stage(
             if temporary.exists():
                 shutil.rmtree(temporary)
     if stage == 6:
-        output_directory = root / "06-sections" / ".automation-current"
+        output_directory = workspace.sections / ".automation-current"
         temporary = output_directory.with_name(
             f".{output_directory.name}.part-{uuid.uuid4().hex}"
         )
@@ -2016,11 +2041,12 @@ def _run_stage(
                 "data_root": str(root),
                 "mode": mode,
                 "parser_method": execution["parser_method"],
-                "input_directory": str(root / "06-sections" / ".automation-current"),
-                "output_directory": str(root / "07-converted" / mode),
+                "input_directory": str(workspace.sections / ".automation-current"),
+                "output_directory": str(workspace.converted / mode),
                 "filtered_metadata_path": str(_filter_result_path(profile)),
                 "compressed_metadata_path": str(
-                    _external_mode_directory(profile) / "compressed-external-html.json"
+                    _external_compress_mode_directory(profile)
+                    / "compressed-external-html.json"
                 ),
                 "parallel_workers": execution["local_workers"],
                 "skip_errors": False,

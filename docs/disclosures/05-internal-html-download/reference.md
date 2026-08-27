@@ -2,10 +2,10 @@
 
 ## Paths
 
-- `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`을 입력으로 받아 `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`에 본문 HTML을, `<data_root>/05-internal-html-download/<mode>/kind_disclosure_html_manifest.json`에 원본 연결 정보를 저장한다.
-- 파생 필터 `<parent_mode>/<mode>`는 상위 `<data_root>/04-external-html-download/<parent_mode>/compressed-external-html.json`과 `<data_root>/05-internal-html-download/<parent_mode>` 산출물을 사용한다. 자식 `mode`나 `subfilters/<mode>`의 05단계 출력 폴더는 만들지 않는다.
+- `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`을 입력으로 받아 `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`에 본문 HTML을, `<data_root>/05-internal-html-download/<mode>/kind_disclosure_html_manifest.json`에 원본 연결 정보를 저장한다.
+- 파생 필터 `<parent_mode>/<mode>`는 상위 `<data_root>/04-external-html-compress/<parent_mode>/compressed-external-html.json`과 `<data_root>/05-internal-html-download/<parent_mode>` 산출물을 사용한다. 자식 `mode`나 `subfilters/<mode>`의 05단계 출력 폴더는 만들지 않는다.
 
-### `<data_root>/04-external-html-download/<mode>/compressed-external-html.json`
+### `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`
 
 #### I/O Structure
 

@@ -54,8 +54,8 @@ const stepStatusClassNames: Record<DataIntegrityInspectionStepStatus, string> = 
 };
 
 const stepResultStatusClassNames: Record<"complete" | "failed", string> = {
-  complete: "!border-[color:var(--tv-up)] !bg-[var(--tv-up-soft)] !text-[var(--tv-up-text)] hover:!bg-[var(--tv-up-soft)]",
-  failed: "!border-[color:var(--tv-down)] !bg-[var(--tv-down-soft)] !text-[var(--tv-down-text)] hover:!bg-[var(--tv-down-soft)]",
+  complete: "!border-[color:var(--tv-border)] !bg-[var(--tv-up-soft)] !text-[var(--tv-up-text)] hover:!bg-[var(--tv-up-soft)]",
+  failed: "!border-[color:var(--tv-border)] !bg-[var(--tv-down-soft)] !text-[var(--tv-down-text)] hover:!bg-[var(--tv-down-soft)]",
 };
 
 const stepControlClassName = "h-8 w-28 shrink-0 self-start justify-center whitespace-nowrap";

@@ -24,6 +24,7 @@ import {
   type DisclosureConditionPreset,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
 import { HtmlInspectorField, HtmlInspectorToggle, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
   deleteDisclosureConditionPreset,
@@ -951,6 +952,12 @@ export default function FilterPage() {
           settingsContent={
             <div className="space-y-5">
               <WorkflowPathSettings id="filter-separate-output-directory" fields={pathFields} onError={handlePathError} />
+              <DisclosureStageStorageSettings
+                dataRoot={rootDirectory}
+                stages={["03-filter"]}
+                disabled={isJobActive}
+                onError={handlePathError}
+              />
               {taskMode === "filter" && <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>

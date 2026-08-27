@@ -579,15 +579,17 @@ def _verify_internal_download_membership(
     expected_acpt_numbers: list[str],
     saved_paths: list[Path],
     allow_missing: bool,
+    source_unavailable_acpt_numbers: Sequence[str] = (),
 ) -> dict[str, Any]:
     expected = set(expected_acpt_numbers)
+    source_unavailable = set(source_unavailable_acpt_numbers)
     actual_acpt_numbers = [path.stem for path in saved_paths]
     actual = set(actual_acpt_numbers)
     counts = Counter(actual_acpt_numbers)
     duplicate_acpt_numbers = sorted(
         acpt_no for acpt_no, count in counts.items() if count > 1
     )
-    missing_acpt_numbers = sorted(expected - actual)
+    missing_acpt_numbers = sorted(expected - actual - source_unavailable)
     unexpected_acpt_numbers = sorted(actual - expected)
     passed = (
         not duplicate_acpt_numbers
@@ -606,6 +608,13 @@ def _verify_internal_download_membership(
         "unexpected_acpt_numbers": unexpected_acpt_numbers,
         "duplicate_acpt_numbers": duplicate_acpt_numbers,
     }
+    if source_unavailable:
+        verification.update(
+            {
+                "source_unavailable_records": len(source_unavailable),
+                "source_unavailable_acpt_numbers": sorted(source_unavailable),
+            }
+        )
     if not passed:
         raise ValueError(
             "Internal HTML download membership does not match requested targets: "
@@ -647,7 +656,7 @@ def download_disclosure_internal_html_payload(
         mode = validate_workspace_mode(body.get("mode"))
         parent_mode = validate_workspace_mode(parent_mode_raw)
         expected_source_path = (
-            workspace.external_owner_mode(mode, parent_mode=parent_mode)
+            workspace.external_compress_owner_mode(mode, parent_mode=parent_mode)
             / COMPRESSED_EXTERNAL_HTML_FILENAME
         ).resolve()
         if source_path != expected_source_path:
@@ -699,6 +708,9 @@ def download_disclosure_internal_html_payload(
             expected_acpt_numbers=child_acpt_numbers,
             saved_paths=saved_paths,
             allow_missing=False,
+            source_unavailable_acpt_numbers=integrity[
+                "source_unavailable_target_acpt_numbers"
+            ],
         )
         verification["hash_verified_target_html_count"] = integrity[
             "hash_verified_target_html_count"
@@ -712,6 +724,12 @@ def download_disclosure_internal_html_payload(
             "output_directory": str(resolved_output_directory),
             "requested_count": len(child_acpt_numbers),
             "saved_count": len(saved_paths),
+            "source_unavailable_count": integrity[
+                "source_unavailable_target_html_count"
+            ],
+            "source_unavailable_acpt_numbers": integrity[
+                "source_unavailable_target_acpt_numbers"
+            ],
             "cancelled": False,
             "acpt_numbers": child_acpt_numbers,
             "saved_files": [str(path) for path in saved_paths],
@@ -789,6 +807,16 @@ def download_disclosure_internal_html_payload(
     emit(f"병렬 처리: {max_workers}개 워커")
     existing_paths_by_acpt_no: dict[str, Path] = {}
     source_integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
+    target_by_acpt_no = {target["acpt_no"]: target for target in targets}
+    recorded_source_unavailable = _load_html_manifest_source_unavailable(
+        resolved_output_directory
+    )
+    source_unavailable_by_acpt_no = {
+        acpt_no: marker
+        for acpt_no, marker in recorded_source_unavailable.items()
+        if acpt_no in target_by_acpt_no
+        and marker["doc_no"] == target_by_acpt_no[acpt_no]["doc_no"]
+    }
     download_acpt_numbers = acpt_numbers
     if bool(body.get("skip_existing", True)):
         existing_check_started_at = time.monotonic()
@@ -832,7 +860,10 @@ def download_disclosure_internal_html_payload(
         if redownload_unverified_existing:
             download_targets.update(unverified_acpt_numbers)
         download_acpt_numbers = [
-            acpt_no for acpt_no in acpt_numbers if acpt_no in download_targets
+            acpt_no
+            for acpt_no in acpt_numbers
+            if acpt_no in download_targets
+            and acpt_no not in source_unavailable_by_acpt_no
         ]
         source_integrity_by_acpt_no.update(
             integrity_summary["_verified_integrity_by_acpt_no"]
@@ -859,6 +890,11 @@ def download_disclosure_internal_html_payload(
             emit("기존 HTML 겹침: 전체 대상이 이미 저장되어 있습니다.")
         else:
             emit(f"새로 저장할 대상: {len(download_acpt_numbers)}건.")
+        if source_unavailable_by_acpt_no:
+            emit(
+                "KIND 원본 없음 기록 재사용: "
+                f"{len(source_unavailable_by_acpt_no)}건."
+            )
         for acpt_no, path in existing_paths_by_acpt_no.items():
             handle_progress(f"Skipping existing KIND internal HTML: {path}")
     try:
@@ -883,7 +919,6 @@ def download_disclosure_internal_html_payload(
             spacing_limiter = RequestSpacingLimiter(
                 max(wait_seconds, 60.0 / max_requests_per_minute)
             )
-            target_by_acpt_no = {target["acpt_no"]: target for target in targets}
             download_targets = [
                 target_by_acpt_no[acpt_no] for acpt_no in download_acpt_numbers
             ]
@@ -915,11 +950,92 @@ def download_disclosure_internal_html_payload(
                     _allow_partial=True,
                 )
             )
+            downloaded_acpt_numbers = {path.stem for path in downloaded_paths}
+            for acpt_no in downloaded_acpt_numbers:
+                source_unavailable_by_acpt_no.pop(acpt_no, None)
+            revalidation_targets = [
+                target
+                for target in download_targets
+                if target["acpt_no"] not in downloaded_acpt_numbers
+            ]
+            if redownload_unverified_existing and revalidation_targets:
+                emit(
+                    "다운로드 실패 대상의 KIND 원본 재검증을 시작합니다: "
+                    f"{len(revalidation_targets)}건."
+                )
+                revalidation_rate_limiter = SlidingWindowRateLimiter(
+                    max_requests_per_minute
+                )
+
+                def wait_for_revalidation_request() -> None:
+                    if wait_for_html_download_request_slot(
+                        lambda: _is_cancelled(cancel_token)
+                        or bool(cancel_check and cancel_check()),
+                        local_limiter=revalidation_rate_limiter,
+                        spacing_limiter=spacing_limiter,
+                    ):
+                        raise InterruptedError("internal HTML revalidation cancelled")
+
+                with requests.Session() as revalidation_session:
+                    for target in revalidation_targets:
+                        acpt_no = target["acpt_no"]
+                        doc_no = target["doc_no"]
+                        emit(
+                            "KIND 원본 재검증: "
+                            f"acpt_no={acpt_no} doc_no={doc_no}"
+                        )
+                        reason = ""
+                        try:
+                            internal_html = _fetch_internal_html(
+                                revalidation_session,
+                                acpt_no=acpt_no,
+                                doc_no=doc_no,
+                                request_headers=DEFAULT_REQUEST_HEADERS,
+                                timeout=timeout,
+                                before_request=wait_for_revalidation_request,
+                            )
+                        except InterruptedError:
+                            break
+                        except ValueError as exc:
+                            if "content path not found" not in str(exc):
+                                emit(f"KIND 원본 재검증 실패 acpt_no={acpt_no}: {exc}")
+                                continue
+                            reason = "content_path_missing"
+                        except Exception as exc:
+                            emit(f"KIND 원본 재검증 실패 acpt_no={acpt_no}: {exc}")
+                            continue
+                        output_path = _target_html_path(
+                            resolved_output_directory,
+                            acpt_no,
+                            target_years=target_years,
+                        )
+                        if not reason:
+                            output_path.parent.mkdir(parents=True, exist_ok=True)
+                            output_path.write_bytes(internal_html)
+                            if _is_valid_html(output_path):
+                                downloaded_paths.append(output_path)
+                                source_unavailable_by_acpt_no.pop(acpt_no, None)
+                                emit(
+                                    "KIND 원본 재검증에서 정상 HTML을 저장했습니다: "
+                                    f"acpt_no={acpt_no}"
+                                )
+                                continue
+                            output_path.unlink(missing_ok=True)
+                            reason = "invalid_html"
+                        source_unavailable_by_acpt_no[acpt_no] = {
+                            "doc_no": doc_no,
+                            "reason": reason,
+                        }
+                        emit(
+                            "KIND 원본 없음 확인: "
+                            f"acpt_no={acpt_no} doc_no={doc_no} reason={reason}"
+                        )
         cancelled = _is_cancelled(cancel_token) or bool(cancel_check and cancel_check())
         verification = _verify_internal_download_membership(
             expected_acpt_numbers=acpt_numbers,
             saved_paths=[*existing_paths_by_acpt_no.values(), *downloaded_paths],
             allow_missing=True,
+            source_unavailable_acpt_numbers=source_unavailable_by_acpt_no,
         )
         saved_paths_by_acpt_no = dict(existing_paths_by_acpt_no)
         saved_paths_by_acpt_no.update({path.stem: path for path in downloaded_paths})
@@ -930,46 +1046,37 @@ def download_disclosure_internal_html_payload(
         ]
         hash_started_at = time.monotonic()
         emit(f"새 HTML 기준 해시 생성을 시작합니다: {len(downloaded_paths)}건.")
-        downloaded_integrity, hash_cancelled = _hash_html_files(
+        downloaded_integrity, _ = _hash_html_files(
             {path.stem: path for path in downloaded_paths},
             progress_callback=emit,
-            cancel_check=lambda: _is_cancelled(cancel_token)
-            or bool(cancel_check and cancel_check()),
         )
+        source_integrity_by_acpt_no.update(downloaded_integrity)
         cancelled = (
             cancelled
-            or hash_cancelled
             or _is_cancelled(cancel_token)
             or bool(cancel_check and cancel_check())
         )
-        if cancelled:
-            emit(
-                "새 HTML 기준 해시 생성을 중지했습니다: "
-                f"{time.monotonic() - hash_started_at:.1f}초."
-            )
-        else:
-            emit(
-                f"새 HTML 기준 해시 생성 완료: {len(downloaded_integrity)}건 · "
-                f"{time.monotonic() - hash_started_at:.1f}초."
-            )
-            source_integrity_by_acpt_no.update(downloaded_integrity)
+        emit(
+            f"새 HTML 기준 해시 생성 완료: {len(downloaded_integrity)}건 · "
+            f"{time.monotonic() - hash_started_at:.1f}초."
+        )
     finally:
         _clear_cancel_token(cancel_token)
     saved_acpt_numbers = [path.stem for path in saved_paths]
-    manifest_path = None
-    if not cancelled:
-        manifest_path = _write_html_manifest(
-            output_directory=resolved_output_directory,
-            acpt_numbers=saved_acpt_numbers,
-            source_json=source_json,
-            source_integrity=source_integrity_by_acpt_no,
-        )
-        emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
+    manifest_path = _write_html_manifest(
+        output_directory=resolved_output_directory,
+        acpt_numbers=saved_acpt_numbers,
+        source_json=source_json,
+        source_integrity=source_integrity_by_acpt_no,
+        source_unavailable=source_unavailable_by_acpt_no,
+    )
+    emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
     if not cancelled and not verification["complete"]:
         _verify_internal_download_membership(
             expected_acpt_numbers=acpt_numbers,
             saved_paths=saved_paths,
             allow_missing=False,
+            source_unavailable_acpt_numbers=source_unavailable_by_acpt_no,
         )
     emit(
         f"HTML 내부 저장 {'중지' if cancelled else '완료'}: 저장 파일 {len(saved_paths)}/{len(acpt_numbers)}건."
@@ -979,10 +1086,12 @@ def download_disclosure_internal_html_payload(
         "output_directory": str(resolved_output_directory),
         "requested_count": len(acpt_numbers),
         "saved_count": len(saved_paths),
+        "source_unavailable_count": len(source_unavailable_by_acpt_no),
+        "source_unavailable_acpt_numbers": sorted(source_unavailable_by_acpt_no),
         "cancelled": cancelled,
         "acpt_numbers": acpt_numbers,
         "saved_files": [str(path) for path in saved_paths],
-        "manifest_path": str(manifest_path) if manifest_path is not None else "",
+        "manifest_path": str(manifest_path),
         "verification": verification,
         "progress_log": list(progress_log),
     }

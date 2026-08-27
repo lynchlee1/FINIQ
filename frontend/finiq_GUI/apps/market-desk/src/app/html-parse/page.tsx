@@ -19,6 +19,7 @@ import {
   type DisclosureConditionPresetPayload,
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
+import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
 import {
   HtmlWorkflowForm,
   HtmlWorkflowPage,
@@ -1348,6 +1349,12 @@ export default function HtmlParsePage() {
             <>
               <div className="space-y-5">
                 <WorkflowPathSettings id="parse-separate-output-directory" fields={parsePathFields} onError={handlePathError} />
+                <DisclosureStageStorageSettings
+                  dataRoot={dataRoot}
+                  stages={["07-converted"]}
+                  disabled={isJobActive}
+                  onError={handlePathError}
+                />
                 <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>

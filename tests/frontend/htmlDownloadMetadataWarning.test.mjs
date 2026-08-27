@@ -110,6 +110,8 @@ test("internal HTML save uses the same all-mode repair contract", () => {
   assert.match(page, /setAllModeSaveInspectionData\(nextResult\.verification\)/);
   assert.match(page, /showSaveWorkflow && allModeSaveInspectionData/);
   assert.match(page, /saveInspectionResults\.map/);
+  assert.match(page, /KIND 원본 없음/);
+  assert.match(page, /source_unavailable_target_html_count/);
   assert.doesNotMatch(page, /variant !== "external" && !selectedFilterPreset/);
   assert.doesNotMatch(page, /inspectionFilterKey|inspectionLimitKey/);
 });
