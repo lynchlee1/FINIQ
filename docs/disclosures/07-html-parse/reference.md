@@ -10,7 +10,7 @@
 04단계 metadata ┘
 ```
 
-- 필수 입력: `<data_root>/06-sections/<YYYY>/<acpt_no>.html`
+- 필수 입력: `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`
 - 선택 입력: `<data_root>/03-filter/<mode>/filtered.json`
 - 파생 필터 입력: `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`
 - 선택 입력: `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`
@@ -51,7 +51,7 @@
   "mode": "<mode>",
   "parser_method": "<parser_method>",
   "parent_mode": "<parent_mode>",
-  "input_directory": "/data/06-sections",
+  "input_directory": "/data/06-sections/<mode>",
   "output_directory": "/data/07-converted/<mode>",
   "skip_errors": true,
   "filtered_metadata_path": "/data/03-filter/<mode>/filtered.json",
@@ -103,7 +103,7 @@ N=1             N=2      N=3
 
 ### Section HTML
 
-`<data_root>/06-sections/<YYYY>/<acpt_no>.html`이 실제 parsing 대상이다.
+`<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`이 실제 parsing 대상이다.
 
 - 입력 루트 바로 아래의 4자리 숫자 연도 폴더만 찾는다.
 - 연도 폴더 바로 아래의 `.html` 파일만 읽고 더 깊은 파일은 읽지 않는다.

@@ -51,8 +51,9 @@
 │       │   └── <acpt_no>.html
 │       └── kind_disclosure_html_manifest.json
 ├── 06-sections/
-│   └── <YYYY>/
-│       └── <acpt_no>.html
+│   └── <mode>/
+│       └── <YYYY>/
+│           └── <acpt_no>.html
 ├── 07-converted/
 │   └── <mode>/
 │       └── parsed-<mode>.json

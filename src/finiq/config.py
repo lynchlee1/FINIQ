@@ -153,7 +153,9 @@ def build_disclosure_workspace_path_settings(
         "internal_html_output_directory": str(
             root / "05-internal-html-download" / normalized_mode
         ),
-        "html_section_split_output_directory": str(root / "06-sections"),
+        "html_section_split_output_directory": str(
+            root / "06-sections" / normalized_mode
+        ),
         "html_parse_output_directory": str(converted_path),
         "html_parse_result_path": str(
             converted_path / f"parsed-{normalized_mode}.json"

@@ -91,7 +91,9 @@ def test_workspace_parse_reads_kind_time_from_stage_three(
     prepare_disclosure_workspace_payload(
         {"data_root": str(data_root), "modes": ["bond_issuance"]}
     )
-    source_path = data_root / "06-sections" / "2025" / "20250102000001.html"
+    source_path = (
+        data_root / "06-sections" / "bond_issuance" / "2025" / "20250102000001.html"
+    )
     source_path.parent.mkdir(parents=True)
     source_path.write_text("<html></html>", encoding="utf-8")
     _write_filtered(

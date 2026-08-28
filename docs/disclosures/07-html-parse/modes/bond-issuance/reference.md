@@ -2,7 +2,7 @@
 
 ## Paths
 
-- `<data_root>/06-sections/<YYYY>/<acpt_no>.html`을 입력으로 받아 `<data_root>/07-converted/bond_issuance/parsed-bond_issuance.json`에 구조화 결과를 저장한다.
+- `<data_root>/06-sections/bond_issuance/<YYYY>/<acpt_no>.html`을 입력으로 받아 `<data_root>/07-converted/bond_issuance/parsed-bond_issuance.json`에 구조화 결과를 저장한다.
 
 ### `<data_root>/07-converted/bond_issuance/parsed-bond_issuance.json`
 

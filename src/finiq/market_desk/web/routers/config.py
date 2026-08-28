@@ -23,6 +23,7 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     DISCLOSURE_STAGE_NAMES,
     STAGE_LINK_FILENAME,
     manage_disclosure_stage_links_payload,
+    resolve_disclosure_workspace,
 )
 from finiq.market_desk.web.features.market_data.discovery import (
     list_classification_files,
@@ -202,7 +203,9 @@ def _disclosure_config_path_settings(
                 "internal_html_output_directory": str(stage_root / mode)
             }
         elif stage == "06-sections":
-            replacements = {"html_section_split_output_directory": str(stage_root)}
+            replacements = {
+                "html_section_split_output_directory": str(stage_root / mode)
+            }
         elif stage == "07-converted":
             mode_root = stage_root / mode
             replacements = {
@@ -231,7 +234,25 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
         def workspace_value(key: str, configured: str) -> str:
             if key in linked_workspace_keys:
                 return workspace_defaults[key]
-            return configured or workspace_defaults.get(key, "")
+            value = configured or workspace_defaults.get(key, "")
+            if (
+                key != "html_section_split_output_directory"
+                or not value
+                or not str(config.output_root).strip()
+                or not str(config.html_parse_mode).strip()
+            ):
+                return value
+            try:
+                workspace = resolve_disclosure_workspace(
+                    config.output_root, create=False
+                )
+            except ValueError:
+                return value
+            resolved = Path(value).expanduser().resolve()
+            stage = workspace.sections.resolve()
+            if resolved != stage and stage not in resolved.parents:
+                return value
+            return str(workspace.sections_mode(config.html_parse_mode))
 
         payload = {
             "parallel_worker_count": available_cpu_count(),

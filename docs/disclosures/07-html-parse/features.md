@@ -10,7 +10,7 @@
 
 #### Behavior
 
-- `<data_root>/06-sections` 바로 아래의 4자리 연도 폴더와 그 바로 아래의 `*.html`만 읽는다.
+- `<data_root>/06-sections/<mode>` 바로 아래의 4자리 연도 폴더와 그 바로 아래의 `*.html`만 읽는다.
 - 입력 루트, 이름이 다른 폴더와 더 깊은 하위 HTML은 제외한다.
 - `parse_disclosure_html_payload()`가 필수 경로, 작업공간 `mode`, 선택적인 `parent_mode`, `parser_method`, 필터와 실행 옵션을 검증하고 registry parser를 선택한다.
 

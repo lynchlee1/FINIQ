@@ -1,5 +1,11 @@
 # Completed Changes Requiring Follow-up
 
+## 2026-08-29: partition section HTML by disclosure mode
+
+- Purpose: prevent `06-sections` outputs from different disclosure modes from being written directly into the same yearly directories.
+- Implementation: make the only legal stage-06 path `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`. A folder named `06-sections` always receives the current mode directory before any year folder; a leftover path under another mode is replaced, and writing `06-sections/<YYYY>/` is an error. Point stage-07 parsing, linked workspace settings, and automation caches at the same mode directory. Derived filters keep using the parent mode directory. Folders not named `06-sections` are unchanged.
+- Verification: saving shareholder-meeting HTML while the leftover output path is still `06-sections/bond_issuance` now creates `06-sections/shareholder_meeting` and does not write into the bond folder. Saving into `06-sections` without a mode fails. The workspace, automation, time-metadata, parse-integrity, web service, web app, pipeline, and persistence set passed 618 tests with 166 environment-dependent tests skipped.
+
 ## 2026-08-28: hide derived filters from HTML storage workflows
 
 - Purpose: keep subfilters out of `공시원문 외부 저장`, `공시원문 내부 저장`, and `공시원문 목차 분리`, where outputs belong to the top-level filter rather than a derived filter.

@@ -2,7 +2,7 @@
 
 ## Paths
 
-- `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`을 입력으로 받아 `<data_root>/06-sections`에 `<YYYY>/<acpt_no>.html`을 저장한다.
+- `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`을 입력으로 받아 `<data_root>/06-sections/<mode>`에 `<YYYY>/<acpt_no>.html`을 저장한다.
 
 ### `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`
 
@@ -13,14 +13,15 @@
 - `workers`는 목차 조합 요약, 분리 저장과 결과 검사에서 동시에 처리할 HTML 파일 수를 정한다.
 - `progress_interval`은 전체 검사와 분리 저장 중 몇 건마다 우측 `실행 현황` 로그를 갱신할지 정하는 1 이상의 정수다.
 
-### `<data_root>/06-sections/<YYYY>/<acpt_no>.html`
+### `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`
 
 #### I/O Structure
 
 - 구조로 완전히 분리한 뒤 정정 section만 제외한 모든 목차 범위를 보존한 출력 HTML 파일이다.
 - 정정 판별은 분리 후 첫 section 제목의 공백을 제거하고 단일 토큰 `정정`만 확인한다. 첫 section이 정정이면 그것만 제외하고, 두 번째 이후 section은 검사하거나 제외하지 않는다. 목차 경계 탐지에는 문자열을 사용하지 않는다.
 - Manual selection이나 모드별 저장 규칙은 사용하지 않는다.
-- HTML은 연도별 폴더에 저장하며 parser JSON은 만들지 않는다.
+- HTML은 `<mode>/<YYYY>/<acpt_no>.html`만 사용한다. `06-sections` 바로 아래 연도 폴더는 만들지 않고, 그 모양을 읽거나 보정하지도 않는다.
+- parser JSON은 만들지 않는다.
 
 ### Section metadata
 

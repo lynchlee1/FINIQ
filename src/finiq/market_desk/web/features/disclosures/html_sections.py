@@ -14,6 +14,10 @@ from typing import Any, Callable, Iterable, Iterator, TypeVar
 from lxml import etree, html
 
 from finiq.concurrency import resolve_worker_count
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+    validate_workspace_mode,
+)
 from finiq.market_desk.web.features.disclosures.html_common import (
     _internal_html_source_unavailable_placeholder_file,
 )
@@ -24,6 +28,7 @@ _SOURCE_TOC_ID_RE = re.compile(r"^toc_(\d+)$", flags=re.IGNORECASE)
 _HEADING_TAGS = {f"h{level}" for level in range(1, 7)}
 # Post-split classification only; structural boundary detection must not use text.
 _CORRECTION_TITLE_TOKEN = "정정"
+_SECTIONS_STAGE_NAME = "06-sections"
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 DEFAULT_HTML_SECTION_PROBLEM_REPORT_LIMIT = 50
 T = TypeVar("T")
@@ -976,6 +981,39 @@ def _relative_source_path(input_directory: Path, source_file: Path) -> str:
     return source_file.relative_to(input_directory).as_posix()
 
 
+def _resolve_sections_output_directory(
+    body: dict[str, Any], output_directory: Path
+) -> Path:
+    stage = (
+        output_directory
+        if output_directory.name == _SECTIONS_STAGE_NAME
+        else output_directory.parent
+        if output_directory.parent.name == _SECTIONS_STAGE_NAME
+        else None
+    )
+    if stage is None:
+        return output_directory
+    parent_mode = body.get("parent_mode")
+    mode = parent_mode if parent_mode not in (None, "") else body.get("mode")
+    if not str(mode or "").strip():
+        raise ValueError(
+            "06-sections HTML must be stored at <mode>/<YYYY>/<acpt_no>.html"
+        )
+    return stage / validate_workspace_mode(mode)
+
+
+def _reject_year_directly_under_sections_stage(output_path: Path) -> None:
+    year_directory = output_path.parent
+    if (
+        len(year_directory.name) == 4
+        and year_directory.name.isdigit()
+        and year_directory.parent.name == _SECTIONS_STAGE_NAME
+    ):
+        raise ValueError(
+            "06-sections HTML must be stored at <mode>/<YYYY>/<acpt_no>.html"
+        )
+
+
 def _parse_limit(value: Any) -> int | None:
     if value in (None, ""):
         return None
@@ -1056,6 +1094,8 @@ def inspect_disclosure_html_section_output_payload(
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Rebuild and compare each expected section output without retaining contents."""
+    if str(body.get("data_root") or "").strip():
+        body = apply_workspace_defaults("section_save", body)
     input_directory_raw = str(body.get("input_directory") or "").strip()
     output_directory_raw = str(body.get("output_directory") or "").strip()
     if not input_directory_raw:
@@ -1063,7 +1103,9 @@ def inspect_disclosure_html_section_output_payload(
     if not output_directory_raw:
         raise ValueError("output_directory is required")
     input_directory = Path(input_directory_raw).expanduser().resolve()
-    output_directory = Path(output_directory_raw).expanduser().resolve()
+    output_directory = _resolve_sections_output_directory(
+        body, Path(output_directory_raw).expanduser().resolve()
+    )
     if not input_directory.is_dir():
         raise ValueError(f"input_directory does not exist: {input_directory}")
 
@@ -1158,6 +1200,8 @@ def save_disclosure_html_sections_payload(
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
+    if str(body.get("data_root") or "").strip():
+        body = apply_workspace_defaults("section_save", body)
     input_directory_raw = str(body.get("input_directory") or "").strip()
     output_directory_raw = str(body.get("output_directory") or "").strip()
     if not input_directory_raw:
@@ -1168,7 +1212,9 @@ def save_disclosure_html_sections_payload(
         raise ValueError(msg)
 
     input_directory = Path(input_directory_raw).expanduser().resolve()
-    output_directory = Path(output_directory_raw).expanduser().resolve()
+    output_directory = _resolve_sections_output_directory(
+        body, Path(output_directory_raw).expanduser().resolve()
+    )
     if not input_directory.is_dir():
         msg = f"input_directory does not exist: {input_directory}"
         raise ValueError(msg)
@@ -1222,6 +1268,7 @@ def save_disclosure_html_sections_payload(
         selected = _automatic_section_output(source_file)
         source_relative_path = source_file.relative_to(input_directory)
         output_path = output_directory / source_relative_path
+        _reject_year_directly_under_sections_stage(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(str(selected["content"]), encoding="utf-8")
         return {

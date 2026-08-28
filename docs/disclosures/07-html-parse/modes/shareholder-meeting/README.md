@@ -36,7 +36,7 @@
 
 ### 입출력과 필드 계약
 
-`parse_shareholder_meeting()`은 `<data_root>/06-sections/<YYYY>/<acpt_no>.html`을 입력으로 받아 공통 레코드에 `shareholder_meeting` 업무값을 추가하고, `<data_root>/07-converted/shareholder_meeting/parsed-shareholder_meeting.json`에 결과를 저장한다. 외부·내부 HTML 쌍을 받는 공개 파서는 외부 공시 제목을 호출 경계에서 `NOTICE` 또는 `RESULT`로 정규화하고, 지원하지 않는 제목은 `ValueError`로 거부한다. 내부 HTML 상세 파서를 직접 호출하면서 모드를 생략하거나 잘못 지정하면 `disclosure_phase=unknown`으로 유지한다. 문서 구조나 다른 메타데이터로 단계를 보완하지 않는다.
+`parse_shareholder_meeting()`은 `<data_root>/06-sections/shareholder_meeting/<YYYY>/<acpt_no>.html`을 입력으로 받아 공통 레코드에 `shareholder_meeting` 업무값을 추가하고, `<data_root>/07-converted/shareholder_meeting/parsed-shareholder_meeting.json`에 결과를 저장한다. 외부·내부 HTML 쌍을 받는 공개 파서는 외부 공시 제목을 호출 경계에서 `NOTICE` 또는 `RESULT`로 정규화하고, 지원하지 않는 제목은 `ValueError`로 거부한다. 내부 HTML 상세 파서를 직접 호출하면서 모드를 생략하거나 잘못 지정하면 `disclosure_phase=unknown`으로 유지한다. 문서 구조나 다른 메타데이터로 단계를 보완하지 않는다.
 
 필터 레코드의 `company_name`은 파싱 전에 `reporting_company_name`으로 전달한다. 이 값은 명시적 현직 기관을 `@reporting_company`로 연결하거나 두 합병 당사자의 방향을 판정할 때만 쓴다. HTML의 누락 필드를 대신 채우는 값은 아니다.
 

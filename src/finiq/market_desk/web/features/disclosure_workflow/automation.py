@@ -317,6 +317,12 @@ def _internal_mode_directory(profile: dict[str, Any]) -> Path:
     )
 
 
+def _sections_mode_directory(profile: dict[str, Any]) -> Path:
+    return _profile_workspace(profile).sections_mode(
+        validate_workspace_mode(profile["execution"]["mode"])
+    )
+
+
 def _checkpoint_path(profile: dict[str, Any], stage: int) -> Path:
     return _automation_root(profile) / "checkpoints" / f"stage-{stage}.json"
 
@@ -355,7 +361,7 @@ def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
             _external_mode_directory(profile) / ".automation-current",
         ],
         5: [_internal_mode_directory(profile) / ".automation-current"],
-        6: [workspace.sections / ".automation-current"],
+        6: [_sections_mode_directory(profile) / ".automation-current"],
         7: [workspace.converted / mode / f"parsed-{mode}.json"],
     }
     return paths[stage]
@@ -880,7 +886,9 @@ def _inspect_detail_sections(profile: dict[str, Any]) -> dict[str, Any]:
             "input_directory": str(
                 _internal_mode_directory(profile) / ".automation-current"
             ),
-            "output_directory": str(workspace.sections / ".automation-current"),
+            "output_directory": str(
+                _sections_mode_directory(profile) / ".automation-current"
+            ),
             "workers": profile["execution"]["local_workers"],
         }
     )
@@ -912,7 +920,9 @@ def _inspect_detail_parse(profile: dict[str, Any]) -> dict[str, Any]:
     payload = _read_json_object(path)
     if payload is None or payload.get("format") != "finiq_disclosure_html_parse_v1":
         return _inspection_failure(7, reason="공시원문 변환 결과가 없거나 손상되었습니다.")
-    input_directory = (workspace.sections / ".automation-current").resolve()
+    input_directory = (
+        _sections_mode_directory(profile) / ".automation-current"
+    ).resolve()
     filters = payload.get("filter_settings") or {}
     html_files = (
         _collect_parse_html_files(input_directory, None)
@@ -1093,7 +1103,7 @@ def _load_valid_checkpoint(profile: dict[str, Any], stage: int) -> dict[str, Any
             AUTOMATION_INTERNAL_FORMAT,
         ),
         6: (
-            _profile_workspace(profile).sections
+            _sections_mode_directory(profile)
             / ".automation-current"
             / "automation-sections.json",
             AUTOMATION_SECTIONS_FORMAT,
@@ -2007,7 +2017,7 @@ def _run_stage(
             if temporary.exists():
                 shutil.rmtree(temporary)
     if stage == 6:
-        output_directory = workspace.sections / ".automation-current"
+        output_directory = _sections_mode_directory(profile) / ".automation-current"
         temporary = output_directory.with_name(
             f".{output_directory.name}.part-{uuid.uuid4().hex}"
         )
@@ -2050,7 +2060,9 @@ def _run_stage(
                 "data_root": str(root),
                 "mode": mode,
                 "parser_method": execution["parser_method"],
-                "input_directory": str(workspace.sections / ".automation-current"),
+                "input_directory": str(
+                    _sections_mode_directory(profile) / ".automation-current"
+                ),
                 "output_directory": str(workspace.converted / mode),
                 "filtered_metadata_path": str(_filter_result_path(profile)),
                 "compressed_metadata_path": str(

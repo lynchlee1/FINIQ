@@ -24,6 +24,9 @@ from finiq.market_desk.web.features.disclosures.table_export import (
 from finiq.market_desk.web.features.disclosures.filter_presets import (
     manage_filter_presets_payload,
 )
+from finiq.market_desk.web.features.disclosures.html_sections import (
+    save_disclosure_html_sections_payload,
+)
 
 
 def test_stage_link_uses_visible_filename() -> None:
@@ -68,6 +71,8 @@ def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
         "05-internal-html-download/bond_issuance",
         "05-internal-html-download/rights_issuance",
         "06-sections",
+        "06-sections/bond_issuance",
+        "06-sections/rights_issuance",
         "07-converted",
         "07-converted/bond_issuance",
         "07-converted/rights_issuance",
@@ -263,7 +268,9 @@ def test_section_steps_ignore_broken_unrelated_stage_links(tmp_path: Path) -> No
         data_root / "05-internal-html-download" / "bond_issuance"
     )
     assert saved["input_directory"] == inspected["input_directory"]
-    assert saved["output_directory"] == str(data_root / "06-sections")
+    assert saved["output_directory"] == str(
+        data_root / "06-sections" / "bond_issuance"
+    )
 
 
 def test_internal_download_ignores_broken_unrelated_stage_links(tmp_path: Path) -> None:
@@ -572,12 +579,24 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     assert sections["input_directory"] == str(
         workspace.internal / "bond_issuance"
     )
-    assert sections["output_directory"] == str(workspace.sections)
+    assert sections["output_directory"] == str(
+        workspace.sections / "bond_issuance"
+    )
+    rights_sections = apply_workspace_defaults(
+        "section_save",
+        {"data_root": str(workspace.root), "mode": "rights_issuance"},
+    )
+    assert rights_sections["output_directory"] == str(
+        workspace.sections / "rights_issuance"
+    )
+    assert rights_sections["output_directory"] != sections["output_directory"]
     converted = apply_workspace_defaults(
         "parse", {"data_root": str(workspace.root), "mode": "bond_issuance"}
     )
     assert "skip_errors" not in converted
-    assert converted["input_directory"] == str(workspace.sections)
+    assert converted["input_directory"] == str(
+        workspace.sections / "bond_issuance"
+    )
     assert converted["output_directory"] == str(
         workspace.converted / "bond_issuance"
     )
@@ -586,6 +605,192 @@ def test_workspace_defaults_cover_all_seven_stages(tmp_path: Path) -> None:
     )
     assert converted["compressed_metadata_path"] == str(
         workspace.external_compress / "bond_issuance" / "compressed-external-html.json"
+    )
+
+
+def test_workspace_section_save_writes_under_mode_not_year_root(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    prepare_disclosure_workspace_payload(
+        {
+            "data_root": str(data_root),
+            "modes": ["bond_issuance", "rights_issuance"],
+        }
+    )
+    html = (
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2>"
+        "<p>본문</p></body></html>"
+    )
+    source_name = "20260101000001.html"
+    for mode in ("bond_issuance", "rights_issuance"):
+        source = (
+            data_root / "05-internal-html-download" / mode / "2026" / source_name
+        )
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(html, encoding="utf-8")
+        result = save_disclosure_html_sections_payload(
+            apply_workspace_defaults(
+                "section_save",
+                {"data_root": str(data_root), "mode": mode},
+            )
+        )
+        saved = data_root / "06-sections" / mode / "2026" / source_name
+        assert result["summary"]["saved_files"] == 1
+        assert result["output_directory"] == str(data_root / "06-sections" / mode)
+        assert saved.is_file()
+        assert "본문" in saved.read_text(encoding="utf-8")
+    assert not (data_root / "06-sections" / "2026").exists()
+
+
+def test_workspace_section_save_rewrites_stage_root_output_to_mode(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    prepare_disclosure_workspace_payload(
+        {"data_root": str(data_root), "modes": ["bond_issuance"]}
+    )
+    source = (
+        data_root
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / "2026"
+        / "20260101000001.html"
+    )
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2>"
+        "<p>본문</p></body></html>",
+        encoding="utf-8",
+    )
+
+    result = save_disclosure_html_sections_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "input_directory": str(
+                data_root / "05-internal-html-download" / "bond_issuance"
+            ),
+            "output_directory": str(data_root / "06-sections"),
+        }
+    )
+
+    saved = (
+        data_root / "06-sections" / "bond_issuance" / "2026" / source.name
+    )
+    assert result["output_directory"] == str(
+        data_root / "06-sections" / "bond_issuance"
+    )
+    assert saved.is_file()
+    assert not (data_root / "06-sections" / "2026").exists()
+
+
+def test_workspace_section_save_creates_current_mode_not_previous_mode(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    prepare_disclosure_workspace_payload(
+        {
+            "data_root": str(data_root),
+            "modes": ["bond_issuance", "shareholder_meeting"],
+        }
+    )
+    html = (
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2>"
+        "<p>본문</p></body></html>"
+    )
+    bond_source = (
+        data_root
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / "2026"
+        / "20260101000001.html"
+    )
+    meeting_source = (
+        data_root
+        / "05-internal-html-download"
+        / "shareholder_meeting"
+        / "2026"
+        / "20260101000002.html"
+    )
+    for source in (bond_source, meeting_source):
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(html, encoding="utf-8")
+
+    save_disclosure_html_sections_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "input_directory": str(bond_source.parent.parent),
+            "output_directory": str(data_root / "06-sections"),
+        }
+    )
+    result = save_disclosure_html_sections_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "shareholder_meeting",
+            "input_directory": str(meeting_source.parent.parent),
+            "output_directory": str(data_root / "06-sections" / "bond_issuance"),
+        }
+    )
+
+    meeting_saved = (
+        data_root
+        / "06-sections"
+        / "shareholder_meeting"
+        / "2026"
+        / meeting_source.name
+    )
+    assert result["output_directory"] == str(
+        data_root / "06-sections" / "shareholder_meeting"
+    )
+    assert meeting_saved.is_file()
+    assert (
+        data_root / "06-sections" / "bond_issuance" / "2026" / bond_source.name
+    ).is_file()
+    assert not (
+        data_root / "06-sections" / "bond_issuance" / "2026" / meeting_source.name
+    ).exists()
+
+
+def test_section_save_rejects_year_directly_under_sections_stage_without_mode(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "05-internal-html-download"
+    source = input_directory / "2026" / "20260101000001.html"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2>"
+        "<p>본문</p></body></html>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="06-sections"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(tmp_path / "06-sections"),
+            }
+        )
+    assert not (tmp_path / "06-sections" / "2026").exists()
+
+
+def test_workspace_parse_rewrites_stage_root_input_to_mode(tmp_path: Path) -> None:
+    workspace = resolve_disclosure_workspace(tmp_path / "workspace", create=True)
+    payload = apply_workspace_defaults(
+        "parse",
+        {
+            "data_root": str(workspace.root),
+            "mode": "bond_issuance",
+            "input_directory": str(workspace.sections),
+        },
+    )
+    assert payload["input_directory"] == str(
+        workspace.sections / "bond_issuance"
     )
 
 
@@ -612,9 +817,13 @@ def test_workspace_defaults_use_parent_html_for_derived_filter(tmp_path: Path) -
     assert parsed["compressed_metadata_path"] == str(
         workspace.external_compress / "parent" / "compressed-external-html.json"
     )
+    assert parsed["input_directory"] == str(workspace.sections / "parent")
     assert parsed["output_directory"] == str(
         workspace.converted / "parent" / "subfilters" / "child"
     )
+    sections = apply_workspace_defaults("section_save", identity)
+    assert sections["input_directory"] == str(workspace.internal / "parent")
+    assert sections["output_directory"] == str(workspace.sections / "parent")
 
 
 def test_workspace_defaults_preserve_explicit_stage_paths(tmp_path: Path) -> None:
@@ -824,7 +1033,9 @@ def test_workspace_links_override_explicit_stage_paths(tmp_path: Path) -> None:
     assert sections["input_directory"] == str(
         target_root / "05-internal-html-download" / "bond_issuance"
     )
-    assert sections["output_directory"] == str(target_root / "06-sections")
+    assert sections["output_directory"] == str(
+        target_root / "06-sections" / "bond_issuance"
+    )
 
     parsed = apply_workspace_defaults(
         "parse",
@@ -837,7 +1048,9 @@ def test_workspace_links_override_explicit_stage_paths(tmp_path: Path) -> None:
             "compressed_metadata_path": str(explicit / "compressed.json"),
         },
     )
-    assert parsed["input_directory"] == str(target_root / "06-sections")
+    assert parsed["input_directory"] == str(
+        target_root / "06-sections" / "bond_issuance"
+    )
     assert parsed["output_directory"] == str(
         target_root / "07-converted" / "bond_issuance"
     )
@@ -1025,7 +1238,9 @@ def test_workspace_settings_map_existing_workflows(tmp_path: Path) -> None:
         "internal_html_output_directory": str(
             data_root / "05-internal-html-download" / "bond_issuance"
         ),
-        "html_section_split_output_directory": str(data_root / "06-sections"),
+        "html_section_split_output_directory": str(
+            data_root / "06-sections" / "bond_issuance"
+        ),
         "html_parse_output_directory": str(
             data_root / "07-converted" / "bond_issuance"
         ),

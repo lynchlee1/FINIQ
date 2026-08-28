@@ -181,7 +181,7 @@ def test_automation_stage_paths_use_linked_stage_directories(tmp_path: Path) -> 
     ]
     assert _stage_output_paths(profile, 2) == [target_root / "02-table"]
     assert _stage_output_paths(profile, 6) == [
-        target_root / "06-sections" / ".automation-current"
+        target_root / "06-sections" / "bond_issuance" / ".automation-current"
     ]
     assert automation._detail_download_payload(profile)["output_directory"] == str(
         target_root / "01-list"
@@ -966,7 +966,7 @@ def test_section_inspection_uses_automatic_exact_output(
         / ".automation-current"
     )
     assert captured["output_directory"] == str(
-        tmp_path / "06-sections" / ".automation-current"
+        tmp_path / "06-sections" / "bond_issuance" / ".automation-current"
     )
 
 
@@ -974,7 +974,9 @@ def test_parse_inspection_compares_mode_filters_membership_and_mtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
-    input_directory = tmp_path / "06-sections" / ".automation-current"
+    input_directory = (
+        tmp_path / "06-sections" / "bond_issuance" / ".automation-current"
+    )
     input_directory.mkdir(parents=True)
     source = input_directory / "2026" / "20260712000001.html"
     source.parent.mkdir()

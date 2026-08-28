@@ -84,6 +84,9 @@ class DisclosureWorkspace:
     def internal_mode(self, mode: str) -> Path:
         return self.internal / validate_workspace_mode(mode)
 
+    def sections_mode(self, mode: str) -> Path:
+        return self.sections / validate_workspace_mode(mode)
+
     def converted_mode(self, mode: str) -> Path:
         return self.converted / validate_workspace_mode(mode)
 
@@ -118,6 +121,10 @@ class DisclosureWorkspace:
     def internal_owner_mode(self, mode: str, *, parent_mode: object = None) -> Path:
         owner_mode = mode if parent_mode in (None, "") else parent_mode
         return self.internal_mode(validate_workspace_mode(owner_mode))
+
+    def sections_owner_mode(self, mode: str, *, parent_mode: object = None) -> Path:
+        owner_mode = mode if parent_mode in (None, "") else parent_mode
+        return self.sections_mode(validate_workspace_mode(owner_mode))
 
     def paths_payload(self, modes: list[str] | None = None) -> dict[str, Any]:
         normalized_modes = sorted({validate_workspace_mode(mode) for mode in modes or []})
@@ -379,6 +386,7 @@ def prepare_disclosure_workspace_payload(payload: dict[str, Any]) -> dict[str, A
         workspace.external_mode(mode).mkdir(parents=True, exist_ok=True)
         workspace.external_compress_mode(mode).mkdir(parents=True, exist_ok=True)
         workspace.internal_mode(mode).mkdir(parents=True, exist_ok=True)
+        workspace.sections_mode(mode).mkdir(parents=True, exist_ok=True)
         workspace.converted_mode(mode).mkdir(parents=True, exist_ok=True)
 
     manifest = {
@@ -415,7 +423,9 @@ def disclosure_workspace_settings(
         "internal_html_output_directory": str(
             workspace.internal_mode(normalized_mode)
         ),
-        "html_section_split_output_directory": str(workspace.sections),
+        "html_section_split_output_directory": str(
+            workspace.sections_mode(normalized_mode)
+        ),
         "html_parse_output_directory": str(converted_path),
         "html_parse_result_path": str(
             converted_path / f"parsed-{normalized_mode}.json"
@@ -439,6 +449,33 @@ def _set_stage_path(
 
 def _stage_is_linked(workspace: DisclosureWorkspace, stage_name: str) -> bool:
     return workspace.stage_directory(stage_name) != workspace.root / stage_name
+
+
+def _is_under_workspace_sections(
+    workspace: DisclosureWorkspace, path: object
+) -> bool:
+    raw = str(path or "").strip()
+    if not raw:
+        return False
+    resolved = Path(raw).expanduser().resolve()
+    stage = workspace.sections.resolve()
+    return resolved == stage or stage in resolved.parents
+
+
+def _assign_sections_mode_directory(
+    payload: dict[str, Any],
+    key: str,
+    workspace: DisclosureWorkspace,
+    *,
+    mode: object,
+    parent_mode: object,
+    linked: bool,
+) -> None:
+    provided = str(payload.get(key) or "").strip()
+    if linked or not provided or _is_under_workspace_sections(workspace, provided):
+        payload[key] = str(
+            workspace.sections_owner_mode(mode, parent_mode=parent_mode)
+        )
 
 
 def apply_workspace_defaults(
@@ -560,18 +597,22 @@ def apply_workspace_defaults(
                 str(workspace.internal_owner_mode(mode, parent_mode=parent_mode)),
                 linked=internal_linked,
             )
-        _set_stage_path(
+        _assign_sections_mode_directory(
             payload,
             "output_directory",
-            str(workspace.sections),
+            workspace,
+            mode=payload.get("mode"),
+            parent_mode=parent_mode,
             linked=_stage_is_linked(workspace, "06-sections"),
         )
     elif normalized_kind == "parse":
         mode = validate_workspace_mode(payload.get("mode"))
-        _set_stage_path(
+        _assign_sections_mode_directory(
             payload,
             "input_directory",
-            str(workspace.sections),
+            workspace,
+            mode=mode,
+            parent_mode=parent_mode,
             linked=_stage_is_linked(workspace, "06-sections"),
         )
         _set_stage_path(

@@ -6387,12 +6387,15 @@ def test_section_save_ignores_automation_cache_below_standard_input(
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
+            "mode": "bond_issuance",
             "section_save_rules": {"toc_1 1": ["toc_1"]},
         }
     )
 
     assert result["summary"]["found_files"] == 1
-    assert (output_directory / "2026" / visible.name).is_file()
+    assert result["output_directory"] == str(output_directory / "bond_issuance")
+    assert (output_directory / "bond_issuance" / "2026" / visible.name).is_file()
+    assert not (output_directory / "2026").exists()
     assert not (output_directory / ".automation-current" / hidden.name).exists()
 
 
@@ -6446,6 +6449,7 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
+            "mode": "bond_issuance",
             "section_save_rules": {
                 "toc_1 주요사항보고서 toc_2 신주인수권부사채권 발행결정": [
                     "toc_2"
@@ -6453,7 +6457,7 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
             },
         }
     )
-    section_file = output_directory / "2013" / source_file.name
+    section_file = output_directory / "bond_issuance" / "2013" / source_file.name
     section_html = section_file.read_text(encoding="utf-8")
 
     assert "정정신고" not in section_html
@@ -6497,11 +6501,12 @@ def test_section_save_never_discards_correction_word_after_first_section(
         {
             "input_directory": str(input_directory),
             "output_directory": str(output_directory),
+            "mode": "bond_issuance",
         }
     )
-    output = (output_directory / "2026" / source_file.name).read_text(
-        encoding="utf-8"
-    )
+    output = (
+        output_directory / "bond_issuance" / "2026" / source_file.name
+    ).read_text(encoding="utf-8")
 
     assert result["summary"]["removed_correction_sections"] == 0
     assert "일반공시" in output
