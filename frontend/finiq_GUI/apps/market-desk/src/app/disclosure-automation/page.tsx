@@ -123,6 +123,7 @@ type StoredProfile = {
   parserMethod?: string;
   pageSize?: number;
   localWorkers?: number;
+  progressInterval?: number;
   timeout?: number;
 };
 
@@ -226,6 +227,7 @@ export default function DisclosureAutomationPage() {
   const [parserMethods, setParserMethods] = useState<ParserMethodConfig[]>([]);
   const [pageSize, setPageSize] = useState("100");
   const [localWorkers, setLocalWorkers] = useState("1");
+  const [progressInterval, setProgressInterval] = useState("25");
   const [timeout, setTimeoutValue] = useState("20");
   const [downloadOptions, setDownloadOptions] = useState<DownloadOptions | null>(null);
   const [plan, setPlan] = useState<AutomationPlan | null>(null);
@@ -329,6 +331,11 @@ export default function DisclosureAutomationPage() {
         throw new Error(`localWorkers must be between 1 and ${workerLimit}`);
       }
       setLocalWorkers(String(configuredWorkers));
+      const configuredProgressInterval = stored?.progressInterval ?? 25;
+      if (!Number.isInteger(configuredProgressInterval) || configuredProgressInterval < 1 || configuredProgressInterval > 10000) {
+        throw new Error("progressInterval must be between 1 and 10000");
+      }
+      setProgressInterval(String(configuredProgressInterval));
       const configuredTimeout = stored?.timeout ?? 20;
       if (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0) {
         throw new Error("timeout must be a positive number");
@@ -390,6 +397,7 @@ export default function DisclosureAutomationPage() {
   const validatedExecution = () => {
     const configuredPageSize = Number(pageSize);
     const configuredWorkers = Number(localWorkers);
+    const configuredProgressInterval = Number(progressInterval);
     const configuredTimeout = Number(timeout);
     if (!Number.isInteger(configuredPageSize) || configuredPageSize < 1) {
       throw new Error("pageSize must be a positive integer");
@@ -397,12 +405,16 @@ export default function DisclosureAutomationPage() {
     if (!Number.isInteger(configuredWorkers) || configuredWorkers < 1) {
       throw new Error("localWorkers must be a positive integer");
     }
+    if (!Number.isInteger(configuredProgressInterval) || configuredProgressInterval < 1 || configuredProgressInterval > 10000) {
+      throw new Error("progressInterval must be between 1 and 10000");
+    }
     if (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0) {
       throw new Error("timeout must be a positive number");
     }
     return {
       pageSize: configuredPageSize,
       localWorkers: configuredWorkers,
+      progressInterval: configuredProgressInterval,
       timeout: configuredTimeout,
     };
   };
@@ -443,6 +455,7 @@ export default function DisclosureAutomationPage() {
         parser_method: parserMethod,
         page_size: execution.pageSize,
         local_workers: execution.localWorkers,
+        progress_interval: execution.progressInterval,
         timeout: execution.timeout,
         kind_proxy_urls: kindProxyUrls,
       },
@@ -469,6 +482,7 @@ export default function DisclosureAutomationPage() {
       parserMethod,
       pageSize: execution.pageSize,
       localWorkers: execution.localWorkers,
+      progressInterval: execution.progressInterval,
       timeout: execution.timeout,
     };
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(stored));
@@ -928,6 +942,9 @@ export default function DisclosureAutomationPage() {
                 </HtmlInspectorField>
                 <HtmlInspectorField label={SETTINGS_LABELS.workerCount}>
                   <Input type="number" min="1" max={parallelWorkerCount} value={localWorkers} onChange={(event) => { setLocalWorkers(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
+                </HtmlInspectorField>
+                <HtmlInspectorField label={SETTINGS_LABELS.progressInterval}>
+                  <Input type="number" min="1" max="10000" value={progressInterval} onChange={(event) => { setProgressInterval(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />
                 </HtmlInspectorField>
                 <HtmlInspectorField label={SETTINGS_LABELS.timeoutSeconds}>
                   <Input type="number" min="1" max="120" value={timeout} onChange={(event) => { setTimeoutValue(event.target.value); setPlan(null); }} className={htmlInspectorControlClassName} />

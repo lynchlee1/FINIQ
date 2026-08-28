@@ -75,6 +75,8 @@ test("html section split exposes worker count setting for automatic section save
   assert.match(source, /setWorkers\(String\(workerCount\)\)/);
   assert.doesNotMatch(source, /config\.parallel_worker_count \|\| 1/);
   assert.match(source, /label: SETTINGS_LABELS\.workerCount/);
+  assert.match(source, /label: SETTINGS_LABELS\.progressInterval/);
+  assert.match(source, /progress_interval: parseOptionalNumber\(progressInterval\)/);
   assert.match(source, /workers: parseOptionalNumber\(workers\)/);
   assert.match(source, /\/api\/disclosures\/html\/cancel/);
   assert.match(source, /\/api\/disclosures\/html\/sections\/save\/start/);
@@ -302,6 +304,7 @@ test("right-dock number settings use compact inspector rows", async () => {
   assert.match(templateSource, /if \(field\.kind === "select"\) \{[\s\S]*?if \(layout === "inspector"\)/);
   assert.doesNotMatch(downloadSource, /같은 워커 수를 연도 간/);
   assert.match(htmlDownloadSource, /HtmlWorkflowForm layout="inspector" fields=\{requestOptionFields\}/);
+  assert.match(htmlDownloadSource, /const compressionSettingFields:[\s\S]*?label: SETTINGS_LABELS\.progressInterval/);
   assert.match(parseSource, /HtmlWorkflowForm layout="inspector" fields=\{parseOptionFields\}/);
   assert.match(sectionResultsSource, /HtmlWorkflowForm layout="inspector" fields=\{settingsFields\}/);
 });

@@ -279,7 +279,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       return;
     }
     listDisclosureConditionPresets(dataRoot).then((response) => {
-      setFilterPresets(response.presets);
+      setFilterPresets(response.presets.filter((preset) => !preset.parent_mode));
     }).catch((error) => {
       setFilterPresets([]);
       setStatus(error instanceof Error ? error.message : String(error));
@@ -544,6 +544,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       {
         data_root: dataRoot,
         parallel_workers: compressWorkers ? Number(compressWorkers) : null,
+        progress_interval: Number(progressInterval),
       },
     );
   };
@@ -658,6 +659,7 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       input_directory: "",
       output_directory: "",
       parallel_workers: compressWorkers ? Number(compressWorkers) : null,
+      progress_interval: Number(progressInterval),
     };
     startJob("/api/disclosures/external-html-download/compress/start", payload);
   };
@@ -699,6 +701,15 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     },
   ];
   const compressionSettingFields: HtmlWorkflowField[] = [
+    {
+      id: "progressInterval",
+      kind: "input",
+      type: "number",
+      label: SETTINGS_LABELS.progressInterval,
+      value: progressInterval,
+      onChange: setProgressInterval,
+      span: 2,
+    },
     {
       id: "compressWorkers",
       kind: "input",

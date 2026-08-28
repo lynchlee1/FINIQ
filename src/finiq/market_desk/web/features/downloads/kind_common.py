@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -299,9 +300,11 @@ def _download_integrity_status(
     output_directory: Path,
     page_size: int,
     precomputed_status: dict[str, int] | None = None,
+    precomputed_file_state: str | None = None,
 ) -> dict[str, Any]:
     status: dict[str, Any] = {
         "output_directory": str(output_directory),
+        "page_size": page_size,
         "pagination": None,
         "integrity_valid": False,
         "complete": False,
@@ -309,8 +312,13 @@ def _download_integrity_status(
         "errors": [],
     }
     try:
+        file_state_before = (
+            precomputed_file_state
+            if precomputed_status is not None and precomputed_file_state is not None
+            else _result_body_file_state(output_directory)
+        )
         status["pagination"] = _detect_pagination(output_directory)
-        if precomputed_status is not None:
+        if precomputed_status is not None and precomputed_file_state is not None:
             status.update(precomputed_status)
             status["integrity_valid"] = True
             total_pages = int(precomputed_status.get("total_pages") or 0)
@@ -318,6 +326,8 @@ def _download_integrity_status(
             status["complete"] = total_pages > 0 and downloaded_pages == total_pages
             if total_pages > downloaded_pages:
                 status["missing_pages"] = list(range(downloaded_pages + 1, total_pages + 1))
+            if file_state_before == _result_body_file_state(output_directory):
+                status["file_state"] = file_state_before
             return status
 
         inspected = inspect_download_directory_pages(
@@ -332,6 +342,8 @@ def _download_integrity_status(
         status["complete"] = total_pages > 0 and downloaded_pages == total_pages
         if total_pages > downloaded_pages:
             status["missing_pages"] = list(range(downloaded_pages + 1, total_pages + 1))
+        if file_state_before == _result_body_file_state(output_directory):
+            status["file_state"] = file_state_before
     except Exception as exc:
         status["errors"].append(str(exc))
     return status
@@ -339,6 +351,20 @@ def _download_integrity_status(
 
 def _result_body_files(output_directory: Path) -> list[Path]:
     return sorted(output_directory.glob("*_post_page_*.body"))
+
+
+def _result_body_file_state(
+    output_directory: Path,
+) -> str:
+    digest = hashlib.sha256()
+    for path in _result_body_files(output_directory):
+        stat = path.stat()
+        digest.update(
+            f"{len(path.name)}:{path.name}:{stat.st_size}:{stat.st_mtime_ns}\n".encode(
+                "utf-8"
+            )
+        )
+    return digest.hexdigest()
 
 
 def _workflow_auxiliary_files(output_directory: Path) -> list[Path]:

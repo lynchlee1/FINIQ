@@ -30,6 +30,21 @@ def test_stage_link_uses_visible_filename() -> None:
     assert STAGE_LINK_FILENAME == "finiq-stage-link.json"
 
 
+def _write_stage_link(data_root: Path, stage_name: str, target_root: Path) -> None:
+    local_stage = data_root / stage_name
+    local_stage.mkdir(parents=True, exist_ok=True)
+    (local_stage / STAGE_LINK_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_stage_link_v1",
+                "schema_version": 1,
+                "target_workspace": str(target_root),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_prepare_disclosure_workspace_creates_stage_roots_and_modes(
     tmp_path: Path,
 ) -> None:
@@ -178,8 +193,10 @@ def test_workspace_rejects_invalid_stage_link(
         json.dumps(payload), encoding="utf-8"
     )
 
+    workspace = resolve_disclosure_workspace(tmp_path / "workspace")
+
     with pytest.raises(ValueError, match=error):
-        resolve_disclosure_workspace(tmp_path / "workspace")
+        _ = workspace.list
 
 
 def test_workspace_link_shadows_existing_local_data(tmp_path: Path) -> None:
@@ -221,8 +238,82 @@ def test_workspace_rejects_chained_stage_link(tmp_path: Path) -> None:
             json.dumps(payload), encoding="utf-8"
         )
 
+    workspace = resolve_disclosure_workspace(data_root)
+
     with pytest.raises(ValueError, match="Chained"):
-        resolve_disclosure_workspace(data_root)
+        _ = workspace.list
+
+
+def test_section_steps_ignore_broken_unrelated_stage_links(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    missing_target = tmp_path / "missing-target"
+    for stage_name in ("01-list", "04-external-html-download"):
+        _write_stage_link(data_root, stage_name, missing_target)
+
+    inspected = apply_workspace_defaults(
+        "section_inspect",
+        {"data_root": str(data_root), "mode": "bond_issuance"},
+    )
+    saved = apply_workspace_defaults(
+        "section_save",
+        {"data_root": str(data_root), "mode": "bond_issuance"},
+    )
+
+    assert inspected["input_directory"] == str(
+        data_root / "05-internal-html-download" / "bond_issuance"
+    )
+    assert saved["input_directory"] == inspected["input_directory"]
+    assert saved["output_directory"] == str(data_root / "06-sections")
+
+
+def test_internal_download_ignores_broken_unrelated_stage_links(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    missing_target = tmp_path / "missing-target"
+    for stage_name in ("01-list", "04-external-html-download"):
+        _write_stage_link(data_root, stage_name, missing_target)
+
+    payload = apply_workspace_defaults(
+        "internal_html_download",
+        {"data_root": str(data_root), "mode": "bond_issuance"},
+    )
+
+    assert payload["source_compressed_json_path"] == str(
+        data_root
+        / "04-external-html-compress"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+    assert payload["output_directory"] == str(
+        data_root / "05-internal-html-download" / "bond_issuance"
+    )
+
+
+def test_section_steps_validate_only_their_required_stage_links(tmp_path: Path) -> None:
+    data_root = tmp_path / "workspace"
+    missing_target = tmp_path / "missing-target"
+    _write_stage_link(data_root, "05-internal-html-download", missing_target)
+
+    with pytest.raises(ValueError, match="target workspace does not exist"):
+        apply_workspace_defaults(
+            "section_inspect",
+            {"data_root": str(data_root), "mode": "bond_issuance"},
+        )
+
+    (data_root / "05-internal-html-download" / STAGE_LINK_FILENAME).unlink()
+    _write_stage_link(data_root, "06-sections", missing_target)
+
+    inspected = apply_workspace_defaults(
+        "section_inspect",
+        {"data_root": str(data_root), "mode": "bond_issuance"},
+    )
+    assert inspected["input_directory"] == str(
+        data_root / "05-internal-html-download" / "bond_issuance"
+    )
+    with pytest.raises(ValueError, match="target workspace does not exist"):
+        apply_workspace_defaults(
+            "section_save",
+            {"data_root": str(data_root), "mode": "bond_issuance"},
+        )
 
 
 def test_manage_stage_links_add_change_and_remove(tmp_path: Path) -> None:

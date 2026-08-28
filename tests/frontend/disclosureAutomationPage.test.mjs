@@ -49,6 +49,8 @@ test("automation page uses a continuous work range and in-page settings actions"
   assert.doesNotMatch(page, /<option value="(?:bond_issuance|rights_issuance|shareholder_meeting)"/);
   assert.match(page, /mode: selectedPreset/);
   assert.match(page, /parser_method: parserMethod/);
+  assert.match(page, /<HtmlInspectorField label=\{SETTINGS_LABELS\.progressInterval\}>/);
+  assert.match(page, /progress_interval: execution\.progressInterval/);
 });
 
 test("automation range is selected directly by dragging task-table controls", async () => {

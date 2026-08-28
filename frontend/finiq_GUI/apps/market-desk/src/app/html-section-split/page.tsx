@@ -73,6 +73,7 @@ export default function HtmlSectionSplitPage() {
   const [outputDirectory, setOutputDirectory] = useState("");
   const [limit, setLimit] = useState("20");
   const [reportLimit, setReportLimit] = useState("50");
+  const [progressInterval, setProgressInterval] = useState("25");
   const [workers, setWorkers] = useState("1");
   const [filterPresets, setFilterPresets] = useState<DisclosureConditionPreset[]>([]);
   const [selectedFilterId, setSelectedFilterId] = useState("");
@@ -202,6 +203,8 @@ export default function HtmlSectionSplitPage() {
     ...(currentParentMode ? { parent_mode: currentParentMode } : {}),
     input_directory: useSeparateOutputDirectory ? inputDirectory : "",
     workers: parseOptionalNumber(workers),
+    report_limit: parseOptionalNumber(reportLimit),
+    progress_interval: parseOptionalNumber(progressInterval),
   };
   const currentIntegrityInspectionKey = JSON.stringify(integrityInspectionPayload);
   currentIntegrityInspectionKeyRef.current = currentIntegrityInspectionKey;
@@ -235,7 +238,7 @@ export default function HtmlSectionSplitPage() {
       return;
     }
     listDisclosureConditionPresets(dataRoot).then((response) => {
-      setFilterPresets(response.presets);
+      setFilterPresets(response.presets.filter((preset) => !preset.parent_mode));
     }).catch((err) => {
       setFilterPresets([]);
       setSelectedFilterId("");
@@ -364,6 +367,15 @@ export default function HtmlSectionSplitPage() {
       label: "문제 파일 표시 수",
       value: reportLimit,
       onChange: setReportLimit,
+      span: 2,
+    },
+    {
+      id: "progressInterval",
+      kind: "input",
+      type: "number",
+      label: SETTINGS_LABELS.progressInterval,
+      value: progressInterval,
+      onChange: setProgressInterval,
       span: 2,
     },
     {
@@ -606,6 +618,7 @@ export default function HtmlSectionSplitPage() {
           input_directory: useSeparateOutputDirectory ? inputDirectory : "",
           output_directory: useSeparateOutputDirectory ? outputDirectory : "",
           workers: parseOptionalNumber(workers),
+          progress_interval: parseOptionalNumber(progressInterval),
         }),
       });
       if (!response.ok) {
@@ -628,6 +641,13 @@ export default function HtmlSectionSplitPage() {
     && !!currentFilterMode
     && (!useSeparateOutputDirectory || !!inputDirectory);
   const integrityProblemFiles = integrityInspectionResult?.problem_files || [];
+  const integrityProblemCount = Number(integrityInspectionResult?.summary?.failed_files || 0)
+    + Number(integrityInspectionResult?.summary?.files_without_sections || 0);
+  const sourceUnavailableCount = Number(integrityInspectionResult?.summary?.source_unavailable_files || 0);
+  const firstIntegrityProblem = integrityProblemFiles[0];
+  const firstIntegrityProblemDescription = firstIntegrityProblem
+    ? `${firstIntegrityProblem.source_relative_path || firstIntegrityProblem.source_file}: ${firstIntegrityProblem.error || "원인을 확인할 수 없습니다."}`
+    : "";
   const inspectionState: SingleCheckDataIntegrityInspectionState = !hasInspectionInput
     ? "waiting"
     : isIntegrityInspecting
@@ -635,18 +655,18 @@ export default function HtmlSectionSplitPage() {
       : integrityInspectionError
         ? "failed"
       : integrityInspectionResult
-        ? integrityProblemFiles.length > 0 ? "failed" : "success"
+        ? integrityProblemCount > 0 ? "failed" : "success"
         : "ready";
   const inspectionCopy = {
     waiting: ["조건검색 필터와 경로를 선택하세요", "조건검색 필터와 작업공간 디렉토리를 선택한 다음 기존 원문의 목차 구성을 검사하세요."],
     ready: ["기존 원문 데이터 검사가 필요합니다", "목차 분리 전에 입력 HTML 전체의 구성을 확인하세요."],
     running: ["기존 원문 데이터를 확인하고 있습니다", "입력 HTML을 읽어 목차 구성과 문제 파일을 확인합니다."],
-    success: ["기존 원문 데이터를 그대로 사용해도 됩니다", `목차가 있는 공시 ${formatInteger(integrityInspectionResult?.summary?.documents_with_sections || 0)}개를 확인했습니다.`],
-    failed: ["기존 원문 데이터에 문제가 있습니다", integrityInspectionError || `읽거나 처리할 수 없는 파일 ${formatInteger(integrityProblemFiles.length)}개를 확인하세요.`],
+    success: ["기존 원문 데이터를 그대로 사용해도 됩니다", `목차가 있는 공시 ${formatInteger(integrityInspectionResult?.summary?.documents_with_sections || 0)}개를 확인했습니다.${sourceUnavailableCount > 0 ? ` KIND 원본 없음 ${formatInteger(sourceUnavailableCount)}건은 별도로 확인했습니다.` : ""}`],
+    failed: ["기존 원문 데이터에 문제가 있습니다", integrityInspectionError || `문제 파일 ${formatInteger(integrityProblemCount)}개를 확인했습니다.${firstIntegrityProblemDescription ? ` 첫 문제: ${firstIntegrityProblemDescription}` : ""}`],
   }[inspectionState];
   const inspectionStepSummary = integrityInspectionError
     || (integrityInspectionResult
-      ? `대상 ${formatInteger(integrityInspectionResult.summary?.found_files || 0)}개, 목차 없음 ${formatInteger(integrityInspectionResult.summary?.files_without_sections || 0)}개, 문제 파일 ${formatInteger(integrityProblemFiles.length)}개입니다.`
+      ? `대상 ${formatInteger(integrityInspectionResult.summary?.found_files || 0)}개, 정상 ${formatInteger(integrityInspectionResult.summary?.documents_with_sections || 0)}개, KIND 원본 없음 ${formatInteger(sourceUnavailableCount)}개, 목차 없음 ${formatInteger(integrityInspectionResult.summary?.files_without_sections || 0)}개, 읽기 실패 ${formatInteger(integrityInspectionResult.summary?.failed_files || 0)}개입니다.${firstIntegrityProblemDescription ? ` 첫 문제: ${firstIntegrityProblemDescription}` : ""}`
       : "입력 HTML을 읽어 목차 구성과 문제 파일을 확인합니다.");
 
   return (

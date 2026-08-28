@@ -88,7 +88,43 @@ def _compression_payload(
     return payload
 
 
-def test_external_html_compression_requires_output_directory(tmp_path: Path) -> None:
+def test_external_html_compression_uses_and_creates_standard_output_directory(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    output_directory = Path(str(payload["output_directory"]))
+    assert not output_directory.exists()
+
+    result = compress_disclosure_external_html_payload(
+        {
+            "data_root": payload["data_root"],
+            "mode": payload["mode"],
+            "parallel_workers": 1,
+        }
+    )
+
+    assert result["output_directory"] == str(output_directory)
+    assert (output_directory / "compressed-external-html.json").is_file()
+
+
+def test_external_html_compression_uses_requested_progress_interval(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    payload["progress_interval"] = 1
+    progress_log: list[str] = []
+
+    compress_disclosure_external_html_payload(
+        payload,
+        progress_callback=progress_log.append,
+    )
+
+    assert "외부 HTML 압축 중간 확인: 1/1건 처리." in progress_log
+
+
+def test_external_html_compression_does_not_fall_back_to_input_directory(
+    tmp_path: Path,
+) -> None:
     input_directory = tmp_path / "04-external-html-download" / "bond_issuance"
 
     with pytest.raises(ValueError, match="output_directory is required"):

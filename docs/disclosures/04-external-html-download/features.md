@@ -84,7 +84,7 @@ KIND 요청은 직접 연결과 `kind_proxy_urls`에 명시한 localhost HTTP �
 
 #### Defaults and Exceptions
 
-- 압축할 폴더는 `input_directory`, 압축 JSON을 저장할 폴더는 `output_directory`로 받는다. 두 경로는 모두 필수며, worker 수는 `parallel_workers`로만 받는다.
+- 표준 작업은 `data_root`와 `mode`에서 `04-external-html-download/<mode>` 입력과 `04-external-html-compress/<mode>` 출력을 정한다. 출력 폴더가 없으면 저장할 때 만들며, 입력 폴더에 압축 JSON을 대신 저장하지 않는다. worker 수는 `parallel_workers`로만 받는다.
 - 외부 HTML 안에 `acptNo`, `mainDoc`, `attachedDoc` 또는 각 select의 option 목록이 없으면 실패 처리한다.
 - 외부 HTML에서 읽은 `acptNo`가 파일명과 다르면 실패 처리하며, 빈 `acptNo`를 파일명으로 대신하지 않는다.
 - 외부 HTML의 `<YYYY>` 폴더와 manifest metadata의 `disclosed_at` 연도가 다르면 실패 처리한다.
@@ -129,3 +129,4 @@ KIND 요청은 직접 연결과 `kind_proxy_urls`에 명시한 localhost HTTP �
 - 회사명이나 종목 코드를 읽지 못하면 빈 값으로 둔다.
 - 본문 문서 번호나 제출일을 읽지 못해도 다른 값으로 대신하지 않는다.
 - 실행 결과의 진행 내역은 생성 중부터 최근 100줄만 보관한다.
+- 우측 `설정`의 `진행 확인 간격 (건)`은 외부 HTML 저장과 압축 진행 로그에 함께 적용한다.

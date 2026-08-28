@@ -3,6 +3,7 @@
 ## Paths
 
 - `<data_root>/03-filter/<mode>/filtered.json`을 입력으로 받아 `<data_root>/04-external-html-download/<mode>/<YYYY>/<acpt_no>.html`에 외부 HTML을, `<data_root>/04-external-html-download/<mode>/kind_disclosure_html_manifest.json`에 원본 연결 정보를, `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`에 압축한 문서 선택 정보를 저장한다.
+- 압축 단계는 `data_root`와 `mode`에서 입력·출력 경로를 정하며, `<data_root>/04-external-html-compress/<mode>`가 없으면 저장할 때 생성한다.
 - 파생 필터 `<parent_mode>/<mode>`는 `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`의 멤버십을 사용하되 원본은 `<data_root>/04-external-html-download/<parent_mode>`, 압축 결과는 `<data_root>/04-external-html-compress/<parent_mode>`에서 읽는다. 두 폴더 모두 `subfilters/<mode>`나 자식 `mode`의 별도 출력 폴더는 만들지 않는다.
 
 ### `<data_root>/03-filter/<mode>/filtered.json`

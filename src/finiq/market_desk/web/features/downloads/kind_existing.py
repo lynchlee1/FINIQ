@@ -91,6 +91,7 @@ def _validate_single_folder(
     cancel_check: Callable[[], bool] | None = None,
     validation_parallelism: int | None = None,
     kind_query_lock: Any | None = None,
+    precomputed_status: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     _raise_if_cancelled(cancel_check)
     body_files = list(folder.glob("*_post_page_*.body"))
@@ -196,12 +197,36 @@ def _validate_single_folder(
                     f"does not match total pages ({total_pages})"
                 )
         else:
-            inspected = inspect_download_directory_pages(
-                folder,
-                expected_page_size=expected_page_size,
-                require_complete=True,
-                validation_parallelism=validation_parallelism,
-            )
+            inspected = None
+            if (
+                precomputed_status is not None
+                and int(precomputed_status.get("page_size") or 0)
+                == expected_page_size
+                and precomputed_status.get("file_state")
+                == _result_body_file_state(folder)
+            ):
+                if not precomputed_status.get("integrity_valid"):
+                    errors = precomputed_status.get("errors") or []
+                    raise ValueError("; ".join(str(error) for error in errors))
+                downloaded_pages = int(
+                    precomputed_status.get("downloaded_pages") or 0
+                )
+                total_pages = int(precomputed_status.get("total_pages") or 0)
+                if downloaded_pages != total_pages:
+                    raise ValueError(
+                        "페이지 무결성 검사 실패: 저장된 페이지 수와 페이지네이션의 "
+                        "전체 페이지 수가 다릅니다. "
+                        f"저장된 페이지는 {downloaded_pages}개, "
+                        f"페이지네이션은 {total_pages}페이지입니다."
+                    )
+                inspected = precomputed_status
+            if inspected is None:
+                inspected = inspect_download_directory_pages(
+                    folder,
+                    expected_page_size=expected_page_size,
+                    require_complete=True,
+                    validation_parallelism=validation_parallelism,
+                )
             local_count = inspected.get("total_items")
         _raise_if_cancelled(cancel_check)
     except DownloadCancelled:
@@ -249,6 +274,7 @@ def check_existing_downloads(
     cancel_check: Callable[[], bool] | None = None,
     progress_callback: Callable[[str], None] | None = None,
     parallel_workers: int | None = None,
+    precomputed_download_statuses: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Inspect output directory to detect and validate existing downloaded date ranges."""
 
@@ -294,6 +320,11 @@ def check_existing_downloads(
     current_filters = (
         _current_filters_payload(current_payload) if current_payload else None
     )
+    precomputed_by_folder = {
+        str(Path(status["output_directory"]).expanduser().resolve()): status
+        for status in precomputed_download_statuses or []
+        if status.get("output_directory")
+    }
 
     # Check for yearly subfolders (YYYYMMDD_YYYYMMDD)
     try:
@@ -414,6 +445,9 @@ def check_existing_downloads(
                     cancel_check=cancel_check,
                     validation_parallelism=validation_parallelism,
                     kind_query_lock=kind_query_lock,
+                    precomputed_status=precomputed_by_folder.get(
+                        str(item[0].resolve())
+                    ),
                 ),
                 max_pending=worker_count * 2,
             )

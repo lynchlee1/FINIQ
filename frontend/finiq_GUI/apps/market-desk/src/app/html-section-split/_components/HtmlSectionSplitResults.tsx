@@ -19,6 +19,10 @@ export type TocItem = {
   toc_id: string;
   index: number;
   title: string;
+  kind?: "preamble" | "cover" | "part" | "section" | "document";
+  level?: number;
+  parent_toc_id?: string | null;
+  is_toc?: boolean;
 };
 
 export type DocumentRow = {
@@ -26,7 +30,11 @@ export type DocumentRow = {
   source_name: string;
   source_relative_path: string;
   section_count?: number;
+  toc_count?: number;
   sections?: TocItem[];
+  source_unavailable?: {
+    reason?: string;
+  } | null;
 };
 
 export type SplitSection = TocItem & {
@@ -36,6 +44,7 @@ export type SplitSection = TocItem & {
 export type SplitResult = {
   document: DocumentRow;
   section_count: number;
+  toc_count?: number;
   sections: SplitSection[];
 };
 
@@ -44,6 +53,7 @@ export type ReviewView = "source" | "sections";
 export type ProblemFile = {
   kind: "read_failed" | "no_sections";
   source_file: string;
+  source_relative_path?: string;
   error?: string;
 };
 
@@ -55,6 +65,7 @@ export type InspectResult = {
     files_without_sections?: number;
     failed_files?: number;
     reported_problem_files?: number;
+    source_unavailable_files?: number;
     page?: number;
     page_size?: number;
     returned_files?: number;
@@ -211,7 +222,7 @@ export function HtmlSectionSplitResults({
           onViewSections(item);
           scrollToReviewPanel();
         }}
-        disabled={isSplitting && isSelected}
+        disabled={(isSplitting && isSelected) || Boolean(item.source_unavailable)}
       >
         <Loader2
           className={[
@@ -269,7 +280,7 @@ export function HtmlSectionSplitResults({
 
     return (
       <>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-col items-start gap-1.5">
           {splitResult.sections.map((section) => (
             <Button
               key={section.toc_id}
@@ -277,6 +288,7 @@ export function HtmlSectionSplitResults({
               variant={section.toc_id === selectedSection?.toc_id ? "default" : "outline"}
               size="sm"
               onClick={() => onSelectSection(section.toc_id)}
+              style={{ marginLeft: `${Math.max(0, section.level || 0) * 16}px` }}
             >
               <span className="font-mono">{section.toc_id}</span>
               {section.title ? <span className="ml-1">{section.title}</span> : null}
@@ -330,11 +342,14 @@ export function HtmlSectionSplitResults({
                   return (
                     <tr key={item.source_file} className={isSelected ? "bg-slate-50 dark:bg-[#21262d]" : ""}>
                       <td className="px-3 py-3 align-middle">
-                        <p className="font-medium text-slate-900 dark:text-slate-100">{item.source_name}</p>
+                        <p className="font-medium text-slate-900 dark:text-slate-100">
+                          {item.source_name}
+                          {item.source_unavailable ? <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">KIND 원본 없음</span> : null}
+                        </p>
                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">{compactPath(item.source_relative_path || item.source_file)}</p>
                       </td>
                       <td className="px-3 py-3 text-right align-middle tabular-nums text-slate-700 dark:text-slate-300">
-                        {formatInteger(item.section_count || 0)}
+                        {formatInteger(item.toc_count || 0)}
                       </td>
                       <td className="px-3 py-3 text-center align-middle">
                         {rowReviewActions(item, isSelected)}
@@ -358,7 +373,7 @@ export function HtmlSectionSplitResults({
           description={
             selectedDocument
               ? activeReviewView === "sections" && splitResult
-                ? `${selectedDocument.source_relative_path || selectedDocument.source_name} - ${formatInteger(splitResult.section_count)}개 목차`
+                ? `${selectedDocument.source_relative_path || selectedDocument.source_name} - ${formatInteger(splitResult.toc_count || 0)}개 목차`
                 : selectedDocument.source_relative_path || selectedDocument.source_name
               : "공시 파일을 선택하세요."
           }

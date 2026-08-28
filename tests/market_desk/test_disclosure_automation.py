@@ -86,6 +86,7 @@ def test_normalize_automation_profile_fixes_safe_kind_execution_settings(
 
     assert profile["data_root"] == str(tmp_path.resolve())
     assert profile["execution"]["max_requests_per_minute"] == 45
+    assert profile["execution"]["progress_interval"] == 25
     assert "mutable_lookback_days" not in profile["execution"]
     assert profile["decisions"]["s6_sections"] == {
         "unmatched_policy": "automatic",
@@ -1314,6 +1315,7 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
         output = Path(str(body["output_directory"]))
         existing_before_download.append(sorted(output.rglob("*.html")))
         assert body["skip_existing"] is False
+        assert body["progress_interval"] == profile["execution"]["progress_interval"]
         acpt_numbers = [record["acpt_no"] for record in source["disclosures"]]
         for acpt_no in acpt_numbers:
             path = output / "2026" / f"{acpt_no}.html"
@@ -1330,6 +1332,7 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
         }
 
     def fake_compress(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        assert body["progress_interval"] == profile["execution"]["progress_interval"]
         directory = Path(str(body["input_directory"]))
         records = [
                 {
@@ -1644,7 +1647,9 @@ def test_stage_six_rejects_source_without_sections(
 def test_stage_six_allows_an_empty_filtered_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    profile = normalize_automation_profile(_profile(tmp_path))
+    payload = _profile(tmp_path)
+    payload["execution"]["progress_interval"] = 7  # type: ignore[index]
+    profile = normalize_automation_profile(payload)
     stage_five_output = _stage_output_paths(profile, 5)[0]
     assert stage_five_output == (
         tmp_path
@@ -1654,7 +1659,10 @@ def test_stage_six_allows_an_empty_filtered_result(
     )
     stage_five_output.mkdir(parents=True)
 
+    captured_body: dict[str, object] = {}
+
     def fake_save(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        captured_body.update(body)
         Path(str(body["output_directory"])).mkdir(parents=True)
         return {"summary": {"integrity_ok": True, "saved_files": 0}}
 
@@ -1671,4 +1679,5 @@ def test_stage_six_allows_an_empty_filtered_result(
     )
 
     assert result["summary"]["saved_files"] == 0
+    assert captured_body["progress_interval"] == 7
     assert _stage_output_paths(profile, 6)[0].is_dir()

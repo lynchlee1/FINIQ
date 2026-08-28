@@ -274,6 +274,12 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
                 execution.get("local_workers"),
                 field_name="local_workers",
             ),
+            "progress_interval": _positive_int(
+                execution.get("progress_interval"),
+                "progress_interval",
+                25,
+                10_000,
+            ),
             "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
             "kind_proxy_urls": normalize_kind_proxy_urls(
                 execution.get("kind_proxy_urls")
@@ -1776,7 +1782,7 @@ def _run_stage(
             "filter_blocks": selection["filter_blocks"],
             "include_external_html_download_acpt_numbers": True,
             "filter_workers": execution["local_workers"],
-            "progress_interval": 100,
+            "progress_interval": execution["progress_interval"],
         }
         workflow_run = begin_filter_workflow_payload(filter_body)
         filter_body["source_offset"] = workflow_run["source_offset"]
@@ -1847,7 +1853,7 @@ def _run_stage(
                         "max_requests_per_minute": KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE,
                         "max_workers": execution["local_workers"],
                         "kind_proxy_urls": execution["kind_proxy_urls"],
-                        "progress_interval": 25,
+                        "progress_interval": execution["progress_interval"],
                         "cancel_token": uuid.uuid4().hex,
                     },
                     progress_callback=progress_callback,
@@ -1864,6 +1870,7 @@ def _run_stage(
                         "input_directory": str(temporary),
                         "output_directory": str(compressed_temporary),
                         "parallel_workers": execution["local_workers"],
+                        "progress_interval": execution["progress_interval"],
                     },
                     progress_callback=progress_callback,
                 )
@@ -1965,7 +1972,7 @@ def _run_stage(
                         "max_requests_per_minute": KIND_AUTOMATION_CONTENT_REQUESTS_PER_MINUTE,
                         "max_workers": execution["local_workers"],
                         "kind_proxy_urls": execution["kind_proxy_urls"],
-                        "progress_interval": 25,
+                        "progress_interval": execution["progress_interval"],
                         "cancel_token": uuid.uuid4().hex,
                     },
                     progress_callback=progress_callback,
@@ -2012,6 +2019,7 @@ def _run_stage(
                     ),
                     "output_directory": str(temporary),
                     "workers": execution["local_workers"],
+                    "progress_interval": execution["progress_interval"],
                 },
                 progress_callback=progress_callback,
                 cancel_check=cancel_check,
@@ -2051,7 +2059,7 @@ def _run_stage(
                 ),
                 "parallel_workers": execution["local_workers"],
                 "skip_errors": False,
-                "progress_interval": 25,
+                "progress_interval": execution["progress_interval"],
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,

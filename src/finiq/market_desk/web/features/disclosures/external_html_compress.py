@@ -14,6 +14,9 @@ from finiq.market_desk.web.features.disclosures.filter_presets import (
     manage_filter_presets_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_common import *
+from finiq.market_desk.web.features.disclosures.html_common import (
+    _parse_progress_interval,
+)
 
 
 def _workspace_filter_presets(data_root: object) -> list[dict[str, Any]]:
@@ -42,6 +45,7 @@ def inspect_all_disclosure_external_html_compress_payload(
                 "mode": mode,
                 **({"parent_mode": parent_mode} if parent_mode else {}),
                 "parallel_workers": body.get("parallel_workers"),
+                "progress_interval": body.get("progress_interval"),
             },
             create_workspace=False,
         )
@@ -165,6 +169,9 @@ def inspect_disclosure_external_html_compress_payload(
     body: dict[str, Any],
 ) -> dict[str, Any]:
     """Verify the saved compressed JSON against the source HTML files."""
+    body = apply_workspace_defaults(
+        "external_html_compress", body, create_workspace=False
+    )
     input_directory_raw = str(body.get("input_directory") or "").strip()
     output_directory_raw = str(body.get("output_directory") or "").strip()
     if not input_directory_raw:
@@ -267,12 +274,14 @@ def compress_disclosure_external_html_payload(
         raise ValueError(
             "source_directory is not supported; use input_directory"
         )
+    body = apply_workspace_defaults("external_html_compress", body)
     input_directory_raw = str(body.get("input_directory") or "").strip()
     if not input_directory_raw:
         msg = "input_directory is required"
         raise ValueError(msg)
     input_directory = Path(input_directory_raw).expanduser().resolve()
     limit = _parse_merge_limit(body.get("limit"))
+    progress_interval = _parse_progress_interval(body.get("progress_interval"))
     output_directory_raw = str(body.get("output_directory") or "").strip()
     if not output_directory_raw:
         raise ValueError("output_directory is required")
@@ -447,7 +456,7 @@ def compress_disclosure_external_html_payload(
             record["title"] = str(metadata[expected_acpt_no].get("title") or "")
             indexed_records[index] = (year, acpt_no, record)
             completed_count = index + 1
-            if completed_count % 100 == 0:
+            if completed_count % progress_interval == 0:
                 emit(
                     f"외부 HTML 압축 중간 확인: {completed_count}/{len(html_files)}건 처리."
                 )
@@ -469,7 +478,7 @@ def compress_disclosure_external_html_payload(
                 record["metadata"] = metadata[expected_acpt_no]
                 record["title"] = str(metadata[expected_acpt_no].get("title") or "")
                 indexed_records[index] = (year, acpt_no, record)
-                if completed_count % 100 == 0:
+                if completed_count % progress_interval == 0:
                     emit(
                         f"외부 HTML 압축 중간 확인: {completed_count}/{len(html_files)}건 처리."
                     )

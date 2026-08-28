@@ -20,11 +20,12 @@ from finiq.market_desk.web.features.disclosures.html_common import (
 from finiq.market_desk.web.html_parsers.common import decode_html_markup
 
 ProgressCallback = Callable[[str], None]
-_SECTION_CLASS_RE = re.compile(r"^SECTION-\d+$")
+_SOURCE_TOC_ID_RE = re.compile(r"^toc_(\d+)$", flags=re.IGNORECASE)
 _HEADING_TAGS = {f"h{level}" for level in range(1, 7)}
 # Post-split classification only; structural boundary detection must not use text.
 _CORRECTION_TITLE_TOKEN = "정정"
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
+DEFAULT_HTML_SECTION_PROBLEM_REPORT_LIMIT = 50
 T = TypeVar("T")
 
 
@@ -34,6 +35,10 @@ class HtmlSection:
     index: int
     title: str
     html: str
+    kind: str = "section"
+    level: int = 1
+    parent_toc_id: str | None = None
+    is_toc: bool = True
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,20 @@ class HtmlSectionSummary:
     toc_id: str
     index: int
     title: str
+    kind: str = "section"
+    level: int = 1
+    parent_toc_id: str | None = None
+    is_toc: bool = True
+
+
+@dataclass(frozen=True)
+class _HtmlTocBoundary:
+    position: int
+    element: etree._Element
+    toc_id: str
+    kind: str
+    level: int
+    is_toc: bool
 
 
 @dataclass(frozen=True)
@@ -48,6 +67,11 @@ class _HtmlSectionPlan:
     start: int
     end: int
     title: str
+    toc_id: str
+    kind: str
+    level: int
+    parent_toc_id: str | None
+    is_toc: bool
 
 
 def _clean_text(value: object) -> str:
@@ -60,24 +84,25 @@ def _element_children(element: etree._Element) -> list[etree._Element]:
 
 def _parse_internal_html_document(html_markup: str | bytes) -> html.HtmlElement:
     decoded_markup = decode_html_markup(html_markup)
-    if re.search(r"<head(?:\s|>)", decoded_markup, flags=re.IGNORECASE) is None:
-        raise ValueError("HTML head is required")
-    if re.search(r"<body(?:\s|>)", decoded_markup, flags=re.IGNORECASE) is None:
-        raise ValueError("HTML body is required")
     parser = html.HTMLParser(encoding="utf-8", recover=True, huge_tree=True)
-    return html.fromstring(decoded_markup, parser=parser)
+    return html.document_fromstring(decoded_markup, parser=parser)
 
 
-def _section_title(
-    heading: etree._Element, section_children: list[etree._Element]
+def _boundary_title(
+    heading: etree._Element,
+    section_children: list[etree._Element],
+    *,
+    kind: str,
+    level: int,
 ) -> str:
     title = _clean_text(heading.text_content())
     if not title and len(section_children) > 1:
         first_content = section_children[1]
-        if _is_section_paragraph(first_content):
+        first_role = _toc_element_role(first_content)
+        if first_role == (kind, level):
             title = _clean_text(first_content.text_content())
     if not title:
-        raise ValueError("SECTION heading title is required")
+        raise ValueError("TOC boundary title is required")
     return title
 
 
@@ -90,24 +115,39 @@ def _first_text_fragment(elements: Iterable[etree._Element]) -> str:
     return ""
 
 
-def _is_section_heading(element: etree._Element) -> bool:
-    if not isinstance(element.tag, str):
-        return False
-    if element.tag.lower() not in _HEADING_TAGS:
-        return False
-    return any(
-        _SECTION_CLASS_RE.match(class_name)
+def _toc_element_role(element: etree._Element) -> tuple[str, int] | None:
+    class_names = [
+        class_name.upper()
         for class_name in str(element.get("class") or "").split()
+    ]
+    roles: list[tuple[str, int]] = []
+    if "COVER-TITLE" in class_names:
+        roles.append(("cover", 0))
+    if "PART" in class_names:
+        roles.append(("part", 0))
+    roles.extend(
+        ("section", int(match.group(1)))
+        for class_name in class_names
+        if (match := re.fullmatch(r"SECTION-(\d+)", class_name)) is not None
+    )
+    if len(roles) > 1:
+        raise ValueError("one TOC hierarchy class is required")
+    return roles[0] if roles else None
+
+
+def _is_toc_heading(element: etree._Element) -> bool:
+    return (
+        isinstance(element.tag, str)
+        and element.tag.lower() in _HEADING_TAGS
+        and _toc_element_role(element) is not None
     )
 
 
 def _is_section_paragraph(element: etree._Element) -> bool:
     if not isinstance(element.tag, str) or element.tag.lower() != "p":
         return False
-    return any(
-        _SECTION_CLASS_RE.match(class_name)
-        for class_name in str(element.get("class") or "").split()
-    )
+    role = _toc_element_role(element)
+    return role is not None and role[0] == "section"
 
 
 def _has_class(element: etree._Element, class_name: str) -> bool:
@@ -116,7 +156,7 @@ def _has_class(element: etree._Element, class_name: str) -> bool:
 
 def _section_container_and_boundaries(
     document: html.HtmlElement,
-) -> tuple[etree._Element, list[tuple[int, etree._Element]], str]:
+) -> tuple[etree._Element, list[_HtmlTocBoundary], str]:
     body_nodes = document.xpath("//body")
     if not body_nodes:
         raise ValueError("HTML body is required")
@@ -124,25 +164,85 @@ def _section_container_and_boundaries(
     body_children = _element_children(body)
     xforms_wrappers = [child for child in body_children if _has_class(child, "xforms")]
 
-    heading_boundaries = [
-        (position, child)
+    source_toc_elements = [
+        (position, child, _SOURCE_TOC_ID_RE.fullmatch(str(child.get("id") or "")))
         for position, child in enumerate(body_children)
-        if _is_section_heading(child)
+        if _SOURCE_TOC_ID_RE.fullmatch(str(child.get("id") or "")) is not None
     ]
-    if heading_boundaries:
+    if source_toc_elements:
         if xforms_wrappers:
             raise ValueError("one unambiguous TOC structure is required")
-        return body, heading_boundaries, "heading"
+        source_numbers: list[int] = []
+        boundaries: list[_HtmlTocBoundary] = []
+        for position, element, source_match in source_toc_elements:
+            if not _is_toc_heading(element) or source_match is None:
+                raise ValueError("supported source TOC heading is required")
+            kind, level = _toc_element_role(element) or ("", 0)
+            source_numbers.append(int(source_match.group(1)))
+            boundaries.append(
+                _HtmlTocBoundary(
+                    position=position,
+                    element=element,
+                    toc_id=str(element.get("id")),
+                    kind=kind,
+                    level=level,
+                    is_toc=True,
+                )
+            )
+        if source_numbers != sorted(set(source_numbers)):
+            raise ValueError("source TOC ids must be unique and ascending")
+        unlinked_headings = [
+            child
+            for child in body_children
+            if _is_toc_heading(child)
+            and _SOURCE_TOC_ID_RE.fullmatch(str(child.get("id") or "")) is None
+        ]
+        if unlinked_headings:
+            raise ValueError("every TOC heading must have a source TOC id")
+        return body, boundaries, "source_toc"
 
-    paragraph_boundaries = [
+    heading_elements = [
+        (position, child)
+        for position, child in enumerate(body_children)
+        if _is_toc_heading(child)
+    ]
+    if heading_elements:
+        if xforms_wrappers:
+            raise ValueError("one unambiguous TOC structure is required")
+        boundaries = []
+        for index, (position, element) in enumerate(heading_elements, start=1):
+            kind, level = _toc_element_role(element) or ("", 0)
+            boundaries.append(
+                _HtmlTocBoundary(
+                    position=position,
+                    element=element,
+                    toc_id=f"toc_{index}",
+                    kind=kind,
+                    level=level,
+                    is_toc=True,
+                )
+            )
+        return body, boundaries, "heading"
+
+    paragraph_elements = [
         (position, child)
         for position, child in enumerate(body_children)
         if _is_section_paragraph(child)
     ]
-    if paragraph_boundaries:
+    if paragraph_elements:
         if xforms_wrappers:
             raise ValueError("one unambiguous TOC structure is required")
-        return body, paragraph_boundaries, "paragraph"
+        return body, [
+            _HtmlTocBoundary(
+                position=position,
+                element=element,
+                toc_id=f"toc_{index}",
+                kind="section",
+                level=(_toc_element_role(element) or ("section", 1))[1],
+                is_toc=True,
+            )
+            for index, (position, element) in enumerate(paragraph_elements, start=1)
+        ], "paragraph"
 
     if len(xforms_wrappers) != 1:
         raise ValueError("supported TOC structure is required")
@@ -151,14 +251,24 @@ def _section_container_and_boundaries(
         raise ValueError("XForms content wrapper is required")
     container = wrapper_children[0]
     container_children = _element_children(container)
-    xforms_boundaries = [
+    xforms_elements = [
         (position, child)
         for position, child in enumerate(container_children)
         if child.tag.lower() == "div" and _has_class(child, "xforms_title")
     ]
-    if len(xforms_boundaries) != 1:
-        raise ValueError("one direct XForms TOC boundary is required")
-    return container, xforms_boundaries, "xforms"
+    if len(xforms_elements) != 1:
+        raise ValueError("one direct XForms document title is required")
+    position, element = xforms_elements[0]
+    return container, [
+        _HtmlTocBoundary(
+            position=position,
+            element=element,
+            toc_id="document",
+            kind="document",
+            level=0,
+            is_toc=False,
+        )
+    ], "xforms"
 
 
 def _section_plans(
@@ -167,23 +277,73 @@ def _section_plans(
     container, boundaries, structure = _section_container_and_boundaries(document)
     children = _element_children(container)
     plans: list[_HtmlSectionPlan] = []
-    first_boundary = boundaries[0][0]
+    first_boundary = boundaries[0].position
     preamble_title = _first_text_fragment(children[:first_boundary])
     if preamble_title:
         plans.append(
-            _HtmlSectionPlan(start=0, end=first_boundary, title=preamble_title)
+            _HtmlSectionPlan(
+                start=0,
+                end=first_boundary,
+                title=preamble_title,
+                toc_id="preamble",
+                kind="preamble",
+                level=0,
+                parent_toc_id=None,
+                is_toc=False,
+            )
         )
 
-    for order, (start, boundary) in enumerate(boundaries):
-        end = boundaries[order + 1][0] if order + 1 < len(boundaries) else len(children)
+    hierarchy: dict[int, str] = {}
+    for order, boundary in enumerate(boundaries):
+        start = boundary.position
+        end = (
+            boundaries[order + 1].position
+            if order + 1 < len(boundaries)
+            else len(children)
+        )
         section_children = children[start:end]
-        if structure == "heading":
-            title = _section_title(boundary, section_children)
+        if structure in {"heading", "source_toc"}:
+            title = _boundary_title(
+                boundary.element,
+                section_children,
+                kind=boundary.kind,
+                level=boundary.level,
+            )
         else:
-            title = _clean_text(boundary.text_content())
+            title = _clean_text(boundary.element.text_content())
             if not title:
-                raise ValueError("SECTION boundary title is required")
-        plans.append(_HtmlSectionPlan(start=start, end=end, title=title))
+                raise ValueError("TOC boundary title is required")
+
+        if boundary.kind in {"cover", "document"}:
+            hierarchy.clear()
+            parent_toc_id = None
+        else:
+            parent_toc_id = next(
+                (
+                    hierarchy[level]
+                    for level in sorted(hierarchy, reverse=True)
+                    if level < boundary.level
+                ),
+                None,
+            )
+            hierarchy = {
+                level: toc_id
+                for level, toc_id in hierarchy.items()
+                if level < boundary.level
+            }
+            hierarchy[boundary.level] = boundary.toc_id
+        plans.append(
+            _HtmlSectionPlan(
+                start=start,
+                end=end,
+                title=title,
+                toc_id=boundary.toc_id,
+                kind=boundary.kind,
+                level=boundary.level,
+                parent_toc_id=parent_toc_id,
+                is_toc=boundary.is_toc,
+            )
+        )
     return container, plans
 
 
@@ -211,16 +371,28 @@ def _is_correction_section_title(title: str) -> bool:
     return _CORRECTION_TITLE_TOKEN in re.sub(r"\s+", "", title)
 
 
+def _leading_correction_plan(
+    plans: list[_HtmlSectionPlan],
+) -> _HtmlSectionPlan | None:
+    if plans and _is_correction_section_title(plans[0].title):
+        return plans[0]
+    return None
+
+
 def split_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection]:
     """Split every structural TOC section before any correction filtering."""
     document = _parse_internal_html_document(html_markup)
     container, plans = _section_plans(document)
     return [
         HtmlSection(
-            toc_id=f"toc_{index}",
+            toc_id=plan.toc_id,
             index=index,
             title=plan.title,
             html=_render_section_plan(document, container, plan),
+            kind=plan.kind,
+            level=plan.level,
+            parent_toc_id=plan.parent_toc_id,
+            is_toc=plan.is_toc,
         )
         for index, plan in enumerate(plans, start=1)
     ]
@@ -231,7 +403,15 @@ def inspect_internal_html_sections(html_markup: str | bytes) -> list[HtmlSection
     document = _parse_internal_html_document(html_markup)
     _container, plans = _section_plans(document)
     return [
-        HtmlSectionSummary(toc_id=f"toc_{index}", index=index, title=plan.title)
+        HtmlSectionSummary(
+            toc_id=plan.toc_id,
+            index=index,
+            title=plan.title,
+            kind=plan.kind,
+            level=plan.level,
+            parent_toc_id=plan.parent_toc_id,
+            is_toc=plan.is_toc,
+        )
         for index, plan in enumerate(plans, start=1)
     ]
 
@@ -254,6 +434,40 @@ def _parse_page_size(value: Any) -> int:
         msg = "page_size must be >= 1"
         raise ValueError(msg)
     return parsed
+
+
+def _parse_problem_report_limit(value: Any) -> int:
+    if value in (None, ""):
+        return DEFAULT_HTML_SECTION_PROBLEM_REPORT_LIMIT
+    parsed = int(value)
+    if parsed < 1:
+        raise ValueError("report_limit must be >= 1")
+    return parsed
+
+
+def _parse_section_progress_interval(value: Any, *, default: int) -> int:
+    if value in (None, ""):
+        return default
+    parsed = int(value)
+    if parsed < 1:
+        raise ValueError("progress_interval must be >= 1")
+    return parsed
+
+
+def _inspection_error_message(exc: Exception) -> str:
+    messages = {
+        "HTML body is required": "HTML 문서에 <body> 요소가 없습니다.",
+        "supported TOC structure is required": (
+            "지원하는 목차 구조(SECTION, COVER, PART 또는 XForms)를 "
+            "찾지 못했습니다."
+        ),
+        "one unambiguous TOC structure is required": (
+            "서로 다른 목차 구조가 함께 있어 하나로 판단할 수 없습니다."
+        ),
+        "TOC boundary title is required": "목차 제목이 비어 있습니다.",
+    }
+    message = str(exc)
+    return messages.get(message, message)
 
 
 def parse_html_section_worker_count(value: Any) -> int:
@@ -340,12 +554,30 @@ def _source_document(input_directory: Path, source_file: Path) -> dict[str, str]
 def _source_document_with_sections(
     input_directory: Path, source_file: Path
 ) -> dict[str, Any]:
+    source_unavailable = _internal_html_source_unavailable_placeholder_file(source_file)
+    if source_unavailable is not None:
+        return {
+            **_source_document(input_directory, source_file),
+            "section_count": 0,
+            "toc_count": 0,
+            "sections": [],
+            "source_unavailable": source_unavailable,
+        }
     sections = inspect_internal_html_sections(source_file.read_bytes())
     return {
         **_source_document(input_directory, source_file),
         "section_count": len(sections),
+        "toc_count": sum(section.is_toc for section in sections),
         "sections": [
-            {"toc_id": section.toc_id, "index": section.index, "title": section.title}
+            {
+                "toc_id": section.toc_id,
+                "index": section.index,
+                "title": section.title,
+                "kind": section.kind,
+                "level": section.level,
+                "parent_toc_id": section.parent_toc_id,
+                "is_toc": section.is_toc,
+            }
             for section in sections
         ],
     }
@@ -360,6 +592,7 @@ def _source_document_with_section_count(
         "source_name": str(document["source_name"]),
         "source_relative_path": str(document["source_relative_path"]),
         "section_count": int(document["section_count"]),
+        "toc_count": int(document["toc_count"]),
     }
 
 
@@ -461,6 +694,8 @@ def list_disclosure_html_section_sources_payload(
             "source_name": str(document["source_name"]),
             "source_relative_path": str(document["source_relative_path"]),
             "section_count": int(document["section_count"]),
+            "toc_count": int(document["toc_count"]),
+            "source_unavailable": document.get("source_unavailable"),
         }
         for document in documents_with_sections
     ]
@@ -472,6 +707,10 @@ def list_disclosure_html_section_sources_payload(
             "page_size": page_size,
             "returned_files": len(html_files),
             "has_next_page": has_next_page,
+            "source_unavailable_files": sum(
+                bool(document.get("source_unavailable"))
+                for document in documents_with_sections
+            ),
         },
         "documents": documents,
         "section_patterns": _section_patterns(documents_with_sections),
@@ -560,11 +799,16 @@ def split_disclosure_html_section_source_payload(
         "input_directory": str(input_directory),
         "document": _source_document(input_directory, source_file),
         "section_count": len(sections),
+        "toc_count": sum(section.is_toc for section in sections),
         "sections": [
             {
                 "toc_id": section.toc_id,
                 "index": section.index,
                 "title": section.title,
+                "kind": section.kind,
+                "level": section.level,
+                "parent_toc_id": section.parent_toc_id,
+                "is_toc": section.is_toc,
                 "html": section.html,
             }
             for section in sections
@@ -591,27 +835,66 @@ def inspect_disclosure_html_sections_payload(
         progress_callback("입력 폴더에서 목차 확인 대상 HTML을 찾습니다.")
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
+    report_limit = _parse_problem_report_limit(body.get("report_limit"))
+    progress_interval = _parse_section_progress_interval(
+        body.get("progress_interval"), default=100
+    )
 
     def emit(message: str) -> None:
         if progress_callback is not None:
             progress_callback(message)
 
     def inspect_one(source_file: Path) -> dict[str, Any]:
-        sections = inspect_internal_html_sections(source_file.read_bytes())
+        source_relative_path = _relative_source_path(input_directory, source_file)
+        source_unavailable = _internal_html_source_unavailable_placeholder_file(
+            source_file
+        )
+        if source_unavailable is not None:
+            return {
+                "status": "source_unavailable",
+                "source_file": str(source_file),
+                "source_relative_path": source_relative_path,
+                "source_unavailable": source_unavailable,
+            }
+        try:
+            sections = inspect_internal_html_sections(source_file.read_bytes())
+        except (OSError, UnicodeError, ValueError, etree.Error) as exc:
+            return {
+                "status": "read_failed",
+                "problem": {
+                    "kind": "read_failed",
+                    "source_file": str(source_file),
+                    "source_relative_path": source_relative_path,
+                    "error": _inspection_error_message(exc),
+                },
+            }
+        if not sections:
+            return {
+                "status": "no_sections",
+                "problem": {
+                    "kind": "no_sections",
+                    "source_file": str(source_file),
+                    "source_relative_path": source_relative_path,
+                    "error": "분리할 목차를 찾지 못했습니다.",
+                },
+            }
         return {
             "status": "ok",
             "document": {
                 "source_file": str(source_file),
                 "source_name": source_file.name,
-                "source_relative_path": _relative_source_path(
-                    input_directory, source_file
-                ),
+                "source_relative_path": source_relative_path,
                 "section_count": len(sections),
+                "toc_count": sum(section.is_toc for section in sections),
                 "sections": [
                     {
                         "toc_id": section.toc_id,
                         "index": section.index,
                         "title": section.title,
+                        "kind": section.kind,
+                        "level": section.level,
+                        "parent_toc_id": section.parent_toc_id,
+                        "is_toc": section.is_toc,
                     }
                     for section in sections
                 ],
@@ -625,26 +908,50 @@ def inspect_disclosure_html_sections_payload(
     )
     results = _map_html_files(html_files, workers, inspect_one, cancel_check)
     documents: list[dict[str, Any]] = []
+    problem_files: list[dict[str, str]] = []
+    failed_files = 0
+    files_without_sections = 0
+    source_unavailable_files = 0
     for index, result in enumerate(results, start=1):
         if _cancel_requested(cancel_check):
             return {"cancelled": True}
-        documents.append(result["document"])
-        if index == 1 or index == len(html_files) or index % 100 == 0:
+        if result["status"] == "ok":
+            documents.append(result["document"])
+        elif result["status"] == "source_unavailable":
+            source_unavailable_files += 1
+        else:
+            if result["status"] == "no_sections":
+                files_without_sections += 1
+            else:
+                failed_files += 1
+            if len(problem_files) < report_limit:
+                problem_files.append(result["problem"])
+        if (
+            index == 1
+            or index == len(html_files)
+            or index % progress_interval == 0
+        ):
             emit(f"목차 확인 중간 확인: {index}/{len(html_files)}건 처리.")
 
     total_files = len(html_files)
+    emit(
+        "목차 확인 완료: "
+        f"정상 {len(documents)}건, KIND 원본 없음 {source_unavailable_files}건, "
+        f"목차 없음 {files_without_sections}건, 읽기 실패 {failed_files}건."
+    )
     return {
         "format": "finiq_disclosure_html_section_inspect_v1",
         "input_directory": str(input_directory),
         "summary": {
             "found_files": total_files,
             "documents_with_sections": len(documents),
-            "files_without_sections": 0,
-            "failed_files": 0,
-            "reported_problem_files": 0,
+            "files_without_sections": files_without_sections,
+            "failed_files": failed_files,
+            "reported_problem_files": len(problem_files),
+            "source_unavailable_files": source_unavailable_files,
         },
         "documents": documents,
-        "problem_files": [],
+        "problem_files": problem_files,
     }
 
 
@@ -717,11 +1024,8 @@ def _automatic_section_output(source_file: Path) -> dict[str, Any]:
         }
     document = _parse_internal_html_document(source_file.read_bytes())
     container, plans = _section_plans(document)
-    correction_plans = [
-        plan for plan in plans if _is_correction_section_title(plan.title)
-    ]
-    if len(correction_plans) > 1:
-        raise ValueError(f"multiple correction sections: {source_file}")
+    correction_plan = _leading_correction_plan(plans)
+    correction_plans = [correction_plan] if correction_plan is not None else []
     selected_sections = len(plans) - len(correction_plans)
     if selected_sections < 1:
         raise ValueError(f"business section is required: {source_file}")
@@ -741,11 +1045,7 @@ def _validate_automatic_section_output(source_file: Path) -> None:
         return
     document = _parse_internal_html_document(source_file.read_bytes())
     _container, plans = _section_plans(document)
-    correction_count = sum(
-        1 for plan in plans if _is_correction_section_title(plan.title)
-    )
-    if correction_count > 1:
-        raise ValueError(f"multiple correction sections: {source_file}")
+    correction_count = int(_leading_correction_plan(plans) is not None)
     if len(plans) == correction_count:
         raise ValueError(f"business section is required: {source_file}")
 
@@ -887,6 +1187,9 @@ def save_disclosure_html_sections_payload(
     emit("입력 폴더에서 목차 분리 대상 HTML을 찾습니다.")
     html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
     workers = parse_html_section_worker_count(body.get("workers"))
+    progress_interval = _parse_section_progress_interval(
+        body.get("progress_interval"), default=25
+    )
     emit(
         f"목차 분리 대상 HTML {len(html_files)}건을 찾았습니다. "
         f"파일 탐색 {time.monotonic() - collect_started_at:.1f}초 · "
@@ -946,7 +1249,11 @@ def save_disclosure_html_sections_payload(
             skipped_files.append(result["skipped"])
             source_name = Path(result["skipped"]["source_file"]).name
             emit(f"목차 저장 제외 {index}/{len(html_files)}: {source_name}")
-        if index == 1 or index == len(html_files) or index % 25 == 0:
+        if (
+            index == 1
+            or index == len(html_files)
+            or index % progress_interval == 0
+        ):
             emit(f"목차 저장 중간 확인: {index}/{len(html_files)}건 처리.")
 
     missing_files = [path for path in expected_files if not Path(path).is_file()]

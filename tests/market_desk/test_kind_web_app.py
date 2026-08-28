@@ -2745,7 +2745,7 @@ def test_download_inspect_folder_start_route(tmp_path: Path, monkeypatch) -> Non
     assert data["job_id"] == job_id
 
 
-def test_html_section_inspect_route_rejects_file_without_canonical_toc(tmp_path: Path) -> None:
+def test_html_section_inspect_route_reports_file_without_canonical_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
     (input_directory / "20260421000111.html").write_text(
@@ -2770,8 +2770,20 @@ def test_html_section_inspect_route_rejects_file_without_canonical_toc(tmp_path:
         json={"input_directory": str(input_directory)},
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "supported TOC structure is required"
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == {
+        "found_files": 2,
+        "documents_with_sections": 1,
+        "files_without_sections": 0,
+        "failed_files": 1,
+        "reported_problem_files": 1,
+        "source_unavailable_files": 0,
+    }
+    assert payload["problem_files"][0]["source_relative_path"] == "20260421000111.html"
+    assert payload["problem_files"][0]["error"] == (
+        "지원하는 목차 구조(SECTION, COVER, PART 또는 XForms)를 찾지 못했습니다."
+    )
 
 
 def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_path: Path) -> None:
@@ -2799,10 +2811,13 @@ def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_pat
         "page_size": 20,
         "returned_files": 20,
         "has_next_page": True,
+        "source_unavailable_files": 0,
     }
     assert len(data["documents"]) == 20
     assert data["documents"][0]["section_count"] == 2
+    assert data["documents"][0]["toc_count"] == 2
     assert data["documents"][1]["section_count"] == 1
+    assert data["documents"][1]["toc_count"] == 1
     assert "sections" not in data["documents"][0]
 
 
@@ -2839,8 +2854,24 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
             "count": 2,
             "section_count": 2,
             "sections": [
-                {"toc_id": "toc_1", "index": 1, "title": "1"},
-                {"toc_id": "toc_2", "index": 2, "title": "2"},
+                {
+                    "toc_id": "toc_1",
+                    "index": 1,
+                    "title": "1",
+                    "kind": "section",
+                    "level": 1,
+                    "parent_toc_id": None,
+                    "is_toc": True,
+                },
+                {
+                    "toc_id": "toc_2",
+                    "index": 2,
+                    "title": "2",
+                    "kind": "section",
+                    "level": 2,
+                    "parent_toc_id": "toc_1",
+                    "is_toc": True,
+                },
             ],
             "sample_documents": [
                 {
@@ -2859,7 +2890,17 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
             "signature": "toc_1 1",
             "count": 1,
             "section_count": 1,
-            "sections": [{"toc_id": "toc_1", "index": 1, "title": "1"}],
+            "sections": [
+                {
+                    "toc_id": "toc_1",
+                    "index": 1,
+                    "title": "1",
+                    "kind": "section",
+                    "level": 1,
+                    "parent_toc_id": None,
+                    "is_toc": True,
+                }
+            ],
             "sample_documents": [
                 {
                     "source_file": str(input_directory / "20260403000001.html"),
@@ -3133,5 +3174,6 @@ def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> 
         "files_without_sections": 0,
         "failed_files": 0,
         "reported_problem_files": 0,
+        "source_unavailable_files": 0,
     }
     assert snapshot["result"]["documents"][0]["section_count"] == 2

@@ -703,7 +703,7 @@ def test_filter_disclosures_payload_filters_by_title_and_date(tmp_path: Path) ->
 def test_search_disclosure_titles_payload_returns_distinct_db_titles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    ) -> None:
     _write_filter_manifest_fixture(tmp_path)
     progress: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -4766,7 +4766,12 @@ def test_inspect_folder_job_runs_kind_verification_in_background(
     )
 
     def fake_inspect(payload, progress_callback=None, cancel_check=None):
-        return {"format": "kind_download_folder_cleanup_v1"}
+        return {
+            "format": "kind_download_folder_cleanup_v1",
+            "download_statuses": [
+                {"output_directory": payload["output_directory"]}
+            ],
+        }
 
     verification_calls = []
     verification_started = threading.Event()
@@ -4780,9 +4785,15 @@ def test_inspect_folder_job_runs_kind_verification_in_background(
         cancel_check=None,
         progress_callback=None,
         parallel_workers=None,
+        precomputed_download_statuses=None,
     ):
         verification_calls.append(
-            (output_directory, verify_with_kind, current_payload)
+            (
+                output_directory,
+                verify_with_kind,
+                current_payload,
+                precomputed_download_statuses,
+            )
         )
         verification_started.set()
         assert release_verification.wait(timeout=1)
@@ -4825,7 +4836,14 @@ def test_inspect_folder_job_runs_kind_verification_in_background(
         "has_existing": True,
         "ranges": [],
     }
-    assert verification_calls == [(str(tmp_path), True, payload)]
+    assert verification_calls == [
+        (
+            str(tmp_path),
+            True,
+            payload,
+            [{"output_directory": str(tmp_path)}],
+        )
+    ]
 
 
 def test_inspect_folder_job_cancels_during_kind_verification(
@@ -4860,6 +4878,7 @@ def test_inspect_folder_job_cancels_during_kind_verification(
         cancel_check=None,
         progress_callback=None,
         parallel_workers=None,
+        precomputed_download_statuses=None,
     ):
         received_cancel_checks.append(cancel_check)
         verification_started.set()
@@ -4963,6 +4982,7 @@ def test_inspect_folder_job_finishes_committed_deletion_after_cancel(
         cancel_check=None,
         progress_callback=None,
         parallel_workers=None,
+        precomputed_download_statuses=None,
     ):
         verification_cancel_checks.append(cancel_check)
         return {"has_existing": False}
@@ -5402,7 +5422,8 @@ def test_split_internal_html_sections_uses_direct_section_heading_regardless_of_
         """
     )
 
-    assert [section.toc_id for section in sections] == ["toc_1", "toc_2"]
+    assert [section.toc_id for section in sections] == ["preamble", "toc_1"]
+    assert [section.is_toc for section in sections] == [False, True]
     assert sections[0].title == "중첩 목차"
     assert "중첩 내용" in sections[0].html
     assert sections[1].title == "정규 목차"
@@ -5432,7 +5453,7 @@ def test_split_internal_html_sections_uses_legacy_section_one_paragraphs() -> No
 
 
 def test_split_internal_html_sections_rejects_multiple_direct_xforms_boundaries() -> None:
-    with pytest.raises(ValueError, match="one direct XForms TOC boundary is required"):
+    with pytest.raises(ValueError, match="one direct XForms document title is required"):
         split_internal_html_sections(
             """
             <html>
@@ -5476,6 +5497,8 @@ def test_split_internal_html_sections_uses_one_main_xforms_boundary() -> None:
         "정정신고(보고)",
         "주주총회소집 결의",
     ]
+    assert [section.kind for section in sections] == ["preamble", "document"]
+    assert [section.is_toc for section in sections] == [False, False]
     assert "하위 서식" not in sections[0].html
     assert "하위 서식" in sections[1].html
     assert 'class="xforms"' in sections[1].html
@@ -5485,16 +5508,8 @@ def test_split_internal_html_sections_uses_one_main_xforms_boundary() -> None:
     ("markup", "message"),
     [
         (
-            "<html><body><h2 class='SECTION-1' id='toc_1'>목차</h2></body></html>",
-            "HTML head is required",
-        ),
-        (
-            "<html><head></head><h2 class='SECTION-1' id='toc_1'>목차</h2></html>",
-            "HTML body is required",
-        ),
-        (
             "<html><head></head><body><h2 class='SECTION-1' id='toc_1'></h2><div>대체 제목</div></body></html>",
-            "SECTION heading title is required",
+            "TOC boundary title is required",
         ),
     ],
 )
@@ -5505,11 +5520,99 @@ def test_split_internal_html_sections_rejects_missing_canonical_structure(
         split_internal_html_sections(markup)
 
 
+def test_split_internal_html_sections_accepts_legacy_kind_fragment() -> None:
+    sections = split_internal_html_sections(
+        "<P class='section-1'><a name='1'>옛 공시 제목</a></P>"
+        "<TABLE><TR><TD><P>옛 공시 본문</P></TD></TR></TABLE>"
+    )
+
+    assert len(sections) == 1
+    assert sections[0].title == "옛 공시 제목"
+    assert sections[0].toc_id == "toc_1"
+    assert "옛 공시 본문" in sections[0].html
+
+
 def test_split_internal_html_sections_rejects_ordinary_paragraph_as_heading_title() -> None:
-    with pytest.raises(ValueError, match="SECTION heading title is required"):
+    with pytest.raises(ValueError, match="TOC boundary title is required"):
         split_internal_html_sections(
             "<html><head></head><body><h2 class='SECTION-1'></h2>"
             "<p>일반 본문</p></body></html>"
+        )
+
+
+def test_split_internal_html_sections_preserves_source_toc_hierarchy() -> None:
+    sections = split_internal_html_sections(
+        """
+        <html><head></head><body>
+          <p class="CORRECTION">정 정 신 고 (보고)</p>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">대표이사 등의 확인</p></h2>
+          <h1 class="COVER-TITLE" id="toc_2"><p class="COVER-TITLE">증권신고서</p></h1>
+          <h2 class="SECTION-1" id="toc_3"><p class="SECTION-1">대표이사 등의 확인</p></h2>
+          <h2 class="PART" id="toc_4"><p class="PART">요약정보</p></h2>
+          <h3 class="SECTION-2" id="toc_5"><p class="SECTION-2">핵심투자위험</p></h3>
+          <h2 class="PART" id="toc_6"><p class="PART">제1부</p></h2>
+          <h2 class="SECTION-1" id="toc_7"><p class="SECTION-1">모집 일반사항</p></h2>
+          <h3 class="SECTION-2" id="toc_8"><p class="SECTION-2">공모개요</p></h3>
+        </body></html>
+        """
+    )
+
+    assert [section.toc_id for section in sections] == [
+        "preamble",
+        "toc_1",
+        "toc_2",
+        "toc_3",
+        "toc_4",
+        "toc_5",
+        "toc_6",
+        "toc_7",
+        "toc_8",
+    ]
+    assert [section.kind for section in sections] == [
+        "preamble",
+        "section",
+        "cover",
+        "section",
+        "part",
+        "section",
+        "part",
+        "section",
+        "section",
+    ]
+    assert [section.level for section in sections] == [0, 1, 0, 1, 0, 2, 0, 1, 2]
+    assert [section.parent_toc_id for section in sections] == [
+        None,
+        None,
+        None,
+        None,
+        None,
+        "toc_4",
+        None,
+        "toc_6",
+        "toc_7",
+    ]
+    assert [section.is_toc for section in sections] == [
+        False,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+    ]
+
+
+def test_split_internal_html_sections_rejects_incomplete_source_toc_ids() -> None:
+    with pytest.raises(ValueError, match="every TOC heading must have a source TOC id"):
+        split_internal_html_sections(
+            """
+            <html><head></head><body>
+              <h2 class="PART" id="toc_1"><p class="PART">제1부</p></h2>
+              <h2 class="SECTION-1"><p class="SECTION-1">본문</p></h2>
+            </body></html>
+            """
         )
 
 
@@ -5692,6 +5795,7 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: P
         "files_without_sections": 0,
         "failed_files": 0,
         "reported_problem_files": 0,
+        "source_unavailable_files": 0,
     }
     documents = sorted(payload["documents"], key=lambda document: document["source_name"])
     assert [document["source_name"] for document in documents] == [
@@ -5705,6 +5809,58 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: P
     assert [section["toc_id"] for section in documents[0]["sections"]] == ["toc_1", "toc_2"]
     assert [section["toc_id"] for section in documents[1]["sections"]] == ["toc_1"]
     assert payload["problem_files"] == []
+
+
+def test_html_section_inspect_and_save_use_requested_progress_interval(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    input_directory.mkdir()
+    for index in range(1, 4):
+        (input_directory / f"2026040{index}000001.html").write_text(
+            "<html><head></head><body>"
+            "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2>"
+            f"<p>본문 {index}</p></body></html>",
+            encoding="utf-8",
+        )
+
+    inspect_log: list[str] = []
+    inspect_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "progress_interval": 2,
+        },
+        progress_callback=inspect_log.append,
+    )
+    assert [line for line in inspect_log if "목차 확인 중간 확인" in line] == [
+        "목차 확인 중간 확인: 1/3건 처리.",
+        "목차 확인 중간 확인: 2/3건 처리.",
+        "목차 확인 중간 확인: 3/3건 처리.",
+    ]
+
+    save_log: list[str] = []
+    save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "progress_interval": 2,
+        },
+        progress_callback=save_log.append,
+    )
+    assert [line for line in save_log if "목차 저장 중간 확인" in line] == [
+        "목차 저장 중간 확인: 1/3건 처리.",
+        "목차 저장 중간 확인: 2/3건 처리.",
+        "목차 저장 중간 확인: 3/3건 처리.",
+    ]
+
+    with pytest.raises(ValueError, match="progress_interval must be >= 1"):
+        inspect_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "progress_interval": 0,
+            }
+        )
 
 
 def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_cancelled(
@@ -5744,17 +5900,8 @@ def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_ca
     assert "첫 번째" in parsed[0]
 
 
-@pytest.mark.parametrize(
-    "operation",
-    [
-        summarize_disclosure_html_section_kinds_payload,
-        inspect_disclosure_html_sections_payload,
-    ],
-)
-def test_html_section_summary_and_inspection_propagate_file_errors(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operation: Any,
+def test_html_section_summary_propagates_file_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_directory = tmp_path / "content_html"
     input_directory.mkdir()
@@ -5773,7 +5920,84 @@ def test_html_section_summary_and_inspection_propagate_file_errors(
     )
 
     with pytest.raises(OSError, match="read failed"):
-        operation({"input_directory": str(input_directory)})
+        summarize_disclosure_html_section_kinds_payload(
+            {"input_directory": str(input_directory)}
+        )
+
+
+def test_html_section_inspection_reports_file_errors_without_stopping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    source_file = input_directory / "20260401000001.html"
+    source_file.write_text("<html><body>broken</body></html>", encoding="utf-8")
+
+    def fail_inspection(_markup: bytes) -> list[HtmlSectionSummary]:
+        raise ValueError("supported TOC structure is required")
+
+    monkeypatch.setattr(
+        disclosure_html_sections,
+        "inspect_internal_html_sections",
+        fail_inspection,
+    )
+
+    payload = inspect_disclosure_html_sections_payload(
+        {"input_directory": str(input_directory), "report_limit": 1}
+    )
+
+    assert payload["summary"] == {
+        "found_files": 1,
+        "documents_with_sections": 0,
+        "files_without_sections": 0,
+        "failed_files": 1,
+        "reported_problem_files": 1,
+        "source_unavailable_files": 0,
+    }
+    assert payload["problem_files"] == [
+        {
+            "kind": "read_failed",
+            "source_file": str(source_file),
+            "source_relative_path": source_file.name,
+            "error": "지원하는 목차 구조(SECTION, COVER, PART 또는 XForms)를 찾지 못했습니다.",
+        }
+    ]
+
+
+def test_html_section_inspection_counts_source_unavailable_as_expected(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    input_directory.mkdir()
+    source_file = input_directory / "20260401000001.html"
+    source_file.write_bytes(
+        _render_internal_html_source_unavailable_placeholder(
+            acpt_no=source_file.stem,
+            doc_no="20260401000002",
+            reason="invalid_html",
+        )
+    )
+
+    payload = inspect_disclosure_html_sections_payload(
+        {"input_directory": str(input_directory)}
+    )
+
+    assert payload["summary"] == {
+        "found_files": 1,
+        "documents_with_sections": 0,
+        "files_without_sections": 0,
+        "failed_files": 0,
+        "reported_problem_files": 0,
+        "source_unavailable_files": 1,
+    }
+    assert payload["problem_files"] == []
+
+    listed = list_disclosure_html_section_sources_payload(
+        {"input_directory": str(input_directory)}
+    )
+    assert listed["summary"]["source_unavailable_files"] == 1
+    assert listed["documents"][0]["source_unavailable"]["reason"] == "invalid_html"
+    assert listed["documents"][0]["toc_count"] == 0
 
 
 def test_list_disclosure_html_section_sources_payload_pages_with_current_page_toc_counts(tmp_path: Path) -> None:
@@ -5799,17 +6023,21 @@ def test_list_disclosure_html_section_sources_payload_pages_with_current_page_to
         "page_size": 20,
         "returned_files": 20,
         "has_next_page": True,
+        "source_unavailable_files": 0,
     }
     assert len(first_page["documents"]) == 20
     assert first_page["documents"][0]["source_name"] == "20260401000001.html"
     assert first_page["documents"][0]["section_count"] == 2
+    assert first_page["documents"][0]["toc_count"] == 2
     assert first_page["documents"][1]["section_count"] == 1
+    assert first_page["documents"][1]["toc_count"] == 1
     assert "sections" not in first_page["documents"][0]
     assert second_page["summary"] == {
         "page": 2,
         "page_size": 20,
         "returned_files": 2,
         "has_next_page": False,
+        "source_unavailable_files": 0,
     }
     assert [document["source_name"] for document in second_page["documents"]] == [
         "20260421000001.html",
@@ -5925,8 +6153,24 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
             "count": 4,
             "section_count": 2,
             "sections": [
-                {"toc_id": "toc_1", "index": 1, "title": "1"},
-                {"toc_id": "toc_2", "index": 2, "title": "2"},
+                {
+                    "toc_id": "toc_1",
+                    "index": 1,
+                    "title": "1",
+                    "kind": "section",
+                    "level": 1,
+                    "parent_toc_id": None,
+                    "is_toc": True,
+                },
+                {
+                    "toc_id": "toc_2",
+                    "index": 2,
+                    "title": "2",
+                    "kind": "section",
+                    "level": 2,
+                    "parent_toc_id": "toc_1",
+                    "is_toc": True,
+                },
             ],
             "sample_documents": [
                 {
@@ -5950,7 +6194,17 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
             "signature": "toc_1 1",
             "count": 1,
             "section_count": 1,
-            "sections": [{"toc_id": "toc_1", "index": 1, "title": "1"}],
+            "sections": [
+                {
+                    "toc_id": "toc_1",
+                    "index": 1,
+                    "title": "1",
+                    "kind": "section",
+                    "level": 1,
+                    "parent_toc_id": None,
+                    "is_toc": True,
+                }
+            ],
             "sample_documents": [
                 {
                     "source_file": str(input_directory / "20260405000001.html"),
@@ -6218,6 +6472,41 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
         ["이용복", 5_500_000_000],
         ["김태현", 2_000_000_000],
     ]
+
+
+def test_section_save_never_discards_correction_word_after_first_section(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "05-internal-html-download"
+    output_directory = tmp_path / "06-sections"
+    source_file = input_directory / "2026" / "20260828000001.html"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text(
+        """
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">일반공시</p></h2>
+          <p>첫 번째 본문</p>
+          <h3 class="SECTION-2" id="toc_2"><p class="SECTION-2">정정 관련 참고사항</p></h3>
+          <p>두 번째 본문</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+        }
+    )
+    output = (output_directory / "2026" / source_file.name).read_text(
+        encoding="utf-8"
+    )
+
+    assert result["summary"]["removed_correction_sections"] == 0
+    assert "일반공시" in output
+    assert "정정 관련 참고사항" in output
+    assert "두 번째 본문" in output
 
 
 def test_save_disclosure_html_sections_payload_preserves_multiple_selected_sections(tmp_path: Path) -> None:
@@ -12383,6 +12672,192 @@ def test_check_existing_downloads_yearly(tmp_path: Path, monkeypatch) -> None:
     assert progress_log[-1] == "KIND 현재 건수와 로컬 파일 비교 완료."
     assert used_page_workers == [1, 1]
     assert query_state["maximum"] == 1
+
+
+def test_check_existing_downloads_reuses_unchanged_folder_inspection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import finiq.market_desk.web.features.downloads.kind_existing as kind_existing
+    from finiq.market_desk.web.features.downloads.kind_existing import (
+        check_existing_downloads,
+    )
+    from finiq.market_desk.web.features.downloads.kind_inspect import (
+        inspect_download_output_directory_payload,
+    )
+
+    folder = tmp_path / "20260101_20261231"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(
+            page_number=1, page_size=100, total_items=100
+        )
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2026-01-01", end_date="2026-12-31"
+            )
+        ),
+        encoding="utf-8",
+    )
+    inspection = inspect_download_output_directory_payload(
+        {
+            "mode": "yearly",
+            "output_directory": str(tmp_path),
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "page_size": 100,
+            "dry_run": True,
+        }
+    )
+
+    monkeypatch.setattr(
+        kind_existing,
+        "get_current_kind_total_count",
+        lambda _snapshot: 100,
+    )
+    monkeypatch.setattr(
+        kind_existing,
+        "inspect_download_directory_pages",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unchanged files must not be parsed twice")
+        ),
+    )
+
+    result = check_existing_downloads(
+        str(tmp_path),
+        precomputed_download_statuses=inspection["download_statuses"],
+    )
+
+    assert result["ranges"][0]["status"] == "validated"
+    assert result["ranges"][0]["local_count"] == 100
+
+
+def test_check_existing_downloads_rechecks_changed_folder(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import finiq.market_desk.web.features.downloads.kind_existing as kind_existing
+    from finiq.market_desk.web.features.downloads.kind_existing import (
+        check_existing_downloads,
+    )
+    from finiq.market_desk.web.features.downloads.kind_inspect import (
+        inspect_download_output_directory_payload,
+    )
+
+    folder = tmp_path / "20260101_20261231"
+    folder.mkdir()
+    body_path = folder / "001_post_page_00001.body"
+    body_path.write_bytes(
+        _build_download_result_page_html(
+            page_number=1, page_size=100, total_items=100
+        )
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2026-01-01", end_date="2026-12-31"
+            )
+        ),
+        encoding="utf-8",
+    )
+    inspection = inspect_download_output_directory_payload(
+        {
+            "mode": "yearly",
+            "output_directory": str(tmp_path),
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "page_size": 100,
+            "dry_run": True,
+        }
+    )
+    body_path.write_bytes(body_path.read_bytes() + b"\n")
+
+    original_inspect = kind_existing.inspect_download_directory_pages
+    inspection_calls = 0
+
+    def inspect_with_count(*args, **kwargs):
+        nonlocal inspection_calls
+        inspection_calls += 1
+        return original_inspect(*args, **kwargs)
+
+    monkeypatch.setattr(
+        kind_existing,
+        "get_current_kind_total_count",
+        lambda _snapshot: 100,
+    )
+    monkeypatch.setattr(
+        kind_existing,
+        "inspect_download_directory_pages",
+        inspect_with_count,
+    )
+
+    result = check_existing_downloads(
+        str(tmp_path),
+        precomputed_download_statuses=inspection["download_statuses"],
+    )
+
+    assert inspection_calls == 1
+    assert result["ranges"][0]["status"] == "validated"
+
+
+def test_check_existing_downloads_keeps_completeness_check_for_reused_result(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import finiq.market_desk.web.features.downloads.kind_existing as kind_existing
+    from finiq.market_desk.web.features.downloads.kind_existing import (
+        check_existing_downloads,
+    )
+    from finiq.market_desk.web.features.downloads.kind_inspect import (
+        inspect_download_output_directory_payload,
+    )
+
+    folder = tmp_path / "20260101_20261231"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(
+        _build_download_result_page_html(
+            page_number=1, page_size=100, total_items=200
+        )
+    )
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(
+            _trusted_download_input_snapshot(
+                start_date="2026-01-01", end_date="2026-12-31"
+            )
+        ),
+        encoding="utf-8",
+    )
+    inspection = inspect_download_output_directory_payload(
+        {
+            "mode": "yearly",
+            "output_directory": str(tmp_path),
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "page_size": 100,
+            "dry_run": True,
+        }
+    )
+
+    monkeypatch.setattr(
+        kind_existing,
+        "get_current_kind_total_count",
+        lambda _snapshot: 200,
+    )
+    monkeypatch.setattr(
+        kind_existing,
+        "inspect_download_directory_pages",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("stable incomplete files must use the first result")
+        ),
+    )
+
+    result = check_existing_downloads(
+        str(tmp_path),
+        precomputed_download_statuses=inspection["download_statuses"],
+    )
+
+    assert result["ranges"][0]["status"] == "stale"
+    assert "저장된 페이지는 1개" in result["ranges"][0]["error_detail"]
+    assert "페이지네이션은 2페이지" in result["ranges"][0]["error_detail"]
 
 
 def test_check_existing_downloads_preserves_each_range_filter_match(

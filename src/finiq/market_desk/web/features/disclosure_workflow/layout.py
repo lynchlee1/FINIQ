@@ -33,14 +33,47 @@ _MODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 @dataclass(frozen=True, slots=True)
 class DisclosureWorkspace:
     root: Path
-    list: Path
-    table: Path
-    filtered: Path
-    external: Path
-    external_compress: Path
-    internal: Path
-    sections: Path
-    converted: Path
+    create_on_access: bool = False
+
+    def stage_directory(self, stage_name: str) -> Path:
+        directory = _resolve_stage_directory(
+            self.root, _validate_stage_name(stage_name)
+        )
+        if self.create_on_access:
+            directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    @property
+    def list(self) -> Path:
+        return self.stage_directory("01-list")
+
+    @property
+    def table(self) -> Path:
+        return self.stage_directory("02-table")
+
+    @property
+    def filtered(self) -> Path:
+        return self.stage_directory("03-filter")
+
+    @property
+    def external(self) -> Path:
+        return self.stage_directory("04-external-html-download")
+
+    @property
+    def external_compress(self) -> Path:
+        return self.stage_directory("04-external-html-compress")
+
+    @property
+    def internal(self) -> Path:
+        return self.stage_directory("05-internal-html-download")
+
+    @property
+    def sections(self) -> Path:
+        return self.stage_directory("06-sections")
+
+    @property
+    def converted(self) -> Path:
+        return self.stage_directory("07-converted")
 
     def external_mode(self, mode: str) -> Path:
         return self.external / validate_workspace_mode(mode)
@@ -284,30 +317,7 @@ def resolve_disclosure_workspace(
         raise ValueError("data_root is required")
     root = Path(raw).expanduser().resolve()
     _validate_workspace_root(root)
-    workspace = DisclosureWorkspace(
-        root=root,
-        list=_resolve_stage_directory(root, "01-list"),
-        table=_resolve_stage_directory(root, "02-table"),
-        filtered=_resolve_stage_directory(root, "03-filter"),
-        external=_resolve_stage_directory(root, "04-external-html-download"),
-        external_compress=_resolve_stage_directory(root, "04-external-html-compress"),
-        internal=_resolve_stage_directory(root, "05-internal-html-download"),
-        sections=_resolve_stage_directory(root, "06-sections"),
-        converted=_resolve_stage_directory(root, "07-converted"),
-    )
-    if create:
-        for directory in (
-            workspace.list,
-            workspace.table,
-            workspace.filtered,
-            workspace.external,
-            workspace.external_compress,
-            workspace.internal,
-            workspace.sections,
-            workspace.converted,
-        ):
-            directory.mkdir(parents=True, exist_ok=True)
-    return workspace
+    return DisclosureWorkspace(root=root, create_on_access=create)
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -428,17 +438,7 @@ def _set_stage_path(
 
 
 def _stage_is_linked(workspace: DisclosureWorkspace, stage_name: str) -> bool:
-    stage_paths = {
-        "01-list": workspace.list,
-        "02-table": workspace.table,
-        "03-filter": workspace.filtered,
-        "04-external-html-download": workspace.external,
-        "04-external-html-compress": workspace.external_compress,
-        "05-internal-html-download": workspace.internal,
-        "06-sections": workspace.sections,
-        "07-converted": workspace.converted,
-    }
-    return stage_paths[stage_name] != workspace.root / stage_name
+    return workspace.stage_directory(stage_name) != workspace.root / stage_name
 
 
 def apply_workspace_defaults(

@@ -224,6 +224,7 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
                     ),
                     progress_callback=lambda message: _append_job_progress(job_id, message),
                     parallel_workers=_as_worker_count(payload),
+                    precomputed_download_statuses=result.get("download_statuses"),
                 )
                 _append_job_progress(job_id, "KIND 건수 비교 작업이 끝났습니다.")
             if not deletion_committed and _is_download_cancelled(job_id):

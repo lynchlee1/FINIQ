@@ -6,6 +6,7 @@ const filterPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/filter/page.
 const presetClientPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureConditionPresets.ts";
 const conditionCardPath = "frontend/finiq_GUI/apps/market-desk/src/components/disclosures/DisclosureConditionFilterCard.tsx";
 const downloadPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/external-html-download/_components/DisclosureHtmlDownloadPageView.tsx";
+const sectionSplitPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/html-section-split/page.tsx";
 const htmlParsePagePath = "frontend/finiq_GUI/apps/market-desk/src/app/html-parse/page.tsx";
 const automationPagePath = "frontend/finiq_GUI/apps/market-desk/src/app/disclosure-automation/page.tsx";
 
@@ -70,13 +71,16 @@ test("derived disclosure filters keep parent and child identities separate", asy
   assert.match(card, /getPresetLabel=\{getLibraryPresetLabel \?\? getPresetLabel\}/);
 });
 
-test("manual HTML workflows preserve derived filter identity", async () => {
-  const [downloadPage, parsePage] = await Promise.all([
+test("HTML storage workflows hide derived filters while parsing preserves their identity", async () => {
+  const [downloadPage, sectionSplitPage, parsePage] = await Promise.all([
     readFile(downloadPagePath, "utf8"),
+    readFile(sectionSplitPagePath, "utf8"),
     readFile(htmlParsePagePath, "utf8"),
   ]);
 
   assert.match(downloadPage, /listDisclosureConditionPresets\(dataRoot\)/);
+  assert.match(downloadPage, /setFilterPresets\(response\.presets\.filter\(\(preset\) => !preset\.parent_mode\)\)/);
+  assert.match(sectionSplitPage, /setFilterPresets\(response\.presets\.filter\(\(preset\) => !preset\.parent_mode\)\)/);
   assert.match(downloadPage, /preset\.parent_mode \? `\$\{preset\.parent_mode\} › \$\{preset\.mode\}` : preset\.mode/);
   assert.match(downloadPage, /mode: selectedFilterMode/);
   assert.match(downloadPage, /const selectedFilterMode = selectedFilterPreset\?\.mode \|\| ""/);

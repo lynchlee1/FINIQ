@@ -33,6 +33,7 @@ def inspect_download_output_directory_payload(
 
     candidates_by_path: dict[str, dict[str, str]] = {}
     precomputed_statuses: dict[str, dict[str, int]] = {}
+    precomputed_file_states: dict[str, str] = {}
     validation_targets: list[tuple[int, Path, int]] = []
 
     log(f"검사 대상 저장 폴더: {len(targets)}개.")
@@ -104,19 +105,30 @@ def inspect_download_output_directory_payload(
 
     def inspect_target(
         target: tuple[int, Path, int],
-    ) -> tuple[int, Path, dict[str, int] | None, str | None]:
+    ) -> tuple[
+        int,
+        Path,
+        dict[str, int] | None,
+        str | None,
+        str | None,
+    ]:
         index, folder, page_size = target
         check_cancel()
         try:
+            file_state_before = _result_body_file_state(folder)
             status = inspect_download_directory_pages(
                 folder,
                 expected_page_size=page_size,
                 require_complete=False,
                 validation_parallelism=page_workers,
             )
+            file_state_after = _result_body_file_state(folder)
         except (OSError, ValueError) as exc:
-            return index, folder, None, str(exc)
-        return index, folder, status, None
+            return index, folder, None, None, str(exc)
+        stable_file_state = (
+            file_state_after if file_state_before == file_state_after else None
+        )
+        return index, folder, status, stable_file_state, None
 
     if folder_workers == 1:
         validation_results = map(inspect_target, validation_targets)
@@ -128,10 +140,12 @@ def inspect_download_output_directory_payload(
         validation_results = executor.map(inspect_target, validation_targets)
 
     try:
-        for index, folder, status, error in validation_results:
+        for index, folder, status, file_state, error in validation_results:
             check_cancel()
             if status is not None:
                 precomputed_statuses[str(folder)] = status
+            if file_state is not None:
+                precomputed_file_states[str(folder)] = file_state
             if error is not None:
                 for path in _result_body_files(folder) + _workflow_auxiliary_files(folder):
                     candidates_by_path[str(path)] = _relative_candidate(
@@ -168,7 +182,10 @@ def inspect_download_output_directory_payload(
     log("폴더 검증 요약 데이터 구성 중...")
     statuses = [
         _download_integrity_status(
-            folder, page_size, precomputed_statuses.get(str(folder))
+            folder,
+            page_size,
+            precomputed_statuses.get(str(folder)),
+            precomputed_file_states.get(str(folder)),
         )
         for folder, page_size in targets
         if folder.exists()
