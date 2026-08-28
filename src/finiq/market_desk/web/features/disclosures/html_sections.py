@@ -379,7 +379,7 @@ def _is_correction_section_title(title: str) -> bool:
 def _leading_correction_plan(
     plans: list[_HtmlSectionPlan],
 ) -> _HtmlSectionPlan | None:
-    if plans and _is_correction_section_title(plans[0].title):
+    if len(plans) > 1 and _is_correction_section_title(plans[0].title):
         return plans[0]
     return None
 

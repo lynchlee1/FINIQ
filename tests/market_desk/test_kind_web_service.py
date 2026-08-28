@@ -6514,6 +6514,37 @@ def test_section_save_never_discards_correction_word_after_first_section(
     assert "두 번째 본문" in output
 
 
+def test_section_save_preserves_single_legacy_correction_disclosure(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "05-internal-html-download"
+    output_directory = tmp_path / "06-sections"
+    source_file = input_directory / "1997" / "19970407M00015.html"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text(
+        "<P class='section-1'><a name='1'>대신개발금융(주) 유상증자 정정공시</P>"
+        "<TABLE><TR><TD><P>일정변경이 불가피하여 추후 재공시하겠음</P>"
+        "</TD></TR></TABLE>",
+        encoding="utf-8",
+    )
+
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "mode": "rights_issuance",
+        }
+    )
+    output = (
+        output_directory / "rights_issuance" / "1997" / source_file.name
+    ).read_text(encoding="utf-8")
+
+    assert result["summary"]["saved_files"] == 1
+    assert result["summary"]["removed_correction_sections"] == 0
+    assert "유상증자 정정공시" in output
+    assert "일정변경이 불가피" in output
+
+
 def test_save_disclosure_html_sections_payload_preserves_multiple_selected_sections(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"

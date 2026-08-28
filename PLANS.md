@@ -6,6 +6,12 @@
 - Implementation: make the only legal stage-06 path `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`. A folder named `06-sections` always receives the current mode directory before any year folder; a leftover path under another mode is replaced, and writing `06-sections/<YYYY>/` is an error. Point stage-07 parsing, linked workspace settings, and automation caches at the same mode directory. Derived filters keep using the parent mode directory. Folders not named `06-sections` are unchanged.
 - Verification: saving shareholder-meeting HTML while the leftover output path is still `06-sections/bond_issuance` now creates `06-sections/shareholder_meeting` and does not write into the bond folder. Saving into `06-sections` without a mode fails. The workspace, automation, time-metadata, parse-integrity, web service, web app, pipeline, and persistence set passed 618 tests with 166 environment-dependent tests skipped.
 
+## 2026-08-29: preserve single-section legacy correction disclosures
+
+- Purpose: prevent a legacy correction disclosure whose only section is the business document itself from being removed as if it were a separate correction preamble.
+- Implementation: remove a leading correction section only when the document has at least one later section to preserve. Single-section correction disclosures remain intact; later sections containing `정정` remain unaffected.
+- Verification: the reduced `19970407M00015` regression and existing multi-section correction regressions passed. A read-only pre-save pass over all 39,622 rights-issuance inputs preserved all 17 single-section correction disclosures, removed 21,400 genuine leading correction preambles, recognized one source-unavailable placeholder, and completed without errors.
+
 ## 2026-08-28: hide derived filters from HTML storage workflows
 
 - Purpose: keep subfilters out of `공시원문 외부 저장`, `공시원문 내부 저장`, and `공시원문 목차 분리`, where outputs belong to the top-level filter rather than a derived filter.
