@@ -4,7 +4,7 @@
 
 - `<data_root>`를 공시 작업공간 루트로 사용하면 각 단계의 기본 입력과 출력을 아래 폴더에 저장한다.
 - 화면이 별도 경로를 받는 작업은 작업공간 밖의 입력·출력 경로도 실행 요청으로 지정할 수 있다.
-- 어느 루트를 선택하더라도 단계별 하위 폴더, 파일명과 상대 배치는 아래 구조를 바꾸지 않는다.
+- 어느 루트를 선택하더라도 단계별 하위 폴더, 파일명과 상대 배치는 아래 구조를 바꾸지 않는다. `06-sections`는 04·05단계와 같이 현재 소유 모드 폴더 아래에 연도 폴더를 두며, 이전 모드 폴더나 단계 루트의 연도 폴더로 우회하지 않는다.
 - 실행 요청과 API 응답은 실제 경로를 전달할 수 있지만 저장 결과 JSON에는 절대 입력·출력 디렉터리를 기록하지 않는다. 파일 연결에는 결과 JSON 위치 기준의 상대 경로나 내용 fingerprint를 사용한다.
 
 ### `<data_root>`
@@ -18,7 +18,7 @@
 - `04-external-html-download`는 KIND 외부 HTML과 원본 연결 manifest를 저장한다.
 - `04-external-html-compress`는 압축한 문서 선택 정보를 저장한다.
 - `05-internal-html-download`는 KIND 본문 HTML과 원본 연결 manifest를 저장한다.
-- `06-sections`는 공시별로 선택한 목차의 HTML을 저장한다.
+- `06-sections`는 조건검색 필터 mode별 목차 HTML을 `<mode>/<YYYY>/<acpt_no>.html`로 저장한다. `06-sections/<YYYY>/`는 허용하지 않는다.
 - `07-converted`는 mode별 파싱 결과를 저장한다.
 - `09-disclosure-graph`는 공시 graph를 저장한다.
 

@@ -11,6 +11,7 @@
 ```
 
 - 필수 입력: `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`
+- 파생 필터 HTML 입력: `<data_root>/06-sections/<parent_mode>/<YYYY>/<acpt_no>.html`
 - 선택 입력: `<data_root>/03-filter/<mode>/filtered.json`
 - 파생 필터 입력: `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`
 - 선택 입력: `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`
@@ -28,7 +29,7 @@
 | --- | --- | --- |
 | `mode` | 문자열 | 작업공간 `조건검색 필터` 이름 |
 | `parser_method` | 문자열 | `PARSER_REGISTRY`에 등록된 파싱 방법 |
-| `input_directory` | 디렉터리 경로 | `<YYYY>/<acpt_no>.html`을 찾을 입력 루트 |
+| `input_directory` | 디렉터리 경로 | `<data_root>/06-sections/<mode>`처럼 `<YYYY>/<acpt_no>.html`을 찾을 모드 디렉터리 |
 | `output_directory` | 디렉터리 경로 | `parsed-<mode>.json`을 저장할 디렉터리 |
 | `skip_errors` | 불리언 | `true`이면 파일 하나가 실패해도 오류를 기록하고 다음 파일을 처리 |
 
@@ -105,6 +106,8 @@ N=1             N=2      N=3
 
 `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`이 실제 parsing 대상이다.
 
+- 입력 루트는 모드 디렉터리 `<data_root>/06-sections/<mode>`이다. 파생 필터는 `<data_root>/06-sections/<parent_mode>`를 사용한다.
+- `06-sections` 단계 루트나 `06-sections/<YYYY>/`는 입력으로 쓰지 않는다.
 - 입력 루트 바로 아래의 4자리 숫자 연도 폴더만 찾는다.
 - 연도 폴더 바로 아래의 `.html` 파일만 읽고 더 깊은 파일은 읽지 않는다.
 - 확장자를 뺀 파일명 전체를 `acpt_no`로 사용한다.
@@ -121,7 +124,7 @@ N=1             N=2      N=3
 - 각 `acpt_no`는 비어 있지 않고 서로 달라야 한다.
 - 선택한 모든 HTML에 `YYYY-MM-DD HH:MM` 형식의 `disclosed_at`이 있어야 한다.
 - `market`이 `유가증권`이면 결과에는 `코스피`로 저장한다.
-- 파생 필터는 자식 `mode`와 `parent_mode`를 함께 지정한다. 작업공간 기본 경로는 자식의 중첩 `filtered.json`으로 정하고, parser는 `parser_method`로만 선택한다.
+- 파생 필터는 자식 `mode`와 `parent_mode`를 함께 지정한다. HTML 입력은 상위 `06-sections/<parent_mode>`이고, 작업공간 기본 메타데이터 경로는 자식의 중첩 `filtered.json`으로 정하며, parser는 `parser_method`로만 선택한다.
 
 ### Compressed External HTML Metadata
 

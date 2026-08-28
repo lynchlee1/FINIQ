@@ -2,7 +2,10 @@
 
 ## Paths
 
-- `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`을 입력으로 받아 `<data_root>/06-sections/<mode>`에 `<YYYY>/<acpt_no>.html`을 저장한다.
+- `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`을 입력으로 받아 `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`에 저장한다.
+- 허용하는 상대 배치는 `<mode>/<YYYY>/<acpt_no>.html`뿐이다. `06-sections/<YYYY>/`는 만들지 않고, 그 모양을 읽거나 보정하지도 않는다.
+- 조건검색 필터를 바꾸면 현재 소유 모드 폴더에 저장한다. 직전에 쓴 `06-sections/<다른 mode>` 경로가 남아 있어도 그 폴더에 이어 쓰지 않는다.
+- 파생 필터 `<parent_mode>/<mode>`는 상위 `<data_root>/05-internal-html-download/<parent_mode>`를 읽고 `<data_root>/06-sections/<parent_mode>`에 저장한다. 자식 `mode`나 `subfilters/<mode>`의 06단계 출력 폴더는 만들지 않는다.
 
 ### `<data_root>/05-internal-html-download/<mode>/<YYYY>/<acpt_no>.html`
 
@@ -19,8 +22,8 @@
 
 - 구조로 완전히 분리한 뒤 정정 section만 제외한 모든 목차 범위를 보존한 출력 HTML 파일이다.
 - 정정 판별은 분리된 section이 둘 이상일 때만 첫 section 제목의 공백을 제거하고 단일 토큰 `정정`을 확인한다. 첫 section이 정정이면 그것만 제외하고, section이 하나뿐인 정정공시와 두 번째 이후 section은 검사하거나 제외하지 않는다. 목차 경계 탐지에는 문자열을 사용하지 않는다.
-- Manual selection이나 모드별 저장 규칙은 사용하지 않는다.
-- HTML은 `<mode>/<YYYY>/<acpt_no>.html`만 사용한다. `06-sections` 바로 아래 연도 폴더는 만들지 않고, 그 모양을 읽거나 보정하지도 않는다.
+- Manual selection이나 목차 선택용 모드별 저장 규칙은 사용하지 않는다.
+- HTML은 `<mode>/<YYYY>/<acpt_no>.html`만 사용한다. `06-sections` 바로 아래 연도 폴더, 다른 모드 폴더, 더 깊은 임의 배치는 허용하지 않는다.
 - parser JSON은 만들지 않는다.
 
 ### Section metadata

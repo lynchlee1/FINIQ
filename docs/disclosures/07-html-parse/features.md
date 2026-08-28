@@ -11,7 +11,8 @@
 #### Behavior
 
 - `<data_root>/06-sections/<mode>` 바로 아래의 4자리 연도 폴더와 그 바로 아래의 `*.html`만 읽는다.
-- 입력 루트, 이름이 다른 폴더와 더 깊은 하위 HTML은 제외한다.
+- 입력 루트, 이름이 다른 폴더와 더 깊은 하위 HTML은 제외한다. `06-sections/<YYYY>/`나 다른 모드 폴더는 읽지 않는다.
+- 파생 필터는 상위 기본 필터의 `<data_root>/06-sections/<parent_mode>`를 읽는다. 자식 `mode` 전용 06단계 폴더는 만들지 않고 찾지도 않는다.
 - `parse_disclosure_html_payload()`가 필수 경로, 작업공간 `mode`, 선택적인 `parent_mode`, `parser_method`, 필터와 실행 옵션을 검증하고 registry parser를 선택한다.
 
 #### Defaults and Exceptions
