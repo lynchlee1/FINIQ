@@ -1169,6 +1169,30 @@ def test_internal_html_invalid_response_preserves_previous_file_and_manifest(
     assert manifest_path.read_bytes() == previous_manifest
 
 
+def test_internal_html_revalidation_rejects_invalid_response_without_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _internal_html_body(tmp_path, ["20250101000001"])
+    output_directory = Path(str(body["output_directory"]))
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        lambda *_args, **_kwargs: b"not html",
+    )
+
+    with pytest.raises(ValueError, match="Downloaded internal response is invalid HTML"):
+        download_disclosure_internal_html_payload(
+            {**body, "skip_existing": False},
+            redownload_unverified_existing=True,
+        )
+
+    assert not (output_directory / "2025" / "20250101000001.html").exists()
+    assert not (output_directory / "kind_disclosure_html_manifest.json").exists()
+
+
 def test_internal_html_download_accepts_legacy_html_fragment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

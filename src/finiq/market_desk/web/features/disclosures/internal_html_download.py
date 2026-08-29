@@ -27,6 +27,10 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
 from finiq.market_desk.web.features.disclosures.html_common import *
 
 
+class _ContentPathMissingError(ValueError):
+    pass
+
+
 def _publish_validated_internal_html(output_path: Path, content: bytes) -> None:
     """Validate downloaded HTML beside its target before replacing the target."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,7 +157,7 @@ def _fetch_internal_html(
     paths = search_paths(contents_response.content)
     if paths is None or not paths.get("doc_loc_path"):
         msg = f"content path not found for acpt_no={acpt_no} doc_no={doc_no}"
-        raise ValueError(msg)
+        raise _ContentPathMissingError(msg)
 
     if before_request is not None:
         before_request()
@@ -1122,10 +1126,7 @@ def download_disclosure_internal_html_payload(
                             )
                         except InterruptedError:
                             break
-                        except ValueError as exc:
-                            if "content path not found" not in str(exc):
-                                emit(f"KIND 원본 재검증 실패 acpt_no={acpt_no}: {exc}")
-                                continue
+                        except _ContentPathMissingError:
                             reason = "content_path_missing"
                         except Exception as exc:
                             emit(f"KIND 원본 재검증 실패 acpt_no={acpt_no}: {exc}")
@@ -1136,20 +1137,16 @@ def download_disclosure_internal_html_payload(
                             target_years=target_years,
                         )
                         if not reason:
-                            try:
-                                _publish_validated_internal_html(
-                                    output_path, internal_html
-                                )
-                            except ValueError:
-                                reason = "invalid_html"
-                            else:
-                                downloaded_paths.append(output_path)
-                                source_unavailable_by_acpt_no.pop(acpt_no, None)
-                                emit(
-                                    "KIND 원본 재검증에서 정상 HTML을 저장했습니다: "
-                                    f"acpt_no={acpt_no}"
-                                )
-                                continue
+                            _publish_validated_internal_html(
+                                output_path, internal_html
+                            )
+                            downloaded_paths.append(output_path)
+                            source_unavailable_by_acpt_no.pop(acpt_no, None)
+                            emit(
+                                "KIND 원본 재검증에서 정상 HTML을 저장했습니다: "
+                                f"acpt_no={acpt_no}"
+                            )
+                            continue
                         source_unavailable_by_acpt_no[acpt_no] = {
                             "doc_no": doc_no,
                             "reason": reason,
@@ -1161,7 +1158,7 @@ def download_disclosure_internal_html_payload(
                         ):
                             source_unavailable_by_acpt_no.pop(acpt_no, None)
                             emit(
-                                "KIND 응답이 유효하지 않아 기존 정상 HTML을 보존합니다: "
+                                "KIND 본문 경로가 없어 기존 정상 HTML을 보존합니다: "
                                 f"acpt_no={acpt_no}"
                             )
                             continue
