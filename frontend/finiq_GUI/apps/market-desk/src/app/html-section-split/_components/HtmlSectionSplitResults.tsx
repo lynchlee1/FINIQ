@@ -57,6 +57,22 @@ export type ProblemFile = {
   error?: string;
 };
 
+export type SectionPattern = {
+  signature: string;
+  count: number;
+  section_count: number;
+  sections: Array<{
+    toc_id: string;
+    index: number;
+    title: string;
+    kind: NonNullable<TocItem["kind"]>;
+    level: number;
+    parent_toc_id: string | null;
+    is_toc: boolean;
+    will_remove: boolean;
+  }>;
+};
+
 export type InspectResult = {
   input_directory?: string;
   summary?: {
@@ -110,6 +126,23 @@ type HtmlSectionSplitActionDockProps = {
   onPathError: (message: string) => void;
   onCancel: () => void;
 };
+
+type HtmlSectionStructureTypesProps = {
+  sectionPatterns: SectionPattern[] | null;
+};
+
+const sectionKindLabels: Record<NonNullable<TocItem["kind"]>, string> = {
+  preamble: "머리말",
+  cover: "표지",
+  part: "부",
+  section: "목차",
+  document: "본문",
+};
+
+function sectionKindLabel(section: SectionPattern["sections"][number]) {
+  if (section.kind === "section") return `${section.level}단계 목차`;
+  return sectionKindLabels[section.kind];
+}
 
 function compactPath(path: string) {
   if (!path) return "";
@@ -409,6 +442,78 @@ export function HtmlSectionSplitResults({
       ) : null}
 
     </>
+  );
+}
+
+export function HtmlSectionStructureTypes({ sectionPatterns }: HtmlSectionStructureTypesProps) {
+  if (sectionPatterns === null) return null;
+
+  return (
+    <HtmlWorkflowCard
+      title="목차 구조 종류"
+      description={`목차 분리 실행에서 확인한 전체 입력 HTML의 고유 목차 구조 ${formatInteger(sectionPatterns.length)}종류입니다.`}
+    >
+      {sectionPatterns.length ? (
+        <div className={htmlTableFrameClassName}>
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500 dark:bg-[#0d1117] dark:text-slate-400">
+              <tr>
+                <th className="px-3 py-2 font-semibold">목차 구조</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">목차 수</th>
+                <th className="w-28 px-3 py-2 text-right font-semibold">전체 구간 수</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">공시 수</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-[#30363d]">
+              {sectionPatterns.map((pattern, patternIndex) => {
+                const tocCount = pattern.sections.filter((section) => section.is_toc).length;
+                return (
+                  <tr key={pattern.signature}>
+                    <td className="px-3 py-3 text-slate-700 dark:text-slate-300">
+                      <p className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        구조 {formatInteger(patternIndex + 1)}
+                      </p>
+                      <div className="space-y-1.5">
+                        {pattern.sections.map((section) => (
+                          <div
+                            key={section.toc_id}
+                            className="flex items-start gap-2"
+                            style={{ marginLeft: `${Math.max(0, section.level - 1) * 20}px` }}
+                          >
+                            <span className="mt-0.5 shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:border-[#30363d] dark:bg-[#161b22] dark:text-slate-400">
+                              {sectionKindLabel(section)}
+                            </span>
+                            {section.will_remove ? (
+                              <span className="mt-0.5 shrink-0 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300">
+                                제거 예정
+                              </span>
+                            ) : null}
+                            <span className="min-w-0 break-words leading-6">{section.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-right align-top tabular-nums text-slate-700 dark:text-slate-300">
+                      {formatInteger(tocCount)}
+                    </td>
+                    <td className="px-3 py-3 text-right align-top tabular-nums text-slate-700 dark:text-slate-300">
+                      {formatInteger(pattern.section_count)}
+                    </td>
+                    <td className="px-3 py-3 text-right align-top tabular-nums text-slate-700 dark:text-slate-300">
+                      {formatInteger(pattern.count)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-[#30363d] dark:text-slate-400">
+          실행 결과에서 목차 구조를 찾지 못했습니다.
+        </div>
+      )}
+    </HtmlWorkflowCard>
   );
 }
 

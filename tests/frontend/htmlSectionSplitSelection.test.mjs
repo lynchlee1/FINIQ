@@ -27,6 +27,27 @@ test("HTML section preview preserves and indents structural TOC hierarchy", asyn
   assert.match(source, /KIND 원본 없음/);
 });
 
+test("HTML section save shows every structure type from the completed execution", async () => {
+  const pageSource = await readFile(pagePath, "utf8");
+  const resultsSource = await readFile(resultsPath, "utf8");
+
+  assert.match(pageSource, /data\?\.format === "finiq_disclosure_html_section_save_v2"/);
+  assert.match(pageSource, /setSectionPatterns\(data\.section_patterns \|\| \[\]\)/);
+  assert.match(pageSource, /<HtmlSectionStructureTypes sectionPatterns=\{sectionPatterns\} \/>/);
+  assert.match(resultsSource, /title="목차 구조 종류"/);
+  assert.match(resultsSource, /sectionPatterns\.map\(\(pattern, patternIndex\) =>/);
+  assert.match(resultsSource, /pattern\.sections\.map\(\(section\) =>/);
+  assert.match(resultsSource, /sectionKindLabel\(section\)/);
+  assert.match(resultsSource, /section\.will_remove/);
+  assert.match(resultsSource, /제거 예정/);
+  assert.match(resultsSource, /Math\.max\(0, section\.level - 1\) \* 20/);
+  assert.match(resultsSource, /pattern\.sections\.filter\(\(section\) => section\.is_toc\)\.length/);
+  assert.match(resultsSource, /전체 구간 수/);
+  assert.match(resultsSource, /pattern\.section_count/);
+  assert.match(resultsSource, /pattern\.count/);
+  assert.doesNotMatch(resultsSource, />\{pattern\.signature\}</);
+});
+
 test("source-unavailable documents never request section splitting", async () => {
   const pageSource = await readFile(pagePath, "utf8");
   const resultsSource = await readFile(resultsPath, "utf8");

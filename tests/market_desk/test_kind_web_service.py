@@ -6894,6 +6894,54 @@ def test_save_disclosure_html_sections_payload_ignores_incomplete_obsolete_rules
             "output_directory": str(output_directory),
             "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
         }
+def test_section_save_returns_every_toc_structure_found_during_execution(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    for source_name in ["20260401000001.html", "20260402000001.html"]:
+        (source_directory / source_name).write_text(
+            "<html><head></head><body>"
+            "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>표지</p></h2>"
+            "<h3 class='SECTION-2' id='toc_2'><p class='SECTION-2'>본문</p></h3>"
+            "</body></html>",
+            encoding="utf-8",
+        )
+    (source_directory / "20260403000001.html").write_text(
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>단일 본문</p></h2>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+        }
+    )
+
+    assert [
+        (item["signature"], item["count"], item["section_count"])
+        for item in result["section_patterns"]
+    ] == [
+        ("toc_1 표지 toc_2 본문", 2, 2),
+        ("toc_1 단일 본문", 1, 1),
+    ]
+    assert result["section_patterns"][0]["sections"][1] == {
+        "toc_id": "toc_2",
+        "index": 2,
+        "title": "본문",
+        "kind": "section",
+        "level": 2,
+        "parent_toc_id": "toc_1",
+        "is_toc": True,
+        "will_remove": False,
+    }
+
+
     )
 
     assert result["summary"]["saved_files"] == 2
@@ -7215,6 +7263,8 @@ def test_section_save_preserves_single_legacy_correction_disclosure(
     assert result["summary"]["removed_correction_sections"] == 0
     assert "유상증자 정정공시" in output
     assert "일정변경이 불가피" in output
+    assert result["section_patterns"][0]["sections"][0]["will_remove"] is True
+    assert result["section_patterns"][0]["sections"][1]["will_remove"] is False
 
 
 def test_save_disclosure_html_sections_payload_preserves_multiple_selected_sections(tmp_path: Path) -> None:
@@ -10422,7 +10472,8 @@ def test_html_parser_methods_are_registered_documented_and_loaded_dynamically() 
     assert "개별 공시" in section_split_ui_html
     assert "목차 수" in section_split_ui_html
     assert "목차 조합 모아보기" not in section_split_ui_html
-    assert "sectionPatterns" not in section_split_ui_html
+    assert "sectionPatterns" in section_split_ui_html
+    assert "목차 구조 종류" in section_split_ui_html
     assert "section_save_rules" not in section_split_ui_html
     assert "selectedPatternTocIds" not in section_split_ui_html
     assert "onTogglePatternSection" not in section_split_ui_html

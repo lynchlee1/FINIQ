@@ -619,36 +619,41 @@ def _section_signature(sections: list[dict[str, Any]]) -> str:
     ).strip()
 
 
-def _section_patterns(documents: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    counts: dict[str, dict[str, Any]] = {}
-    for document in documents:
-        sections = list(document.get("sections") or [])
-        if not sections:
-            continue
-        signature = _section_signature(sections)
-        if not signature:
-            continue
-        item = counts.setdefault(
-            signature,
+def _count_section_pattern(
+    counts: dict[str, dict[str, Any]], document: dict[str, Any]
+) -> None:
+    sections = list(document.get("sections") or [])
+    if not sections:
+        return
+    signature = _section_signature(sections)
+    if not signature:
+        return
+    item = counts.setdefault(
+        signature,
+        {
+            "signature": signature,
+            "count": 0,
+            "section_count": len(sections),
+            "sections": sections,
+            "sample_documents": [],
+        },
+    )
+    item["count"] += 1
+    if len(item["sample_documents"]) < 3:
+        item["sample_documents"].append(
             {
-                "signature": signature,
-                "count": 0,
-                "section_count": len(sections),
-                "sections": sections,
-                "sample_documents": [],
-            },
+                "source_file": str(document.get("source_file") or ""),
+                "source_name": str(document.get("source_name") or ""),
+                "source_relative_path": str(
+                    document.get("source_relative_path") or ""
+                ),
+            }
         )
-        item["count"] += 1
-        if len(item["sample_documents"]) < 3:
-            item["sample_documents"].append(
-                {
-                    "source_file": str(document.get("source_file") or ""),
-                    "source_name": str(document.get("source_name") or ""),
-                    "source_relative_path": str(
-                        document.get("source_relative_path") or ""
-                    ),
-                }
-            )
+
+
+def _sorted_section_patterns(
+    counts: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     return sorted(
         counts.values(),
         key=lambda item: (
@@ -657,6 +662,13 @@ def _section_patterns(documents: Iterable[dict[str, Any]]) -> list[dict[str, Any
             str(item["signature"]),
         ),
     )
+
+
+def _section_patterns(documents: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: dict[str, dict[str, Any]] = {}
+    for document in documents:
+        _count_section_pattern(counts, document)
+    return _sorted_section_patterns(counts)
 
 
 def _resolve_html_source_file(
@@ -1208,6 +1220,7 @@ def _automatic_section_output(source_file: Path) -> dict[str, Any]:
             "selected_sections": 1,
             "removed_correction_sections": 0,
             "source_unavailable": source_unavailable,
+            "sections": [],
         }
     document = _parse_internal_html_document(source_file.read_bytes())
     container, plans = _section_plans(document)
@@ -1224,6 +1237,19 @@ def _automatic_section_output(source_file: Path) -> dict[str, Any]:
         ),
         "selected_sections": selected_sections,
         "removed_correction_sections": len(correction_plans),
+        "sections": [
+            {
+                "toc_id": plan.toc_id,
+                "index": index,
+                "title": plan.title,
+                "kind": plan.kind,
+                "level": plan.level,
+                "parent_toc_id": plan.parent_toc_id,
+                "is_toc": plan.is_toc,
+                "will_remove": plan is correction_plan,
+            }
+            for index, plan in enumerate(plans, start=1)
+        ],
     }
 
 
@@ -1428,6 +1454,7 @@ def save_disclosure_html_sections_payload(
     saved_files: list[str] = []
     expected_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
+    section_pattern_counts: dict[str, dict[str, Any]] = {}
     removed_correction_sections = 0
     source_unavailable_files = 0
     output_directory.parent.mkdir(parents=True, exist_ok=True)
@@ -1452,6 +1479,10 @@ def save_disclosure_html_sections_payload(
                 "status": "ok",
                 "staged": staged_path,
                 "relative_path": source_relative_path.as_posix(),
+                "source_file": str(source_file),
+                "source_name": source_file.name,
+                "source_relative_path": source_relative_path.as_posix(),
+                "sections": selected["sections"],
                 "saved": [str(output_path)],
                 "expected": [str(output_path)],
                 "removed_correction_sections": int(
@@ -1465,6 +1496,8 @@ def save_disclosure_html_sections_payload(
         for index, result in enumerate(results, start=1):
             if _cancel_requested(cancel_check):
                 return {"cancelled": True}
+            _count_section_pattern(section_pattern_counts, result)
+            result.pop("sections")
             staged_results.append(result)
             saved_files.extend(result["saved"])
             expected_files.extend(result["expected"])
@@ -1506,6 +1539,7 @@ def save_disclosure_html_sections_payload(
         f"저장 완료 {len(saved_files)}건, 누락 {len(missing_files)}건, "
         f"예상 밖 파일 {len(unexpected_files)}건"
     )
+    section_patterns = _sorted_section_patterns(section_pattern_counts)
     return {
         "format": "finiq_disclosure_html_section_save_v2",
         "input_directory": str(input_directory),
@@ -1526,5 +1560,6 @@ def save_disclosure_html_sections_payload(
         "missing_files": missing_files,
         "unexpected_files": unexpected_files,
         "skipped_files": skipped_files,
+        "section_patterns": section_patterns,
         "progress_log": list(progress_log),
     }

@@ -256,6 +256,10 @@ UI 문구를 추가하거나 바꿀 때는 이 절의 용어를 먼저 따른다
 | Internal HTML section save action | 목차 저장 | Button/action that structurally splits every TOC range, removes only the correction section, and saves the remaining ranges as one HTML file per disclosure while preserving the source-relative path. |
 | Internal HTML individual disclosure table | 개별 공시 | Table listing per-file section lists and source-open actions. |
 | Internal HTML individual disclosure section count | 목차 수 | Column showing the number of sections in each listed disclosure. |
+| Internal HTML section structure result | 목차 구조 종류 | Result card shown after `공시원문 목차 분리` execution. List every unique TOC sequence found across the complete execution input with its section and disclosure counts. |
+| Internal HTML section structure entry labels | 머리말 / 표지 / 부 / N단계 목차 / 본문 | Human-readable labels for each line in a `목차 구조 종류` entry. Never expose `preamble`, `toc_N`, or other internal identifiers as the primary structure text. |
+| Internal HTML section structure removal state | 제거 예정 | Badge on a `목차 구조 종류` line that the completed split execution excluded from the saved HTML. |
+| Internal HTML section structure total range count | 전체 구간 수 | Count of every separated range, including non-TOC preamble or document ranges. Keep this separate from `목차 수`, which counts only actual TOC entries. |
 | Internal HTML problem file table | 문제 파일 | Table listing files without TOC sections and files that failed to read. |
 | Disclosure HTML problem file setting | 문제 파일 표시 수 | Right-side setting for the maximum problem-file rows returned by an HTML inspection or validation error. Default to 20. |
 | Disclosure HTML delete confirmation input | 확인 문구 | Labeled input shown before the destructive action. Require the exact text `확인했습니다.`. |

@@ -20,9 +20,11 @@ import { formatInteger } from "@/lib/format";
 import {
   HtmlSectionSplitActionDock,
   HtmlSectionSplitResults,
+  HtmlSectionStructureTypes,
   type DocumentRow,
   type InspectResult,
   type ReviewView,
+  type SectionPattern,
   type SplitResult,
 } from "./_components/HtmlSectionSplitResults";
 import {
@@ -80,6 +82,7 @@ export default function HtmlSectionSplitPage() {
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [integrityInspectionResult, setIntegrityInspectionResult] = useState<InspectResult | null>(null);
   const [integrityInspectionError, setIntegrityInspectionError] = useState("");
+  const [sectionPatterns, setSectionPatterns] = useState<SectionPattern[] | null>(null);
   const [page, setPage] = useState(1);
   const [selectedDocument, setSelectedDocument] = useState<DocumentRow | null>(null);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
@@ -160,6 +163,9 @@ export default function HtmlSectionSplitPage() {
       if (data?.format === "finiq_disclosure_html_section_inspect_v1") {
         setInspectResult(data);
         setStatus(`폴더 열기 완료: ${formatInteger(data.summary?.documents_with_sections || 0)}개 공시`);
+      }
+      if (data?.format === "finiq_disclosure_html_section_save_v2") {
+        setSectionPatterns(data.section_patterns || []);
       }
       setIsInspecting(false);
     },
@@ -282,6 +288,7 @@ export default function HtmlSectionSplitPage() {
     setInspectResult(null);
     setIntegrityInspectionResult(null);
     setIntegrityInspectionError("");
+    setSectionPatterns(null);
     setIsIntegrityInspecting(false);
     setPage(1);
     setSelectedDocument(null);
@@ -297,6 +304,7 @@ export default function HtmlSectionSplitPage() {
     cancelActiveIntegrityInspection();
     setIntegrityInspectionResult(null);
     setIntegrityInspectionError("");
+    setSectionPatterns(null);
     setIsIntegrityInspecting(false);
   }, [
     currentFilterMode,
@@ -314,6 +322,7 @@ export default function HtmlSectionSplitPage() {
     if (activeJobId) cancelJob();
     setSelectedFilterId(value);
     setInspectResult(null);
+    setSectionPatterns(null);
     setPage(1);
     resetSelectedDisclosure();
   };
@@ -333,6 +342,7 @@ export default function HtmlSectionSplitPage() {
 
   const handleOutputDirectoryChange = (value: string) => {
     setOutputDirectory(value);
+    setSectionPatterns(null);
     saveSetting("html_section_split_output_directory", value);
   };
 
@@ -635,6 +645,7 @@ export default function HtmlSectionSplitPage() {
         throw new Error(payload?.detail || "목차 분리 작업을 시작하지 못했습니다.");
       }
       const data = await response.json();
+      setSectionPatterns(null);
       startPolling(data.job_id);
     } catch (err: any) {
       setStatus(errorMessage(err));
@@ -759,6 +770,8 @@ export default function HtmlSectionSplitPage() {
               </Button>
             </div>
           </HtmlWorkflowCard>
+
+          <HtmlSectionStructureTypes sectionPatterns={sectionPatterns} />
         </section>
 
         <HtmlSectionSplitActionDock
