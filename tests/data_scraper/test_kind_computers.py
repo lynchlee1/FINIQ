@@ -272,6 +272,87 @@ def test_external_html_dispatches_configured_egresses(
     ]
 
 
+def test_external_html_reassigns_missing_proxy_result_to_direct_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acpt_numbers = ["20250101000001", "20250101000002"]
+    direct_path = tmp_path / f"{acpt_numbers[0]}.html"
+    direct_path.write_text("<html><body>direct</body></html>", encoding="utf-8")
+    progress: list[str] = []
+
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client.run_kind_virtual_computers",
+        lambda **_kwargs: [[str(direct_path)], []],
+    )
+
+    def valid_response(*_args: object, **_kwargs: object) -> requests.Response:
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b"<html><body>recovered</body></html>"
+        return response
+
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client._request_disclosure_viewer_page",
+        valid_response,
+    )
+
+    saved = download_disclosure_external_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        acpt_numbers=acpt_numbers,
+        kind_proxy_urls=["http://127.0.0.1:25001"],
+        max_workers=2,
+        max_retries=0,
+        skip_existing=False,
+        progress_callback=progress.append,
+    )
+
+    assert [path.stem for path in saved] == acpt_numbers
+    assert any("직접 연결로 재시도" in message for message in progress)
+
+
+def test_external_html_does_not_reassign_failed_direct_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy_path = tmp_path / "20250101000002.html"
+    proxy_path.write_text("<html><body>proxy</body></html>", encoding="utf-8")
+    requested: list[str] = []
+
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client.run_kind_virtual_computers",
+        lambda **_kwargs: [[], [str(proxy_path)]],
+    )
+
+    def track_request(
+        *_args: object, **kwargs: object
+    ) -> requests.Response:
+        requested.append(str(kwargs["acpt_no"]))
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b"<html><body>unexpected retry</body></html>"
+        return response
+
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client._request_disclosure_viewer_page",
+        track_request,
+    )
+
+    saved = download_disclosure_external_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        acpt_numbers=["20250101000001", "20250101000002"],
+        kind_proxy_urls=["http://127.0.0.1:25001"],
+        max_workers=2,
+        max_retries=0,
+        skip_existing=False,
+    )
+
+    assert requested == []
+    assert [path.stem for path in saved] == ["20250101000002"]
+
+
 def test_internal_html_dispatches_configured_egresses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

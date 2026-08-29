@@ -26,6 +26,7 @@ from .kind_computers import (
     create_kind_computer_session,
     normalize_kind_proxy_urls,
     run_kind_virtual_computers,
+    split_items_round_robin,
 )
 
 from .payload import (
@@ -639,6 +640,16 @@ def _external_html_virtual_computer_worker(
             )
             for acpt_no in acpt_numbers
         },
+        spacing_limiter=(
+            worker_kwargs.get("direct_spacing_limiter")
+            if computer.proxy_url is None
+            else None
+        ),  # type: ignore[arg-type]
+        _rate_limiter=(
+            worker_kwargs.get("direct_rate_limiter")
+            if computer.proxy_url is None
+            else None
+        ),  # type: ignore[arg-type]
         _egress_proxy_url=computer.proxy_url,
         _include_process_limiter=False,
     )
@@ -674,6 +685,8 @@ def download_disclosure_external_htmls(
     max_retries: int = 5,
     kind_proxy_urls: Sequence[str] | None = None,
     target_output_directories: Mapping[str, str | Path] | None = None,
+    spacing_limiter: RequestSpacingLimiter | None = None,
+    _rate_limiter: SlidingWindowRateLimiter | None = None,
     _egress_proxy_url: str | None = None,
     _include_process_limiter: bool = True,
 ) -> list[Path]:
@@ -726,6 +739,12 @@ def download_disclosure_external_htmls(
         max_workers,
     )
     if active_computer_count > 1:
+        direct_spacing_limiter = spacing_limiter or RequestSpacingLimiter(
+            wait_seconds_between_requests
+        )
+        direct_rate_limiter = _rate_limiter or SlidingWindowRateLimiter(
+            max_requests_per_minute
+        )
         computer_results = run_kind_virtual_computers(
             items=normalized_acpt_numbers,
             worker_qualname=(
@@ -743,13 +762,65 @@ def download_disclosure_external_htmls(
                     acpt_no: str(path)
                     for acpt_no, path in resolved_output_directories.items()
                 },
+                "direct_spacing_limiter": direct_spacing_limiter,
+                "direct_rate_limiter": direct_rate_limiter,
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,
             proxy_urls=normalized_proxy_urls,
             max_workers=max_workers,
         )
-        return _paths_in_request_order(normalized_acpt_numbers, computer_results)
+        saved_paths = {
+            path.stem: path
+            for path in _paths_in_request_order(
+                normalized_acpt_numbers, computer_results
+            )
+        }
+        computer_buckets = split_items_round_robin(
+            normalized_acpt_numbers, active_computer_count
+        )
+        proxy_targets = {
+            acpt_no for bucket in computer_buckets[1:] for acpt_no in bucket
+        }
+        missing_proxy_targets = [
+            acpt_no
+            for acpt_no in normalized_acpt_numbers
+            if acpt_no in proxy_targets and acpt_no not in saved_paths
+        ]
+        if missing_proxy_targets and not (
+            cancel_check is not None and cancel_check()
+        ):
+            _report_progress(
+                progress_callback,
+                "병렬 경로에서 완료하지 못한 외부 HTML "
+                f"{len(missing_proxy_targets)}건을 직접 연결로 재시도합니다.",
+            )
+            recovered_paths = download_disclosure_external_htmls(
+                output_directory=output_directory,
+                request_headers=normalized_request_headers,
+                acpt_numbers=missing_proxy_targets,
+                timeout=timeout,
+                wait_seconds_between_requests=wait_seconds_between_requests,
+                max_requests_per_minute=max_requests_per_minute,
+                skip_existing=skip_existing,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+                max_workers=min(max_workers, len(missing_proxy_targets)),
+                max_retries=max_retries,
+                target_output_directories={
+                    acpt_no: resolved_output_directories[acpt_no]
+                    for acpt_no in missing_proxy_targets
+                },
+                spacing_limiter=direct_spacing_limiter,
+                _rate_limiter=direct_rate_limiter,
+                _include_process_limiter=_include_process_limiter,
+            )
+            saved_paths.update({path.stem: path for path in recovered_paths})
+        return [
+            saved_paths[acpt_no]
+            for acpt_no in normalized_acpt_numbers
+            if acpt_no in saved_paths
+        ]
     owns_session = session is None
     computer = KindVirtualComputer(index=0, proxy_url=_egress_proxy_url)
     active_session = session or create_kind_computer_session(
@@ -764,8 +835,10 @@ def download_disclosure_external_htmls(
         active_session.mount("https://", adapter)
         active_session.mount("http://", adapter)
 
-    rate_limiter = SlidingWindowRateLimiter(max_requests_per_minute)
-    spacing_limiter = RequestSpacingLimiter(wait_seconds_between_requests)
+    rate_limiter = _rate_limiter or SlidingWindowRateLimiter(max_requests_per_minute)
+    spacing_limiter = spacing_limiter or RequestSpacingLimiter(
+        wait_seconds_between_requests
+    )
     saved_paths: dict[str, Path] = {}
     valid_acpt_numbers: set[str] = set()
     errors: dict[str, str] = {}
