@@ -1,0 +1,66 @@
+site_name: FINIQ 문서
+site_description: FINIQ 공시 수집·분석·시각화 프로젝트 문서
+repo_url: https://github.com/lynchlee1/FINIQ
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: ko
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - 문서 홈: index.md
+  - 아키텍처: architecture.md
+  - 공시 파이프라인:
+      - 전체 흐름: disclosures/index.md
+      - 공통 계약: disclosures/common.md
+      - 01 공시내역 다운로드: disclosures/01-download.md
+      - 02 공시내역 변환: disclosures/02-table.md
+      - 03 공시내역 필터링: disclosures/03-filter.md
+      - 04 공시원문 외부 저장: disclosures/04-external-html.md
+      - 05 공시원문 내부 저장: disclosures/05-internal-html.md
+      - 06 공시원문 목차 분리: disclosures/06-section-split.md
+      - 07 공시원문 변환:
+          - 단계 계약: disclosures/07-html-parse/index.md
+          - 요청·저장 형식: disclosures/07-html-parse/reference.md
+          - 자산 거래: disclosures/07-html-parse/parsers/asset-transaction.md
+          - 채권 발행: disclosures/07-html-parse/parsers/bond-issuance.md
+          - 유상·무상증자: disclosures/07-html-parse/parsers/rights-issuance.md
+          - 증권 거래: disclosures/07-html-parse/parsers/security-transaction.md
+          - 주주총회: disclosures/07-html-parse/parsers/shareholder-meeting.md
+      - 08 공시 정정내역 한눈에: disclosures/08-change-log.md
+      - 09 공시 관계 그래프: disclosures/09-disclosure-graph.md
+  - Ontology:
+      - 개요: ontology/index.md
+      - 공통 계약: ontology/common.md
+      - Quantiwise: ontology/quantiwise.md
+      - Graph View: ontology/graph-view.md
+      - Chart View: ontology/chart-view.md
+      - 공시 분석: ontology/disclosure-analysis.md
+  - 디자인:
+      - 디자인 시스템: design/index.md
+      - 컴포넌트 계약: design/components/index.md
+      - 기존 데이터 검토: design/components/inspection-block.md
+  - 운영 안내: operations.md
+  - 개발 안내: development.md
+  - ADR:
+      - 원자적 게시: adr/0001-atomic-publication.md

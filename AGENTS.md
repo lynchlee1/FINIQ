@@ -68,5 +68,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   5. Conditional statements, correction logic or temporary processing are used to get around specific disclosure formats or exceptional HTML structures.
 
 ## 6. Other Rules
-- Always use `PLANS.md` to record the purpose, implementation summary, and verification result for completed code changes.
-- Before adding or changing UI labels, button names, page titles, status text, or feature names, consult the UI terminology section in `design/README.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to that section in the same change and keep UI/tests aligned with it.
+- Use `PLANS.md` only for completed changes that still require follow-up. Record each item's purpose, implementation summary, verification result, and unresolved finding. Remove items after the follow-up is resolved.
+- Keep the current project documentation under `docs/`. When behavior changes, update the owning stage or domain document in the same change. Do not create empty placeholder documents or repeat one contract in multiple files.
+- Before adding or changing UI labels, button names, page titles, status text, or feature names, consult the UI terminology section in `docs/design/index.md`. Reuse existing terms as much as possible; do not invent new button names or near-synonyms. If a new term is genuinely needed, add it to that section in the same change and keep UI/tests aligned with it.

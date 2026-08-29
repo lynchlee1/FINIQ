@@ -1,6 +1,6 @@
-# Disclosure HTML Parse Reference
+# 07 공시원문 변환 참고 계약
 
-## Overview
+## 개요
 
 07단계는 06단계가 잘라 둔 공시 HTML을 선택한 `parser_method`로 읽고 JSON으로 저장한다. 필요하면 앞 단계의 metadata를 연결하고, parsing이 끝난 값으로 저장 대상을 한 번 더 거른다.
 
@@ -10,20 +10,13 @@
 04단계 metadata ┘
 ```
 
-- 필수 입력: `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`
-- 파생 필터 HTML 입력: `<data_root>/06-sections/<parent_mode>/<YYYY>/<acpt_no>.html`
-- 선택 입력: `<data_root>/03-filter/<mode>/filtered.json`
-- 파생 필터 입력: `<data_root>/03-filter/<parent_mode>/subfilters/<mode>/filtered.json`
-- 선택 입력: `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`
-- 출력: `<data_root>/07-converted/<mode>/parsed-<mode>.json`
-
-## Parse Request
+## 변환 요청
 
 `parse_disclosure_html_payload()`에 실행 조건을 객체로 전달한다.
 
 `input_directory`와 `output_directory`는 실행 위치를 정하는 요청값이다. 작업공간 밖의 경로도 지정할 수 있지만 저장 결과에는 두 경로를 복사하지 않는다.
 
-### Required Fields
+### 필수 필드
 
 | 항목 | 형식 | 설명 |
 | --- | --- | --- |
@@ -33,7 +26,7 @@
 | `output_directory` | 디렉터리 경로 | `parsed-<mode>.json`을 저장할 디렉터리 |
 | `skip_errors` | 불리언 | `true`이면 파일 하나가 실패해도 오류를 기록하고 다음 파일을 처리 |
 
-### Optional Fields
+### 선택 필드
 
 | 항목 | 형식 | 기본값과 설명 |
 | --- | --- | --- |
@@ -61,7 +54,7 @@
 }
 ```
 
-### Result Filters
+### 결과 필터
 
 `record_filters`는 HTML을 parsing한 뒤 나온 업무값에 적용한다. 각 조건은 `field`, `operator`, `value`로 구성한다.
 
@@ -74,7 +67,7 @@
 
 `record_filters`의 모든 조건을 만족하고 `filter_blocks`도 통과한 record만 `records`에 저장한다. 필터에서 빠진 record는 parsing 실패로 세지 않는다.
 
-## How HTML Becomes Rows
+## HTML을 행으로 바꾸는 과정
 
 mode 문서에 나오는 `N=1`, `logical_rows` 같은 표현은 아래 과정을 전제로 한다.
 
@@ -100,9 +93,9 @@ N=1             N=2      N=3
 - 숫자는 문자열에서 처음 찾은 부호 있는 정수를 읽고 천 단위 쉼표를 제거한다.
 - `-`는 각 field 규칙이 명시적으로 허용할 때만 0으로 바꾼다.
 
-## Input Files
+## 입력 파일
 
-### Section HTML
+### 목차 HTML
 
 `<data_root>/06-sections/<mode>/<YYYY>/<acpt_no>.html`이 실제 parsing 대상이다.
 
@@ -115,7 +108,7 @@ N=1             N=2      N=3
 - byte 입력은 UTF-8로만 decode한다.
 - 깨진 HTML 문법은 복구하며 읽지만 `rowspan`이나 `colspan`이 유효한 양의 정수가 아니면 실패한다.
 
-### Filtered Metadata
+### 필터 metadata
 
 `<data_root>/03-filter/<mode>/filtered.json`을 지정하면 HTML의 `acpt_no`와 같은 항목에서 회사명, 시장, 공시시각을 가져온다.
 
@@ -126,7 +119,7 @@ N=1             N=2      N=3
 - `market`이 `유가증권`이면 결과에는 `코스피`로 저장한다.
 - 파생 필터는 자식 `mode`와 `parent_mode`를 함께 지정한다. HTML 입력은 상위 `06-sections/<parent_mode>`이고, 작업공간 기본 메타데이터 경로는 자식의 중첩 `filtered.json`으로 정하며, parser는 `parser_method`로만 선택한다.
 
-### Compressed External HTML Metadata
+### 외부 HTML 압축 metadata
 
 `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`을 지정하면 제목, 본문 문서번호와 정정공시 관계를 연결한다.
 
@@ -137,11 +130,11 @@ N=1             N=2      N=3
 - `mainDoc`가 둘 이상이고 모든 문서를 연결할 수 있을 때만 correction family를 만든다.
 - 파생 필터는 상위 기본 필터의 압축 metadata를 읽되 자식 `filtered.json`의 `acpt_no` 부분집합만 변환한다.
 
-## Saved Result
+## 저장 결과
 
 결과 파일의 최상위 `format`은 `finiq_disclosure_html_parse_v1`이다.
 
-### Top-Level Fields
+### 최상위 필드
 
 | 항목 | 형식 | 바로 확인할 수 있는 내용 |
 | --- | --- | --- |
@@ -157,9 +150,9 @@ N=1             N=2      N=3
 | `warning_report_counts` | 객체 | warning을 수준과 공시별로 모은 집계 |
 | `families` | 객체 | 저장한 record가 속한 정정공시 묶음 |
 
-### Summary Counts
+### 집계값
 
-세 집계값은 다음처럼 읽는다.
+세 집계값:
 
 - `found_files`: `limit`까지 적용한 뒤 처리 대상으로 선택한 HTML 수
 - `parsed_files`: parsing 성공 수가 아니라 필터까지 통과해 `records`에 저장한 수
@@ -199,7 +192,7 @@ N=1             N=2      N=3
 
 위 예시는 공통 구조만 보여 준다. 실제 record에는 선택한 mode의 업무 field가 추가된다.
 
-### Fields Shared by Every Record
+### 공통 record 필드
 
 | 항목 | 형식 | 언제 들어가는지 |
 | --- | --- | --- |
@@ -215,7 +208,7 @@ N=1             N=2      N=3
 
 `raw_tables`는 HTML에서 값을 뽑거나 preview를 만들 때만 쓰는 중간 자료다. 최종 `records`에는 저장하지 않는다. `raw_rows`, `rcept_no`, `source_file`과 빈 `correction_families`도 만들지 않는다.
 
-## Field Status
+## 필드 상태
 
 일부 mode는 각 업무값을 얼마나 확실하게 읽었는지 `field_parse_status`에 기록한다.
 
@@ -228,11 +221,11 @@ N=1             N=2      N=3
 
 `source_not_found`는 “일부 값을 찾지 못했다”는 상태이지 파일 전체의 parsing 실패를 뜻하지 않는다. mode가 반드시 필요로 하는 표가 없거나 입력 형식 자체가 잘못된 경우에만 파일 오류가 된다.
 
-## Warnings and Errors
+## 경고와 오류
 
 warning은 record를 저장할 수 있지만 확인이 필요한 경우이고, error는 해당 파일의 record를 만들지 못한 경우다.
 
-### Warning Item
+### warning 항목
 
 | 항목 | 의미 |
 | --- | --- |
@@ -244,14 +237,14 @@ warning은 record를 저장할 수 있지만 확인이 필요한 경우이고, e
 
 한 record의 `parse_warnings`는 수준별 warning 목록과 같은 문장 집합이어야 한다. 빈 문장, 중복 문장, 수준이 없는 문장, 두 수준에 동시에 들어간 문장이 있으면 저장 전에 실패한다.
 
-### Error Item
+### 오류 항목
 
 `errors[]`의 각 항목은 `index`, `total`, `mode`, `acpt_no`, `error_type`, `error`를 가진다.
 
 - `skip_errors=true`: 오류를 `errors`에 넣고 다음 파일을 처리한다.
 - `skip_errors=false`: 첫 파일 오류에서 전체 실행을 중단하고 최종 결과를 저장하지 않는다.
 
-## Correction Families
+## 정정공시 묶음
 
 correction family는 최초 공시와 이후 정정공시를 한 묶음으로 표현한다.
 
@@ -266,7 +259,7 @@ families[family_id]
 
 각 record에는 어느 family의 몇 번째 문서인지만 기록한다. 구성원 전체 정보는 최상위 `families[family_id].members`에 한 번만 둔다. 필요한 구성원을 모두 연결하지 못하면 불완전한 family를 만들지 않는다.
 
-## Preview and Inspection
+## 미리보기와 검사
 
 | 기능 | 입력과 결과 |
 | --- | --- |

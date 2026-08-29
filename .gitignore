@@ -23,6 +23,7 @@ frontend/**/.next/
 frontend/**/tsconfig.tsbuildinfo
 dist-ssr/
 apps/*/dist/
+site/
 
 # Local data/cache
 resources/

@@ -114,12 +114,9 @@ test("automation keeps derived filters out until its profile stores parent ident
 
 test("derived disclosure filter documentation fixes ownership and depth", async () => {
   const paths = [
-    "docs/disclosures/03-filter/features.md",
-    "docs/disclosures/03-filter/reference.md",
-    "docs/disclosures/04-external-html-download/features.md",
-    "docs/disclosures/04-external-html-download/reference.md",
-    "docs/disclosures/05-internal-html-download/features.md",
-    "docs/disclosures/05-internal-html-download/reference.md",
+    "docs/disclosures/03-filter.md",
+    "docs/disclosures/04-external-html.md",
+    "docs/disclosures/05-internal-html.md",
   ];
   const docs = (await Promise.all(paths.map((path) => readFile(path, "utf8")))).join("\n");
 

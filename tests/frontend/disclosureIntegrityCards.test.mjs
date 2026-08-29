@@ -216,7 +216,7 @@ test("changing a main or detail page immediately cancels its running inspection"
     readFile(paths.htmlDownload, "utf8"),
     readFile(paths.sectionSplit, "utf8"),
     readFile(hookPath, "utf8"),
-    readFile("design/components/inspection-block.md", "utf8"),
+    readFile("docs/design/components/inspection-block.md", "utf8"),
   ]);
 
   assert.match(hook, /inspect: \(payload: TPayload, signal: AbortSignal\)/);
