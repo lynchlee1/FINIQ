@@ -407,6 +407,19 @@ def _valid_download_html() -> str:
     return "<html><body>" + ("valid " * 30) + "</body></html>"
 
 
+def _selected_main_doc_fields(doc_no: str) -> dict[str, object]:
+    return {
+        "selected_main_doc_no": doc_no,
+        "docs": [
+            {
+                "select_id": "mainDoc",
+                "doc_no": doc_no,
+                "selected": True,
+            }
+        ],
+    }
+
+
 def _trusted_download_input_snapshot(
     *,
     start_date: str = "2026-01-01",
@@ -459,7 +472,13 @@ def _html_parse_metadata_paths(
         payload = json.loads(compressed_path.read_text(encoding="utf-8"))
         payload["format"] = "finiq_disclosure_external_html_docs_v1"
         for record in payload["records"]:
-            record.setdefault("selected_main_doc_no", f"{record['acpt_no']}01")
+            doc_no = str(
+                record.setdefault(
+                    "selected_main_doc_no",
+                    f"{record['acpt_no']}01",
+                )
+            )
+            record.setdefault("docs", _selected_main_doc_fields(doc_no)["docs"])
             record.setdefault("metadata", {})
         compressed_path.write_text(
             json.dumps(payload, ensure_ascii=False), encoding="utf-8"
@@ -1302,7 +1321,7 @@ def test_filter_disclosures_payload_supports_title_include_and_exclude_keywords(
         ("공정공시(무슨사항에대한공시)공시내용", "공정공시공시내용"),
         ("공정공시((주)삼성전자)공시내용", "공정공시공시내용"),
         ("공정공시((주)삼성전자))공시내용", "공정공시공시내용"),
-        ("공정공시(((주)삼성전자)공시내용", "공정공시공시내용"),
+        ("공정공시(((주)삼성전자)공시내용", "공정공시"),
     ],
 )
 def test_clean_search_text_removes_parenthesized_title_fragments(value: str, expected: str) -> None:
@@ -1329,7 +1348,7 @@ def test_filter_disclosures_payload_supports_clean_search_title_blocks(tmp_path:
                 _filter_block(
                     field="title",
                     operator="contains",
-                    value="공정공시공시내용",
+                    value="공정공시",
                     clean_search=True,
                 )
             ],
@@ -2082,7 +2101,7 @@ def test_build_disclosure_table_payload_preserves_unlinked_disclosure(
               </tr>
             </tbody>
             """,
-        ),
+        ).replace("전체 <em>2</em>건", "전체 <em>3</em>건"),
         encoding="utf-8",
     )
 
@@ -2154,11 +2173,14 @@ def test_build_disclosure_table_payload_parses_source_pages_in_parallel(
     second_page = first_page.with_name("001_post_page_00002.body")
     first_markup = first_page.read_text(encoding="utf-8")
     first_page.write_text(
-        first_markup.replace("<strong>1</strong>/1", "<strong>1</strong>/2"),
+        first_markup
+        .replace("전체 <em>2</em>건", "전체 <em>4</em>건")
+        .replace("<strong>1</strong>/1", "<strong>1</strong>/2"),
         encoding="utf-8",
     )
     second_page.write_text(
         first_markup
+        .replace("전체 <em>2</em>건", "전체 <em>4</em>건")
         .replace("<strong>1</strong>/1", "<strong>2</strong>/2")
         .replace("20250102000001", "20250104000001")
         .replace("20250103000001", "20250105000001"),
@@ -2592,6 +2614,34 @@ def test_build_and_inspect_disclosure_table_reject_body_page_mismatch(
     assert mismatch_message in inspection["reason"]
 
 
+def test_build_and_inspect_disclosure_table_reject_total_row_mismatch(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    request = {
+        "root_directory": str(source_root),
+        "output_path": str(tmp_path / "02-table"),
+        "table_workers": 2,
+    }
+    build_disclosure_table_payload(request)
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace(
+            "전체 <em>2</em>건",
+            "전체 <em>3</em>건",
+        ),
+        encoding="utf-8",
+    )
+    mismatch_message = "전체 공시 건수 3건과 실제 공시 행 수 2건이 다릅니다"
+
+    with pytest.raises(ValueError, match=mismatch_message):
+        build_disclosure_table_payload(request)
+
+    inspection = table_export_module.inspect_disclosure_table_payload(request)
+    assert inspection["confirmed"] is False
+    assert mismatch_message in inspection["reason"]
+
+
 def test_build_disclosure_table_payload_deduplicates_source_rows_by_acpt_no(
     tmp_path: Path,
 ) -> None:
@@ -2880,10 +2930,10 @@ def test_download_disclosure_internal_html_payload_saves_body_html(tmp_path: Pat
         json.dumps(
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
-                "records": [{
-                    "acpt_no": "20250101000001",
-                    "selected_main_doc_no": "20250101000099",
-                    "metadata": {"disclosed_at": "2025-01-01"},
+                    "records": [{
+                        "acpt_no": "20250101000001",
+                        **_selected_main_doc_fields("20250101000099"),
+                        "metadata": {"disclosed_at": "2025-01-01"},
                 }],
             }
         ),
@@ -2935,7 +2985,7 @@ def test_download_disclosure_internal_html_payload_finishes_hashing_after_cancel
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000999",
+                        **_selected_main_doc_fields("20250101000999"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3003,7 +3053,7 @@ def test_download_disclosure_internal_html_payload_accepts_compressed_json_file(
                 "records": [
                         {
                             "acpt_no": "AB202501010001",
-                            "selected_main_doc_no": "DOC202501Z",
+                            **_selected_main_doc_fields("DOC202501Z"),
                             "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3124,7 +3174,7 @@ def test_download_disclosure_internal_html_payload_does_not_use_legacy_compresse
                 "records": [
                         {
                             "acpt_no": "20250101000001",
-                            "selected_main_doc_no": "20250101000999",
+                            **_selected_main_doc_fields("20250101000999"),
                             "year": "2025",
                         }
                 ]
@@ -3175,7 +3225,7 @@ def test_download_disclosure_internal_html_payload_rejects_result_membership_mis
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000999",
+                        **_selected_main_doc_fields("20250101000999"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ]
@@ -3205,7 +3255,7 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
         "records": [
             {
                 "acpt_no": acpt_no,
-                "selected_main_doc_no": doc_no,
+                **_selected_main_doc_fields(doc_no),
                 "metadata": {"disclosed_at": "2025-01-01"},
             }
         ],
@@ -3309,6 +3359,7 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
     }
 
     compressed_payload["records"][0]["selected_main_doc_no"] = "20250101000888"
+    compressed_payload["records"][0]["docs"][0]["doc_no"] = "20250101000888"
     compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
     changed_source_inspection = check_disclosure_html_output_directory_payload(
         {
@@ -3322,6 +3373,7 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
     assert changed_source_inspection["source_unavailable_target_html_count"] == 0
 
     compressed_payload["records"][0]["selected_main_doc_no"] = doc_no
+    compressed_payload["records"][0]["docs"][0]["doc_no"] = doc_no
     compressed_path.write_text(json.dumps(compressed_payload), encoding="utf-8")
     manifest["disclosures"][0]["source_sha256"] = "0" * 64
     Path(result["manifest_path"]).write_text(
@@ -3398,7 +3450,7 @@ def test_source_unavailable_placeholder_receipt_must_match_filename(
                 "records": [
                     {
                         "acpt_no": filename_acpt_no,
-                        "selected_main_doc_no": doc_no,
+                        **_selected_main_doc_fields(doc_no),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3433,7 +3485,7 @@ def test_failed_placeholder_refresh_reports_membership_error(
                 "records": [
                     {
                         "acpt_no": acpt_no,
-                        "selected_main_doc_no": doc_no,
+                        **_selected_main_doc_fields(doc_no),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3506,7 +3558,7 @@ def test_internal_html_redownload_does_not_hide_revalidation_request_failure(
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000999",
+                        **_selected_main_doc_fields("20250101000999"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3880,7 +3932,7 @@ def test_all_internal_html_inspection_reuses_parent_file_hashes_for_derived_filt
                 "records": [
                     {
                         "acpt_no": acpt_no,
-                        "selected_main_doc_no": f"{acpt_no[:-2]}99",
+                        **_selected_main_doc_fields(f"{acpt_no[:-2]}99"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                     for acpt_no in ("20250101000001", "20250101000002")
@@ -4294,7 +4346,7 @@ def test_clean_disclosure_external_html_output_directory_deletes_unexpected_cont
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [{
                     "acpt_no": "20250101000001",
-                    "selected_main_doc_no": "1",
+                    **_selected_main_doc_fields("1"),
                     "metadata": {"disclosed_at": "2025-01-01"},
                 }],
             }
@@ -5568,12 +5620,12 @@ def test_download_disclosure_internal_html_payload_reads_and_writes_yearly_files
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000099",
+                        **_selected_main_doc_fields("20250101000099"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     },
                     {
                         "acpt_no": "20260101000001",
-                        "selected_main_doc_no": "20260101000099",
+                        **_selected_main_doc_fields("20260101000099"),
                         "metadata": {"disclosed_at": "2026-01-01"},
                     },
                 ],
@@ -5619,26 +5671,17 @@ def test_download_disclosure_internal_html_payload_rejects_source_directory(
         )
 
 
-def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_sot(
+def test_download_disclosure_internal_html_payload_rejects_selected_main_doc_no_mismatch(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    calls: list[tuple[Path, list[dict[str, str]]]] = []
+    def fail_download(**_kwargs):
+        raise AssertionError("mismatched source must fail before download")
 
-    def fake_download(**kwargs):
-        targets = list(kwargs["targets"])
-        calls.append((Path(kwargs["output_directory"]), targets))
-        paths = [
-            Path(kwargs["target_output_directories"][target["acpt_no"]])
-            / f"{target['acpt_no']}.html"
-            for target in targets
-        ]
-        for path in paths:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(_valid_download_html(), encoding="utf-8")
-        return paths
-
-    monkeypatch.setattr("finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls", fake_download)
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fail_download,
+    )
 
     external_dir = tmp_path / "viewer_html"
     external_dir.mkdir()
@@ -5680,24 +5723,15 @@ def test_download_disclosure_internal_html_payload_uses_selected_main_doc_no_as_
         encoding="utf-8",
     )
 
-    payload = download_disclosure_internal_html_payload(
-        {
-            "output_directory": str(tmp_path / "content_html"),
-            "source_compressed_json_path": str(
-                external_dir / "compressed-external-html.json"
-            ),
-        }
-    )
-
-    assert calls == [
-        (
-            tmp_path / "content_html",
-            [{"acpt_no": "20250101000001", "doc_no": "20250101000000"}],
+    with pytest.raises(ValueError, match="does not match the selected mainDoc"):
+        download_disclosure_internal_html_payload(
+            {
+                "output_directory": str(tmp_path / "content_html"),
+                "source_compressed_json_path": str(
+                    external_dir / "compressed-external-html.json"
+                ),
+            }
         )
-    ]
-    assert payload["saved_files"] == [
-        str(tmp_path / "content_html" / "2025" / "20250101000001.html")
-    ]
 
 
 def test_split_internal_html_sections_uses_toc_boundaries(tmp_path: Path) -> None:
@@ -6860,40 +6894,6 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
     ]
 
 
-def test_save_disclosure_html_sections_payload_ignores_incomplete_obsolete_rules(
-    tmp_path: Path,
-) -> None:
-    input_directory = tmp_path / "content_html"
-    output_directory = tmp_path / "section_html"
-    source_directory = input_directory / "2008"
-    source_directory.mkdir(parents=True)
-    (source_directory / "20260401000001.html").write_text(
-        """
-        <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
-          <p>표지</p>
-          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">2</p></h2>
-          <p>본문</p>
-        </body></html>
-        """,
-        encoding="utf-8",
-    )
-    (source_directory / "20260402000001.html").write_text(
-        """
-        <html><head></head><body>
-          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">단독</p></h2>
-          <p>단독 본문</p>
-        </body></html>
-        """,
-        encoding="utf-8",
-    )
-
-    result = save_disclosure_html_sections_payload(
-        {
-            "input_directory": str(input_directory),
-            "output_directory": str(output_directory),
-            "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
-        }
 def test_section_save_returns_every_toc_structure_found_during_execution(
     tmp_path: Path,
 ) -> None:
@@ -6942,6 +6942,40 @@ def test_section_save_returns_every_toc_structure_found_during_execution(
     }
 
 
+def test_save_disclosure_html_sections_payload_ignores_incomplete_obsolete_rules(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "content_html"
+    output_directory = tmp_path / "section_html"
+    source_directory = input_directory / "2008"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260401000001.html").write_text(
+        """
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
+          <p>표지</p>
+          <h2 class="SECTION-2" id="toc_2"><p class="SECTION-2">2</p></h2>
+          <p>본문</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    (source_directory / "20260402000001.html").write_text(
+        """
+        <html><head></head><body>
+          <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">단독</p></h2>
+          <p>단독 본문</p>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "section_save_rules": {"toc_1 1 toc_2 2": ["toc_1"]},
+        }
     )
 
     assert result["summary"]["saved_files"] == 2
@@ -7229,6 +7263,8 @@ def test_section_save_removes_direct_text_correction_preamble(tmp_path: Path) ->
     )
 
     assert result["summary"]["removed_correction_sections"] == 1
+    assert result["section_patterns"][0]["sections"][0]["will_remove"] is True
+    assert result["section_patterns"][0]["sections"][1]["will_remove"] is False
     assert "정정 신고" not in output
     assert "업무 본문" in output
     assert "본문 내용" in output
@@ -7263,8 +7299,6 @@ def test_section_save_preserves_single_legacy_correction_disclosure(
     assert result["summary"]["removed_correction_sections"] == 0
     assert "유상증자 정정공시" in output
     assert "일정변경이 불가피" in output
-    assert result["section_patterns"][0]["sections"][0]["will_remove"] is True
-    assert result["section_patterns"][0]["sections"][1]["will_remove"] is False
 
 
 def test_save_disclosure_html_sections_payload_preserves_multiple_selected_sections(tmp_path: Path) -> None:
@@ -7788,7 +7822,7 @@ def test_check_disclosure_external_html_output_directory_finds_yearly_output(
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000999",
+                        **_selected_main_doc_fields("20250101000999"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -7889,7 +7923,7 @@ def test_download_disclosure_internal_html_payload_keeps_prequeued_cancel_token(
                 "records": [
                     {
                         "acpt_no": "20250101000001",
-                        "selected_main_doc_no": "20250101000999",
+                        **_selected_main_doc_fields("20250101000999"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],

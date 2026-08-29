@@ -16,7 +16,7 @@ KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
 
 - 일반 실행 입력은 `compressed-external-html.json`만 허용한다.
 - record가 객체가 아니거나 비어 있지 않은 `acpt_no`가 없으면 실패 처리한다.
-- `selected_main_doc_no`가 비어 있거나 연도별 외부 HTML의 `mainDoc`에서 직접 선택한 값이 아니면 실패 처리한다.
+- `selected_main_doc_no`가 비어 있거나 `records[].docs`에 `selected=true`인 `mainDoc`이 정확히 하나가 아니거나, 그 `doc_no`와 `selected_main_doc_no`가 다르면 다운로드 전에 실패 처리한다.
 - `metadata.disclosed_at`이 없거나 유효한 ISO 날짜로 시작하지 않으면 `records[].year`나 `acpt_no`로 저장 연도를 대신하지 않고 실패 처리한다.
 - 연도별 외부 HTML을 직접 입력하면 파일이 실제로 들어 있는 4자리 연도 폴더를 저장 연도로 사용한다.
 - `records[].acpt_no`가 중복되면 실패 처리한다.
@@ -85,6 +85,7 @@ KIND 본문 HTML을 mode와 연도에 따라 나누어 저장한다.
 #### Defaults and Exceptions
 
 - 일반 실행 결과에 중복·누락·추가 `acpt_no`가 있으면 실패 처리한다.
+- 일반 실행의 대상-결과 집합 검증이 실패하면 기존 정상 manifest를 새 부분 manifest로 덮어쓰지 않는다.
 - 재검증으로 확정한 빈 원문도 요청한 접수번호의 실제 HTML 파일이어야 한다. 파일 없이 manifest 예외만 남겨 누락을 통과시키지 않는다.
 - 사용자가 작업을 취소하면 그 뒤 생긴 누락은 허용하되, 중복·추가 `acpt_no`는 계속 검사하고 발견하면 실패 처리한다.
 - 다운로드 중 취소되면 이미 저장을 마친 HTML의 기준 hash 생성을 끝내고 그 파일만 담은 부분 manifest를 원자적으로 저장한 뒤 취소 결과를 반환한다. 아직 저장하지 못한 대상은 manifest에 넣지 않는다.

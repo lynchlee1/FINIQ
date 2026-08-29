@@ -542,7 +542,6 @@ def _clean_search_text(value: str) -> str:
         char = text[index]
         if char == "(":
             depth = 0
-            last_close_index = -1
             scan_index = index
             while scan_index < len(text):
                 current = text[scan_index]
@@ -550,7 +549,6 @@ def _clean_search_text(value: str) -> str:
                     depth += 1
                 elif current == ")":
                     depth -= 1
-                    last_close_index = scan_index
                     if depth <= 0:
                         scan_index += 1
                         while scan_index < len(text) and text[scan_index] == ")":
@@ -558,9 +556,7 @@ def _clean_search_text(value: str) -> str:
                         break
                 scan_index += 1
             else:
-                scan_index = (
-                    last_close_index + 1 if last_close_index >= 0 else len(text)
-                )
+                scan_index = len(text)
             index = scan_index
             continue
         if char == ")":

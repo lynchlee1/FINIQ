@@ -12,6 +12,7 @@
 - 접수번호, 공시일 metadata와 선택한 본문 문서 번호를 담은 입력 파일이다.
 - `records[].acpt_no`는 저장할 공시를 식별한다.
 - `records[].selected_main_doc_no`는 선택한 본문 문서 번호다.
+- `records[].docs`에는 `selected=true`인 `mainDoc`이 정확히 하나 있어야 하고, 그 `doc_no`는 `records[].selected_main_doc_no`와 같아야 한다.
 - `records[].metadata.disclosed_at`은 ISO 날짜로 시작한다.
 - `kind_proxy_urls`는 localhost HTTP 프록시 URL을 현재 CPU 개수보다 하나 적게 저장한다. 직접 연결을 0번 경로로 사용하고 설정 순서대로 프록시 경로를 추가한다.
 - `max_workers`는 모든 연결의 동시 처리 공시 대상 수를 정한다. 경로별 worker 합계는 이 값을 넘지 않으며, 분당 요청 한도와 요청 간격은 연결마다 따로 적용한다.

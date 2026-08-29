@@ -206,15 +206,55 @@ def _compressed_record_year(record: dict[str, Any], acpt_no: str) -> str:
     )
 
 
+def _selected_main_doc_no(record: dict[str, Any], acpt_no: str) -> str:
+    selected_main_doc_no = str(record.get("selected_main_doc_no") or "").strip()
+    if not selected_main_doc_no:
+        raise ValueError(
+            f"selected main docNo not found in compressed external HTML JSON: {acpt_no}"
+        )
+    docs = record.get("docs")
+    if not isinstance(docs, list):
+        raise ValueError(
+            f"compressed external HTML JSON docs is not a list: {acpt_no}"
+        )
+    selected_main_docs: list[str] = []
+    for index, document in enumerate(docs):
+        if not isinstance(document, dict):
+            raise ValueError(
+                "compressed external HTML JSON document is not an object: "
+                f"acpt_no={acpt_no} index={index}"
+            )
+        if (
+            document.get("select_id") != "mainDoc"
+            or document.get("selected") is not True
+        ):
+            continue
+        doc_no = str(document.get("doc_no") or "").strip()
+        if not doc_no:
+            raise ValueError(
+                f"selected mainDoc doc_no is empty: acpt_no={acpt_no} index={index}"
+            )
+        selected_main_docs.append(doc_no)
+    if len(selected_main_docs) != 1:
+        raise ValueError(
+            "compressed external HTML JSON must contain exactly one selected mainDoc: "
+            f"acpt_no={acpt_no} selected={len(selected_main_docs)}"
+        )
+    if selected_main_docs[0] != selected_main_doc_no:
+        raise ValueError(
+            "selected_main_doc_no does not match the selected mainDoc: "
+            f"acpt_no={acpt_no} selected_main_doc_no={selected_main_doc_no} "
+            f"mainDoc={selected_main_docs[0]}"
+        )
+    return selected_main_doc_no
+
+
 def _collect_internal_targets_from_compressed_payload(
     payload: dict[str, Any],
 ) -> tuple[list[dict[str, str]], Any]:
     targets: list[dict[str, str]] = []
     for record, acpt_no in _validated_compressed_records(payload):
-        doc_no = str(record.get("selected_main_doc_no") or "").strip()
-        if not doc_no:
-            msg = f"selected main docNo not found in compressed external HTML JSON: {acpt_no}"
-            raise ValueError(msg)
+        doc_no = _selected_main_doc_no(record, acpt_no)
         year = _compressed_record_year(record, acpt_no)
         targets.append({"acpt_no": acpt_no, "doc_no": doc_no, "year": year})
     if not targets:
@@ -1147,6 +1187,13 @@ def download_disclosure_internal_html_payload(
     finally:
         _clear_cancel_token(cancel_token)
     saved_acpt_numbers = [path.stem for path in saved_paths]
+    if not cancelled and not verification["complete"]:
+        _verify_internal_download_membership(
+            expected_acpt_numbers=acpt_numbers,
+            saved_paths=saved_paths,
+            allow_missing=False,
+            source_unavailable_acpt_numbers=source_unavailable_by_acpt_no,
+        )
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
         acpt_numbers=saved_acpt_numbers,
@@ -1155,13 +1202,6 @@ def download_disclosure_internal_html_payload(
         source_unavailable=source_unavailable_by_acpt_no,
     )
     emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
-    if not cancelled and not verification["complete"]:
-        _verify_internal_download_membership(
-            expected_acpt_numbers=acpt_numbers,
-            saved_paths=saved_paths,
-            allow_missing=False,
-            source_unavailable_acpt_numbers=source_unavailable_by_acpt_no,
-        )
     emit(
         f"HTML 내부 저장 {'중지' if cancelled else '완료'}: 저장 파일 {len(saved_paths)}/{len(acpt_numbers)}건."
     )

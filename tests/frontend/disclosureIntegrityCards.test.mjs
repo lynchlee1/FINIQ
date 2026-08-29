@@ -266,7 +266,7 @@ test("section integrity card uses the full inspection endpoint", async () => {
   assert.match(source, /KIND 원본 없음/);
   assert.match(source, /첫 문제:/);
   assert.match(source, /const handleFilterInputChange = \(value: string\) => \{[\s\S]*?setInspectResult\(null\)[\s\S]*?resetSelectedDisclosure\(\)/);
-  assert.doesNotMatch(source, /setSectionPatterns|selectedPatternTocIds|section_save_rules/);
+  assert.doesNotMatch(source, /selectedPatternTocIds|section_save_rules/);
 });
 
 test("parse inspection waits for its mode and parser method", async () => {

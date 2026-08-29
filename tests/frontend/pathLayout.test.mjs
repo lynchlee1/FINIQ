@@ -80,7 +80,8 @@ test("html section split exposes worker count setting for automatic section save
   assert.match(source, /workers: parseOptionalNumber\(workers\)/);
   assert.match(source, /\/api\/disclosures\/html\/cancel/);
   assert.match(source, /\/api\/disclosures\/html\/sections\/save\/start/);
-  assert.doesNotMatch(source, /sections\/kinds\/start|setSectionPatterns|section_save_rules/);
+  assert.doesNotMatch(source, /sections\/kinds\/start|selectedPatternTocIds|section_save_rules/);
+  assert.match(source, /setSectionPatterns\(data\.section_patterns \|\| \[\]\)/);
 });
 
 test("html section split can cancel save jobs and source loading", async () => {

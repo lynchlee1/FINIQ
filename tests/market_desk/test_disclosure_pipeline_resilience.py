@@ -38,6 +38,19 @@ def _valid_html(label: str = "valid") -> str:
     return f"<html><body>{label * 30}</body></html>"
 
 
+def _selected_main_doc(doc_no: str) -> dict[str, object]:
+    return {
+        "selected_main_doc_no": doc_no,
+        "docs": [
+            {
+                "select_id": "mainDoc",
+                "doc_no": doc_no,
+                "selected": True,
+            }
+        ],
+    }
+
+
 def _external_workspace_body(
     tmp_path: Path, source_json: dict, **body: object
 ) -> dict[str, object]:
@@ -62,7 +75,7 @@ def _internal_html_body(
                 "records": [
                     {
                         "acpt_no": acpt_no,
-                        "selected_main_doc_no": f"{acpt_no}99",
+                        **_selected_main_doc(f"{acpt_no}99"),
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                     for acpt_no in acpt_numbers
@@ -296,7 +309,7 @@ def test_derived_external_html_compression_reuses_parent_file_without_rewrite(
         "records": [
             {
                 "acpt_no": disclosure["acpt_no"],
-                "selected_main_doc_no": f"{disclosure['acpt_no']}99",
+                **_selected_main_doc(f"{disclosure['acpt_no']}99"),
                 "metadata": disclosure,
                 **integrity_by_acpt_no[disclosure["acpt_no"]],
             }
@@ -370,7 +383,7 @@ def test_derived_parse_selects_child_membership_before_limit(tmp_path: Path) -> 
                     },
                     {
                         "acpt_no": child.stem,
-                        "selected_main_doc_no": "doc-child",
+                        **_selected_main_doc("doc-child"),
                         "metadata": {"disclosed_at": "2025-01-02 09:00"},
                     },
                 ],
@@ -518,7 +531,7 @@ def test_derived_internal_html_strictly_reuses_parent_without_download(
         "records": [
             {
                 "acpt_no": disclosure["acpt_no"],
-                "selected_main_doc_no": f"doc-{index}",
+                **_selected_main_doc(f"doc-{index}"),
                 "metadata": {"disclosed_at": disclosure["disclosed_at"]},
             }
             for index, disclosure in enumerate(parent_disclosures)
@@ -1332,7 +1345,7 @@ def test_internal_html_download_cancellation_writes_partial_manifest(
             "format": "finiq_disclosure_external_html_docs_v1",
             "records": [{
                 "acpt_no": "20250101000001",
-                "selected_main_doc_no": "1",
+                **_selected_main_doc("1"),
                 "metadata": {"disclosed_at": "2025-01-01"},
             }],
         }),
@@ -1379,7 +1392,7 @@ def test_internal_html_download_cancellation_writes_partial_manifest(
     assert inspection["hash_unverified_target_html_count"] == 0
 
 
-def test_internal_html_partial_failure_records_saved_files_before_raising(
+def test_internal_html_partial_failure_preserves_previous_manifest_before_raising(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     acpt_numbers = ["20250101000001", "20250101000002"]
@@ -1400,19 +1413,22 @@ def test_internal_html_partial_failure_records_saved_files_before_raising(
         acpt_numbers,
         skip_existing=False,
     )
-
-    with pytest.raises(ValueError, match="membership.*missing="):
-        download_disclosure_internal_html_payload(body)
-
     manifest_path = (
         Path(str(body["output_directory"]))
         / "kind_disclosure_html_manifest.json"
     )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    previous_manifest = {
+        "format": "finiq_disclosure_html_manifest_v2",
+        "disclosures": [],
+    }
+    manifest_path.write_text(json.dumps(previous_manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="membership.*missing="):
+        download_disclosure_internal_html_payload(body)
+
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert [item["acpt_no"] for item in manifest["disclosures"]] == [
-        acpt_numbers[0]
-    ]
-    assert manifest["disclosures"][0]["source_sha256"]
+    assert manifest == previous_manifest
 
 
 def test_external_html_compression_rejects_receipt_number_mismatching_filename(

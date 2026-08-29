@@ -11,6 +11,7 @@ import time
 import pytest
 
 import finiq.data_scraper.core.html_rate_limit as rate_limit_module
+import finiq.data_scraper.workflow.workflow as workflow_module
 from finiq.data_scraper.core.client import (
     download_disclosure_external_htmls,
     download_pages,
@@ -105,6 +106,76 @@ def test_kind_workflow_rejects_corrupted_metadata_before_writing_or_requesting(
 
     assert not (tmp_path / "kind_workflow.input.json").exists()
     assert session.post_calls == []
+
+
+def test_kind_workflow_does_not_publish_input_metadata_after_download_failure(
+    tmp_path: Path,
+) -> None:
+    class FailingSession(FakeSession):
+        def get(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            timeout: float,
+        ) -> FakeResponse:
+            del url, headers, timeout
+            raise RuntimeError("network failed")
+
+    workflow = KindWorkflow()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=2,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+
+    with pytest.raises(RuntimeError, match="network failed"):
+        workflow.save_search_results(session=FailingSession())
+
+    assert not (tmp_path / "kind_workflow.input.json").exists()
+    checkpoint = json.loads(
+        (tmp_path / "kind_workflow.checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["completed"] is False
+
+
+def test_kind_workflow_does_not_complete_checkpoint_when_input_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_write_json_file = workflow_module._write_json_file
+
+    def fail_input_snapshot(file_path: Path, payload: dict[str, object]) -> None:
+        if file_path.name == "kind_workflow.input.json":
+            raise OSError("input publish failed")
+        original_write_json_file(file_path, payload)
+
+    monkeypatch.setattr(workflow_module, "_write_json_file", fail_input_snapshot)
+    workflow = KindWorkflow()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=1,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+
+    with pytest.raises(OSError, match="input publish failed"):
+        workflow.save_search_results(session=FakeSession())
+
+    checkpoint = json.loads(
+        (tmp_path / "kind_workflow.checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["completed"] is False
+    assert not (tmp_path / "kind_workflow.input.json").exists()
 
 
 def get_form_values(form_data: list[tuple[str, str]], key: str) -> list[str]:
@@ -824,6 +895,36 @@ def test_kind_workflow_parallel_checkpoint_contains_every_saved_file(
         "002_post_page_00002.body",
         "003_post_page_00003.body",
     ]
+
+
+def test_kind_workflow_checkpoint_keeps_highest_parallel_page(
+    tmp_path: Path,
+) -> None:
+    workflow = KindWorkflow()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=3,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+    checkpoint_path = tmp_path / "kind_workflow.checkpoint.json"
+    callback = workflow._make_saved_file_callback(checkpoint_path, None)
+    page_three = tmp_path / "003_post_page_00003.body"
+    page_two = tmp_path / "002_post_page_00002.body"
+    page_three.write_bytes(b"three")
+    page_two.write_bytes(b"two")
+
+    callback(page_three, 3, [("pageIndex", "3")])
+    callback(page_two, 2, [("pageIndex", "2")])
+
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert checkpoint["last_saved_page"] == 3
+    assert checkpoint["last_saved_file"] == page_three.name
+    assert checkpoint["last_request_data"] == [["pageIndex", "3"]]
 
 
 def test_kind_workflow_parallel_cancellation_keeps_checkpoint_incomplete(

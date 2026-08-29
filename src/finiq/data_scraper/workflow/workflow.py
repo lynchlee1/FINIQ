@@ -1402,11 +1402,19 @@ class KindWorkflow:
             with checkpoint_lock:
                 checkpoint.saved_files.append(relative_output_path)
                 checkpoint.saved_files.sort()
-                checkpoint.last_saved_file = relative_output_path
-                checkpoint.last_saved_page = page_number
-                checkpoint.last_request_data = (
-                    [] if request_data is None else list(request_data)
-                )
+                if page_number is None:
+                    if checkpoint.last_saved_page is None:
+                        checkpoint.last_saved_file = relative_output_path
+                        checkpoint.last_request_data = []
+                elif (
+                    checkpoint.last_saved_page is None
+                    or page_number >= checkpoint.last_saved_page
+                ):
+                    checkpoint.last_saved_file = relative_output_path
+                    checkpoint.last_saved_page = page_number
+                    checkpoint.last_request_data = (
+                        [] if request_data is None else list(request_data)
+                    )
                 checkpoint.completed = False
                 if checkpoint_path is not None:
                     _write_json_file(checkpoint_path, checkpoint.to_dict())
@@ -1438,7 +1446,7 @@ class KindWorkflow:
             requested_page_size=configured_input.page_size,
             input_snapshot_path=resolved_input_snapshot_path,
         )
-        resolved_input_snapshot_path = self.save_input_snapshot(resolved_input_snapshot_path)
+        validate_kind_workflow_input_snapshot(configured_input.to_dict())
         resolved_checkpoint_path = (
             configured_input.output_directory / "kind_workflow.checkpoint.json"
             if checkpoint_path is None
@@ -1495,6 +1503,10 @@ class KindWorkflow:
                 checkpoint.last_request_data = list(
                     self.build_request_data(page_number=final_page)
                 )
+        if checkpoint.completed:
+            resolved_input_snapshot_path = self.save_input_snapshot(
+                resolved_input_snapshot_path
+            )
         _write_json_file(resolved_checkpoint_path, checkpoint.to_dict())
         return {
             "input": configured_input.to_dict(),

@@ -20,6 +20,7 @@
 
 - 문서 선택 정보가 있는 KIND 외부 화면을 원본 구조로 보존한 출력 파일이다.
 - `<YYYY>`는 입력 항목의 `disclosed_at` 연도다.
+- **사용자가 직접 밝힌 레거시 호환 의도:** 구조 검사는 `<html`이 있는 전체 문서, `openDisclsViewer` 식별자가 있는 과거 KIND 외부 화면, 그리고 wrapper 없이 `<P>`로 시작해 `<TABLE>`을 포함하는 과거 본문 조각을 허용한다. wrapper가 없다는 사실만으로 오류 처리하지 않으며, 이 허용 범위의 재설계는 차후 작업이다.
 
 ### `<data_root>/04-external-html-download/<mode>/kind_disclosure_html_manifest.json`
 

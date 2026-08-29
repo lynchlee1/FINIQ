@@ -154,6 +154,7 @@ def _collect_source_folder_rows_by_year(
     source_folder = inventory.source_path
     body_paths = inventory.body_paths
     source_pagination: dict[Path, tuple[int, int]] = {}
+    source_rows_by_folder: dict[Path, int] = {}
 
     def iter_page_records():
         if worker_count <= 1 or len(body_paths) <= 1:
@@ -240,6 +241,10 @@ def _collect_source_folder_rows_by_year(
             rows_by_year.setdefault(_row_year(row), []).append(row)
             row_count += 1
             page_written_rows += 1
+        folder = body_path.parent.resolve()
+        source_rows_by_folder[folder] = (
+            source_rows_by_folder.get(folder, 0) + page_source_rows
+        )
         page_number = inventory.page_number_by_path[body_path]
         pages.append(
             {
@@ -250,6 +255,10 @@ def _collect_source_folder_rows_by_year(
                 "duplicate_rows": page_duplicate_rows,
             }
         )
+    _validate_source_folder_row_totals(
+        source_pagination,
+        source_rows_by_folder=source_rows_by_folder,
+    )
     return (
         rows_by_year,
         len(company_keys),
@@ -286,6 +295,7 @@ def _inspect_source_folder_counts(
     source_folder = inventory.source_path
     body_paths = inventory.body_paths
     source_pagination: dict[Path, tuple[int, int]] = {}
+    source_rows_by_folder: dict[Path, int] = {}
 
     def iter_page_records():
         if worker_count <= 1 or len(body_paths) <= 1:
@@ -352,6 +362,10 @@ def _inspect_source_folder_counts(
             row_count += 1
             page_written_rows += 1
 
+        folder = body_path.parent.resolve()
+        source_rows_by_folder[folder] = (
+            source_rows_by_folder.get(folder, 0) + page_source_rows
+        )
         pages.append(
             {
                 "source_file": body_path.relative_to(source_folder).as_posix(),
@@ -362,6 +376,10 @@ def _inspect_source_folder_counts(
             }
         )
 
+    _validate_source_folder_row_totals(
+        source_pagination,
+        source_rows_by_folder=source_rows_by_folder,
+    )
     return (
         shard_counts,
         len(company_keys),
@@ -422,6 +440,20 @@ def _validate_source_page_pagination(
             f"{folder}: BODY 페이지 사이의 전체 페이지 수 또는 "
             "전체 공시 건수가 다릅니다."
         )
+
+
+def _validate_source_folder_row_totals(
+    source_pagination: dict[Path, tuple[int, int]],
+    *,
+    source_rows_by_folder: dict[Path, int],
+) -> None:
+    for folder, (_total_pages, total_items) in source_pagination.items():
+        source_rows = source_rows_by_folder.get(folder, 0)
+        if source_rows != total_items:
+            raise ValueError(
+                f"{folder}: BODY의 전체 공시 건수 {total_items}건과 "
+                f"실제 공시 행 수 {source_rows}건이 다릅니다."
+            )
 
 
 def _validate_source_inventory(
