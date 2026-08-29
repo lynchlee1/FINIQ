@@ -1475,7 +1475,18 @@ def _stage_one_windows_valid(profile: dict[str, Any]) -> bool:
     return actual_names == expected_names
 
 
-def _replace_owned_window(target: Path, temporary: Path) -> None:
+def _cleanup_published_directory(path: Path, *, label: str) -> list[str]:
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        return [
+            f"{label} 게시에는 성공했지만 이전 결과 백업을 정리하지 "
+            f"못했습니다: {path} ({exc})"
+        ]
+    return []
+
+
+def _replace_owned_window(target: Path, temporary: Path) -> list[str]:
     backup = target.with_name(f".{target.name}.backup-{uuid.uuid4().hex}")
     if target.exists():
         _owned_window_manifest(target)
@@ -1487,7 +1498,8 @@ def _replace_owned_window(target: Path, temporary: Path) -> None:
             os.replace(backup, target)
         raise
     if backup.exists():
-        shutil.rmtree(backup)
+        return _cleanup_published_directory(backup, label="01단계 결과")
+    return []
 
 
 def _replace_owned_sections(target: Path, temporary: Path) -> None:
@@ -1521,7 +1533,7 @@ def _replace_owned_html_directory(
     *,
     owner_name: str,
     owner_format: str,
-) -> None:
+) -> list[str]:
     backup = target.with_name(f".{target.name}.backup-{uuid.uuid4().hex}")
     if target.exists():
         try:
@@ -1542,7 +1554,108 @@ def _replace_owned_html_directory(
             os.replace(backup, target)
         raise
     if backup.exists():
-        shutil.rmtree(backup)
+        return _cleanup_published_directory(backup, label="HTML 결과")
+    return []
+
+
+def _publish_external_html_generation(
+    *,
+    html_target: Path,
+    staged_html: Path,
+    compressed_target: Path,
+    staged_compressed: Path,
+) -> list[str]:
+    owner_name = "automation-external-html-download.json"
+    if html_target.exists():
+        try:
+            owner = json.loads((html_target / owner_name).read_text("utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"자동화 소유가 아닌 HTML 결과를 교체할 수 없습니다: {html_target}"
+            ) from exc
+        if (
+            not isinstance(owner, dict)
+            or owner.get("format") != AUTOMATION_EXTERNAL_FORMAT
+        ):
+            raise ValueError(
+                f"자동화 소유가 아닌 HTML 결과를 교체할 수 없습니다: {html_target}"
+            )
+    if not staged_compressed.is_file():
+        raise ValueError(f"준비된 외부 HTML 압축 결과가 없습니다: {staged_compressed}")
+
+    html_target.parent.mkdir(parents=True, exist_ok=True)
+    compressed_target.parent.mkdir(parents=True, exist_ok=True)
+    transaction_id = uuid.uuid4().hex
+    html_backup = html_target.with_name(
+        f".{html_target.name}.backup-{transaction_id}"
+    )
+    compressed_backup = compressed_target.with_name(
+        f".{compressed_target.name}.backup-{transaction_id}"
+    )
+    html_backup_moved = False
+    compressed_backup_moved = False
+    html_published = False
+    compressed_published = False
+    try:
+        if html_target.exists():
+            os.replace(html_target, html_backup)
+            html_backup_moved = True
+        if compressed_target.exists():
+            os.replace(compressed_target, compressed_backup)
+            compressed_backup_moved = True
+        os.replace(staged_html, html_target)
+        html_published = True
+        os.replace(staged_compressed, compressed_target)
+        compressed_published = True
+    except Exception as error:
+        rollback_failures: list[str] = []
+        new_html_exists = html_published or (
+            not staged_html.exists() and html_target.exists()
+        )
+        new_compressed_exists = compressed_published or (
+            not staged_compressed.exists() and compressed_target.exists()
+        )
+        if new_compressed_exists:
+            try:
+                compressed_target.unlink(missing_ok=True)
+            except OSError as exc:
+                rollback_failures.append(f"압축 JSON 제거: {exc}")
+        if new_html_exists:
+            try:
+                shutil.rmtree(html_target)
+            except OSError as exc:
+                rollback_failures.append(f"HTML 제거: {exc}")
+        if compressed_backup_moved and compressed_backup.exists():
+            try:
+                os.replace(compressed_backup, compressed_target)
+            except OSError as exc:
+                rollback_failures.append(f"압축 JSON 복원: {exc}")
+        if html_backup_moved and html_backup.exists():
+            try:
+                os.replace(html_backup, html_target)
+            except OSError as exc:
+                rollback_failures.append(f"HTML 복원: {exc}")
+        if rollback_failures:
+            raise RuntimeError(
+                "04단계 결과 게시 rollback에 실패했습니다: "
+                + "; ".join(rollback_failures)
+            ) from error
+        raise
+
+    cleanup_warnings: list[str] = []
+    if html_backup.exists():
+        cleanup_warnings.extend(
+            _cleanup_published_directory(html_backup, label="04단계 결과")
+        )
+    if compressed_backup.exists():
+        try:
+            compressed_backup.unlink()
+        except OSError as exc:
+            cleanup_warnings.append(
+                "04단계 결과 게시에는 성공했지만 이전 압축 JSON 백업을 "
+                f"정리하지 못했습니다: {compressed_backup} ({exc})"
+            )
+    return cleanup_warnings
 
 
 def _active_disclosure_targets(filtered_path: Path) -> list[tuple[str, str]]:
@@ -1679,6 +1792,7 @@ def _run_stage_one(
     }
     downloaded = 0
     reused = 0
+    cleanup_warnings: list[str] = []
     for index, (window_start, window_end) in enumerate(ranges, start=1):
         if cancel_check():
             raise RuntimeError("Job cancelled")
@@ -1750,7 +1864,7 @@ def _run_stage_one(
                     "summary": result.get("summary") or {},
                 },
             )
-            _replace_owned_window(target, temporary)
+            cleanup_warnings.extend(_replace_owned_window(target, temporary))
             downloaded += 1
         finally:
             if temporary.exists():
@@ -1761,10 +1875,16 @@ def _run_stage_one(
         if child.name.startswith(".") and (
             ".part-" in child.name or ".backup-" in child.name
         ):
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            except OSError as exc:
+                cleanup_warnings.append(
+                    "01단계 결과는 정상이지만 이전 임시 항목을 정리하지 "
+                    f"못했습니다: {child} ({exc})"
+                )
             continue
         if child.is_dir():
             try:
@@ -1786,6 +1906,7 @@ def _run_stage_one(
         "reused_ranges": reused,
         "checked_ranges": inspected["checked_ranges"],
         "output_directory": str(windows_root),
+        "cleanup_warnings": cleanup_warnings,
     }
 
 
@@ -1875,6 +1996,7 @@ def _run_stage(
     if stage == 4:
         mode = execution["mode"]
         targets = _active_workspace_disclosure_targets(root, mode)
+        cleanup_warnings: list[str] = []
         current = _external_mode_directory(profile) / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
         compressed_path = (
@@ -1925,6 +2047,9 @@ def _run_stage(
                     external_html_compress_result.get("verification") or {}
                 ).get("passed"):
                     raise ValueError("외부 HTML 압축 결과 재검사에 실패했습니다.")
+                cleanup_warnings.extend(
+                    external_html_compress_result.get("cleanup_warnings") or []
+                )
                 compressed_payload = json.loads(
                     (compressed_temporary / "compressed-external-html.json").read_text(
                         "utf-8"
@@ -1982,25 +2107,46 @@ def _run_stage(
                     "complete": True,
                 },
             )
-            _replace_owned_html_directory(
-                current,
-                temporary,
-                owner_name="automation-external-html-download.json",
-                owner_format=AUTOMATION_EXTERNAL_FORMAT,
+            cleanup_warnings.extend(
+                _publish_external_html_generation(
+                    html_target=current,
+                    staged_html=temporary,
+                    compressed_target=compressed_path,
+                    staged_compressed=(
+                        compressed_temporary / "compressed-external-html.json"
+                    ),
+                )
             )
-            atomic_write_json(compressed_path, compressed_payload)
             return {
                 "external_html_download": external_html_download_result,
                 "external_html_compress": external_html_compress_result,
+                "cleanup_warnings": cleanup_warnings,
             }
         finally:
             if temporary.exists():
-                shutil.rmtree(temporary)
+                try:
+                    shutil.rmtree(temporary)
+                except OSError as exc:
+                    warning = (
+                        "04단계 HTML 임시 디렉터리를 정리하지 못했습니다: "
+                        f"{temporary} ({exc})"
+                    )
+                    cleanup_warnings.append(warning)
+                    progress_callback(warning)
             if compressed_temporary.exists():
-                shutil.rmtree(compressed_temporary)
+                try:
+                    shutil.rmtree(compressed_temporary)
+                except OSError as exc:
+                    warning = (
+                        "04단계 압축 임시 디렉터리를 정리하지 못했습니다: "
+                        f"{compressed_temporary} ({exc})"
+                    )
+                    cleanup_warnings.append(warning)
+                    progress_callback(warning)
     if stage == 5:
         mode = execution["mode"]
         targets = _active_workspace_disclosure_targets(root, mode)
+        cleanup_warnings = []
         current = _internal_mode_directory(profile) / ".automation-current"
         temporary = current.with_name(f".{current.name}.part-{uuid.uuid4().hex}")
         try:
@@ -2042,17 +2188,28 @@ def _run_stage(
                     "complete": True,
                 },
             )
-            _replace_owned_html_directory(
-                current,
-                temporary,
-                owner_name="automation-internal-html-download.json",
-                owner_format=AUTOMATION_INTERNAL_FORMAT,
+            cleanup_warnings.extend(
+                _replace_owned_html_directory(
+                    current,
+                    temporary,
+                    owner_name="automation-internal-html-download.json",
+                    owner_format=AUTOMATION_INTERNAL_FORMAT,
+                )
             )
             result["output_directory"] = str(current)
+            result["cleanup_warnings"] = cleanup_warnings
             return result
         finally:
             if temporary.exists():
-                shutil.rmtree(temporary)
+                try:
+                    shutil.rmtree(temporary)
+                except OSError as exc:
+                    warning = (
+                        "05단계 HTML 임시 디렉터리를 정리하지 못했습니다: "
+                        f"{temporary} ({exc})"
+                    )
+                    cleanup_warnings.append(warning)
+                    progress_callback(warning)
     if stage == 6:
         output_directory = _sections_mode_directory(profile) / ".automation-current"
         temporary = output_directory.with_name(

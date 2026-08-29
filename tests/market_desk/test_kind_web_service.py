@@ -1910,6 +1910,46 @@ def test_table_build_publish_failure_preserves_previous_shards_and_manifest(
     assert not list(output_root.glob(".finiq-table-build-*"))
 
 
+def test_table_backup_cleanup_failure_keeps_published_generation_successful(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    build_disclosure_table_payload(
+        {"root_directory": str(source_root), "output_path": str(output_root)}
+    )
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace(
+            "전환사채발행결정", "교체된제목"
+        ),
+        encoding="utf-8",
+    )
+    original_rmtree = table_export_module.shutil.rmtree
+
+    def fail_backup_cleanup(path: Path) -> None:
+        if Path(path).name.startswith(".finiq-table-backup-"):
+            raise OSError("simulated backup cleanup failure")
+        original_rmtree(path)
+
+    monkeypatch.setattr(table_export_module.shutil, "rmtree", fail_backup_cleanup)
+
+    result = build_disclosure_table_payload(
+        {"root_directory": str(source_root), "output_path": str(output_root)}
+    )
+
+    assert len(result["cleanup_warnings"]) == 1
+    assert "게시에는 성공" in result["cleanup_warnings"][0]
+    shard_path = Path(result["manifest_path"]).parent / result["shards"][0][
+        "relative_path"
+    ]
+    with sqlite3.connect(shard_path) as connection:
+        title = connection.execute("SELECT title FROM disclosures").fetchone()[0]
+    assert title == "[정정]교체된제목"
+    assert list(output_root.glob(".finiq-table-backup-*"))
+
+
 def test_table_generation_publish_waits_for_manifest_reader(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

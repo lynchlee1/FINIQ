@@ -13,6 +13,7 @@ import shutil
 import threading
 from typing import Any
 import uuid
+import warnings
 
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     atomic_write_json,
@@ -475,6 +476,22 @@ def _workflow_transaction_path(path: Path) -> Path:
     return path.with_name(".filter-workflow-transaction.json")
 
 
+def _remove_workflow_artifact(path: Path, *, committed: bool) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        prefix = (
+            "필터 결과 게시에는 성공했지만 이전 작업 파일을 정리하지 못했습니다"
+            if committed
+            else "실패한 필터 작업의 임시 파일을 정리하지 못했습니다"
+        )
+        warnings.warn(
+            f"{prefix}: {path} ({exc})",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
 def _recover_workflow_transaction(path: Path) -> bool:
     transaction_path = _workflow_transaction_path(path)
     if not transaction_path.is_file():
@@ -535,6 +552,7 @@ def _write_workflow_transaction(
     transaction_id = uuid.uuid4().hex
     transaction_path = _workflow_transaction_path(path)
     entries: list[dict[str, Any]] = []
+    committed = False
     try:
         for index, (target, payload) in enumerate(writes):
             if target.parent != path.parent:
@@ -571,13 +589,16 @@ def _write_workflow_transaction(
             _recover_workflow_transaction(path)
             raise
         transaction_path.unlink()
-        for entry in entries:
-            (path.parent / str(entry["backup"])).unlink(missing_ok=True)
+        committed = True
     finally:
         for entry in entries:
-            (path.parent / str(entry["staged"])).unlink(missing_ok=True)
+            _remove_workflow_artifact(
+                path.parent / str(entry["staged"]), committed=committed
+            )
             if not transaction_path.exists():
-                (path.parent / str(entry["backup"])).unlink(missing_ok=True)
+                _remove_workflow_artifact(
+                    path.parent / str(entry["backup"]), committed=committed
+                )
 
 
 def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
@@ -645,14 +666,14 @@ def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
         }
         canonical_result = path.with_name("filtered.json")
         if canonical_result.name not in referenced:
-            canonical_result.unlink(missing_ok=True)
+            _remove_workflow_artifact(canonical_result, committed=True)
         for pattern in ("filter.result-*.json", "filter.pending-*.json"):
             for sidecar in path.parent.glob(pattern):
                 if sidecar.name not in referenced:
-                    sidecar.unlink(missing_ok=True)
+                    _remove_workflow_artifact(sidecar, committed=True)
         fixed_pending = path.with_name("filter.pending.json")
         if fixed_pending.name not in referenced:
-            fixed_pending.unlink(missing_ok=True)
+            _remove_workflow_artifact(fixed_pending, committed=True)
 
 
 def _workflow_sidecar_path(path: Path, file_name: str) -> Path:
@@ -869,7 +890,7 @@ def _merge_filter_results(
             inspected_count,
         ) = _filter_result_counts(validated)
         if source_offset != cursor:
-            raise _integrity_error("04단계 처리 구간이 이어지지 않습니다.")
+            raise _integrity_error("03단계 처리 구간이 이어지지 않습니다.")
         cursor += inspected_count
         latest_payload = validated
         duplicate_disclosures += _required_count(
@@ -885,14 +906,14 @@ def _merge_filter_results(
             acpt_no = str(disclosure["acpt_no"])
             if acpt_no in disclosures_by_acpt_no:
                 raise _integrity_error(
-                    "04단계 신규 구간에 이미 처리한 접수번호가 있습니다. "
+                    "03단계 신규 구간에 이미 처리한 접수번호가 있습니다. "
                     f"중복 접수번호={acpt_no}."
                 )
             disclosures_by_acpt_no[acpt_no] = disclosure
 
     if complete and cursor != source_disclosures:
         raise _integrity_error(
-            "04단계 검색 대상 건수와 검사 완료 건수가 다릅니다. "
+            "03단계 검색 대상 건수와 검사 완료 건수가 다릅니다. "
             f"검색 대상={source_disclosures}, 검사 완료={cursor}"
         )
     if latest_payload is None:

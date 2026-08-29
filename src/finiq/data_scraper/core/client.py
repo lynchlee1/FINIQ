@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -71,6 +73,25 @@ def _is_valid_html(path: Path) -> bool:
         )
     except Exception:
         return False
+
+
+def _publish_validated_html_response(
+    output_path: Path,
+    response: requests.Response,
+    *,
+    invalid_message: str,
+) -> None:
+    """Validate a response beside its target before replacing existing HTML."""
+    temporary_path = output_path.with_name(
+        f".{output_path.name}.part-{uuid.uuid4().hex}"
+    )
+    try:
+        _save_response_content(temporary_path, response)
+        if not _is_valid_html(temporary_path):
+            raise ValueError(invalid_message)
+        os.replace(temporary_path, output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _report_progress(progress_callback: KindProgressCallback | None, message: str) -> None:
@@ -575,7 +596,14 @@ def fetch_disclosure_viewer_html(
             doc_no=normalized_doc_no,
             timeout=timeout,
         )
-        _save_response_content(output_path, response)
+        _publish_validated_html_response(
+            output_path,
+            response,
+            invalid_message=(
+                "Downloaded external response for "
+                f"acpt_no={normalized_acpt_no} is invalid HTML"
+            ),
+        )
         _report_progress(progress_callback, f"Saved KIND external HTML to: {output_path}")
     finally:
         if owns_session:
@@ -797,10 +825,11 @@ def download_disclosure_external_htmls(
                 doc_no=None,
                 timeout=timeout,
             )
-            _save_response_content(output_path, response)
-            
-            if not _is_valid_html(output_path):
-                raise ValueError(f"Downloaded content for {acpt_no} is invalid")
+            _publish_validated_html_response(
+                output_path,
+                response,
+                invalid_message=f"Downloaded content for {acpt_no} is invalid",
+            )
 
             with lock:
                 saved_paths[acpt_no] = output_path

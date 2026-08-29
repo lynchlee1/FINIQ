@@ -717,6 +717,47 @@ def test_external_html_hash_mismatch_redownloads_only_changed_file(
     assert verified["hash_mismatch_target_html_count"] == 0
 
 
+def test_external_html_invalid_response_preserves_previous_file_and_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output_directory = tmp_path / "external"
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    previous = _valid_html("previous").encode()
+    target.write_bytes(previous)
+    body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+            ]
+        },
+        output_directory=str(output_directory),
+    )
+    baseline = create_external_html_integrity_baseline_payload(
+        {**body, "trust_existing_files": True}
+    )
+    manifest_path = Path(str(baseline["manifest_path"]))
+    previous_manifest = manifest_path.read_bytes()
+
+    response = requests.Response()
+    response.status_code = 200
+    response._content = b"not html"
+    response.url = "https://kind.invalid"
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client._request_disclosure_viewer_page",
+        lambda *_args, **_kwargs: response,
+    )
+
+    with pytest.raises(ValueError, match="membership.*missing"):
+        download_disclosure_external_html_payload(
+            {**body, "skip_existing": False, "max_retries": 0}
+        )
+
+    assert target.read_bytes() == previous
+    assert manifest_path.read_bytes() == previous_manifest
+
+
 def test_external_html_baseline_survives_filtered_json_rerun(
     tmp_path: Path,
 ) -> None:
@@ -1098,6 +1139,34 @@ def test_internal_html_download_rejects_invalid_response(
         )
 
     assert not (tmp_path / "20250101000001.html").exists()
+
+
+def test_internal_html_invalid_response_preserves_previous_file_and_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _internal_html_body(tmp_path, ["20250101000001"])
+    output_directory = Path(str(body["output_directory"]))
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True)
+    previous = _valid_html("previous").encode()
+    target.write_bytes(previous)
+    baseline = create_internal_html_integrity_baseline_payload(
+        {**body, "trust_existing_files": True}
+    )
+    manifest_path = Path(str(baseline["manifest_path"]))
+    previous_manifest = manifest_path.read_bytes()
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        lambda *_args, **_kwargs: b"not html",
+    )
+
+    with pytest.raises(ValueError, match="membership.*missing"):
+        download_disclosure_internal_html_payload(
+            {**body, "skip_existing": False}
+        )
+
+    assert target.read_bytes() == previous
+    assert manifest_path.read_bytes() == previous_manifest
 
 
 def test_internal_html_download_accepts_legacy_html_fragment(

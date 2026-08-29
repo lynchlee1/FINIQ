@@ -146,6 +146,90 @@ def _external_workspace_body(
     )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
+
+def test_filter_merge_integrity_errors_identify_stage_three() -> None:
+    row = {"acpt_no": "20250101000001", "title": "공시"}
+    gap = _filter_result(
+        source_disclosures=2,
+        source_offset=1,
+        inspected_disclosures=1,
+        disclosures=[row],
+        complete=False,
+    )
+    with pytest.raises(ValueError, match="03단계 처리 구간"):
+        filter_presets._merge_filter_results(
+            [gap],
+            condition_blocks=[],
+            initial_offset=0,
+            source_disclosures=2,
+            complete=False,
+        )
+
+    first = _filter_result(
+        source_disclosures=2,
+        source_offset=0,
+        inspected_disclosures=1,
+        disclosures=[row],
+        complete=False,
+    )
+    second = _filter_result(
+        source_disclosures=2,
+        source_offset=1,
+        inspected_disclosures=1,
+        disclosures=[row],
+        complete=False,
+    )
+    with pytest.raises(ValueError, match="03단계 신규 구간"):
+        filter_presets._merge_filter_results(
+            [first, second],
+            condition_blocks=[],
+            initial_offset=0,
+            source_disclosures=2,
+            complete=False,
+        )
+
+    incomplete = _filter_result(
+        source_disclosures=2,
+        source_offset=0,
+        inspected_disclosures=1,
+        disclosures=[row],
+        complete=False,
+    )
+    with pytest.raises(ValueError, match="03단계 검색 대상"):
+        filter_presets._merge_filter_results(
+            [incomplete],
+            condition_blocks=[],
+            initial_offset=0,
+            source_disclosures=2,
+            complete=True,
+        )
+
+
+def test_filter_backup_cleanup_failure_warns_after_committed_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workflow_path = tmp_path / "filter.json"
+    workflow_path.write_text('{"generation":"old"}', encoding="utf-8")
+    original_unlink = Path.unlink
+
+    def fail_backup_cleanup(
+        path: Path, missing_ok: bool = False
+    ) -> None:
+        if ".backup-" in path.name:
+            raise OSError("simulated backup cleanup failure")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_backup_cleanup)
+
+    with pytest.warns(RuntimeWarning, match="게시에는 성공"):
+        filter_presets._write_workflow_transaction(
+            workflow_path,
+            [(workflow_path, {"generation": "new"})],
+        )
+
+    assert json.loads(workflow_path.read_text("utf-8")) == {"generation": "new"}
+    assert list(tmp_path.glob(".filter.json.backup-*"))
+
 def test_api_config(tmp_path: Path):
     # Setup mock config
     config.output_root = str(tmp_path)

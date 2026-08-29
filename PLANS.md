@@ -17,3 +17,10 @@
 - Implementation summary: 01 자동 다운로드는 숨김 staging 폴더에서 전체 페이지를 완성하고 checkpoint로 중단 지점부터 재개한다. 모든 페이지 검증 후 첫 페이지를 같은 조건으로 다시 받아 pagination과 공시 행이 같을 때만 기존 결과와 원자적으로 교체하며, 완료 전에는 `kind_workflow.input.json`이나 완료 checkpoint를 게시하지 않는다. 02는 기간 폴더별 pagination 전체 건수와 실제 BODY 행 수를 build·inspection 양쪽에서 대조한다. 03은 닫히지 않은 괄호부터 문자열 끝까지 제거한다. 05는 `selected_main_doc_no`가 `docs`의 유일한 `selected=true` `mainDoc`과 정확히 일치하는지 다운로드 전에 확인하고, 정상 실행의 멤버십 실패 시 기존 manifest를 부분 결과로 덮어쓰지 않는다.
 - **04 사용자 직접 명시 의도:** 사용자가 04의 HTML 판별은 과거 HTML 레거시 호환 문제이며 차후 별도로 다룰 것이라고 직접 밝혔다. 따라서 `<html` 일반 문서, `openDisclsViewer` 과거 외부 화면, wrapper 없이 `<P>`로 시작해 `<TABLE>`을 포함하는 과거 본문 조각을 허용하는 현재 규칙은 이번에 오류로 취급하거나 변경하지 않았다. 이 예외 의도를 04 feature/reference와 공통 case 문서에 명시했다.
 - Verification result: 전체 Python 테스트 `1529 passed, 167 skipped`, 수정 파일 `py_compile`, `git diff --check`를 통과했다. 추가 회귀 테스트는 실패 다운로드의 입력 metadata 미게시, metadata 게시 실패 시 미완료 checkpoint 유지, 병렬 저장의 최종 페이지 유지, staging 재개·완료 후 게시, 첫 페이지 변경 시 기존 결과 보존, 02 원본 총건수 불일치 거부, 05 선택 문서 불일치 거부와 기존 manifest 보존을 검증한다.
+
+## 2026-08-29: 01~05 결과 게시 원자성 보강
+
+- Purpose: 04·05단계가 잘못된 새 응답으로 기존 정상 HTML을 파괴하지 않게 하고, 자동화 04의 HTML과 압축 JSON을 같은 세대로 게시하며, 01~05의 게시 성공 뒤 정리 실패를 실제 게시 실패와 구분한다. 03단계 무결성 오류가 잘못 가리키던 단계 번호도 바로잡는다.
+- Implementation summary: 04·05의 새 HTML은 대상 옆 임시 파일에서 기존 HTML 판별 규칙을 통과한 뒤에만 `os.replace`로 게시하며, 정상 실행의 누락은 manifest 갱신 전에 거부한다. 자동화 04는 기존 HTML과 압축 JSON을 모두 백업한 뒤 새 두 결과를 게시하고 어느 한쪽이 실패하면 둘 다 복원한다. 01·02·03·04·05는 commit 이후 backup·staging 삭제 실패를 예외 대신 `cleanup_warnings` 또는 runtime warning으로 보고한다. 03 결과 병합 오류의 `04단계` 표기 3곳을 `03단계`로 수정했다.
+- **04 사용자 직접 명시 의도 유지:** 사용자가 직접 지정한 과거 KIND HTML 레거시 호환 범위는 변경하지 않았다. `<html`, `openDisclsViewer`, wrapper 없이 `<P>`로 시작하고 `<TABLE>`을 포함하는 문서는 계속 정상 후보이며, 새 임시 파일도 반드시 이 동일한 규칙으로 검사한다.
+- Verification result: 잘못된 04·05 응답에서 기존 HTML·hash manifest가 유지되는 테스트, 04 압축 JSON 게시 실패 시 HTML·JSON 모두 이전 세대로 복원되는 테스트, 01·02·03·04·05 게시 후 정리 실패가 성공 결과와 경고를 남기는 테스트, 03 오류 문구 3종과 04 legacy fragment 허용 테스트를 추가했다. 관련 Python 테스트 `650 passed, 166 skipped`, 전체 Python 테스트 `1541 passed, 167 skipped`, 수정 Python 파일 `py_compile`, `git diff --check`를 통과했다.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 import os
+import shutil
 import tempfile
 
 from finiq.concurrency import bounded_as_completed
@@ -543,11 +544,15 @@ def compress_disclosure_external_html_payload(
         )
     ensure_not_cancelled()
     output_directory.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix=".finiq-external-html-compress-",
-        dir=output_directory.parent,
-    ) as staging_directory:
-        staged_path = Path(staging_directory) / output_path.name
+    cleanup_warnings: list[str] = []
+    staging_directory = Path(
+        tempfile.mkdtemp(
+            prefix=".finiq-external-html-compress-",
+            dir=output_directory.parent,
+        )
+    )
+    try:
+        staged_path = staging_directory / output_path.name
         atomic_write_json(staged_path, payload)
         verification = _verify_compressed_external_html_files(
             written_files=[str(staged_path)],
@@ -558,6 +563,21 @@ def compress_disclosure_external_html_payload(
         ensure_not_cancelled()
         output_directory.mkdir(parents=True, exist_ok=True)
         os.replace(staged_path, output_path)
+    except Exception:
+        try:
+            shutil.rmtree(staging_directory)
+        except OSError:
+            pass
+        raise
+    try:
+        shutil.rmtree(staging_directory)
+    except OSError as exc:
+        warning = (
+            "외부 HTML 압축 JSON 게시에는 성공했지만 준비 디렉터리를 "
+            f"정리하지 못했습니다: {staging_directory} ({exc})"
+        )
+        cleanup_warnings.append(warning)
+        emit(warning)
     written_files.append(str(output_path))
     emit(f"외부 HTML 압축 JSON 저장 완료: {output_path}")
     emit(
@@ -579,5 +599,6 @@ def compress_disclosure_external_html_payload(
         "metadata_check": metadata_check,
         "processing_verification": processing_verification,
         "verification": verification,
+        "cleanup_warnings": cleanup_warnings,
         "progress_log": list(progress_log),
     }

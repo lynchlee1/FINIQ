@@ -140,7 +140,7 @@ def _verify_first_page_consistency(
 def _publish_staged_download(
     staging_directory: Path,
     output_directory: Path,
-) -> None:
+) -> list[str]:
     output_directory.parent.mkdir(parents=True, exist_ok=True)
     if staging_directory.is_symlink():
         raise ValueError(
@@ -167,8 +167,16 @@ def _publish_staged_download(
         if previous_moved and not output_directory.exists():
             os.replace(backup_directory, output_directory)
         raise
+    cleanup_warnings: list[str] = []
     if previous_moved:
-        shutil.rmtree(backup_directory)
+        try:
+            shutil.rmtree(backup_directory)
+        except OSError as exc:
+            cleanup_warnings.append(
+                "KIND 결과 게시에는 성공했지만 이전 결과 백업을 정리하지 "
+                f"못했습니다: {backup_directory} ({exc})"
+            )
+    return cleanup_warnings
 
 
 def _run_auto_download_staged(
@@ -186,7 +194,7 @@ def _run_auto_download_staged(
     page_worker_count: int,
     progress_callback: Any | None,
     cancel_check: Any | None,
-) -> None:
+) -> list[str]:
     staging_directory = _download_staging_directory(output_directory)
     checkpoint_path = staging_directory / "kind_workflow.checkpoint.json"
     staging_directory.parent.mkdir(parents=True, exist_ok=True)
@@ -380,7 +388,7 @@ def _run_auto_download_staged(
         full_workflow.build_request_data(page_number=total_pages)
     )
     full_workflow.save_checkpoint(checkpoint_path)
-    _publish_staged_download(staging_directory, output_directory)
+    return _publish_staged_download(staging_directory, output_directory)
 
 
 def _append_progress(
@@ -532,6 +540,7 @@ def _run_single(
         progress_callback,
     )
 
+    cleanup_warnings: list[str] = []
     if end_page_value is not None:
         _append_progress(
             progress_log,
@@ -566,7 +575,7 @@ def _run_single(
             "SINGLE auto_page_download first_page_probe=1",
             progress_callback,
         )
-        _run_auto_download_staged(
+        cleanup_warnings = _run_auto_download_staged(
             output_directory=output_directory,
             payload=payload,
             start_date=start_date_raw,
@@ -581,6 +590,12 @@ def _run_single(
             cancel_check=cancel_check,
             page_worker_count=page_worker_count,
         )
+        for warning in cleanup_warnings:
+            _append_progress(
+                progress_log,
+                f"CLEANUP warning {warning}",
+                progress_callback,
+            )
 
     status = _download_integrity_status(output_directory, page_size)
     _append_status_progress(progress_log, status, progress_callback)
@@ -590,6 +605,7 @@ def _run_single(
         "pagination": status.get("pagination"),
         "download_status": status,
         "summary": _download_status_summary(status),
+        "cleanup_warnings": cleanup_warnings,
         "progress_log": list(progress_log),
     }
 
@@ -769,15 +785,19 @@ def _run_yearly(
         raise DownloadCancelled("download job cancelled")
 
     results: list[dict[str, Any]] = []
+    cleanup_warnings: list[str] = []
     for task in tasks:
         folder_name = str(task["_folder_name"])
         result = chunk_results_by_folder[folder_name]
+        range_cleanup_warnings = list(result.get("cleanup_warnings") or [])
+        cleanup_warnings.extend(range_cleanup_warnings)
         results.append(
             {
                 "folder": folder_name,
                 "output_directory": result.get("output_directory"),
                 "pagination": result.get("pagination"),
                 "download_status": result.get("download_status"),
+                "cleanup_warnings": range_cleanup_warnings,
             }
         )
 
@@ -789,5 +809,6 @@ def _run_yearly(
         "parallel_strategy": parallel_strategy,
         "results": results,
         "summary": _aggregate_download_summary(results),
+        "cleanup_warnings": cleanup_warnings,
         "progress_log": list(progress_log),
     }

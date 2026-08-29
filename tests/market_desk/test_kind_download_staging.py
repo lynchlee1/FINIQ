@@ -193,3 +193,33 @@ def test_auto_download_consistency_failure_preserves_previous_output(
     assert previous_file.read_text(encoding="utf-8") == "do not replace"
     assert kind_runner._download_staging_directory(output_directory).is_dir()
     assert not list(tmp_path.glob(".01-list.kind-download-backup-*"))
+
+
+def test_download_publish_cleanup_failure_is_reported_without_failing_publish(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_directory = tmp_path / "01-list"
+    output_directory.mkdir()
+    (output_directory / "old.txt").write_text("old", encoding="utf-8")
+    staging_directory = kind_runner._download_staging_directory(output_directory)
+    staging_directory.mkdir()
+    (staging_directory / "new.txt").write_text("new", encoding="utf-8")
+    original_rmtree = kind_runner.shutil.rmtree
+
+    def fail_backup_cleanup(path: Path) -> None:
+        if ".kind-download-backup-" in Path(path).name:
+            raise OSError("simulated cleanup failure")
+        original_rmtree(path)
+
+    monkeypatch.setattr(kind_runner.shutil, "rmtree", fail_backup_cleanup)
+
+    warnings = kind_runner._publish_staged_download(
+        staging_directory, output_directory
+    )
+
+    assert (output_directory / "new.txt").read_text(encoding="utf-8") == "new"
+    assert not (output_directory / "old.txt").exists()
+    assert len(warnings) == 1
+    assert "게시에는 성공" in warnings[0]
+    assert list(tmp_path.glob(".01-list.kind-download-backup-*"))

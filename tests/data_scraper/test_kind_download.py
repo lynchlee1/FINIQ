@@ -654,6 +654,41 @@ def test_fetch_disclosure_viewer_html_preserves_text_identifiers(tmp_path: Path)
     assert "docno=DOC9Z" in str(session.get_calls[0]["url"])
 
 
+def test_fetch_disclosure_viewer_html_rejects_invalid_response_without_replacing_existing(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "AB2026C001.html"
+    previous = b"<html><body>previous valid disclosure</body></html>"
+    output_path.write_bytes(previous)
+
+    class InvalidViewerSession(ViewerFakeSession):
+        def get(
+            self, url: str, *, headers: dict[str, str], timeout: float
+        ) -> FakeResponse:
+            self.get_calls.append(
+                {"url": url, "headers": headers, "timeout": timeout}
+            )
+            return FakeResponse(
+                status_code=200,
+                url=url,
+                content=b"not html",
+                text="not html",
+            )
+
+    with pytest.raises(ValueError, match="invalid HTML"):
+        fetch_disclosure_viewer_html(
+            output_directory=tmp_path,
+            request_headers=REQUEST_HEADERS,
+            acpt_no="AB2026C001",
+            timeout=5,
+            session=InvalidViewerSession(),
+            skip_existing=False,
+        )
+
+    assert output_path.read_bytes() == previous
+    assert not list(tmp_path.glob(".AB2026C001.html.part-*"))
+
+
 def test_download_disclosure_external_htmls_rate_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -739,6 +774,70 @@ def test_download_disclosure_external_htmls_reports_replaced_file_as_completed_d
         "Fetching KIND external HTML acpt_no=20260108000150 (retry=0)...",
         f"Saved KIND external HTML to: {existing_path}",
     ]
+
+
+def test_download_disclosure_external_htmls_invalid_response_preserves_existing_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_path = tmp_path / "20260108000150.html"
+    previous = b"<html><body>previous valid disclosure</body></html>"
+    output_path.write_bytes(previous)
+
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client._request_disclosure_viewer_page",
+        lambda *_args, **_kwargs: FakeResponse(
+            status_code=200,
+            url="https://kind.invalid",
+            content=b"not html",
+            text="not html",
+        ),
+    )
+
+    saved_paths = download_disclosure_external_htmls(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        acpt_numbers=["20260108000150"],
+        timeout=5,
+        session=ViewerFakeSession(),
+        skip_existing=False,
+        max_retries=0,
+    )
+
+    assert saved_paths == []
+    assert output_path.read_bytes() == previous
+    assert not list(tmp_path.glob(".20260108000150.html.part-*"))
+
+
+def test_download_disclosure_external_htmls_accepts_legacy_html_fragment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_html = (
+        b'<P class="section-1">Legacy disclosure</P>'
+        b"<TABLE><TR><TD>content</TD></TR></TABLE>"
+    )
+    monkeypatch.setattr(
+        "finiq.data_scraper.core.client._request_disclosure_viewer_page",
+        lambda *_args, **_kwargs: FakeResponse(
+            status_code=200,
+            url="https://kind.invalid",
+            content=legacy_html,
+            text=legacy_html.decode(),
+        ),
+    )
+
+    saved_paths = download_disclosure_external_htmls(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        acpt_numbers=["19970415M00003"],
+        timeout=5,
+        session=ViewerFakeSession(),
+        max_retries=0,
+    )
+
+    assert [path.name for path in saved_paths] == ["19970415M00003.html"]
+    assert saved_paths[0].read_bytes() == legacy_html
 
 
 def test_download_disclosure_external_htmls_rejects_rates_over_kind_limit(tmp_path: Path) -> None:

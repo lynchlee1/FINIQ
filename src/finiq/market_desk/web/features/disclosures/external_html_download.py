@@ -355,6 +355,11 @@ def download_disclosure_external_html_payload(
     missing_acpt_numbers = [
         acpt_no for acpt_no in acpt_numbers if acpt_no not in saved_paths_by_acpt_no
     ]
+    if not cancelled and missing_acpt_numbers:
+        raise ValueError(
+            "External HTML download membership does not match requested targets: "
+            f"missing={missing_acpt_numbers[:10]}"
+        )
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
         acpt_numbers=saved_acpt_numbers,

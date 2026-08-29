@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
+import uuid
 from collections import Counter, deque
 
 from finiq.data_scraper.core.html_rate_limit import (
@@ -23,6 +25,23 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
 )
 from finiq.market_desk.web.features.disclosures.html_common import *
+
+
+def _publish_validated_internal_html(output_path: Path, content: bytes) -> None:
+    """Validate downloaded HTML beside its target before replacing the target."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = output_path.with_name(
+        f".{output_path.name}.part-{uuid.uuid4().hex}"
+    )
+    try:
+        temporary_path.write_bytes(content)
+        if not _is_valid_html(temporary_path):
+            raise ValueError(
+                f"Downloaded internal response is invalid HTML: {output_path.stem}"
+            )
+        os.replace(temporary_path, output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def redownload_missing_disclosure_internal_html_payload(
@@ -542,18 +561,10 @@ def download_disclosure_internal_htmls(
                     timeout=timeout,
                     before_request=wait_for_request,
                 )
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_bytes(internal_html)
-                if not _is_valid_html(output_path):
-                    output_path.unlink(missing_ok=True)
-                    raise ValueError(
-                        "Downloaded internal response for "
-                        f"acpt_no={acpt_no} is invalid HTML"
-                    )
+                _publish_validated_internal_html(output_path, internal_html)
             except InterruptedError:
                 return None
             except Exception as exc:
-                output_path.unlink(missing_ok=True)
                 is_connection_failure = isinstance(
                     exc,
                     (
@@ -1125,9 +1136,13 @@ def download_disclosure_internal_html_payload(
                             target_years=target_years,
                         )
                         if not reason:
-                            output_path.parent.mkdir(parents=True, exist_ok=True)
-                            output_path.write_bytes(internal_html)
-                            if _is_valid_html(output_path):
+                            try:
+                                _publish_validated_internal_html(
+                                    output_path, internal_html
+                                )
+                            except ValueError:
+                                reason = "invalid_html"
+                            else:
                                 downloaded_paths.append(output_path)
                                 source_unavailable_by_acpt_no.pop(acpt_no, None)
                                 emit(
@@ -1135,14 +1150,23 @@ def download_disclosure_internal_html_payload(
                                     f"acpt_no={acpt_no}"
                                 )
                                 continue
-                            output_path.unlink(missing_ok=True)
-                            reason = "invalid_html"
                         source_unavailable_by_acpt_no[acpt_no] = {
                             "doc_no": doc_no,
                             "reason": reason,
                         }
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_path.write_bytes(
+                        if (
+                            _is_valid_html(output_path)
+                            and _internal_html_source_unavailable_placeholder(output_path)
+                            is None
+                        ):
+                            source_unavailable_by_acpt_no.pop(acpt_no, None)
+                            emit(
+                                "KIND 응답이 유효하지 않아 기존 정상 HTML을 보존합니다: "
+                                f"acpt_no={acpt_no}"
+                            )
+                            continue
+                        _publish_validated_internal_html(
+                            output_path,
                             _render_internal_html_source_unavailable_placeholder(
                                 acpt_no=acpt_no,
                                 doc_no=doc_no,

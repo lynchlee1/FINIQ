@@ -1464,6 +1464,153 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
     assert all(callable(check) for check in compression_cancel_checks)
 
 
+def test_stage_four_compressed_publish_failure_restores_previous_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    acpt_no = "20260712000001"
+    filtered_path = tmp_path / "03-filter" / "bond_issuance" / "filtered.json"
+    filtered_path.parent.mkdir(parents=True)
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {"acpt_no": acpt_no, "disclosed_at": "2026-07-12 09:00"}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    current = (
+        tmp_path
+        / "04-external-html-download"
+        / "bond_issuance"
+        / ".automation-current"
+    )
+    current.mkdir(parents=True)
+    (current / "automation-external-html-download.json").write_text(
+        json.dumps({"format": AUTOMATION_EXTERNAL_FORMAT}), encoding="utf-8"
+    )
+    previous_html = current / "2025" / "old.html"
+    previous_html.parent.mkdir()
+    previous_html.write_text("<html><body>old</body></html>", encoding="utf-8")
+    compressed_path = (
+        tmp_path
+        / "04-external-html-compress"
+        / "bond_issuance"
+        / "compressed-external-html.json"
+    )
+    compressed_path.parent.mkdir(parents=True)
+    previous_compressed = b'{"generation":"old"}'
+    compressed_path.write_bytes(previous_compressed)
+
+    def fake_download(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        target = Path(str(body["output_directory"])) / "2026" / f"{acpt_no}.html"
+        target.parent.mkdir(parents=True)
+        target.write_text("<html><body>new</body></html>", encoding="utf-8")
+        return {"requested_count": 1, "saved_count": 1, "cancelled": False}
+
+    def fake_compress(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        output = Path(str(body["output_directory"])) / "compressed-external-html.json"
+        output.write_text(
+            json.dumps(
+                {
+                    "format": "finiq_disclosure_external_html_docs_v1",
+                    "records": [
+                        {
+                            "acpt_no": acpt_no,
+                            "selected_main_doc_no": "doc-1",
+                            "metadata": {"disclosed_at": "2026-07-12 09:00"},
+                            "docs": [
+                                {
+                                    "select_id": "mainDoc",
+                                    "doc_no": "doc-1",
+                                    "selected": True,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"verification": {"passed": True}}
+
+    monkeypatch.setattr(automation, "download_disclosure_external_html_payload", fake_download)
+    monkeypatch.setattr(
+        automation, "compress_disclosure_external_html_payload", fake_compress
+    )
+    original_replace = automation.os.replace
+
+    def fail_compressed_publish(source: Path, target: Path) -> None:
+        if (
+            Path(target) == compressed_path
+            and Path(source).parent.name.startswith(".compressed-external-html.part-")
+        ):
+            raise OSError("simulated compressed publish failure")
+        original_replace(source, target)
+
+    monkeypatch.setattr(automation.os, "replace", fail_compressed_publish)
+
+    with pytest.raises(OSError, match="compressed publish failure"):
+        _run_stage(
+            4,
+            profile,
+            trigger="sync",
+            progress_callback=lambda _message: None,
+            cancel_check=lambda: False,
+        )
+
+    assert previous_html.read_text("utf-8") == "<html><body>old</body></html>"
+    assert compressed_path.read_bytes() == previous_compressed
+    assert not list(current.parent.glob("*automation-current.backup-*"))
+    assert not list(
+        compressed_path.parent.glob(".compressed-external-html.json.backup-*")
+    )
+
+
+def test_stage_four_backup_cleanup_failure_keeps_new_pair_committed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    html_target = tmp_path / "external" / ".automation-current"
+    html_target.mkdir(parents=True)
+    (html_target / "automation-external-html-download.json").write_text(
+        json.dumps({"format": AUTOMATION_EXTERNAL_FORMAT}), encoding="utf-8"
+    )
+    (html_target / "old.html").write_text("old", encoding="utf-8")
+    staged_html = tmp_path / "external" / ".automation-current.part-new"
+    staged_html.mkdir()
+    (staged_html / "automation-external-html-download.json").write_text(
+        json.dumps({"format": AUTOMATION_EXTERNAL_FORMAT}), encoding="utf-8"
+    )
+    (staged_html / "new.html").write_text("new", encoding="utf-8")
+    compressed_target = tmp_path / "compressed" / "compressed-external-html.json"
+    compressed_target.parent.mkdir()
+    compressed_target.write_text("old-json", encoding="utf-8")
+    staged_compressed = tmp_path / "compressed" / ".compressed.part"
+    staged_compressed.write_text("new-json", encoding="utf-8")
+    original_rmtree = automation.shutil.rmtree
+
+    def fail_html_backup_cleanup(path: Path) -> None:
+        if ".backup-" in Path(path).name:
+            raise OSError("simulated backup cleanup failure")
+        original_rmtree(path)
+
+    monkeypatch.setattr(automation.shutil, "rmtree", fail_html_backup_cleanup)
+
+    warnings = automation._publish_external_html_generation(
+        html_target=html_target,
+        staged_html=staged_html,
+        compressed_target=compressed_target,
+        staged_compressed=staged_compressed,
+    )
+
+    assert (html_target / "new.html").read_text("utf-8") == "new"
+    assert compressed_target.read_text("utf-8") == "new-json"
+    assert len(warnings) == 1
+    assert "게시에는 성공" in warnings[0]
+
+
 def test_stage_five_rebuilds_internal_html_without_reusing_current(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1522,6 +1669,44 @@ def test_stage_five_rebuilds_internal_html_without_reusing_current(
 
     assert existing_before_download == []
     assert old_path.read_text("utf-8") == "<html><body>new</body></html>"
+
+
+def test_stage_five_backup_cleanup_failure_reports_warning_after_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / ".automation-current"
+    target.mkdir()
+    (target / "automation-internal-html-download.json").write_text(
+        json.dumps({"format": AUTOMATION_INTERNAL_FORMAT}), encoding="utf-8"
+    )
+    (target / "old.html").write_text("old", encoding="utf-8")
+    staged = tmp_path / ".automation-current.part-new"
+    staged.mkdir()
+    (staged / "automation-internal-html-download.json").write_text(
+        json.dumps({"format": AUTOMATION_INTERNAL_FORMAT}), encoding="utf-8"
+    )
+    (staged / "new.html").write_text("new", encoding="utf-8")
+    original_rmtree = automation.shutil.rmtree
+
+    def fail_backup_cleanup(path: Path) -> None:
+        if ".backup-" in Path(path).name:
+            raise OSError("simulated backup cleanup failure")
+        original_rmtree(path)
+
+    monkeypatch.setattr(automation.shutil, "rmtree", fail_backup_cleanup)
+
+    warnings = automation._replace_owned_html_directory(
+        target,
+        staged,
+        owner_name="automation-internal-html-download.json",
+        owner_format=AUTOMATION_INTERNAL_FORMAT,
+    )
+
+    assert (target / "new.html").read_text("utf-8") == "new"
+    assert not (target / "old.html").exists()
+    assert len(warnings) == 1
+    assert "게시에는 성공" in warnings[0]
+    assert list(tmp_path.glob("*automation-current.backup-*"))
 
 
 def test_stage_five_checkpoint_rejects_internal_html_hash_contamination(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -753,7 +754,7 @@ def _publish_sqlite_generation(
     manifest_path: Path,
     staged_root: Path,
     shards: list[dict[str, Any]],
-) -> None:
+) -> list[str]:
     shard_root = manifest_path.parent
     shard_names = [str(shard.get("relative_path") or "") for shard in shards]
     if any(
@@ -776,31 +777,45 @@ def _publish_sqlite_generation(
     if manifest_path.is_file():
         previous_paths.append(manifest_path)
 
-    with tempfile.TemporaryDirectory(
-        dir=shard_root,
-        prefix=".finiq-table-backup-",
-    ) as backup_raw:
-        backup_root = Path(backup_raw)
-        moved_previous: list[tuple[Path, Path]] = []
-        published: list[Path] = []
+    backup_root = Path(
+        tempfile.mkdtemp(
+            dir=shard_root,
+            prefix=".finiq-table-backup-",
+        )
+    )
+    moved_previous: list[tuple[Path, Path]] = []
+    published: list[Path] = []
+    try:
+        for previous in previous_paths:
+            backup = backup_root / previous.name
+            os.replace(previous, backup)
+            moved_previous.append((previous, backup))
+        for staged in staged_shards:
+            target = shard_root / staged.name
+            os.replace(staged, target)
+            published.append(target)
+        os.replace(staged_manifest, manifest_path)
+        published.append(manifest_path)
+    except Exception:
+        for target in reversed(published):
+            target.unlink(missing_ok=True)
+        for target, backup in reversed(moved_previous):
+            if backup.exists():
+                os.replace(backup, target)
         try:
-            for previous in previous_paths:
-                backup = backup_root / previous.name
-                os.replace(previous, backup)
-                moved_previous.append((previous, backup))
-            for staged in staged_shards:
-                target = shard_root / staged.name
-                os.replace(staged, target)
-                published.append(target)
-            os.replace(staged_manifest, manifest_path)
-            published.append(manifest_path)
-        except Exception:
-            for target in reversed(published):
-                target.unlink(missing_ok=True)
-            for target, backup in reversed(moved_previous):
-                if backup.exists():
-                    os.replace(backup, target)
-            raise
+            shutil.rmtree(backup_root)
+        except OSError:
+            pass
+        raise
+
+    try:
+        shutil.rmtree(backup_root)
+    except OSError as exc:
+        return [
+            "SQLite 결과 게시에는 성공했지만 이전 세대 백업을 정리하지 "
+            f"못했습니다: {backup_root} ({exc})"
+        ]
+    return []
 
 
 def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
@@ -969,11 +984,15 @@ def build_disclosure_table_payload(
 
     shard_started_at = time.monotonic()
     shard_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        dir=shard_root,
-        prefix=".finiq-table-build-",
-    ) as staged_raw:
-        staged_root = Path(staged_raw)
+    staged_root = Path(
+        tempfile.mkdtemp(
+            dir=shard_root,
+            prefix=".finiq-table-build-",
+        )
+    )
+    cleanup_warnings: list[str] = []
+    published = False
+    try:
         shards = _write_sqlite_shards(
             rows_by_year=rows_by_year,
             shard_root=staged_root,
@@ -1011,11 +1030,30 @@ def build_disclosure_table_payload(
         }
         _write_manifest(staged_root / MANIFEST_FILENAME, manifest)
         _raise_if_cancelled(cancel_check)
-        _publish_sqlite_generation(
-            manifest_path=manifest_path,
-            staged_root=staged_root,
-            shards=shards,
+        cleanup_warnings.extend(
+            _publish_sqlite_generation(
+                manifest_path=manifest_path,
+                staged_root=staged_root,
+                shards=shards,
+            )
+            or []
         )
+        published = True
+    finally:
+        if staged_root.exists():
+            try:
+                shutil.rmtree(staged_root)
+            except OSError as exc:
+                if published:
+                    cleanup_warnings.append(
+                        "SQLite 결과 게시에는 성공했지만 준비 디렉터리를 정리하지 "
+                        f"못했습니다: {staged_root} ({exc})"
+                    )
+                elif progress_callback:
+                    progress_callback(
+                        "SQLite 준비 디렉터리 정리 실패: "
+                        f"{staged_root} ({exc})"
+                    )
     return {
         "format": "finiq_disclosure_table_build_v1",
         "manifest_format": MANIFEST_FORMAT,
@@ -1040,6 +1078,7 @@ def build_disclosure_table_payload(
         },
         "pages": pages,
         "shards": shards,
+        "cleanup_warnings": cleanup_warnings,
     }
 
 
